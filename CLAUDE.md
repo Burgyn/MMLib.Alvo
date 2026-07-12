@@ -11,7 +11,10 @@ domain analysis). Architecture notes live in `docs/`.
   not VSTest (selected via the `test` section in `global.json`).
 - Target framework: `net10.0`. The SDK is pinned in `global.json`.
 
-## Package boundary (hard rule — spec §1.1)
+## Package boundary
+
+See: `docs/architecture/package-boundary.md` for the full rule, examples, and
+the current project list — for your orientation.
 
 A component earns its **own NuGet package** only if it meets at least one of:
 
@@ -21,8 +24,7 @@ A component earns its **own NuGet package** only if it meets at least one of:
 3. it has a **different distribution/license policy**.
 
 Everything else lives as a **namespace / vertical slice inside the core**, not a
-separate project. Conceptual tidiness is not a reason for a package. See
-`docs/architecture/package-boundary.md` for the full rule and examples.
+separate project. Conceptual tidiness is not a reason for a package.
 
 Hard dependency rules: `MMLib.Alvo.Abstractions` depends on nothing; the core
 depends only on `Abstractions`; no package depends on another port's provider;

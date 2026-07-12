@@ -3,6 +3,15 @@
 > The rule that decides what becomes a separate NuGet package in the
 > `MMLib.Alvo.*` family. Source: spec `specs/alvo-specifikacia.md` §1.1.
 
+## Current projects
+
+- `src/MMLib.Alvo.Abstractions` — interface-first root of the dependency
+  graph; currently source-free, waiting for ports (phase 1, spec §1.2).
+- `test/MMLib.Alvo.Abstractions.Tests` — xUnit v3 (MTP) tests; holds the
+  NetArchTest architecture guard enforcing the rule below.
+
+Keep this list current — update it whenever a project is added or removed.
+
 ## The rule (hard)
 
 A standalone NuGet package is justified only when a component meets **at least one**:
