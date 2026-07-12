@@ -22,4 +22,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Central package management finished: shared assembly/NuGet metadata (author, product,
   license, repo link, tags, icon, readme), warnings-as-errors, deterministic builds, and
   SourceLink in `Directory.Build.props`; root `README.md` and package icon (`icon.png`,
-  generated from `docs/assets/alvo-logo.svg`).
+  generated from `assets/alvo-logo.svg`).
