@@ -1,5 +1,3 @@
-using System;
-using System.Linq;
 using System.Reflection;
 using NetArchTest.Rules;
 using Shouldly;
@@ -15,15 +13,17 @@ public class ArchitectureTests
 
     // Architectural invariant (spec §1.1): MMLib.Alvo.Abstractions is the root of
     // the dependency graph — it may depend on NO other project in the solution.
-    // Wired from the first commit; stays green today (Abstractions is empty) and
-    // becomes load-bearing the moment a type here references a sibling package.
+    // Wired from the first commit; green today (Abstractions is empty) and it
+    // fails the moment Abstractions references any sibling MMLib.Alvo.* assembly.
     [Fact]
     public void Abstractions_depends_on_no_other_project_in_the_solution()
     {
         var abstractions = Assembly.Load(AbstractionsAssemblyName);
 
-        // Sibling MMLib.Alvo.* assemblies that Abstractions actually references
-        // (everything except itself). This set must always be empty.
+        // The reliable signal: GetReferencedAssemblies() lists only assemblies
+        // actually used by a type in Abstractions (the compiler drops unused
+        // references), so any MMLib.Alvo.* entry other than itself is a genuine,
+        // false-positive-free cross-project dependency.
         var forbiddenSiblings = abstractions
             .GetReferencedAssemblies()
             .Select(name => name.Name!)
@@ -31,23 +31,31 @@ public class ArchitectureTests
             .Where(name => name != AbstractionsAssemblyName)
             .ToArray();
 
-        if (forbiddenSiblings.Length == 0)
+        // Best-effort enrichment: NetArchTest names the offending types for a
+        // helpful failure message. Diagnostics only — the assembly-level check
+        // above is the source of truth for pass/fail.
+        var offendingTypes = string.Empty;
+        if (forbiddenSiblings.Length > 0)
         {
-            // No sibling references at the assembly level — invariant holds.
-            return;
+            var result = Types.InAssembly(abstractions)
+                .Should()
+                .NotHaveDependencyOnAny(forbiddenSiblings)
+                .GetResult();
+
+            var failing = (result.FailingTypes ?? Enumerable.Empty<Type>())
+                .Select(t => t.FullName)
+                .ToArray();
+
+            if (failing.Length > 0)
+            {
+                offendingTypes = $" Offending types: {string.Join(", ", failing)}.";
+            }
         }
 
-        // A sibling is referenced: use NetArchTest to name the offending types.
-        var result = Types.InAssembly(abstractions)
-            .Should()
-            .NotHaveDependencyOnAny(forbiddenSiblings)
-            .GetResult();
-
-        result.IsSuccessful.ShouldBeTrue(
+        // Always asserts (no vacuous early return): empty today, and a real
+        // failure the moment a sibling reference appears.
+        forbiddenSiblings.ShouldBeEmpty(
             "MMLib.Alvo.Abstractions must not depend on any other project in the " +
-            $"solution, but references: {string.Join(", ", forbiddenSiblings)}. " +
-            "Offending types: " +
-            string.Join(", ", (result.FailingTypes ?? Enumerable.Empty<Type>())
-                .Select(t => t.FullName)));
+            $"solution, but references: {string.Join(", ", forbiddenSiblings)}.{offendingTypes}");
     }
 }
