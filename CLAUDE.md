@@ -13,22 +13,10 @@ domain analysis). Architecture notes live in `docs/`.
 
 ## Package boundary
 
-See: `docs/architecture/package-boundary.md` for the full rule, examples, and
-the current project list — for your orientation.
+See: `docs/architecture/package-boundary.md` for the hard rule (spec §1.1),
+examples, and the current project list — for your orientation.
 
-A component earns its **own NuGet package** only if it meets at least one of:
-
-1. it pulls a **heavy/foreign dependency** most users don't want (a DB driver,
-   the Azure SDK, Roslyn, Blazor), or
-2. it is a **real swap point** someone actually replaces (DB engine, secret store), or
-3. it has a **different distribution/license policy**.
-
-Everything else lives as a **namespace / vertical slice inside the core**, not a
-separate project. Conceptual tidiness is not a reason for a package.
-
-Hard dependency rules: `MMLib.Alvo.Abstractions` depends on nothing; the core
-depends only on `Abstractions`; no package depends on another port's provider;
-lockstep SemVer (one version for the whole family).
+A package is earned, not assumed. Default to adding new code inside the core.
 
 ## Do not create projects ahead of time
 
