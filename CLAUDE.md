@@ -4,10 +4,6 @@ Alvo is a .NET-native Backend-as-a-Service. The product specs live in `specs/`
 (`alvo-specifikacia.md` = delivery strategy & technical spec; `baas-analyza.md` =
 domain analysis). Architecture notes live in `docs/`.
 
-The human-facing contribution workflow (build/test, PR process, CLA, Code of
-Conduct) lives in `CONTRIBUTING.md`. This file remains the source of truth for the
-coding conventions and code style below; `CONTRIBUTING.md` links back here for them.
-
 ## Build & test
 
 - `dotnet build` — build the whole solution (`MMLib.Alvo.slnx`).

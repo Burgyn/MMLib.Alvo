@@ -29,12 +29,12 @@ reputational cost a CLA usually carries.
 3. **Individual *and* Corporate CLA from the start.** Two documents in `docs/legal/`. The
    Corporate CLA covers employees contributing within the scope of their employment (the case
    where an individual's grant may be legally insufficient because the employer owns the IP).
-4. **Layered, de-duplicated docs — but `CLAUDE.md` is not stripped.** `CLAUDE.md` is
-   auto-loaded into agent context; `CONTRIBUTING.md` is not. Agent-critical conventions (the
-   comment policy, disallowed packages, CPM, "no direct push to `main`") therefore **stay** in
-   `CLAUDE.md` as the source of truth. `CONTRIBUTING.md` is the human-facing entry point and
-   *links back* to `CLAUDE.md` for the detailed style rules, so there is no divergent second
-   copy of them. `CLAUDE.md` gains only a one-paragraph pointer to `CONTRIBUTING.md`.
+4. **Layered docs — `CLAUDE.md` is left untouched.** `CLAUDE.md` is auto-loaded into agent
+   context; `CONTRIBUTING.md` is not. Agent-critical conventions (the comment policy,
+   disallowed packages, CPM, "no direct push to `main`") therefore **stay** in `CLAUDE.md` as
+   the source of truth, unchanged. `CONTRIBUTING.md` is the human-facing entry point and
+   *links to* `CLAUDE.md` for the detailed style rules, so there is no divergent second copy
+   of them. `CLAUDE.md` itself is not modified by this change.
 5. **Project identity:** Miňo Martiniak, mino.martiniak@gmail.com — keeps the project's legal
    identity independent of any employer.
 
@@ -45,7 +45,6 @@ CONTRIBUTING.md                  # root — human entry point; GitHub surfaces i
 CODE_OF_CONDUCT.md               # root — Contributor Covenant v2.1, contact = maintainer email
 docs/legal/CLA-INDIVIDUAL.md     # canonical Individual CLA text (versioned, PR-reviewable)
 docs/legal/CLA-CORPORATE.md      # canonical Corporate CLA text
-CLAUDE.md                        # + one pointer paragraph to CONTRIBUTING.md (no stripping)
 CHANGELOG.md                     # [Unreleased] → Added entry
 docs/superpowers/specs/2026-07-12-contributing-cla-design.md   # this document
 ```
@@ -107,7 +106,7 @@ This is the part not automatable from the repo. Do it once:
   consistent and cross-linked.
 - `CONTRIBUTING.md` transparently explains *why* the CLA exists (fund the future via
   commercial add-ons without relicensing contributions), and that the core stays Apache-2.0.
-- `CLAUDE.md` still carries the agent conventions and now points to `CONTRIBUTING.md`.
+- `CLAUDE.md` is unchanged and still carries the agent conventions as the source of truth.
 - The runbook above lets the maintainer satisfy the issue's operational DoD: bot blocks merge
   without a signed CLA; first PR prompts, subsequent PRs don't.
 
