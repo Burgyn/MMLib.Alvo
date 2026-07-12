@@ -1,81 +1,187 @@
-# Corporate Contributor License Agreement
+# Corporate (Entity) Contributor License Agreement
 
 > **Plain-language summary (not part of the agreement):** Use this when your employees
-> contribute to Alvo as part of their job. The company keeps copyright to its
-> contributions and grants the maintainer the same broad license as the Individual CLA,
-> including the right to relicense. One authorized person signs on the company's behalf.
-
-This Corporate Contributor License Agreement ("Agreement") is between the company or other
-legal entity identified when signing ("the Corporation") and **Miňo Martiniak**
-(mino.martiniak@gmail.com), the maintainer of **MMLib.Alvo** ("the Project", "the
-Maintainer"). It covers Contributions submitted to the Project on the Corporation's behalf
-by its employees or contractors ("Designated Contributors").
-
-This Agreement complements the [Individual CLA](CLA-INDIVIDUAL.md); where a Designated
-Contributor also submits personal Contributions outside the scope of their engagement with
-the Corporation, the Individual CLA governs those.
-
-## 1. Authority to bind
-
-The individual accepting this Agreement through the [CLA Assistant](https://cla-assistant.io/)
-bot on the Corporation's behalf represents and warrants that they are authorized to enter
-into this Agreement on behalf of the Corporation.
-
-## 2. Definitions
-
-"Contribution" has the same meaning as in the [Individual CLA](CLA-INDIVIDUAL.md), §1, when
-submitted by a Designated Contributor acting within the scope of their employment or
-engagement with the Corporation.
-
-## 3. Copyright retained
-
-The Corporation retains all right, title, and interest in and to its Contributions. This
-Agreement does **not** transfer ownership to the Maintainer; it grants the licenses set out
-below and nothing more.
-
-## 4. Grant of copyright license
-
-The Corporation grants to the Maintainer a perpetual, worldwide, non-exclusive,
-royalty-free, irrevocable copyright license to reproduce, prepare derivative works of,
-publicly display, publicly perform, sublicense, and distribute the Contributions and any
-derivative works, **under the Apache License 2.0 or under any other license terms of the
-Maintainer's choosing, including proprietary or commercial license terms** — the same
-right to relicense granted in the Individual CLA, §3.
-
-## 5. Grant of patent license
-
-The Corporation grants to the Maintainer the patent license described in the
-[Individual CLA](CLA-INDIVIDUAL.md), §4, applied to patent claims licensable by the
-Corporation that are necessarily infringed by its Contributions alone or in combination
-with the Project. The same defensive-termination condition applies.
-
-## 6. Representations
-
-The Corporation represents that:
-
-- Each Designated Contributor is authorized to submit Contributions on the Corporation's
-  behalf.
-- It is legally entitled to grant the licenses above, and doing so does not conflict with
-  any other agreement it has entered into.
-- To its knowledge, its Contributions do not violate any third party's intellectual
-  property rights.
-
-## 7. No obligation, no warranty
-
-The Corporation is not expected to provide support for its Contributions, except to the
-extent it wishes to do so. Contributions are provided **"AS IS"**, without warranty of any
-kind, express or implied, including, without limitation, any warranties of merchantability,
-fitness for a particular purpose, or non-infringement.
-
-## 8. How this Agreement is signed
-
-Signing is electronic. An authorized representative of the Corporation accepts this
-Agreement through the CLA Assistant bot, associated with a GitHub identity. The Corporation
-is responsible for keeping the association between its Designated Contributors' GitHub
-accounts and this Agreement accurate, using whatever mechanism the CLA Assistant provides.
+> contribute to Alvo as part of their job. The company keeps copyright to its contributions
+> and grants a broad license (§2.3, the Harmony "any licence" Option Five) that lets the
+> project be relicensed — including commercially — in the future. One authorized person
+> accepts on the company's behalf via the [CLA Assistant](https://cla-assistant.io/) bot.
+>
+> This document is the **Harmony Entity Contributor License Agreement (HA-CLA-E), Version
+> 1.0**, with outbound-licence **Option Five** ("any licence") selected, adapted only to name
+> the project and maintainer, the submission method, the media licences, and the governing
+> law. It is a recognised, widely-used template — not a bespoke draft — but it is **not** a
+> substitute for your own legal advice.
 
 ---
 
-*This document is written in plain language to be understandable, not to serve as legal
-advice. It has not been reviewed by a lawyer on the Corporation's behalf. Please seek your
-own legal counsel before signing.*
+Thank you for your interest in contributing to MMLib.Alvo and other software projects managed
+by Miňo Martiniak (mino.martiniak@gmail.com) ("We" or "Us").
+
+This contributor agreement ("Agreement") documents the rights granted by contributors to Us.
+To make this document effective, please accept it electronically through the
+[CLA Assistant](https://cla-assistant.io/) bot, following the instructions in
+[`CONTRIBUTING.md`](../../CONTRIBUTING.md). This is a legally binding document, so please read
+it carefully before agreeing to it. The Agreement may cover more than one software project
+managed by Us.
+
+## 1. Definitions
+
+"You" means any Legal Entity on behalf of whom a Contribution has been received by Us. "Legal
+Entity" means an entity which is not a natural person. "Affiliates" means other Legal Entities
+that control, are controlled by, or under common control with that Legal Entity. For the
+purposes of this definition, "control" means (i) the power, direct or indirect, to cause the
+direction or management of such Legal Entity, whether by contract or otherwise, (ii) ownership
+of fifty percent (50%) or more of the outstanding shares or securities which vote to elect the
+management or other persons who direct such Legal Entity or (iii) beneficial ownership of such
+entity.
+
+"Contribution" means any work of authorship that is Submitted by You to Us in which You own or
+assert ownership of the Copyright. If You do not own the Copyright in the entire work of
+authorship, please follow the instructions in [`CONTRIBUTING.md`](../../CONTRIBUTING.md).
+
+"Copyright" means all rights protecting works of authorship owned or controlled by You or Your
+Affiliates, including copyright, moral and neighboring rights, as appropriate, for the full
+term of their existence including any extensions by You.
+
+"Material" means the work of authorship which is made available by Us to third parties. When
+this Agreement covers more than one software project, the Material means the work of authorship
+to which the Contribution was Submitted. After You Submit the Contribution, it may be included
+in the Material.
+
+"Submit" means any form of electronic, verbal, or written communication sent to Us or our
+representatives, including but not limited to electronic mailing lists, source code control
+systems, and issue tracking systems that are managed by, or on behalf of, Us for the purpose
+of discussing and improving the Material, but excluding communication that is conspicuously
+marked or otherwise designated in writing by You as "Not a Contribution."
+
+"Submission Date" means the date on which You Submit a Contribution to Us.
+
+"Effective Date" means the date You execute this Agreement or the date You first Submit a
+Contribution to Us, whichever is earlier.
+
+"Media" means any portion of a Contribution which is not software.
+
+## 2. Grant of Rights
+
+### 2.1 Copyright License
+
+(a) You retain ownership of the Copyright in Your Contribution and have the same rights to use
+or license the Contribution which You would have had without entering into the Agreement.
+
+(b) To the maximum extent permitted by the relevant law, You grant to Us a perpetual,
+worldwide, non-exclusive, transferable, royalty-free, irrevocable license under the Copyright
+covering the Contribution, with the right to sublicense such rights through multiple tiers of
+sublicensees, to reproduce, modify, display, perform and distribute the Contribution as part
+of the Material; provided that this license is conditioned upon compliance with Section 2.3.
+
+### 2.2 Patent License
+
+For patent claims including, without limitation, method, process, and apparatus claims which
+You or Your Affiliates own, control or have the right to grant, now or in the future, You grant
+to Us a perpetual, worldwide, non-exclusive, transferable, royalty-free, irrevocable patent
+license, with the right to sublicense these rights to multiple tiers of sublicensees, to make,
+have made, use, sell, offer for sale, import and otherwise transfer the Contribution and the
+Contribution in combination with the Material (and portions of such combination). This license
+is granted only to the extent that the exercise of the licensed rights infringes such patent
+claims; and provided that this license is conditioned upon compliance with Section 2.3.
+
+### 2.3 Outbound License
+
+Based on the grant of rights in Sections 2.1 and 2.2, if We include Your Contribution in a
+Material, We may license the Contribution under any license, including copyleft, permissive,
+commercial, or proprietary licenses. As a condition on the exercise of this right, We agree to
+also license the Contribution under the terms of the license or licenses which We are using for
+the Material on the Submission Date.
+
+In addition, We may use, for Media in the Contribution, any license, including copyleft,
+permissive, commercial, or proprietary licenses, on the same basis as set out above in this
+Section 2.3 (including any right to adopt any future version of a license if permitted).
+
+### 2.4 Moral Rights
+
+If moral rights apply to the Contribution, to the maximum extent permitted by law, You waive
+and agree not to assert such moral rights against Us or our successors in interest, or any of
+our licensees, either direct or indirect.
+
+### 2.5 Our Rights
+
+You acknowledge that We are not obligated to use Your Contribution as part of the Material and
+may decide to include any Contribution We consider appropriate.
+
+### 2.6 Reservation of Rights
+
+Any rights not expressly licensed under this section are expressly reserved by You.
+
+## 3. Agreement
+
+You confirm that:
+
+(a) You have the legal authority to enter into this Agreement.
+
+(b) You or Your Affiliates own the Copyright and patent claims covering the Contribution which
+are required to grant the rights under Section 2.
+
+(c) The grant of rights under Section 2 does not violate any grant of rights which You or Your
+Affiliates have made to third parties.
+
+(d) You have followed the instructions in [`CONTRIBUTING.md`](../../CONTRIBUTING.md), if You do
+not own the Copyright in the entire work of authorship Submitted.
+
+## 4. Disclaimer
+
+EXCEPT FOR THE EXPRESS WARRANTIES IN SECTION 3, THE CONTRIBUTION IS PROVIDED "AS IS". MORE
+PARTICULARLY, ALL EXPRESS OR IMPLIED WARRANTIES INCLUDING, WITHOUT LIMITATION, ANY IMPLIED
+WARRANTY OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT ARE
+EXPRESSLY DISCLAIMED BY YOU TO US. TO THE EXTENT THAT ANY SUCH WARRANTIES CANNOT BE DISCLAIMED,
+SUCH WARRANTY IS LIMITED IN DURATION TO THE MINIMUM PERIOD PERMITTED BY LAW.
+
+## 5. Consequential Damage Waiver
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT WILL YOU BE LIABLE FOR ANY LOSS
+OF PROFITS, LOSS OF ANTICIPATED SAVINGS, LOSS OF DATA, INDIRECT, SPECIAL, INCIDENTAL,
+CONSEQUENTIAL AND EXEMPLARY DAMAGES ARISING OUT OF THIS AGREEMENT REGARDLESS OF THE LEGAL OR
+EQUITABLE THEORY (CONTRACT, TORT OR OTHERWISE) UPON WHICH THE CLAIM IS BASED.
+
+## 6. Miscellaneous
+
+6.1 This Agreement will be governed by and construed in accordance with the laws of the Slovak
+Republic excluding its conflicts of law provisions. Under certain circumstances, the governing
+law in this section might be superseded by the United Nations Convention on Contracts for the
+International Sale of Goods ("UN Convention") and the parties intend to avoid the application of
+the UN Convention to this Agreement and, thus, exclude the application of the UN Convention in
+its entirety to this Agreement.
+
+6.2 This Agreement sets out the entire agreement between You and Us for Your Contributions to Us
+and overrides all other agreements or understandings.
+
+6.3 If You or We assign the rights or obligations received through this Agreement to a third
+party, as a condition of the assignment, that third party must agree in writing to abide by all
+the rights and obligations in the Agreement.
+
+6.4 The failure of either party to require performance by the other party of any provision of
+this Agreement in one situation shall not affect the right of a party to require such
+performance at any time in the future. A waiver of performance under a provision in one
+situation shall not be considered a waiver of the performance of the provision in the future or
+a waiver of the provision in its entirety.
+
+6.5 If any provision of this Agreement is found void and unenforceable, such provision will be
+replaced to the extent possible with a provision that comes closest to the meaning of the
+original provision and which is enforceable. The terms and conditions set forth in this
+Agreement shall apply notwithstanding any failure of essential purpose of this Agreement or any
+limited remedy to the maximum extent possible under law.
+
+---
+
+**You** — the Corporation, represented by an authorized signatory whose name, title, and GitHub
+identity are recorded electronically by the CLA Assistant bot on acceptance.
+
+**Us** — Miňo Martiniak, mino.martiniak@gmail.com
+
+---
+
+*Based on the [Harmony Entity Contributor License Agreement (HA-CLA-E) Version 1.0](https://www.harmonyagreements.org/),
+with outbound-licence Option Five ("any licence") selected. The Harmony Agreements are licensed
+under a Creative Commons Attribution 3.0 Unported License. This adaptation changes only the named
+project and maintainer, the submission method, the media licences, and the governing law. It has
+not been reviewed by a lawyer on the Corporation's behalf — please seek your own legal counsel
+before signing.*

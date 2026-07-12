@@ -63,7 +63,9 @@ Two things worth being clear about:
   combined work beyond Apache-2.0 in the future. That breadth is the whole point, and we'd
   rather say so plainly than bury it.
 
-The exact terms:
+The exact terms are the well-established [Project Harmony](https://www.harmonyagreements.org/)
+CLA templates (v1.0, "any licence" variant) — not a bespoke document — adapted only to name
+the project, the signing method, and the governing law:
 
 - Individual contributors: [`docs/legal/CLA-INDIVIDUAL.md`](docs/legal/CLA-INDIVIDUAL.md)
 - Contributing on behalf of an employer: [`docs/legal/CLA-CORPORATE.md`](docs/legal/CLA-CORPORATE.md)

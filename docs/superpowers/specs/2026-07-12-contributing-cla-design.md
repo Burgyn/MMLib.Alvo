@@ -22,10 +22,17 @@ reputational cost a CLA usually carries.
    status-check/webhook access). An agent cannot and should not perform that on the
    maintainer's behalf, so this design ships every *file* and provides a manual checklist
    (below) for the one-time bot setup.
-2. **Custom CLA text, "light" version.** The contributor **keeps copyright**; grants a broad,
-   perpetual, sublicensable, irrevocable copyright + patent license that permits relicensing
-   beyond Apache-2.0. This is a grant, not an assignment. Plain-English, not a legal
-   template, because transparency is the point.
+2. **CLA based on the Project Harmony templates (not a bespoke draft).** After an initial
+   custom draft, the maintainer chose to use the recognised, widely-used **Harmony
+   Agreements v1.0** templates instead: `HA-CLA-I` ("any licence" variant) for individuals and
+   `HA-CLA-E` (outbound Option Five, "any licence") for entities. The contributor **keeps
+   copyright** (a licence, not an assignment); §2.3 grants the right to relicense the combined
+   Material under *any* licence, including commercial/proprietary — exactly the future-funding
+   option the issue requires. Adaptations to the verbatim templates are minimal: the named
+   project/maintainer, the submission method (the CLA bot + `CONTRIBUTING.md`), the Media
+   licences (Option Five), and the governing law. Harmony is CC-BY 3.0, so each file keeps an
+   attribution line. Each document carries a plain-language summary on top and an explicit
+   "not lawyer-reviewed" disclaimer at the bottom.
 3. **Individual *and* Corporate CLA from the start.** Two documents in `docs/legal/`. The
    Corporate CLA covers employees contributing within the scope of their employment (the case
    where an individual's grant may be legally insufficient because the employer owns the IP).
@@ -58,13 +65,14 @@ paragraph + links to both CLA docs + how the bot works) → Code of Conduct (lin
 
 ### CLA text — substance
 
-Both documents share the same load-bearing clauses: copyright retained by the contributor;
-broad copyright license *including the right to relicense beyond Apache-2.0*; patent license
-with defensive termination; representations of originality / right to contribute; "AS IS", no
-warranty; electronic one-time signing via the bot. The Individual CLA adds a third-party
-materials clause and points employed contributors at the Corporate CLA. Each document carries
-a plain-language summary at the top and an explicit "not reviewed by a lawyer" disclaimer at
-the bottom.
+Both documents are the Harmony v1.0 templates. Load-bearing clauses: copyright retained by the
+contributor (§2.1(a), §2.6 reservation of rights); a broad, sublicensable, irrevocable
+copyright licence (§2.1(b)) and patent licence (§2.2); the **§2.3 outbound licence granting the
+right to relicense under any licence including commercial/proprietary** — the whole point;
+moral-rights waiver (§2.4); representations of authority and ownership (§3); "AS IS" disclaimer
+(§4) and consequential-damage waiver (§5). The Individual CLA (§3(c)) points employed
+contributors at the Corporate CLA; the Corporate CLA adds Legal Entity / Affiliates definitions
+and authority-to-bind. Signing is one-time and electronic via the bot.
 
 ## Manual runbook — wiring `cla-assistant.io` (maintainer, one-time)
 
@@ -112,6 +120,9 @@ This is the part not automatable from the repo. Do it once:
 
 ## Caveats
 
-The CLA / CCLA text is a plain-English draft aimed at achieving what the issue describes. It
+The CLA / CCLA are the Harmony v1.0 templates — recognised and widely used, but the adaptation
+(notably **governing law set to the Slovak Republic**, matching the maintainer's jurisdiction)
 is **not** a substitute for review by a lawyer and should be checked before it becomes
-load-bearing for a future `Alvo.Enterprise.*` business.
+load-bearing for a future `Alvo.Enterprise.*` business. Governing law and the maintainer's
+legal identity (currently the natural person Miňo Martiniak, not a company) are the two points
+most worth a professional's eye.
