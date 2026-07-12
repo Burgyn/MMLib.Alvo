@@ -23,3 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   license, repo link, tags, icon, readme), warnings-as-errors, deterministic builds, and
   SourceLink in `Directory.Build.props`; root `README.md` and package icon (`icon.png`,
   generated from `assets/alvo-logo.svg`).
+- Repo tooling: CodeQL analysis, `Dependabot` version updates (NuGet + GitHub Actions),
+  a Dependency Review check on pull requests (fails on moderate+ severity or
+  non-allow-listed licenses), and a CodeRabbit config (`.coderabbit.yaml`) tuned to this
+  project's conventions (Central Package Management, disallowed packages, XML doc and
+  comment-style rules).
