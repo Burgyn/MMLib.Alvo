@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The interface-first root of the MMLib.Alvo.* dependency graph (spec §1.1).
+    Intentionally contains no source yet — ports/interfaces are designed in a
+    later phase (spec §1.2). It compiles to an empty assembly.
+  -->
+
+</Project>
