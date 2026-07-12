@@ -1,6 +1,6 @@
 # MMLib.Alvo — working agreements for agents
 
-Alvo is a .NET-native Backend-as-a-Service. The product specs live in `specs/`
+Alvo is a .NET-native Backend-as-a-Service. The product specs live in `docs/product/`
 (`alvo-specifikacia.md` = delivery strategy & technical spec; `baas-analyza.md` =
 domain analysis). Architecture notes live in `docs/`.
 

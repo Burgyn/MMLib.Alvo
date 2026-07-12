@@ -1,7 +1,7 @@
 # Package boundary
 
 > The rule that decides what becomes a separate NuGet package in the
-> `MMLib.Alvo.*` family. Source: spec `specs/alvo-specifikacia.md` §1.1.
+> `MMLib.Alvo.*` family. Source: spec `docs/product/alvo-specifikacia.md` §1.1.
 
 ## Current projects
 

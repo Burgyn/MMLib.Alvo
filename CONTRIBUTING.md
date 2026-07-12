@@ -5,7 +5,7 @@ covers how to build, test, and submit changes, and explains the Contributor Lice
 Agreement (CLA) up front and honestly.
 
 If you want the full picture of what Alvo is and where it's going, the product specs
-live in [`specs/`](specs/) and architecture notes in [`docs/`](docs/).
+live in [`docs/product/`](docs/product/) and architecture notes in [`docs/`](docs/).
 
 ## Building & testing
 
