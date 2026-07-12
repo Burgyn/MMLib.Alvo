@@ -78,12 +78,12 @@ and authority-to-bind. Signing is one-time and electronic via the bot.
 
 This is the part not automatable from the repo. Do it once:
 
-1. **Create the CLA Gist.** At <https://gist.github.com>, create a Gist (public) whose body
-   is the CLA text. `cla-assistant.io` supports **both an Individual and a Corporate section
-   in one Gist** — paste both, using `docs/legal/CLA-INDIVIDUAL.md` and
-   `docs/legal/CLA-CORPORATE.md` as the source. Keep the Gist in sync with those files
-   whenever the canonical text changes (the repo files are the source of truth; the Gist is a
-   mirror the bot can read).
+1. **CLA Gist — already created.** A public Gist holding both the Individual and Corporate
+   sections (bot-facing signable copy) exists at
+   <https://gist.github.com/Burgyn/682cff66a18e155101646cb297382499>. The repo files under
+   `docs/legal/` remain the source of truth; keep the Gist in sync (`gh gist edit
+   682cff66a18e155101646cb297382499`) whenever the canonical text changes — including after
+   this PR merges, so the Gist's absolute links resolve on `main`.
 2. **(Optional) Add a custom field for the corporate case.** Add a metadata file to the Gist
    describing a form field such as *"Company / Organization — leave blank if contributing as
    an individual"*, so corporate contributors self-identify at signing.
