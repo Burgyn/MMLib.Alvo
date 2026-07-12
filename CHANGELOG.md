@@ -19,3 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   explanation), Individual and Corporate CLAs (`docs/legal/`) based on the Project Harmony
   v1.0 templates that keep contributor copyright while allowing future relicensing, and a
   Contributor Covenant `CODE_OF_CONDUCT.md`.
+- Central package management finished: shared assembly/NuGet metadata (author, product,
+  license, repo link, tags, icon, readme), warnings-as-errors, deterministic builds, and
+  SourceLink in `Directory.Build.props`; root `README.md` and package icon (`icon.png`,
+  generated from `docs/assets/alvo-logo.svg`).
