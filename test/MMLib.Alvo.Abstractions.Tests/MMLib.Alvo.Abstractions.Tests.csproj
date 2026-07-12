@@ -1,16 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-    <OutputType>Exe</OutputType>
-    <IsPackable>false</IsPackable>
-  </PropertyGroup>
-
-  <ItemGroup>
-    <PackageReference Include="xunit.v3" />
-    <PackageReference Include="NetArchTest.Rules" />
-    <PackageReference Include="Shouldly" />
-  </ItemGroup>
-
   <ItemGroup>
     <ProjectReference Include="..\..\src\MMLib.Alvo.Abstractions\MMLib.Alvo.Abstractions.csproj" />
   </ItemGroup>
