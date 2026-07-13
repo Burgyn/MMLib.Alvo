@@ -1,33 +1,19 @@
 # CodeRabbit config for MMLib.Alvo — a solo-maintained, pre-v1, Apache-2.0
 # .NET Backend-as-a-Service framework. Keep this lean; revisit once the repo
 # has external contributors or security-critical modules (auth/RBAC/secrets)
-# actually land. Full schema: https://docs.coderabbit.ai (some reference
-# pages require an access code we don't have — sanity-check against the
-# CodeRabbit dashboard UI if a key here turns out to be wrong; unknown keys
-# are ignored, not fatal).
+# actually land. Validated against the schema at
+# https://storage.googleapis.com/coderabbit_public_assets/schema.v2.json —
+# it is strict: unknown top-level keys AND over-length values are fatal
+# (CodeRabbit silently falls back to defaults). Notably tone_instructions
+# has a 250-char cap — keep detailed rules in reviews.path_instructions.
 
 language: "en-US"
 
-tone_instructions: >
-  This is MMLib.Alvo, a solo-maintainer, pre-v1, Apache-2.0-licensed .NET
-  Backend-as-a-Service framework (net10.0, Central Package Management).
-  Be direct and concise, no filler praise. Specifically flag:
-  (1) any PackageReference carrying an inline Version attribute — this repo
-  uses Central Package Management, versions belong only in
-  Directory.Packages.props;
-  (2) use of MediatR or FluentAssertions v8+ — both are disallowed for
-  licensing reasons, use Shouldly for assertions instead;
-  (3) public API members (types/methods/properties) on shipped library
-  projects missing XML doc comments (`/// <summary>`);
-  (4) comments that narrate *what* the code does instead of *why* — this
-  project's stated style is why-not-what, comments describing obvious
-  behavior should be flagged for removal.
-  There are no external contributors yet, so prioritize correctness and
-  security over style nitpicks. This is a Backend-as-a-Service framework
-  whose eventual scope includes authentication, RBAC, secrets management,
-  multi-tenancy isolation, and script/rule execution (CEL, Roslyn scripting)
-  — any code touching those areas deserves extra scrutiny for privilege
-  escalation, cross-tenant data leaks, SSRF (webhooks), and injection risks.
+# Tone only (250-char cap). The concrete rules live in path_instructions below.
+tone_instructions: >-
+  Solo-maintained, pre-v1 .NET BaaS framework. Be direct and concise, no
+  filler praise. Prioritize correctness and security (auth, RBAC, secrets,
+  multi-tenant isolation, injection, SSRF) over style nitpicks.
 
 reviews:
   profile: "chill"
