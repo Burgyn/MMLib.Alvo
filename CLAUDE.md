@@ -19,8 +19,10 @@ suggestions, and idempotent operations throughout.
 
 ## The 9 principles (spec §0)
 
-Condensed from `docs/product/alvo-specifikacia.md` §0 — read that section
-for the full rationale; violating one of these is a bug, not a style nit.
+One-liners condensed from spec §0. For more, go to `docs/design-brief.en.md`
+"Principles" first (English, the pyramid's next layer down); drop to
+`docs/product/alvo-specifikacia.md` §0 only for the full rationale the brief
+compresses out. Violating one of these is a bug, not a style nit.
 
 - **Interface-first** — contracts and tests against them before implementation.
 - **Provider model everywhere** — infrastructure is a swappable port; the core never touches a concrete provider.
