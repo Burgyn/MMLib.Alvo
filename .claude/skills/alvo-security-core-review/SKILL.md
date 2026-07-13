@@ -66,8 +66,8 @@ run** before merge — not the checklist alone.
   `WHERE`, enforced inside the data port, is the *only* thing separating tenant
   X's records from tenant Y's. And because there is no DB constraint on `data`,
   the application-layer validation against `field_definitions` is the *only*
-  validation layer (spec §2.1) — the fail-fast/type/required guarantees must
-  hold there, not just for physical columns. Acceptance bar: the **same**
+  validation layer (spec §2.1) — the type/required/enum validation must hold
+  there, not just as physical-column constraints. Acceptance bar: the **same**
   adversarial + policy test suite must pass **identically** over a physical and
   a virtual entity — run the two-user and two-tenant tests against a dynamic
   entity too, not only a physical one.
