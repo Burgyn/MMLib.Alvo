@@ -21,12 +21,19 @@ suggestion in your output instead and let a human or another agent apply it.
 You are invoked fresh, with no memory of whatever conversation produced the
 change. Gather everything yourself before judging anything:
 
-1. **The diff.** Run `git diff` against the base branch (find the merge-base
-   with `main` if you're not sure what's already merged, e.g.
-   `git diff $(git merge-base main HEAD)...HEAD`, or fall back to
-   `git diff main...HEAD` / `git status` plus `git diff` for uncommitted
-   work). Read the whole diff, not just file names — drift and shortcuts are
-   visible in the changed lines, not the changed paths.
+1. **The diff — the complete change set.** Cover three layers so nothing
+   slips through:
+   - **Committed:** `git diff $(git merge-base main HEAD)...HEAD` (find the
+     merge-base with `main` if you're unsure what's already merged; fall back
+     to `git diff main...HEAD`).
+   - **Staged + unstaged:** `git diff HEAD`. A plain `git diff` omits the
+     index, so staged-but-uncommitted hunks would be missed and you could
+     wrongly return `PASS` without reading changes headed for the next commit.
+   - **Untracked:** `git status --porcelain` (or
+     `git ls-files --others --exclude-standard`). New files appear in no
+     `git diff` — report them separately.
+   Read the whole diff, not just file names — drift and shortcuts are visible
+   in the changed lines, not the changed paths.
 2. **`docs/PLAN.md`.** The coarse master plan: phase map (F0–F7), the
    `← YOU ARE HERE` marker, and §4 "Key invariants that must not break".
    This is what you check the diff against.
