@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Deterministic freshness gate: the design-brief must carry SHA-256 markers
+# matching its two sources. Exit 0 = fresh; non-zero = stale or missing.
+set -euo pipefail
+
+BRIEF="docs/design-brief.en.md"
+SOURCES=("docs/product/alvo-specifikacia.md" "docs/product/baas-analyza.md")
+
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  else
+    shasum -a 256 "$1" | awk '{print $1}'
+  fi
+}
+
+if [[ ! -f "$BRIEF" ]]; then
+  echo "check-brief-freshness: $BRIEF is missing — regenerate via the alvo-regen-brief skill." >&2
+  exit 1
+fi
+
+stale=0
+for src in "${SOURCES[@]}"; do
+  if [[ ! -f "$src" ]]; then
+    echo "check-brief-freshness: source $src is missing." >&2
+    stale=1
+    continue
+  fi
+  actual="$(sha256_of "$src")"
+  stored="$(grep -oE "brief-source: ${src//./\\.} sha256:[0-9a-f]{64}" "$BRIEF" | sed 's/.*sha256://' || true)"
+  if [[ -z "$stored" ]]; then
+    echo "check-brief-freshness: no hash marker for $src in $BRIEF." >&2
+    stale=1
+  elif [[ "$actual" != "$stored" ]]; then
+    echo "check-brief-freshness: $src changed (brief hash is stale)." >&2
+    stale=1
+  fi
+done
+
+if [[ "$stale" -ne 0 ]]; then
+  echo "check-brief-freshness: STALE — regenerate $BRIEF via the alvo-regen-brief skill, then re-run." >&2
+  exit 1
+fi
+echo "check-brief-freshness: OK"

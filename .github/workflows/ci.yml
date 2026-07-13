@@ -32,3 +32,13 @@ jobs:
 
       - name: Test
         run: dotnet test --configuration Release --no-restore
+
+  brief-freshness:
+    name: Brief freshness
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Check design-brief is fresh vs its sources
+        run: bash scripts/check-brief-freshness

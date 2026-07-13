@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Block a commit that stages a source or brief change while the brief is stale.
+set -euo pipefail
+staged="$(git diff --cached --name-only)"
+if echo "$staged" | grep -qE '^docs/product/(alvo-specifikacia|baas-analyza)\.md$|^docs/design-brief\.en\.md$'; then
+  if ! scripts/check-brief-freshness; then
+    echo "pre-commit: design-brief.en.md is stale vs its sources." >&2
+    echo "Regenerate it via the alvo-regen-brief skill, then re-commit." >&2
+    exit 1
+  fi
+fi
