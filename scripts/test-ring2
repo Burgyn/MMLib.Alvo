@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# ring2 — run before opening a PR (ring1 + integration (affected) + API
+# invariant + Vacuum). None of those exist yet — add them here when they land.
+# Full run (+ mutation + e2e) stays in CI on the PR; do not run it locally.
+set -euo pipefail
+DIR="$(cd "$(dirname "$0")" && pwd)"
+"$DIR/test-ring1"
+echo "[ring2] placeholder: integration (affected-scoped), API invariant, Vacuum — none yet"
+echo "[ring2] OK"

@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# ring1 — run after finishing a slice (ring0 + arch + public-API approval).
+# Arch tests already run inside dotnet test today; public-API approval does
+# not exist yet — add it here when it lands.
+set -euo pipefail
+DIR="$(cd "$(dirname "$0")" && pwd)"
+"$DIR/test-ring0"
+echo "[ring1] placeholder: public-API approval tests — none yet"
+echo "[ring1] OK"
