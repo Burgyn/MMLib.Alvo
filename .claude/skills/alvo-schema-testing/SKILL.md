@@ -47,3 +47,24 @@ round-trip property tests catch schema↔implementation drift that no fixed
 example would trigger, and snapshots catch unintended changes to what the
 schema *produces*. Dropping one leaves a gap the others don't cover — treat
 all four as required, not as options to pick from.
+
+## Dynamic entities: where they do and don't fit these four
+
+Dynamic (metadata-driven) entities are created by end-users at *runtime* and
+live in metadata tables (`entity_definitions` / `field_definitions`), **not**
+in the descriptor — so their per-entity shape is not what these four test types
+validate. Two things about them do land in scope, and one deliberately does
+not:
+
+- **In scope — descriptor touchpoints.** The descriptor schema carries
+  dynamic-entity configuration, e.g. an index over a JSON path
+  (`alvo-descriptor.schema.json`: "index … for dynamic entities = generated
+  column + index over the JSON path"). An example descriptor exercising that
+  belongs in the examples suite (type 2) and its generated artifacts in the
+  snapshot suite (type 4).
+- **Out of scope — the parity guarantee.** "The same adversarial and policy
+  test suite passes identically over a physical and a virtual entity" (spec
+  §2.1 acceptance criteria) is a *data-layer / security-core* test, verified per
+  `alvo-security-core-review` — **not** a descriptor-schema test. Named here
+  only so runtime-entity validation isn't assumed to live here and fall through
+  the crack between the two skills.
