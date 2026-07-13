@@ -76,6 +76,20 @@ today.
   last check — it flags drift from `docs/PLAN.md`, violated §0 principles,
   and shortcuts in the security core. It is read-only and advisory: it
   reports a verdict, it does not fix, tidy, or commit anything itself.
+- **Also run Claude Code's built-in reviews as the local inner loop** (once
+  there is product code to review — from F3 on). They are the general
+  correctness/security pass that `alvo-plan-guard` deliberately is not (it
+  only judges Alvo domain/plan drift):
+  - `/code-review medium` — correctness bugs + reuse/simplify/efficiency.
+    Use `low`/`medium` for the fast inner loop; `high`+ for a large or risky
+    diff.
+  - `/security-review` — an actual vulnerability scan (injection, authz
+    flaws, insecure data handling). Run it **whenever the diff touches the
+    security core** (rule engine, CEL, tenancy, auth/RBAC), paired with the
+    `alvo-security-core-review` checklist.
+
+  Fix findings *before* opening the PR. CodeRabbit and CodeQL are the
+  outer-loop gate on the PR itself — not a substitute for reviewing first.
 
 ## Context pyramid — read big docs rarely, on demand
 

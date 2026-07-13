@@ -18,6 +18,18 @@ Background: `docs/product/alvo-specifikacia.md` §1.2 (rule engine, hard
 guarantees) and the hard-invariants section; `docs/design-brief.en.md`
 "Hard invariants / contracts" and "Rule engine (the security core)".
 
+## Run this alongside `/security-review`
+
+This skill is the **checklist** — the Alvo-specific invariants that must
+hold. It is not a scanner. Pair it with Claude Code's built-in
+**`/security-review`** command, which does an actual vulnerability pass over
+the pending changes (injection, authz flaws, insecure data handling,
+insecure dependencies). The two are complementary: the checklist tells you
+*what must be true*; `/security-review` is a second engine hunting for the
+violations you would miss by eye. When `alvo-plan-guard` escalates a change
+as `needs-deep-review`, the deep pass = **this checklist + a `/security-review`
+run** before merge — not the checklist alone.
+
 ## Checklist
 
 - **SQL predicate — user input is never interpolated.** All values reach SQL
