@@ -105,14 +105,13 @@ and only descend when the layer above does not answer your question.
 
 ## Skills & guard
 
-The `alvo-*` skills activate automatically when a task touches their area —
-you should not need to invoke them by name:
-
-- `alvo-architecture-rules` — ports, public API, package structure, the descriptor.
-- `alvo-security-core-review` — rule engine, tenancy, CEL compilation, authorization; runs a deep-review checklist and marks the change `needs-deep-review`.
-- `alvo-schema-testing` — tests against the descriptor JSON Schema.
-- `alvo-dotnet-conventions` — packaging, licensing, test stack, and code-style conventions live here now, **not** inline in this file.
-- `alvo-regen-brief` — regenerate `docs/design-brief.en.md` when the spec/analysis sources change.
+Domain discipline lives in `.claude/skills/alvo-*` (skills) and the read-only
+`alvo-plan-guard` subagent (`.claude/agents/`). You don't invoke skills by
+name and this file deliberately doesn't re-list them — the harness surfaces
+each skill's `description` and it activates when a task touches its area. Two
+things those descriptions won't tell you: packaging / licensing / test-stack /
+**code-style conventions live in the `alvo-dotnet-conventions` skill, not
+inline here**; and `alvo-plan-guard` is your pre-PR check (see Hard rules).
 
 ## One-time setup
 
