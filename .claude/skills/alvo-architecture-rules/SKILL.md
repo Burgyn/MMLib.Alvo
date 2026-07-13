@@ -32,6 +32,32 @@ descriptor (two admins editing = a conflict, not a silent overwrite). If you
 add a descriptor-mutating feature, ask which path(s) it must work on before
 writing it, and don't let one path get an escape hatch the other lacks.
 
+## Schema registry: one model, two drivers (physical + dynamic)
+
+The schema registry exposes one entity model (`TableMeta`/`ColumnMeta`) from
+two drivers: **physical** (introspection of real DB tables) and **dynamic**
+(the metadata tables `entity_definitions` / `field_definitions`). Everything
+above the registry — Data API, rule engine, realtime, automation — must work
+**identically** over a virtual and a physical entity and must never branch on
+which driver produced the model. If any code asks "is this a real table?", the
+abstraction has leaked and the ERP embedding story breaks.
+
+Dynamic entities are a *distinct data-layer mode*, not physical tables created
+on the fly. When an ERP end-user creates an *evidencia* ("evidenciu vozidiel")
+at runtime, that is a pure metadata INSERT — no DDL, no lock — and every
+tenant's every dynamic entity shares **one partitioned `entity_records` table**
+(`tenant_id`, `entity_definition_id`, `data JSONB`). A physical table per
+user-defined entity is the specific anti-pattern this mode exists to avoid: N
+tenants × M entities would bloat the catalog and degrade the planner. Spec
+§2.1; enabled via `.EnableDynamicEntities()` (spec §2.14).
+
+Consequences to hold when designing anything schema-shaped: the entity model
+must be expressible *without* a physical table (don't design a physical-only
+`TableMeta`); typed C# codegen applies to physical entities only (dynamic ones
+are consumed via weakly-typed JSON/dictionary access — two data-access modes,
+stated openly, not hidden); and "materialization" — promoting a hot dynamic
+entity to a real table — must preserve the public API contract.
+
 ## The computed / rollup / hook ladder
 
 A derived value belongs on the rung that matches how it is computed — pushing
