@@ -55,7 +55,11 @@ Write one file: `docs/design-brief.en.md`.
   6. **Boundaries** — must cover: descriptor ≠ infra, MCP is an adapter (not a
      special case), the two sources of truth (repo file vs. DB record), and
      the computed/rollup/hook ladder.
-  7. **Phase map**
+  7. **Phase map** — always open this section with a note disambiguating the
+     spec's build-order phase numbers (F1–F7+, spec §"Súhrnná mapa fáz") from
+     the GitHub-milestone numbering (F0–F7) used in `docs/PLAN.md`, and pointing
+     to `docs/PLAN.md` as the authority for "where we are now." Regenerate this
+     note verbatim each time; it must survive every regeneration.
 
 ## Keep / drop rules
 

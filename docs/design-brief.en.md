@@ -354,6 +354,10 @@ another port**; lockstep SemVer (everything released together as one version).
 
 ## 7. Phase map
 
+> Note: these phase numbers follow the spec's build order (spec §"Súhrnná mapa
+> fáz"), NOT the GitHub-milestone numbering (F0–F7) used in `docs/PLAN.md`. For
+> "where we are now," `docs/PLAN.md` is the authority.
+
 ```
 F1 Interfaces + packages → F2 README → F3 Contract tests → F4 CRUD core → F5 Admin → F6 Demo (descriptor+agent; MCP optional) → F7+ components
                                │              │
