@@ -138,8 +138,12 @@ outbox, durable, retried, network allowed.
 guarantees:* an event is published **in the same transaction** as the data change
 (transactional outbox — no lost and no phantom event: "no change without an
 event, no event without a change"); subscribe supports wildcard patterns
-(`entity.orders.*`). Everything else (realtime, webhooks, functions, automation,
-audit) is a consumer of this one stream.
+(`entity.orders.*`); payload carries `record` + `old_record` + changed-columns
+(cheap `changed(field)` conditions). **Bulk operations coalesce:** per-item vs
+batch delivery is declared per rule, with a batch event shape (e.g.
+`entity.orders.created.batch`) — a 10k-row import must not emit 10k events
+(the Directus per-item scaling gap). Everything else (realtime, webhooks,
+functions, automation, audit) is a consumer of this one stream.
 
 **Infrastructure ports (provider model)** — each has a default in the core and a
 swap point: **secret store** (get + rotation/versioning), **object store**
