@@ -9,9 +9,15 @@ cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 echo "Alvo orientation:"
 
 if [ -f docs/PLAN.md ]; then
-  # The checklist marker line (starts with the ← arrow) plus the phase line
-  # above it. Anchoring on a leading ← avoids the prose mentions of the marker.
-  grep -m1 -B1 '^[[:space:]]*←' docs/PLAN.md | sed 's/^/  /' || echo "  (no ← YOU ARE HERE marker found in docs/PLAN.md)"
+  # Print the phase-title line that carries the ← marker, plus the marker line.
+  # We track the most recent "- [ ] **F<n>" title and emit it when we hit the
+  # marker, so a phase whose description spans several lines still resolves to
+  # its title (a plain `grep -B1` would grab a mid-description line instead).
+  awk '
+    /^- \[.\] \*\*F[0-9]/ { phase = $0 }
+    /^[[:space:]]*←/      { if (phase != "") print phase; print $0; found = 1; exit }
+    END                   { if (!found) print "(no ← YOU ARE HERE marker found in docs/PLAN.md)" }
+  ' docs/PLAN.md | sed 's/^/  /'
 else
   echo "  (docs/PLAN.md not found)"
 fi

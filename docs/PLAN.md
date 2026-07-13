@@ -46,15 +46,15 @@ Where, not how — see the design brief for the reasoning behind each bullet.
 
 ## 3. Phase map F0–F7
 
-`← YOU ARE HERE` sits on **F0**. Each phase = one GitHub milestone; issues
+`← YOU ARE HERE` sits on **F1**. Each phase = one GitHub milestone; issues
 are numbered independently of the plan's own bracketed `[N]` step numbers
 (see `docs/superpowers/` for the distinction).
 
-- [ ] **F0 — Skeleton** — have something to build on; deliberately small.
-  ← YOU ARE HERE ([milestone #1](https://github.com/Burgyn/MMLib.Alvo/milestone/1))
+- [x] **F0 — Skeleton** — have something to build on; deliberately small.
+  ([milestone #1](https://github.com/Burgyn/MMLib.Alvo/milestone/1))
 - [ ] **F1 — Quality before code** — set up all gates on empty projects, so
   every subsequent commit passes through them.
-  ([milestone #2](https://github.com/Burgyn/MMLib.Alvo/milestone/2))
+  ← YOU ARE HERE ([milestone #2](https://github.com/Burgyn/MMLib.Alvo/milestone/2))
 - [ ] **F2 — Schema foundation** — the schema is the source of truth;
   specify it and work out how to test against it.
   ([milestone #3](https://github.com/Burgyn/MMLib.Alvo/milestone/3))
