@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# ring0 — run after every small step (unit + fast contract tests, seconds).
+# Today runs the whole suite (it is fast because it is small). When slow
+# tests appear, add a fast-only filter here — grow by adding, not rewriting.
+set -euo pipefail
+echo "[ring0] dotnet test"
+dotnet test
+echo "[ring0] OK"
