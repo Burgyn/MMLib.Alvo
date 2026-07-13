@@ -176,10 +176,12 @@ sections:
 
   ```
   <!-- GENERATED — do not hand-edit. Regenerate via the alvo-regen-brief skill. -->
-  <!-- brief-sources:
-       docs/product/alvo-specifikacia.md sha256:<hash>
-       docs/product/baas-analyza.md sha256:<hash> -->
+  <!-- brief-source: docs/product/alvo-specifikacia.md sha256:<hash> -->
+  <!-- brief-source: docs/product/baas-analyza.md sha256:<hash> -->
   ```
+
+  (One single-line `brief-source:` marker per source — the exact form
+  `scripts/check-brief-freshness` parses.)
 
 - **Audience:** the agent that is **building** Alvo. (Distinct from the `llms.txt`
   in #26, which is for agents/users **consuming** the framework. Same format
