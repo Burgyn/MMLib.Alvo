@@ -162,12 +162,15 @@ here only so it isn't assumed to live here.
 5. Spec and skill edits are written in **English**, matching the existing
    specs and skills.
 
-## Follow-up (not in this PR)
+## Follow-up
 
-- Consider a GitHub issue under **F7 (milestone #8)** for the dynamic-entities
-  data-layer component, linked from the PLAN.md F7 line, when F7 is picked up.
-  Left out here on purpose — creating tracking issues wasn't requested and this
-  PR is a docs/orchestration change.
+- **F7 implementation is already tracked** — issue #41 `[36] DynamicEntities`
+  (milestone F7, "metadata-driven records, depends on Tenancy #40") is the home
+  for the `entity_records` store. This PR does not duplicate it. _(Corrects an
+  earlier draft of this section that assumed no F7 issue existed.)_
+- **F2 accommodation guard** — a dedicated F2 issue (milestone #3) ensures the
+  descriptor-schema finalization (#16) and the testing mechanism (#17) do not
+  foreclose the dynamic (second) driver. Cross-linked to #16 / #17 / #41.
 
 ## Verification (how we know it worked)
 
