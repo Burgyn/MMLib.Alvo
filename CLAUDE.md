@@ -13,9 +13,14 @@ codebase: standalone (a Docker image with a dashboard and CLI/Management
 API) or embedded (a NuGet package inside your own host). Every backend —
 entities, rules, automation, webhooks — is driven by one JSON project
 descriptor, whether it lives as a repo file (GitOps) or a DB record
-(dashboard-first). The primary user is a coding agent, not a human clicking
-through a wizard: declarative config, structured errors with fix
-suggestions, and idempotent operations throughout.
+(dashboard-first). Embedded mode also carries a distinct data-layer mode —
+**dynamic, metadata-driven entities** — where the host's own end-users define
+record types (*evidencie*) at runtime, backed by one shared, partitioned
+store, never a table (or database) per entity. The schema registry is
+therefore **one model, two drivers** (physical + dynamic): everything above it
+treats a virtual entity exactly like a physical one. The primary user is a
+coding agent, not a human clicking through a wizard: declarative config,
+structured errors with fix suggestions, and idempotent operations throughout.
 
 ## The 9 principles (spec §0)
 

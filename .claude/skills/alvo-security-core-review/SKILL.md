@@ -58,6 +58,22 @@ run** before merge — not the checklist alone.
   reads via the data port automatically inherits isolation; one that bypasses
   the port does not, and that is the bug class this checklist exists to
   catch.
+- **Dynamic entities share one table — isolation rests entirely on the
+  predicate.** All tenants' dynamic entities live in one partitioned
+  `entity_records` table (`tenant_id`, `entity_definition_id`, `data JSONB`) —
+  there is **no** per-entity or per-tenant *physical* table boundary to fall
+  back on. So **every** data-port query over `entity_records` must filter on
+  `tenant_id` in the SQL `WHERE` (enforced inside the data port) — that
+  predicate is the *only* thing separating tenant X's records from tenant Y's.
+  `entity_definition_id` is added on top only when a query targets one specific
+  entity; it scopes an entity, **not** a tenant, and is never a substitute for
+  `tenant_id`. And because there is no DB constraint on `data`,
+  the application-layer validation against `field_definitions` is the *only*
+  validation layer (spec §2.1) — the type/required/enum validation must hold
+  there, not just as physical-column constraints. Acceptance bar: the **same**
+  adversarial + policy test suite must pass **identically** over a physical and
+  a virtual entity — run the two-user and two-tenant tests against a dynamic
+  entity too, not only a physical one.
 - **Default-deny.** Nothing is exposed without an explicit policy. A query
   issued without tenant/authorization context must fail, not silently return
   everything (or nothing looking like success). If a new code path can reach

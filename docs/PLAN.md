@@ -56,7 +56,10 @@ are numbered independently of the plan's own bracketed `[N]` step numbers
   every subsequent commit passes through them.
   ← YOU ARE HERE ([milestone #2](https://github.com/Burgyn/MMLib.Alvo/milestone/2))
 - [ ] **F2 — Schema foundation** — the schema is the source of truth;
-  specify it and work out how to test against it.
+  specify it and work out how to test against it. The entity model is
+  **one model, two drivers** (physical introspection + dynamic metadata)
+  from the start — F2 must not bake in a physical-table-only assumption,
+  even though the dynamic *store* itself lands in F7.
   ([milestone #3](https://github.com/Burgyn/MMLib.Alvo/milestone/3))
 - [ ] **F3 — Vertical slice (CRUD)** — the smallest thing that actually
   works: project → table → CRUD API + validations.
@@ -69,7 +72,10 @@ are numbered independently of the plan's own bracketed `[N]` step numbers
 - [ ] **F6 — v0.1** — documentation, logo, release.
   ([milestone #7](https://github.com/Burgyn/MMLib.Alvo/milestone/7))
 - [ ] **F7 — Further components** — by value, gradually, contract tests
-  first. ([milestone #8](https://github.com/Burgyn/MMLib.Alvo/milestone/8))
+  first; includes **dynamic (metadata-driven) entities** — the shared
+  `entity_records` store that lets ERP end-users create their own record
+  types at runtime without a table per entity (spec §2.1).
+  ([milestone #8](https://github.com/Burgyn/MMLib.Alvo/milestone/8))
 
 ## 4. Key invariants that must not break
 
@@ -82,6 +88,12 @@ are numbered independently of the plan's own bracketed `[N]` step numbers
 - **Descriptor ≠ infra config** — the descriptor defines the backend
   (entities, rules, automation); env/secrets define infrastructure. Never
   mixed.
+- **Schema registry = one model, two drivers** — a virtual
+  (metadata-driven) entity must be indistinguishable from a physical one to
+  the Data API, rule engine, realtime, and automation. Never bake a
+  physical-table assumption into the entity model; all dynamic entities of
+  all tenants share one partitioned `entity_records` table, never a table
+  per entity (spec §2.1).
 - **MCP = an adapter, not a building block** — sits over the one Management
   API; removing it changes nothing structural.
 - **Two sources of truth, one format** — the descriptor can live as a repo
