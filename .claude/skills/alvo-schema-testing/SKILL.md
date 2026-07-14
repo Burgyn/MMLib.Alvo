@@ -50,11 +50,12 @@ all four as required, not as options to pick from.
 
 ## Dynamic entities: where they do and don't fit these four
 
-Dynamic (metadata-driven) entities are created by end-users at *runtime* and
-live in metadata tables (`entity_definitions` / `field_definitions`), **not**
-in the descriptor — so their per-entity shape is not what these four test types
-validate. Two things about them do land in scope, and one deliberately does
-not:
+Dynamic (metadata-driven) entity *definitions and records* are created by
+end-users at *runtime* and live in metadata tables (`entity_definitions` /
+`field_definitions`), not in the descriptor — so their per-entity *runtime*
+shape is not what these four test types validate. Their descriptor-level
+*configuration*, however, is a different matter. Two things about dynamic
+entities do land in scope, and one deliberately does not:
 
 - **In scope — descriptor touchpoints.** The descriptor schema carries
   dynamic-entity configuration, e.g. an index over a JSON path
