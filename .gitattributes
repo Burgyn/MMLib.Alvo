@@ -1,0 +1,11 @@
+# Line-ending normalization — keeps the dotnet format gate and Git Bash on the
+# Windows CI runner stable across platforms.
+* text=auto
+
+# Shell scripts MUST stay LF: Git Bash on the Windows runner executes them and
+# CRLF breaks the shebang / parsing.
+*.sh text eol=lf
+
+# C# sources are CRLF + UTF-8 BOM per .editorconfig; pin the EOL so git does not
+# rewrite it under core.autocrlf on Windows.
+*.cs text eol=crlf

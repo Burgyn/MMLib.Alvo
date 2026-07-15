@@ -1,6 +1,6 @@
-using System.Reflection;
-using NetArchTest.Rules;
+﻿using NetArchTest.Rules;
 using Shouldly;
+using System.Reflection;
 using Xunit;
 
 namespace MMLib.Alvo.Abstractions.Tests;

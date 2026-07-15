@@ -1,6 +1,6 @@
-using System.Xml.Linq;
-using MMLib.Alvo.Testing;
+﻿using MMLib.Alvo.Testing;
 using Shouldly;
+using System.Xml.Linq;
 using Xunit;
 
 namespace MMLib.Alvo.Conventions.Tests;
@@ -13,10 +13,10 @@ namespace MMLib.Alvo.Conventions.Tests;
 /// </summary>
 public class SolutionConventionTests
 {
-    private static readonly string Root = RepositoryRoot.Find();
+    private static readonly string _root = RepositoryRoot.Find();
 
     private static IReadOnlyList<string> ProjectFiles() =>
-        Directory.EnumerateFiles(Root, "*.csproj", SearchOption.AllDirectories)
+        Directory.EnumerateFiles(_root, "*.csproj", SearchOption.AllDirectories)
             .Where(path => !IsInFolder(path, "bin") && !IsInFolder(path, "obj"))
             .ToList();
 
@@ -32,7 +32,7 @@ public class SolutionConventionTests
             StringComparison.OrdinalIgnoreCase);
 
     private static string RelativePath(string absolutePath) =>
-        Path.GetRelativePath(Root, absolutePath).Replace('\\', '/');
+        Path.GetRelativePath(_root, absolutePath).Replace('\\', '/');
 
     [Fact]
     public void No_project_pins_an_inline_package_version()
@@ -80,7 +80,7 @@ public class SolutionConventionTests
     [Fact]
     public void Every_project_is_registered_in_the_solution()
     {
-        var solution = XDocument.Load(Path.Combine(Root, "MMLib.Alvo.slnx"));
+        var solution = XDocument.Load(Path.Combine(_root, "MMLib.Alvo.slnx"));
         var registered = solution.Descendants("Project")
             .Select(project => project.Attribute("Path")?.Value)
             .Where(path => path is not null)

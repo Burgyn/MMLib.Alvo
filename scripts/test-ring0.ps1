@@ -3,7 +3,8 @@
 # Mirrors scripts/test-ring0 for PowerShell. Today runs the whole suite (fast
 # because it is small); add a fast-only filter here when slow tests appear.
 $ErrorActionPreference = 'Stop'
-Write-Host '[ring0] dotnet test'
-dotnet test
+$config = if ($env:ALVO_CONFIGURATION) { $env:ALVO_CONFIGURATION } else { 'Debug' }
+Write-Host "[ring0] dotnet test (-c $config)"
+dotnet test -c $config
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Write-Host '[ring0] OK'

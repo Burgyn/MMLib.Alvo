@@ -13,8 +13,9 @@ $integration = Get-ChildItem -Path $root -Recurse -Filter '*.Tests.Integration.c
 if ($integration) {
     Write-Host '[ring2] integration tests (Testcontainers)'
     # TODO(#9): scope via dotnet-affected once integration projects exist.
+    $config = if ($env:ALVO_CONFIGURATION) { $env:ALVO_CONFIGURATION } else { 'Debug' }
     foreach ($proj in $integration) {
-        dotnet test --project $proj.FullName
+        dotnet test --project $proj.FullName -c $config
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
 } else {

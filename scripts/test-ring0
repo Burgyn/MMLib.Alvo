@@ -3,6 +3,7 @@
 # Today runs the whole suite (it is fast because it is small). When slow
 # tests appear, add a fast-only filter here — grow by adding, not rewriting.
 set -euo pipefail
-echo "[ring0] dotnet test"
-dotnet test
+CONFIG="${ALVO_CONFIGURATION:-Debug}"
+echo "[ring0] dotnet test (-c $CONFIG)"
+dotnet test -c "$CONFIG"
 echo "[ring0] OK"

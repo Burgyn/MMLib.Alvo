@@ -1,7 +1,7 @@
-using System.Reflection;
-using MMLib.Alvo.Testing;
+﻿using MMLib.Alvo.Testing;
 using NetArchTest.Rules;
 using Shouldly;
+using System.Reflection;
 using Xunit;
 
 namespace MMLib.Alvo.Tests.Shared;

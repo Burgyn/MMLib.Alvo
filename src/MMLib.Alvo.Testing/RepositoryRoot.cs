@@ -1,4 +1,4 @@
-namespace MMLib.Alvo.Testing;
+﻿namespace MMLib.Alvo.Testing;
 
 /// <summary>
 /// Locates the repository root for tests that scan project and solution files on

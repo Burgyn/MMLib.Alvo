@@ -1,4 +1,4 @@
-namespace MMLib.Alvo.Testing;
+﻿namespace MMLib.Alvo.Testing;
 
 /// <summary>
 /// Declares which production assembly the shared architecture rules linked into

@@ -11,10 +11,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-and-test:
-    name: Build & test
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+  build-test:
+    name: Build & test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -29,11 +33,46 @@ jobs:
       - name: Restore
         run: dotnet restore
 
+      - name: Restore tools
+        run: dotnet tool restore
+
+      # Formatting is OS-independent — run the verify gate once (Linux) to avoid
+      # cross-platform line-ending flakiness. TreatWarningsAsErrors covers
+      # analyzer rules; this catches formatting/style .editorconfig forgives at
+      # build time (whitespace, using order, IDE naming).
+      - name: Format gate
+        if: runner.os == 'Linux'
+        run: dotnet format --verify-no-changes
+
       - name: Build
         run: dotnet build --configuration Release --no-restore
 
-      - name: Test
-        run: dotnet test --configuration Release --no-restore
+      # The PR is the single full gate: run the rings (ring2 = ring1 + affected
+      # integration + API-invariant/Vacuum placeholders) on both OSes. Same
+      # scripts the agent runs locally. bash is available on the Windows runner.
+      - name: Test (rings)
+        shell: bash
+        env:
+          ALVO_CONFIGURATION: Release
+        run: scripts/test-ring2
+
+  # Stable required status check: the branch ruleset requires "Build & test",
+  # which must not change when matrix legs are added/removed. This gate passes
+  # only if every matrix leg succeeded.
+  build-and-test:
+    name: Build & test
+    needs: build-test
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require all matrix legs to pass
+        run: |
+          if [ "${{ needs.build-test.result }}" != "success" ]; then
+            echo "One or more Build & test matrix legs failed."
+            exit 1
+          fi
+          echo "All Build & test matrix legs passed."
 
   brief-freshness:
     name: Brief freshness
