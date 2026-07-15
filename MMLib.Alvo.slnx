@@ -5,5 +5,6 @@
   </Folder>
   <Folder Name="/test/">
     <Project Path="test/MMLib.Alvo.Abstractions.Tests/MMLib.Alvo.Abstractions.Tests.csproj" />
+    <Project Path="test/MMLib.Alvo.Conventions.Tests/MMLib.Alvo.Conventions.Tests.csproj" />
   </Folder>
 </Solution>

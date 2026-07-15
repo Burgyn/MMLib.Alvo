@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    os A — solution-structure convention tests. Scans *.csproj / .slnx as files
+    (no Assembly.Load, no build of the scanned projects). Has no sibling
+    production assembly, so it opts out of the linked os B architecture rules.
+  -->
+  <PropertyGroup>
+    <AlvoSharedArchTests>false</AlvoSharedArchTests>
+  </PropertyGroup>
+
+</Project>
