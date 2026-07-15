@@ -4,6 +4,19 @@
 # Full run (+ mutation + e2e) stays in CI on the PR; do not run it locally.
 set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$DIR/.." && pwd)"
 "$DIR/test-ring1"
-echo "[ring2] placeholder: integration (affected-scoped), API invariant, Vacuum — none yet"
+
+integration="$(find "$ROOT" -name '*.Tests.Integration.csproj' -not -path '*/bin/*' -not -path '*/obj/*' 2>/dev/null || true)"
+if [ -n "$integration" ]; then
+  echo "[ring2] integration tests (Testcontainers)"
+  # TODO(#9): scope via dotnet-affected once integration projects exist.
+  while IFS= read -r proj; do
+    [ -n "$proj" ] && dotnet test --project "$proj"
+  done <<< "$integration"
+else
+  echo "[ring2] no integration test projects yet — skipping"
+fi
+
+echo "[ring2] placeholder: API invariant + Vacuum — land in a later F1 PR"
 echo "[ring2] OK"
