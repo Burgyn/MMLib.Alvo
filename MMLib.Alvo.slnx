@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/MMLib.Alvo.Abstractions/MMLib.Alvo.Abstractions.csproj" />
+    <Project Path="src/MMLib.Alvo.Testing/MMLib.Alvo.Testing.csproj" />
   </Folder>
   <Folder Name="/test/">
     <Project Path="test/MMLib.Alvo.Abstractions.Tests/MMLib.Alvo.Abstractions.Tests.csproj" />
