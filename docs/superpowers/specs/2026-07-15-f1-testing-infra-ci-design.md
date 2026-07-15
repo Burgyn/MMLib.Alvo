@@ -44,11 +44,13 @@ gate. #9 has nothing to run without #10, so they land together.
   written with `[Fact(Skip = "…F3")]`, not vacuum-passing (visible, not silently
   green).
 - **CI (#9):** extend `.github/workflows/ci.yml` (do not recreate). Add a
-  `dotnet format --verify-no-changes` gate, run the ring scripts, publish
-  TRX/JUnit via MTP-native reporting (**not** VSTest `--logger`, and **never**
-  `--nologo` — in MTP that is forwarded to the test app and breaks the run),
-  **Linux + Windows** matrix, and `dotnet-affected` wired to scope integration
-  tests (skips cleanly while there are none). PR stays the single full gate.
+  `dotnet format --verify-no-changes` gate (Linux only — formatting is
+  OS-independent and this avoids line-ending flakiness), run the ring scripts as
+  the test step (**never** `--nologo` — in MTP that is forwarded to the test app
+  and breaks the run; **not** VSTest `--logger`), a **Linux + Windows** matrix
+  with a stable `Build & test` aggregation check for the branch ruleset, and
+  `dotnet-affected` wired to scope integration tests (skips cleanly while there
+  are none). PR stays the single full gate.
 - **`dotnet-affected`:** adopt as a dotnet-tool; fallback to a custom
   git-diff + project-graph script if it proves incompatible with net10/MTP.
 - **Branch protection** already exists as an active repo ruleset; adding new
@@ -62,6 +64,11 @@ gate. #9 has nothing to run without #10, so they land together.
 - Stryker → PR4 (#13). Git hooks + PR template → PR5 (#15).
 - The `alvo-testing` and `alvo-new-package` skills ship with the PRs that first
   rely on them, each with a `writing-skills` baseline test.
+- **Test-result publishing (TRX/JUnit artifacts):** deferred to a follow-up. The
+  gate is the ring scripts' exit code (a red run blocks merge); MTP-native TRX
+  reporting needs the `Microsoft.Testing.Extensions.TrxReport` extension wired
+  into the test projects, which is not pulled in yet. Actions logs already show
+  the MTP run summary in the meantime.
 
 ## Definition of done
 
