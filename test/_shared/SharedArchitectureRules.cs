@@ -25,7 +25,19 @@ public class SharedArchitectureRules
         var testAssembly = Assembly.GetExecutingAssembly();
         var explicitTarget = testAssembly.GetCustomAttribute<ArchTargetAttribute>()?.TargetAssemblyName;
         var targetName = explicitTarget ?? StripTestsSuffix(testAssembly.GetName().Name!);
-        return Assembly.Load(targetName);
+        try
+        {
+            return Assembly.Load(targetName);
+        }
+        catch (FileNotFoundException exception)
+        {
+            throw new InvalidOperationException(
+                $"Shared architecture rules could not load target assembly '{targetName}' "
+                + $"(inferred from test assembly '{testAssembly.GetName().Name}'). Either reference the "
+                + "production project it tests, point at it explicitly with [assembly: ArchTarget(\"...\")] , "
+                + "or opt this project out via <AlvoSharedArchTests>false</AlvoSharedArchTests>.",
+                exception);
+        }
     }
 
     private static string StripTestsSuffix(string assemblyName) =>
@@ -36,8 +48,10 @@ public class SharedArchitectureRules
     [Fact]
     public void Public_types_do_not_live_in_internal_namespaces()
     {
+        // Regex, not Containing: ".Internal" as a whole namespace segment only,
+        // so e.g. "MMLib.Alvo.Internals" or "*.InternalApi" is not a false positive.
         var result = Types.InAssembly(TargetAssembly())
-            .That().ResideInNamespaceContaining(".Internal")
+            .That().ResideInNamespaceMatching(@"\.Internal(\.|$)")
             .ShouldNot().BePublic()
             .GetResult();
 
