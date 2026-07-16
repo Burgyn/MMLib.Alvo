@@ -12,7 +12,10 @@ if [ -n "$integration" ]; then
   echo "[ring2] integration tests (Testcontainers)"
   # TODO(#9): scope via dotnet-affected once integration projects exist.
   while IFS= read -r proj; do
-    [ -n "$proj" ] && dotnet test --project "$proj" -c "${ALVO_CONFIGURATION:-Debug}"
+    # if/fi, not `[ -n ] &&`: under set -e the && form aborts on a blank line.
+    if [ -n "$proj" ]; then
+      dotnet test --project "$proj" -c "${ALVO_CONFIGURATION:-Debug}"
+    fi
   done <<< "$integration"
 else
   echo "[ring2] no integration test projects yet — skipping"
