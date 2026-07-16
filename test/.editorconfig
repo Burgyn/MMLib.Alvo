@@ -1,0 +1,7 @@
+# Test code under test/ (including the linked test/_shared sources).
+
+[*.cs]
+# CA1707: descriptive snake_case test names are the convention here
+# (alvo-dotnet-conventions: "tests rely on descriptive test names") — the
+# no-underscores rule applies to production identifiers, not test methods.
+dotnet_diagnostic.CA1707.severity = none

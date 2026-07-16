@@ -4,7 +4,7 @@ using Shouldly;
 using System.Reflection;
 using Xunit;
 
-namespace MMLib.Alvo.Tests.Shared;
+namespace MMLib.Alvo.Tests.Architecture;
 
 /// <summary>
 /// Architecture rules that must hold for EVERY MMLib.Alvo production assembly.

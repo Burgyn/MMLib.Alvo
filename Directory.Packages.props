@@ -11,4 +11,11 @@
     <PackageVersion Include="Microsoft.SourceLink.GitHub" Version="10.0.300" />
   </ItemGroup>
 
+  <!-- Analyzers for every project (CPM global = PrivateAssets=all, no per-csproj
+       entries). Roslynator severities were already configured in .editorconfig;
+       this makes them actually run. Apache-2.0. -->
+  <ItemGroup>
+    <GlobalPackageReference Include="Roslynator.Analyzers" Version="4.15.0" />
+  </ItemGroup>
+
 </Project>

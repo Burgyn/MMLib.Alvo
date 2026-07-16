@@ -15,7 +15,7 @@ public class SolutionConventionTests
 {
     private static readonly string _root = RepositoryRoot.Find();
 
-    private static IReadOnlyList<string> ProjectFiles() =>
+    private static List<string> ProjectFiles() =>
         Directory.EnumerateFiles(_root, "*.csproj", SearchOption.AllDirectories)
             .Where(path => !IsInFolder(path, "bin") && !IsInFolder(path, "obj"))
             .ToList();

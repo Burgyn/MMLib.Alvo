@@ -53,6 +53,13 @@ gate. #9 has nothing to run without #10, so they land together.
   are none). PR stays the single full gate.
 - **`dotnet-affected`:** adopt as a dotnet-tool; fallback to a custom
   git-diff + project-graph script if it proves incompatible with net10/MTP.
+- **Analyzers as a build gate** (issue #9 "analyzers as a gate"):
+  `AnalysisLevel=latest-recommended` + `EnforceCodeStyleInBuild=true` in
+  `Directory.Build.props`, and `Roslynator.Analyzers` wired via a CPM
+  `GlobalPackageReference` — the RCS severities in `.editorconfig` predated the
+  package and were inert until now. With `TreatWarningsAsErrors` these all fail
+  the build. `test/.editorconfig` turns CA1707 off for test code only
+  (snake_case test names are the documented convention).
 - **Branch protection** already exists as an active repo ruleset; adding new
   required status-check names to it is a separate maintainer (admin) action,
   not part of this PR.
