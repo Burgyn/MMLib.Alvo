@@ -33,19 +33,23 @@ jobs:
       - name: Restore
         run: dotnet restore
 
-      - name: Restore tools
-        run: dotnet tool restore
-
-      # Formatting is OS-independent — run the verify gate once (Linux) to avoid
-      # cross-platform line-ending flakiness. TreatWarningsAsErrors covers
-      # analyzer rules; this catches formatting/style .editorconfig forgives at
-      # build time (whitespace, using order, IDE naming).
-      - name: Format gate
+      # Nothing invokes the tool manifest in CI yet (dotnet-affected is wired
+      # for ring2 once integration projects exist) — this only validates the
+      # manifest stays restorable, so one OS is enough.
+      - name: Restore tools (manifest check)
         if: runner.os == 'Linux'
-        run: dotnet format --verify-no-changes
+        run: dotnet tool restore
 
       - name: Build
         run: dotnet build --configuration Release --no-restore
+
+      # After Build, so a compile error is always attributed to the Build step.
+      # Formatting is OS-independent — run the verify gate once (Linux) to avoid
+      # cross-platform line-ending flakiness. It catches formatting/style that
+      # .editorconfig marks below warning (whitespace, using order, IDE naming).
+      - name: Format gate
+        if: runner.os == 'Linux'
+        run: dotnet format --verify-no-changes
 
       # The PR is the single full gate: run the rings (ring2 = ring1 + affected
       # integration + API-invariant/Vacuum placeholders) on both OSes. Same

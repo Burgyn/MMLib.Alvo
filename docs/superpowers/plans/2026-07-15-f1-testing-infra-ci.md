@@ -93,7 +93,7 @@
 - Create: `.config/dotnet-tools.json` (tool manifest with `dotnet-affected`)
 
 - [ ] `dotnet new tool-manifest`; `dotnet tool install dotnet-affected`. Verify it runs on net10 (`dotnet affected --help`); if broken, drop the tool and add a `scripts/affected` git-diff fallback + note.
-- [ ] Extend `ci.yml` `build-and-test` job: `strategy.matrix.os: [ubuntu-latest, windows-latest]`, `runs-on: ${{ matrix.os }}`; add `dotnet format --verify-no-changes` step (after restore); replace the bare test step with `scripts/test-ring2` (bash on both — GitHub Windows runners have bash); publish TRX via MTP reporting flags (`dotnet test -- --report-trx --results-directory TestResults` — verify exact flag) uploaded with `actions/upload-artifact`.
+- [ ] Extend `ci.yml` `build-and-test` job: `strategy.matrix.os: [ubuntu-latest, windows-latest]`, `runs-on: ${{ matrix.os }}`; add `dotnet format --verify-no-changes` step; replace the bare test step with `scripts/test-ring2` (bash on both — GitHub Windows runners have bash). ~~TRX publishing~~ — deferred, needs `Microsoft.Testing.Extensions.TrxReport`; see the spec's "Out of scope" (the gate is the ring exit code).
 - [ ] Keep `brief-freshness` job as-is.
 - [ ] Commit.
 
