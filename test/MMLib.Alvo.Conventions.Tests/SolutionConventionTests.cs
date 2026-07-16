@@ -20,14 +20,19 @@ public class SolutionConventionTests
             .Where(path => !IsInFolder(path, "bin") && !IsInFolder(path, "obj"))
             .ToList();
 
+    // Segment match on the repo-relative path, so a clone under e.g. ~/src/alvo
+    // can never misclassify projects (the absolute path is out of our control).
     private static bool IsInFolder(string path, string folder) =>
-        path.Contains(
-            $"{Path.DirectorySeparatorChar}{folder}{Path.DirectorySeparatorChar}",
-            StringComparison.Ordinal);
+        RelativePath(path).Split('/').Contains(folder, StringComparer.Ordinal);
+
+    // Match by local name so an (unconventional) xmlns on a csproj cannot turn
+    // a convention gate into a silent false negative.
+    private static IEnumerable<XElement> ElementsNamed(XContainer document, string localName) =>
+        document.Descendants().Where(element => element.Name.LocalName == localName);
 
     private static bool IsPackable(XDocument project) =>
         !string.Equals(
-            project.Descendants("IsPackable").FirstOrDefault()?.Value.Trim(),
+            ElementsNamed(project, "IsPackable").FirstOrDefault()?.Value.Trim(),
             "false",
             StringComparison.OrdinalIgnoreCase);
 
@@ -41,12 +46,19 @@ public class SolutionConventionTests
         foreach (var projectFile in ProjectFiles())
         {
             var document = XDocument.Load(projectFile);
-            if (document.Descendants("PackageReference").Any(reference => reference.Attribute("Version") is not null))
+            foreach (var reference in ElementsNamed(document, "PackageReference"))
             {
-                offenders.Add($"{RelativePath(projectFile)} (PackageReference/@Version)");
+                // VersionOverride is the CPM escape hatch — same rule applies.
+                foreach (var attribute in new[] { "Version", "VersionOverride" })
+                {
+                    if (reference.Attribute(attribute) is not null)
+                    {
+                        offenders.Add($"{RelativePath(projectFile)} (PackageReference/@{attribute})");
+                    }
+                }
             }
 
-            if (document.Descendants("Version").Any(version => version.Parent?.Name.LocalName == "PropertyGroup"))
+            if (ElementsNamed(document, "Version").Any(version => version.Parent?.Name.LocalName == "PropertyGroup"))
             {
                 offenders.Add($"{RelativePath(projectFile)} (<Version>)");
             }
@@ -66,7 +78,7 @@ public class SolutionConventionTests
             var document = XDocument.Load(projectFile);
             foreach (var property in inherited)
             {
-                if (document.Descendants(property).Any())
+                if (ElementsNamed(document, property).Any())
                 {
                     offenders.Add($"{RelativePath(projectFile)} (<{property}>)");
                 }
@@ -81,18 +93,20 @@ public class SolutionConventionTests
     public void Every_project_is_registered_in_the_solution()
     {
         var solution = XDocument.Load(Path.Combine(_root, "MMLib.Alvo.slnx"));
-        var registered = solution.Descendants("Project")
-            .Select(project => project.Attribute("Path")?.Value)
+        var registered = ElementsNamed(solution, "Project")
+            .Select(project => project.Attribute("Path")?.Value?.Replace('\\', '/'))
             .Where(path => path is not null)
-            .Select(path => Path.GetFileName(path!.Replace('\\', '/')))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+        // Compare repo-relative paths, not file names — a project registered
+        // from the wrong directory must fail too.
         var missing = ProjectFiles()
-            .Select(Path.GetFileName)
-            .Where(name => !registered.Contains(name!))
+            .Select(RelativePath)
+            .Where(path => !registered.Contains(path))
             .ToList();
 
-        missing.ShouldBeEmpty("Every project must be registered in MMLib.Alvo.slnx.");
+        missing.ShouldBeEmpty(
+            "Every project must be registered in MMLib.Alvo.slnx — run: dotnet sln MMLib.Alvo.slnx add <csproj>.");
     }
 
     [Fact]
@@ -113,7 +127,7 @@ public class SolutionConventionTests
         foreach (var projectFile in ProjectFiles().Where(path => IsInFolder(path, "src")))
         {
             var document = XDocument.Load(projectFile);
-            foreach (var reference in document.Descendants("ProjectReference"))
+            foreach (var reference in ElementsNamed(document, "ProjectReference"))
             {
                 var include = reference.Attribute("Include")?.Value?.Replace('\\', '/');
                 if (include is not null && include.Contains("/test/", StringComparison.OrdinalIgnoreCase))
@@ -149,6 +163,8 @@ public class SolutionConventionTests
             }
         }
 
-        missing.ShouldBeEmpty("Every packable src project must have a matching *.Tests project.");
+        missing.ShouldBeEmpty(
+            "Every packable src project needs a matching test project — create test/<name>.Tests, "
+            + "or mark the project <IsPackable>false</IsPackable> if it is internal.");
     }
 }
