@@ -3,8 +3,13 @@
 * text=auto
 
 # Shell scripts MUST stay LF: Git Bash on the Windows runner executes them and
-# CRLF breaks the shebang / parsing.
+# CRLF breaks the shebang / parsing. scripts/ and .githooks/ hold extensionless
+# bash scripts (test-ring*, check-brief-freshness, pre-commit), so pin the whole
+# directories rather than relying on the runner's git config. *.ps1 under
+# scripts/ is fine with LF on every platform.
 *.sh text eol=lf
+scripts/* text eol=lf
+.githooks/* text eol=lf
 
 # C# sources are CRLF + UTF-8 BOM per .editorconfig; pin the EOL so git does not
 # rewrite it under core.autocrlf on Windows.
