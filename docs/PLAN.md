@@ -46,21 +46,21 @@ Where, not how — see the design brief for the reasoning behind each bullet.
 
 ## 3. Phase map F0–F7
 
-`← YOU ARE HERE` sits on **F1**. Each phase = one GitHub milestone; issues
+`← YOU ARE HERE` sits on **F2**. Each phase = one GitHub milestone; issues
 are numbered independently of the plan's own bracketed `[N]` step numbers
 (see `docs/superpowers/` for the distinction).
 
 - [x] **F0 — Skeleton** — have something to build on; deliberately small.
   ([milestone #1](https://github.com/Burgyn/MMLib.Alvo/milestone/1))
-- [ ] **F1 — Quality before code** — set up all gates on empty projects, so
+- [x] **F1 — Quality before code** — set up all gates on empty projects, so
   every subsequent commit passes through them.
-  ← YOU ARE HERE ([milestone #2](https://github.com/Burgyn/MMLib.Alvo/milestone/2))
+  ([milestone #2](https://github.com/Burgyn/MMLib.Alvo/milestone/2))
 - [ ] **F2 — Schema foundation** — the schema is the source of truth;
   specify it and work out how to test against it. The entity model is
   **one model, two drivers** (physical introspection + dynamic metadata)
   from the start — F2 must not bake in a physical-table-only assumption,
   even though the dynamic *store* itself lands in F7.
-  ([milestone #3](https://github.com/Burgyn/MMLib.Alvo/milestone/3))
+  ← YOU ARE HERE ([milestone #3](https://github.com/Burgyn/MMLib.Alvo/milestone/3))
 - [ ] **F3 — Vertical slice (CRUD)** — the smallest thing that actually
   works: project → table → CRUD API + validations.
   ([milestone #4](https://github.com/Burgyn/MMLib.Alvo/milestone/4))
