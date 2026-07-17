@@ -16,7 +16,7 @@ namespace MMLib.Alvo.Tests.Architecture;
 public class SharedArchitectureRules
 {
     private const string TestsSuffix = ".Tests";
-    private const string InternalNamespaceSegmentPattern = @"\.Internal(\.|$)";
+    private const string InternalNamespaceSegmentPattern = @"(^|\.)Internal(\.|$)";
 
     private static Assembly TargetAssembly()
     {
