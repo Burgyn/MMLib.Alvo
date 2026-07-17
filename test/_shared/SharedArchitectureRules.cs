@@ -16,6 +16,7 @@ namespace MMLib.Alvo.Tests.Architecture;
 public class SharedArchitectureRules
 {
     private const string TestsSuffix = ".Tests";
+    private const string InternalNamespaceSegmentPattern = @"\.Internal(\.|$)";
 
     private static Assembly TargetAssembly()
     {
@@ -45,10 +46,8 @@ public class SharedArchitectureRules
     [Fact]
     public void Public_types_do_not_live_in_internal_namespaces()
     {
-        // Regex, not Containing: ".Internal" as a whole namespace segment only,
-        // so e.g. "MMLib.Alvo.Internals" or "*.InternalApi" is not a false positive.
         var result = Types.InAssembly(TargetAssembly())
-            .That().ResideInNamespaceMatching(@"\.Internal(\.|$)")
+            .That().ResideInNamespaceMatching(InternalNamespaceSegmentPattern)
             .ShouldNot().BePublic()
             .GetResult();
 
@@ -58,10 +57,8 @@ public class SharedArchitectureRules
             + string.Join(", ", offenders));
     }
 
-    [Fact(Skip = "Ožije keď vznikne core projekt MMLib.Alvo — F3.")]
+    [Fact(Skip = "Enabled once the core project (MMLib.Alvo) exists — F3.")]
     public void Core_depends_only_on_Abstractions()
     {
-        // F3: the core assembly must not depend on any MMLib.Alvo.* assembly
-        // other than MMLib.Alvo.Abstractions. No core project exists yet.
     }
 }
