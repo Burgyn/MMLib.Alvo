@@ -1,8 +1,5 @@
-﻿using MMLib.Alvo.Testing;
-using NetArchTest.Rules;
-using Shouldly;
+﻿using NetArchTest.Rules;
 using System.Reflection;
-using Xunit;
 
 namespace MMLib.Alvo.Tests.Architecture;
 

@@ -14,6 +14,12 @@
     <PackageReference Include="Shouldly" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="Shouldly" />
+    <Using Include="MMLib.Alvo.Testing" />
+  </ItemGroup>
+
   <!-- Test-support library (ArchTargetAttribute, RepositoryRoot; later fakes + contract-suite base). -->
   <ItemGroup>
     <ProjectReference Include="$(MSBuildThisFileDirectory)../src/MMLib.Alvo.Testing/MMLib.Alvo.Testing.csproj" />
