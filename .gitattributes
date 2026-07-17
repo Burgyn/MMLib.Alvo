@@ -14,3 +14,7 @@ scripts/** text eol=lf
 # C# sources are CRLF + UTF-8 BOM per .editorconfig; pin the EOL so git does not
 # rewrite it under core.autocrlf on Windows.
 *.cs text eol=crlf
+
+# Verify snapshots must stay LF on every platform — Verify rejects a verified
+# file containing a carriage return (Windows would otherwise check it out CRLF).
+*.verified.txt text eol=lf

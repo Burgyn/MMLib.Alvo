@@ -1,11 +1,24 @@
 #!/usr/bin/env bash
-# Block a commit that stages a source or brief change while the brief is stale.
+# pre-commit: design-brief freshness (always) + format & fast tests when the
+# commit stages code. Docs-only commits skip the code gate and stay fast.
+# Requires the one-time: git config core.hooksPath .githooks
 set -euo pipefail
 staged="$(git diff --cached --name-only)"
+
 if echo "$staged" | grep -qE '^docs/product/(alvo-specifikacia|baas-analyza)\.md$|^docs/design-brief\.en\.md$'; then
   if ! scripts/check-brief-freshness; then
     echo "pre-commit: design-brief.en.md is stale vs its sources." >&2
     echo "Regenerate it via the alvo-regen-brief skill, then re-commit." >&2
     exit 1
   fi
+fi
+
+if echo "$staged" | grep -qE '\.(cs|csproj|props|targets)$'; then
+  echo "[pre-commit] dotnet format --verify-no-changes"
+  if ! dotnet format --verify-no-changes; then
+    echo "pre-commit: code is not formatted — run: dotnet format" >&2
+    exit 1
+  fi
+  echo "[pre-commit] scripts/test-ring0"
+  DiffEngine_Disabled=true scripts/test-ring0
 fi

@@ -1,0 +1,16 @@
+{
+  "stryker-config": {
+    "mutate": [
+      "src/MMLib.Alvo/**/*.cs"
+    ],
+    "thresholds": {
+      "high": 90,
+      "low": 85,
+      "break": 80
+    },
+    "reporters": [
+      "progress",
+      "cleartext"
+    ]
+  }
+}

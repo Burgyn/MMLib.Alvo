@@ -1,0 +1,51 @@
+name: Mutation
+
+# Mutation testing of the security core (rule engine, CEL, tenancy). Path-filtered
+# so it runs only when the core changes — and the core does not exist yet (F3),
+# so today this workflow never triggers. The guard step is a second safety net.
+on:
+  pull_request:
+    paths:
+      - 'src/MMLib.Alvo/**'
+      - 'stryker-config.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mutation:
+    name: Stryker (security core)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Guard — security core must exist
+        id: guard
+        run: |
+          if [ -f src/MMLib.Alvo/MMLib.Alvo.csproj ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "No security core project yet — skipping mutation (activates in F3)."
+          fi
+
+      - name: Restore tools
+        if: steps.guard.outputs.run == 'true'
+        run: dotnet tool restore
+
+      - name: Mutation test
+        if: steps.guard.outputs.run == 'true'
+        run: dotnet tool run dotnet-stryker
