@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Internal test-support library (fakes, fixtures, and the port contract-suite
+    base once ports exist in F3). Referenced only by test projects; not shipped
+    yet, so IsPackable=false. Earns a package when external provider authors need
+    the contract suite (spec §1.1, package-boundary.md). TFM/Nullable/etc. are
+    inherited from Directory.Build.props — do not re-declare here.
+  -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+</Project>

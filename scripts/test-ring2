@@ -4,6 +4,34 @@
 # Full run (+ mutation + e2e) stays in CI on the PR; do not run it locally.
 set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$DIR/.." && pwd)"
 "$DIR/test-ring1"
-echo "[ring2] placeholder: integration (affected-scoped), API invariant, Vacuum — none yet"
+
+integration="$(find "$ROOT" -name '*.Tests.Integration.csproj' -not -path '*/bin/*' -not -path '*/obj/*' 2>/dev/null || true)"
+if [ -z "$integration" ]; then
+  echo "[ring2] no integration test projects yet — skipping"
+else
+  echo "[ring2] integration tests (Testcontainers), affected-scoped"
+  base="${ALVO_AFFECTED_BASE:-origin/main}"
+  affected_scoped=false
+  affected_list=""
+  if git -C "$ROOT" rev-parse --verify --quiet "${base}^{commit}" >/dev/null; then
+    if affected_raw="$(dotnet tool run dotnet-affected -- --repository-path "$ROOT" --filter-file-path "$ROOT/MMLib.Alvo.slnx" --from "$base" --to HEAD --dry-run -f text 2>/dev/null)"; then
+      affected_scoped=true
+      affected_list="$(printf '%s\n' "$affected_raw" | grep '\.csproj$' || true)"
+    fi
+  fi
+  while IFS= read -r proj; do
+    if [ -z "$proj" ]; then
+      continue
+    fi
+    if [ "$affected_scoped" = true ] && ! grep -qxF "$proj" <<< "$affected_list"; then
+      echo "[ring2] unaffected, skipping $(basename "$proj")"
+      continue
+    fi
+    dotnet test --project "$proj" -c "${ALVO_CONFIGURATION:-Debug}"
+  done <<< "$integration"
+fi
+
+echo "[ring2] placeholder: API invariant + Vacuum — land in a later F1 PR"
 echo "[ring2] OK"

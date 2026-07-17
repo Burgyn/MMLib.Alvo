@@ -14,4 +14,26 @@
     <PackageReference Include="Shouldly" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="Shouldly" />
+    <Using Include="MMLib.Alvo.Testing" />
+  </ItemGroup>
+
+  <!-- Test-support library (ArchTargetAttribute, RepositoryRoot; later fakes + contract-suite base). -->
+  <ItemGroup>
+    <ProjectReference Include="$(MSBuildThisFileDirectory)../src/MMLib.Alvo.Testing/MMLib.Alvo.Testing.csproj" />
+  </ItemGroup>
+
+  <!--
+    Shared architecture rules (os B): linked into each test project so they
+    compile into that project's assembly and run against its sibling production
+    assembly, composing with dotnet-affected. Opt out with
+    AlvoSharedArchTests=false where a project does not map 1:1 to a production
+    assembly (conventions, integration, e2e).
+  -->
+  <ItemGroup Condition="'$(AlvoSharedArchTests)' != 'false'">
+    <Compile Include="$(MSBuildThisFileDirectory)_shared/*.cs" Link="_shared/%(Filename)%(Extension)" />
+  </ItemGroup>
+
 </Project>

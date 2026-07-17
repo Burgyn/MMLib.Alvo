@@ -5,5 +5,5 @@
 set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
 "$DIR/test-ring0"
-echo "[ring1] placeholder: public-API approval tests — none yet"
+echo "[ring1] placeholder: public-API approval tests — land in PR2 (#12)"
 echo "[ring1] OK"

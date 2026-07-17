@@ -68,12 +68,32 @@ types are actually written, following the same "no inline version" pattern.
 
 ## Code style
 
-- **Comments say *why*, not *what*.** Do not narrate what the code already
-  says in its own structure. If a reader needs prose to follow the logic,
-  that's a sign to extract a well-named method or variable instead —
-  self-documenting code over comments. Reserve an actual comment for
-  genuinely non-obvious rationale: a workaround, a subtle invariant, or why
-  the obvious approach was deliberately avoided.
+- **Default to zero inline comments; make the code say it instead.** Reaching
+  for a `//` comment to explain *what* or *why* a line does something is the
+  signal to refactor — lift the value into a well-named constant, the
+  expression into a well-named method, the branch into a named predicate. A
+  comment is the last resort, only for genuinely non-obvious rationale a name
+  cannot carry (a workaround for an external bug, a subtle concurrency
+  invariant). "It reads more clearly with a note" is not that — rename instead.
+
+  ```csharp
+  // ❌ a comment justifying a choice
+  // Regex, not Containing: ".Internal" as a whole segment, so ".Internals" isn't a false positive.
+  .ResideInNamespaceMatching(@"\.Internal(\.|$)")
+
+  // ✅ the name carries the intent, the comment disappears
+  private const string InternalNamespaceSegmentPattern = @"\.Internal(\.|$)";
+  ...
+  .ResideInNamespaceMatching(InternalNamespaceSegmentPattern)
+  ```
+
+  Red flags that mean *rename, don't comment*: `// X, not Y because…`,
+  `// compare … not …`, a comment restating the next statement, a comment
+  naming what a magic value / regex / flag is for. This holds in **every**
+  language in the repo — C#, MSBuild XML, and shell scripts alike.
+- **Code is written in English** — identifiers, string literals, log and test
+  `Skip` messages, and the rare surviving comment. No other natural language
+  belongs in code (docs and commit messages are a separate matter).
 - **XML doc comments (`/// <summary>`) are required on public API members**
   of shipped library projects — public types/methods/properties on the ports
   (`Abstractions`) and the core. This is the published API surface

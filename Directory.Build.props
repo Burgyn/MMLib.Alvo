@@ -7,6 +7,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
 
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- Analyzers as a build gate (issue #9): recommended CA rules + the
+         .editorconfig IDE style rules enforced at build, not just in the IDE. -->
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <Deterministic>true</Deterministic>
     <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
