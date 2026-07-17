@@ -1,21 +1,17 @@
-﻿using System.Reflection;
-using System.Runtime.CompilerServices;
+﻿using System.Runtime.CompilerServices;
 using VerifyTests;
 using VerifyXunit;
 
 namespace MMLib.Alvo.Tests;
 
-// Keep each Verify baseline next to its own test project (not in test/_shared,
-// where the linked source physically lives): the shared file is compiled into
-// each test assembly, so derive the directory from that assembly's name — the
-// repo-relative test project folder — which is stable in local and CI builds.
+// Keep each Verify baseline next to its own test project. The shared file lives
+// in test/_shared, so Verify's default (caller-path) would put baselines there;
+// projectDirectory is the consuming test project's directory (injected per build),
+// which is exactly where the baseline belongs.
 internal static class VerifyModuleInit
 {
     [ModuleInitializer]
     internal static void Initialize() =>
-        Verifier.DerivePathInfo((_, _, type, method) =>
-            new PathInfo(
-                directory: Path.Combine(RepositoryRoot.Find(), "test", Assembly.GetExecutingAssembly().GetName().Name!),
-                typeName: type.Name,
-                methodName: method.Name));
+        Verifier.DerivePathInfo((_, projectDirectory, type, method) =>
+            new PathInfo(projectDirectory, type.Name, method.Name));
 }
