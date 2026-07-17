@@ -24,6 +24,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
@@ -59,6 +60,20 @@ jobs:
         env:
           ALVO_CONFIGURATION: Release
         run: scripts/test-ring2
+
+      # Pack-only on the PR (issue #14): prove packaging works and publish the
+      # .nupkg as an artifact. No feed publish — that lands with v0.1.
+      - name: Pack
+        if: runner.os == 'Linux'
+        run: dotnet pack --configuration Release --no-build --output artifacts
+
+      - name: Upload packages
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: nupkg
+          path: artifacts/*.nupkg
+          if-no-files-found: error
 
   # Stable required status check: the branch ruleset requires "Build & test",
   # which must not change when matrix legs are added/removed. This gate passes
