@@ -12,6 +12,7 @@
     <PackageVersion Include="Verify.XunitV3" Version="31.25.0" />
     <PackageVersion Include="Microsoft.Extensions.FileSystemGlobbing" Version="10.0.10" />
     <PackageVersion Include="Microsoft.SourceLink.GitHub" Version="10.0.300" />
+    <PackageVersion Include="MinVer" Version="7.0.0" />
   </ItemGroup>
 
   <!-- Analyzers for every project (CPM global = PrivateAssets=all, no per-csproj
