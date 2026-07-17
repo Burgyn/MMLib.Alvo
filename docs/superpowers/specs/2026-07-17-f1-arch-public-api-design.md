@@ -45,10 +45,12 @@ core/providers exist (F2/F3).
 
 ### Skill — `alvo-new-package`
 
-- The setup runbook (decision Q18) an agent follows when creating a new package,
-  paired with the os A conventions test as its enforcement. Authored per
-  `writing-skills` (baseline check before deploy). May land as a small follow-up
-  if the baseline process warrants its own PR.
+- The setup runbook (decision Q18), paired with the os A conventions test as its
+  enforcement. Landed in this PR. A `writing-skills` RED probe showed a capable
+  agent largely rediscovers the steps from the repo (the conventions test +
+  existing skills already carry the mechanical load), so the skill is
+  intentionally **lean** — judgment (is the package earned?) + the few
+  non-obvious steps a test can't check + pointers, rather than a heavy runbook.
 
 ## Decisions carried in
 
