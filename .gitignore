@@ -485,3 +485,6 @@ $RECYCLE.BIN/
 
 # dotnet-affected generated traversal project
 affected.proj
+
+# Verify received snapshots (transient; only *.verified.* is committed)
+*.received.*
