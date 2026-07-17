@@ -31,12 +31,14 @@ core/providers exist (F2/F3).
   resolver), so a new packable package's `*.Tests` gets the gate automatically
   and it composes with `dotnet-affected`. Verify keys its baseline off the caller
   path — which a single linked file would collapse across assemblies and a
-  deterministic CI build would remap — so `VerifyModuleInit` pins the baseline
-  directory to `test/_shared/` via `Verifier.DerivePathInfo` + `RepositoryRoot`,
+  deterministic CI build would remap — so `VerifyModuleInit` derives the baseline
+  directory from each test assembly's name (`Verifier.DerivePathInfo` +
+  `RepositoryRoot`), keeping the baseline **next to its own `*.Tests` project**,
   and `UseFileName($"PublicApi.{assembly}")` keeps the baselines distinct. The
   `alvo-new-package` runbook's only per-package step is "accept the generated
-  baseline". Verified: a fresh packable `*.Tests` auto-ran the gate against its
-  sibling and produced its own `PublicApi.<assembly>.received.txt`.
+  baseline". Verified (local + CI incl. Windows): a fresh packable `*.Tests`
+  auto-ran the gate against its sibling and produced its own
+  `PublicApi.<assembly>.received.txt` in its own project directory.
 - Runs inside `dotnet test` (ring1's "public-API approval" slot).
 
 ### #11 — Encapsulation, finishing the editorconfig part

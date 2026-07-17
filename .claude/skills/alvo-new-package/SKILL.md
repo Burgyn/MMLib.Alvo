@@ -31,8 +31,9 @@ will challenge an unearned package before the PR.
    architecture rules `Assembly.Load` the sibling assembly and throw without it.
 5. **Shipped (`IsPackable` not false):** the public-API approval gate is linked
    in automatically once the `*.Tests` exists — run the tests once and commit the
-   generated `test/_shared/PublicApi.<name>.verified.txt` baseline, so any later
-   public-surface change is a conscious, reviewed act (ties to SemVer).
+   generated `PublicApi.<name>.verified.txt` baseline (written next to the test
+   project), so any later public-surface change is a conscious, reviewed act
+   (ties to SemVer).
 6. **Encapsulation:** mark `public` only what is genuinely the contract; default
    to `internal`. Widening the public surface should be deliberate.
 
