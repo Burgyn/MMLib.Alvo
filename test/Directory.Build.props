@@ -26,14 +26,17 @@
   </ItemGroup>
 
   <!--
-    Shared architecture rules (os B): linked into each test project so they
-    compile into that project's assembly and run against its sibling production
-    assembly, composing with dotnet-affected. Opt out with
-    AlvoSharedArchTests=false where a project does not map 1:1 to a production
-    assembly (conventions, integration, e2e).
+    Shared tests linked into each test project so they compile into that
+    project's assembly and run against its sibling production assembly, composing
+    with dotnet-affected: architecture rules (os B) + the public-API approval
+    gate. Opt out with AlvoSharedArchTests=false where a project does not map 1:1
+    to a production assembly (conventions, integration, e2e). The public-API
+    tooling is only needed here.
   -->
   <ItemGroup Condition="'$(AlvoSharedArchTests)' != 'false'">
     <Compile Include="$(MSBuildThisFileDirectory)_shared/*.cs" Link="_shared/%(Filename)%(Extension)" />
+    <PackageReference Include="PublicApiGenerator" />
+    <PackageReference Include="Verify.XunitV3" />
   </ItemGroup>
 
 </Project>

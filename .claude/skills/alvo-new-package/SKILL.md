@@ -29,9 +29,10 @@ will challenge an unearned package before the PR.
 4. **Every packable `src` project needs a matching `<name>.Tests`.** The test
    project **must** `ProjectReference` its production project — the linked shared
    architecture rules `Assembly.Load` the sibling assembly and throw without it.
-5. **Shipped (`IsPackable` not false) → add a public-API approval test**
-   (PublicApiGenerator + Verify) and commit the `*.verified.txt` baseline, so any
-   later public-surface change is a conscious, reviewed act (ties to SemVer).
+5. **Shipped (`IsPackable` not false):** the public-API approval gate is linked
+   in automatically once the `*.Tests` exists — run the tests once and commit the
+   generated `test/_shared/PublicApi.<name>.verified.txt` baseline, so any later
+   public-surface change is a conscious, reviewed act (ties to SemVer).
 6. **Encapsulation:** mark `public` only what is genuinely the contract; default
    to `internal`. Widening the public surface should be deliberate.
 

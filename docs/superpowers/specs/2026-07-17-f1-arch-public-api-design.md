@@ -26,11 +26,17 @@ core/providers exist (F2/F3).
   committed `*.verified.txt` baseline. Abstractions is source-free, so the
   baseline locks in "nothing public yet"; any future public member fails the
   test until the baseline is consciously updated (= an acknowledged API change).
-- **Dedicated per-project test, not linked** (unlike os B): Verify locates its
-  baseline via the caller's source-file path, which a single *linked* file would
-  collapse onto one shared location for every assembly. A per-project test keeps
-  each baseline next to its own project; the `alvo-new-package` runbook records
-  "add a public-API approval test" as a step for each new packable package.
+- **Linked, like the os B architecture rules** — `test/_shared/PublicApiApprovalTests.cs`
+  runs against each test project's sibling assembly (shared `TestTarget`
+  resolver), so a new packable package's `*.Tests` gets the gate automatically
+  and it composes with `dotnet-affected`. Verify keys its baseline off the caller
+  path — which a single linked file would collapse across assemblies and a
+  deterministic CI build would remap — so `VerifyModuleInit` pins the baseline
+  directory to `test/_shared/` via `Verifier.DerivePathInfo` + `RepositoryRoot`,
+  and `UseFileName($"PublicApi.{assembly}")` keeps the baselines distinct. The
+  `alvo-new-package` runbook's only per-package step is "accept the generated
+  baseline". Verified: a fresh packable `*.Tests` auto-ran the gate against its
+  sibling and produced its own `PublicApi.<assembly>.received.txt`.
 - Runs inside `dotnet test` (ring1's "public-API approval" slot).
 
 ### #11 — Encapsulation, finishing the editorconfig part
