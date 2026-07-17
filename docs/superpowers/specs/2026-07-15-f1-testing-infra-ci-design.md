@@ -64,6 +64,28 @@ gate. #9 has nothing to run without #10, so they land together.
   required status-check names to it is a separate maintainer (admin) action,
   not part of this PR.
 
+## Review-round refinements (2026-07-17)
+
+Applied on the PR from maintainer review feedback:
+
+- **os A scan:** each rule re-parsed every `*.csproj`; now every project is
+  parsed **once** into a `ProjectDescriptor` record (cached) and the rules are
+  LINQ over it. Enumeration uses **`Microsoft.Extensions.FileSystemGlobbing`**
+  (`**/*.csproj`, excluding `**/bin|obj/**`) instead of manual filtering.
+- **`dotnet-affected` is wired now**, not a TODO: `ring2` scopes integration
+  tests to affected projects (`--dry-run -f text`, base
+  `${ALVO_AFFECTED_BASE:-origin/main}`), falling back to running all when the
+  base or tool is unavailable. No-op until integration projects exist.
+- **Global usings** for test projects (`Xunit`, `Shouldly`, `MMLib.Alvo.Testing`)
+  in `test/Directory.Build.props`.
+- **File-scoped namespaces** enforced (`csharp_style_namespace_declarations =
+  file_scoped:warning`).
+- **No inline comments / English-only in code** — sharpened in the
+  `alvo-dotnet-conventions` skill; existing inline comments removed and any
+  Slovak in code translated.
+- **`scripts/ci/update-required-checks.sh`** prepared for the maintainer to set
+  the `main` ruleset's required checks (D2 set).
+
 ## Out of scope (later PRs)
 
 - Public API approval gate + the remaining architecture rules → PR2 (#11 + #12).
