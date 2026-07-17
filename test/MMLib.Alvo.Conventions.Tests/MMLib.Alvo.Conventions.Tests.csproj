@@ -9,4 +9,8 @@
     <AlvoSharedArchTests>false</AlvoSharedArchTests>
   </PropertyGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.FileSystemGlobbing" />
+  </ItemGroup>
+
 </Project>
