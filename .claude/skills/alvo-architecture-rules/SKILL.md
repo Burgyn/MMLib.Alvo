@@ -112,7 +112,12 @@ custom endpoints added in the embedded host.
 Organize code by *feature* (a slice like "create record" or "dispatch
 webhook" keeps its endpoint + handler + validator + model together), not by
 technical layer (`Controllers/`, `Services/`, `Validators/`). This is a rule
-about organization *inside* a package.
+about organization *inside* a package. The .NET tutorial reflex is
+layer-by-type; resist it — a change arrives as one feature, so a feature is
+one folder. The full rule (slice shape, `Setup.cs` wiring, no in-process bus,
+slice isolation, orchestrate-don't-fork-the-base, the MUST/SHOULD list) lives
+in `docs/architecture/vertical-slice.md` — load it before laying out new
+request-handling code.
 
 Do not confuse it with the package boundary (spec §1.1,
 `docs/architecture/package-boundary.md`), which is a different axis entirely:

@@ -2,13 +2,21 @@
 
 > The rule that decides what becomes a separate NuGet package in the
 > `MMLib.Alvo.*` family. Source: spec `docs/product/alvo-specifikacia.md` §1.1.
+> Counterpart: [`vertical-slice.md`](./vertical-slice.md) decides how code is
+> organized *inside* a package — a different axis. Neither justifies the other's
+> answer: a vertical slice is never a reason to split a package, and a package
+> split is never a reason to organize by technical layer inside one.
 
 ## Current projects
 
 - `src/MMLib.Alvo.Abstractions` — interface-first root of the dependency
   graph; currently source-free, waiting for ports (phase 1, spec §1.2).
+- `src/MMLib.Alvo.Testing` — test-support library (`ArchTargetAttribute`,
+  `RepositoryRoot`); grows into the shipped contract-suite + fakes package.
 - `test/MMLib.Alvo.Abstractions.Tests` — xUnit v3 (MTP) tests; holds the
   NetArchTest architecture guard enforcing the rule below.
+- `test/MMLib.Alvo.Conventions.Tests` — solution-structure convention tests
+  (the file-scanning "os A" checks).
 
 Keep this list current — update it whenever a project is added or removed.
 
