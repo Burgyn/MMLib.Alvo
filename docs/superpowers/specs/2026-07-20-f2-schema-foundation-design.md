@@ -142,6 +142,17 @@ during review, fixed as part of #16:
 6. Authoring polish: `title` on `$defs` entries, `examples` on non-obvious
    properties, `oneOf` + `const` discriminators for trigger variants (actions
    already have them), descriptions kept on every property, no `$dynamicRef`.
+7. `rollup.via` is missing from the `rollup` `$defs` (present only in prose) —
+   add it (M4b).
+8. `automationRule.name` is still `required` after the array→map conversion
+   (D6.3) — the map key is the name; drop the redundant inner field.
+9. `entity.update` action `payload` is a plain object with no statement on
+   whether values may be expressions — align it with M1 (`literal | {$cel}`
+   per value) and document `{{…}}` sugar there explicitly.
+10. Reconcile `field.default`: the draft doc lists only `now()` /
+    `gen_random_uuid()`, but M1 makes `default = literal | {$cel}`. State that
+    the `$cel` default context includes `@user`/`@tenant` (so `created_by`
+    audit defaults work) and is evaluated at insert time.
 
 ### D7 — Publishing
 
@@ -186,10 +197,13 @@ into **later**; nothing pretends to test code that does not exist.
 
 **Positive example corpus (minimum):** minimal descriptor; the CRM example
 (analysis §16, **adapted to v1** — tagged `$cel`, `tenancy`, `templates`,
-`rollup.via`); a dynamic-entities example (`dynamicEntities.enabled` +
-`storage: "dynamic"` + `index: true` — the #57 acceptance criterion); a
-tenancy example with a `global` reference-data entity; a batch-delivery
-automation example; a split-layout example; `renamedFrom` and `x-` examples.
+`rollup.via`, `softDelete`/`audit`); a dynamic-entities example with
+**governance** (`dynamicEntities.enabled` + `defaultRules` + `allowedFieldTypes`
++ quotas, plus a `storage: "dynamic"` entity with `index: true` and a
+physical→dynamic `ref` — the #57 acceptance surface); a tenancy example with a
+`global` reference-data entity; a batch-delivery automation example; a
+field-level `hidden: {$cel}` (per-role masking) example; a `computed`-reads-
+`rollup` example; a split-layout example; `renamedFrom` and `x-` examples.
 
 **Canonical form (defined now, needed by F4 export):** structural comparison
 ignores object member order; export emits a deterministic order (schema
@@ -248,6 +262,14 @@ Optional identifier of the FK field on the child entity; required (enforced
 fail-fast at apply) only when the child has more than one `ref` to the
 parent. Also fixes the `count` contradiction (D6.1).
 
+### M4b — `rollup.via` is actually in the schema JSON
+
+The as-designed `rollup.via` (indirect/disambiguating FK) must land in the
+committed schema's `rollup` `$defs` — the draft's `rollup` has only
+`from/op/field/where`. Without it, two-FK rollups (directional
+follower/following counts, payment-via-allocation sums) are unbuildable. This
+is a finalization fix, not a new idea.
+
 ### M5 — `delivery: "perItem" | "batch"` on automation rules
 
 The brief guarantees per-rule batch coalescing ("a 10k-row import must not
@@ -262,15 +284,118 @@ interpolation, or `bodyFile` (bundle-relative path, consistent with `.csx`).
 Gives the `email` action's `template` reference a home; the action's `data`
 (JSONata) remains the template input.
 
+### M7 — Dynamic-entities governance (#57 hardening)
+
+The stress test found the original `dynamicEntities` toggle
+(`enabled`/`namePrefix`/`maxEntitiesPerTenant`) **forecloses secure-by-default**:
+runtime user-created entities have no `entities.<name>` node and therefore no
+`rules` block, so they are either unreachable (default-deny) or wide open, and
+the host embedding Alvo cannot express any governance. `dynamicEntities` gains:
+- `defaultRules`: { list,get,create,update,delete: CEL } — the default-deny
+  bridge applied to every runtime-created entity (a virtual entity must carry
+  policy exactly like a physical one carries `rules`).
+- `allowedFieldTypes`: string[] — the type subset end-users may use.
+- `maxFieldsPerEntity`, `maxRecordsPerEntity` — per-entity quotas.
+- `defaultTenancy`: "scoped" | "global" (default scoped).
+- `ref.entity` may name a dynamic/late-bound target so a physical entity can
+  reference a runtime one (cross-driver ref), with `onDelete` documented as
+  registry-level (app-enforced for the dynamic side), not a physical FK.
+
+This turns the #57 acceptance from "a toggle exists" into "the host can express
+the security policy over user-created entities" — the actual invariant.
+
+### M8 — Security-semantic helpers pulled into v1
+
+These are additive keys, but bolting them on *later* silently changes the
+read/security semantics of existing descriptors, so they belong in v1:
+- **`entity.softDelete: true`** — a framework-managed `deleted_at`;
+  reads/`list`/`get` and `rollup` auto-exclude soft-deleted rows; a restore op.
+  (Adding this later would change what every existing `list` returns.)
+- **`entity.audit: true`** — injects managed `created_at/by`, `updated_at/by`.
+- **`field.hidden` / `field.readOnly` widen from `bool` to `bool | CEL`** — a
+  CEL expression over `@user` gives per-role field visibility/mutability (PHI
+  masking, "only compliance sees SSN"). Widening `bool`→`bool|CEL` now is
+  non-foreclosing; the full `rules.fields` map stays additive-later. This is
+  the v0.1 answer to per-role field access (previously punted entirely).
+
+### M9 — `computed` may reference `rollup`; ladder clarified
+
+The stress test surfaced `order.total = sum(items) − discount + tax` — a derived
+value mixing a rollup with same-row arithmetic. The ladder must state that
+`computed` **may reference `rollup` fields** (a rollup materializes as a
+maintained column; a computed reading it re-evaluates when the rollup changes),
+and that where a target engine forbids generated-column-on-generated-column,
+the framework maintains the value rather than emitting an invalid DDL. This is
+a semantic clarification of the existing ladder, decided now to avoid an
+under-specified `computed`.
+
 ### Additive policy (documented, deliberately not in v1)
 
 Safe to add within v1 (new optional keys / new enum values), recorded so they
 are designed *for*, not stumbled into: field types `float`, `bigint`, `file`
 (F7.7 storage), array/multi-select; first-class many-to-many (v1 documents
-the junction-entity pattern); per-role field-level rules (`rules.fields`,
-Hasura column-allowlist shape) — `hidden`/`readOnly` booleans are the v0.1
-answer; RBAC `teams` + custom claims; partial/directional indexes; inbound
-webhooks (D6.4).
+the junction-entity pattern); the full per-role field-level `rules.fields` map
+(the `hidden`/`readOnly` CEL widening in M8 is the v0.1 answer); RBAC `teams` +
+`@user.claims.*`; partial/directional indexes; inbound webhooks (D6.4);
+`rollup.groupBy` (per-vendor/per-rate subtotals); a `sequence` field kind
+(gapless numbering); a `stateMachine`/`workflow` block; a `rank`/position
+field; a `money` composite type; enum-with-metadata + entity `seed` data;
+per-endpoint `subscribedEvents`/`paused`/`payloadMode`; automation action
+types `entity.delete`, `push`, `sms`, `emit`, `delay`, and a per-action
+`condition` + data-chain. Each is genuinely additive; none is foreclosed by v1.
+
+## Binding constraints for F4/F7 (from the modeling stress test)
+
+~42 hypothetical backends across 6 families (SaaS/collaboration, commerce/
+fintech, content/social, ERP/dynamic, automation/integration, auth/RBAC) were
+modeled against the v1 surface. The schema is strong for its declared v0.1
+scope (single-owner physical CRUD, rollups, ownership rules, workflow gating,
+tenant row-isolation — §16 invoicing, feature-flags, expense/budget are FULLY
+expressible). Three capability ceilings recurred across families. **All three
+are F4 rule-engine / pipeline capabilities carried *through* the descriptor as
+opaque CEL/action content — not descriptor *shape* — so F2 does not build them;
+it records them as binding so F4 cannot foreclose them, exactly as this spec
+already does for the diff engine.**
+
+- **C1 — Rule engine must reach across relations (ALL 6 families).** The single
+  biggest finding: `rules.*` CEL currently sees only same-row columns +
+  `@user`/`@tenant`. Relationship-based authorization (board/channel
+  membership, org-scoped roles, per-document data-driven ACL, owner-via-
+  relation, ticket-oversell, seat/quota) is the norm, not the exception. F4's
+  CEL compiler **must** support a bounded `exists(<entity>, <alias>,
+  <predicate>)` compiling to a correlated `EXISTS`/JOIN, and ref-path reads
+  (`new.coupon.value`, `new.ticket_type.remaining`). Recursion (folder-tree
+  inheritance, transitive manager→reports) is a deeper, separately-tracked
+  hole (materialized-path pattern is the likely answer). The descriptor holds a
+  CEL string, so this does not change v1 shape — but F2 asserts the schema must
+  not assume single-row rules anywhere, and the parity/adversarial suites must
+  exercise a relation-traversing rule.
+- **C2 — Pipeline must allow in-transaction multi-entity / conditional writes
+  (5/6 families).** Inventory decrement, double-entry ledger dual-post,
+  reserve-N-rows, atomic conditional decrement (last unit), a before-hook
+  calling a deterministic function (VAT). Today before-hooks are same-row CEL
+  reject/mutate and the only cross-entity write is after-side (post-commit,
+  at-least-once, single record). F4 **must** provide an in-transaction
+  side-write (a before-side `entity.create`/`entity.mutate` scoped to a ref
+  target, bounded, no network) and a whitelisted in-tx function call; the
+  action catalog gains these slots additively.
+- **C3 — Scheduled per-record set-processing + one-shot delay (5/6 families).**
+  "On a schedule, for each row matching a filter, act" (SLA breach, STK-expires
+  reminder, scheduled publishing, rent generation) and per-record one-shot
+  delays (dunning retry, drip day 0/3/7, escalate-in-48h). The `schedule`
+  trigger gains `entity` + `where` (feeding `perItem`/`batch` delivery), and a
+  relative `delay`/`runAt` — additive shape, backed by Wolverine's native
+  scheduled delivery. Recorded so F4 builds the scheduled path against a
+  record-set, not a contextless cron.
+
+**Correctly deferred to F7, confirmed additive-safe and non-foreclosing:**
+storage end-to-end + `file` type (F7.7 — the single largest missing pillar; a
+whole app family, DAM/file-sharing, is not v0.1-buildable, stated plainly);
+inbound webhooks + custom app events + workflow chaining/branching (F7.1);
+RBAC teams/org-scoped roles/claims (F7.5); realtime presence/broadcast/
+subscription-authz config (F7.6); full auth flows — MFA/magic-link/invitations/
+per-provider OIDC (F7.4); per-tenant config/branding/BYO-provider/lifecycle +
+cross-tenant platform admin (F7.8). None requires a v1 shape change to add.
 
 **Note:** the §16 CRM example in `baas-analyza.md` predates M1/M3 (bare CEL
 strings in `mutate`, no tenancy section). The `examples/` corpus carries the
@@ -279,8 +404,9 @@ follow-up outside F2 (it would trigger `alvo-regen-brief`).
 
 ## PR plan (final cut decided in the implementation plan)
 
-- **PR1** — schema v1 (all D1–D8 changes) + `examples/` + test types 1–2
-  (they are the proof of finalization). Closes **#16 + #57**.
+- **PR1** — schema v1 (all D1–D8 + M1–M9 changes, incl. the 10 finalization
+  fixes in D6) + `examples/` + test types 1–2 (they are the proof of
+  finalization). Closes **#16 + #57**.
 - **PR2** — canonical form + round-trip property + snapshot suites. Closes
   **#17**.
 - `alvo-plan-guard` dispatched before each PR, per the hard rules.
@@ -292,11 +418,18 @@ follow-up outside F2 (it would trigger `alvo-regen-brief`).
   constraints D2/D5 impose on it).
 - The dynamic store implementation (`entity_records`, edge tables, JSON-path
   indexes) — F7 (#41).
-- Inbound webhooks (dropped trigger) — F7.1.
-- SchemaStore submission, final domain, per-role field-level permission
-  extensions (additive later if earned).
-- Hasura-style column-level per-operation rules — additive within v1 when a
-  real need lands.
+- **The F4/F7 capability work behind C1–C3** (relation-reach CEL, in-tx
+  multi-entity writes, scheduled set-processing) — implemented later; F2 only
+  records them as binding and keeps the shape non-foreclosing.
+- Storage + `file` type, inbound webhooks + custom events + workflow
+  chaining, RBAC teams/claims, realtime presence/broadcast, full auth flows,
+  per-tenant config/lifecycle — all F7, all additive-safe (see the deferral
+  list in "Binding constraints").
+- The additive helpers listed in the additive policy (`sequence`,
+  `stateMachine`, `rank`, `money`, `rollup.groupBy`, enum metadata, `seed`,
+  array type, extra action types) — added within v1 when a real need lands;
+  none foreclosed.
+- SchemaStore submission, final domain.
 
 ## Verification
 
@@ -310,3 +443,9 @@ follow-up outside F2 (it would trigger `alvo-regen-brief`).
 - **Modeling-power proof:** the §16 CRM scenario, the vehicles demo, and the
   ERP dynamic-entities scenario are each fully expressible in v1; the adapted
   CRM descriptor validates as part of the examples corpus (type 2).
+- **Stress-test binding constraints (C1–C3) are recorded**, so the F4
+  rule-engine and pipeline design cannot ship a single-row-only engine, a
+  before-side with no in-transaction side-write, or a contextless scheduler
+  without failing this spec's stated constraints. The F7 deferrals are
+  confirmed additive-safe (adding any of them is a new optional key / enum
+  value, never a breaking change).
