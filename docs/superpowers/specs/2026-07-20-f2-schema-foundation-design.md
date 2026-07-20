@@ -185,10 +185,11 @@ into **later**; nothing pretends to test code that does not exist.
 | 4. Snapshot (Verify) | structured validation-error output over the negative corpus (error-message regression) + canonical serialization of the examples | generated DB schema and OpenAPI snapshots |
 
 **Positive example corpus (minimum):** minimal descriptor; the CRM example
-(analysis §16 — the draft was validated against it); a dynamic-entities
-example (`dynamicEntities.enabled` + `storage: "dynamic"` + `index: true` —
-the #57 acceptance criterion); a split-layout example; `renamedFrom` and
-`x-` examples.
+(analysis §16, **adapted to v1** — tagged `$cel`, `tenancy`, `templates`,
+`rollup.via`); a dynamic-entities example (`dynamicEntities.enabled` +
+`storage: "dynamic"` + `index: true` — the #57 acceptance criterion); a
+tenancy example with a `global` reference-data entity; a batch-delivery
+automation example; a split-layout example; `renamedFrom` and `x-` examples.
 
 **Canonical form (defined now, needed by F4 export):** structural comparison
 ignores object member order; export emits a deterministic order (schema
@@ -198,6 +199,83 @@ export; `x-*` keys pass through verbatim.
 **Infra:** new test project `test/MMLib.Alvo.Schema.Tests` (xUnit v3 on MTP,
 CsCheck, Verify, Corvus.JsonSchema). All four F2-level types are fast and run
 in ring0. The GitHub Pages publish job covers the #16 "published" DoD.
+
+## Modeling power — content decisions (M1–M6)
+
+The schema is not just a well-versioned contract — it must be able to *model
+the product*. The CRM scenario (analysis §16), the vehicles demo, and the ERP
+dynamic-entities scenario were walked line-by-line against the draft; six
+modeling gaps must be fixed in v1 because they are semantic (not additive),
+and a documented additive policy covers the rest.
+
+### M1 — Literal vs expression: tagged `{"$cel": "…"}`
+
+In value positions (before-hook `mutate` values, field `default`, email `to`,
+`entity.update` payload values) a plain string was "value **or** CEL" —
+indistinguishable, and exactly the class of silent-wrong-backend ambiguity
+that kills agent reliability. Decision: **all plain JSON values are
+literals; an expression is always the explicit object `{"$cel": "…"}`**
+(schema: `oneOf` literal | cel-object). Positions that are purely
+expression-typed today (rules, conditions, `computed`, `validation`) stay
+bare strings — no ambiguity exists there. `{{…}}` interpolation remains only
+as sugar in after-side text fields (`to`, template bodies), defined as sugar
+over JSONata. Consequence: `default: now()` becomes
+`default: {"$cel": "now()"}`.
+
+### M2 — `users` is a reserved system entity
+
+`ref` may target the reserved name `users` (the built-in auth entity) — the
+§16 CRM example (`owner_id → users`) is otherwise unexpressible. Declaring an
+entity named `users` in the descriptor is an error (reserved). Extending the
+user profile with custom fields is additive later (`auth.users.fields`).
+
+### M3 — Tenancy is descriptor-visible
+
+Project-level `tenancy: { enabled: bool }` declares that the backend is
+multi-tenant (definition, not infrastructure); per-entity
+`tenancy: "scoped" | "global"` with default **scoped** when tenancy is
+enabled — shared reference data (číselníky) is the exception and must opt
+out explicitly, in the default-deny spirit. Tenant *resolution*
+(subdomain/header/claim) stays host/env — the descriptor ≠ infra boundary.
+Tenant profile fields (`@tenant.country`) are additive later
+(`tenancy.fields`). This lands in v1 so the F3/F4 registry, CRUD, and
+two-tenant adversarial suite design see the tenant dimension in the model
+from the start (the #57 lesson applied to tenancy).
+
+### M4 — `rollup.via`
+
+Optional identifier of the FK field on the child entity; required (enforced
+fail-fast at apply) only when the child has more than one `ref` to the
+parent. Also fixes the `count` contradiction (D6.1).
+
+### M5 — `delivery: "perItem" | "batch"` on automation rules
+
+The brief guarantees per-rule batch coalescing ("a 10k-row import must not
+emit 10k events"). Default `perItem`; `batch` delivers the actions an array
+payload and matches the `entity.*.created.batch` event shape (regex fixed in
+D6.2).
+
+### M6 — `templates` section
+
+Name-keyed map: `{ "subject": "…", "body": "…" }` with `{{…}}`
+interpolation, or `bodyFile` (bundle-relative path, consistent with `.csx`).
+Gives the `email` action's `template` reference a home; the action's `data`
+(JSONata) remains the template input.
+
+### Additive policy (documented, deliberately not in v1)
+
+Safe to add within v1 (new optional keys / new enum values), recorded so they
+are designed *for*, not stumbled into: field types `float`, `bigint`, `file`
+(F7.7 storage), array/multi-select; first-class many-to-many (v1 documents
+the junction-entity pattern); per-role field-level rules (`rules.fields`,
+Hasura column-allowlist shape) — `hidden`/`readOnly` booleans are the v0.1
+answer; RBAC `teams` + custom claims; partial/directional indexes; inbound
+webhooks (D6.4).
+
+**Note:** the §16 CRM example in `baas-analyza.md` predates M1/M3 (bare CEL
+strings in `mutate`, no tenancy section). The `examples/` corpus carries the
+**adapted, canonical** CRM descriptor; updating the analysis text is a
+follow-up outside F2 (it would trigger `alvo-regen-brief`).
 
 ## PR plan (final cut decided in the implementation plan)
 
@@ -229,3 +307,6 @@ in ring0. The GitHub Pages publish job covers the #16 "published" DoD.
   `dynamicEntities` + `storage` schema surface, the dynamic-entities example
   in the corpus, D5's model constraint, and the F3 constraint sentence.
 - The published URL serves the schema after a main merge.
+- **Modeling-power proof:** the §16 CRM scenario, the vehicles demo, and the
+  ERP dynamic-entities scenario are each fully expressible in v1; the adapted
+  CRM descriptor validates as part of the examples corpus (type 2).
