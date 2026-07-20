@@ -43,4 +43,14 @@
     <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\" Visible="false" />
   </ItemGroup>
 
+  <!-- Installs the Husky.Net git hooks on restore/build so no manual `git config`
+       step is needed. Runs only until the hooks exist (i.e. once per fresh clone),
+       never on CI (GitHub via ContinuousIntegrationBuild, Azure via TF_BUILD) or
+       when HUSKY=0, and is best-effort (ContinueOnError) so it can never break a build. -->
+  <Target Name="HuskyInstall" BeforeTargets="Restore;CollectPackageReferences"
+          Condition="'$(HUSKY)' != '0' and '$(TF_BUILD)' == '' and '$(ContinuousIntegrationBuild)' != 'true' and !Exists('$(MSBuildThisFileDirectory).husky/_/husky.sh')">
+    <Exec Command="dotnet tool restore" WorkingDirectory="$(MSBuildThisFileDirectory)" ContinueOnError="true" />
+    <Exec Command="dotnet husky install" WorkingDirectory="$(MSBuildThisFileDirectory)" ContinueOnError="true" />
+  </Target>
+
 </Project>

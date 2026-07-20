@@ -1,0 +1,31 @@
+{
+   "$schema": "https://alirezanet.github.io/Husky.Net/schema.json",
+   "tasks": [
+      {
+         "name": "design-brief-freshness",
+         "group": "pre-commit",
+         "command": "scripts/check-brief-freshness",
+         "filteringRule": "staged",
+         "include": [
+            "docs/product/alvo-specifikacia.md",
+            "docs/product/baas-analyza.md",
+            "docs/design-brief.en.md"
+         ]
+      },
+      {
+         "name": "dotnet-format",
+         "group": "pre-commit",
+         "command": "dotnet",
+         "args": [ "format", "--verify-no-changes" ],
+         "filteringRule": "staged",
+         "include": [ "**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets" ]
+      },
+      {
+         "name": "ring0-tests",
+         "group": "pre-commit",
+         "command": "scripts/test-ring0",
+         "filteringRule": "staged",
+         "include": [ "**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets" ]
+      }
+   ]
+}

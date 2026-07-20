@@ -112,7 +112,7 @@ sha256sum docs/product/baas-analyza.md
 **Compute the hashes as the last step of this procedure**, after the body of
 the brief is finished and about to be saved. If you hash first and then keep
 editing, the header will not match what actually gets committed and
-`scripts/check-brief-freshness` (and the `.githooks/pre-commit` hook that
+`scripts/check-brief-freshness` (and the Husky.Net `pre-commit` hook that
 calls it) will report the brief as stale.
 
 ## Freshness enforcement (why this matters)
@@ -124,9 +124,10 @@ writes:
 - `scripts/check-brief-freshness` recomputes each source's SHA-256 and
   compares it against the corresponding `brief-source:` marker; it exits
   non-zero on any mismatch or missing marker.
-- `.githooks/pre-commit` runs that check automatically whenever a commit
-  stages a change to either source file or to the brief itself, and blocks
-  the commit on failure.
+- The Husky.Net `pre-commit` hook runs that check automatically whenever a
+  commit stages a change to either source file or to the brief itself (the
+  `design-brief-freshness` task in `.husky/task-runner.json`), and blocks the
+  commit on failure.
 
 On top of that deterministic gate, the `alvo-plan-guard` subagent may
 additionally flag a brief that is technically fresh (hashes match) but
