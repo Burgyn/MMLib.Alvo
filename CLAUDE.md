@@ -120,18 +120,11 @@ inline here**; and `alvo-plan-guard` is your pre-PR check (see Hard rules).
 
 ## Git hooks
 
-Managed by **Husky.Net** and installed automatically — the first
-`dotnet build`/`dotnet restore` after a clone runs `dotnet husky install` (via
-the `HuskyInstall` target in `Directory.Build.props`), so there is no manual
-`git config` step. Skipped on CI and when `HUSKY=0`.
-
-- **`pre-commit`** (`dotnet husky run --group pre-commit`, gated by staged paths
-  in `.husky/task-runner.json`): brief freshness when a spec/analysis or the
-  brief is staged (via `scripts/check-brief-freshness`); `dotnet format
-  --verify-no-changes` + `scripts/test-ring0` when code
-  (`*.cs`/`*.csproj`/`*.props`/`*.targets`) is staged. If the freshness gate
-  fires, regenerate the brief via the `alvo-regen-brief` skill and re-commit.
-- **`commit-msg`**: enforces Conventional Commits (merge/revert/fixup exempt).
+Husky.Net, auto-installed on the first `dotnet build`/`dotnet restore` — no
+manual `git config` step; `HUSKY=0` and CI skip them. **pre-commit**:
+brief-freshness on a staged spec/analysis/brief (regenerate via
+`alvo-regen-brief` if it fires), plus `dotnet format` and ring0 on staged code.
+**commit-msg**: Conventional Commits. Details in `.husky/task-runner.json`.
 
 ## Always on
 
