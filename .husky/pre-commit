@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+. "$(dirname "$0")/_/husky.sh"
+
+export DiffEngine_Disabled=true
+dotnet husky run --group pre-commit

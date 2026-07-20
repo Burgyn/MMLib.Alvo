@@ -50,7 +50,7 @@ compresses out. Violating one of these is a bug, not a style nit.
 - `.claude/skills/` — the `alvo-*` skills (see below).
 - `.claude/agents/` — subagents, e.g. `alvo-plan-guard`.
 - `scripts/` — `test-ring0`/`test-ring1`/`test-ring2` plus `check-brief-freshness`.
-- `.githooks/` — the brief-freshness pre-commit hook.
+- `.husky/` — Husky.Net git hooks (`pre-commit`, `commit-msg`) + `task-runner.json`; auto-installed on build.
 - `.github/` — CI workflows; this is where the full run (mutation + e2e) lives.
 
 ## Build, test & rings
@@ -118,13 +118,20 @@ things those descriptions won't tell you: packaging / licensing / test-stack /
 **code-style conventions live in the `alvo-dotnet-conventions` skill, not
 inline here**; and `alvo-plan-guard` is your pre-PR check (see Hard rules).
 
-## One-time setup
+## Git hooks
 
-`git config core.hooksPath .githooks` — enables the pre-commit hook that
-blocks a commit touching the spec/analysis or the brief while
-`docs/design-brief.en.md` is stale against its sources (checked via
-`scripts/check-brief-freshness`). If it fires, regenerate via the
-`alvo-regen-brief` skill and re-commit.
+Managed by **Husky.Net** and installed automatically — the first
+`dotnet build`/`dotnet restore` after a clone runs `dotnet husky install` (via
+the `HuskyInstall` target in `Directory.Build.props`), so there is no manual
+`git config` step. Skipped on CI and when `HUSKY=0`.
+
+- **`pre-commit`** (`dotnet husky run --group pre-commit`, gated by staged paths
+  in `.husky/task-runner.json`): brief freshness when a spec/analysis or the
+  brief is staged (via `scripts/check-brief-freshness`); `dotnet format
+  --verify-no-changes` + `scripts/test-ring0` when code
+  (`*.cs`/`*.csproj`/`*.props`/`*.targets`) is staged. If the freshness gate
+  fires, regenerate the brief via the `alvo-regen-brief` skill and re-commit.
+- **`commit-msg`**: enforces Conventional Commits (merge/revert/fixup exempt).
 
 ## Always on
 
