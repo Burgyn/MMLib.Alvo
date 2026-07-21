@@ -24,7 +24,7 @@ Reference descriptors validated against `schema/project.schema.json`
 
 ## Validating
 
-Until the .NET test project (Corvus.JsonSchema, per design decision D8) lands
-in the F2 implementation PR, a quick 2020-12 conformance smoke test proved
-these examples validate and the negatives are rejected. The authoritative
-validator in CI will be Corvus inside `test/MMLib.Alvo.Schema.Tests`.
+Validated in CI by `test/MMLib.Alvo.Schema.Tests` (Corvus.Json.Validator):
+every descriptor here must validate against `schema/project.schema.json`, and
+every fixture under `_negative/` must be rejected at the JSON-pointer location
+declared in `_negative/expectations.json`.

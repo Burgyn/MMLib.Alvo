@@ -38,11 +38,9 @@ public class MetaValidationTests
         missing.ShouldBeEmpty("every declared property must carry a description (agent + IntelliSense UX)");
     }
 
-    // Only real property *declarations* need a description. Exemptions:
-    //  - subschemas under if/then/else/not are constraint contexts, not declarations;
-    //  - a property whose schema is a bare $ref inherits the target $def's description;
-    //  - a discriminator (const) or a boolean schema (e.g. reserved `users: false`)
-    //    carries no user-facing description.
+    // Only real property declarations need a description; skip constraint contexts
+    // (if/then/else/not), a bare $ref (inherits the target's description), and
+    // discriminator const / boolean schemas (e.g. reserved `users: false`).
     private static readonly string[] _constraintKeywords = ["if", "then", "else", "not"];
 
     private static void WalkProperties(JsonElement node, string pointer, List<string> missing)

@@ -202,10 +202,16 @@ physical→dynamic `ref` — the #57 acceptance surface); a tenancy example with
 field-level `hidden: {$cel}` (per-role masking) example; a `computed`-reads-
 `rollup` example; a split-layout example; `renamedFrom` and `x-` examples.
 
-**Canonical form (defined now, needed by F4 export):** structural comparison
-ignores object member order; export emits a deterministic order (schema
-declaration order); properties equal to their schema default are omitted on
-export; `x-*` keys pass through verbatim.
+**Canonical form (F2 — for comparison):** the F2 canonicalizer produces a
+deterministic text for structural equality — **object members ordered ordinally
+by key** (a total, unambiguous order that also works for the many name-keyed
+maps, where "schema declaration order" is undefined), arrays left in place
+(order is significant), `x-*` keys and tagged `{"$cel": …}` values preserved
+verbatim. Two descriptors are structurally equal iff their canonical text is
+equal. **Distinct from F4 export order:** what a human sees on export is a
+*separate, later* decision (it may float `$schema`/`apiVersion`/`name` to the
+top for readability and omit properties equal to their schema default) — the F2
+canonical form is a comparison utility, not the export formatter.
 
 **Infra:** new test project `test/MMLib.Alvo.Schema.Tests` (xUnit v3 on MTP,
 CsCheck, Verify, Corvus.JsonSchema). All four F2-level types are fast and run

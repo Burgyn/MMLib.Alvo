@@ -1,0 +1,7 @@
+{
+  "decimal-without-scale.json": { "pointer": "#/entities/orders/fields/total", "messageContains": "scale" },
+  "format-without-pattern.json": { "pointer": "#/formats/slug", "messageContains": "pattern" },
+  "reserved-users-entity.json": { "pointer": "#/entities/users" },
+  "typo-property.json": { "pointer": "#/entities/widgets/fields/name/requird" },
+  "wrong-api-version.json": { "pointer": "#/apiVersion", "messageContains": "alvo.dev/v1" }
+}

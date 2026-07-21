@@ -5,9 +5,9 @@ using System.Text.Json;
 
 namespace MMLib.Alvo.Schema.Tests;
 
-// F2 canonical form: deterministic member order (ordinal by key) and stable
-// indentation. Structural equality of two descriptors = equality of their
-// canonical text. Schema-aware default-omission is deferred to F4 export.
+// Canonical text for structural comparison: object members ordered ordinally by
+// key (arrays left as-is, order is significant). F4 export order and schema-aware
+// default-omission are separate, later concerns.
 internal static class Canonicalizer
 {
     internal static string Canonicalize(string json)
@@ -19,10 +19,9 @@ internal static class Canonicalizer
             Indented = true,
             Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
         };
-        using (var writer = new Utf8JsonWriter(buffer, options))
-        {
-            Write(document.RootElement, writer);
-        }
+        using var writer = new Utf8JsonWriter(buffer, options);
+        Write(document.RootElement, writer);
+        writer.Flush();
 
         return Encoding.UTF8.GetString(buffer.WrittenSpan);
     }
