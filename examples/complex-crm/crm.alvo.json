@@ -159,7 +159,12 @@
           "scale": 2,
           "rollup": { "from": "invoice_items", "op": "sum", "field": "line_total", "via": "invoice_id" }
         },
-        "vat_total": { "type": "decimal", "precision": 12, "scale": 2, "readOnly": true },
+        "vat_total": {
+          "type": "decimal",
+          "precision": 12,
+          "scale": 2,
+          "x-note": "Caller-supplied in v1. Auto-deriving it (countries.vat_rate via deal->company->country, by supply date) needs ref-path reads in expressions (C1) + contextual/time-valued logic — deferred past v1, see the design brief's binding constraints."
+        },
         "gross_total": {
           "type": "decimal",
           "precision": 12,
