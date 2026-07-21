@@ -1,0 +1,11 @@
+{
+  "apiVersion": "alvo.dev/v1",
+  "name": "typo",
+  "entities": {
+    "widgets": {
+      "fields": {
+        "name": { "type": "string", "requird": true }
+      }
+    }
+  }
+}

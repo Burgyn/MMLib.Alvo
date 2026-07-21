@@ -1,0 +1,11 @@
+{
+  "apiVersion": "alvo.dev/v1",
+  "name": "reserved-users",
+  "entities": {
+    "users": {
+      "fields": {
+        "nick": { "type": "string" }
+      }
+    }
+  }
+}

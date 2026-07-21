@@ -1,0 +1,76 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "simple-tasks",
+  "auth": {
+    "providers": ["local"]
+  },
+  "entities": {
+    "projects": {
+      "description": "A container the signed-in user owns.",
+      "audit": true,
+      "softDelete": true,
+      "fields": {
+        "name": { "type": "string", "required": true, "maxLength": 120 },
+        "color": { "type": "string", "maxLength": 7, "default": "#4f46e5" },
+        "owner_id": {
+          "type": "ref",
+          "entity": "users",
+          "required": true,
+          "default": { "$cel": "@user.id" }
+        },
+        "open_tasks": {
+          "type": "integer",
+          "rollup": { "from": "tasks", "op": "count", "where": "done == false" }
+        }
+      },
+      "rules": {
+        "list": "owner_id == @user.id",
+        "get": "owner_id == @user.id",
+        "create": "@user.id != null",
+        "update": "owner_id == @user.id",
+        "delete": "owner_id == @user.id"
+      }
+    },
+    "tasks": {
+      "description": "A single to-do inside a project.",
+      "audit": true,
+      "fields": {
+        "project_id": {
+          "type": "ref",
+          "entity": "projects",
+          "required": true,
+          "onDelete": "cascade"
+        },
+        "title": { "type": "string", "required": true, "maxLength": 200 },
+        "notes": { "type": "text" },
+        "priority": {
+          "type": "enum",
+          "values": ["low", "normal", "high"],
+          "default": "normal"
+        },
+        "done": { "type": "boolean", "default": false },
+        "due_on": { "type": "date" },
+        "completed_at": { "type": "datetime", "readOnly": true }
+      },
+      "rules": {
+        "list": "project_id != null",
+        "get": "project_id != null",
+        "create": "@user.id != null",
+        "update": "@user.id != null",
+        "delete": "@user.id != null"
+      },
+      "hooks": {
+        "beforeUpdate": [
+          {
+            "condition": "changed(done) && new.done == true",
+            "action": { "mutate": { "completed_at": { "$cel": "now()" } } }
+          }
+        ]
+      },
+      "indexes": [
+        { "fields": ["project_id", "done"] }
+      ]
+    }
+  }
+}
