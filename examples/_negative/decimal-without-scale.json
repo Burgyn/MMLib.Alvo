@@ -1,0 +1,11 @@
+{
+  "apiVersion": "alvo.dev/v1",
+  "name": "bad-decimal",
+  "entities": {
+    "orders": {
+      "fields": {
+        "total": { "type": "decimal", "precision": 12 }
+      }
+    }
+  }
+}

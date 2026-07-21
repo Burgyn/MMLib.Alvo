@@ -6,23 +6,115 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
+    "apiVersion",
     "name",
     "entities"
   ],
   "properties": {
     "$schema": {
       "type": "string",
-      "format": "uri"
+      "format": "uri",
+      "description": "Optional editor hint pointing at this schema; ignored by Alvo."
+    },
+    "apiVersion": {
+      "const": "alvo.dev/v1",
+      "description": "Descriptor format version. Self-describing so a loader can dispatch the right parser before fetching the schema. Within v1 the format evolves additively only; a breaking change becomes alvo.dev/v2 at a new URL."
     },
     "name": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9-]{1,62}$",
       "description": "Project identifier (kebab-case). In standalone mode it identifies the project within the instance."
     },
-    "version": {
+    "description": {
+      "type": "string",
+      "description": "Human-readable description of this project/backend (what it is), surfaced to agents and in the admin UI."
+    },
+    "branding": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Identity of THIS project/backend (display name, logo), shown wherever the project is presented: its section in the admin dashboard, generated end-user surfaces, transactional emails. This is NOT the instance-wide dashboard chrome — one Alvo instance can host many projects, so dashboard branding is host/env config, not a per-project descriptor concern.",
+      "properties": {
+        "title": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Display name of this project/backend."
+        },
+        "logoUrl": {
+          "type": "string",
+          "format": "uri-reference",
+          "description": "URL or path to this project's logo."
+        }
+      }
+    },
+    "revision": {
       "type": "integer",
       "minimum": 1,
-      "description": "Project schema version. Incremented on every applied change; used for optimistic concurrency checks during apply."
+      "description": "Content revision counter, incremented on every applied change; used for optimistic concurrency during apply. NOT the format version (that is apiVersion)."
+    },
+    "tenancy": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Declares this backend as multi-tenant (definition, not infrastructure). Tenant resolution (subdomain/header/claim) is host/env config, never here. When enabled, entities default to tenancy:scoped unless they opt out with tenancy:global.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Turn on row-level multi-tenancy (shared DB + shared schema, discriminator column)."
+        }
+      }
+    },
+    "dynamicEntities": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Governance for runtime, user-defined entities (the dynamic schema-registry driver). End-users create record types at runtime via the Management API into metadata tables — they are NOT declared under `entities`. This block is how the host expresses the security policy and limits over that whole class. The store itself is F7.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Allow end-users to define entities at runtime."
+        },
+        "namePrefix": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,15}_$",
+          "description": "Reserved name prefix for runtime-created entities, so they can never collide with descriptor-defined entity names."
+        },
+        "defaultRules": {
+          "$ref": "#/$defs/rules",
+          "description": "Authorization rules applied to EVERY runtime-created entity. A virtual entity must carry policy exactly as a physical one carries `rules`; without this, default-deny makes user entities unreachable (or, if defaulted open, insecure). Missing operation = deny."
+        },
+        "allowedFieldTypes": {
+          "type": "array",
+          "uniqueItems": true,
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/fieldType"
+          },
+          "description": "The subset of field types end-users may use on runtime entities."
+        },
+        "maxFieldsPerEntity": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Per-entity field quota for runtime entities."
+        },
+        "maxRecordsPerEntity": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Per-entity record quota for runtime entities (per tenant)."
+        },
+        "maxEntitiesPerTenant": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "How many runtime entities a single tenant may create."
+        },
+        "defaultTenancy": {
+          "enum": [
+            "scoped",
+            "global"
+          ],
+          "default": "scoped",
+          "description": "Default tenancy for runtime-created entities."
+        }
+      }
     },
     "auth": {
       "type": "object",
@@ -42,7 +134,7 @@
               "oidc"
             ]
           },
-          "description": "Enabled identity providers. `local` = ASP.NET Core Identity; `oidc` = generic OIDC relying party (endpoint configuration is infra/env)."
+          "description": "Enabled identity providers. `local` = credentials managed by Alvo (ASP.NET Core Identity). `oidc` = a generic OIDC relying party — this is the path for a custom / self-hosted identity provider (Keycloak, Auth0, Okta, Entra ID, …); its endpoints are infra/env, never here."
         },
         "roles": {
           "type": "array",
@@ -54,59 +146,67 @@
         }
       }
     },
-    "admin": {
+    "access": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Admin dashboard configuration — definition ONLY (access mapping, branding). Enablement, path, IP allowlist and the script UI-edit gate are env.",
+      "description": "Who may manage THIS project in the admin dashboard (project-scoped), mapped to management levels via CEL over @user. Whether the dashboard is reachable at all — enablement, path, IP allowlist, the script UI-edit gate — is host/env config, not here.",
       "properties": {
-        "access": {
-          "type": "object",
-          "additionalProperties": false,
-          "description": "Mapping to dashboard access levels via CEL expressions over @user.",
-          "properties": {
-            "admin": {
-              "$ref": "#/$defs/cel"
-            },
-            "developer": {
-              "$ref": "#/$defs/cel"
-            },
-            "viewer": {
-              "$ref": "#/$defs/cel"
-            }
-          }
+        "admin": {
+          "$ref": "#/$defs/cel",
+          "description": "CEL: who may fully administer this project (schema, rules, data, settings)."
         },
-        "branding": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "title": {
-              "type": "string",
-              "maxLength": 60
-            },
-            "logoUrl": {
-              "type": "string",
-              "format": "uri-reference"
-            }
-          }
+        "developer": {
+          "$ref": "#/$defs/cel",
+          "description": "CEL: who may edit this project's schema, rules, and automation, but not its settings."
+        },
+        "viewer": {
+          "$ref": "#/$defs/cel",
+          "description": "CEL: who may view this project's data and configuration read-only."
         }
       }
     },
     "entities": {
       "type": "object",
-      "description": "Entity definitions. Key = entity name (snake_case, plural recommended). Each entity auto-generates a CRUD API, validation, and a schema registry record.",
+      "description": "Entity definitions. Key = entity name (snake_case, plural recommended). Each entity auto-generates a CRUD API, validation, and a schema registry record. The name `users` is reserved (the built-in auth entity).",
       "minProperties": 1,
       "propertyNames": {
         "pattern": "^[a-z][a-z0-9_]{0,62}$"
+      },
+      "properties": {
+        "users": false
       },
       "additionalProperties": {
         "$ref": "#/$defs/entity"
       }
     },
     "automation": {
-      "type": "array",
-      "description": "ECA rules (event–condition–action). Run post-commit from the outbox, durable, with retries.",
-      "items": {
+      "type": "object",
+      "description": "ECA rules (event–condition–action). Key = rule name. Run post-commit from the outbox, durable, with retries.",
+      "propertyNames": {
+        "$ref": "#/$defs/identifier"
+      },
+      "additionalProperties": {
         "$ref": "#/$defs/automationRule"
+      }
+    },
+    "templates": {
+      "type": "object",
+      "description": "Reusable message templates referenced by email/notification actions. Key = template name.",
+      "propertyNames": {
+        "$ref": "#/$defs/identifier"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/template"
+      }
+    },
+    "formats": {
+      "type": "object",
+      "description": "Reusable named validation formats referenced by field.format (beyond the built-ins email/uri/phone). Declarative and engine-agnostic (works in standalone), enforced by Alvo at the API layer and reflected into the generated OpenAPI as a pattern. For validators a regex cannot express (checksums, external lookups), a host registers an IFieldFormatValidator in embedded mode instead. Key = format name.",
+      "propertyNames": {
+        "$ref": "#/$defs/identifier"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/namedFormat"
       }
     },
     "webhooks": {
@@ -116,6 +216,7 @@
       "properties": {
         "endpoints": {
           "type": "object",
+          "description": "Managed webhook endpoints, keyed by endpoint name.",
           "propertyNames": {
             "pattern": "^[a-z][a-z0-9-]{0,62}$"
           },
@@ -137,7 +238,8 @@
                 "description": "Secret name in ISecretStore (never the secret value itself)."
               },
               "description": {
-                "type": "string"
+                "type": "string",
+                "description": "Human-readable description of the endpoint."
               }
             }
           }
@@ -175,13 +277,15 @@
                   "http": {
                     "type": "object",
                     "additionalProperties": false,
+                    "description": "Expose the function at an HTTP route (also serves as an inbound receiver).",
                     "required": [
                       "route"
                     ],
                     "properties": {
                       "route": {
                         "type": "string",
-                        "pattern": "^/"
+                        "pattern": "^/",
+                        "description": "Route path, starting with '/'."
                       },
                       "method": {
                         "enum": [
@@ -190,7 +294,8 @@
                           "PUT",
                           "PATCH",
                           "DELETE"
-                        ]
+                        ],
+                        "description": "HTTP method (defaults to POST when omitted)."
                       }
                     }
                   }
@@ -234,6 +339,11 @@
       }
     }
   },
+  "patternProperties": {
+    "^x-": {
+      "description": "Extension keys. Alvo ignores these but guarantees passthrough through apply -> export. Use for host/tooling metadata (UI hints, provenance)."
+    }
+  },
   "$defs": {
     "identifier": {
       "type": "string",
@@ -245,11 +355,51 @@
       "maxLength": 2000,
       "description": "Condition in the CEL subset. Context: @user, @tenant; hooks/events additionally expose old, new, changed(field). Compiled fail-fast at apply time."
     },
+    "celExpr": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "$cel"
+      ],
+      "properties": {
+        "$cel": {
+          "$ref": "#/$defs/cel"
+        }
+      },
+      "description": "A tagged CEL expression in a value position, distinguishing it unambiguously from a JSON literal."
+    },
+    "valueOrExpr": {
+      "description": "A literal JSON value, or a tagged CEL expression object {\"$cel\": \"...\"}.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/celExpr"
+        },
+        {
+          "not": {
+            "type": "object",
+            "required": [
+              "$cel"
+            ]
+          }
+        }
+      ]
+    },
+    "boolOrCel": {
+      "description": "A static boolean, or a CEL expression over @user for a conditional (e.g. per-role) decision.",
+      "oneOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/$defs/cel"
+        }
+      ]
+    },
     "jsonata": {
       "type": "string",
       "minLength": 1,
       "maxLength": 8000,
-      "description": "JSONata transformation expression (JSON → JSON). Runs strictly post-commit (after-side), with depth/time limits. {{...}} templates are syntactic sugar."
+      "description": "JSONata transformation expression (JSON -> JSON). Runs strictly post-commit (after-side), with depth/time limits. {{...}} templates are syntactic sugar."
     },
     "cron": {
       "type": "string",
@@ -258,8 +408,68 @@
     },
     "eventPattern": {
       "type": "string",
-      "pattern": "^(entity|auth|storage)\\.[a-z0-9_*]+\\.[a-z]+$",
-      "description": "Event pattern, e.g. entity.deals.updated or entity.*.created."
+      "pattern": "^(entity|auth|storage)\\.([a-z][a-z0-9_]*|\\*)\\.([a-z]+|\\*)(\\.batch)?$",
+      "description": "Event pattern, e.g. entity.deals.updated, entity.*.created, entity.orders.* or the coalesced batch shape entity.orders.created.batch.",
+      "examples": [
+        "entity.deals.updated",
+        "entity.*.created",
+        "entity.orders.created.batch"
+      ]
+    },
+    "fieldType": {
+      "enum": [
+        "string",
+        "text",
+        "integer",
+        "decimal",
+        "boolean",
+        "date",
+        "datetime",
+        "uuid",
+        "json",
+        "enum",
+        "ref"
+      ]
+    },
+    "namedFormat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pattern"
+      ],
+      "description": "A reusable validation format defined by a regular expression.",
+      "properties": {
+        "pattern": {
+          "type": "string",
+          "description": "Regular expression the field value must match."
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of the format (surfaced to agents and in the generated OpenAPI)."
+        }
+      }
+    },
+    "rules": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Per-operation authorization rules — CEL, compiled into a SQL predicate. Missing operation = deny (secure-by-default).",
+      "properties": {
+        "list": {
+          "$ref": "#/$defs/cel"
+        },
+        "get": {
+          "$ref": "#/$defs/cel"
+        },
+        "create": {
+          "$ref": "#/$defs/cel"
+        },
+        "update": {
+          "$ref": "#/$defs/cel"
+        },
+        "delete": {
+          "$ref": "#/$defs/cel"
+        }
+      }
     },
     "entity": {
       "type": "object",
@@ -269,7 +479,37 @@
       ],
       "properties": {
         "description": {
-          "type": "string"
+          "type": "string",
+          "description": "Human-readable description of the entity (surfaced to agents and in the admin UI)."
+        },
+        "renamedFrom": {
+          "$ref": "#/$defs/identifier",
+          "description": "Previous name of this entity: declares a rename so apply preserves data instead of drop+add. Safe to leave permanently; ignored once the old name no longer exists."
+        },
+        "storage": {
+          "enum": [
+            "physical",
+            "dynamic"
+          ],
+          "default": "physical",
+          "description": "physical = a real table (introspected/migrated); dynamic = the shared metadata-driven store (no DDL, instant apply). Everything above the registry treats both identically."
+        },
+        "tenancy": {
+          "enum": [
+            "scoped",
+            "global"
+          ],
+          "description": "scoped = rows carry tenant_id and are isolated per tenant (default when tenancy.enabled); global = shared reference data (číselník) visible to all tenants."
+        },
+        "softDelete": {
+          "type": "boolean",
+          "default": false,
+          "description": "Framework-managed soft delete: a managed deleted_at column, DELETE becomes a soft delete, and reads/list/get/rollup auto-exclude soft-deleted rows. A restore operation is provided."
+        },
+        "audit": {
+          "type": "boolean",
+          "default": false,
+          "description": "Inject framework-managed audit columns: created_at, created_by, updated_at, updated_by."
         },
         "fields": {
           "type": "object",
@@ -283,26 +523,7 @@
           "description": "Entity fields. The `id` field (uuid, PK) is added automatically when not defined."
         },
         "rules": {
-          "type": "object",
-          "additionalProperties": false,
-          "description": "Per-operation authorization rules — CEL, compiled into a SQL predicate. Missing operation = deny (secure-by-default).",
-          "properties": {
-            "list": {
-              "$ref": "#/$defs/cel"
-            },
-            "get": {
-              "$ref": "#/$defs/cel"
-            },
-            "create": {
-              "$ref": "#/$defs/cel"
-            },
-            "update": {
-              "$ref": "#/$defs/cel"
-            },
-            "delete": {
-              "$ref": "#/$defs/cel"
-            }
-          }
+          "$ref": "#/$defs/rules"
         },
         "hooks": {
           "type": "object",
@@ -349,15 +570,20 @@
                 "minItems": 1,
                 "items": {
                   "$ref": "#/$defs/identifier"
-                }
+                },
+                "description": "Fields covered by the index, in order."
               },
               "unique": {
                 "type": "boolean",
-                "default": false
+                "default": false,
+                "description": "Whether the index enforces uniqueness across the covered fields."
               }
             }
           }
         }
+      },
+      "patternProperties": {
+        "^x-": true
       }
     },
     "field": {
@@ -368,37 +594,33 @@
       ],
       "properties": {
         "type": {
-          "enum": [
-            "string",
-            "text",
-            "integer",
-            "decimal",
-            "boolean",
-            "date",
-            "datetime",
-            "uuid",
-            "json",
-            "enum",
-            "ref"
-          ]
+          "$ref": "#/$defs/fieldType"
         },
         "description": {
-          "type": "string"
+          "type": "string",
+          "description": "Human-readable description of the field (surfaced to agents and in the admin UI)."
+        },
+        "renamedFrom": {
+          "$ref": "#/$defs/identifier",
+          "description": "Previous name of this field: declares a rename so apply preserves data instead of drop+add."
         },
         "required": {
           "type": "boolean",
-          "default": false
+          "default": false,
+          "description": "Whether the field must be present (NOT NULL)."
         },
         "unique": {
           "type": "boolean",
-          "default": false
+          "default": false,
+          "description": "Whether values must be unique across the entity."
         },
         "nullable": {
           "type": "boolean",
           "description": "Explicitly allow NULL; the default is derived from required."
         },
         "default": {
-          "description": "Default value (must match the field type) or a function: now(), gen_random_uuid()."
+          "$ref": "#/$defs/valueOrExpr",
+          "description": "Default value: a JSON literal, or a tagged expression {\"$cel\": \"...\"} (e.g. {\"$cel\": \"now()\"}, {\"$cel\": \"gen_random_uuid()\"}, {\"$cel\": \"@user.id\"}). The $cel default context includes @user/@tenant and is evaluated at insert time."
         },
         "maxLength": {
           "type": "integer",
@@ -409,12 +631,12 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 38,
-          "description": "type=decimal only."
+          "description": "type=decimal only (required)."
         },
         "scale": {
           "type": "integer",
           "minimum": 0,
-          "description": "type=decimal only."
+          "description": "type=decimal only (required)."
         },
         "values": {
           "type": "array",
@@ -427,7 +649,7 @@
         },
         "entity": {
           "$ref": "#/$defs/identifier",
-          "description": "type=ref only — target entity (FK to its id)."
+          "description": "type=ref only — target entity (FK to its id). May target the reserved `users` entity, or a dynamic/runtime entity (late-bound)."
         },
         "onDelete": {
           "enum": [
@@ -436,15 +658,22 @@
             "setNull"
           ],
           "default": "restrict",
-          "description": "type=ref only."
+          "description": "type=ref only. Registry-level semantics: enforced as a DB FK for physical targets, app-enforced for dynamic targets."
         },
         "format": {
-          "enum": [
-            "email",
-            "uri",
-            "phone"
-          ],
-          "description": "type=string only — validation format."
+          "description": "type=string only — validation format: a built-in (email, uri, phone) or the name of a format declared in the top-level `formats`. An unknown name is caught fail-fast at apply (like a ref to a missing entity), not by this schema.",
+          "anyOf": [
+            {
+              "enum": [
+                "email",
+                "uri",
+                "phone"
+              ]
+            },
+            {
+              "$ref": "#/$defs/identifier"
+            }
+          ]
         },
         "validation": {
           "$ref": "#/$defs/cel",
@@ -456,26 +685,23 @@
           "description": "Create an index (for dynamic entities = generated column + index over the JSON path)."
         },
         "hidden": {
-          "type": "boolean",
-          "default": false,
-          "description": "Field is never returned in API responses (e.g. internal flags)."
+          "$ref": "#/$defs/boolOrCel",
+          "description": "Field is never returned in API responses. true = always hidden; a CEL expression over @user makes visibility conditional (per-role masking, e.g. \"@user.role != 'compliance'\")."
         },
         "readOnly": {
-          "type": "boolean",
-          "default": false,
-          "description": "Field cannot be modified via the API (hooks/system only)."
+          "$ref": "#/$defs/boolOrCel",
+          "description": "Field cannot be modified via the API. true = always read-only; a CEL expression over @user makes it conditional."
         },
         "computed": {
           "$ref": "#/$defs/cel",
-          "description": "Value derived from other fields of the SAME row (pure arithmetic/expression, deterministic, no side effects), e.g. unit_price * amount. Maps to a DB stored generated column. Field becomes read-only."
+          "description": "Value derived from other fields of the SAME row (pure arithmetic/expression, deterministic, no side effects), e.g. unit_price * amount. May also reference this entity's rollup fields (the framework maintains the value). Field becomes read-only."
         },
         "rollup": {
           "type": "object",
           "additionalProperties": false,
           "required": [
             "from",
-            "op",
-            "field"
+            "op"
           ],
           "description": "Value aggregated over RELATED records, transactionally consistent (e.g. sum of child line_total). Framework maintains it; the field is read-only.",
           "properties": {
@@ -490,18 +716,44 @@
                 "avg",
                 "min",
                 "max"
-              ]
+              ],
+              "description": "Aggregate operation over the child records."
             },
             "field": {
               "$ref": "#/$defs/identifier",
-              "description": "Field on the child entity to aggregate (omit-able for count)."
+              "description": "Field on the child entity to aggregate (required for all ops except count)."
+            },
+            "via": {
+              "$ref": "#/$defs/identifier",
+              "description": "The FK field on the child entity that points back to this parent. Required when the child has more than one ref to this parent (e.g. follows.follower vs follows.followee)."
             },
             "where": {
               "$ref": "#/$defs/cel",
               "description": "Optional CEL filter on child records."
             }
-          }
+          },
+          "allOf": [
+            {
+              "if": {
+                "not": {
+                  "properties": {
+                    "op": {
+                      "const": "count"
+                    }
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "field"
+                ]
+              }
+            }
+          ]
         }
+      },
+      "patternProperties": {
+        "^x-": true
       },
       "allOf": [
         {
@@ -529,6 +781,21 @@
           "then": {
             "required": [
               "entity"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "decimal"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "precision",
+              "scale"
             ]
           }
         },
@@ -666,7 +933,10 @@
                   "mutate": {
                     "type": "object",
                     "minProperties": 1,
-                    "description": "Payload patch before write: field → value or CEL expression."
+                    "additionalProperties": {
+                      "$ref": "#/$defs/valueOrExpr"
+                    },
+                    "description": "Payload patch before write: field -> literal value or tagged {\"$cel\": \"...\"} expression."
                   }
                 }
               }
@@ -697,22 +967,21 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "name",
         "trigger",
         "actions"
       ],
       "properties": {
-        "name": {
-          "$ref": "#/$defs/identifier"
-        },
         "description": {
-          "type": "string"
+          "type": "string",
+          "description": "Human-readable description of the automation rule."
         },
         "enabled": {
           "type": "boolean",
-          "default": true
+          "default": true,
+          "description": "Whether the rule is active."
         },
         "trigger": {
+          "description": "What fires the rule: an event pattern or a cron schedule.",
           "oneOf": [
             {
               "type": "object",
@@ -737,36 +1006,66 @@
                   "$ref": "#/$defs/cron"
                 }
               }
-            },
-            {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "inboundWebhook"
-              ],
-              "properties": {
-                "inboundWebhook": {
-                  "$ref": "#/$defs/identifier",
-                  "description": "Inbound endpoint name; receiving a request triggers the rule."
-                }
-              }
             }
           ]
         },
         "condition": {
           "$ref": "#/$defs/cel"
         },
+        "delivery": {
+          "enum": [
+            "perItem",
+            "batch"
+          ],
+          "default": "perItem",
+          "description": "perItem = one execution per affected row; batch = one execution with an array payload (coalesces bulk operations; matches the entity.*.*.batch event shape)."
+        },
         "actions": {
           "type": "array",
           "minItems": 1,
           "items": {
             "$ref": "#/$defs/action"
-          }
+          },
+          "description": "Actions to run when the rule fires (in order)."
         }
+      },
+      "patternProperties": {
+        "^x-": true
       }
     },
+    "template": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A reusable message template. Provide an inline body or a bundle-relative bodyFile.",
+      "properties": {
+        "subject": {
+          "type": "string",
+          "description": "Subject line; supports {{...}} interpolation."
+        },
+        "body": {
+          "type": "string",
+          "description": "Inline body; supports {{...}} interpolation."
+        },
+        "bodyFile": {
+          "type": "string",
+          "description": "Relative path to a template file inside the descriptor bundle."
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "body"
+          ]
+        },
+        {
+          "required": [
+            "bodyFile"
+          ]
+        }
+      ]
+    },
     "action": {
-      "description": "After-side action (post-commit, durable, retries). Payload transformations = JSONata.",
+      "description": "After-side action (post-commit, durable, retries). Payload transformations = JSONata; {{...}} is sugar.",
       "oneOf": [
         {
           "type": "object",
@@ -847,11 +1146,15 @@
             },
             "recordId": {
               "type": "string",
-              "description": "Id or {{...}}; omit to create."
+              "description": "Id or {{...}} template; omit to create a new record."
             },
             "payload": {
               "type": "object",
-              "minProperties": 1
+              "minProperties": 1,
+              "additionalProperties": {
+                "$ref": "#/$defs/valueOrExpr"
+              },
+              "description": "Field -> literal value or tagged {\"$cel\": \"...\"} expression; {{...}} sugar allowed in string values."
             }
           }
         },
@@ -868,7 +1171,8 @@
             },
             "url": {
               "type": "string",
-              "format": "uri"
+              "format": "uri",
+              "description": "Absolute URL to call."
             },
             "method": {
               "enum": [
@@ -878,10 +1182,12 @@
                 "PATCH",
                 "DELETE"
               ],
-              "default": "POST"
+              "default": "POST",
+              "description": "HTTP method."
             },
             "headersSecretRef": {
-              "type": "string"
+              "type": "string",
+              "description": "Secret name in ISecretStore holding request headers (e.g. auth token); never the value itself."
             },
             "payload": {
               "$ref": "#/$defs/jsonata"

@@ -1,0 +1,22 @@
+<!doctype html>
+<html>
+  <body style="font-family: system-ui, sans-serif; color: #111;">
+    <h1>Invoice {{new.number}}</h1>
+    <p>Issued on {{new.issued_on}}.</p>
+    <table style="border-collapse: collapse;">
+      <tr>
+        <td style="padding: 4px 12px 4px 0;">Net total</td>
+        <td style="text-align: right;">{{new.net_total}}</td>
+      </tr>
+      <tr>
+        <td style="padding: 4px 12px 4px 0;">VAT</td>
+        <td style="text-align: right;">{{new.vat_total}}</td>
+      </tr>
+      <tr style="font-weight: bold;">
+        <td style="padding: 4px 12px 4px 0;">Gross total</td>
+        <td style="text-align: right;">{{new.gross_total}}</td>
+      </tr>
+    </table>
+    <p style="color: #666; font-size: 12px;">Sent by Firma CRM.</p>
+  </body>
+</html>

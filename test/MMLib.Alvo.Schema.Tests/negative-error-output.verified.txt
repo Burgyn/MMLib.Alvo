@@ -1,0 +1,55 @@
+[
+  {
+    file: decimal-without-scale.json,
+    failures: [
+      {
+        Pointer: #/entities/orders/fields/total,
+        Message: Validation - allOf failed to validate against the schema.
+      },
+      {
+        Pointer: #/entities/orders/fields/total,
+        Message: Validation required - the required property 'scale' was not present.
+      },
+      {
+        Pointer: #/entities/orders/fields/total,
+        Message: Validation then - failed to validate against the then schema
+      }
+    ]
+  },
+  {
+    file: format-without-pattern.json,
+    failures: [
+      {
+        Pointer: #/formats/slug,
+        Message: Validation properties - the required property 'pattern' was not present.
+      }
+    ]
+  },
+  {
+    file: reserved-users-entity.json,
+    failures: [
+      {
+        Pointer: #/entities/users,
+        Message: 
+      }
+    ]
+  },
+  {
+    file: typo-property.json,
+    failures: [
+      {
+        Pointer: #/entities/widgets/fields/name/requird,
+        Message: 
+      }
+    ]
+  },
+  {
+    file: wrong-api-version.json,
+    failures: [
+      {
+        Pointer: #/apiVersion,
+        Message: Validation const - the value '"alvo.dev/v2"' did not match '"alvo.dev/v1'.
+      }
+    ]
+  }
+]

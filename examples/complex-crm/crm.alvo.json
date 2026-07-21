@@ -1,0 +1,264 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "crm",
+  "revision": 1,
+  "x-generator": "alvo-examples/complex-crm",
+  "auth": {
+    "providers": ["local", "google"],
+    "roles": ["sales", "manager", "finance"]
+  },
+  "description": "Customer relationship management: companies, contacts, deals, and invoicing.",
+  "branding": {
+    "title": "Firma CRM",
+    "logoUrl": "/assets/logo.svg"
+  },
+  "access": {
+    "admin": "@user.role == 'manager' && @user.email.endsWith('@firma.sk')",
+    "developer": "@user.role == 'manager'",
+    "viewer": "@user.role in ['sales', 'manager', 'finance']"
+  },
+  "tenancy": {
+    "enabled": true
+  },
+  "dynamicEntities": {
+    "enabled": true,
+    "namePrefix": "dyn_",
+    "defaultRules": {
+      "list": "tenant_id == @tenant.id",
+      "get": "tenant_id == @tenant.id",
+      "create": "@user.role in ['manager', 'sales']",
+      "update": "@user.role == 'manager'",
+      "delete": "@user.role == 'manager'"
+    },
+    "allowedFieldTypes": ["string", "text", "integer", "decimal", "boolean", "date", "datetime", "enum", "ref"],
+    "maxFieldsPerEntity": 40,
+    "maxRecordsPerEntity": 500000,
+    "maxEntitiesPerTenant": 25,
+    "defaultTenancy": "scoped"
+  },
+  "formats": {
+    "sk-ico": {
+      "pattern": "^[0-9]{8}$",
+      "description": "Slovak company registration number (IČO): 8 digits."
+    }
+  },
+  "templates": {
+    "deal-won": {
+      "subject": "Deal won: {{new.title}}",
+      "body": "Congratulations — {{new.title}} ({{new.amount}}) has been marked won."
+    },
+    "invoice-issued": {
+      "subject": "Invoice {{new.number}}",
+      "bodyFile": "templates/invoice-issued.html"
+    }
+  },
+  "entities": {
+    "countries": {
+      "description": "Shared reference data (číselník) visible to all tenants.",
+      "tenancy": "global",
+      "fields": {
+        "code": { "type": "string", "required": true, "unique": true, "maxLength": 2 },
+        "name": { "type": "string", "required": true },
+        "vat_rate": { "type": "decimal", "precision": 5, "scale": 2, "required": true }
+      },
+      "rules": {
+        "list": "@user.id != null",
+        "get": "@user.id != null",
+        "create": "@user.role == 'manager'",
+        "update": "@user.role == 'manager'"
+      }
+    },
+    "companies": {
+      "description": "Customer companies, tenant-scoped.",
+      "audit": true,
+      "softDelete": true,
+      "fields": {
+        "name": { "type": "string", "required": true },
+        "ico": { "type": "string", "unique": true, "maxLength": 8, "format": "sk-ico" },
+        "country_id": { "type": "ref", "entity": "countries" },
+        "owner_id": { "type": "ref", "entity": "users", "default": { "$cel": "@user.id" } },
+        "open_deals": {
+          "type": "integer",
+          "rollup": { "from": "deals", "op": "count", "where": "stage in ['lead', 'offer']" }
+        }
+      },
+      "rules": {
+        "list": "@user.role in ['sales', 'manager']",
+        "get": "@user.role in ['sales', 'manager']",
+        "create": "@user.role in ['sales', 'manager']",
+        "update": "@user.role == 'manager' || owner_id == @user.id"
+      }
+    },
+    "contacts": {
+      "audit": true,
+      "fields": {
+        "company_id": { "type": "ref", "entity": "companies", "required": true, "onDelete": "cascade" },
+        "name": { "type": "string", "required": true },
+        "email": { "type": "string", "format": "email" },
+        "phone": { "type": "string", "format": "phone" }
+      },
+      "rules": {
+        "list": "@user.id != null",
+        "get": "@user.id != null",
+        "create": "@user.id != null",
+        "update": "@user.id != null"
+      },
+      "hooks": {
+        "beforeCreate": [
+          {
+            "condition": "has(new.email)",
+            "action": { "mutate": { "email": { "$cel": "lower(new.email)" } } }
+          }
+        ]
+      }
+    },
+    "deals": {
+      "description": "Sales opportunities.",
+      "audit": true,
+      "softDelete": true,
+      "fields": {
+        "company_id": { "type": "ref", "entity": "companies", "required": true },
+        "title": { "type": "string", "required": true },
+        "amount": { "type": "decimal", "precision": 12, "scale": 2 },
+        "stage": {
+          "type": "enum",
+          "values": ["lead", "offer", "won", "lost"],
+          "default": "lead"
+        },
+        "commission_note": {
+          "type": "string",
+          "hidden": "@user.role != 'finance'"
+        },
+        "owner_id": { "type": "ref", "entity": "users", "default": { "$cel": "@user.id" } },
+        "closed_at": { "type": "datetime", "readOnly": true }
+      },
+      "rules": {
+        "list": "@user.role == 'manager' || owner_id == @user.id",
+        "get": "@user.role == 'manager' || owner_id == @user.id",
+        "create": "@user.role in ['sales', 'manager']",
+        "update": "@user.role == 'manager' || owner_id == @user.id"
+      },
+      "hooks": {
+        "beforeUpdate": [
+          {
+            "condition": "old.stage in ['won', 'lost'] && @user.role != 'manager'",
+            "action": { "reject": "Only a manager may change a closed deal" }
+          },
+          {
+            "condition": "changed(stage) && new.stage in ['won', 'lost']",
+            "action": { "mutate": { "closed_at": { "$cel": "now()" } } }
+          }
+        ]
+      }
+    },
+    "invoices": {
+      "audit": true,
+      "fields": {
+        "deal_id": { "type": "ref", "entity": "deals", "required": true },
+        "number": { "type": "string", "required": true, "unique": true },
+        "issued_on": { "type": "date", "required": true },
+        "net_total": {
+          "type": "decimal",
+          "precision": 12,
+          "scale": 2,
+          "rollup": { "from": "invoice_items", "op": "sum", "field": "line_total", "via": "invoice_id" }
+        },
+        "vat_total": {
+          "type": "decimal",
+          "precision": 12,
+          "scale": 2,
+          "x-note": "Caller-supplied in v1. Auto-deriving it (countries.vat_rate via deal->company->country, by supply date) needs ref-path reads in expressions (C1) + contextual/time-valued logic — deferred past v1, see the design brief's binding constraints."
+        },
+        "gross_total": {
+          "type": "decimal",
+          "precision": 12,
+          "scale": 2,
+          "computed": "net_total + vat_total"
+        }
+      },
+      "rules": {
+        "list": "@user.id != null",
+        "get": "@user.id != null",
+        "create": "@user.role in ['manager', 'finance']",
+        "update": "@user.role in ['manager', 'finance']"
+      }
+    },
+    "invoice_items": {
+      "renamedFrom": "line_items",
+      "fields": {
+        "invoice_id": { "type": "ref", "entity": "invoices", "required": true, "onDelete": "cascade" },
+        "label": { "type": "string", "required": true },
+        "unit_price": { "type": "decimal", "precision": 12, "scale": 2, "required": true },
+        "amount": { "type": "decimal", "precision": 10, "scale": 2, "required": true },
+        "line_total": {
+          "type": "decimal",
+          "precision": 12,
+          "scale": 2,
+          "computed": "unit_price * amount"
+        }
+      },
+      "rules": {
+        "list": "@user.id != null",
+        "get": "@user.id != null",
+        "create": "@user.role in ['manager', 'finance']",
+        "update": "@user.role in ['manager', 'finance']"
+      }
+    }
+  },
+  "automation": {
+    "deal-won": {
+      "description": "Notify ERP and the deal owner when a deal is won.",
+      "trigger": { "event": "entity.deals.updated" },
+      "condition": "changed(stage) && new.stage == 'won'",
+      "actions": [
+        {
+          "type": "webhook",
+          "endpoint": "invoicing",
+          "payload": "$merge([new, {\"source\": \"alvo\"}])"
+        },
+        {
+          "type": "email",
+          "template": "deal-won",
+          "to": "{{@user.email}}"
+        }
+      ]
+    },
+    "bulk-import-index": {
+      "description": "Coalesce large company imports into one downstream call.",
+      "trigger": { "event": "entity.companies.created.batch" },
+      "delivery": "batch",
+      "actions": [
+        {
+          "type": "http.call",
+          "url": "https://erp.firma.sk/hooks/reindex",
+          "method": "POST",
+          "headersSecretRef": "erp-reindex-headers",
+          "payload": "{\"companyIds\": records.id}"
+        }
+      ]
+    },
+    "stale-deal-reminder": {
+      "description": "Weekly nudge for stale deals (delegates the per-record scan to a function; see C3).",
+      "trigger": { "schedule": "0 8 * * MON" },
+      "actions": [
+        { "type": "function", "name": "remind-stale-deals" }
+      ]
+    }
+  },
+  "webhooks": {
+    "endpoints": {
+      "invoicing": {
+        "url": "https://erp.firma.sk/hooks/alvo",
+        "secretRef": "invoicing-webhook-secret",
+        "description": "ERP integration endpoint."
+      }
+    }
+  },
+  "functions": {
+    "remind-stale-deals": {
+      "script": "functions/remind-stale-deals.csx",
+      "execution": "queued"
+    }
+  }
+}

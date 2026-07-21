@@ -1,0 +1,11 @@
+{
+  "apiVersion": "alvo.dev/v2",
+  "name": "wrong-version",
+  "entities": {
+    "widgets": {
+      "fields": {
+        "name": { "type": "string" }
+      }
+    }
+  }
+}

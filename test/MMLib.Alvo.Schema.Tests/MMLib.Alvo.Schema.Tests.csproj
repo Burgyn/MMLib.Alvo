@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- No 1:1 production assembly (like Conventions/integration/e2e): opt out of
+       the shared architecture + public-API approval gate. -->
+  <PropertyGroup>
+    <AlvoSharedArchTests>false</AlvoSharedArchTests>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Corvus.Json.Validator" />
+    <PackageReference Include="CsCheck" />
+    <PackageReference Include="Verify.XunitV3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="VerifyXunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="meta-schema/**/*.json" CopyToOutputDirectory="PreserveNewest" LinkBase="meta-schema" />
+  </ItemGroup>
+
+</Project>

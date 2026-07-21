@@ -1,0 +1,16 @@
+{
+  "apiVersion": "alvo.dev/v1",
+  "name": "bad-format",
+  "formats": {
+    "slug": {
+      "description": "missing the required pattern"
+    }
+  },
+  "entities": {
+    "articles": {
+      "fields": {
+        "handle": { "type": "string", "format": "slug" }
+      }
+    }
+  }
+}

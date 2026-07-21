@@ -5,14 +5,13 @@ description: Use when writing or changing tests against the Alvo descriptor JSON
 
 # Alvo schema testing
 
-This skill is deliberately thin. The descriptor JSON Schema
-(`alvo-descriptor.schema.json`) and its full test mechanism are F2 work
-(issue #17, bracketed `[13]` in the plan, milestone F2) and haven't landed
-yet. What follows is the spec/analysis-level shape of the four test types the
-schema needs, so that any test written against the schema before F2 lands
-uses the right shape from the start instead of inventing a fifth pattern.
-When F2 lands, expect this skill to grow — go read issue #17 for the full
-treatment rather than assuming this document is complete.
+The canonical descriptor JSON Schema now lives at `schema/project.schema.json`
+(draft 2020-12, `$id` `https://alvo.dev/schema/v1/project.json`), and the four
+test types below are implemented in `test/MMLib.Alvo.Schema.Tests` against it
+(Corvus.Json.Validator + CsCheck + Verify), landed in F2 (issues #16/#17/#57).
+What follows is the spec/analysis-level shape of those four types; go read
+issue #17 and the test project for the full treatment rather than assuming this
+document is complete.
 
 ## The four schema test types
 
@@ -59,7 +58,7 @@ entities do land in scope, and one deliberately does not:
 
 - **In scope — descriptor touchpoints.** The descriptor schema carries
   dynamic-entity configuration, e.g. an index over a JSON path
-  (`alvo-descriptor.schema.json`: "index … for dynamic entities = generated
+  (`schema/project.schema.json`: "index … for dynamic entities = generated
   column + index over the JSON path"). An example descriptor exercising that
   belongs in the examples suite (type 2) and its generated artifacts in the
   snapshot suite (type 4).
