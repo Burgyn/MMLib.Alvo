@@ -113,7 +113,7 @@
               "oidc"
             ]
           },
-          "description": "Enabled identity providers. `local` = ASP.NET Core Identity; `oidc` = generic OIDC relying party (endpoint configuration is infra/env)."
+          "description": "Enabled identity providers. `local` = credentials managed by Alvo (ASP.NET Core Identity). `oidc` = a generic OIDC relying party — this is the path for a custom / self-hosted identity provider (Keycloak, Auth0, Okta, Entra ID, …); its endpoints are infra/env, never here."
         },
         "roles": {
           "type": "array",
