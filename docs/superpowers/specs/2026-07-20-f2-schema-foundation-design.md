@@ -18,24 +18,21 @@ identity, layout, extensibility, and the dynamic-entities touchpoints.
 
 ## Research base
 
-Three research passes inform every decision here (full reports in the session,
-key citations inline):
+Three research passes inform every decision here (full reports in the session):
 
-1. **Prior art** — PocketBase, Supabase, Hasura v2/v3, Directus, Strapi,
-   Appwrite, Amplify Gen 2, Dataverse, Salesforce, Kubernetes CRDs.
-2. **JSON Schema 2020-12 practice** — OpenAPI 3.1 meta-schema conventions,
-   SchemaStore, VS Code behavior, .NET validator landscape.
-3. **Schema evolution & dynamic-entity architectures** — Atlas, Prisma, EF
-   Core, Terraform, kubectl apply; Dataverse elastic/virtual tables,
-   Salesforce MT_Data/pivot tables, modern JSONB practice.
+1. **Prior art** — existing BaaS and declarative-schema descriptor formats.
+2. **JSON Schema 2020-12 practice** — meta-schema conventions, editor/tooling
+   behavior, and the .NET validator landscape.
+3. **Schema evolution & dynamic-entity architectures** — declarative
+   diff/apply and metadata-driven ("virtual") entity stores.
 
-The recurring failure modes the design guards against: no format version
-(PocketBase v0.23 broke every export), name-as-identity renames (Prisma/EF/
-Strapi rename = drop + add = data loss), deletion inferred from absence
-(Strapi boot-time auto-sync), auth rules living outside the descriptor
-(Strapi/Directus), observed state mixed into desired state (Appwrite), and a
-dynamic driver that visibly degrades vs the physical one (Dataverse elastic
-tables' long limitation lists).
+The recurring failure modes the design guards against: no format version (an
+export format that breaks on the next release), name-as-identity renames (a
+rename modeled as drop + add = data loss), deletion inferred from absence
+(boot-time auto-sync silently dropping data), auth rules living outside the
+descriptor (permissions that don't travel with the schema), observed state
+mixed into desired state, and a dynamic driver that visibly degrades vs the
+physical one.
 
 ## Decisions
 
@@ -59,7 +56,7 @@ tables' long limitation lists).
 
 - The entity/field **name stays the identity** (the object key). Renames are
   declared, never guessed: an optional `renamedFrom` string on an entity and
-  on a field, with Terraform `moved`-block semantics — safe to leave in the
+  on a field, with declarative-rename semantics — safe to leave in the
   file permanently (ignored when the source no longer exists), an error when
   source and target both exist as distinct things.
 - The registry keeps **internal stable IDs** for its own bookkeeping; they
@@ -69,8 +66,8 @@ tables' long limitation lists).
   the differ never infers a rename heuristically; a drop without
   `renamedFrom` is a destructive change requiring explicit approval, and the
   structured error suggests `renamedFrom` as the fix. Every tool that guessed
-  renames (EF Core, Prisma) shipped a data-loss footgun; every tool that
-  separated identity from display (Dataverse, PocketBase, Terraform) did not.
+  renames shipped a data-loss footgun; every tool that separated identity
+  from display (a stable identity distinct from the display name) did not.
 
 ### D3 — Layout: one canonical document + a split convention
 
@@ -81,7 +78,7 @@ tables' long limitation lists).
   `project.json` + `entities/<name>.json` (file content = the entity object,
   file name = the entity key) + `automation/<name>.json` +
   `functions/*.csx`. The loader composes them deterministically; a duplicate
-  definition is an **error**, never last-write-wins (the Hasura v2 lesson).
+  definition is an **error**, never last-write-wins.
   Single-file stays fully supported (everything inline except `.csx`).
 - The loader/composer is F3/F4 work; F2 records the convention and ships a
   split-layout example.
@@ -100,8 +97,8 @@ tables' long limitation lists).
 
 - Project-level `dynamicEntities` object: `enabled` (bool, default false),
   `namePrefix` (identifier prefix reserved for runtime user-created entities —
-  the Dataverse publisher-prefix / Salesforce `__c` collision guard against
-  descriptor-defined entity names), and an optional `maxEntitiesPerTenant`
+  a collision guard against descriptor-defined entity names), and an optional
+  `maxEntitiesPerTenant`
   integer quota. Further quota knobs are added additively when F7 shows they
   are needed.
 - Entity-level `storage: "physical" | "dynamic"` (default `physical`). A
