@@ -439,7 +439,10 @@ follow-up outside F2 (it would trigger `alvo-regen-brief`).
 - Every #57 acceptance criterion is satisfiable by pointing at: the
   `dynamicEntities` + `storage` schema surface, the dynamic-entities example
   in the corpus, D5's model constraint, and the F3 constraint sentence.
-- The published URL serves the schema after a main merge.
+- Publishing (`$id` URL served over HTTPS/CORS) is a **tracked follow-up** —
+  the domain is deferred (`alvo.burgyn.online` candidate), so the GitHub Pages
+  workflow lands separately once the host is chosen. `$id` already carries the
+  intended canonical URL; the schema is finalized and validated regardless.
 - **Modeling-power proof:** the §16 CRM scenario, the vehicles demo, and the
   ERP dynamic-entities scenario are each fully expressible in v1; the adapted
   CRM descriptor validates as part of the examples corpus (type 2).
