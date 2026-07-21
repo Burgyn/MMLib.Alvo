@@ -309,6 +309,14 @@ read/security semantics of existing descriptors, so they belong in v1:
   reads/`list`/`get` and `rollup` auto-exclude soft-deleted rows; a restore op.
   (Adding this later would change what every existing `list` returns.)
 - **`entity.audit: true`** — injects managed `created_at/by`, `updated_at/by`.
+  Scope note: this boolean is **only** the on-row stamp columns. The richer
+  **audit log / change-history trail** (append-only who-changed-which-field,
+  hash-chaining, retention, GDPR export/erasure) is a *separate subsystem*
+  (F7.10) and gets its own concept (e.g. an `auditLog` key / instance-level
+  config) — it is deliberately NOT crammed into this boolean. If per-stamp
+  tuning is ever needed (e.g. `created_*` only, custom `created_by` claim,
+  `deleted_by`), `audit` widens `bool`→`bool | object` additively (same trick
+  as `hidden`/`readOnly`), so nothing here is foreclosed.
 - **`field.hidden` / `field.readOnly` widen from `bool` to `bool | CEL`** — a
   CEL expression over `@user` gives per-role field visibility/mutability (PHI
   masking, "only compliance sees SSN"). Widening `bool`→`bool|CEL` now is
@@ -326,6 +334,55 @@ the framework maintains the value rather than emitting an invalid DDL. This is
 a semantic clarification of the existing ladder, decided now to avoid an
 under-specified `computed`.
 
+### M10 — `admin` split by scope: project `branding`/`access`, not dashboard config
+
+The draft's `admin` object conflated two scopes. One Alvo instance hosts **many
+projects** (standalone: one DB per project) behind **one** dashboard, so a
+per-project descriptor must not carry instance/dashboard-wide config. Resolution:
+- **`branding`** moves to top-level and is reframed as the **project/backend's
+  own identity** (display name, logo) — shown in the project's dashboard section,
+  its generated end-user surfaces, and transactional emails. The instance-wide
+  dashboard chrome (if brandable) is host/env, never a per-project concern.
+- **`access`** replaces `admin` as a top-level, **project-scoped** map: who may
+  manage *this* project (admin/developer/viewer via CEL). Whether the dashboard
+  is reachable at all (enablement, path, IP allowlist, UI-edit gate) stays env.
+- A top-level **`description`** (human-readable "what this backend is") is added
+  alongside `name` (which is only an identifier).
+
+This aligns the descriptor with the multi-project reality and removes the
+"one dashboard, N conflicting brandings" incoherence.
+
+### M11 — Field formats: a three-rung ladder, declarative first
+
+`field.format` was a closed enum (`email`/`uri`/`phone`). Custom validation had
+only the C# escape hatch, which is embedded-only and opaque (can't reflect into
+OpenAPI). Replace that with a declarative-first ladder, consistent with Alvo's
+`declarative → code` gradient:
+1. **Built-in** (`email`/`uri`/`phone`, extended additively) — enum, works
+   everywhere.
+2. **Declarative custom format** — a top-level **`formats`** map of named regex
+   formats (`{ pattern, description }`) referenced by `field.format`. Engine-
+   agnostic (works in standalone, no host code), enforced at the API layer, and
+   **reflectable into the generated OpenAPI as a `pattern`**. `field.format`
+   widens from the closed enum to `anyOf: [ builtin-enum, identifier ]` — the
+   enum branch keeps editor suggestions for built-ins, the identifier branch
+   allows a declared-format name.
+3. **`IFieldFormatValidator`** (C#, embedded, **last resort**) — for what regex
+   can't express (checksums like IBAN/rodné číslo, external lookups, locale-aware
+   phone). Opaque to schema/OpenAPI, host-registered via DI; F7 extension point.
+
+Subtlety (same as `ref`/`rollup`): the static schema can't enforce that a
+`field.format` name resolves to a declared format (no standard cross-key
+reference in JSON Schema), so an unknown format is caught **fail-fast at apply**,
+not by the schema — fail-loud is preserved, one layer down. Because declarative
+formats live *in the descriptor*, this is a stronger guarantee than the
+host-registered C# validator. Inline raw `pattern` on a field is deliberately
+NOT added (redundant with a single-use named format; one-off predicates use
+`field.validation` CEL). Runtime (regex compilation, apply-time reference check,
+OpenAPI reflection, the `IFieldFormatValidator` port) is F3/F4/F7; F2 fixes the
+shape and tests it (a `formats`+`format` example in `complex-crm`, a negative
+case for a `formats` entry missing its required `pattern`).
+
 ### Additive policy (documented, deliberately not in v1)
 
 Safe to add within v1 (new optional keys / new enum values), recorded so they
@@ -339,7 +396,16 @@ the junction-entity pattern); the full per-role field-level `rules.fields` map
 field; a `money` composite type; enum-with-metadata + entity `seed` data;
 per-endpoint `subscribedEvents`/`paused`/`payloadMode`; automation action
 types `entity.delete`, `push`, `sms`, `emit`, `delay`, and a per-action
-`condition` + data-chain. Each is genuinely additive; none is foreclosed by v1.
+`condition` + data-chain; the **audit log / change-history trail** as its own
+concept (F7.10 — separate from `entity.audit`'s stamp columns); widening
+`entity.audit` to `bool | object` for per-stamp tuning; the
+**`IFieldFormatValidator`** host extension point (embedded-only, for formats a
+regex can't express — the third rung of M11); extending the built-in `format`
+enum with more values; template i18n / localization — and cross-cutting enum
+labels and validation messages — as a coherent later feature, not a
+template-only bolt-on; a template `contentType` (`html`/`text`) for multipart
+bodies (today inferred from the `bodyFile` extension). Each is genuinely
+additive; none is foreclosed by v1.
 
 ## Binding constraints for F4/F7 (from the modeling stress test)
 

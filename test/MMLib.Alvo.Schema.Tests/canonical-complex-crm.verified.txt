@@ -1,15 +1,9 @@
 {
   "$schema": "https://alvo.dev/schema/v1/project.json",
-  "admin": {
-    "access": {
-      "admin": "@user.role == 'manager' && @user.email.endsWith('@firma.sk')",
-      "developer": "@user.role == 'manager'",
-      "viewer": "@user.role in ['sales', 'manager', 'finance']"
-    },
-    "branding": {
-      "logoUrl": "/assets/logo.svg",
-      "title": "Firma CRM"
-    }
+  "access": {
+    "admin": "@user.role == 'manager' && @user.email.endsWith('@firma.sk')",
+    "developer": "@user.role == 'manager'",
+    "viewer": "@user.role in ['sales', 'manager', 'finance']"
   },
   "apiVersion": "alvo.dev/v1",
   "auth": {
@@ -72,6 +66,11 @@
       }
     }
   },
+  "branding": {
+    "logoUrl": "/assets/logo.svg",
+    "title": "Firma CRM"
+  },
+  "description": "Customer relationship management: companies, contacts, deals, and invoicing.",
   "dynamicEntities": {
     "allowedFieldTypes": [
       "string",
@@ -108,7 +107,8 @@
           "type": "ref"
         },
         "ico": {
-          "maxLength": 12,
+          "format": "sk-ico",
+          "maxLength": 8,
           "type": "string",
           "unique": true
         },
@@ -369,6 +369,12 @@
         "list": "@user.id != null",
         "update": "@user.role in ['manager', 'finance']"
       }
+    }
+  },
+  "formats": {
+    "sk-ico": {
+      "description": "Slovak company registration number (IČO): 8 digits.",
+      "pattern": "^[0-9]{8}$"
     }
   },
   "functions": {

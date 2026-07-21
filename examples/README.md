@@ -10,9 +10,13 @@ Reference descriptors validated against `schema/project.schema.json`
   the surface: multi-tenancy (`tenancy.enabled` + a `global` číselník),
   dynamic-entities governance (`dynamicEntities.defaultRules` + quotas),
   `rollup.via`, a `computed` field reading a `rollup` (`gross_total`),
+  a declarative `formats` entry (`sk-ico`) referenced by a field,
   field-level per-role masking (`hidden` as CEL), tagged `{"$cel": …}` values,
   `renamedFrom`, `templates`, outbound `webhooks`, a `batch`-delivery
   automation rule, a scheduled rule delegating to a `function`, and `x-` keys.
+  It is a real **bundle** (D3): `crm.alvo.json` alongside
+  `templates/invoice-issued.html` (referenced via `bodyFile`) and
+  `functions/remind-stale-deals.csx` (referenced via `script`).
 - **`_negative/`** — descriptors that MUST be rejected, each proving one
   constraint (unknown property, `decimal` missing `scale`, the reserved
   `users` entity name, a wrong `apiVersion`). The test asserts they fail with

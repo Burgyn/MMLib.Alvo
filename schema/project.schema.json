@@ -25,6 +25,27 @@
       "pattern": "^[a-z][a-z0-9-]{1,62}$",
       "description": "Project identifier (kebab-case). In standalone mode it identifies the project within the instance."
     },
+    "description": {
+      "type": "string",
+      "description": "Human-readable description of this project/backend (what it is), surfaced to agents and in the admin UI."
+    },
+    "branding": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Identity of THIS project/backend (display name, logo), shown wherever the project is presented: its section in the admin dashboard, generated end-user surfaces, transactional emails. This is NOT the instance-wide dashboard chrome — one Alvo instance can host many projects, so dashboard branding is host/env config, not a per-project descriptor concern.",
+      "properties": {
+        "title": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Display name of this project/backend."
+        },
+        "logoUrl": {
+          "type": "string",
+          "format": "uri-reference",
+          "description": "URL or path to this project's logo."
+        }
+      }
+    },
     "revision": {
       "type": "integer",
       "minimum": 1,
@@ -125,43 +146,22 @@
         }
       }
     },
-    "admin": {
+    "access": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Admin dashboard configuration — definition ONLY (access mapping, branding). Enablement, path, IP allowlist and the script UI-edit gate are env.",
+      "description": "Who may manage THIS project in the admin dashboard (project-scoped), mapped to management levels via CEL over @user. Whether the dashboard is reachable at all — enablement, path, IP allowlist, the script UI-edit gate — is host/env config, not here.",
       "properties": {
-        "access": {
-          "type": "object",
-          "additionalProperties": false,
-          "description": "Mapping to dashboard access levels via CEL expressions over @user.",
-          "properties": {
-            "admin": {
-              "$ref": "#/$defs/cel"
-            },
-            "developer": {
-              "$ref": "#/$defs/cel"
-            },
-            "viewer": {
-              "$ref": "#/$defs/cel"
-            }
-          }
+        "admin": {
+          "$ref": "#/$defs/cel",
+          "description": "CEL: who may fully administer this project (schema, rules, data, settings)."
         },
-        "branding": {
-          "type": "object",
-          "additionalProperties": false,
-          "description": "Dashboard branding.",
-          "properties": {
-            "title": {
-              "type": "string",
-              "maxLength": 60,
-              "description": "Dashboard title shown in the admin UI."
-            },
-            "logoUrl": {
-              "type": "string",
-              "format": "uri-reference",
-              "description": "URL or path to the dashboard logo."
-            }
-          }
+        "developer": {
+          "$ref": "#/$defs/cel",
+          "description": "CEL: who may edit this project's schema, rules, and automation, but not its settings."
+        },
+        "viewer": {
+          "$ref": "#/$defs/cel",
+          "description": "CEL: who may view this project's data and configuration read-only."
         }
       }
     },
@@ -197,6 +197,16 @@
       },
       "additionalProperties": {
         "$ref": "#/$defs/template"
+      }
+    },
+    "formats": {
+      "type": "object",
+      "description": "Reusable named validation formats referenced by field.format (beyond the built-ins email/uri/phone). Declarative and engine-agnostic (works in standalone), enforced by Alvo at the API layer and reflected into the generated OpenAPI as a pattern. For validators a regex cannot express (checksums, external lookups), a host registers an IFieldFormatValidator in embedded mode instead. Key = format name.",
+      "propertyNames": {
+        "$ref": "#/$defs/identifier"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/namedFormat"
       }
     },
     "webhooks": {
@@ -421,6 +431,24 @@
         "ref"
       ]
     },
+    "namedFormat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pattern"
+      ],
+      "description": "A reusable validation format defined by a regular expression.",
+      "properties": {
+        "pattern": {
+          "type": "string",
+          "description": "Regular expression the field value must match."
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of the format (surfaced to agents and in the generated OpenAPI)."
+        }
+      }
+    },
     "rules": {
       "type": "object",
       "additionalProperties": false,
@@ -633,12 +661,19 @@
           "description": "type=ref only. Registry-level semantics: enforced as a DB FK for physical targets, app-enforced for dynamic targets."
         },
         "format": {
-          "enum": [
-            "email",
-            "uri",
-            "phone"
-          ],
-          "description": "type=string only — validation format."
+          "description": "type=string only — validation format: a built-in (email, uri, phone) or the name of a format declared in the top-level `formats`. An unknown name is caught fail-fast at apply (like a ref to a missing entity), not by this schema.",
+          "anyOf": [
+            {
+              "enum": [
+                "email",
+                "uri",
+                "phone"
+              ]
+            },
+            {
+              "$ref": "#/$defs/identifier"
+            }
+          ]
         },
         "validation": {
           "$ref": "#/$defs/cel",

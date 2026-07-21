@@ -17,6 +17,15 @@
     ]
   },
   {
+    file: format-without-pattern.json,
+    failures: [
+      {
+        Pointer: #/formats/slug,
+        Message: Validation properties - the required property 'pattern' was not present.
+      }
+    ]
+  },
+  {
     file: reserved-users-entity.json,
     failures: [
       {

@@ -8,16 +8,15 @@
     "providers": ["local", "google"],
     "roles": ["sales", "manager", "finance"]
   },
-  "admin": {
-    "access": {
-      "admin": "@user.role == 'manager' && @user.email.endsWith('@firma.sk')",
-      "developer": "@user.role == 'manager'",
-      "viewer": "@user.role in ['sales', 'manager', 'finance']"
-    },
-    "branding": {
-      "title": "Firma CRM",
-      "logoUrl": "/assets/logo.svg"
-    }
+  "description": "Customer relationship management: companies, contacts, deals, and invoicing.",
+  "branding": {
+    "title": "Firma CRM",
+    "logoUrl": "/assets/logo.svg"
+  },
+  "access": {
+    "admin": "@user.role == 'manager' && @user.email.endsWith('@firma.sk')",
+    "developer": "@user.role == 'manager'",
+    "viewer": "@user.role in ['sales', 'manager', 'finance']"
   },
   "tenancy": {
     "enabled": true
@@ -37,6 +36,12 @@
     "maxRecordsPerEntity": 500000,
     "maxEntitiesPerTenant": 25,
     "defaultTenancy": "scoped"
+  },
+  "formats": {
+    "sk-ico": {
+      "pattern": "^[0-9]{8}$",
+      "description": "Slovak company registration number (IČO): 8 digits."
+    }
   },
   "templates": {
     "deal-won": {
@@ -70,7 +75,7 @@
       "softDelete": true,
       "fields": {
         "name": { "type": "string", "required": true },
-        "ico": { "type": "string", "unique": true, "maxLength": 12 },
+        "ico": { "type": "string", "unique": true, "maxLength": 8, "format": "sk-ico" },
         "country_id": { "type": "ref", "entity": "countries" },
         "owner_id": { "type": "ref", "entity": "users", "default": { "$cel": "@user.id" } },
         "open_deals": {

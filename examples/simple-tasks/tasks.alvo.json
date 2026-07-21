@@ -2,6 +2,7 @@
   "$schema": "https://alvo.dev/schema/v1/project.json",
   "apiVersion": "alvo.dev/v1",
   "name": "simple-tasks",
+  "description": "A personal task list: projects and the tasks inside them.",
   "auth": {
     "providers": ["local"]
   },
