@@ -18,7 +18,7 @@
     },
     "apiVersion": {
       "const": "alvo.dev/v1",
-      "description": "Descriptor format version (Kubernetes-style). Self-describing so a loader can dispatch the right parser before fetching the schema. Within v1 the format evolves additively only; a breaking change becomes alvo.dev/v2 at a new URL."
+      "description": "Descriptor format version. Self-describing so a loader can dispatch the right parser before fetching the schema. Within v1 the format evolves additively only; a breaking change becomes alvo.dev/v2 at a new URL."
     },
     "name": {
       "type": "string",
@@ -55,7 +55,7 @@
         "namePrefix": {
           "type": "string",
           "pattern": "^[a-z][a-z0-9_]{0,15}_$",
-          "description": "Reserved name prefix for runtime-created entities, so they can never collide with descriptor-defined entity names (the Dataverse publisher-prefix / Salesforce __c collision guard)."
+          "description": "Reserved name prefix for runtime-created entities, so they can never collide with descriptor-defined entity names."
         },
         "defaultRules": {
           "$ref": "#/$defs/rules",
@@ -456,7 +456,7 @@
         },
         "renamedFrom": {
           "$ref": "#/$defs/identifier",
-          "description": "Previous name of this entity (Terraform `moved` semantics): declares a rename so apply preserves data instead of drop+add. Safe to leave permanently; ignored once the old name no longer exists."
+          "description": "Previous name of this entity: declares a rename so apply preserves data instead of drop+add. Safe to leave permanently; ignored once the old name no longer exists."
         },
         "storage": {
           "enum": [
@@ -574,7 +574,7 @@
         },
         "renamedFrom": {
           "$ref": "#/$defs/identifier",
-          "description": "Previous name of this field (Terraform `moved` semantics): declares a rename so apply preserves data instead of drop+add."
+          "description": "Previous name of this field: declares a rename so apply preserves data instead of drop+add."
         },
         "required": {
           "type": "boolean",
