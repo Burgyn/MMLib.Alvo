@@ -1,5 +1,6 @@
 ﻿using System.Buffers;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 
 namespace MMLib.Alvo.Schema.Tests;
@@ -13,7 +14,12 @@ internal static class Canonicalizer
     {
         using JsonDocument document = JsonDocument.Parse(json);
         var buffer = new ArrayBufferWriter<byte>();
-        using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { Indented = true }))
+        var options = new JsonWriterOptions
+        {
+            Indented = true,
+            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        };
+        using (var writer = new Utf8JsonWriter(buffer, options))
         {
             Write(document.RootElement, writer);
         }
