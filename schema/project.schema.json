@@ -149,14 +149,17 @@
         "branding": {
           "type": "object",
           "additionalProperties": false,
+          "description": "Dashboard branding.",
           "properties": {
             "title": {
               "type": "string",
-              "maxLength": 60
+              "maxLength": 60,
+              "description": "Dashboard title shown in the admin UI."
             },
             "logoUrl": {
               "type": "string",
-              "format": "uri-reference"
+              "format": "uri-reference",
+              "description": "URL or path to the dashboard logo."
             }
           }
         }
@@ -203,6 +206,7 @@
       "properties": {
         "endpoints": {
           "type": "object",
+          "description": "Managed webhook endpoints, keyed by endpoint name.",
           "propertyNames": {
             "pattern": "^[a-z][a-z0-9-]{0,62}$"
           },
@@ -224,7 +228,8 @@
                 "description": "Secret name in ISecretStore (never the secret value itself)."
               },
               "description": {
-                "type": "string"
+                "type": "string",
+                "description": "Human-readable description of the endpoint."
               }
             }
           }
@@ -262,13 +267,15 @@
                   "http": {
                     "type": "object",
                     "additionalProperties": false,
+                    "description": "Expose the function at an HTTP route (also serves as an inbound receiver).",
                     "required": [
                       "route"
                     ],
                     "properties": {
                       "route": {
                         "type": "string",
-                        "pattern": "^/"
+                        "pattern": "^/",
+                        "description": "Route path, starting with '/'."
                       },
                       "method": {
                         "enum": [
@@ -277,7 +284,8 @@
                           "PUT",
                           "PATCH",
                           "DELETE"
-                        ]
+                        ],
+                        "description": "HTTP method (defaults to POST when omitted)."
                       }
                     }
                   }
@@ -443,7 +451,8 @@
       ],
       "properties": {
         "description": {
-          "type": "string"
+          "type": "string",
+          "description": "Human-readable description of the entity (surfaced to agents and in the admin UI)."
         },
         "renamedFrom": {
           "$ref": "#/$defs/identifier",
@@ -533,11 +542,13 @@
                 "minItems": 1,
                 "items": {
                   "$ref": "#/$defs/identifier"
-                }
+                },
+                "description": "Fields covered by the index, in order."
               },
               "unique": {
                 "type": "boolean",
-                "default": false
+                "default": false,
+                "description": "Whether the index enforces uniqueness across the covered fields."
               }
             }
           }
@@ -558,7 +569,8 @@
           "$ref": "#/$defs/fieldType"
         },
         "description": {
-          "type": "string"
+          "type": "string",
+          "description": "Human-readable description of the field (surfaced to agents and in the admin UI)."
         },
         "renamedFrom": {
           "$ref": "#/$defs/identifier",
@@ -566,11 +578,13 @@
         },
         "required": {
           "type": "boolean",
-          "default": false
+          "default": false,
+          "description": "Whether the field must be present (NOT NULL)."
         },
         "unique": {
           "type": "boolean",
-          "default": false
+          "default": false,
+          "description": "Whether values must be unique across the entity."
         },
         "nullable": {
           "type": "boolean",
@@ -667,7 +681,8 @@
                 "avg",
                 "min",
                 "max"
-              ]
+              ],
+              "description": "Aggregate operation over the child records."
             },
             "field": {
               "$ref": "#/$defs/identifier",
@@ -922,13 +937,16 @@
       ],
       "properties": {
         "description": {
-          "type": "string"
+          "type": "string",
+          "description": "Human-readable description of the automation rule."
         },
         "enabled": {
           "type": "boolean",
-          "default": true
+          "default": true,
+          "description": "Whether the rule is active."
         },
         "trigger": {
+          "description": "What fires the rule: an event pattern or a cron schedule.",
           "oneOf": [
             {
               "type": "object",
@@ -972,7 +990,8 @@
           "minItems": 1,
           "items": {
             "$ref": "#/$defs/action"
-          }
+          },
+          "description": "Actions to run when the rule fires (in order)."
         }
       },
       "patternProperties": {
@@ -1117,7 +1136,8 @@
             },
             "url": {
               "type": "string",
-              "format": "uri"
+              "format": "uri",
+              "description": "Absolute URL to call."
             },
             "method": {
               "enum": [
@@ -1127,10 +1147,12 @@
                 "PATCH",
                 "DELETE"
               ],
-              "default": "POST"
+              "default": "POST",
+              "description": "HTTP method."
             },
             "headersSecretRef": {
-              "type": "string"
+              "type": "string",
+              "description": "Secret name in ISecretStore holding request headers (e.g. auth token); never the value itself."
             },
             "payload": {
               "$ref": "#/$defs/jsonata"

@@ -16,4 +16,8 @@
     <Using Include="VerifyXunit" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="meta-schema/**/*.json" CopyToOutputDirectory="PreserveNewest" LinkBase="meta-schema" />
+  </ItemGroup>
+
 </Project>
