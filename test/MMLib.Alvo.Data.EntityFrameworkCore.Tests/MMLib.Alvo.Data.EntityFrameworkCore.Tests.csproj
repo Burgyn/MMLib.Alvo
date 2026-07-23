@@ -4,4 +4,11 @@
     <ProjectReference Include="../../src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- SQLite conventions only, to drive DescriptorModelBuilder in tests. The
+         production Data.EntityFrameworkCore project stays provider-agnostic;
+         this reference is test-only. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+  </ItemGroup>
+
 </Project>
