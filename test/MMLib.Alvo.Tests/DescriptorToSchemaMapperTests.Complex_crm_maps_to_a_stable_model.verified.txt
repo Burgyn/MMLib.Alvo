@@ -1,0 +1,563 @@
+﻿{
+  Entities: [
+    {
+      Name: countries,
+      Tenancy: Global,
+      SoftDelete: false,
+      Audit: false,
+      Fields: [
+        {
+          Name: id,
+          Type: Uuid,
+          Required: true,
+          Unique: false,
+          Nullable: false,
+          Indexed: false
+        },
+        {
+          Name: code,
+          Required: true,
+          Unique: true,
+          Nullable: false,
+          MaxLength: 2,
+          Indexed: false
+        },
+        {
+          Name: name,
+          Required: true,
+          Unique: false,
+          Nullable: false,
+          Indexed: false
+        },
+        {
+          Name: vat_rate,
+          Type: Decimal,
+          Required: true,
+          Unique: false,
+          Nullable: false,
+          Precision: 5,
+          Scale: 2,
+          Indexed: false
+        }
+      ]
+    },
+    {
+      Name: companies,
+      Tenancy: Scoped,
+      SoftDelete: true,
+      Audit: true,
+      Fields: [
+        {
+          Name: id,
+          Type: Uuid,
+          Required: true,
+          Unique: false,
+          Nullable: false,
+          Indexed: false
+        },
+        {
+          Name: name,
+          Required: true,
+          Unique: false,
+          Nullable: false,
+          Indexed: false
+        },
+        {
+          Name: ico,
+          Required: false,
+          Unique: true,
+          Nullable: true,
+          MaxLength: 8,
+          Indexed: false
+        },
+        {
+          Name: country_id,
+          Type: Ref,
+          Required: false,
+          Unique: false,
+          Nullable: true,
+          Reference: {
+            TargetEntity: countries
+          },
+          Indexed: false
+        },
+        {
+          Name: owner_id,
+          Type: Ref,
+          Required: false,
+          Unique: false,
+          Nullable: true,
+          Reference: {
+            TargetEntity: users
+          },
+          Indexed: false
+        },
+        {
+          Name: open_deals,
+          Type: Integer,
+          Required: false,
+          Unique: false,
+          Nullable: true,
+          Indexed: false
+        },
+        {
+          Name: tenant_id,
+          Type: Uuid,
+          Required: true,
+          Unique: false,
+          Nullable: false,
+          Indexed: true
+        },
+        {
+          Name: created_at,
+          Type: DateTime,
+          Required: true,
+          Unique: false,
+          Nullable: false,
+          Indexed: false
+        },
+        {
+          Name: created_by,
+          Type: Uuid,
+          Required: false,
+          Unique: false,
+          Nullable: false,
+          Indexed: false
+        },
+        {
+          Name: updated_at,
+          Type: DateTime,
+          Required: true,
+          Unique: false,
+          Nullable: false,
+          Indexed: false
+        },
+        {
+          Name: updated_by,
+          Type: Uuid,
+          Required: false,
+          Unique: false,
+          Nullable: false,
+          Indexed: false
+        },
+        {
+          Name: deleted_at,
+          Type: DateTime,
+          Required: false,
+          Unique: false,
+          Nullable: false,
+          Indexed: false
+        }
+      ]
+    },
+    {
+      Name: contacts,
+      Tenancy: Scoped,
+      SoftDelete: false,
+      Audit: true,
+      Fields: [
+        {
+          Name: id,
+          Type: Uuid,
+          Required: true,
+          Unique: false,
+          Nullable: false,
+          Indexed: false
+        },
+        {
+          Name: company_id,
+          Type: Ref,
+          Required: true,
+          Unique: false,
+          Nullable: false,
+          Reference: {
+            TargetEntity: companies,
+            OnDelete: Cascade
+          },
+          Indexed: false
+        },
+        {
+          Name: name,
+          Required: true,
+          Unique: false,
+          Nullable: false,
+          Indexed: false
+        },
+        {
+          Name: email,
+          Required: false,
+          Unique: false,
+          Nullable: true,
+          Indexed: false
+        },
+        {
+          Name: phone,
+          Required: false,
+          Unique: false,
+          Nullable: true,
+          Indexed: false
+        },
+        {
+          Name: tenant_id,
+          Type: Uuid,
+          Required: true,
+          Unique: false,
+          Nullable: false,
+          Indexed: true
+        },
+        {
+          Name: created_at,
+          Type: DateTime,
+          Required: true,
+          Unique: false,
+          Nullable: false,
+          Indexed: false
+        },
+        {
+          Name: created_by,
+          Type: Uuid,
+          Required: false,
+          Unique: false,
+          Nullable: false,
+          Indexed: false
+        },
+        {
+          Name: updated_at,
+          Type: DateTime,
+          Required: true,
+          Unique: false,
+          Nullable: false,
+          Indexed: false
+        },
+        {
+          Name: updated_by,
+          Type: Uuid,
+          Required: false,
+          Unique: false,
+          Nullable: false,
+          Indexed: false
+        }
+      ]
+    },
+    {
+      Name: deals,
+      Tenancy: Scoped,
+      SoftDelete: true,
+      Audit: true,
+      Fields: [
+        {
+          Name: id,
+          Type: Uuid,
+          Required: true,
+          Unique: false,
+          Nullable: false,
+          Indexed: false
+        },
+        {
+          Name: company_id,
+          Type: Ref,
+          Required: true,
+          Unique: false,
+          Nullable: false,
+          Reference: {
+            TargetEntity: companies
+          },
+          Indexed: false
+        },
+        {
+          Name: title,
+          Required: true,
+          Unique: false,
+          Nullable: false,
+          Indexed: false
+        },
+        {
+          Name: amount,
+          Type: Decimal,
+          Required: false,
+          Unique: false,
+          Nullable: true,
+          Precision: 12,
+          Scale: 2,
+          Indexed: false
+        },
+        {
+          Name: stage,
+          Type: Enum,
+          Required: false,
+          Unique: false,
+          Nullable: true,
+          EnumValues: [
+            lead,
+            offer,
+            won,
+            lost
+          ],
+          Indexed: false
+        },
+        {
+          Name: commission_note,
+          Required: false,
+          Unique: false,
+          Nullable: true,
+          Indexed: false
+        },
+        {
+          Name: owner_id,
+          Type: Ref,
+          Required: false,
+          Unique: false,
+          Nullable: true,
+          Reference: {
+            TargetEntity: users
+          },
+          Indexed: false
+        },
+        {
+          Name: closed_at,
+          Type: DateTime,
+          Required: false,
+          Unique: false,
+          Nullable: true,
+          Indexed: false
+        },
+        {
+          Name: tenant_id,
+          Type: Uuid,
+          Required: true,
+          Unique: false,
+          Nullable: false,
+          Indexed: true
+        },
+        {
+          Name: created_at,
+          Type: DateTime,
+          Required: true,
+          Unique: false,
+          Nullable: false,
+          Indexed: false
+        },
+        {
+          Name: created_by,
+          Type: Uuid,
+          Required: false,
+          Unique: false,
+          Nullable: false,
+          Indexed: false
+        },
+        {
+          Name: updated_at,
+          Type: DateTime,
+          Required: true,
+          Unique: false,
+          Nullable: false,
+          Indexed: false
+        },
+        {
+          Name: updated_by,
+          Type: Uuid,
+          Required: false,
+          Unique: false,
+          Nullable: false,
+          Indexed: false
+        },
+        {
+          Name: deleted_at,
+          Type: DateTime,
+          Required: false,
+          Unique: false,
+          Nullable: false,
+          Indexed: false
+        }
+      ]
+    },
+    {
+      Name: invoices,
+      Tenancy: Scoped,
+      SoftDelete: false,
+      Audit: true,
+      Fields: [
+        {
+          Name: id,
+          Type: Uuid,
+          Required: true,
+          Unique: false,
+          Nullable: false,
+          Indexed: false
+        },
+        {
+          Name: deal_id,
+          Type: Ref,
+          Required: true,
+          Unique: false,
+          Nullable: false,
+          Reference: {
+            TargetEntity: deals
+          },
+          Indexed: false
+        },
+        {
+          Name: number,
+          Required: true,
+          Unique: true,
+          Nullable: false,
+          Indexed: false
+        },
+        {
+          Name: issued_on,
+          Type: Date,
+          Required: true,
+          Unique: false,
+          Nullable: false,
+          Indexed: false
+        },
+        {
+          Name: net_total,
+          Type: Decimal,
+          Required: false,
+          Unique: false,
+          Nullable: true,
+          Precision: 12,
+          Scale: 2,
+          Indexed: false
+        },
+        {
+          Name: vat_total,
+          Type: Decimal,
+          Required: false,
+          Unique: false,
+          Nullable: true,
+          Precision: 12,
+          Scale: 2,
+          Indexed: false
+        },
+        {
+          Name: gross_total,
+          Type: Decimal,
+          Required: false,
+          Unique: false,
+          Nullable: true,
+          Precision: 12,
+          Scale: 2,
+          Indexed: false,
+          ComputedExpression: net_total + vat_total
+        },
+        {
+          Name: tenant_id,
+          Type: Uuid,
+          Required: true,
+          Unique: false,
+          Nullable: false,
+          Indexed: true
+        },
+        {
+          Name: created_at,
+          Type: DateTime,
+          Required: true,
+          Unique: false,
+          Nullable: false,
+          Indexed: false
+        },
+        {
+          Name: created_by,
+          Type: Uuid,
+          Required: false,
+          Unique: false,
+          Nullable: false,
+          Indexed: false
+        },
+        {
+          Name: updated_at,
+          Type: DateTime,
+          Required: true,
+          Unique: false,
+          Nullable: false,
+          Indexed: false
+        },
+        {
+          Name: updated_by,
+          Type: Uuid,
+          Required: false,
+          Unique: false,
+          Nullable: false,
+          Indexed: false
+        }
+      ]
+    },
+    {
+      Name: invoice_items,
+      RenamedFrom: line_items,
+      Tenancy: Scoped,
+      SoftDelete: false,
+      Audit: false,
+      Fields: [
+        {
+          Name: id,
+          Type: Uuid,
+          Required: true,
+          Unique: false,
+          Nullable: false,
+          Indexed: false
+        },
+        {
+          Name: invoice_id,
+          Type: Ref,
+          Required: true,
+          Unique: false,
+          Nullable: false,
+          Reference: {
+            TargetEntity: invoices,
+            OnDelete: Cascade
+          },
+          Indexed: false
+        },
+        {
+          Name: label,
+          Required: true,
+          Unique: false,
+          Nullable: false,
+          Indexed: false
+        },
+        {
+          Name: unit_price,
+          Type: Decimal,
+          Required: true,
+          Unique: false,
+          Nullable: false,
+          Precision: 12,
+          Scale: 2,
+          Indexed: false
+        },
+        {
+          Name: amount,
+          Type: Decimal,
+          Required: true,
+          Unique: false,
+          Nullable: false,
+          Precision: 10,
+          Scale: 2,
+          Indexed: false
+        },
+        {
+          Name: line_total,
+          Type: Decimal,
+          Required: false,
+          Unique: false,
+          Nullable: true,
+          Precision: 12,
+          Scale: 2,
+          Indexed: false,
+          ComputedExpression: unit_price * amount
+        },
+        {
+          Name: tenant_id,
+          Type: Uuid,
+          Required: true,
+          Unique: false,
+          Nullable: false,
+          Indexed: true
+        }
+      ]
+    }
+  ]
+}
