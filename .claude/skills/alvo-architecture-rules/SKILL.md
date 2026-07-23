@@ -117,7 +117,14 @@ layer-by-type; resist it — a change arrives as one feature, so a feature is
 one folder. The full rule (slice shape, `Setup.cs` wiring, no in-process bus,
 slice isolation, orchestrate-don't-fork-the-base, the MUST/SHOULD list) lives
 in `docs/architecture/vertical-slice.md` — load it before laying out new
-request-handling code.
+request-handling code. That doc also fixes the scope: VSA (the REPR pattern)
+governs **request-triggered** operations; framework **mechanisms** (engines,
+ports, registries, mappers) are organized by capability/subsystem, not sliced
+per-operation. How a mechanism *attaches* to the framework — the `AddAlvo()` /
+`IAlvoBuilder` seam, options, provider registration, the pitfalls (e.g. never
+`BuildServiceProvider()` during registration) — lives in
+`docs/architecture/extensibility.md`; load it before adding a package that
+registers services or exposes a `Use*`/`Add*`/`Enable*` extension.
 
 Do not confuse it with the package boundary (spec §1.1,
 `docs/architecture/package-boundary.md`), which is a different axis entirely:
