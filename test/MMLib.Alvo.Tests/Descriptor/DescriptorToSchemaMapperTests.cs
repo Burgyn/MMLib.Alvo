@@ -28,6 +28,26 @@ public class DescriptorToSchemaMapperTests
     }
 
     [Fact]
+    public void Soft_delete_column_is_nullable_and_audit_timestamps_are_required()
+    {
+        // simple-tasks' "projects" entity declares both audit:true and softDelete:true.
+        var m = Map("simple-tasks/tasks.alvo.json");
+        var projects = m.Entities.Single(e => e.Name == "projects");
+
+        var createdAt = projects.Fields.Single(f => f.Name == "created_at");
+        createdAt.Required.ShouldBeTrue();
+        createdAt.Nullable.ShouldBeFalse();
+
+        var createdBy = projects.Fields.Single(f => f.Name == "created_by");
+        createdBy.Required.ShouldBeFalse();
+        createdBy.Nullable.ShouldBeTrue();
+
+        var deletedAt = projects.Fields.Single(f => f.Name == "deleted_at");
+        deletedAt.Required.ShouldBeFalse();
+        deletedAt.Nullable.ShouldBeTrue();
+    }
+
+    [Fact]
     public async Task Complex_crm_maps_to_a_stable_model()
     {
         var m = Map("complex-crm/crm.alvo.json");

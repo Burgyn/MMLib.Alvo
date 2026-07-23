@@ -40,14 +40,14 @@ internal static class DescriptorToSchemaMapper
         if (e.Audit)
         {
             fields.Add(new FieldSchema { Name = "created_at", Type = FieldType.DateTime, Required = true });
-            fields.Add(new FieldSchema { Name = "created_by", Type = FieldType.Uuid });
+            fields.Add(new FieldSchema { Name = "created_by", Type = FieldType.Uuid, Nullable = true });
             fields.Add(new FieldSchema { Name = "updated_at", Type = FieldType.DateTime, Required = true });
-            fields.Add(new FieldSchema { Name = "updated_by", Type = FieldType.Uuid });
+            fields.Add(new FieldSchema { Name = "updated_by", Type = FieldType.Uuid, Nullable = true });
         }
 
         if (e.SoftDelete)
         {
-            fields.Add(new FieldSchema { Name = "deleted_at", Type = FieldType.DateTime });
+            fields.Add(new FieldSchema { Name = "deleted_at", Type = FieldType.DateTime, Nullable = true });
         }
 
         var indexes = (e.Indexes ?? [])
