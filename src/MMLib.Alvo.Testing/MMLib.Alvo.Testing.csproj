@@ -11,4 +11,20 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
+  <!--
+    The schema-migrator contract-test base (SchemaMigratorContractTests) is a
+    public abstract xUnit test class inherited by every provider's own test
+    project (Tasks 11-12), so this library needs the test framework and
+    assertion library directly — it is not itself covered by
+    test/Directory.Build.props, which only applies to projects under test/.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="../MMLib.Alvo.Abstractions/MMLib.Alvo.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3.extensibility.core" />
+    <PackageReference Include="Shouldly" />
+  </ItemGroup>
+
 </Project>

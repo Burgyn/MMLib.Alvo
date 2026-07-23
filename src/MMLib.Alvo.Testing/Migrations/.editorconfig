@@ -1,0 +1,7 @@
+# The behavioral contract-test base under this folder (SchemaMigratorContractTests)
+# is xUnit test code even though it lives in src/, not test/ — it is inherited by
+# provider test projects (Tasks 11-12), so its [Fact] methods follow the same
+# descriptive snake_case convention as test/.editorconfig, for the same reason.
+
+[*.cs]
+dotnet_diagnostic.CA1707.severity = none
