@@ -21,6 +21,7 @@
     <PackageVersion Include="PublicApiGenerator" Version="11.5.4" />
     <PackageVersion Include="Verify.XunitV3" Version="31.25.0" />
     <PackageVersion Include="Microsoft.Extensions.FileSystemGlobbing" Version="10.0.10" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.7" />
     <PackageVersion Include="Microsoft.SourceLink.GitHub" Version="10.0.301" />
     <PackageVersion Include="MinVer" Version="7.0.0" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.0" />

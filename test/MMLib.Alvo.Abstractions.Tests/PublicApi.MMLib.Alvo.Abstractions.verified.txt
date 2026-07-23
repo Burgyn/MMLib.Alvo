@@ -1,5 +1,86 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/Burgyn/MMLib.Alvo")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace MMLib.Alvo
+{
+    public enum AlvoMode
+    {
+        Standalone = 0,
+        Embedded = 1,
+    }
+    public sealed class AlvoOptions
+    {
+        public AlvoOptions() { }
+        public MMLib.Alvo.AlvoMode Mode { get; set; }
+        [System.ComponentModel.DataAnnotations.RegularExpression("^[a-z][a-z0-9_]{0,15}$", ErrorMessage="SchemaPrefix must be lower snake_case, 1–16 chars.")]
+        public string SchemaPrefix { get; set; }
+    }
+    public interface IAlvoBuilder
+    {
+        Microsoft.Extensions.DependencyInjection.IServiceCollection Services { get; }
+    }
+}
+namespace MMLib.Alvo.Migrations
+{
+    public interface IDescriptorSource
+    {
+        System.Threading.Tasks.Task<string> LoadAsync(System.Threading.CancellationToken ct = default);
+    }
+    public interface ISchemaMigrator
+    {
+        System.Threading.Tasks.Task<MMLib.Alvo.Migrations.MigrationResult> ApplyAsync(MMLib.Alvo.Migrations.MigrationPlan plan, MMLib.Alvo.Migrations.MigrationOptions options, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Migrations.MigrationPlan> PlanAsync(MMLib.Alvo.Schema.SchemaModel current, MMLib.Alvo.Schema.SchemaModel desired, MMLib.Alvo.Migrations.MigrationOptions options, System.Threading.CancellationToken ct = default);
+    }
+    public sealed class MigrationOptions : System.IEquatable<MMLib.Alvo.Migrations.MigrationOptions>
+    {
+        public MigrationOptions() { }
+        public bool AllowDestructive { get; init; }
+        public bool DryRun { get; init; }
+    }
+    public sealed class MigrationPlan : System.IEquatable<MMLib.Alvo.Migrations.MigrationPlan>
+    {
+        public MigrationPlan() { }
+        public bool HasDestructiveChanges { get; }
+        public bool IsEmpty { get; }
+        public required System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Migrations.MigrationStep> Steps { get; init; }
+    }
+    public sealed class MigrationResult : System.IEquatable<MMLib.Alvo.Migrations.MigrationResult>
+    {
+        public MigrationResult(bool Applied, MMLib.Alvo.Migrations.MigrationPlan Plan, bool WasDryRun) { }
+        public bool Applied { get; init; }
+        public MMLib.Alvo.Migrations.MigrationPlan Plan { get; init; }
+        public bool WasDryRun { get; init; }
+    }
+    public sealed class MigrationStep : System.IEquatable<MMLib.Alvo.Migrations.MigrationStep>
+    {
+        public MigrationStep(MMLib.Alvo.Migrations.SchemaChange Change, string Sql, bool IsDestructive, string? Reason) { }
+        public MMLib.Alvo.Migrations.SchemaChange Change { get; init; }
+        public bool IsDestructive { get; init; }
+        public string? Reason { get; init; }
+        public string Sql { get; init; }
+    }
+    public sealed class SchemaChange : System.IEquatable<MMLib.Alvo.Migrations.SchemaChange>
+    {
+        public SchemaChange() { }
+        public string? Detail { get; init; }
+        public required string Entity { get; init; }
+        public string? Field { get; init; }
+        public string? FromName { get; init; }
+        public bool IsDestructive { get; init; }
+        public required MMLib.Alvo.Migrations.SchemaChangeKind Kind { get; init; }
+    }
+    public enum SchemaChangeKind
+    {
+        CreateEntity = 0,
+        DropEntity = 1,
+        RenameEntity = 2,
+        AddField = 3,
+        DropField = 4,
+        RenameField = 5,
+        AlterField = 6,
+        AddIndex = 7,
+        DropIndex = 8,
+    }
+}
 namespace MMLib.Alvo.Schema
 {
     public sealed class EntitySchema : System.IEquatable<MMLib.Alvo.Schema.EntitySchema>
@@ -49,6 +130,14 @@ namespace MMLib.Alvo.Schema
         Json = 8,
         Enum = 9,
         Ref = 10,
+    }
+    public interface ISchemaIntrospector
+    {
+        System.Threading.Tasks.Task<MMLib.Alvo.Schema.SchemaModel> IntrospectAsync(System.Threading.CancellationToken ct = default);
+    }
+    public interface ISchemaRegistry
+    {
+        MMLib.Alvo.Schema.SchemaModel GetSchema();
     }
     public sealed class IndexSchema : System.IEquatable<MMLib.Alvo.Schema.IndexSchema>
     {
