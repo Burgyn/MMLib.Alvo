@@ -40,11 +40,14 @@ internal sealed class SchemaMigrationRunner
     /// <param name="options">Migration options.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>
-    /// The migration result. When the plan contains destructive changes and
-    /// <see cref="MigrationOptions.AllowDestructive"/> is <see langword="false"/>, or when
-    /// <see cref="MigrationOptions.DryRun"/> is <see langword="true"/>, the plan is returned
-    /// un-applied (<c>Applied == false</c>) — inspect <c>Plan.Steps</c>, or pass the plan to
-    /// <see cref="DestructiveChangeGuard.Describe"/>, for a readable summary of what was refused.
+    /// The migration result. An empty plan (the applied/introspected schema already matches the
+    /// descriptor) is a true no-op: it returns un-applied without touching
+    /// <see cref="ISchemaMigrator.ApplyAsync"/> or <see cref="IAppliedSchemaStore.SaveAsync"/>, so
+    /// the applied snapshot and its revision are left untouched. When the plan contains destructive
+    /// changes and <see cref="MigrationOptions.AllowDestructive"/> is <see langword="false"/>, or
+    /// when <see cref="MigrationOptions.DryRun"/> is <see langword="true"/>, the plan is likewise
+    /// returned un-applied (<c>Applied == false</c>) — inspect <c>Plan.Steps</c>, or pass the plan
+    /// to <see cref="DestructiveChangeGuard.Describe"/>, for a readable summary of what was refused.
     /// </returns>
     public async Task<MigrationResult> RunAsync(MigrationOptions options, CancellationToken ct = default)
     {
@@ -59,6 +62,11 @@ internal sealed class SchemaMigrationRunner
             ?? await _introspector.IntrospectAsync(ct).ConfigureAwait(false);
 
         var plan = await _migrator.PlanAsync(current, desired, options, ct).ConfigureAwait(false);
+
+        if (plan.IsEmpty)
+        {
+            return new MigrationResult(Applied: false, plan, WasDryRun: options.DryRun);
+        }
 
         if (plan.HasDestructiveChanges && !options.AllowDestructive)
         {

@@ -57,7 +57,7 @@ public sealed class SchemaMigrationRunnerTests
     }
 
     [Fact]
-    public async Task Second_run_with_unchanged_descriptor_yields_an_empty_plan_and_no_spurious_changes()
+    public async Task Second_run_with_unchanged_descriptor_is_a_true_no_op()
     {
         var previouslyAppliedSchema = MapFleetDescriptor();
         _store.GetCurrentAsync("fleet", Arg.Any<CancellationToken>())
@@ -65,11 +65,9 @@ public sealed class SchemaMigrationRunnerTests
 
         var result = await _runner.RunAsync(new MigrationOptions(), TestContext.Current.CancellationToken);
 
+        result.Applied.ShouldBeFalse();
         result.Plan.IsEmpty.ShouldBeTrue();
-
-        var saved = SavedSchemas().ShouldHaveSingleItem();
-        saved.Revision.ShouldBe(2);
-        VehicleFieldNames(saved.Schema).ShouldBe(_expectedFieldNames);
+        SavedSchemas().ShouldBeEmpty();
     }
 
     [Fact]
