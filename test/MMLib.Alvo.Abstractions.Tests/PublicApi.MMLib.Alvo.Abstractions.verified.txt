@@ -1,2 +1,81 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/Burgyn/MMLib.Alvo")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace MMLib.Alvo.Schema
+{
+    public sealed class EntitySchema : System.IEquatable<MMLib.Alvo.Schema.EntitySchema>
+    {
+        public EntitySchema() { }
+        public bool Audit { get; init; }
+        public required System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Schema.FieldSchema> Fields { get; init; }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Schema.IndexSchema> Indexes { get; init; }
+        public required string Name { get; init; }
+        public string? RenamedFrom { get; init; }
+        public bool SoftDelete { get; init; }
+        public MMLib.Alvo.Schema.EntityStorage Storage { get; init; }
+        public MMLib.Alvo.Schema.TenancyMode? Tenancy { get; init; }
+    }
+    public enum EntityStorage
+    {
+        Physical = 0,
+        Dynamic = 1,
+    }
+    public sealed class FieldSchema : System.IEquatable<MMLib.Alvo.Schema.FieldSchema>
+    {
+        public FieldSchema() { }
+        public string? ComputedExpression { get; init; }
+        public System.Collections.Generic.IReadOnlyList<string>? EnumValues { get; init; }
+        public bool Indexed { get; init; }
+        public int? MaxLength { get; init; }
+        public required string Name { get; init; }
+        public bool Nullable { get; init; }
+        public int? Precision { get; init; }
+        public MMLib.Alvo.Schema.RefSchema? Reference { get; init; }
+        public string? RenamedFrom { get; init; }
+        public bool Required { get; init; }
+        public int? Scale { get; init; }
+        public required MMLib.Alvo.Schema.FieldType Type { get; init; }
+        public bool Unique { get; init; }
+    }
+    public enum FieldType
+    {
+        String = 0,
+        Text = 1,
+        Integer = 2,
+        Decimal = 3,
+        Boolean = 4,
+        Date = 5,
+        DateTime = 6,
+        Uuid = 7,
+        Json = 8,
+        Enum = 9,
+        Ref = 10,
+    }
+    public sealed class IndexSchema : System.IEquatable<MMLib.Alvo.Schema.IndexSchema>
+    {
+        public IndexSchema(System.Collections.Generic.IReadOnlyList<string> Fields, bool Unique) { }
+        public System.Collections.Generic.IReadOnlyList<string> Fields { get; init; }
+        public bool Unique { get; init; }
+    }
+    public enum OnDelete
+    {
+        Restrict = 0,
+        Cascade = 1,
+        SetNull = 2,
+    }
+    public sealed class RefSchema : System.IEquatable<MMLib.Alvo.Schema.RefSchema>
+    {
+        public RefSchema(string TargetEntity, MMLib.Alvo.Schema.OnDelete OnDelete) { }
+        public MMLib.Alvo.Schema.OnDelete OnDelete { get; init; }
+        public string TargetEntity { get; init; }
+    }
+    public sealed class SchemaModel : System.IEquatable<MMLib.Alvo.Schema.SchemaModel>
+    {
+        public SchemaModel(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Schema.EntitySchema> Entities) { }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Schema.EntitySchema> Entities { get; init; }
+    }
+    public enum TenancyMode
+    {
+        Scoped = 0,
+        Global = 1,
+    }
+}
