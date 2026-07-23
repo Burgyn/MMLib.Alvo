@@ -21,6 +21,19 @@ namespace MMLib.Alvo
 }
 namespace MMLib.Alvo.Migrations
 {
+    public sealed class AppliedSchema : System.IEquatable<MMLib.Alvo.Migrations.AppliedSchema>
+    {
+        public AppliedSchema(MMLib.Alvo.Schema.SchemaModel Schema, string DescriptorJson, int Revision, System.DateTimeOffset UpdatedAt) { }
+        public string DescriptorJson { get; init; }
+        public int Revision { get; init; }
+        public MMLib.Alvo.Schema.SchemaModel Schema { get; init; }
+        public System.DateTimeOffset UpdatedAt { get; init; }
+    }
+    public interface IAppliedSchemaStore
+    {
+        System.Threading.Tasks.Task<MMLib.Alvo.Migrations.AppliedSchema?> GetCurrentAsync(string project, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task SaveAsync(string project, MMLib.Alvo.Migrations.AppliedSchema snapshot, System.Threading.CancellationToken ct = default);
+    }
     public interface IDescriptorSource
     {
         System.Threading.Tasks.Task<string> LoadAsync(System.Threading.CancellationToken ct = default);
