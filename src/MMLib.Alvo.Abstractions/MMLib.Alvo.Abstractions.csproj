@@ -1,9 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    The interface-first root of the MMLib.Alvo.* dependency graph (spec §1.1).
-    Intentionally contains no source yet — ports/interfaces are designed in a
-    later phase (spec §1.2). It compiles to an empty assembly.
+    The interface-first root of the MMLib.Alvo.* dependency graph (spec §1.1):
+    the ports and pure model every other package is contracted against. Depends
+    on no MMLib.Alvo.* package and no provider — the one foundational exception
+    is Microsoft.Extensions.DependencyInjection.Abstractions (the DI contract
+    IAlvoBuilder.Services needs). See docs/architecture/package-boundary.md.
   -->
 
   <PropertyGroup>

@@ -171,7 +171,9 @@ v0.1, not 30+, because splitting a namespace out later is cheap and merging
 packages back is a breaking change.
 
 See `docs/architecture/package-boundary.md` for the full rule, the current
-project list, and the hard dependency rules (`Abstractions` depends on
-nothing; the core depends only on `Abstractions`; no package depends on
-another port's provider; lockstep SemVer). See spec §1.1 for the source
-rationale.
+project list, and the hard dependency rules (`Abstractions` depends on no
+`MMLib.Alvo.*` package and no provider — the one foundational exception is
+`Microsoft.Extensions.DependencyInjection.Abstractions`, the DI contract
+`IAlvoBuilder.Services` needs; the core depends only on `Abstractions`; no
+package depends on another port's provider; lockstep SemVer). See spec §1.1
+for the source rationale.

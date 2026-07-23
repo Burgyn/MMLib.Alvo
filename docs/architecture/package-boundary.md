@@ -58,7 +58,14 @@ is a breaking change.
 
 ## Hard dependency rules
 
-- `MMLib.Alvo.Abstractions` depends on nothing.
+- `MMLib.Alvo.Abstractions` depends on no other `MMLib.Alvo.*` package and no
+  provider. The **one foundational exception** is
+  `Microsoft.Extensions.DependencyInjection.Abstractions` — the DI contract the
+  whole framework builds on (needed by `IAlvoBuilder.Services`). It is the DI
+  *abstraction*, not a concrete container or provider, and taking it keeps the
+  clean `Data.* → Abstractions` graph (the alternative — moving the builder into
+  the core — would force every provider to reference the whole core). No other
+  external dependency may be added to `Abstractions`.
 - The core depends only on `Abstractions`.
 - **No package depends on another port's provider.**
 - Lockstep SemVer: everything is versioned and released together as one version.
