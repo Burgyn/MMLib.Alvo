@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- No fast unit test project yet — only the Testcontainers integration
+       project (MMLib.Alvo.Data.PostgreSql.Tests.Integration) exists so far.
+       IsPackable=false defers the "every packable src project has a matching
+       Tests project" convention and the public-API baseline until Task 12
+       wires the provider and adds MMLib.Alvo.Data.PostgreSql.Tests. -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+  </ItemGroup>
+
+</Project>

@@ -2,6 +2,14 @@
 
   <PropertyGroup>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <!-- Microsoft.EntityFrameworkCore.Sqlite 10.0.0 transitively drags in
+         SQLitePCLRaw.lib.e_sqlite3 2.1.11, which carries a known-high NuGet
+         audit advisory (GHSA-2m69-gcr7-jv3q, CVE-2025-6965, a SQLite memory
+         corruption issue fixed upstream in SQLite 3.50.2). Central transitive
+         pinning lets the explicit SQLitePCLRaw.lib.e_sqlite3 PackageVersion
+         below win over that transitive version without a direct package
+         reference in any project. -->
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
   </PropertyGroup>
 
   <ItemGroup>
@@ -15,6 +23,11 @@
     <PackageVersion Include="Microsoft.Extensions.FileSystemGlobbing" Version="10.0.10" />
     <PackageVersion Include="Microsoft.SourceLink.GitHub" Version="10.0.301" />
     <PackageVersion Include="MinVer" Version="7.0.0" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.0" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.0" />
+    <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.0" />
+    <PackageVersion Include="Testcontainers.PostgreSql" Version="4.13.0" />
+    <PackageVersion Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.12" />
   </ItemGroup>
 
   <!-- Analyzers for every project (CPM global = PrivateAssets=all, no per-csproj

@@ -6,4 +6,11 @@
     later phase (spec §1.2). It compiles to an empty assembly.
   -->
 
+  <PropertyGroup>
+    <!-- Feature-first namespaces: types live under MMLib.Alvo.*, not
+         MMLib.Alvo.Abstractions.*, even though the assembly/package keeps
+         the Abstractions name. -->
+    <RootNamespace>MMLib.Alvo</RootNamespace>
+  </PropertyGroup>
+
 </Project>
