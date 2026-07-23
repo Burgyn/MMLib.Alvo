@@ -53,6 +53,7 @@ internal static class RenamePrePass
             }
 
             var alignedFields = new List<FieldSchema>(currentEntity.Fields.Count);
+            var fieldRenames = new Dictionary<string, string>(StringComparer.Ordinal);
             foreach (var currentField in currentEntity.Fields)
             {
                 var alignedFieldName = currentField.Name;
@@ -61,7 +62,11 @@ internal static class RenamePrePass
 
                 if (desiredField is not null && !string.Equals(desiredField.Name, currentField.Name, StringComparison.Ordinal))
                 {
+                    // TODO(triage): an A→B / B→A swap-rename could collide mid-pre-pass (both
+                    // names live at once in the aligned model); the descriptor does not express
+                    // swaps today, tracked for final triage.
                     alignedFieldName = desiredField.Name;
+                    fieldRenames[currentField.Name] = desiredField.Name;
                     renames.Add(new RenameEntry(
                         new RenameColumnOperation { Table = alignedName, Name = currentField.Name, NewName = desiredField.Name },
                         new SchemaChange
@@ -76,7 +81,22 @@ internal static class RenamePrePass
                 alignedFields.Add(currentField with { Name = alignedFieldName, RenamedFrom = null });
             }
 
-            alignedEntities.Add(currentEntity with { Name = alignedName, RenamedFrom = null, Fields = alignedFields });
+            // Indexes must point at the aligned (new) column names, or DescriptorModelBuilder's
+            // HasIndex would reference a property that no longer exists and FinalizeModel() throws.
+            var alignedIndexes = currentEntity.Indexes
+                .Select(index => index with
+                {
+                    Fields = [.. index.Fields.Select(f => fieldRenames.GetValueOrDefault(f, f))],
+                })
+                .ToList();
+
+            alignedEntities.Add(currentEntity with
+            {
+                Name = alignedName,
+                RenamedFrom = null,
+                Fields = alignedFields,
+                Indexes = alignedIndexes,
+            });
         }
 
         return new Result(new SchemaModel(alignedEntities), renames);

@@ -70,6 +70,7 @@ internal static class DestructiveScan
             Entity = op.Table ?? string.Empty,
             Detail = op.Name,
         },
+        // TODO(triage): SchemaChangeKind has no RenameIndex; AddIndex is a cosmetic mislabel here.
         RenameIndexOperation op => new SchemaChange
         {
             Kind = SchemaChangeKind.AddIndex,
@@ -136,19 +137,28 @@ internal static class DestructiveScan
             return (true, "Column becomes non-nullable; existing NULL values would be rejected.");
         }
 
-        if (old.MaxLength is { } oldLength && op.MaxLength is { } newLength && newLength < oldLength)
+        // A newly-imposed bound is narrowing too: an unbounded column gaining a MaxLength /
+        // Precision / Scale can truncate or reject existing values, so old == null && new != null
+        // counts alongside the shrink-when-both-bound case.
+        if (op.MaxLength is { } newLength && (old.MaxLength is not { } oldLength || newLength < oldLength))
         {
-            return (true, $"Max length shrinks from {oldLength} to {newLength}; longer values would be truncated.");
+            return (true, old.MaxLength is { } ol
+                ? $"Max length shrinks from {ol} to {newLength}; longer values would be truncated."
+                : $"Max length is newly bounded to {newLength}; longer values would be truncated.");
         }
 
-        if (old.Precision is { } oldPrecision && op.Precision is { } newPrecision && newPrecision < oldPrecision)
+        if (op.Precision is { } newPrecision && (old.Precision is not { } oldPrecision || newPrecision < oldPrecision))
         {
-            return (true, $"Precision shrinks from {oldPrecision} to {newPrecision}.");
+            return (true, old.Precision is { } op2
+                ? $"Precision shrinks from {op2} to {newPrecision}."
+                : $"Precision is newly bounded to {newPrecision}.");
         }
 
-        if (old.Scale is { } oldScale && op.Scale is { } newScale && newScale < oldScale)
+        if (op.Scale is { } newScale && (old.Scale is not { } oldScale || newScale < oldScale))
         {
-            return (true, $"Scale shrinks from {oldScale} to {newScale}.");
+            return (true, old.Scale is { } os
+                ? $"Scale shrinks from {os} to {newScale}."
+                : $"Scale is newly bounded to {newScale}.");
         }
 
         if (old.ClrType != op.ClrType)
