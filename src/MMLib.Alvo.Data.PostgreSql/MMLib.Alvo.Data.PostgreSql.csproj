@@ -7,6 +7,10 @@
        wires the provider and adds MMLib.Alvo.Data.PostgreSql.Tests. -->
   <PropertyGroup>
     <IsPackable>false</IsPackable>
+    <!-- EF1001: NpgsqlDatabaseModelFactory is design-time-only and [EntityFrameworkInternal].
+         PostgreSqlMigrationServices constructs it directly (deliberate, see its ctor comment) to
+         avoid a Microsoft.EntityFrameworkCore.Design dependency in a shipped provider package. -->
+    <NoWarn>$(NoWarn);EF1001</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
