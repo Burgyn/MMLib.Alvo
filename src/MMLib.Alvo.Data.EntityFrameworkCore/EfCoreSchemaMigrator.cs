@@ -24,14 +24,28 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// stays provider-agnostic. The <see cref="DbConnection"/> is likewise provider-supplied: plain
 /// ADO.NET is enough to execute the already-generated SQL, so no relational-command infrastructure
 /// is needed here.
+///
+/// <para>
+/// <see cref="ApplyAsync"/> serializes its connection-touching work within one instance (an
+/// internal gate around open/transaction/execute), so two concurrent callers sharing the same
+/// migrator instance never race on its single <see cref="DbConnection"/>. This makes the type
+/// safe under a long-lived (e.g. singleton) registration, but it is still intended for
+/// controlled use — startup migrations or a single orchestrator (CLI/dashboard) — not as the
+/// concurrency-control mechanism for many independent clients changing the schema at runtime;
+/// that is governed by descriptor optimistic locking (PR-B), not by this type.
+/// </para>
 /// </remarks>
-internal sealed class EfCoreSchemaMigrator : ISchemaMigrator
+internal sealed class EfCoreSchemaMigrator : ISchemaMigrator, IDisposable
 {
     private readonly IMigrationsModelDiffer _differ;
     private readonly IMigrationsSqlGenerator _sqlGenerator;
     private readonly IModelRuntimeInitializer _modelRuntimeInitializer;
     private readonly Func<ModelBuilder> _newModelBuilder;
+
+    // TODO(PR-B): replace this single shared connection with a per-call connection (factory)
+    // once runtime concurrent schema changes need real parallelism instead of serialization.
     private readonly DbConnection _connection;
+    private readonly SemaphoreSlim _gate = new(1, 1);
 
     public EfCoreSchemaMigrator(
         IMigrationsModelDiffer differ,
@@ -103,40 +117,50 @@ internal sealed class EfCoreSchemaMigrator : ISchemaMigrator
             return new MigrationResult(false, plan, true);
         }
 
-        if (_connection.State != ConnectionState.Open)
-        {
-            await _connection.OpenAsync(ct).ConfigureAwait(false);
-        }
-
-        var transaction = await _connection.BeginTransactionAsync(ct).ConfigureAwait(false);
+        // Serialize connection-touching work: this instance's single DbConnection cannot safely
+        // run two open/transaction/execute sequences at once (see the class remarks).
+        await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            foreach (var step in plan.Steps)
+            if (_connection.State != ConnectionState.Open)
             {
-                if (string.IsNullOrWhiteSpace(step.Sql))
-                {
-                    continue;
-                }
-
-                var command = _connection.CreateCommand();
-                await using (command.ConfigureAwait(false))
-                {
-                    command.CommandText = step.Sql;
-                    command.Transaction = transaction;
-                    await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-                }
+                await _connection.OpenAsync(ct).ConfigureAwait(false);
             }
 
-            await transaction.CommitAsync(ct).ConfigureAwait(false);
-        }
-        catch
-        {
-            await transaction.RollbackAsync(ct).ConfigureAwait(false);
-            throw;
+            var transaction = await _connection.BeginTransactionAsync(ct).ConfigureAwait(false);
+            try
+            {
+                foreach (var step in plan.Steps)
+                {
+                    if (string.IsNullOrWhiteSpace(step.Sql))
+                    {
+                        continue;
+                    }
+
+                    var command = _connection.CreateCommand();
+                    await using (command.ConfigureAwait(false))
+                    {
+                        command.CommandText = step.Sql;
+                        command.Transaction = transaction;
+                        await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                    }
+                }
+
+                await transaction.CommitAsync(ct).ConfigureAwait(false);
+            }
+            catch
+            {
+                await transaction.RollbackAsync(ct).ConfigureAwait(false);
+                throw;
+            }
+            finally
+            {
+                await transaction.DisposeAsync().ConfigureAwait(false);
+            }
         }
         finally
         {
-            await transaction.DisposeAsync().ConfigureAwait(false);
+            _gate.Release();
         }
 
         return new MigrationResult(true, plan, false);
@@ -159,4 +183,10 @@ internal sealed class EfCoreSchemaMigrator : ISchemaMigrator
         var model = DescriptorModelBuilder.Build(schema, _newModelBuilder);
         return _modelRuntimeInitializer.Initialize(model, designTime: true);
     }
+
+    /// <summary>
+    /// Disposes the internal serialization gate. The provider-supplied <see cref="DbConnection"/>
+    /// is not owned by this type (see the field's TODO) and is left untouched.
+    /// </summary>
+    public void Dispose() => _gate.Dispose();
 }

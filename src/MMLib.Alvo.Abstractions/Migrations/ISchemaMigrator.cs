@@ -3,6 +3,12 @@
 namespace MMLib.Alvo.Migrations;
 
 /// <summary>Port for schema migration operations.</summary>
+/// <remarks>
+/// Implementations are expected to serialize their own <see cref="ApplyAsync"/> execution
+/// internally and are intended for controlled use (startup migrations, a single orchestrator) —
+/// not as the concurrency-control mechanism for many independent clients changing the schema at
+/// runtime, which is governed by descriptor optimistic locking, not by this port.
+/// </remarks>
 public interface ISchemaMigrator
 {
     /// <summary>Plans a migration from the current schema to the desired schema.</summary>

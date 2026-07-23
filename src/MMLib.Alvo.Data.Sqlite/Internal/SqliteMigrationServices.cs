@@ -22,6 +22,15 @@ namespace MMLib.Alvo.Data.Sqlite.Internal;
 /// model runtime initializer, type mapping source, scaffolding logger) are already-built object
 /// graphs that don't reach back into the disposed provider — so nothing here leaks a second,
 /// host-visible container: the throwaway provider lives and dies inside this one call.
+///
+/// <para>
+/// This relies on a version-pinned assumption about EF Core 10: <c>IMigrationsModelDiffer</c>
+/// and <c>IMigrationsSqlGenerator</c> are registered Scoped by the SQLite provider, but the code
+/// paths actually exercised against them (<c>GetDifferences</c>/<c>Generate</c>) hold or
+/// dereference nothing from the now-disposed scope — they only close over already-injected,
+/// non-disposable dependencies. A future EF Core version could change that and would surface as
+/// an <see cref="ObjectDisposedException"/> from those calls, not from this method.
+/// </para>
 /// </remarks>
 internal static class SqliteMigrationServices
 {
