@@ -52,6 +52,44 @@ public class DescriptorModelBuilderTests
     }
 
     [Fact]
+    public void Explicit_nullable_true_overrides_required_true()
+    {
+        var model = new SchemaModel([
+            new EntitySchema
+            {
+                Name = "vehicles",
+                Fields = [
+                    new FieldSchema { Name = "id", Type = FieldType.Uuid, Required = true },
+                    new FieldSchema { Name = "vin", Type = FieldType.String, Required = true, Nullable = true },
+                ],
+            },
+        ]);
+
+        IModel efModel = DescriptorModelBuilder.Build(model, NewSqliteBuilder);
+
+        efModel.FindEntityType("vehicles")!.FindProperty("vin")!.IsNullable.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Explicit_nullable_false_overrides_required_false()
+    {
+        var model = new SchemaModel([
+            new EntitySchema
+            {
+                Name = "vehicles",
+                Fields = [
+                    new FieldSchema { Name = "id", Type = FieldType.Uuid, Required = true },
+                    new FieldSchema { Name = "vin", Type = FieldType.String, Required = false, Nullable = false },
+                ],
+            },
+        ]);
+
+        IModel efModel = DescriptorModelBuilder.Build(model, NewSqliteBuilder);
+
+        efModel.FindEntityType("vehicles")!.FindProperty("vin")!.IsNullable.ShouldBeFalse();
+    }
+
+    [Fact]
     public void Ref_field_produces_a_foreign_key_to_the_target_entity()
     {
         var model = new SchemaModel([
@@ -100,6 +138,7 @@ public class DescriptorModelBuilderTests
                     {
                         Name = "vehicle_id",
                         Type = FieldType.Ref,
+                        Nullable = true,
                         Reference = new RefSchema("vehicles", OnDelete.Restrict),
                     },
                 ],
@@ -267,6 +306,33 @@ public class DescriptorModelBuilderTests
         IModel efModel = DescriptorModelBuilder.Build(model, NewSqliteBuilder);
 
         efModel.FindEntityType("vehicles")!.FindProperty("mileage")!.ClrType.ShouldBe(typeof(long));
+    }
+
+    [Fact]
+    public void Boolean_field_maps_to_bool()
+    {
+        var model = new SchemaModel([
+            new EntitySchema
+            {
+                Name = "vehicles",
+                Fields = [
+                    new FieldSchema { Name = "id", Type = FieldType.Uuid, Required = true },
+                    new FieldSchema { Name = "is_active", Type = FieldType.Boolean, Required = true },
+                    new FieldSchema { Name = "is_scrapped", Type = FieldType.Boolean, Nullable = true },
+                ],
+            },
+        ]);
+
+        IModel efModel = DescriptorModelBuilder.Build(model, NewSqliteBuilder);
+
+        var entityType = efModel.FindEntityType("vehicles")!;
+        var isActive = entityType.FindProperty("is_active")!;
+        isActive.ClrType.ShouldBe(typeof(bool));
+        isActive.IsNullable.ShouldBeFalse();
+
+        var isScrapped = entityType.FindProperty("is_scrapped")!;
+        isScrapped.ClrType.ShouldBe(typeof(bool?));
+        isScrapped.IsNullable.ShouldBeTrue();
     }
 
     [Fact]

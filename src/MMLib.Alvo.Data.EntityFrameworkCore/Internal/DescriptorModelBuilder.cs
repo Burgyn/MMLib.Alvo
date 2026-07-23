@@ -51,7 +51,7 @@ internal static class DescriptorModelBuilder
 
     private static void ConfigureField(EntityTypeBuilder entityBuilder, FieldSchema field)
     {
-        var property = entityBuilder.Property(ClrType(field), field.Name).IsRequired(field.Required);
+        var property = entityBuilder.Property(ClrType(field), field.Name).IsRequired(!field.Nullable);
 
         if (field.MaxLength is { } maxLength)
         {
@@ -106,16 +106,16 @@ internal static class DescriptorModelBuilder
 
     private static Type ClrType(FieldSchema field) => field.Type switch
     {
-        FieldType.Uuid or FieldType.Ref => Nullable(typeof(Guid), field.Required),
+        FieldType.Uuid or FieldType.Ref => NullableIfNeeded(typeof(Guid), field.Nullable),
         FieldType.String or FieldType.Text or FieldType.Json or FieldType.Enum => typeof(string),
-        FieldType.Integer => Nullable(typeof(long), field.Required),
-        FieldType.Decimal => Nullable(typeof(decimal), field.Required),
-        FieldType.Boolean => Nullable(typeof(bool), field.Required),
-        FieldType.Date => Nullable(typeof(DateOnly), field.Required),
-        FieldType.DateTime => Nullable(typeof(DateTimeOffset), field.Required),
+        FieldType.Integer => NullableIfNeeded(typeof(long), field.Nullable),
+        FieldType.Decimal => NullableIfNeeded(typeof(decimal), field.Nullable),
+        FieldType.Boolean => NullableIfNeeded(typeof(bool), field.Nullable),
+        FieldType.Date => NullableIfNeeded(typeof(DateOnly), field.Nullable),
+        FieldType.DateTime => NullableIfNeeded(typeof(DateTimeOffset), field.Nullable),
         _ => throw new NotSupportedException($"Unsupported field type '{field.Type}'."),
     };
 
-    private static Type Nullable(Type valueType, bool required) =>
-        required ? valueType : typeof(Nullable<>).MakeGenericType(valueType);
+    private static Type NullableIfNeeded(Type valueType, bool nullable) =>
+        nullable ? typeof(Nullable<>).MakeGenericType(valueType) : valueType;
 }
