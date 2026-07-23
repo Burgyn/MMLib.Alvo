@@ -1,4 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata.Conventions;
 using Microsoft.EntityFrameworkCore.Migrations;
@@ -14,15 +15,18 @@ public class EfCoreSchemaMigratorPlanTests
     private static MigrationOptions Options => new();
 
     // Resolves the SQLite provider services from a throwaway DbContext (the reusable helper lands
-    // in Task 11); until then the test wires the migrator by hand.
+    // in Task 11); until then the test wires the migrator by hand. PlanAsync never touches the
+    // connection, so an unopened one is enough to satisfy the (now required) ctor parameter.
     private static EfCoreSchemaMigrator NewSqliteMigrator()
     {
-        var ctx = new DbContext(new DbContextOptionsBuilder().UseSqlite("Data Source=:memory:").Options);
+        var connection = new SqliteConnection("Data Source=:memory:");
+        var ctx = new DbContext(new DbContextOptionsBuilder().UseSqlite(connection).Options);
         return new EfCoreSchemaMigrator(
             ctx.GetService<IMigrationsModelDiffer>(),
             ctx.GetService<IMigrationsSqlGenerator>(),
             ctx.GetService<IModelRuntimeInitializer>(),
-            () => new ModelBuilder(SqliteConventionSetBuilder.Build()));
+            () => new ModelBuilder(SqliteConventionSetBuilder.Build()),
+            connection);
     }
 
     private static EntitySchema Vehicles(params FieldSchema[] fields) =>

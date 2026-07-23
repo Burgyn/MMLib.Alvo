@@ -5,20 +5,25 @@ using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Schema;
+using System.Data;
+using System.Data.Common;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore;
 
 /// <summary>
 /// An <see cref="ISchemaMigrator"/> that reuses EF Core's migrations differ and per-provider SQL
 /// generator to turn a (current, desired) pair of <see cref="SchemaModel"/>s into a
-/// <see cref="MigrationPlan"/>.
+/// <see cref="MigrationPlan"/>, and executes the resulting plan over a provider-supplied ADO.NET
+/// connection.
 /// </summary>
 /// <remarks>
 /// The provider-specific services (<see cref="IMigrationsModelDiffer"/>,
 /// <see cref="IMigrationsSqlGenerator"/>, <see cref="IModelRuntimeInitializer"/>) and the
 /// conventionless <see cref="ModelBuilder"/> factory are injected by the provider wiring
 /// (SQLite/PostgreSQL packages), so this type only depends on EFCore.Relational abstractions and
-/// stays provider-agnostic.
+/// stays provider-agnostic. The <see cref="DbConnection"/> is likewise provider-supplied: plain
+/// ADO.NET is enough to execute the already-generated SQL, so no relational-command infrastructure
+/// is needed here.
 /// </remarks>
 internal sealed class EfCoreSchemaMigrator : ISchemaMigrator
 {
@@ -26,22 +31,26 @@ internal sealed class EfCoreSchemaMigrator : ISchemaMigrator
     private readonly IMigrationsSqlGenerator _sqlGenerator;
     private readonly IModelRuntimeInitializer _modelRuntimeInitializer;
     private readonly Func<ModelBuilder> _newModelBuilder;
+    private readonly DbConnection _connection;
 
     public EfCoreSchemaMigrator(
         IMigrationsModelDiffer differ,
         IMigrationsSqlGenerator sqlGenerator,
         IModelRuntimeInitializer modelRuntimeInitializer,
-        Func<ModelBuilder> newModelBuilder)
+        Func<ModelBuilder> newModelBuilder,
+        DbConnection connection)
     {
         ArgumentNullException.ThrowIfNull(differ);
         ArgumentNullException.ThrowIfNull(sqlGenerator);
         ArgumentNullException.ThrowIfNull(modelRuntimeInitializer);
         ArgumentNullException.ThrowIfNull(newModelBuilder);
+        ArgumentNullException.ThrowIfNull(connection);
 
         _differ = differ;
         _sqlGenerator = sqlGenerator;
         _modelRuntimeInitializer = modelRuntimeInitializer;
         _newModelBuilder = newModelBuilder;
+        _connection = connection;
     }
 
     /// <inheritdoc/>
@@ -75,8 +84,63 @@ internal sealed class EfCoreSchemaMigrator : ISchemaMigrator
     }
 
     /// <inheritdoc/>
-    public Task<MigrationResult> ApplyAsync(MigrationPlan plan, MigrationOptions options, CancellationToken ct = default) =>
-        throw new NotImplementedException("Applying a migration plan is implemented in Task 10.");
+    public async Task<MigrationResult> ApplyAsync(MigrationPlan plan, MigrationOptions options, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(options);
+        ct.ThrowIfCancellationRequested();
+
+        // Refused: destructive changes are never executed unless explicitly allowed. WasDryRun
+        // mirrors the caller's DryRun flag here (a destructive-refused dry run is still a dry run).
+        if (plan.HasDestructiveChanges && !options.AllowDestructive)
+        {
+            return new MigrationResult(false, plan, options.DryRun);
+        }
+
+        // Preview only: nothing is executed.
+        if (options.DryRun)
+        {
+            return new MigrationResult(false, plan, true);
+        }
+
+        if (_connection.State != ConnectionState.Open)
+        {
+            await _connection.OpenAsync(ct).ConfigureAwait(false);
+        }
+
+        var transaction = await _connection.BeginTransactionAsync(ct).ConfigureAwait(false);
+        try
+        {
+            foreach (var step in plan.Steps)
+            {
+                if (string.IsNullOrWhiteSpace(step.Sql))
+                {
+                    continue;
+                }
+
+                var command = _connection.CreateCommand();
+                await using (command.ConfigureAwait(false))
+                {
+                    command.CommandText = step.Sql;
+                    command.Transaction = transaction;
+                    await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                }
+            }
+
+            await transaction.CommitAsync(ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(ct).ConfigureAwait(false);
+            throw;
+        }
+        finally
+        {
+            await transaction.DisposeAsync().ConfigureAwait(false);
+        }
+
+        return new MigrationResult(true, plan, false);
+    }
 
     private MigrationStep ToStep(MigrationOperation operation, SchemaChange change, IModel desiredModel)
     {
