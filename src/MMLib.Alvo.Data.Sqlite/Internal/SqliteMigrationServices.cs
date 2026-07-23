@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore.Metadata.Conventions;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Sqlite.Scaffolding.Internal;
 using Microsoft.EntityFrameworkCore.Storage;
+using MMLib.Alvo;
 using MMLib.Alvo.Data.EntityFrameworkCore;
 
 namespace MMLib.Alvo.Data.Sqlite.Internal;
@@ -46,7 +47,7 @@ internal static class SqliteMigrationServices
             new SqliteConnection(connectionString));
     }
 
-    public static EfCoreSchemaIntrospector CreateIntrospector(string connectionString)
+    public static EfCoreSchemaIntrospector CreateIntrospector(string connectionString, string schemaPrefix)
     {
         using var context = new DbContext(BuildOptions(connectionString));
 
@@ -62,8 +63,14 @@ internal static class SqliteMigrationServices
             context.GetService<IRelationalTypeMappingSource>());
 #pragma warning restore EF1001
 
-        return new EfCoreSchemaIntrospector(databaseModelFactory, new SqliteConnection(connectionString));
+        return new EfCoreSchemaIntrospector(
+            databaseModelFactory,
+            new SqliteConnection(connectionString),
+            SystemSchemaInitializer.AppliedSchemaTableName(schemaPrefix));
     }
+
+    public static AppliedSchemaStore CreateAppliedSchemaStore(string connectionString, AlvoOptions options) =>
+        new(new SqliteConnection(connectionString), options);
 
     private static DbContextOptions BuildOptions(string connectionString) =>
         new DbContextOptionsBuilder().UseSqlite(connectionString).Options;

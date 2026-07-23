@@ -2,6 +2,7 @@
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
+using MMLib.Alvo;
 using MMLib.Alvo.Data.EntityFrameworkCore;
 using Npgsql;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata.Conventions;
@@ -45,7 +46,7 @@ internal static class PostgreSqlMigrationServices
             new NpgsqlConnection(connectionString));
     }
 
-    public static EfCoreSchemaIntrospector CreateIntrospector(string connectionString)
+    public static EfCoreSchemaIntrospector CreateIntrospector(string connectionString, string schemaPrefix)
     {
         using var context = new DbContext(BuildOptions(connectionString));
 
@@ -61,8 +62,14 @@ internal static class PostgreSqlMigrationServices
             context.GetService<IDiagnosticsLogger<DbLoggerCategory.Scaffolding>>());
 #pragma warning restore EF1001
 
-        return new EfCoreSchemaIntrospector(databaseModelFactory, new NpgsqlConnection(connectionString));
+        return new EfCoreSchemaIntrospector(
+            databaseModelFactory,
+            new NpgsqlConnection(connectionString),
+            SystemSchemaInitializer.AppliedSchemaTableName(schemaPrefix));
     }
+
+    public static AppliedSchemaStore CreateAppliedSchemaStore(string connectionString, AlvoOptions options) =>
+        new(new NpgsqlConnection(connectionString), options);
 
     private static DbContextOptions BuildOptions(string connectionString) =>
         new DbContextOptionsBuilder().UseNpgsql(connectionString).Options;

@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 using MMLib.Alvo;
 using MMLib.Alvo.Data.PostgreSql.Internal;
 using MMLib.Alvo.Migrations;
@@ -10,9 +11,9 @@ namespace Microsoft.Extensions.DependencyInjection;
 public static class AlvoPostgreSqlBuilderExtensions
 {
     /// <summary>
-    /// Wires <see cref="ISchemaMigrator"/> and <see cref="ISchemaIntrospector"/> to PostgreSQL, using
-    /// EF Core's migrations differ, SQL generator, and scaffolding model factory for the given
-    /// connection string.
+    /// Wires <see cref="ISchemaMigrator"/>, <see cref="ISchemaIntrospector"/>, and
+    /// <see cref="IAppliedSchemaStore"/> to PostgreSQL, using EF Core's migrations differ, SQL
+    /// generator, and scaffolding model factory for the given connection string.
     /// </summary>
     /// <param name="builder">The Alvo builder.</param>
     /// <param name="connectionString">The PostgreSQL ADO.NET connection string.</param>
@@ -31,8 +32,16 @@ public static class AlvoPostgreSqlBuilderExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
 
+        // Ensures IOptions<AlvoOptions> resolves (to the defaults, if AddAlvo() never configured
+        // it) regardless of whether this provider is attached through AddAlvo() or directly onto a
+        // bare IAlvoBuilder — a provider must not assume a particular caller.
+        builder.Services.AddOptions<AlvoOptions>();
+
         builder.Services.TryAddSingleton<ISchemaMigrator>(_ => PostgreSqlMigrationServices.CreateMigrator(connectionString));
-        builder.Services.TryAddSingleton<ISchemaIntrospector>(_ => PostgreSqlMigrationServices.CreateIntrospector(connectionString));
+        builder.Services.TryAddSingleton<ISchemaIntrospector>(sp => PostgreSqlMigrationServices.CreateIntrospector(
+            connectionString, sp.GetRequiredService<IOptions<AlvoOptions>>().Value.SchemaPrefix));
+        builder.Services.TryAddSingleton<IAppliedSchemaStore>(sp =>
+            PostgreSqlMigrationServices.CreateAppliedSchemaStore(connectionString, sp.GetRequiredService<IOptions<AlvoOptions>>().Value));
 
         return builder;
     }

@@ -30,11 +30,18 @@ internal sealed partial class SystemSchemaInitializer
         }
 
         _connection = connection;
-        TableName = $"{schemaPrefix}_applied_schema";
+        TableName = AppliedSchemaTableName(schemaPrefix);
     }
 
     /// <summary>Gets the fully-prefixed applied-schema table name, e.g. <c>alvo_applied_schema</c>.</summary>
     public string TableName { get; }
+
+    /// <summary>
+    /// Computes the applied-schema table name for a given prefix — the single source of truth
+    /// <see cref="EfCoreSchemaIntrospector"/> reuses to exclude Alvo's own bookkeeping table from
+    /// what it reports as the user's schema.
+    /// </summary>
+    public static string AppliedSchemaTableName(string schemaPrefix) => $"{schemaPrefix}_applied_schema";
 
     /// <summary>
     /// Creates the applied-schema table if it does not already exist. Safe to call repeatedly —

@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 using MMLib.Alvo;
 using MMLib.Alvo.Data.Sqlite.Internal;
 using MMLib.Alvo.Migrations;
@@ -10,9 +11,9 @@ namespace Microsoft.Extensions.DependencyInjection;
 public static class AlvoSqliteBuilderExtensions
 {
     /// <summary>
-    /// Wires <see cref="ISchemaMigrator"/> and <see cref="ISchemaIntrospector"/> to SQLite, using
-    /// EF Core's migrations differ, SQL generator, and scaffolding model factory for the given
-    /// connection string.
+    /// Wires <see cref="ISchemaMigrator"/>, <see cref="ISchemaIntrospector"/>, and
+    /// <see cref="IAppliedSchemaStore"/> to SQLite, using EF Core's migrations differ, SQL
+    /// generator, and scaffolding model factory for the given connection string.
     /// </summary>
     /// <param name="builder">The Alvo builder.</param>
     /// <param name="connectionString">The SQLite ADO.NET connection string.</param>
@@ -31,8 +32,16 @@ public static class AlvoSqliteBuilderExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
 
+        // Ensures IOptions<AlvoOptions> resolves (to the defaults, if AddAlvo() never configured
+        // it) regardless of whether this provider is attached through AddAlvo() or directly onto a
+        // bare IAlvoBuilder — a provider must not assume a particular caller.
+        builder.Services.AddOptions<AlvoOptions>();
+
         builder.Services.TryAddSingleton<ISchemaMigrator>(_ => SqliteMigrationServices.CreateMigrator(connectionString));
-        builder.Services.TryAddSingleton<ISchemaIntrospector>(_ => SqliteMigrationServices.CreateIntrospector(connectionString));
+        builder.Services.TryAddSingleton<ISchemaIntrospector>(sp => SqliteMigrationServices.CreateIntrospector(
+            connectionString, sp.GetRequiredService<IOptions<AlvoOptions>>().Value.SchemaPrefix));
+        builder.Services.TryAddSingleton<IAppliedSchemaStore>(sp =>
+            SqliteMigrationServices.CreateAppliedSchemaStore(connectionString, sp.GetRequiredService<IOptions<AlvoOptions>>().Value));
 
         return builder;
     }

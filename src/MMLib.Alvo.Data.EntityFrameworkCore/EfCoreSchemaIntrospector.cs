@@ -16,20 +16,24 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// <see cref="SchemaModel"/> (entities/fields/indexes/references). The mapping is necessarily
 /// lossy on engines with weak column typing (e.g. SQLite's type affinities), so it only recovers
 /// what round-tripping and drift detection need: names, coarse field types, nullability, indexes,
-/// and foreign keys.
+/// and foreign keys. The optional <c>excludedTableName</c> keeps Alvo's own bookkeeping table
+/// (<see cref="SystemSchemaInitializer.AppliedSchemaTableName"/>) out of the introspected schema —
+/// without it, the code-first diff would see its own applied-schema table as a rogue user entity.
 /// </remarks>
 internal sealed class EfCoreSchemaIntrospector : ISchemaIntrospector
 {
     private readonly IDatabaseModelFactory _databaseModelFactory;
     private readonly DbConnection _connection;
+    private readonly string? _excludedTableName;
 
-    public EfCoreSchemaIntrospector(IDatabaseModelFactory databaseModelFactory, DbConnection connection)
+    public EfCoreSchemaIntrospector(IDatabaseModelFactory databaseModelFactory, DbConnection connection, string? excludedTableName = null)
     {
         ArgumentNullException.ThrowIfNull(databaseModelFactory);
         ArgumentNullException.ThrowIfNull(connection);
 
         _databaseModelFactory = databaseModelFactory;
         _connection = connection;
+        _excludedTableName = excludedTableName;
     }
 
     /// <inheritdoc/>
@@ -38,7 +42,10 @@ internal sealed class EfCoreSchemaIntrospector : ISchemaIntrospector
         ct.ThrowIfCancellationRequested();
 
         var databaseModel = _databaseModelFactory.Create(_connection, new DatabaseModelFactoryOptions());
-        var entities = databaseModel.Tables.Select(ToEntitySchema).ToList();
+        var entities = databaseModel.Tables
+            .Where(table => table.Name != _excludedTableName)
+            .Select(ToEntitySchema)
+            .ToList();
 
         return Task.FromResult(new SchemaModel(entities));
     }
