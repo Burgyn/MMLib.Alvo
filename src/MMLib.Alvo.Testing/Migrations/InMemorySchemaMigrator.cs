@@ -7,7 +7,9 @@ namespace MMLib.Alvo.Testing.Migrations;
 /// <summary>
 /// A DB-less <see cref="ISchemaMigrator"/> fake for tests: it computes plans via
 /// <see cref="SchemaDiff"/> and tracks the applied schema in memory, so tests can
-/// exercise migration behavior without a real database.
+/// exercise migration behavior without a real database. The <see cref="MigrationPlan"/>
+/// passed to <see cref="ApplyAsync"/> must be one this instance's <see cref="PlanAsync"/>
+/// returned — a foreign plan is rejected rather than silently reported as applied.
 /// </summary>
 public sealed class InMemorySchemaMigrator : ISchemaMigrator
 {
@@ -24,7 +26,14 @@ public sealed class InMemorySchemaMigrator : ISchemaMigrator
         return Task.FromResult(plan);
     }
 
-    /// <inheritdoc/>
+    /// <summary>Applies a migration plan.</summary>
+    /// <param name="plan">A plan previously returned by this instance's <see cref="PlanAsync"/>.</param>
+    /// <param name="options">Migration options.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The result of the migration.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="plan"/> was not returned by this instance's <see cref="PlanAsync"/>.
+    /// </exception>
     public Task<MigrationResult> ApplyAsync(MigrationPlan plan, MigrationOptions options, CancellationToken ct = default)
     {
         if (plan.HasDestructiveChanges && !options.AllowDestructive)
@@ -32,7 +41,12 @@ public sealed class InMemorySchemaMigrator : ISchemaMigrator
             return Task.FromResult(new MigrationResult(false, plan, options.DryRun));
         }
 
-        if (!options.DryRun && _projectedModels.TryGetValue(plan, out var projected))
+        if (!_projectedModels.TryGetValue(plan, out var projected))
+        {
+            throw new InvalidOperationException("The MigrationPlan must be one returned by this migrator's PlanAsync.");
+        }
+
+        if (!options.DryRun)
         {
             Applied = projected;
         }
