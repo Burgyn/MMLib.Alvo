@@ -1,5 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <PropertyGroup>
+    <!-- EF1001: SqliteDatabaseModelFactory is design-time-only and [EntityFrameworkInternal].
+         SqliteMigrationServices constructs it directly (deliberate, see its ctor comment) to
+         avoid a Microsoft.EntityFrameworkCore.Design dependency in a shipped provider package. -->
+    <NoWarn>$(NoWarn);EF1001</NoWarn>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="../MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj" />
   </ItemGroup>
