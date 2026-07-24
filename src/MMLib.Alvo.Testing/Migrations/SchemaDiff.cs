@@ -239,16 +239,20 @@ public static class SchemaDiff
         && current.Precision == desired.Precision
         && current.Scale == desired.Scale;
 
-    // Mirrors DestructiveScan.NarrowingReason on the real path: a column becoming non-nullable, or a
-    // newly-imposed / shrunk length bound (unbounded → bounded truncates too), can lose data.
-    private static bool IsDestructiveNarrowing(FieldSchema current, FieldSchema desired)
-    {
-        var becameNonNullable = current.Nullable && !desired.Nullable;
-        var lengthNarrowed = desired.MaxLength is { } newLength
-            && (current.MaxLength is not { } oldLength || newLength < oldLength);
+    // Mirrors DestructiveScan.NarrowingReason on the real path: a column becoming non-nullable, a
+    // newly-imposed / shrunk length, precision, or scale bound (unbounded → bounded truncates too),
+    // or a changed type can all lose data.
+    private static bool IsDestructiveNarrowing(FieldSchema current, FieldSchema desired) =>
+        (current.Nullable && !desired.Nullable)
+        || IsBoundNarrowed(current.MaxLength, desired.MaxLength)
+        || IsBoundNarrowed(current.Precision, desired.Precision)
+        || IsBoundNarrowed(current.Scale, desired.Scale)
+        || current.Type != desired.Type;
 
-        return becameNonNullable || lengthNarrowed;
-    }
+    // A bound narrows when the desired side imposes one the current side did not (unbounded →
+    // bounded) or tightens an existing one (shrink).
+    private static bool IsBoundNarrowed(int? current, int? desired) =>
+        desired is { } desiredBound && (current is not { } currentBound || desiredBound < currentBound);
 
     private static MigrationStep CreateEntityStep(string entity) =>
         new(new SchemaChange { Kind = SchemaChangeKind.CreateEntity, Entity = entity }, IsDestructive: false, Reason: null);

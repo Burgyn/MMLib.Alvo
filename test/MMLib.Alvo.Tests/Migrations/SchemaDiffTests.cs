@@ -59,6 +59,36 @@ public sealed class SchemaDiffTests
     }
 
     [Fact]
+    public void Precision_shrink_is_a_destructive_alter()
+    {
+        var step = AlterStepFor(
+            new FieldSchema { Name = "amount", Type = FieldType.Decimal, Precision = 18, Scale = 2 },
+            new FieldSchema { Name = "amount", Type = FieldType.Decimal, Precision = 10, Scale = 2 });
+
+        step.IsDestructive.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Scale_shrink_is_a_destructive_alter()
+    {
+        var step = AlterStepFor(
+            new FieldSchema { Name = "amount", Type = FieldType.Decimal, Precision = 18, Scale = 4 },
+            new FieldSchema { Name = "amount", Type = FieldType.Decimal, Precision = 18, Scale = 2 });
+
+        step.IsDestructive.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Type_change_is_a_destructive_alter()
+    {
+        var step = AlterStepFor(
+            new FieldSchema { Name = "code", Type = FieldType.String },
+            new FieldSchema { Name = "code", Type = FieldType.Integer });
+
+        step.IsDestructive.ShouldBeTrue();
+    }
+
+    [Fact]
     public void Required_only_flip_with_unchanged_nullability_yields_no_step()
     {
         // Required does not drive the physical column (only Nullable does), so flipping it alone is

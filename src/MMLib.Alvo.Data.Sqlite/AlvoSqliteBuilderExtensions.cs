@@ -97,9 +97,15 @@ public static class AlvoSqliteBuilderExtensions
     {
         ArgumentNullException.ThrowIfNull(builder);
 
-        builder.Services.AddOptions<SqliteProviderOptions>()
-            .Configure<IConfiguration>(static (options, configuration) =>
-                options.ConnectionString ??= configuration.GetConnectionString(DefaultConnectionName));
+        // Resolve IConfiguration optionally (GetService, not GetRequiredService): if the host never
+        // registered it, the connection string stays null and ResolveConnectionString fails fast
+        // with the crafted MissingConnectionStringMessage — the same helpful error as every other
+        // overload — instead of a raw "no service for IConfiguration" DI exception.
+        builder.Services.AddOptions<SqliteProviderOptions>();
+        builder.Services.AddSingleton<IConfigureOptions<SqliteProviderOptions>>(services =>
+            new ConfigureNamedOptions<SqliteProviderOptions>(
+                string.Empty,
+                options => options.ConnectionString ??= services.GetService<IConfiguration>()?.GetConnectionString(DefaultConnectionName)));
 
         return AddSqliteProvider(builder);
     }

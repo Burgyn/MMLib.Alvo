@@ -141,6 +141,22 @@ public sealed class AddAlvoIntegrationTests : IDisposable
     }
 
     [Fact]
+    public void UseSqlite_parameterless_without_IConfiguration_registered_fails_fast_with_a_helpful_message()
+    {
+        // No IConfiguration in the container at all: resolution must still fail fast with the
+        // crafted guidance, not a raw "no service for IConfiguration" DI exception.
+        var services = new ServiceCollection();
+        services.AddAlvo(alvo => alvo.UseSqlite());
+
+        using var sp = services.BuildServiceProvider();
+
+        var exception = Should.Throw<InvalidOperationException>(
+            () => sp.GetRequiredService<ISchemaMigrator>());
+
+        exception.Message.ShouldContain("No SQLite connection string was configured");
+    }
+
+    [Fact]
     public void UseSqlite_without_a_connection_string_fails_fast_when_the_provider_is_built()
     {
         var services = new ServiceCollection();
