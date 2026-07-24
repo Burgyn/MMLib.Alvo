@@ -1,25 +1,24 @@
-﻿using Json.Pointer;
-using Json.Schema;
+﻿using Corvus.Json;
+using MMLib.Alvo.Descriptor.SchemaGen;
 using System.Text.Json;
 
 namespace MMLib.Alvo.Descriptor.Internal;
 
 /// <summary>
-/// Layered descriptor validator: (1) a JsonSchema.Net pass against the embedded
-/// project.schema.json, (2) a semantic pass for cross-field rules the schema cannot express, each
-/// producing agent-first <see cref="DescriptorValidationError"/>s with fix suggestions.
+/// Layered descriptor validator: (1) a schema pass against the build-time Corvus-generated
+/// <see cref="GeneratedProjectDescriptor"/> (from project.schema.json), (2) a semantic pass for
+/// cross-field rules the schema cannot express, each producing agent-first
+/// <see cref="DescriptorValidationError"/>s with fix suggestions.
 /// </summary>
 /// <remarks>
-/// JsonSchema.Net (json-everything) evaluates schemas purely at runtime against
-/// <see cref="System.Text.Json"/> — no Roslyn codegen, so no <c>PreserveCompilationContext</c>
-/// requirement on the host, unlike the Corvus.Json.Validator this replaced.
+/// Corvus.Json.SourceGenerator emits <see cref="GeneratedProjectDescriptor"/> at compile time —
+/// the schema is fixed at build time (Alvo's own per-version descriptor grammar), but the
+/// runtime JSON being validated is fully arbitrary/untrusted (CLI/dashboard/API input). At
+/// runtime this is a plain compiled .NET type: no Roslyn, no <c>PreserveCompilationContext</c>,
+/// unlike the Corvus.Json.Validator (runtime-Roslyn) package Alvo used before this rework.
 /// </remarks>
 internal sealed class DescriptorValidator : IDescriptorValidator
 {
-    private static readonly JsonSchema _schema = JsonSchema.FromText(DescriptorSchemaSource.Json);
-
-    private static readonly EvaluationOptions _evaluationOptions = new() { OutputFormat = OutputFormat.List };
-
     public DescriptorValidationResult Validate(string descriptorJson)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(descriptorJson);
@@ -46,65 +45,50 @@ internal sealed class DescriptorValidator : IDescriptorValidator
     private static DescriptorValidationError Malformed(JsonException ex) =>
         new("/", $"Descriptor is not valid JSON: {ex.Message}", "Fix the JSON syntax.", DescriptorValidationSeverity.Error);
 
-    private static IEnumerable<DescriptorValidationError> SchemaErrors(JsonElement root)
+    private static List<DescriptorValidationError> SchemaErrors(JsonElement root)
     {
-        var results = _schema.Evaluate(root, _evaluationOptions);
-        if (results.IsValid)
+        var instance = new GeneratedProjectDescriptor(root);
+        var context = instance.Validate(ValidationContext.ValidContext, ValidationLevel.Detailed);
+        if (context.IsValid)
         {
             return [];
         }
 
-        return (results.Details ?? [])
-            .Where(HasReportableError)
-            .SelectMany(SchemaErrorsForNode);
+        return context.Results
+            .Where(r => !r.Valid)
+            .Select(ToError)
+            .ToList();
     }
 
-    /// <summary>
-    /// A failing node inside an <c>if</c> condition subschema (the probe for <c>if</c>/<c>then</c>/<c>else</c>)
-    /// is not itself a descriptor defect: it just means that branch's <c>then</c>/<c>else</c> did not apply.
-    /// Only report nodes outside any <c>if</c> condition.
-    /// </summary>
-    private static bool HasReportableError(EvaluationResults node) =>
-        node.Errors is { Count: > 0 } && !IsInsideIfCondition(node.EvaluationPath);
-
-    private static bool IsInsideIfCondition(JsonPointer schemaPath)
+    private static DescriptorValidationError ToError(ValidationResult result)
     {
-        for (var i = 0; i < schemaPath.SegmentCount; i++)
-        {
-            if (schemaPath.GetSegment(i).Equals("if"))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        var instancePath = PointerOrRoot(result.Location?.DocumentLocation.ToString());
+        var schemaPath = PointerOrRoot(result.Location?.SchemaLocation.ToString());
+        var message = result.Message;
+        var effectiveMessage = string.IsNullOrWhiteSpace(message)
+            ? $"Value does not satisfy the schema at '{schemaPath}'."
+            : message;
+        return new DescriptorValidationError(
+            instancePath,
+            effectiveMessage,
+            FixSuggestionFor(instancePath, schemaPath, effectiveMessage),
+            DescriptorValidationSeverity.Error);
     }
 
-    private static IEnumerable<DescriptorValidationError> SchemaErrorsForNode(EvaluationResults node)
+    private static string FixSuggestionFor(string instancePath, string schemaPath, string message)
     {
-        var instancePath = PointerOrRoot(node.InstanceLocation.ToString());
-        var schemaPath = PointerOrRoot(node.EvaluationPath.ToString());
-        foreach (var (keyword, message) in node.Errors!)
-        {
-            var effectiveMessage = string.IsNullOrWhiteSpace(message)
-                ? $"Value does not satisfy the '{keyword}' constraint."
-                : message;
-            yield return new DescriptorValidationError(
-                instancePath,
-                effectiveMessage,
-                FixSuggestionFor(keyword, instancePath, schemaPath, effectiveMessage),
-                DescriptorValidationSeverity.Error);
-        }
-    }
-
-    private static string FixSuggestionFor(string keyword, string instancePath, string schemaPath, string message)
-    {
-        var keywordLabel = string.IsNullOrEmpty(keyword) ? "schema" : $"'{keyword}'";
+        var keyword = KeywordFrom(schemaPath);
+        var keywordLabel = keyword is null ? "schema" : $"'{keyword}'";
         return $"Schema keyword {keywordLabel} failed for instance path '{instancePath}' " +
             $"(schema location '{schemaPath}'): {message} — see schema/project.schema.json there.";
     }
 
-    private static string PointerOrRoot(string pointer) => pointer.Length == 0 ? "/" : pointer;
+    /// <summary>The failing keyword is the last non-numeric segment of the schema pointer (numeric segments are array/oneOf indices).</summary>
+    private static string? KeywordFrom(string schemaPath) =>
+        schemaPath.Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .LastOrDefault(segment => !int.TryParse(segment, out _));
+
+    private static string PointerOrRoot(string? pointer) => string.IsNullOrEmpty(pointer) ? "/" : pointer;
 
     private static List<DescriptorValidationError> SemanticErrors(JsonElement root)
     {

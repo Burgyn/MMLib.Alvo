@@ -101,6 +101,18 @@ public sealed class SchemaMigrationRunnerTests
         DestructiveChangeGuard.Describe(result.Plan).ShouldContain("vehicles.license_plate");
     }
 
+    [Fact]
+    public async Task Invalid_descriptor_throws_before_parsing()
+    {
+        _source.LoadAsync(Arg.Any<CancellationToken>()).Returns("""{ "apiVersion": "alvo.dev/v1", "entities": {} }""");
+
+        await Should.ThrowAsync<DescriptorValidationException>(
+            () => _runner.RunAsync(new MigrationOptions(), TestContext.Current.CancellationToken));
+
+        await _introspector.DidNotReceive().IntrospectAsync(Arg.Any<CancellationToken>());
+        await _store.DidNotReceive().SaveAsync(Arg.Any<string>(), Arg.Any<AppliedSchema>(), Arg.Any<CancellationToken>());
+    }
+
     private static SchemaModel MapFleetDescriptor()
         => DescriptorToSchemaMapper.Map(AlvoDescriptor.Parse(FleetDescriptorJson));
 
