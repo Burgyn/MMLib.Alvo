@@ -21,11 +21,13 @@ public static class AlvoPostgreSqlBuilderExtensions
     /// <remarks>
     /// Registered as singletons: each service owns one ADO.NET connection for the lifetime of the
     /// container. The underlying EF-backed migrator opens its connection once and leaves it open
-    /// for the transaction it runs; neither it nor the introspector implements
-    /// <see cref="IDisposable"/>, so a shorter-than-singleton lifetime would leak a connection
-    /// every time the container disposes a scope instead of closing it. Schema migration is an
-    /// administrative operation invoked rarely — never per-request — so a single long-lived
-    /// connection per service is the appropriate shape here, not a scoped or transient one.
+    /// for the transaction it runs. Both the migrator and the introspector implement
+    /// <see cref="IDisposable"/> and release their connection when the container disposes them —
+    /// which only happens at container shutdown for a singleton, so a shorter-than-singleton
+    /// lifetime would still churn a connection open/close every time the container disposes a
+    /// scope instead of closing it. Schema migration is an administrative operation invoked
+    /// rarely — never per-request — so a single long-lived connection per service is the
+    /// appropriate shape here, not a scoped or transient one.
     /// </remarks>
     public static IAlvoBuilder UsePostgreSql(this IAlvoBuilder builder, string connectionString)
     {

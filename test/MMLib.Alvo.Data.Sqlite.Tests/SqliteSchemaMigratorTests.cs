@@ -32,9 +32,16 @@ public sealed class SqliteSchemaMigratorTests : SchemaMigratorContractTests, IDi
     {
         _services.Dispose();
 
-        if (File.Exists(_databasePath))
+        // Best-effort: the migrator/introspector dispose their (pooling-disabled) connections
+        // above, which is what actually releases the OS file handle. This is still a temp file
+        // either way, so a stray lock (e.g. an antivirus scan on Windows) should not fail the test
+        // — the OS reclaims temp files regardless.
+        try
         {
             File.Delete(_databasePath);
+        }
+        catch (IOException)
+        {
         }
 
         GC.SuppressFinalize(this);

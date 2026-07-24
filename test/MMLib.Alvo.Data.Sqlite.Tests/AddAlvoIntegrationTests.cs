@@ -17,9 +17,17 @@ public sealed class AddAlvoIntegrationTests : IDisposable
 
     public void Dispose()
     {
-        if (File.Exists(_databasePath))
+        // Best-effort: the test method disposes its ServiceProvider (via `using var sp`) before
+        // returning, which disposes the migrator/introspector and releases their (pooling-disabled)
+        // connection — that is what actually releases the OS file handle, well before this method
+        // runs. This is still a temp file either way, so a stray lock should not fail the test — the
+        // OS reclaims temp files regardless.
+        try
         {
             File.Delete(_databasePath);
+        }
+        catch (IOException)
+        {
         }
 
         GC.SuppressFinalize(this);

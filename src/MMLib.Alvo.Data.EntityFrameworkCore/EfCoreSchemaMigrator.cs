@@ -23,7 +23,8 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// (SQLite/PostgreSQL packages), so this type only depends on EFCore.Relational abstractions and
 /// stays provider-agnostic. The <see cref="DbConnection"/> is likewise provider-supplied: plain
 /// ADO.NET is enough to execute the already-generated SQL, so no relational-command infrastructure
-/// is needed here.
+/// is needed here. The provider constructs that connection solely to hand it to this instance, so
+/// this type owns it and disposes it in <see cref="Dispose"/>.
 ///
 /// <para>
 /// <see cref="ApplyAsync"/> serializes its connection-touching work within one instance (an
@@ -44,6 +45,8 @@ internal sealed class EfCoreSchemaMigrator : ISchemaMigrator, IDisposable
 
     // TODO(PR-B): replace this single shared connection with a per-call connection (factory)
     // once runtime concurrent schema changes need real parallelism instead of serialization.
+    // Owned by this instance (the provider constructs it solely to hand it to us) — disposed
+    // alongside the gate; see Dispose().
     private readonly DbConnection _connection;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
@@ -193,8 +196,13 @@ internal sealed class EfCoreSchemaMigrator : ISchemaMigrator, IDisposable
     }
 
     /// <summary>
-    /// Disposes the internal serialization gate. The provider-supplied <see cref="DbConnection"/>
-    /// is not owned by this type (see the field's TODO) and is left untouched.
+    /// Disposes the internal serialization gate and the provider-supplied <see cref="DbConnection"/>
+    /// this instance owns, releasing (e.g.) the underlying file handle deterministically instead of
+    /// relying on process exit or connection-pool finalization.
     /// </summary>
-    public void Dispose() => _gate.Dispose();
+    public void Dispose()
+    {
+        _gate.Dispose();
+        _connection.Dispose();
+    }
 }

@@ -19,8 +19,14 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// and foreign keys. The optional <c>excludedTableName</c> keeps Alvo's own bookkeeping table
 /// (<see cref="SystemSchemaInitializer.AppliedSchemaTableName"/>) out of the introspected schema —
 /// without it, the code-first diff would see its own applied-schema table as a rogue user entity.
+///
+/// <para>
+/// The provider constructs the <see cref="DbConnection"/> solely to hand it to this instance, so
+/// this type owns it and implements <see cref="IDisposable"/> to release it deterministically
+/// (e.g. the underlying file handle on SQLite) instead of relying on process exit.
+/// </para>
 /// </remarks>
-internal sealed class EfCoreSchemaIntrospector : ISchemaIntrospector
+internal sealed class EfCoreSchemaIntrospector : ISchemaIntrospector, IDisposable
 {
     private readonly IDatabaseModelFactory _databaseModelFactory;
     private readonly DbConnection _connection;
@@ -49,6 +55,9 @@ internal sealed class EfCoreSchemaIntrospector : ISchemaIntrospector
 
         return Task.FromResult(new SchemaModel(entities));
     }
+
+    /// <summary>Disposes the provider-supplied <see cref="DbConnection"/> this instance owns.</summary>
+    public void Dispose() => _connection.Dispose();
 
     private static EntitySchema ToEntitySchema(DatabaseTable table)
     {

@@ -44,7 +44,7 @@ internal static class SqliteMigrationServices
             context.GetService<IMigrationsSqlGenerator>(),
             context.GetService<IModelRuntimeInitializer>(),
             () => new ModelBuilder(SqliteConventionSetBuilder.Build()),
-            new SqliteConnection(connectionString));
+            new SqliteConnection(WithoutPooling(connectionString)));
     }
 
     public static EfCoreSchemaIntrospector CreateIntrospector(string connectionString, string schemaPrefix)
@@ -65,7 +65,7 @@ internal static class SqliteMigrationServices
 
         return new EfCoreSchemaIntrospector(
             databaseModelFactory,
-            new SqliteConnection(connectionString),
+            new SqliteConnection(WithoutPooling(connectionString)),
             SystemSchemaInitializer.AppliedSchemaTableName(schemaPrefix));
     }
 
@@ -74,4 +74,16 @@ internal static class SqliteMigrationServices
 
     private static DbContextOptions BuildOptions(string connectionString) =>
         new DbContextOptionsBuilder().UseSqlite(connectionString).Options;
+
+    // The migrator and introspector each own one long-lived connection for the container's
+    // lifetime and dispose it deterministically (see EfCoreSchemaMigrator.Dispose /
+    // EfCoreSchemaIntrospector.Dispose). Microsoft.Data.Sqlite pools connections by default, which
+    // keeps the underlying file handle alive even after Dispose() — on Windows that leaves the
+    // .db file locked (delete fails with IOException) until the pool itself is cleared. Disabling
+    // pooling for these two administrative connections releases the file handle on Dispose(),
+    // which is what a caller (e.g. a test deleting the file right after) needs. This is not a
+    // hot path, so the per-connection setup cost pooling would normally amortize is irrelevant
+    // here.
+    private static string WithoutPooling(string connectionString) =>
+        new SqliteConnectionStringBuilder(connectionString) { Pooling = false }.ToString();
 }
