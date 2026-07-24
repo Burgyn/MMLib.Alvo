@@ -45,14 +45,18 @@ public sealed class RuntimeSchemaService
     /// <exception cref="DescriptorValidationException"><paramref name="descriptorJson"/> is invalid.</exception>
     /// <exception cref="DestructiveChangeNotAllowedException">The plan is destructive and <see cref="MigrationOptions.AllowDestructive"/> is <see langword="false"/>.</exception>
     /// <exception cref="DescriptorConcurrencyException"><paramref name="expectedRevision"/> lost the optimistic-lock race.</exception>
+    /// <exception cref="NotSupportedException"><see cref="MigrationOptions.DryRun"/> is <see langword="true"/>; the runtime path has no dry-run.</exception>
     public async Task<DescriptorVersion> ApplyAsync(string project, string descriptorJson, int expectedRevision, MigrationOptions options, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(project);
         ArgumentNullException.ThrowIfNull(options);
+        RejectDryRun(options);
 
         Validate(descriptorJson);
         var desired = DescriptorToSchemaMapper.Map(AlvoDescriptor.Parse(descriptorJson));
-        var (currentSchema, currentRevision) = await CurrentVersionAsync(project, ct).ConfigureAwait(false);
+        var current = await _store.GetCurrentAsync(project, ct).ConfigureAwait(false);
+        var currentSchema = current?.Schema ?? new SchemaModel([]);
+        var currentRevision = current?.Revision ?? 0;
         if (currentRevision != expectedRevision)
         {
             // Fail fast on staleness BEFORE planning: planning against the store's actual current
@@ -69,6 +73,17 @@ public sealed class RuntimeSchemaService
         var plan = await _migrator.PlanAsync(currentSchema, desired, options, ct).ConfigureAwait(false);
         Guard(project, plan, options);
 
+        if (plan.IsEmpty && current is not null)
+        {
+            // Idempotent re-apply of an unchanged descriptor, mirroring the code-first runner's
+            // plan.IsEmpty no-op: nothing to append, and the optimistic-lock head must not advance
+            // just because the caller resubmitted the same schema. Only skip the writer when a prior
+            // version already exists — a fresh project (current is null) whose desired schema happens
+            // to plan empty (e.g. an entity-less descriptor) still gets its rev-1 baseline appended
+            // below, so ApplyAsync's Task<DescriptorVersion> contract never has to return null.
+            return current;
+        }
+
         var candidate = new DescriptorVersion(desired, descriptorJson, 0, DateTimeOffset.UtcNow, options.Author, options.Reason);
         return await _writer.ApplyAndAppendAsync(project, plan, candidate, expectedRevision, options, ct).ConfigureAwait(false);
     }
@@ -82,10 +97,12 @@ public sealed class RuntimeSchemaService
     /// <exception cref="InvalidOperationException"><paramref name="targetRevision"/> does not exist, or the project has no applied schema to roll back.</exception>
     /// <exception cref="DestructiveChangeNotAllowedException">The plan is destructive and <see cref="MigrationOptions.AllowDestructive"/> is <see langword="false"/>.</exception>
     /// <exception cref="DescriptorConcurrencyException">The current revision changed concurrently, losing the optimistic-lock race.</exception>
+    /// <exception cref="NotSupportedException"><see cref="MigrationOptions.DryRun"/> is <see langword="true"/>; the runtime path has no dry-run.</exception>
     public async Task<DescriptorVersion> RollbackAsync(string project, int targetRevision, MigrationOptions options, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(project);
         ArgumentNullException.ThrowIfNull(options);
+        RejectDryRun(options);
 
         var target = await _store.GetAsync(project, targetRevision, ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"Project '{project}' has no revision {targetRevision} to roll back to.");
@@ -118,9 +135,17 @@ public sealed class RuntimeSchemaService
         }
     }
 
-    private async Task<(SchemaModel Schema, int Revision)> CurrentVersionAsync(string project, CancellationToken ct)
+    // The runtime path has no dry-run: the atomic IRuntimeSchemaWriter applies and appends in one
+    // step, so there is no seam to preview from without actually mutating. Reject up front rather
+    // than silently ignoring the flag (which would surprise a caller expecting a no-op preview).
+    private static void RejectDryRun(MigrationOptions options)
     {
-        var current = await _store.GetCurrentAsync(project, ct).ConfigureAwait(false);
-        return (current?.Schema ?? new SchemaModel([]), current?.Revision ?? 0);
+        if (options.DryRun)
+        {
+            throw new NotSupportedException(
+                "Runtime schema apply does not support dry-run (MigrationOptions.DryRun). " +
+                "Preview is not available on the runtime path; inspect the plan via a plan-only " +
+                "operation, or use the code-first path for dry-run.");
+        }
     }
 }

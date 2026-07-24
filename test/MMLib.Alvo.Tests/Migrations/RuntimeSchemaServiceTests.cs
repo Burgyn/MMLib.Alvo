@@ -142,12 +142,53 @@ public sealed class RuntimeSchemaServiceTests
             () => service.RollbackAsync("demo", targetRevision: 1, new MigrationOptions(), TestContext.Current.CancellationToken));
     }
 
+    [Fact]
+    public async Task Apply_with_DryRun_is_rejected_and_appends_nothing()
+    {
+        var store = new InMemoryDescriptorVersionStore();
+        var service = CreateService(store);
+
+        await Should.ThrowAsync<NotSupportedException>(
+            () => service.ApplyAsync("demo", TasksV1, 0, new MigrationOptions { DryRun = true }, TestContext.Current.CancellationToken));
+
+        (await store.ListAsync("demo", TestContext.Current.CancellationToken)).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Rollback_with_DryRun_is_rejected_and_appends_nothing()
+    {
+        var store = new InMemoryDescriptorVersionStore();
+        var service = CreateService(store);
+        await service.ApplyAsync("demo", TasksV1, 0, new MigrationOptions(), TestContext.Current.CancellationToken);
+        await service.ApplyAsync("demo", TasksV2, 1, new MigrationOptions(), TestContext.Current.CancellationToken);
+
+        await Should.ThrowAsync<NotSupportedException>(
+            () => service.RollbackAsync("demo", targetRevision: 1, new MigrationOptions { DryRun = true }, TestContext.Current.CancellationToken));
+
+        (await store.ListAsync("demo", TestContext.Current.CancellationToken)).Count.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task Apply_of_unchanged_descriptor_is_a_no_op()
+    {
+        var store = new InMemoryDescriptorVersionStore();
+        var service = CreateService(store);
+        var first = await service.ApplyAsync("demo", TasksV1, 0, new MigrationOptions(), TestContext.Current.CancellationToken);
+
+        var second = await service.ApplyAsync("demo", TasksV1, expectedRevision: 1, new MigrationOptions(), TestContext.Current.CancellationToken);
+
+        second.ShouldBe(first);
+        second.Revision.ShouldBe(1);
+        (await store.ListAsync("demo", TestContext.Current.CancellationToken)).Count.ShouldBe(1);
+    }
+
     // IMPORTANT: the same InMemoryDescriptorVersionStore instance is passed both to the writer
     // fake (which delegates its append there) and to the service (as its version-history read
     // port) — otherwise the writer's appends would be invisible to the service's own reads.
-    private static RuntimeSchemaService CreateService()
+    private static RuntimeSchemaService CreateService() => CreateService(new InMemoryDescriptorVersionStore());
+
+    private static RuntimeSchemaService CreateService(InMemoryDescriptorVersionStore store)
     {
-        var store = new InMemoryDescriptorVersionStore();
         var writer = new InMemoryRuntimeSchemaWriter(store);
         var migrator = new InMemorySchemaMigrator();
         var validator = new DescriptorValidator();

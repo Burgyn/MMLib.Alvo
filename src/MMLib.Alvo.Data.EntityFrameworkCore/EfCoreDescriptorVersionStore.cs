@@ -143,6 +143,9 @@ internal sealed class EfCoreDescriptorVersionStore : IDescriptorVersionStore, IA
         var command = connection.CreateCommand();
         await using (command.ConfigureAwait(false))
         {
+            // TODO: ORDER BY ... LIMIT 1 is SQLite/PostgreSQL syntax. Azure SQL (a named §0
+            // engine-agnostic target) has no LIMIT — when that provider lands, this needs a
+            // portable fetch instead (e.g. a MAX(revision) subquery join, or OFFSET ... FETCH NEXT).
             command.CommandText = revision is null
                 ? $"SELECT {SelectColumns} FROM {TableName} WHERE project = @project ORDER BY revision DESC LIMIT 1"
                 : $"SELECT {SelectColumns} FROM {TableName} WHERE project = @project AND revision = @revision";
