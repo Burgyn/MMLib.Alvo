@@ -52,8 +52,21 @@ public sealed class RuntimeSchemaService
 
         Validate(descriptorJson);
         var desired = DescriptorToSchemaMapper.Map(AlvoDescriptor.Parse(descriptorJson));
-        var current = await CurrentSchemaAsync(project, ct).ConfigureAwait(false);
-        var plan = await _migrator.PlanAsync(current, desired, options, ct).ConfigureAwait(false);
+        var (currentSchema, currentRevision) = await CurrentVersionAsync(project, ct).ConfigureAwait(false);
+        if (currentRevision != expectedRevision)
+        {
+            // Fail fast on staleness BEFORE planning: planning against the store's actual current
+            // (which the caller's expectedRevision no longer matches — either a plain stale caller,
+            // or the other side of a genuine race that already committed) would diff the desired
+            // schema against a base the caller never saw. That diff can misclassify as destructive
+            // (e.g. two unrelated single-field additions look like a drop+add) and surface the wrong
+            // exception type, or — worse — silently apply an unintended diff when AllowDestructive is
+            // set. The writer's own optimistic-lock check still guards the true, narrower race between
+            // this read and the atomic append below.
+            throw new DescriptorConcurrencyException(project, expectedRevision, currentRevision);
+        }
+
+        var plan = await _migrator.PlanAsync(currentSchema, desired, options, ct).ConfigureAwait(false);
         Guard(project, plan, options);
 
         var candidate = new DescriptorVersion(desired, descriptorJson, 0, DateTimeOffset.UtcNow, options.Author, options.Reason);
@@ -105,9 +118,9 @@ public sealed class RuntimeSchemaService
         }
     }
 
-    private async Task<SchemaModel> CurrentSchemaAsync(string project, CancellationToken ct)
+    private async Task<(SchemaModel Schema, int Revision)> CurrentVersionAsync(string project, CancellationToken ct)
     {
         var current = await _store.GetCurrentAsync(project, ct).ConfigureAwait(false);
-        return current?.Schema ?? new SchemaModel([]);
+        return (current?.Schema ?? new SchemaModel([]), current?.Revision ?? 0);
     }
 }
