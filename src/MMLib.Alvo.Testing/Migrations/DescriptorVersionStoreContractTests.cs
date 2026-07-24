@@ -72,4 +72,16 @@ public abstract class DescriptorVersionStoreContractTests
 
         (await store.GetAsync("p", 1))!.DescriptorJson.ShouldContain("\"v\":1");
     }
+
+    /// <summary>Unknown project/revision lookups must return <see langword="null"/>, never throw.</summary>
+    [Fact]
+    public async Task Unknown_project_or_revision_returns_null()
+    {
+        EnsureEngineAvailable();
+        var store = CreateStore();
+        await store.AppendAsync("p", Candidate(), 0);
+
+        (await store.GetCurrentAsync("unknown-project")).ShouldBeNull();
+        (await store.GetAsync("p", revision: 99)).ShouldBeNull();
+    }
 }

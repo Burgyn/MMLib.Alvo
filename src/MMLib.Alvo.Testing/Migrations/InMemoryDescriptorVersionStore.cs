@@ -6,6 +6,10 @@ namespace MMLib.Alvo.Testing.Migrations;
 public sealed class InMemoryDescriptorVersionStore : IDescriptorVersionStore
 {
     private readonly Dictionary<string, List<DescriptorVersion>> _history = new(StringComparer.Ordinal);
+
+    // Single global lock serializes access across ALL projects, not just the one being touched.
+    // A deliberate test-fake simplification (correctness over throughput) — NOT a template for the
+    // real EF Core-backed store, which must use per-project DB-level conditional writes instead.
     private readonly Lock _gate = new();
 
     /// <inheritdoc/>

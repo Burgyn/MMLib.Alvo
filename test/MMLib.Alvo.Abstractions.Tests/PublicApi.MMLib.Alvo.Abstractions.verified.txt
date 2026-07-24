@@ -463,6 +463,9 @@ namespace MMLib.Alvo.Migrations
     }
     public sealed class DescriptorConcurrencyException : System.Exception
     {
+        public DescriptorConcurrencyException() { }
+        public DescriptorConcurrencyException(string message) { }
+        public DescriptorConcurrencyException(string message, System.Exception innerException) { }
         public DescriptorConcurrencyException(string project, int expectedRevision, int actualRevision) { }
         public int ActualRevision { get; }
         public int ExpectedRevision { get; }
