@@ -190,6 +190,54 @@ public sealed class RuntimeSchemaServiceTests
     }
 
     [Fact]
+    public async Task Apply_carries_author_and_reason_into_the_appended_version()
+    {
+        var service = CreateService();
+
+        var v1 = await service.ApplyAsync(
+            "demo", TasksV1, expectedRevision: 0,
+            new MigrationOptions { Author = "agent-1", Reason = "initial schema" },
+            TestContext.Current.CancellationToken);
+
+        v1.Author.ShouldBe("agent-1");
+        v1.Reason.ShouldBe("initial schema");
+    }
+
+    [Fact]
+    public async Task Apply_of_a_fresh_project_with_an_empty_plan_still_appends_revision_1()
+    {
+        // "entities" requires at least one key, but a dynamic-storage entity is filtered out of the
+        // mapped SchemaModel (DescriptorToSchemaMapper only maps physical entities) — so this still
+        // maps to an empty schema, and a diff against the empty current schema is a true no-op plan.
+        var emptyDescriptor = """
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "notes": { "storage": "dynamic", "fields": { "text": { "type": "string" } } } } }
+        """;
+        var store = new InMemoryDescriptorVersionStore();
+        var service = CreateService(store);
+
+        var v1 = await service.ApplyAsync("demo", emptyDescriptor, expectedRevision: 0, new MigrationOptions(), TestContext.Current.CancellationToken);
+
+        v1.Revision.ShouldBe(1);
+        (await store.ListAsync("demo", TestContext.Current.CancellationToken)).Count.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Rollback_preserves_an_explicit_reason_instead_of_the_default_message()
+    {
+        var service = CreateService();
+        await service.ApplyAsync("demo", TasksV1, 0, new MigrationOptions(), TestContext.Current.CancellationToken);
+        await service.ApplyAsync("demo", TasksV1WithExtra, 1, new MigrationOptions(), TestContext.Current.CancellationToken);
+
+        var reverted = await service.RollbackAsync(
+            "demo", targetRevision: 1,
+            new MigrationOptions { AllowDestructive = true, Reason = "reverting a bad deploy" },
+            TestContext.Current.CancellationToken);
+
+        reverted.Reason.ShouldBe("reverting a bad deploy");
+    }
+
+    [Fact]
     public async Task Apply_with_DryRun_is_rejected_and_appends_nothing()
     {
         var store = new InMemoryDescriptorVersionStore();

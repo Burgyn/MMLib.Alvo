@@ -80,4 +80,121 @@ public class DescriptorToSchemaMapperTests
         ex.Message.ShouldContain("computed");
         ex.Message.ShouldContain("#21");
     }
+
+    private static SchemaModel MapInline(string descriptorJson)
+        => DescriptorToSchemaMapper.Map(AlvoDescriptor.Parse(descriptorJson));
+
+    private static RefSchema RefOf(SchemaModel model, string entity = "orders", string field = "target")
+        => model.Entities.Single(e => e.Name == entity).Fields.Single(f => f.Name == field).Reference
+            ?? throw new InvalidOperationException("Field has no reference.");
+
+    [Theory]
+    [InlineData("cascade", OnDelete.Cascade)]
+    [InlineData("setNull", OnDelete.SetNull)]
+    [InlineData("restrict", OnDelete.Restrict)]
+    public void MapOnDelete_maps_every_explicit_action(string onDelete, OnDelete expected)
+    {
+        var json = $$"""
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": {
+            "targets": { "fields": { "name": { "type": "string" } } },
+            "orders": { "fields": {
+              "target": { "type": "ref", "entity": "targets", "onDelete": "{{onDelete}}" } } } } }
+        """;
+
+        RefOf(MapInline(json)).OnDelete.ShouldBe(expected);
+    }
+
+    [Fact]
+    public void MapOnDelete_defaults_to_restrict_when_absent()
+    {
+        var json = """
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": {
+            "targets": { "fields": { "name": { "type": "string" } } },
+            "orders": { "fields": {
+              "target": { "type": "ref", "entity": "targets" } } } } }
+        """;
+
+        RefOf(MapInline(json)).OnDelete.ShouldBe(OnDelete.Restrict);
+    }
+
+    [Theory]
+    [InlineData("string", FieldType.String)]
+    [InlineData("text", FieldType.Text)]
+    [InlineData("integer", FieldType.Integer)]
+    [InlineData("boolean", FieldType.Boolean)]
+    [InlineData("date", FieldType.Date)]
+    [InlineData("datetime", FieldType.DateTime)]
+    [InlineData("uuid", FieldType.Uuid)]
+    [InlineData("json", FieldType.Json)]
+    public void MapType_maps_every_simple_field_type(string descriptorType, FieldType expected)
+    {
+        var json = $$"""
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "widgets": { "fields": { "value": { "type": "{{descriptorType}}" } } } } }
+        """;
+
+        var field = MapInline(json).Entities.Single(e => e.Name == "widgets").Fields.Single(f => f.Name == "value");
+        field.Type.ShouldBe(expected);
+    }
+
+    [Fact]
+    public void MapType_maps_enum_and_carries_its_values()
+    {
+        var json = """
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "tasks": { "fields": {
+            "priority": { "type": "enum", "values": ["low", "high"] } } } } }
+        """;
+
+        var field = MapInline(json).Entities.Single(e => e.Name == "tasks").Fields.Single(f => f.Name == "priority");
+        field.Type.ShouldBe(FieldType.Enum);
+        field.EnumValues.ShouldBe(["low", "high"]);
+    }
+
+    [Fact]
+    public void ResolveTenancy_entity_scoped_override_applies_even_when_project_tenancy_is_disabled()
+    {
+        var json = """
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "orders": { "tenancy": "scoped", "fields": { "name": { "type": "string" } } } } }
+        """;
+
+        var orders = MapInline(json).Entities.Single(e => e.Name == "orders");
+
+        orders.Tenancy.ShouldBe(TenancyMode.Scoped);
+        orders.Fields.ShouldContain(f => f.Name == "tenant_id");
+    }
+
+    [Fact]
+    public void ResolveTenancy_entity_global_override_applies_even_when_project_tenancy_is_enabled()
+    {
+        var json = """
+        { "apiVersion": "alvo.dev/v1", "name": "demo", "tenancy": { "enabled": true },
+          "entities": {
+            "countries": { "tenancy": "global", "fields": { "name": { "type": "string" } } },
+            "orders": { "fields": { "name": { "type": "string" } } } } }
+        """;
+
+        var model = MapInline(json);
+
+        model.Entities.Single(e => e.Name == "countries").Tenancy.ShouldBe(TenancyMode.Global);
+        model.Entities.Single(e => e.Name == "countries").Fields.ShouldNotContain(f => f.Name == "tenant_id");
+        model.Entities.Single(e => e.Name == "orders").Tenancy.ShouldBe(TenancyMode.Scoped);
+    }
+
+    [Fact]
+    public void ResolveTenancy_is_null_when_neither_project_nor_entity_declares_tenancy()
+    {
+        var json = """
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "orders": { "fields": { "name": { "type": "string" } } } } }
+        """;
+
+        var orders = MapInline(json).Entities.Single(e => e.Name == "orders");
+
+        orders.Tenancy.ShouldBeNull();
+        orders.Fields.ShouldNotContain(f => f.Name == "tenant_id");
+    }
 }

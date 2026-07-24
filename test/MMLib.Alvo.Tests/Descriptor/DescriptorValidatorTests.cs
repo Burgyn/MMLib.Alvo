@@ -113,4 +113,35 @@ public class DescriptorValidatorTests
         nameError.FixSuggestion.ShouldNotBe(apiVersionError.FixSuggestion);
         nameError.FixSuggestion.ShouldContain("required");
     }
+
+    [Fact]
+    public void Keywordless_schema_violation_falls_back_to_a_generic_message()
+    {
+        // additionalProperties:false has no per-property message from Corvus — this exercises the
+        // "Value does not satisfy the schema at ..." fallback in ToError/FixSuggestionFor, not the
+        // keyword-supplied message path the other tests hit.
+        var json = """
+        { "apiVersion": "alvo.dev/v1", "name": "demo", "entities": { "tasks": { "fields": { "title": { "type": "string" } } } },
+          "unknownTopLevel": 1 }
+        """;
+
+        var result = _validator.Validate(json);
+
+        var error = result.Errors.Single(e => e.Path.Contains("unknownTopLevel"));
+        error.Message.ShouldBe("Value does not satisfy the schema at '#/additionalProperties/unknownTopLevel'.");
+        error.FixSuggestion.ShouldNotBeNull().ShouldContain("'unknownTopLevel'");
+    }
+
+    [Fact]
+    public void Multiple_simultaneous_schema_violations_are_all_reported_distinctly()
+    {
+        var json = """{ "apiVersion": "alvo.dev/v2", "entities": {} }""";
+
+        var result = _validator.Validate(json);
+
+        result.Errors.Count.ShouldBeGreaterThanOrEqualTo(2);
+        result.Errors.ShouldContain(e => e.Path.Contains("apiVersion"));
+        result.Errors.ShouldContain(e => e.Path.Contains("entities"));
+        result.Errors.Select(e => e.Message).Distinct().Count().ShouldBe(result.Errors.Count);
+    }
 }
