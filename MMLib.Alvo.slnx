@@ -11,6 +11,7 @@
     <Project Path="test/MMLib.Alvo.Abstractions.Tests/MMLib.Alvo.Abstractions.Tests.csproj" />
     <Project Path="test/MMLib.Alvo.Conventions.Tests/MMLib.Alvo.Conventions.Tests.csproj" />
     <Project Path="test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/MMLib.Alvo.Data.EntityFrameworkCore.Tests.csproj" />
+    <Project Path="test/MMLib.Alvo.Data.PostgreSql.Tests/MMLib.Alvo.Data.PostgreSql.Tests.csproj" />
     <Project Path="test/MMLib.Alvo.Data.PostgreSql.Tests.Integration/MMLib.Alvo.Data.PostgreSql.Tests.Integration.csproj" />
     <Project Path="test/MMLib.Alvo.Data.Sqlite.Tests/MMLib.Alvo.Data.Sqlite.Tests.csproj" />
     <Project Path="test/MMLib.Alvo.Schema.Tests/MMLib.Alvo.Schema.Tests.csproj" />

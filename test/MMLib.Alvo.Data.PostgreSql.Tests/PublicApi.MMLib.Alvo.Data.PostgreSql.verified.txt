@@ -2,8 +2,8 @@
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace Microsoft.Extensions.DependencyInjection
 {
-    public static class AlvoSqliteBuilderExtensions
+    public static class AlvoPostgreSqlBuilderExtensions
     {
-        public static MMLib.Alvo.IAlvoBuilder UseSqlite(this MMLib.Alvo.IAlvoBuilder builder, string connectionString) { }
+        public static MMLib.Alvo.IAlvoBuilder UsePostgreSql(this MMLib.Alvo.IAlvoBuilder builder, string connectionString) { }
     }
 }
