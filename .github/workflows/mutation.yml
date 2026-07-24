@@ -1,8 +1,17 @@
 name: Mutation
 
 # Mutation testing of the security core (rule engine, CEL, tenancy). Path-filtered
-# so it runs only when the core changes — and the core does not exist yet (F3),
-# so today this workflow never triggers. The guard step is a second safety net.
+# so it runs only when the core changes. The core exists as of F3
+# (src/MMLib.Alvo) and this workflow triggers on every PR that touches it — the
+# guard step below is a second safety net for the (now rare) case the project
+# is absent, not the primary reason this job might not run.
+#
+# stryker-config.json pins `test-runner: mtp` because Stryker 4.16's default
+# VSTest-based test runner cannot discover tests in xUnit v3 projects built for
+# Microsoft.Testing.Platform (our primary runner — see global.json) and
+# silently tests zero mutants (stryker-net#3094). The "Mutation test" step
+# below fails loudly if that ever regresses (e.g. a Stryker/xUnit update
+# reintroduces it) instead of reporting a false green.
 on:
   pull_request:
     paths:
@@ -39,7 +48,7 @@ jobs:
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "No security core project yet — skipping mutation (activates in F3)."
+            echo "No security core project yet — skipping mutation."
           fi
 
       - name: Restore tools
@@ -48,4 +57,21 @@ jobs:
 
       - name: Mutation test
         if: steps.guard.outputs.run == 'true'
-        run: dotnet tool run dotnet-stryker
+        shell: bash
+        run: |
+          set -o pipefail
+          dotnet tool run dotnet-stryker 2>&1 | tee stryker-output.log
+          stryker_exit="${PIPESTATUS[0]}"
+
+          # Fail loud instead of showing a false green: a run that discovered
+          # or tested zero mutants is not a passing run, it's a broken one.
+          # See stryker-net#3094 — Stryker's VSTest-based runner can regress
+          # to this on an xUnit v3 / MTP test project even with `test-runner:
+          # mtp` configured (e.g. a tool upgrade, or a new test project that
+          # isn't MTP-compatible).
+          if grep -qE '0 total mutants will be tested|unable to calculate a mutation score|Number of tests found: 0' stryker-output.log; then
+            echo "::error::Mutation run tested zero mutants (vacuous run) — see stryker-output.log above. Failing the gate instead of a false green (stryker-net#3094)."
+            exit 1
+          fi
+
+          exit "$stryker_exit"
