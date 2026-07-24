@@ -1,0 +1,19 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/Burgyn/MMLib.Alvo")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace MMLib.Alvo.Data.Sqlite
+{
+    public sealed class SqliteProviderOptions
+    {
+        public SqliteProviderOptions() { }
+        public string? ConnectionString { get; set; }
+    }
+}
+namespace Microsoft.Extensions.DependencyInjection
+{
+    public static class AlvoSqliteBuilderExtensions
+    {
+        public static MMLib.Alvo.IAlvoBuilder UseSqlite(this MMLib.Alvo.IAlvoBuilder builder, System.Action<MMLib.Alvo.Data.Sqlite.SqliteProviderOptions> configure) { }
+        public static MMLib.Alvo.IAlvoBuilder UseSqlite(this MMLib.Alvo.IAlvoBuilder builder, string connectionString) { }
+        public static MMLib.Alvo.IAlvoBuilder UseSqlite(this MMLib.Alvo.IAlvoBuilder builder, string connectionString, System.Action<MMLib.Alvo.Data.Sqlite.SqliteProviderOptions> configure) { }
+    }
+}

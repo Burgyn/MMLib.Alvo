@@ -19,6 +19,19 @@ isolated from each other. It does **not** decide package splits (that is
 `package-boundary.md`) and it never justifies one: a vertical slice is a
 namespace, not a project.
 
+**VSA (the REPR pattern) governs request-triggered operations — not every
+file.** A slice is the shape for code *triggered* through a single entry (an
+HTTP route, a message, a schedule): the Management API operations, automation
+and webhook dispatch, the custom endpoints an embedded host adds. Framework
+**mechanisms** — engines, ports, registries, mappers, the data pipeline — are
+not triggered operations; they are organized by **capability/subsystem** (a
+feature namespace with a public contract + `Internal/`, the .NET-framework
+style, e.g. EF Core's `Migrations`/`Metadata`/`Storage`), *not* sliced
+per-operation. Decision rule: triggered through one entry → slice; a mechanism
+other code calls → capability namespace. How such a mechanism *attaches* to the
+framework (its builder/DI/options/provider wiring) is
+[`extensibility.md`](./extensibility.md).
+
 **Why this, and why now.** Alvo is greenfield — there is no legacy layer to
 migrate and no dominant in-house pattern to unlearn. The risk is the opposite:
 the default .NET tutorial muscle-memory is *layer-by-type*

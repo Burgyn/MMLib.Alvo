@@ -1,0 +1,32 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/Burgyn/MMLib.Alvo")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Data.EntityFrameworkCore.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace MMLib.Alvo.Data.EntityFrameworkCore
+{
+    public static class AlvoEfCoreProvider
+    {
+        public static MMLib.Alvo.IAlvoBuilder AddRelationalProvider(this MMLib.Alvo.IAlvoBuilder builder, MMLib.Alvo.Data.EntityFrameworkCore.RelationalProviderRegistration registration) { }
+    }
+    public sealed class EfCoreSchemaIntrospector : MMLib.Alvo.Schema.ISchemaIntrospector, System.IDisposable
+    {
+        public EfCoreSchemaIntrospector(Microsoft.EntityFrameworkCore.Scaffolding.IDatabaseModelFactory databaseModelFactory, System.Data.Common.DbConnection connection, string? excludedTableName = null) { }
+        public void Dispose() { }
+        public System.Threading.Tasks.Task<MMLib.Alvo.Schema.SchemaModel> IntrospectAsync(System.Threading.CancellationToken ct = default) { }
+    }
+    public sealed class EfCoreSchemaMigrator : MMLib.Alvo.Migrations.ISchemaMigrator, System.IDisposable
+    {
+        public EfCoreSchemaMigrator(Microsoft.EntityFrameworkCore.Migrations.IMigrationsModelDiffer differ, Microsoft.EntityFrameworkCore.Migrations.IMigrationsSqlGenerator sqlGenerator, Microsoft.EntityFrameworkCore.Infrastructure.IModelRuntimeInitializer modelRuntimeInitializer, System.Func<Microsoft.EntityFrameworkCore.ModelBuilder> newModelBuilder, System.Data.Common.DbConnection connection) { }
+        public System.Threading.Tasks.Task<MMLib.Alvo.Migrations.MigrationResult> ApplyAsync(MMLib.Alvo.Migrations.MigrationPlan plan, MMLib.Alvo.Migrations.MigrationOptions options, System.Threading.CancellationToken ct = default) { }
+        public void Dispose() { }
+        public System.Threading.Tasks.Task<MMLib.Alvo.Migrations.MigrationPlan> PlanAsync(MMLib.Alvo.Schema.SchemaModel current, MMLib.Alvo.Schema.SchemaModel desired, MMLib.Alvo.Migrations.MigrationOptions options, System.Threading.CancellationToken ct = default) { }
+    }
+    public sealed class RelationalProviderRegistration
+    {
+        public RelationalProviderRegistration() { }
+        public required System.Action<Microsoft.EntityFrameworkCore.DbContextOptionsBuilder, string> ConfigureProvider { get; init; }
+        public required System.Func<System.IServiceProvider, string> ConnectionString { get; init; }
+        public required System.Func<string, System.Data.Common.DbConnection> CreateConnection { get; init; }
+        public required System.Func<System.IServiceProvider, Microsoft.EntityFrameworkCore.Scaffolding.IDatabaseModelFactory> CreateDatabaseModelFactory { get; init; }
+        public required System.Func<Microsoft.EntityFrameworkCore.ModelBuilder> CreateModelBuilder { get; init; }
+    }
+}

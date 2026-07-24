@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Fast unit test project MMLib.Alvo.Data.PostgreSql.Tests (Task 17) hosts the
+       shared arch + public-API approval baseline; the Testcontainers integration
+       project (MMLib.Alvo.Data.PostgreSql.Tests.Integration) covers the provider
+       contract itself. Packable like every other shipped Data.* provider. -->
+  <PropertyGroup>
+    <!-- EF1001: NpgsqlDatabaseModelFactory is design-time-only and [EntityFrameworkInternal].
+         PostgreSqlMigrationServices constructs it directly (deliberate, see its ctor comment) to
+         avoid a Microsoft.EntityFrameworkCore.Design dependency in a shipped provider package. -->
+    <NoWarn>$(NoWarn);EF1001</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- EF1001: IDatabaseModelFactory is design-time-only and never registered by the runtime
+         UseSqlite pipeline, so EfCoreSchemaMigratorApplyTests bootstraps it the same way
+         dotnet-ef does — via DesignTimeServicesBuilder/OperationReporter, both flagged
+         [EntityFrameworkInternal]. Deliberate, test-only use; see that test's ctor comment. -->
+    <NoWarn>$(NoWarn);EF1001</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- SQLite conventions only, to drive DescriptorModelBuilder in tests. The
+         production Data.EntityFrameworkCore project stays provider-agnostic;
+         this reference is test-only. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+    <!-- Bootstraps SqliteDesignTimeServices reflectively (it's internal to the Sqlite
+         assembly) to resolve IDatabaseModelFactory for EfCoreSchemaIntrospector tests. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" />
+  </ItemGroup>
+
+</Project>
