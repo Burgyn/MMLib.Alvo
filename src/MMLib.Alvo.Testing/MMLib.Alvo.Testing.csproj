@@ -27,4 +27,14 @@
     <PackageReference Include="Shouldly" />
   </ItemGroup>
 
+  <!--
+    SchemaSqlSnapshotTests (the shared generated-SQL snapshot base) verifies
+    against Verify baselines, so this library needs Verify directly — the
+    project directory / class-name path derivation still comes from each
+    consuming test project's own VerifyModuleInit (test/_shared).
+  -->
+  <ItemGroup>
+    <PackageReference Include="Verify.XunitV3" />
+  </ItemGroup>
+
 </Project>
