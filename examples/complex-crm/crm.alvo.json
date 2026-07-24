@@ -173,8 +173,7 @@
         "gross_total": {
           "type": "decimal",
           "precision": 12,
-          "scale": 2,
-          "computed": "net_total + vat_total"
+          "scale": 2
         }
       },
       "rules": {
@@ -194,8 +193,7 @@
         "line_total": {
           "type": "decimal",
           "precision": 12,
-          "scale": 2,
-          "computed": "unit_price * amount"
+          "scale": 2
         }
       },
       "rules": {

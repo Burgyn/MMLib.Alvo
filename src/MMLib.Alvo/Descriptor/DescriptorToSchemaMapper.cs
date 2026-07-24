@@ -83,22 +83,32 @@ internal static class DescriptorToSchemaMapper
         _ => tenancyEnabled ? TenancyMode.Scoped : null,
     };
 
-    private static FieldSchema MapField(string name, FieldDescriptor f) => new()
+    private static FieldSchema MapField(string name, FieldDescriptor f)
     {
-        Name = name,
-        Type = MapType(f.Type),
-        RenamedFrom = f.RenamedFrom,
-        Required = f.Required == true,
-        Unique = f.Unique == true,
-        Nullable = f.Nullable ?? f.Required != true,
-        MaxLength = f.MaxLength,
-        Precision = f.Precision,
-        Scale = f.Scale,
-        EnumValues = f.Values,
-        Reference = f.Entity is null ? null : new RefSchema(f.Entity, MapOnDelete(f.OnDelete)),
-        Indexed = f.Index == true,
-        ComputedExpression = f.Computed,
-    };
+        if (f.Computed is not null)
+        {
+            throw new InvalidDataException(
+                $"Field '{name}' declares 'computed', which is not supported yet: computed fields " +
+                "require the CEL→SQL compiler arriving in #21. Remove 'computed' or track #21.");
+        }
+
+        return new()
+        {
+            Name = name,
+            Type = MapType(f.Type),
+            RenamedFrom = f.RenamedFrom,
+            Required = f.Required == true,
+            Unique = f.Unique == true,
+            Nullable = f.Nullable ?? f.Required != true,
+            MaxLength = f.MaxLength,
+            Precision = f.Precision,
+            Scale = f.Scale,
+            EnumValues = f.Values,
+            Reference = f.Entity is null ? null : new RefSchema(f.Entity, MapOnDelete(f.OnDelete)),
+            Indexed = f.Index == true,
+            // ComputedExpression intentionally not set — revived by #21 (CEL→SQL).
+        };
+    }
 
     private static SchemaFieldType MapType(FieldType t) => t switch
     {

@@ -54,4 +54,30 @@ public class DescriptorToSchemaMapperTests
         var m = Map("complex-crm/crm.alvo.json");
         await Verify(m); // snapshot: freezes mapping incl. tenant_id, generated cols, refs
     }
+
+    private const string WithComputed = """
+    {
+      "apiVersion": "alvo.dev/v1",
+      "name": "demo",
+      "entities": {
+        "invoices": {
+          "fields": {
+            "net": { "type": "decimal" },
+            "gross": { "type": "decimal", "computed": "net * 1.2" }
+          }
+        }
+      }
+    }
+    """;
+
+    [Fact]
+    public void Map_rejects_computed_until_cel_compiler()
+    {
+        var descriptor = AlvoDescriptor.Parse(WithComputed);
+
+        var ex = Should.Throw<InvalidDataException>(() => DescriptorToSchemaMapper.Map(descriptor));
+
+        ex.Message.ShouldContain("computed");
+        ex.Message.ShouldContain("#21");
+    }
 }
