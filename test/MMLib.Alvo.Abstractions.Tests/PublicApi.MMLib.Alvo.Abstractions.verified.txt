@@ -498,6 +498,10 @@ namespace MMLib.Alvo.Migrations
         System.Threading.Tasks.Task<MMLib.Alvo.Migrations.DescriptorVersion?> GetCurrentAsync(string project, System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Migrations.DescriptorVersion>> ListAsync(string project, System.Threading.CancellationToken ct = default);
     }
+    public interface IRuntimeSchemaWriter
+    {
+        System.Threading.Tasks.Task<MMLib.Alvo.Migrations.DescriptorVersion> ApplyAndAppendAsync(string project, MMLib.Alvo.Migrations.MigrationPlan plan, MMLib.Alvo.Migrations.DescriptorVersion candidate, int expectedRevision, MMLib.Alvo.Migrations.MigrationOptions options, System.Threading.CancellationToken ct = default);
+    }
     public interface ISchemaMigrator
     {
         System.Threading.Tasks.Task<MMLib.Alvo.Migrations.MigrationResult> ApplyAsync(MMLib.Alvo.Migrations.MigrationPlan plan, MMLib.Alvo.Migrations.MigrationOptions options, System.Threading.CancellationToken ct = default);

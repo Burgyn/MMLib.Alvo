@@ -5,5 +5,5 @@
 # code (InMemorySchemaMigrator, SchemaDiff, InMemoryDescriptorVersionStore) still gets the normal
 # naming rule.
 
-[{SchemaMigratorContractTests.cs,SchemaSqlSnapshotTests.cs,DescriptorVersionStoreContractTests.cs}]
+[{SchemaMigratorContractTests.cs,SchemaSqlSnapshotTests.cs,DescriptorVersionStoreContractTests.cs,RuntimeSchemaWriterContractTests.cs}]
 dotnet_diagnostic.CA1707.severity = none

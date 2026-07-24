@@ -60,6 +60,7 @@ public static class AlvoEfCoreProvider
         builder.Services.TryAddSingleton(CreateDescriptorVersionStore);
         builder.Services.TryAddSingleton<IDescriptorVersionStore>(sp => sp.GetRequiredService<EfCoreDescriptorVersionStore>());
         builder.Services.TryAddSingleton<IAppliedSchemaStore>(sp => sp.GetRequiredService<EfCoreDescriptorVersionStore>());
+        builder.Services.TryAddSingleton<IRuntimeSchemaWriter>(CreateRuntimeSchemaWriter);
 
         return builder;
     }
@@ -105,6 +106,14 @@ public static class AlvoEfCoreProvider
         var options = services.GetRequiredService<IOptions<AlvoOptions>>().Value;
 
         return new EfCoreDescriptorVersionStore(connections, options);
+    }
+
+    private static EfCoreRuntimeSchemaWriter CreateRuntimeSchemaWriter(IServiceProvider services)
+    {
+        var connections = services.GetRequiredService<RelationalConnectionFactory>();
+        var options = services.GetRequiredService<IOptions<AlvoOptions>>().Value;
+
+        return new EfCoreRuntimeSchemaWriter(connections, options);
     }
 
     // A short-lived context configured with the provider's UseXxx, spun up only to reach its

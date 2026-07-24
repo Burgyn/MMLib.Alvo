@@ -155,54 +155,16 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator
         }
 
         // Own connection: opened, transacted, and disposed entirely within this call, so two
-        // concurrent ApplyAsync calls never race on a shared connection.
-        //
-        // NOTE: this open->begin-transaction->execute-each->commit loop is inlined here temporarily
-        // (copied from the previous single-connection implementation). Task 6 extracts it into a
-        // shared RelationalSqlBatch.ExecuteAsync(connection, sql, ct) helper used by every caller
-        // that executes a whole SQL plan over one connection.
+        // concurrent ApplyAsync calls never race on a shared connection. The open->begin->execute
+        // -each->commit sequence lives in the shared RelationalSqlBatch, which both this migrator
+        // and the atomic runtime writer reuse (an uncommitted transaction rolls back on disposal).
         var connection = _connections.Create();
         await using (connection.ConfigureAwait(false))
         {
-            await connection.OpenAsync(ct).ConfigureAwait(false);
-
-            var transaction = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
-            try
-            {
-                await ExecuteInTransactionAsync(connection, plan.Sql, transaction, ct).ConfigureAwait(false);
-                await transaction.CommitAsync(ct).ConfigureAwait(false);
-            }
-            catch
-            {
-                await transaction.RollbackAsync(ct).ConfigureAwait(false);
-                throw;
-            }
-            finally
-            {
-                await transaction.DisposeAsync().ConfigureAwait(false);
-            }
+            await RelationalSqlBatch.ExecuteAsync(connection, plan.Sql, ct).ConfigureAwait(false);
         }
 
         return new MigrationResult(true, plan, false);
-    }
-
-    private static async Task ExecuteInTransactionAsync(DbConnection connection, IReadOnlyList<string> sql, DbTransaction transaction, CancellationToken ct)
-    {
-        foreach (var commandText in sql)
-        {
-            if (string.IsNullOrWhiteSpace(commandText))
-            {
-                continue;
-            }
-
-            var command = connection.CreateCommand();
-            await using (command.ConfigureAwait(false))
-            {
-                command.CommandText = commandText;
-                command.Transaction = transaction;
-                await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-            }
-        }
     }
 
     // A step is purely semantic now: it names the change and whether it destroys data. The
