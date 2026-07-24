@@ -19,7 +19,6 @@ public sealed class DestructiveChangeGuardTests
                         Field = "license_plate",
                         IsDestructive = true,
                     },
-                    "-- drop field vehicles.license_plate",
                     IsDestructive: true,
                     Reason: "drops field 'vehicles.license_plate' and its data"),
             ],
@@ -40,7 +39,6 @@ public sealed class DestructiveChangeGuardTests
             [
                 new MigrationStep(
                     new SchemaChange { Kind = SchemaChangeKind.AddField, Entity = "vehicles", Field = "color" },
-                    "-- add field vehicles.color",
                     IsDestructive: false,
                     Reason: null),
             ],

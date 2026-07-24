@@ -54,6 +54,7 @@ namespace MMLib.Alvo.Migrations
         public MigrationPlan() { }
         public bool HasDestructiveChanges { get; }
         public bool IsEmpty { get; }
+        public System.Collections.Generic.IReadOnlyList<string> Sql { get; init; }
         public required System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Migrations.MigrationStep> Steps { get; init; }
     }
     public sealed class MigrationResult : System.IEquatable<MMLib.Alvo.Migrations.MigrationResult>
@@ -65,11 +66,10 @@ namespace MMLib.Alvo.Migrations
     }
     public sealed class MigrationStep : System.IEquatable<MMLib.Alvo.Migrations.MigrationStep>
     {
-        public MigrationStep(MMLib.Alvo.Migrations.SchemaChange Change, string Sql, bool IsDestructive, string? Reason) { }
+        public MigrationStep(MMLib.Alvo.Migrations.SchemaChange Change, bool IsDestructive, string? Reason) { }
         public MMLib.Alvo.Migrations.SchemaChange Change { get; init; }
         public bool IsDestructive { get; init; }
         public string? Reason { get; init; }
-        public string Sql { get; init; }
     }
     public sealed class SchemaChange : System.IEquatable<MMLib.Alvo.Migrations.SchemaChange>
     {

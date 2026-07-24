@@ -47,9 +47,11 @@ public class EfCoreSchemaMigratorPlanTests
         var step = plan.Steps.ShouldHaveSingleItem();
         step.Change.Kind.ShouldBe(SchemaChangeKind.CreateEntity);
         step.Change.Entity.ShouldBe("vehicles");
-        step.Sql.ShouldNotBeNullOrWhiteSpace();
-        step.Sql.ShouldContain("CREATE TABLE");
         step.IsDestructive.ShouldBeFalse();
+
+        var sql = string.Join("\n", plan.Sql);
+        sql.ShouldNotBeNullOrWhiteSpace();
+        sql.ShouldContain("CREATE TABLE");
     }
 
     [Fact]
@@ -70,9 +72,9 @@ public class EfCoreSchemaMigratorPlanTests
         rename.Change.Entity.ShouldBe("vehicles");
         rename.Change.Field.ShouldBe("color");
         rename.Change.FromName.ShouldBe("colour");
-        rename.Sql.ShouldContain("RENAME", Case.Insensitive);
         rename.IsDestructive.ShouldBeFalse();
 
+        string.Join("\n", plan.Sql).ShouldContain("RENAME", Case.Insensitive);
         plan.Steps.ShouldNotContain(s => s.Change.Kind == SchemaChangeKind.DropField);
     }
 

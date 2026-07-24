@@ -74,27 +74,40 @@ internal sealed class EfCoreSchemaMigrator : ISchemaMigrator, IDisposable
         ArgumentNullException.ThrowIfNull(desired);
         ct.ThrowIfCancellationRequested();
 
-        // 1. Pre-apply the descriptor's renames to the current schema so the differ sees the
-        //    renamed members already aligned by name (no drop+add), then diff.
+        // 1. Pre-apply the descriptor's DECLARED renames to the current schema so the differ sees
+        //    the renamed members already aligned by name (no drop+add), then diff.
         var prePass = RenamePrePass.Compute(current, desired);
         var currentModel = BuildInitializedModel(prePass.AlignedCurrent);
         var desiredModel = BuildInitializedModel(desired);
 
         var residual = _differ.GetDifferences(currentModel.GetRelationalModel(), desiredModel.GetRelationalModel());
 
-        // 2. Renames first (so later operations see the new names), then the residual diff.
-        var steps = new List<MigrationStep>(prePass.Renames.Count + residual.Count);
-        foreach (var rename in prePass.Renames)
-        {
-            steps.Add(ToStep(rename.Operation, rename.Change, desiredModel));
-        }
+        // 2. Neutralize EF's GUESSED renames: any rename op left in the residual (i.e. not one of
+        //    our declared, pre-aligned renames) is a heuristic pairing of an unrelated drop+add and
+        //    must be split back into its destructive Drop + fresh Add, or it would bypass the
+        //    destructive guardrail and silently carry data into a semantically-unrelated column.
+        residual = RenameGuessSplitter.Normalize(residual, prePass.AlignedCurrent, desired, BuildInitializedModel, _differ);
 
-        foreach (var operation in residual)
-        {
-            steps.Add(ToStep(operation, DestructiveScan.Classify(operation), desiredModel));
-        }
+        // 3. Assemble the full, ordered operation list: declared renames first (so later operations
+        //    see the new names), then the (normalized) residual diff.
+        var operations = new List<MigrationOperation>(prePass.Renames.Count + residual.Count);
+        operations.AddRange(prePass.Renames.Select(rename => rename.Operation));
+        operations.AddRange(residual);
 
-        return Task.FromResult(new MigrationPlan { Steps = steps });
+        // 4. Semantic steps (drive HasDestructiveChanges and the dry-run summary), in the same order.
+        var steps = new List<MigrationStep>(operations.Count);
+        steps.AddRange(prePass.Renames.Select(rename => ToStep(rename.Change)));
+        steps.AddRange(residual.Select(operation => ToStep(DestructiveScan.Classify(operation))));
+
+        // 5. Generate the executable SQL from the WHOLE operation list in ONE call: only then does
+        //    EF resolve interdependent operations correctly (e.g. a SQLite table rebuild triggered
+        //    by a drop excludes a not-yet-added column from its INSERT ... SELECT). Generating per
+        //    operation would emit SQL referencing columns that do not exist at that point.
+        IReadOnlyList<string> sql = operations.Count == 0
+            ? []
+            : [.. _sqlGenerator.Generate(operations, desiredModel).Select(command => command.CommandText)];
+
+        return Task.FromResult(new MigrationPlan { Steps = steps, Sql = sql });
     }
 
     /// <inheritdoc/>
@@ -130,9 +143,9 @@ internal sealed class EfCoreSchemaMigrator : ISchemaMigrator, IDisposable
             var transaction = await _connection.BeginTransactionAsync(ct).ConfigureAwait(false);
             try
             {
-                foreach (var step in plan.Steps)
+                foreach (var commandText in plan.Sql)
                 {
-                    if (string.IsNullOrWhiteSpace(step.Sql))
+                    if (string.IsNullOrWhiteSpace(commandText))
                     {
                         continue;
                     }
@@ -140,7 +153,7 @@ internal sealed class EfCoreSchemaMigrator : ISchemaMigrator, IDisposable
                     var command = _connection.CreateCommand();
                     await using (command.ConfigureAwait(false))
                     {
-                        command.CommandText = step.Sql;
+                        command.CommandText = commandText;
                         command.Transaction = transaction;
                         await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
                     }
@@ -166,15 +179,10 @@ internal sealed class EfCoreSchemaMigrator : ISchemaMigrator, IDisposable
         return new MigrationResult(true, plan, false);
     }
 
-    private MigrationStep ToStep(MigrationOperation operation, SchemaChange change, IModel desiredModel)
-    {
-        // Generate SQL per operation so each step's Sql maps exactly to its originating change.
-        // The DESIRED model is passed to Generate: a SQLite table rebuild rebuilds to the target
-        // shape (see Task 0 report), so the target model is load-bearing here.
-        var commands = _sqlGenerator.Generate([operation], desiredModel);
-        var sql = string.Join(Environment.NewLine, commands.Select(c => c.CommandText));
-        return new MigrationStep(change, sql, change.IsDestructive, change.IsDestructive ? change.Detail : null);
-    }
+    // A step is purely semantic now: it names the change and whether it destroys data. The
+    // executable SQL is generated once for the whole plan (see PlanAsync step 5), not per step.
+    private static MigrationStep ToStep(SchemaChange change) =>
+        new(change, change.IsDestructive, change.IsDestructive ? change.Detail : null);
 
     private IModel BuildInitializedModel(SchemaModel schema)
     {

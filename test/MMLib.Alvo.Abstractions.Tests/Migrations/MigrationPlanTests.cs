@@ -11,8 +11,8 @@ public class MigrationPlanTests
         {
             Steps =
             [
-                new MigrationStep(new SchemaChange { Kind = SchemaChangeKind.AddField, Entity = "v" }, "ALTER …", false, null),
-                new MigrationStep(new SchemaChange { Kind = SchemaChangeKind.DropField, Entity = "v", IsDestructive = true }, "ALTER …", true, "drops column data"),
+                new MigrationStep(new SchemaChange { Kind = SchemaChangeKind.AddField, Entity = "v" }, false, null),
+                new MigrationStep(new SchemaChange { Kind = SchemaChangeKind.DropField, Entity = "v", IsDestructive = true }, true, "drops column data"),
             ],
         };
         plan.HasDestructiveChanges.ShouldBeTrue();

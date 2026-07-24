@@ -41,7 +41,6 @@ public static class SchemaDiff
                         Entity = desiredEntity.Name,
                         FromName = renamedFrom,
                     },
-                    $"-- rename entity {renamedFrom} -> {desiredEntity.Name}",
                     IsDestructive: false,
                     Reason: null));
                 steps.AddRange(ComputeFieldSteps(desiredEntity.Name, renameSource, desiredEntity));
@@ -57,7 +56,6 @@ public static class SchemaDiff
 
             steps.Add(new MigrationStep(
                 new SchemaChange { Kind = SchemaChangeKind.CreateEntity, Entity = desiredEntity.Name },
-                $"-- create entity {desiredEntity.Name}",
                 IsDestructive: false,
                 Reason: null));
             steps.AddRange(ComputeFieldSteps(desiredEntity.Name, entitySchema: null, desiredEntity));
@@ -72,7 +70,6 @@ public static class SchemaDiff
 
             steps.Add(new MigrationStep(
                 new SchemaChange { Kind = SchemaChangeKind.DropEntity, Entity = currentEntity.Name, IsDestructive = true },
-                $"-- drop entity {currentEntity.Name}",
                 IsDestructive: true,
                 Reason: $"drops entity '{currentEntity.Name}' and its data"));
         }
@@ -101,7 +98,6 @@ public static class SchemaDiff
                         Field = desiredField.Name,
                         FromName = renamedFrom,
                     },
-                    $"-- rename field {entityName}.{renamedFrom} -> {desiredField.Name}",
                     IsDestructive: false,
                     Reason: null);
 
@@ -126,7 +122,6 @@ public static class SchemaDiff
 
             yield return new MigrationStep(
                 new SchemaChange { Kind = SchemaChangeKind.AddField, Entity = entityName, Field = desiredField.Name },
-                $"-- add field {entityName}.{desiredField.Name}",
                 IsDestructive: false,
                 Reason: null);
         }
@@ -146,7 +141,6 @@ public static class SchemaDiff
                     Field = currentField.Name,
                     IsDestructive = true,
                 },
-                $"-- drop field {entityName}.{currentField.Name}",
                 IsDestructive: true,
                 Reason: $"drops field '{entityName}.{currentField.Name}' and its data");
         }
@@ -177,7 +171,6 @@ public static class SchemaDiff
                 Field = desired.Name,
                 IsDestructive = isDestructive,
             },
-            $"-- alter field {entityName}.{desired.Name}",
             isDestructive,
             isDestructive ? $"narrows or tightens field '{entityName}.{desired.Name}'" : null);
     }

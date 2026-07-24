@@ -105,7 +105,7 @@ public sealed class GeneratedSqlSnapshotTests : IClassFixture<PostgresFixture>, 
 
     private ISchemaMigrator Migrator() => _services.GetRequiredService<ISchemaMigrator>();
 
-    private static string Sql(MigrationPlan plan) => string.Join("\n;\n", plan.Steps.Select(s => s.Sql));
+    private static string Sql(MigrationPlan plan) => string.Join("\n;\n", plan.Sql);
 
     private static SchemaModel Empty() => new([]);
 
