@@ -6,14 +6,6 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
-    <!-- Corvus.Json.Validator compiles its generated validator types at runtime via Roslyn,
-         resolving reference assemblies from DependencyContext.Default.CompileLibraries — which
-         is only populated when the running executable sets PreserveCompilationContext. Every
-         test project here is an Exe (own deps.json), so this belongs on all of them: without it,
-         MMLib.Alvo.Descriptor.Internal.DescriptorValidator's static JsonSchema field throws
-         (CS0518 "Predefined type 'System.Object' is not defined") the first time it runs. Any
-         real host embedding MMLib.Alvo needs this same property set on its own executable. -->
-    <PreserveCompilationContext>true</PreserveCompilationContext>
   </PropertyGroup>
 
   <ItemGroup>

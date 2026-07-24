@@ -4,6 +4,13 @@
        the shared architecture + public-API approval gate. -->
   <PropertyGroup>
     <AlvoSharedArchTests>false</AlvoSharedArchTests>
+    <!-- Corvus.Json.Validator (used only by this project's SchemaValidator test helper, not by
+         shipped MMLib.Alvo) compiles its generated validator types at runtime via Roslyn,
+         resolving reference assemblies from DependencyContext.Default.CompileLibraries — which is
+         only populated when the running executable sets PreserveCompilationContext. This project
+         is an Exe (own deps.json), so without this, JsonSchema.FromFile/Validate throws
+         (CS0518 "Predefined type 'System.Object' is not defined") the first time it runs. -->
+    <PreserveCompilationContext>true</PreserveCompilationContext>
   </PropertyGroup>
 
   <ItemGroup>

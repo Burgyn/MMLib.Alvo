@@ -1,25 +1,24 @@
-﻿using Corvus.Json;
-using Corvus.Json.Validator;
+﻿using Json.Pointer;
+using Json.Schema;
 using System.Text.Json;
 
 namespace MMLib.Alvo.Descriptor.Internal;
 
 /// <summary>
-/// Layered descriptor validator: (1) a Corvus JSON-schema pass against the embedded
-/// project.schema.json, (2) a semantic pass for cross-field rules Corvus cannot express, each
+/// Layered descriptor validator: (1) a JsonSchema.Net pass against the embedded
+/// project.schema.json, (2) a semantic pass for cross-field rules the schema cannot express, each
 /// producing agent-first <see cref="DescriptorValidationError"/>s with fix suggestions.
 /// </summary>
 /// <remarks>
-/// Corvus.Json.Validator compiles the schema's generated types at runtime via Roslyn, resolving
-/// reference assemblies from <c>DependencyContext.Default.CompileLibraries</c> — populated only
-/// when the running executable sets MSBuild's <c>PreserveCompilationContext</c> to
-/// <see langword="true"/>. Any host (standalone or embedded) that constructs this type must set
-/// that property on its own executable project, or the static <see cref="_schema"/> field throws
-/// on first use (Roslyn diagnostic CS0518, "Predefined type 'System.Object' is not defined").
+/// JsonSchema.Net (json-everything) evaluates schemas purely at runtime against
+/// <see cref="System.Text.Json"/> — no Roslyn codegen, so no <c>PreserveCompilationContext</c>
+/// requirement on the host, unlike the Corvus.Json.Validator this replaced.
 /// </remarks>
 internal sealed class DescriptorValidator : IDescriptorValidator
 {
     private static readonly JsonSchema _schema = JsonSchema.FromText(DescriptorSchemaSource.Json);
+
+    private static readonly EvaluationOptions _evaluationOptions = new() { OutputFormat = OutputFormat.List };
 
     public DescriptorValidationResult Validate(string descriptorJson)
     {
@@ -49,27 +48,63 @@ internal sealed class DescriptorValidator : IDescriptorValidator
 
     private static IEnumerable<DescriptorValidationError> SchemaErrors(JsonElement root)
     {
-        var context = _schema.Validate(root, ValidationLevel.Detailed);
-        if (context.IsValid)
+        var results = _schema.Evaluate(root, _evaluationOptions);
+        if (results.IsValid)
         {
             return [];
         }
 
-        return context.Results
-            .Where(r => !r.Valid)
-            .Select(r => new DescriptorValidationError(
-                r.Location?.DocumentLocation.ToString() ?? "/",
-                MessageOrFallback(r),
-                FixSuggestion,
-                DescriptorValidationSeverity.Error));
+        return (results.Details ?? [])
+            .Where(HasReportableError)
+            .SelectMany(SchemaErrorsForNode);
     }
 
-    private static string MessageOrFallback(ValidationResult result) =>
-        string.IsNullOrWhiteSpace(result.Message)
-            ? "Value does not satisfy the project schema at this location."
-            : result.Message;
+    /// <summary>
+    /// A failing node inside an <c>if</c> condition subschema (the probe for <c>if</c>/<c>then</c>/<c>else</c>)
+    /// is not itself a descriptor defect: it just means that branch's <c>then</c>/<c>else</c> did not apply.
+    /// Only report nodes outside any <c>if</c> condition.
+    /// </summary>
+    private static bool HasReportableError(EvaluationResults node) =>
+        node.Errors is { Count: > 0 } && !IsInsideIfCondition(node.EvaluationPath);
 
-    private const string FixSuggestion = "See schema/project.schema.json for the allowed shape at this path.";
+    private static bool IsInsideIfCondition(JsonPointer schemaPath)
+    {
+        for (var i = 0; i < schemaPath.SegmentCount; i++)
+        {
+            if (schemaPath.GetSegment(i).Equals("if"))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static IEnumerable<DescriptorValidationError> SchemaErrorsForNode(EvaluationResults node)
+    {
+        var instancePath = PointerOrRoot(node.InstanceLocation.ToString());
+        var schemaPath = PointerOrRoot(node.EvaluationPath.ToString());
+        foreach (var (keyword, message) in node.Errors!)
+        {
+            var effectiveMessage = string.IsNullOrWhiteSpace(message)
+                ? $"Value does not satisfy the '{keyword}' constraint."
+                : message;
+            yield return new DescriptorValidationError(
+                instancePath,
+                effectiveMessage,
+                FixSuggestionFor(keyword, instancePath, schemaPath, effectiveMessage),
+                DescriptorValidationSeverity.Error);
+        }
+    }
+
+    private static string FixSuggestionFor(string keyword, string instancePath, string schemaPath, string message)
+    {
+        var keywordLabel = string.IsNullOrEmpty(keyword) ? "schema" : $"'{keyword}'";
+        return $"Schema keyword {keywordLabel} failed for instance path '{instancePath}' " +
+            $"(schema location '{schemaPath}'): {message} — see schema/project.schema.json there.";
+    }
+
+    private static string PointerOrRoot(string pointer) => pointer.Length == 0 ? "/" : pointer;
 
     private static List<DescriptorValidationError> SemanticErrors(JsonElement root)
     {
@@ -126,6 +161,9 @@ internal sealed class DescriptorValidator : IDescriptorValidator
     /// </summary>
     private const string ReservedUsersEntity = "users";
 
+    // TODO(#F7): dynamic entities (evidencie) will also be valid ref targets that never appear
+    // as a declared key here — this exemption will need to generalize from a single reserved
+    // name to "known at runtime, not from the descriptor" once that late binding lands.
     private static bool IsUnknownRef(JsonElement field, HashSet<string> entityNames, out string target)
     {
         target = "";
