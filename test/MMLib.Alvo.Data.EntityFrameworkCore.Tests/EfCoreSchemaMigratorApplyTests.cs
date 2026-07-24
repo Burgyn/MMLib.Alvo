@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Scaffolding;
 using Microsoft.Extensions.DependencyInjection;
 using MMLib.Alvo.Data.EntityFrameworkCore;
+using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Schema;
 
@@ -14,24 +15,31 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore.Tests;
 
 public class EfCoreSchemaMigratorApplyTests : IDisposable
 {
-    // A single shared, already-open connection: ":memory:" SQLite DBs live only as long as their
-    // one connection stays open, and it must be the exact instance handed to both the migrator
-    // (executes SQL) and the introspector (reads the schema back) so they see the same database.
-    private readonly SqliteConnection _connection = new("Data Source=:memory:");
+    // A named, shared-cache SQLite in-memory database: distinct connections that share the same
+    // "Data Source" name + Cache=Shared attach to the SAME in-memory database, which is what lets
+    // the migrator's and introspector's independent per-call connections (RelationalConnectionFactory)
+    // see each other's writes. A shared-cache in-memory database is destroyed once its last
+    // connection closes, so _keepAlive holds one dedicated, never-handed-out connection open for
+    // the fixture's lifetime — the per-call connections created by _connections come and go.
+    private readonly string _connectionString = $"Data Source={Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+    private readonly SqliteConnection _keepAlive;
+    private readonly RelationalConnectionFactory _connections;
     private readonly EfCoreSchemaMigrator _migrator;
     private readonly EfCoreSchemaIntrospector _introspector;
 
     public EfCoreSchemaMigratorApplyTests()
     {
-        _connection.Open();
+        _keepAlive = new SqliteConnection(_connectionString);
+        _keepAlive.Open();
+        _connections = new RelationalConnectionFactory(() => new SqliteConnection(_connectionString));
 
-        var ctx = new DbContext(new DbContextOptionsBuilder().UseSqlite(_connection).Options);
+        var ctx = new DbContext(new DbContextOptionsBuilder().UseSqlite(_keepAlive).Options);
         _migrator = new EfCoreSchemaMigrator(
             ctx.GetService<IMigrationsModelDiffer>(),
             ctx.GetService<IMigrationsSqlGenerator>(),
             ctx.GetService<IModelRuntimeInitializer>(),
             () => new ModelBuilder(SqliteConventionSetBuilder.Build()),
-            _connection);
+            _connections);
         // IDatabaseModelFactory is a design-time-only service (never registered by the runtime
         // UseSqlite pipeline), so it's resolved through the same reflective bootstrap `dotnet-ef`
         // itself uses: DesignTimeServicesBuilder reads the [DesignTimeProviderServices] attribute
@@ -39,12 +47,12 @@ public class EfCoreSchemaMigratorApplyTests : IDisposable
         var designTimeServices = new DesignTimeServicesBuilder(
                 GetType().Assembly, GetType().Assembly, new OperationReporter(handler: null), [])
             .Build(ctx);
-        _introspector = new EfCoreSchemaIntrospector(designTimeServices.GetRequiredService<IDatabaseModelFactory>(), _connection);
+        _introspector = new EfCoreSchemaIntrospector(designTimeServices.GetRequiredService<IDatabaseModelFactory>(), _connections);
     }
 
     public void Dispose()
     {
-        _connection.Dispose();
+        _keepAlive.Dispose();
         GC.SuppressFinalize(this);
     }
 
@@ -244,7 +252,7 @@ public class EfCoreSchemaMigratorApplyTests : IDisposable
 
     private async Task ExecAsync(string sql, CancellationToken ct)
     {
-        var command = _connection.CreateCommand();
+        var command = _keepAlive.CreateCommand();
         await using (command.ConfigureAwait(false))
         {
             command.CommandText = sql;
@@ -254,7 +262,7 @@ public class EfCoreSchemaMigratorApplyTests : IDisposable
 
     private async Task<object?> QueryScalarAsync(string sql, CancellationToken ct)
     {
-        var command = _connection.CreateCommand();
+        var command = _keepAlive.CreateCommand();
         await using (command.ConfigureAwait(false))
         {
             command.CommandText = sql;

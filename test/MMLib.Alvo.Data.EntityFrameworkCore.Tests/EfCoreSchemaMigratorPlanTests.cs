@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore.Metadata.Conventions;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using MMLib.Alvo.Data.EntityFrameworkCore;
+using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Schema;
 
@@ -16,7 +17,8 @@ public class EfCoreSchemaMigratorPlanTests
 
     // Resolves the SQLite provider services from a throwaway DbContext (the reusable helper lands
     // in Task 11); until then the test wires the migrator by hand. PlanAsync never touches the
-    // connection, so an unopened one is enough to satisfy the (now required) ctor parameter.
+    // connection, so a factory that always hands back the same unopened connection is enough to
+    // satisfy the (now required) ctor parameter.
     private static EfCoreSchemaMigrator NewSqliteMigrator()
     {
         var connection = new SqliteConnection("Data Source=:memory:");
@@ -26,7 +28,7 @@ public class EfCoreSchemaMigratorPlanTests
             ctx.GetService<IMigrationsSqlGenerator>(),
             ctx.GetService<IModelRuntimeInitializer>(),
             () => new ModelBuilder(SqliteConventionSetBuilder.Build()),
-            connection);
+            new RelationalConnectionFactory(() => connection));
     }
 
     private static EntitySchema Vehicles(params FieldSchema[] fields) =>

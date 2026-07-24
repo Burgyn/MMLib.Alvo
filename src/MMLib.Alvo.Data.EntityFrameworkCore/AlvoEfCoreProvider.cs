@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
+using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Schema;
 
@@ -30,13 +31,13 @@ public static class AlvoEfCoreProvider
     /// <param name="registration">The provider-specific building blocks (connection, EF services, model factory).</param>
     /// <returns>The same builder, for chaining.</returns>
     /// <remarks>
-    /// All three services are registered as idempotent (<c>TryAdd</c>) singletons: each owns one
-    /// ADO.NET connection for the container's lifetime.
-    /// Schema migration is an administrative operation invoked rarely — never per request — so a
-    /// single long-lived connection per service is the appropriate shape, not a scoped or transient
-    /// one. The connection string is resolved from <paramref name="registration"/> at provider-build
-    /// time (when a service is first materialized), never eagerly at call time, so an options-bound
-    /// connection string is honored.
+    /// All three services are registered as idempotent (<c>TryAdd</c>) singletons, backed by one
+    /// shared <see cref="RelationalConnectionFactory"/> singleton: the migrator and introspector
+    /// each open a fresh ADO.NET connection per call instead of holding one for the container's
+    /// lifetime, so two concurrent callers never race on a shared connection. The connection string
+    /// is resolved from <paramref name="registration"/> at provider-build time (when a service is
+    /// first materialized), never eagerly at call time, so an options-bound connection string is
+    /// honored.
     /// </remarks>
     public static IAlvoBuilder AddRelationalProvider(this IAlvoBuilder builder, RelationalProviderRegistration registration)
     {
@@ -48,6 +49,7 @@ public static class AlvoEfCoreProvider
         // IAlvoBuilder — a provider must not assume a particular caller.
         builder.Services.AddOptions<AlvoOptions>();
 
+        builder.Services.TryAddSingleton(sp => CreateConnectionFactory(sp, registration));
         builder.Services.TryAddSingleton<ISchemaMigrator>(sp => CreateMigrator(sp, registration));
         builder.Services.TryAddSingleton<ISchemaIntrospector>(sp => CreateIntrospector(sp, registration));
         builder.Services.TryAddSingleton<IAppliedSchemaStore>(sp => CreateAppliedSchemaStore(sp, registration));
@@ -55,18 +57,25 @@ public static class AlvoEfCoreProvider
         return builder;
     }
 
+    private static RelationalConnectionFactory CreateConnectionFactory(IServiceProvider services, RelationalProviderRegistration registration)
+    {
+        var connectionString = registration.ConnectionString(services);
+        return new RelationalConnectionFactory(() => registration.CreateConnection(connectionString));
+    }
+
     private static EfCoreSchemaMigrator CreateMigrator(IServiceProvider services, RelationalProviderRegistration registration)
     {
         var connectionString = registration.ConnectionString(services);
         using var context = CreateThrowawayContext(registration, connectionString);
         var efServices = context.GetInfrastructure();
+        var connections = services.GetRequiredService<RelationalConnectionFactory>();
 
         return new EfCoreSchemaMigrator(
             efServices.GetRequiredService<IMigrationsModelDiffer>(),
             efServices.GetRequiredService<IMigrationsSqlGenerator>(),
             efServices.GetRequiredService<IModelRuntimeInitializer>(),
             registration.CreateModelBuilder,
-            registration.CreateConnection(connectionString));
+            connections);
     }
 
     private static EfCoreSchemaIntrospector CreateIntrospector(IServiceProvider services, RelationalProviderRegistration registration)
@@ -75,10 +84,11 @@ public static class AlvoEfCoreProvider
         var schemaPrefix = services.GetRequiredService<IOptions<AlvoOptions>>().Value.SchemaPrefix;
         using var context = CreateThrowawayContext(registration, connectionString);
         var databaseModelFactory = registration.CreateDatabaseModelFactory(context.GetInfrastructure());
+        var connections = services.GetRequiredService<RelationalConnectionFactory>();
 
         return new EfCoreSchemaIntrospector(
             databaseModelFactory,
-            registration.CreateConnection(connectionString),
+            connections,
             SystemSchemaInitializer.AppliedSchemaTableName(schemaPrefix));
     }
 
