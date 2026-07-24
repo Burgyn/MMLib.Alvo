@@ -55,6 +55,23 @@ public sealed class AddAlvoIntegrationTests : IDisposable
 
         entityNames.ShouldContain("tasks");
         entityNames.ShouldContain("projects");
+
+        // The managed columns the mapper injects must survive end-to-end (descriptor → mapper →
+        // migration → physical table) with the right nullability, not just the entity existing.
+        // "tasks" declares audit (created_/updated_ columns); "projects" also declares softDelete
+        // (deleted_at).
+        var tasks = introspected.Entities.Single(entity => entity.Name == "tasks");
+        var taskFields = tasks.Fields.Select(field => field.Name).ToList();
+        taskFields.ShouldContain("created_at");
+        taskFields.ShouldContain("updated_at");
+        taskFields.ShouldContain("created_by");
+        taskFields.ShouldContain("updated_by");
+        tasks.Fields.Single(field => field.Name == "created_at").Nullable.ShouldBeFalse();
+        tasks.Fields.Single(field => field.Name == "created_by").Nullable.ShouldBeTrue();
+
+        var projects = introspected.Entities.Single(entity => entity.Name == "projects");
+        projects.Fields.Select(field => field.Name).ShouldContain("deleted_at");
+        projects.Fields.Single(field => field.Name == "deleted_at").Nullable.ShouldBeTrue();
     }
 
     [Fact]

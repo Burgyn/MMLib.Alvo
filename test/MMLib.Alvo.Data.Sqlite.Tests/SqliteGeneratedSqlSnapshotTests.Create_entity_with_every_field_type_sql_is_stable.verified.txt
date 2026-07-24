@@ -1,0 +1,13 @@
+﻿CREATE TABLE "catalog" (
+    "id" TEXT NOT NULL CONSTRAINT "PK_catalog" PRIMARY KEY,
+    "created_at" TEXT NOT NULL,
+    "description" TEXT NOT NULL,
+    "is_active" INTEGER NOT NULL,
+    "metadata" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "notes" TEXT NULL,
+    "price" TEXT NOT NULL,
+    "quantity" INTEGER NOT NULL,
+    "released_on" TEXT NOT NULL,
+    "status" TEXT NOT NULL
+);

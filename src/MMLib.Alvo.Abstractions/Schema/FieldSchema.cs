@@ -12,13 +12,23 @@ public sealed record FieldSchema
     /// <summary>Gets the previous name of the field (for migrations).</summary>
     public string? RenamedFrom { get; init; }
 
-    /// <summary>Gets a value indicating whether the field is required.</summary>
+    /// <summary>
+    /// Gets a value indicating whether the field is required (descriptor-facing intent). This does
+    /// not drive the physical column directly — <see cref="Nullable"/> does; the descriptor mapper
+    /// reconciles the two (a field is nullable unless <c>required</c> or <c>nullable:false</c> is
+    /// set). When building a <see cref="FieldSchema"/> by hand, set <see cref="Nullable"/> to control
+    /// column nullability.
+    /// </summary>
     public bool Required { get; init; }
 
     /// <summary>Gets a value indicating whether the field must be unique.</summary>
     public bool Unique { get; init; }
 
-    /// <summary>Gets a value indicating whether the field is nullable.</summary>
+    /// <summary>
+    /// Gets a value indicating whether the field is nullable. This is the authoritative driver of
+    /// physical column nullability (NULL vs NOT NULL); <see cref="Required"/> is descriptor intent
+    /// the mapper folds into this.
+    /// </summary>
     public bool Nullable { get; init; }
 
     /// <summary>Gets the maximum length for string fields.</summary>

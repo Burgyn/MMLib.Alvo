@@ -1,0 +1,13 @@
+﻿CREATE TABLE "documents" (
+    "id" TEXT NOT NULL CONSTRAINT "PK_documents" PRIMARY KEY,
+    "created_at" TEXT NOT NULL,
+    "created_by" TEXT NULL,
+    "deleted_at" TEXT NULL,
+    "tenant_id" TEXT NOT NULL,
+    "title" TEXT NOT NULL,
+    "updated_at" TEXT NOT NULL,
+    "updated_by" TEXT NULL
+);
+
+;
+CREATE INDEX "IX_documents_tenant_id" ON "documents" ("tenant_id");

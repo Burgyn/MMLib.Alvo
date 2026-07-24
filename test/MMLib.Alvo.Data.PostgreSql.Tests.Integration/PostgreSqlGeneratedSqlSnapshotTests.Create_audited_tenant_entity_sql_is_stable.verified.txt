@@ -1,0 +1,14 @@
+﻿CREATE TABLE documents (
+    id uuid NOT NULL,
+    created_at timestamp with time zone NOT NULL,
+    created_by uuid,
+    deleted_at timestamp with time zone,
+    tenant_id uuid NOT NULL,
+    title character varying(200) NOT NULL,
+    updated_at timestamp with time zone NOT NULL,
+    updated_by uuid,
+    CONSTRAINT "PK_documents" PRIMARY KEY (id)
+);
+
+;
+CREATE INDEX "IX_documents_tenant_id" ON documents (tenant_id);

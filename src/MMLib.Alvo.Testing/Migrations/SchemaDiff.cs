@@ -229,21 +229,25 @@ public static class SchemaDiff
         yield return AlterFieldStep(entityName, desired.Name, isDestructive, reason);
     }
 
+    // Required is intentionally not compared: only Nullable drives the physical column (the real EF
+    // path reads Nullable, never Required — see DescriptorModelBuilder), so a Required-only flip is
+    // not a schema change here either.
     private static bool IsUnchanged(FieldSchema current, FieldSchema desired) =>
         current.Type == desired.Type
-        && current.Required == desired.Required
         && current.Nullable == desired.Nullable
         && current.MaxLength == desired.MaxLength
         && current.Precision == desired.Precision
         && current.Scale == desired.Scale;
 
+    // Mirrors DestructiveScan.NarrowingReason on the real path: a column becoming non-nullable, or a
+    // newly-imposed / shrunk length bound (unbounded → bounded truncates too), can lose data.
     private static bool IsDestructiveNarrowing(FieldSchema current, FieldSchema desired)
     {
-        var isNarrowing = current.MaxLength is { } currentMaxLength
-            && desired.MaxLength is { } desiredMaxLength
-            && desiredMaxLength < currentMaxLength;
+        var becameNonNullable = current.Nullable && !desired.Nullable;
+        var lengthNarrowed = desired.MaxLength is { } newLength
+            && (current.MaxLength is not { } oldLength || newLength < oldLength);
 
-        return isNarrowing || (!current.Required && desired.Required);
+        return becameNonNullable || lengthNarrowed;
     }
 
     private static MigrationStep CreateEntityStep(string entity) =>

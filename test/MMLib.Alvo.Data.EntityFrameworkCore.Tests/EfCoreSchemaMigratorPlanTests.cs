@@ -160,6 +160,98 @@ public class EfCoreSchemaMigratorPlanTests
     }
 
     [Fact]
+    public void Precision_shrink_alter_is_destructive()
+    {
+        var change = DestructiveScan.Classify(AlterDecimal(oldPrecision: 18, newPrecision: 10, scale: 2));
+
+        change.Kind.ShouldBe(SchemaChangeKind.AlterField);
+        change.Field.ShouldBe("amount");
+        change.IsDestructive.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Scale_shrink_alter_is_destructive()
+    {
+        var change = DestructiveScan.Classify(AlterDecimalScale(precision: 18, oldScale: 4, newScale: 2));
+
+        change.Kind.ShouldBe(SchemaChangeKind.AlterField);
+        change.Field.ShouldBe("amount");
+        change.IsDestructive.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Widening_precision_alter_is_not_destructive()
+    {
+        var change = DestructiveScan.Classify(AlterDecimal(oldPrecision: 10, newPrecision: 18, scale: 2));
+
+        change.Kind.ShouldBe(SchemaChangeKind.AlterField);
+        change.IsDestructive.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Type_change_alter_is_destructive()
+    {
+        var change = DestructiveScan.Classify(AlterType(oldType: typeof(string), newType: typeof(long)));
+
+        change.Kind.ShouldBe(SchemaChangeKind.AlterField);
+        change.Field.ShouldBe("code");
+        change.IsDestructive.ShouldBeTrue();
+    }
+
+    private static AlterColumnOperation AlterDecimal(int oldPrecision, int newPrecision, int scale) => new()
+    {
+        Table = "invoices",
+        Name = "amount",
+        ClrType = typeof(decimal),
+        IsNullable = false,
+        Precision = newPrecision,
+        Scale = scale,
+        OldColumn = new AddColumnOperation
+        {
+            Table = "invoices",
+            Name = "amount",
+            ClrType = typeof(decimal),
+            IsNullable = false,
+            Precision = oldPrecision,
+            Scale = scale,
+        },
+    };
+
+    private static AlterColumnOperation AlterDecimalScale(int precision, int oldScale, int newScale) => new()
+    {
+        Table = "invoices",
+        Name = "amount",
+        ClrType = typeof(decimal),
+        IsNullable = false,
+        Precision = precision,
+        Scale = newScale,
+        OldColumn = new AddColumnOperation
+        {
+            Table = "invoices",
+            Name = "amount",
+            ClrType = typeof(decimal),
+            IsNullable = false,
+            Precision = precision,
+            Scale = oldScale,
+        },
+    };
+
+    private static AlterColumnOperation AlterType(Type oldType, Type newType) => new()
+    {
+        Table = "vehicles",
+        Name = "code",
+        ClrType = newType,
+        IsNullable = false,
+        OldColumn = new AddColumnOperation
+        {
+            Table = "vehicles",
+            Name = "code",
+            ClrType = oldType,
+            IsNullable = false,
+        },
+    };
+
+    [Fact]
     public async Task Rename_field_in_composite_index_realigns_index_and_succeeds()
     {
         // Issue-2 case: the renamed field also participates in a composite index; the aligned

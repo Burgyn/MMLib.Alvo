@@ -110,6 +110,35 @@ public abstract class SchemaSqlSnapshotTests
         await VerifySql(plan);
     }
 
+    /// <summary>
+    /// Creating an entity covering every scalar field type, with precision/scale, and both a
+    /// required and a nullable column of the same type — freezes the per-engine DDL for the whole
+    /// type map (numeric/date/timestamp/boolean/uuid/json/enum) and for NULL vs NOT NULL, which the
+    /// other cases (all uuid/string/integer, all NOT NULL) never exercise.
+    /// </summary>
+    [Fact]
+    public async Task Create_entity_with_every_field_type_sql_is_stable()
+    {
+        EnsureEngineAvailable();
+        var plan = await CreateMigrator().PlanAsync(Empty(), Model(Catalog()), new MigrationOptions(), TestContext.Current.CancellationToken);
+        await VerifySql(plan);
+    }
+
+    /// <summary>
+    /// Creating a fully-managed entity — tenant_id (indexed) plus the audit and soft-delete columns
+    /// exactly as <c>DescriptorToSchemaMapper</c> injects them — freezes the DDL of the columns that
+    /// appear on every real Alvo table: the tenant index, the NOT NULL audit timestamps, and the
+    /// nullable actor/deleted_at columns. (The mapper's production of these columns is guarded
+    /// separately by DescriptorToSchemaMapperTests; this freezes the SQL they turn into.)
+    /// </summary>
+    [Fact]
+    public async Task Create_audited_tenant_entity_sql_is_stable()
+    {
+        EnsureEngineAvailable();
+        var plan = await CreateMigrator().PlanAsync(Empty(), Model(AuditedTenant()), new MigrationOptions(), TestContext.Current.CancellationToken);
+        await VerifySql(plan);
+    }
+
     private Task VerifySql(MigrationPlan plan) => Verify(Sql(plan)).UseParameters(EngineName);
 
     private static string Sql(MigrationPlan plan) => string.Join("\n;\n", plan.Sql);
@@ -117,6 +146,43 @@ public abstract class SchemaSqlSnapshotTests
     private static SchemaModel Empty() => new([]);
 
     private static SchemaModel Model(params EntitySchema[] entities) => new(entities);
+
+    private static EntitySchema Catalog() => new()
+    {
+        Name = "catalog",
+        Fields =
+        [
+            new FieldSchema { Name = "id", Type = FieldType.Uuid, Required = true },
+            new FieldSchema { Name = "name", Type = FieldType.String, MaxLength = 100, Required = true },
+            new FieldSchema { Name = "description", Type = FieldType.Text, Required = true },
+            new FieldSchema { Name = "quantity", Type = FieldType.Integer, Required = true },
+            new FieldSchema { Name = "price", Type = FieldType.Decimal, Precision = 18, Scale = 2, Required = true },
+            new FieldSchema { Name = "is_active", Type = FieldType.Boolean, Required = true },
+            new FieldSchema { Name = "released_on", Type = FieldType.Date, Required = true },
+            new FieldSchema { Name = "created_at", Type = FieldType.DateTime, Required = true },
+            new FieldSchema { Name = "metadata", Type = FieldType.Json, Required = true },
+            new FieldSchema { Name = "status", Type = FieldType.Enum, EnumValues = ["draft", "published"], Required = true },
+            new FieldSchema { Name = "notes", Type = FieldType.String, MaxLength = 200, Nullable = true },
+        ],
+    };
+
+    // The managed columns mirror DescriptorToSchemaMapper.AddManagedColumns for an entity with
+    // tenancy=scoped, audit=true, softDelete=true.
+    private static EntitySchema AuditedTenant() => new()
+    {
+        Name = "documents",
+        Fields =
+        [
+            new FieldSchema { Name = "id", Type = FieldType.Uuid, Required = true },
+            new FieldSchema { Name = "title", Type = FieldType.String, MaxLength = 200, Required = true },
+            new FieldSchema { Name = "tenant_id", Type = FieldType.Uuid, Required = true, Indexed = true },
+            new FieldSchema { Name = "created_at", Type = FieldType.DateTime, Required = true },
+            new FieldSchema { Name = "created_by", Type = FieldType.Uuid, Nullable = true },
+            new FieldSchema { Name = "updated_at", Type = FieldType.DateTime, Required = true },
+            new FieldSchema { Name = "updated_by", Type = FieldType.Uuid, Nullable = true },
+            new FieldSchema { Name = "deleted_at", Type = FieldType.DateTime, Nullable = true },
+        ],
+    };
 
     private static EntitySchema Owners() => new()
     {

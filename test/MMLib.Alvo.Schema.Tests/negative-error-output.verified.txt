@@ -30,7 +30,7 @@
     failures: [
       {
         Pointer: #/entities/users,
-        Message: 
+        Message: (schema keyword failure — validator emits no message)
       }
     ]
   },
@@ -39,7 +39,7 @@
     failures: [
       {
         Pointer: #/entities/widgets/fields/name/requird,
-        Message: 
+        Message: (schema keyword failure — validator emits no message)
       }
     ]
   },
