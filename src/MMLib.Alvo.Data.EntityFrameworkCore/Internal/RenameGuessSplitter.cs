@@ -47,30 +47,46 @@ internal static class RenameGuessSplitter
         var normalized = new List<MigrationOperation>(residual.Count + 2);
         foreach (var operation in residual)
         {
-            switch (operation)
-            {
-                case RenameColumnOperation rename:
-                    normalized.AddRange(ScopedDiff(
-                        alignedCurrent, RemoveField(alignedCurrent, rename.Table, rename.Name), buildModel, differ));
-                    normalized.AddRange(ScopedDiff(
-                        RemoveField(desired, rename.Table, rename.NewName!), desired, buildModel, differ));
-                    break;
-
-                case RenameTableOperation rename:
-                    normalized.AddRange(ScopedDiff(
-                        alignedCurrent, RemoveEntity(alignedCurrent, rename.Name), buildModel, differ));
-                    normalized.AddRange(ScopedDiff(
-                        RemoveEntity(desired, rename.NewName!), desired, buildModel, differ));
-                    break;
-
-                default:
-                    normalized.Add(operation);
-                    break;
-            }
+            normalized.AddRange(SplitRenameGuess(operation, alignedCurrent, desired, buildModel, differ));
         }
 
         return normalized;
     }
+
+    private static IEnumerable<MigrationOperation> SplitRenameGuess(
+        MigrationOperation operation,
+        SchemaModel alignedCurrent,
+        SchemaModel desired,
+        Func<SchemaModel, IModel> buildModel,
+        IMigrationsModelDiffer differ) =>
+        operation switch
+        {
+            RenameColumnOperation rename => SplitColumnRenameGuess(rename, alignedCurrent, desired, buildModel, differ),
+            RenameTableOperation rename => SplitTableRenameGuess(rename, alignedCurrent, desired, buildModel, differ),
+            _ => [operation],
+        };
+
+    private static IEnumerable<MigrationOperation> SplitColumnRenameGuess(
+        RenameColumnOperation rename,
+        SchemaModel alignedCurrent,
+        SchemaModel desired,
+        Func<SchemaModel, IModel> buildModel,
+        IMigrationsModelDiffer differ) =>
+        [
+            .. ScopedDiff(alignedCurrent, RemoveField(alignedCurrent, rename.Table, rename.Name), buildModel, differ),
+            .. ScopedDiff(RemoveField(desired, rename.Table, rename.NewName!), desired, buildModel, differ),
+        ];
+
+    private static IEnumerable<MigrationOperation> SplitTableRenameGuess(
+        RenameTableOperation rename,
+        SchemaModel alignedCurrent,
+        SchemaModel desired,
+        Func<SchemaModel, IModel> buildModel,
+        IMigrationsModelDiffer differ) =>
+        [
+            .. ScopedDiff(alignedCurrent, RemoveEntity(alignedCurrent, rename.Name), buildModel, differ),
+            .. ScopedDiff(RemoveEntity(desired, rename.NewName!), desired, buildModel, differ),
+        ];
 
     // Diffs two schemas that differ in exactly one member, so EF returns exactly the drop (or add)
     // operation for that member, with all its facets, and no cross-operation interference.

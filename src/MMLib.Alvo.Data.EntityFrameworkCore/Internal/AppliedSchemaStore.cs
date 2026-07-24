@@ -50,24 +50,25 @@ internal sealed class AppliedSchemaStore : IAppliedSchemaStore, IDisposable
             var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
             await using (reader.ConfigureAwait(false))
             {
-                if (!await reader.ReadAsync(ct).ConfigureAwait(false))
-                {
-                    return null;
-                }
-
-                var descriptorJson = reader.GetString(0);
-                var schemaJson = reader.GetString(1);
-                var revision = reader.GetInt32(2);
-                var updatedAt = DateTimeOffset.Parse(
-                    reader.GetString(3), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
-
-                var schema = JsonSerializer.Deserialize(schemaJson, AppliedSchemaJsonContext.Default.SchemaModel)
-                    ?? throw new InvalidOperationException(
-                        $"Applied schema for project '{project}' deserialized to null.");
-
-                return new AppliedSchema(schema, descriptorJson, revision, updatedAt);
+                return await reader.ReadAsync(ct).ConfigureAwait(false)
+                    ? ReadAppliedSchema(reader, project)
+                    : null;
             }
         }
+    }
+
+    private static AppliedSchema ReadAppliedSchema(DbDataReader reader, string project)
+    {
+        var descriptorJson = reader.GetString(0);
+        var schemaJson = reader.GetString(1);
+        var revision = reader.GetInt32(2);
+        var updatedAt = DateTimeOffset.Parse(
+            reader.GetString(3), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+
+        var schema = JsonSerializer.Deserialize(schemaJson, AppliedSchemaJsonContext.Default.SchemaModel)
+            ?? throw new InvalidOperationException($"Applied schema for project '{project}' deserialized to null.");
+
+        return new AppliedSchema(schema, descriptorJson, revision, updatedAt);
     }
 
     /// <inheritdoc/>
@@ -78,32 +79,38 @@ internal sealed class AppliedSchemaStore : IAppliedSchemaStore, IDisposable
 
         await EnsureReadyAsync(ct).ConfigureAwait(false);
 
+        var command = CreateUpsertCommand(project, snapshot);
+        await using (command.ConfigureAwait(false))
+        {
+            await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+    }
+
+    // Upsert: identical syntax on SQLite (3.24+) and PostgreSQL (9.5+). All values are bound as
+    // parameters — no string concatenation of data, only of the (validated, non-attacker-controlled)
+    // table name.
+    private DbCommand CreateUpsertCommand(string project, AppliedSchema snapshot)
+    {
         var schemaJson = JsonSerializer.Serialize(snapshot.Schema, AppliedSchemaJsonContext.Default.SchemaModel);
 
         var command = _connection.CreateCommand();
-        await using (command.ConfigureAwait(false))
-        {
-            // Upsert: identical syntax on SQLite (3.24+) and PostgreSQL (9.5+). All values are
-            // bound as parameters — no string concatenation of data, only of the (validated,
-            // non-attacker-controlled) table name.
-            command.CommandText =
-                $"""
-                INSERT INTO {_initializer.TableName} (project, descriptor_json, schema_json, revision, updated_at)
-                VALUES (@project, @descriptor_json, @schema_json, @revision, @updated_at)
-                ON CONFLICT(project) DO UPDATE SET
-                    descriptor_json = excluded.descriptor_json,
-                    schema_json = excluded.schema_json,
-                    revision = excluded.revision,
-                    updated_at = excluded.updated_at
-                """;
-            AddParameter(command, "@project", project);
-            AddParameter(command, "@descriptor_json", snapshot.DescriptorJson);
-            AddParameter(command, "@schema_json", schemaJson);
-            AddParameter(command, "@revision", snapshot.Revision);
-            AddParameter(command, "@updated_at", snapshot.UpdatedAt.ToString("O", CultureInfo.InvariantCulture));
+        command.CommandText =
+            $"""
+            INSERT INTO {_initializer.TableName} (project, descriptor_json, schema_json, revision, updated_at)
+            VALUES (@project, @descriptor_json, @schema_json, @revision, @updated_at)
+            ON CONFLICT(project) DO UPDATE SET
+                descriptor_json = excluded.descriptor_json,
+                schema_json = excluded.schema_json,
+                revision = excluded.revision,
+                updated_at = excluded.updated_at
+            """;
+        AddParameter(command, "@project", project);
+        AddParameter(command, "@descriptor_json", snapshot.DescriptorJson);
+        AddParameter(command, "@schema_json", schemaJson);
+        AddParameter(command, "@revision", snapshot.Revision);
+        AddParameter(command, "@updated_at", snapshot.UpdatedAt.ToString("O", CultureInfo.InvariantCulture));
 
-            await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-        }
+        return command;
     }
 
     private async Task EnsureReadyAsync(CancellationToken ct)
