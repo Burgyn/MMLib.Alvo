@@ -10,13 +10,26 @@
 ## Current projects
 
 - `src/MMLib.Alvo.Abstractions` — interface-first root of the dependency
-  graph; currently source-free, waiting for ports (phase 1, spec §1.2).
+  graph: the ports (`ISchemaMigrator`, `ISchemaIntrospector`, `ISchemaRegistry`,
+  `IAppliedSchemaStore`, `IDescriptorSource`) + the driver-agnostic schema model
+  + the `IAlvoBuilder`/`AlvoOptions` builder contract. Depends only on
+  `Microsoft.Extensions.DependencyInjection.Abstractions` (the one exception —
+  see Hard dependency rules).
+- `src/MMLib.Alvo` — the core: descriptor parse/map, schema registry, the
+  migration orchestration (`SchemaMigrationRunner`) + guardrail, and the
+  `AddAlvo()` builder. EF-free (enforced by an arch test).
+- `src/MMLib.Alvo.Data.EntityFrameworkCore` — shared EF-based host (the
+  descriptor→`IModel` builder, the EF-differ migrator, the introspector, the
+  applied-schema store); drags `Microsoft.EntityFrameworkCore.Relational`.
+- `src/MMLib.Alvo.Data.Sqlite` / `src/MMLib.Alvo.Data.PostgreSql` — thin
+  provider packages (`UseSqlite`/`UsePostgreSql`); each drags its EF driver and
+  is a real swap point.
 - `src/MMLib.Alvo.Testing` — test-support library (`ArchTargetAttribute`,
-  `RepositoryRoot`); grows into the shipped contract-suite + fakes package.
-- `test/MMLib.Alvo.Abstractions.Tests` — xUnit v3 (MTP) tests; holds the
-  NetArchTest architecture guard enforcing the rule below.
-- `test/MMLib.Alvo.Conventions.Tests` — solution-structure convention tests
-  (the file-scanning "os A" checks).
+  `RepositoryRoot`, the `ISchemaMigrator` contract suite + in-memory fake);
+  `IsPackable=false` until external provider authors need it.
+- `test/` — one `*.Tests` per shipped project (arch + public-API approval
+  auto-linked), `MMLib.Alvo.Conventions.Tests` (solution-structure checks), and
+  `MMLib.Alvo.Data.PostgreSql.Tests.Integration` (Testcontainers).
 
 Keep this list current — update it whenever a project is added or removed.
 
