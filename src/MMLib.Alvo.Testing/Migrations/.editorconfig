@@ -1,0 +1,9 @@
+# SchemaMigratorContractTests and SchemaSqlSnapshotTests are xUnit test code even
+# though they live in src/, not test/ — each is inherited by provider test
+# projects, so their [Fact] methods follow the same descriptive snake_case
+# convention as test/.editorconfig, for the same reason. Scoped to those two
+# files, not the whole folder, so helper code (InMemorySchemaMigrator,
+# SchemaDiff) still gets the normal naming rule.
+
+[{SchemaMigratorContractTests.cs,SchemaSqlSnapshotTests.cs}]
+dotnet_diagnostic.CA1707.severity = none

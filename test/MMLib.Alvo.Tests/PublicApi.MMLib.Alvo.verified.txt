@@ -1,0 +1,16 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/Burgyn/MMLib.Alvo")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Data.Sqlite.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace Microsoft.Extensions.DependencyInjection
+{
+    public static class AlvoBuilderExtensions
+    {
+        public static MMLib.Alvo.IAlvoBuilder FromDescriptor(this MMLib.Alvo.IAlvoBuilder builder, string path) { }
+        public static MMLib.Alvo.IAlvoBuilder UseSchemaPrefix(this MMLib.Alvo.IAlvoBuilder builder, string prefix) { }
+    }
+    public static class AlvoServiceCollectionExtensions
+    {
+        public static MMLib.Alvo.IAlvoBuilder AddAlvo(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<MMLib.Alvo.IAlvoBuilder>? configure = null) { }
+    }
+}

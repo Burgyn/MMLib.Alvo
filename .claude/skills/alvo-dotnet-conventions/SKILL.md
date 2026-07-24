@@ -91,6 +91,25 @@ types are actually written, following the same "no inline version" pattern.
   `// compare … not …`, a comment restating the next statement, a comment
   naming what a magic value / regex / flag is for. This holds in **every**
   language in the repo — C#, MSBuild XML, and shell scripts alike.
+- **Keep methods short and single-purpose; extract rather than grow.** A
+  method should do one thing and read top-to-bottom as a short story. Rough
+  ceiling: **~25 lines / one screen**; past that, or when a method does more
+  than one thing, extract the pieces into well-named private methods. Extract
+  *by default* — err on the side of more, smaller, named methods over one long
+  one. Concrete signals to extract:
+  - a `foreach`/`for` body longer than a few lines → lift the body into a
+    named method (`foreach (var x in xs) Handle(x);`);
+  - **two sequential loops/passes in one method** (e.g. "add + rename" then
+    "drop") → one named method per pass;
+  - repeated inline object construction (e.g. `new MigrationStep(new SchemaChange { … })`
+    five times) → a small named factory helper (`DropFieldStep(entity, field)`);
+  - a `switch`/`if-else` ladder with non-trivial arms → one method per arm or
+    per family.
+
+  The name of the extracted method replaces the comment you'd otherwise write —
+  same principle as the comments rule above, applied to control flow. A caller
+  built from named calls (`DiffEntities(...)`, `DropRemovedEntities(...)`) is
+  the goal, not a 60-line method with section comments.
 - **Code is written in English** — identifiers, string literals, log and test
   `Skip` messages, and the rare surviving comment. No other natural language
   belongs in code (docs and commit messages are a separate matter).

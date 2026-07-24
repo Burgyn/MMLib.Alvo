@@ -17,6 +17,14 @@ Reference descriptors validated against `schema/project.schema.json`
   It is a real **bundle** (D3): `crm.alvo.json` alongside
   `templates/invoice-issued.html` (referenced via `bodyFile`) and
   `functions/remind-stale-deals.csx` (referenced via `script`).
+- **`vehicle-registry/`** — the #23 demo: owners, their vehicles, and
+  periodic roadworthiness inspections. Exercises two `ref` chains
+  (`vehicles.owner_id` → `owners`, `inspections.vehicle_id` → `vehicles`,
+  the latter `onDelete: cascade`), a composite index on each of `vehicles`
+  and `inspections`, `audit` on both `owners` and `vehicles`, and a
+  `renamedFrom` on `vehicles.plate` (was `license_plate`). Doubles as the
+  fixture for the per-engine generated-SQL snapshot tests (the EF-drift
+  guard) in `MMLib.Alvo.Data.Sqlite.Tests` / `.Data.PostgreSql.Tests.Integration`.
 - **`_negative/`** — descriptors that MUST be rejected, each proving one
   constraint (unknown property, `decimal` missing `scale`, the reserved
   `users` entity name, a wrong `apiVersion`). The test asserts they fail with

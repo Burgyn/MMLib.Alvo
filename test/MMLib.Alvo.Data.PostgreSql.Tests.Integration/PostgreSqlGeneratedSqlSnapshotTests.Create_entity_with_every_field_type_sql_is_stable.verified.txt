@@ -1,0 +1,14 @@
+﻿CREATE TABLE catalog (
+    id uuid NOT NULL,
+    created_at timestamp with time zone NOT NULL,
+    description text NOT NULL,
+    is_active boolean NOT NULL,
+    metadata text NOT NULL,
+    name character varying(100) NOT NULL,
+    notes character varying(200),
+    price numeric(18,2) NOT NULL,
+    quantity bigint NOT NULL,
+    released_on date NOT NULL,
+    status text NOT NULL,
+    CONSTRAINT "PK_catalog" PRIMARY KEY (id)
+);

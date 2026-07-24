@@ -1,0 +1,11 @@
+﻿CREATE TABLE vehicles (
+    id uuid NOT NULL,
+    make character varying(60) NOT NULL,
+    model character varying(60) NOT NULL,
+    vin character varying(17) NOT NULL,
+    year bigint NOT NULL,
+    CONSTRAINT "PK_vehicles" PRIMARY KEY (id)
+);
+
+;
+CREATE UNIQUE INDEX "IX_vehicles_vin" ON vehicles (vin);

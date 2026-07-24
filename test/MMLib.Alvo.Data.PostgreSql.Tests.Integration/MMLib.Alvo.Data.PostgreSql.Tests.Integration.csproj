@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Testcontainers-backed integration project, not a 1:1 unit test project
+       (hence the ".Tests.Integration" suffix instead of ".Tests"): opt out of
+       the shared architecture + public-API approval gate. A fast unit test
+       project for MMLib.Alvo.Data.PostgreSql (and its public-API baseline)
+       lands later, when the provider is wired (F3 Task 12). -->
+  <PropertyGroup>
+    <AlvoSharedArchTests>false</AlvoSharedArchTests>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/MMLib.Alvo.Data.PostgreSql/MMLib.Alvo.Data.PostgreSql.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="Verify.XunitV3" />
+  </ItemGroup>
+
+  <!-- Only the path-derivation module initializer from test/_shared — this project opts out of
+       the shared arch/public-API gate above (AlvoSharedArchTests=false), but the generated-SQL
+       snapshot tests still want their Verify baselines to live next to this project, not in
+       test/_shared. -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/VerifyModuleInit.cs" Link="_shared/VerifyModuleInit.cs" />
+  </ItemGroup>
+
+</Project>

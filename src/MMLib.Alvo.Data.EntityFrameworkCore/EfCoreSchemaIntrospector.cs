@@ -1,0 +1,176 @@
+﻿using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Scaffolding;
+using Microsoft.EntityFrameworkCore.Scaffolding.Metadata;
+using MMLib.Alvo.Schema;
+using System.Data.Common;
+
+namespace MMLib.Alvo.Data.EntityFrameworkCore;
+
+/// <summary>
+/// An <see cref="ISchemaIntrospector"/> that reverse-engineers a live database into a
+/// <see cref="SchemaModel"/> using EF Core's provider-supplied <see cref="IDatabaseModelFactory"/>.
+/// </summary>
+/// <remarks>
+/// This is the inverse of <see cref="DescriptorModelBuilder"/>: it maps a provider's
+/// <see cref="DatabaseModel"/> (tables/columns/indexes/foreign keys) back onto a
+/// <see cref="SchemaModel"/> (entities/fields/indexes/references). The mapping is necessarily
+/// lossy on engines with weak column typing (e.g. SQLite's type affinities), so it only recovers
+/// what round-tripping and drift detection need: names, coarse field types, nullability, indexes,
+/// and foreign keys. The optional <c>excludedTableName</c> keeps Alvo's own bookkeeping table
+/// (<see cref="SystemSchemaInitializer.AppliedSchemaTableName"/>) out of the introspected schema —
+/// without it, the code-first diff would see its own applied-schema table as a rogue user entity.
+///
+/// <para>
+/// The provider constructs the <see cref="DbConnection"/> solely to hand it to this instance, so
+/// this type owns it and implements <see cref="IDisposable"/> to release it deterministically
+/// (e.g. the underlying file handle on SQLite) instead of relying on process exit.
+/// </para>
+/// </remarks>
+public sealed class EfCoreSchemaIntrospector : ISchemaIntrospector, IDisposable
+{
+    private readonly IDatabaseModelFactory _databaseModelFactory;
+    private readonly DbConnection _connection;
+    private readonly string? _excludedTableName;
+
+    /// <summary>
+    /// Initializes a new introspector from a provider's scaffolding factory and an owned ADO.NET connection.
+    /// </summary>
+    /// <param name="databaseModelFactory">EF Core's provider-flavored reverse-engineering / scaffolding factory.</param>
+    /// <param name="connection">The provider's ADO.NET connection; owned and disposed by this instance.</param>
+    /// <param name="excludedTableName">Optional table to omit from the introspected schema (e.g. Alvo's applied-schema bookkeeping table).</param>
+    public EfCoreSchemaIntrospector(IDatabaseModelFactory databaseModelFactory, DbConnection connection, string? excludedTableName = null)
+    {
+        ArgumentNullException.ThrowIfNull(databaseModelFactory);
+        ArgumentNullException.ThrowIfNull(connection);
+
+        _databaseModelFactory = databaseModelFactory;
+        _connection = connection;
+        _excludedTableName = excludedTableName;
+    }
+
+    /// <inheritdoc/>
+    public Task<SchemaModel> IntrospectAsync(CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        var databaseModel = _databaseModelFactory.Create(_connection, new DatabaseModelFactoryOptions());
+        var entities = databaseModel.Tables
+            .Where(table => table.Name != _excludedTableName)
+            .Select(ToEntitySchema)
+            .ToList();
+
+        return Task.FromResult(new SchemaModel(entities));
+    }
+
+    /// <summary>Disposes the provider-supplied <see cref="DbConnection"/> this instance owns.</summary>
+    public void Dispose() => _connection.Dispose();
+
+    private static EntitySchema ToEntitySchema(DatabaseTable table)
+    {
+        var foreignKeysByColumn = BuildForeignKeyMap(table);
+        var fields = table.Columns.Select(c => ToFieldSchema(c, foreignKeysByColumn)).ToList();
+        var indexes = table.Indexes
+            .Select(i => new IndexSchema([.. i.Columns.Select(c => c.Name)], i.IsUnique))
+            .ToList();
+
+        return new EntitySchema
+        {
+            Name = table.Name,
+            Fields = fields,
+            Indexes = indexes,
+        };
+    }
+
+    private static Dictionary<string, DatabaseForeignKey> BuildForeignKeyMap(DatabaseTable table)
+    {
+        // A field maps to at most one FK/RefSchema (Alvo references are single-column), so the
+        // last foreign key declared on a column wins if there were somehow more than one.
+        var map = new Dictionary<string, DatabaseForeignKey>(StringComparer.Ordinal);
+        foreach (var fk in table.ForeignKeys)
+        {
+            foreach (var column in fk.Columns)
+            {
+                map[column.Name] = fk;
+            }
+        }
+
+        return map;
+    }
+
+    private static FieldSchema ToFieldSchema(DatabaseColumn column, Dictionary<string, DatabaseForeignKey> foreignKeysByColumn)
+    {
+        var isRef = foreignKeysByColumn.TryGetValue(column.Name, out var foreignKey);
+        var type = isRef ? FieldType.Ref : ToFieldType(column.StoreType);
+
+        return new FieldSchema
+        {
+            Name = column.Name,
+            Type = type,
+            Nullable = column.IsNullable,
+            Required = !column.IsNullable,
+            Reference = isRef ? ToRefSchema(foreignKey!) : null,
+        };
+    }
+
+    private static RefSchema ToRefSchema(DatabaseForeignKey foreignKey) =>
+        new(foreignKey.PrincipalTable.Name, ToOnDelete(foreignKey.OnDelete));
+
+    private static OnDelete ToOnDelete(ReferentialAction? action) => action switch
+    {
+        ReferentialAction.Cascade => OnDelete.Cascade,
+        ReferentialAction.SetNull => OnDelete.SetNull,
+        _ => OnDelete.Restrict,
+    };
+
+    // Inverse of DescriptorModelBuilder.ClrType: providers only ever hand back their own store
+    // type names (SQLite's type affinities, PostgreSQL's SQL types, ...), so this matches
+    // case-insensitively against the common families rather than any single provider's spelling.
+    private static FieldType ToFieldType(string? storeType)
+    {
+        if (string.IsNullOrEmpty(storeType))
+        {
+            return FieldType.String;
+        }
+
+        var normalized = storeType.Trim();
+
+        if (Contains(normalized, "INT"))
+        {
+            return FieldType.Integer;
+        }
+
+        if (Contains(normalized, "BOOL"))
+        {
+            return FieldType.Boolean;
+        }
+
+        if (Contains(normalized, "TIMESTAMP") || Contains(normalized, "DATETIME"))
+        {
+            return FieldType.DateTime;
+        }
+
+        if (Contains(normalized, "DATE"))
+        {
+            return FieldType.Date;
+        }
+
+        if (Contains(normalized, "NUMERIC") || Contains(normalized, "DECIMAL") ||
+            Contains(normalized, "REAL") || Contains(normalized, "DOUBLE") || Contains(normalized, "FLOAT"))
+        {
+            return FieldType.Decimal;
+        }
+
+        if (Contains(normalized, "JSON"))
+        {
+            return FieldType.Json;
+        }
+
+        // TEXT/VARCHAR/CHAR/CLOB/UUID and anything unrecognized default to String: on SQLite,
+        // String/Text/Json/Enum/Uuid all collapse to the TEXT affinity, so this family cannot be
+        // told apart from StoreType alone (Task 10 report).
+        return FieldType.String;
+    }
+
+    private static bool Contains(string value, string token) =>
+        value.Contains(token, StringComparison.OrdinalIgnoreCase);
+}

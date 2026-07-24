@@ -1,11 +1,20 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/MMLib.Alvo.Abstractions/MMLib.Alvo.Abstractions.csproj" />
+    <Project Path="src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj" />
+    <Project Path="src/MMLib.Alvo.Data.PostgreSql/MMLib.Alvo.Data.PostgreSql.csproj" />
+    <Project Path="src/MMLib.Alvo.Data.Sqlite/MMLib.Alvo.Data.Sqlite.csproj" />
     <Project Path="src/MMLib.Alvo.Testing/MMLib.Alvo.Testing.csproj" />
+    <Project Path="src/MMLib.Alvo/MMLib.Alvo.csproj" />
   </Folder>
   <Folder Name="/test/">
     <Project Path="test/MMLib.Alvo.Abstractions.Tests/MMLib.Alvo.Abstractions.Tests.csproj" />
     <Project Path="test/MMLib.Alvo.Conventions.Tests/MMLib.Alvo.Conventions.Tests.csproj" />
+    <Project Path="test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/MMLib.Alvo.Data.EntityFrameworkCore.Tests.csproj" />
+    <Project Path="test/MMLib.Alvo.Data.PostgreSql.Tests/MMLib.Alvo.Data.PostgreSql.Tests.csproj" />
+    <Project Path="test/MMLib.Alvo.Data.PostgreSql.Tests.Integration/MMLib.Alvo.Data.PostgreSql.Tests.Integration.csproj" />
+    <Project Path="test/MMLib.Alvo.Data.Sqlite.Tests/MMLib.Alvo.Data.Sqlite.Tests.csproj" />
     <Project Path="test/MMLib.Alvo.Schema.Tests/MMLib.Alvo.Schema.Tests.csproj" />
+    <Project Path="test/MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj" />
   </Folder>
 </Solution>

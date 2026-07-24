@@ -1,0 +1,194 @@
+﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using MMLib.Alvo.Internal;
+using MMLib.Alvo.Migrations;
+using MMLib.Alvo.Schema;
+
+namespace MMLib.Alvo.Data.Sqlite.Tests;
+
+/// <summary>
+/// End-to-end: <c>AddAlvo</c> wired exclusively through its public surface (<c>UseSqlite</c>,
+/// <c>FromDescriptor</c>) against the real <c>examples/simple-tasks/tasks.alvo.json</c> descriptor,
+/// plus the fail-fast startup check when no provider is selected.
+/// </summary>
+public sealed class AddAlvoIntegrationTests : IDisposable
+{
+    private readonly string _databasePath = Path.Combine(Path.GetTempPath(), $"alvo-addalvo-tests-{Guid.NewGuid():N}.db");
+
+    public void Dispose()
+    {
+        // Best-effort: the test method disposes its ServiceProvider (via `using var sp`) before
+        // returning, which disposes the migrator/introspector and releases their (pooling-disabled)
+        // connection — that is what actually releases the OS file handle, well before this method
+        // runs. This is still a temp file either way, so a stray lock should not fail the test — the
+        // OS reclaims temp files regardless.
+        try
+        {
+            File.Delete(_databasePath);
+        }
+        catch (IOException)
+        {
+        }
+
+        GC.SuppressFinalize(this);
+    }
+
+    [Fact]
+    public async Task AddAlvo_UseSqlite_FromDescriptor_migrates_the_real_tasks_descriptor()
+    {
+        var descriptorPath = DescriptorPath();
+
+        var services = new ServiceCollection();
+        services.AddAlvo(alvo => alvo.UseSqlite($"Data Source={_databasePath}").FromDescriptor(descriptorPath));
+
+        using var sp = services.BuildServiceProvider();
+        var runner = sp.GetRequiredService<SchemaMigrationRunner>();
+
+        var result = await runner.RunAsync(new MigrationOptions(), TestContext.Current.CancellationToken);
+
+        result.Applied.ShouldBeTrue();
+
+        var introspected = await sp.GetRequiredService<ISchemaIntrospector>()
+            .IntrospectAsync(TestContext.Current.CancellationToken);
+        var entityNames = introspected.Entities.Select(entity => entity.Name).ToList();
+
+        entityNames.ShouldContain("tasks");
+        entityNames.ShouldContain("projects");
+
+        // The managed columns the mapper injects must survive end-to-end (descriptor → mapper →
+        // migration → physical table) with the right nullability, not just the entity existing.
+        // "tasks" declares audit (created_/updated_ columns); "projects" also declares softDelete
+        // (deleted_at).
+        var tasks = introspected.Entities.Single(entity => entity.Name == "tasks");
+        var taskFields = tasks.Fields.Select(field => field.Name).ToList();
+        taskFields.ShouldContain("created_at");
+        taskFields.ShouldContain("updated_at");
+        taskFields.ShouldContain("created_by");
+        taskFields.ShouldContain("updated_by");
+        tasks.Fields.Single(field => field.Name == "created_at").Nullable.ShouldBeFalse();
+        tasks.Fields.Single(field => field.Name == "created_by").Nullable.ShouldBeTrue();
+
+        var projects = introspected.Entities.Single(entity => entity.Name == "projects");
+        projects.Fields.Select(field => field.Name).ShouldContain("deleted_at");
+        projects.Fields.Single(field => field.Name == "deleted_at").Nullable.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task AddAlvo_UseSqlite_options_only_migrates_the_real_tasks_descriptor()
+    {
+        var descriptorPath = DescriptorPath();
+
+        var services = new ServiceCollection();
+        services.AddAlvo(alvo => alvo
+            .UseSqlite(options => options.ConnectionString = $"Data Source={_databasePath}")
+            .FromDescriptor(descriptorPath));
+
+        using var sp = services.BuildServiceProvider();
+
+        var result = await sp.GetRequiredService<SchemaMigrationRunner>()
+            .RunAsync(new MigrationOptions(), TestContext.Current.CancellationToken);
+
+        result.Applied.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task AddAlvo_UseSqlite_parameterless_resolves_the_connection_string_from_configuration()
+    {
+        var configuration = ConfigurationWith("ConnectionStrings:Alvo", $"Data Source={_databasePath}");
+
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(configuration);
+        services.AddAlvo(alvo => alvo.UseSqlite().FromDescriptor(DescriptorPath()));
+
+        using var sp = services.BuildServiceProvider();
+
+        var result = await sp.GetRequiredService<SchemaMigrationRunner>()
+            .RunAsync(new MigrationOptions(), TestContext.Current.CancellationToken);
+
+        result.Applied.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task AddAlvo_UseSqlite_from_configuration_with_a_custom_name_resolves_the_named_connection_string()
+    {
+        var configuration = ConfigurationWith("ConnectionStrings:Fleet", $"Data Source={_databasePath}");
+
+        var services = new ServiceCollection();
+        services.AddAlvo(alvo => alvo.UseSqlite(configuration, "Fleet").FromDescriptor(DescriptorPath()));
+
+        using var sp = services.BuildServiceProvider();
+
+        var result = await sp.GetRequiredService<SchemaMigrationRunner>()
+            .RunAsync(new MigrationOptions(), TestContext.Current.CancellationToken);
+
+        result.Applied.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void UseSqlite_parameterless_without_a_configured_connection_string_fails_fast()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        services.AddAlvo(alvo => alvo.UseSqlite());
+
+        using var sp = services.BuildServiceProvider();
+
+        var exception = Should.Throw<InvalidOperationException>(
+            () => sp.GetRequiredService<ISchemaMigrator>());
+
+        exception.Message.ShouldContain("No SQLite connection string was configured");
+    }
+
+    [Fact]
+    public void UseSqlite_parameterless_without_IConfiguration_registered_fails_fast_with_a_helpful_message()
+    {
+        // No IConfiguration in the container at all: resolution must still fail fast with the
+        // crafted guidance, not a raw "no service for IConfiguration" DI exception.
+        var services = new ServiceCollection();
+        services.AddAlvo(alvo => alvo.UseSqlite());
+
+        using var sp = services.BuildServiceProvider();
+
+        var exception = Should.Throw<InvalidOperationException>(
+            () => sp.GetRequiredService<ISchemaMigrator>());
+
+        exception.Message.ShouldContain("No SQLite connection string was configured");
+    }
+
+    [Fact]
+    public void UseSqlite_without_a_connection_string_fails_fast_when_the_provider_is_built()
+    {
+        var services = new ServiceCollection();
+        services.AddAlvo(alvo => alvo.UseSqlite(options => { }));
+
+        using var sp = services.BuildServiceProvider();
+
+        var exception = Should.Throw<InvalidOperationException>(
+            () => sp.GetRequiredService<ISchemaMigrator>());
+
+        exception.Message.ShouldContain("No SQLite connection string was configured");
+    }
+
+    [Fact]
+    public void AddAlvo_without_a_provider_fails_fast_at_startup_validation()
+    {
+        var services = new ServiceCollection();
+        services.AddAlvo();
+
+        using var sp = services.BuildServiceProvider();
+
+        var exception = Should.Throw<OptionsValidationException>(
+            () => sp.GetRequiredService<IStartupValidator>().Validate());
+
+        exception.Message.ShouldContain(AlvoProviderValidation.NoProviderRegisteredMessage);
+    }
+
+    private static string DescriptorPath() =>
+        Path.Combine(RepositoryRoot.Find(), "examples", "simple-tasks", "tasks.alvo.json");
+
+    private static IConfiguration ConfigurationWith(string key, string value) =>
+        new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { [key] = value })
+            .Build();
+}

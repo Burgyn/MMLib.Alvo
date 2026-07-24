@@ -1,0 +1,7 @@
+﻿ALTER TABLE vehicles ADD owner_id uuid NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000';
+
+;
+CREATE INDEX "IX_vehicles_owner_id" ON vehicles (owner_id);
+
+;
+ALTER TABLE vehicles ADD CONSTRAINT "FK_vehicles_owners_owner_id" FOREIGN KEY (owner_id) REFERENCES owners (id) ON DELETE RESTRICT;

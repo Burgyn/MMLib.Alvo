@@ -1,2 +1,584 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/Burgyn/MMLib.Alvo")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace MMLib.Alvo
+{
+    public enum AlvoMode
+    {
+        Standalone = 0,
+        Embedded = 1,
+    }
+    public sealed class AlvoOptions
+    {
+        public AlvoOptions() { }
+        public MMLib.Alvo.AlvoMode Mode { get; set; }
+        [System.ComponentModel.DataAnnotations.RegularExpression("^[a-z][a-z0-9_]{0,15}$", ErrorMessage="SchemaPrefix must be lower snake_case, 1–16 chars.")]
+        public string SchemaPrefix { get; set; }
+    }
+    public interface IAlvoBuilder
+    {
+        Microsoft.Extensions.DependencyInjection.IServiceCollection Services { get; }
+    }
+}
+namespace MMLib.Alvo.Descriptor
+{
+    public sealed class Access : System.IEquatable<MMLib.Alvo.Descriptor.Access>
+    {
+        public Access() { }
+        public string? Admin { get; init; }
+        public string? Developer { get; init; }
+        public string? Viewer { get; init; }
+    }
+    public sealed class AccessRules : System.IEquatable<MMLib.Alvo.Descriptor.AccessRules>
+    {
+        public AccessRules() { }
+        public string? Create { get; init; }
+        public string? Delete { get; init; }
+        public string? Get { get; init; }
+        public string? List { get; init; }
+        public string? Update { get; init; }
+    }
+    public sealed class AfterHook : System.IEquatable<MMLib.Alvo.Descriptor.AfterHook>
+    {
+        public AfterHook() { }
+        public required MMLib.Alvo.Descriptor.AutomationAction Action { get; init; }
+        public string? Condition { get; init; }
+    }
+    public sealed class AlvoDescriptor : System.IEquatable<MMLib.Alvo.Descriptor.AlvoDescriptor>
+    {
+        public AlvoDescriptor() { }
+        public MMLib.Alvo.Descriptor.Access? Access { get; init; }
+        public required string ApiVersion { get; init; }
+        public MMLib.Alvo.Descriptor.Auth? Auth { get; init; }
+        public System.Collections.Generic.IReadOnlyDictionary<string, MMLib.Alvo.Descriptor.AutomationRule>? Automation { get; init; }
+        public MMLib.Alvo.Descriptor.Branding? Branding { get; init; }
+        public string? Description { get; init; }
+        public MMLib.Alvo.Descriptor.DynamicEntities? DynamicEntities { get; init; }
+        public required System.Collections.Generic.IReadOnlyDictionary<string, MMLib.Alvo.Descriptor.EntityDescriptor> Entities { get; init; }
+        [System.Text.Json.Serialization.JsonExtensionData]
+        public System.Collections.Generic.IDictionary<string, System.Text.Json.JsonElement>? Extensions { get; set; }
+        public System.Collections.Generic.IReadOnlyDictionary<string, MMLib.Alvo.Descriptor.NamedFormat>? Formats { get; init; }
+        public System.Collections.Generic.IReadOnlyDictionary<string, MMLib.Alvo.Descriptor.FunctionDescriptor>? Functions { get; init; }
+        public required string Name { get; init; }
+        public int? Revision { get; init; }
+        [System.Text.Json.Serialization.JsonPropertyName("$schema")]
+        public string? Schema { get; init; }
+        public System.Collections.Generic.IReadOnlyDictionary<string, MMLib.Alvo.Descriptor.MessageTemplate>? Templates { get; init; }
+        public MMLib.Alvo.Descriptor.Tenancy? Tenancy { get; init; }
+        public MMLib.Alvo.Descriptor.Webhooks? Webhooks { get; init; }
+        public static MMLib.Alvo.Descriptor.AlvoDescriptor Parse(string json) { }
+        public static string Serialize(MMLib.Alvo.Descriptor.AlvoDescriptor descriptor) { }
+    }
+    public sealed class Auth : System.IEquatable<MMLib.Alvo.Descriptor.Auth>
+    {
+        public Auth() { }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Descriptor.AuthProvider>? Providers { get; init; }
+        public System.Collections.Generic.IReadOnlyList<string>? Roles { get; init; }
+    }
+    [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Descriptor.AuthProvider>))]
+    public enum AuthProvider
+    {
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("local")]
+        Local = 0,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("google")]
+        Google = 1,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("microsoft")]
+        Microsoft = 2,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("github")]
+        Github = 3,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("apple")]
+        Apple = 4,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("oidc")]
+        Oidc = 5,
+    }
+    [System.Text.Json.Serialization.JsonDerivedType(typeof(MMLib.Alvo.Descriptor.EmailAction), "email")]
+    [System.Text.Json.Serialization.JsonDerivedType(typeof(MMLib.Alvo.Descriptor.EntityUpdateAction), "entity.update")]
+    [System.Text.Json.Serialization.JsonDerivedType(typeof(MMLib.Alvo.Descriptor.FunctionAction), "function")]
+    [System.Text.Json.Serialization.JsonDerivedType(typeof(MMLib.Alvo.Descriptor.HttpCallAction), "http.call")]
+    [System.Text.Json.Serialization.JsonDerivedType(typeof(MMLib.Alvo.Descriptor.WebhookAction), "webhook")]
+    [System.Text.Json.Serialization.JsonPolymorphic(TypeDiscriminatorPropertyName="type")]
+    public abstract class AutomationAction : System.IEquatable<MMLib.Alvo.Descriptor.AutomationAction>
+    {
+        protected AutomationAction() { }
+    }
+    public sealed class AutomationRule : System.IEquatable<MMLib.Alvo.Descriptor.AutomationRule>
+    {
+        public AutomationRule() { }
+        public required System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Descriptor.AutomationAction> Actions { get; init; }
+        public string? Condition { get; init; }
+        public MMLib.Alvo.Descriptor.DeliveryMode? Delivery { get; init; }
+        public string? Description { get; init; }
+        public bool? Enabled { get; init; }
+        [System.Text.Json.Serialization.JsonExtensionData]
+        public System.Collections.Generic.IDictionary<string, System.Text.Json.JsonElement>? Extensions { get; set; }
+        public required MMLib.Alvo.Descriptor.AutomationTrigger Trigger { get; init; }
+    }
+    public sealed class AutomationTrigger : System.IEquatable<MMLib.Alvo.Descriptor.AutomationTrigger>
+    {
+        public AutomationTrigger() { }
+        public string? Event { get; init; }
+        public string? Schedule { get; init; }
+    }
+    public sealed class BeforeHook : System.IEquatable<MMLib.Alvo.Descriptor.BeforeHook>
+    {
+        public BeforeHook() { }
+        public required MMLib.Alvo.Descriptor.BeforeHookAction Action { get; init; }
+        public string? Condition { get; init; }
+    }
+    public sealed class BeforeHookAction : System.IEquatable<MMLib.Alvo.Descriptor.BeforeHookAction>
+    {
+        public BeforeHookAction() { }
+        public System.Collections.Generic.IReadOnlyDictionary<string, MMLib.Alvo.Descriptor.ValueOrExpr>? Mutate { get; init; }
+        public string? Reject { get; init; }
+    }
+    [System.Text.Json.Serialization.JsonConverter(typeof(MMLib.Alvo.Descriptor.BoolOrCelConverter?))]
+    public sealed class BoolOrCel : System.IEquatable<MMLib.Alvo.Descriptor.BoolOrCel>
+    {
+        public BoolOrCel() { }
+        public bool? Boolean { get; init; }
+        public string? Expression { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore]
+        public bool IsExpression { get; }
+        public static MMLib.Alvo.Descriptor.BoolOrCel FromBoolean(bool value) { }
+        public static MMLib.Alvo.Descriptor.BoolOrCel FromExpression(string expression) { }
+    }
+    public sealed class Branding : System.IEquatable<MMLib.Alvo.Descriptor.Branding>
+    {
+        public Branding() { }
+        public string? LogoUrl { get; init; }
+        public string? Title { get; init; }
+    }
+    [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Descriptor.DeliveryMode>))]
+    public enum DeliveryMode
+    {
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("perItem")]
+        PerItem = 0,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("batch")]
+        Batch = 1,
+    }
+    public sealed class DynamicEntities : System.IEquatable<MMLib.Alvo.Descriptor.DynamicEntities>
+    {
+        public DynamicEntities() { }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Descriptor.FieldType>? AllowedFieldTypes { get; init; }
+        public MMLib.Alvo.Descriptor.AccessRules? DefaultRules { get; init; }
+        public MMLib.Alvo.Descriptor.EntityTenancy? DefaultTenancy { get; init; }
+        public bool? Enabled { get; init; }
+        public int? MaxEntitiesPerTenant { get; init; }
+        public int? MaxFieldsPerEntity { get; init; }
+        public int? MaxRecordsPerEntity { get; init; }
+        public string? NamePrefix { get; init; }
+    }
+    public sealed class EmailAction : MMLib.Alvo.Descriptor.AutomationAction, System.IEquatable<MMLib.Alvo.Descriptor.EmailAction>
+    {
+        public EmailAction() { }
+        public string? Data { get; init; }
+        public required string Template { get; init; }
+        public required string To { get; init; }
+    }
+    public sealed class EntityDescriptor : System.IEquatable<MMLib.Alvo.Descriptor.EntityDescriptor>
+    {
+        public EntityDescriptor() { }
+        public bool? Audit { get; init; }
+        public string? Description { get; init; }
+        [System.Text.Json.Serialization.JsonExtensionData]
+        public System.Collections.Generic.IDictionary<string, System.Text.Json.JsonElement>? Extensions { get; set; }
+        public required System.Collections.Generic.IReadOnlyDictionary<string, MMLib.Alvo.Descriptor.FieldDescriptor> Fields { get; init; }
+        public MMLib.Alvo.Descriptor.EntityHooks? Hooks { get; init; }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Descriptor.EntityIndex>? Indexes { get; init; }
+        public bool? Realtime { get; init; }
+        public string? RenamedFrom { get; init; }
+        public MMLib.Alvo.Descriptor.AccessRules? Rules { get; init; }
+        public bool? SoftDelete { get; init; }
+        public MMLib.Alvo.Descriptor.StorageMode? Storage { get; init; }
+        public MMLib.Alvo.Descriptor.EntityTenancy? Tenancy { get; init; }
+    }
+    public sealed class EntityHooks : System.IEquatable<MMLib.Alvo.Descriptor.EntityHooks>
+    {
+        public EntityHooks() { }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Descriptor.AfterHook>? AfterCreate { get; init; }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Descriptor.AfterHook>? AfterDelete { get; init; }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Descriptor.AfterHook>? AfterUpdate { get; init; }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Descriptor.BeforeHook>? BeforeCreate { get; init; }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Descriptor.BeforeHook>? BeforeDelete { get; init; }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Descriptor.BeforeHook>? BeforeUpdate { get; init; }
+    }
+    public sealed class EntityIndex : System.IEquatable<MMLib.Alvo.Descriptor.EntityIndex>
+    {
+        public EntityIndex() { }
+        public required System.Collections.Generic.IReadOnlyList<string> Fields { get; init; }
+        public bool? Unique { get; init; }
+    }
+    [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Descriptor.EntityTenancy>))]
+    public enum EntityTenancy
+    {
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("scoped")]
+        Scoped = 0,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("global")]
+        Global = 1,
+    }
+    public sealed class EntityUpdateAction : MMLib.Alvo.Descriptor.AutomationAction, System.IEquatable<MMLib.Alvo.Descriptor.EntityUpdateAction>
+    {
+        public EntityUpdateAction() { }
+        public required string Entity { get; init; }
+        public required System.Collections.Generic.IReadOnlyDictionary<string, MMLib.Alvo.Descriptor.ValueOrExpr> Payload { get; init; }
+        public string? RecordId { get; init; }
+    }
+    public sealed class FieldDescriptor : System.IEquatable<MMLib.Alvo.Descriptor.FieldDescriptor>
+    {
+        public FieldDescriptor() { }
+        public string? Computed { get; init; }
+        public MMLib.Alvo.Descriptor.ValueOrExpr? Default { get; init; }
+        public string? Description { get; init; }
+        public string? Entity { get; init; }
+        [System.Text.Json.Serialization.JsonExtensionData]
+        public System.Collections.Generic.IDictionary<string, System.Text.Json.JsonElement>? Extensions { get; set; }
+        public string? Format { get; init; }
+        public MMLib.Alvo.Descriptor.BoolOrCel? Hidden { get; init; }
+        public bool? Index { get; init; }
+        public int? MaxLength { get; init; }
+        public bool? Nullable { get; init; }
+        public MMLib.Alvo.Descriptor.OnDeleteAction? OnDelete { get; init; }
+        public int? Precision { get; init; }
+        public MMLib.Alvo.Descriptor.BoolOrCel? ReadOnly { get; init; }
+        public string? RenamedFrom { get; init; }
+        public bool? Required { get; init; }
+        public MMLib.Alvo.Descriptor.Rollup? Rollup { get; init; }
+        public int? Scale { get; init; }
+        public required MMLib.Alvo.Descriptor.FieldType Type { get; init; }
+        public bool? Unique { get; init; }
+        public string? Validation { get; init; }
+        public System.Collections.Generic.IReadOnlyList<string>? Values { get; init; }
+    }
+    [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Descriptor.FieldType>))]
+    public enum FieldType
+    {
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("string")]
+        String = 0,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("text")]
+        Text = 1,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("integer")]
+        Integer = 2,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("decimal")]
+        Decimal = 3,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("boolean")]
+        Boolean = 4,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("date")]
+        Date = 5,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("datetime")]
+        DateTime = 6,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("uuid")]
+        Uuid = 7,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("json")]
+        Json = 8,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("enum")]
+        Enum = 9,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("ref")]
+        Ref = 10,
+    }
+    public sealed class FunctionAction : MMLib.Alvo.Descriptor.AutomationAction, System.IEquatable<MMLib.Alvo.Descriptor.FunctionAction>
+    {
+        public FunctionAction() { }
+        public string? Input { get; init; }
+        public required string Name { get; init; }
+    }
+    public sealed class FunctionDescriptor : System.IEquatable<MMLib.Alvo.Descriptor.FunctionDescriptor>
+    {
+        public FunctionDescriptor() { }
+        public MMLib.Alvo.Descriptor.FunctionExecution? Execution { get; init; }
+        public required string Script { get; init; }
+        public MMLib.Alvo.Descriptor.FunctionTrigger? Trigger { get; init; }
+    }
+    [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Descriptor.FunctionExecution>))]
+    public enum FunctionExecution
+    {
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("sync")]
+        Sync = 0,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("queued")]
+        Queued = 1,
+    }
+    public sealed class FunctionHttpTrigger : System.IEquatable<MMLib.Alvo.Descriptor.FunctionHttpTrigger>
+    {
+        public FunctionHttpTrigger() { }
+        public MMLib.Alvo.Descriptor.HttpVerb? Method { get; init; }
+        public required string Route { get; init; }
+    }
+    public sealed class FunctionTrigger : System.IEquatable<MMLib.Alvo.Descriptor.FunctionTrigger>
+    {
+        public FunctionTrigger() { }
+        public string? Event { get; init; }
+        public MMLib.Alvo.Descriptor.FunctionHttpTrigger? Http { get; init; }
+        public string? Schedule { get; init; }
+    }
+    public sealed class HttpCallAction : MMLib.Alvo.Descriptor.AutomationAction, System.IEquatable<MMLib.Alvo.Descriptor.HttpCallAction>
+    {
+        public HttpCallAction() { }
+        public string? HeadersSecretRef { get; init; }
+        public MMLib.Alvo.Descriptor.HttpVerb? Method { get; init; }
+        public string? Payload { get; init; }
+        public required string Url { get; init; }
+    }
+    [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Descriptor.HttpVerb>))]
+    public enum HttpVerb
+    {
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("GET")]
+        Get = 0,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("POST")]
+        Post = 1,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("PUT")]
+        Put = 2,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("PATCH")]
+        Patch = 3,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("DELETE")]
+        Delete = 4,
+    }
+    public sealed class MessageTemplate : System.IEquatable<MMLib.Alvo.Descriptor.MessageTemplate>
+    {
+        public MessageTemplate() { }
+        public string? Body { get; init; }
+        public string? BodyFile { get; init; }
+        public string? Subject { get; init; }
+    }
+    public sealed class NamedFormat : System.IEquatable<MMLib.Alvo.Descriptor.NamedFormat>
+    {
+        public NamedFormat() { }
+        public string? Description { get; init; }
+        public required string Pattern { get; init; }
+    }
+    [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Descriptor.OnDeleteAction>))]
+    public enum OnDeleteAction
+    {
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("restrict")]
+        Restrict = 0,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("cascade")]
+        Cascade = 1,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("setNull")]
+        SetNull = 2,
+    }
+    public sealed class Rollup : System.IEquatable<MMLib.Alvo.Descriptor.Rollup>
+    {
+        public Rollup() { }
+        public string? Field { get; init; }
+        public required string From { get; init; }
+        public required MMLib.Alvo.Descriptor.RollupOp Op { get; init; }
+        public string? Via { get; init; }
+        public string? Where { get; init; }
+    }
+    [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Descriptor.RollupOp>))]
+    public enum RollupOp
+    {
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("sum")]
+        Sum = 0,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("count")]
+        Count = 1,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("avg")]
+        Avg = 2,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("min")]
+        Min = 3,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("max")]
+        Max = 4,
+    }
+    [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Descriptor.StorageMode>))]
+    public enum StorageMode
+    {
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("physical")]
+        Physical = 0,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("dynamic")]
+        Dynamic = 1,
+    }
+    public sealed class Tenancy : System.IEquatable<MMLib.Alvo.Descriptor.Tenancy>
+    {
+        public Tenancy() { }
+        public bool? Enabled { get; init; }
+    }
+    [System.Text.Json.Serialization.JsonConverter(typeof(MMLib.Alvo.Descriptor.ValueOrExprConverter?))]
+    public sealed class ValueOrExpr : System.IEquatable<MMLib.Alvo.Descriptor.ValueOrExpr>
+    {
+        public ValueOrExpr() { }
+        public string? Expression { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore]
+        public bool IsExpression { get; }
+        public System.Text.Json.JsonElement? Literal { get; init; }
+        public static MMLib.Alvo.Descriptor.ValueOrExpr FromExpression(string expression) { }
+        public static MMLib.Alvo.Descriptor.ValueOrExpr FromLiteral(System.Text.Json.JsonElement literal) { }
+    }
+    public sealed class WebhookAction : MMLib.Alvo.Descriptor.AutomationAction, System.IEquatable<MMLib.Alvo.Descriptor.WebhookAction>
+    {
+        public WebhookAction() { }
+        public required string Endpoint { get; init; }
+        public string? Payload { get; init; }
+    }
+    public sealed class WebhookEndpoint : System.IEquatable<MMLib.Alvo.Descriptor.WebhookEndpoint>
+    {
+        public WebhookEndpoint() { }
+        public string? Description { get; init; }
+        public required string SecretRef { get; init; }
+        public required string Url { get; init; }
+    }
+    public sealed class Webhooks : System.IEquatable<MMLib.Alvo.Descriptor.Webhooks>
+    {
+        public Webhooks() { }
+        public System.Collections.Generic.IReadOnlyDictionary<string, MMLib.Alvo.Descriptor.WebhookEndpoint>? Endpoints { get; init; }
+    }
+}
+namespace MMLib.Alvo.Migrations
+{
+    public sealed class AppliedSchema : System.IEquatable<MMLib.Alvo.Migrations.AppliedSchema>
+    {
+        public AppliedSchema(MMLib.Alvo.Schema.SchemaModel Schema, string DescriptorJson, int Revision, System.DateTimeOffset UpdatedAt) { }
+        public string DescriptorJson { get; init; }
+        public int Revision { get; init; }
+        public MMLib.Alvo.Schema.SchemaModel Schema { get; init; }
+        public System.DateTimeOffset UpdatedAt { get; init; }
+    }
+    public interface IAppliedSchemaStore
+    {
+        System.Threading.Tasks.Task<MMLib.Alvo.Migrations.AppliedSchema?> GetCurrentAsync(string project, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task SaveAsync(string project, MMLib.Alvo.Migrations.AppliedSchema snapshot, System.Threading.CancellationToken ct = default);
+    }
+    public interface IDescriptorSource
+    {
+        System.Threading.Tasks.Task<string> LoadAsync(System.Threading.CancellationToken ct = default);
+    }
+    public interface ISchemaMigrator
+    {
+        System.Threading.Tasks.Task<MMLib.Alvo.Migrations.MigrationResult> ApplyAsync(MMLib.Alvo.Migrations.MigrationPlan plan, MMLib.Alvo.Migrations.MigrationOptions options, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Migrations.MigrationPlan> PlanAsync(MMLib.Alvo.Schema.SchemaModel current, MMLib.Alvo.Schema.SchemaModel desired, MMLib.Alvo.Migrations.MigrationOptions options, System.Threading.CancellationToken ct = default);
+    }
+    public sealed class MigrationOptions : System.IEquatable<MMLib.Alvo.Migrations.MigrationOptions>
+    {
+        public MigrationOptions() { }
+        public bool AllowDestructive { get; init; }
+        public bool DryRun { get; init; }
+    }
+    public sealed class MigrationPlan : System.IEquatable<MMLib.Alvo.Migrations.MigrationPlan>
+    {
+        public MigrationPlan() { }
+        public bool HasDestructiveChanges { get; }
+        public bool IsEmpty { get; }
+        public System.Collections.Generic.IReadOnlyList<string> Sql { get; init; }
+        public required System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Migrations.MigrationStep> Steps { get; init; }
+    }
+    public sealed class MigrationResult : System.IEquatable<MMLib.Alvo.Migrations.MigrationResult>
+    {
+        public MigrationResult(bool Applied, MMLib.Alvo.Migrations.MigrationPlan Plan, bool WasDryRun) { }
+        public bool Applied { get; init; }
+        public MMLib.Alvo.Migrations.MigrationPlan Plan { get; init; }
+        public bool WasDryRun { get; init; }
+    }
+    public sealed class MigrationStep : System.IEquatable<MMLib.Alvo.Migrations.MigrationStep>
+    {
+        public MigrationStep(MMLib.Alvo.Migrations.SchemaChange Change, bool IsDestructive, string? Reason) { }
+        public MMLib.Alvo.Migrations.SchemaChange Change { get; init; }
+        public bool IsDestructive { get; init; }
+        public string? Reason { get; init; }
+    }
+    public sealed class SchemaChange : System.IEquatable<MMLib.Alvo.Migrations.SchemaChange>
+    {
+        public SchemaChange() { }
+        public string? Detail { get; init; }
+        public required string Entity { get; init; }
+        public string? Field { get; init; }
+        public string? FromName { get; init; }
+        public bool IsDestructive { get; init; }
+        public required MMLib.Alvo.Migrations.SchemaChangeKind Kind { get; init; }
+    }
+    public enum SchemaChangeKind
+    {
+        CreateEntity = 0,
+        DropEntity = 1,
+        RenameEntity = 2,
+        AddField = 3,
+        DropField = 4,
+        RenameField = 5,
+        AlterField = 6,
+        AddIndex = 7,
+        DropIndex = 8,
+        RenameIndex = 9,
+    }
+}
+namespace MMLib.Alvo.Schema
+{
+    public sealed class EntitySchema : System.IEquatable<MMLib.Alvo.Schema.EntitySchema>
+    {
+        public EntitySchema() { }
+        public bool Audit { get; init; }
+        public required System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Schema.FieldSchema> Fields { get; init; }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Schema.IndexSchema> Indexes { get; init; }
+        public required string Name { get; init; }
+        public string? RenamedFrom { get; init; }
+        public bool SoftDelete { get; init; }
+        public MMLib.Alvo.Schema.EntityStorage Storage { get; init; }
+        public MMLib.Alvo.Schema.TenancyMode? Tenancy { get; init; }
+    }
+    public enum EntityStorage
+    {
+        Physical = 0,
+        Dynamic = 1,
+    }
+    public sealed class FieldSchema : System.IEquatable<MMLib.Alvo.Schema.FieldSchema>
+    {
+        public FieldSchema() { }
+        public string? ComputedExpression { get; init; }
+        public System.Collections.Generic.IReadOnlyList<string>? EnumValues { get; init; }
+        public bool Indexed { get; init; }
+        public int? MaxLength { get; init; }
+        public required string Name { get; init; }
+        public bool Nullable { get; init; }
+        public int? Precision { get; init; }
+        public MMLib.Alvo.Schema.RefSchema? Reference { get; init; }
+        public string? RenamedFrom { get; init; }
+        public bool Required { get; init; }
+        public int? Scale { get; init; }
+        public required MMLib.Alvo.Schema.FieldType Type { get; init; }
+        public bool Unique { get; init; }
+    }
+    public enum FieldType
+    {
+        String = 0,
+        Text = 1,
+        Integer = 2,
+        Decimal = 3,
+        Boolean = 4,
+        Date = 5,
+        DateTime = 6,
+        Uuid = 7,
+        Json = 8,
+        Enum = 9,
+        Ref = 10,
+    }
+    public interface ISchemaIntrospector
+    {
+        System.Threading.Tasks.Task<MMLib.Alvo.Schema.SchemaModel> IntrospectAsync(System.Threading.CancellationToken ct = default);
+    }
+    public interface ISchemaRegistry
+    {
+        MMLib.Alvo.Schema.SchemaModel GetSchema();
+    }
+    public sealed class IndexSchema : System.IEquatable<MMLib.Alvo.Schema.IndexSchema>
+    {
+        public IndexSchema(System.Collections.Generic.IReadOnlyList<string> Fields, bool Unique) { }
+        public System.Collections.Generic.IReadOnlyList<string> Fields { get; init; }
+        public bool Unique { get; init; }
+    }
+    public enum OnDelete
+    {
+        Restrict = 0,
+        Cascade = 1,
+        SetNull = 2,
+    }
+    public sealed class RefSchema : System.IEquatable<MMLib.Alvo.Schema.RefSchema>
+    {
+        public RefSchema(string TargetEntity, MMLib.Alvo.Schema.OnDelete OnDelete) { }
+        public MMLib.Alvo.Schema.OnDelete OnDelete { get; init; }
+        public string TargetEntity { get; init; }
+    }
+    public sealed class SchemaModel : System.IEquatable<MMLib.Alvo.Schema.SchemaModel>
+    {
+        public SchemaModel(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Schema.EntitySchema> Entities) { }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Schema.EntitySchema> Entities { get; init; }
+    }
+    public enum TenancyMode
+    {
+        Scoped = 0,
+        Global = 1,
+    }
+}

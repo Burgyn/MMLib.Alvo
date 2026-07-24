@@ -1,0 +1,87 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "vehicle-registry",
+  "description": "A small vehicle registry: owners, their vehicles, and periodic roadworthiness inspections.",
+  "auth": {
+    "providers": ["local"],
+    "roles": ["inspector", "admin"]
+  },
+  "entities": {
+    "owners": {
+      "description": "A person or company a vehicle is registered to.",
+      "audit": true,
+      "fields": {
+        "name": { "type": "string", "required": true, "maxLength": 120 },
+        "email": { "type": "string", "unique": true, "format": "email" },
+        "phone": { "type": "string", "format": "phone" }
+      },
+      "rules": {
+        "list": "@user.id != null",
+        "get": "@user.id != null",
+        "create": "@user.role == 'admin'",
+        "update": "@user.role == 'admin'",
+        "delete": "@user.role == 'admin'"
+      }
+    },
+    "vehicles": {
+      "description": "A registered vehicle, owned by exactly one owner.",
+      "audit": true,
+      "fields": {
+        "vin": { "type": "string", "required": true, "unique": true, "maxLength": 17 },
+        "plate": {
+          "type": "string",
+          "required": true,
+          "unique": true,
+          "maxLength": 12,
+          "renamedFrom": "license_plate"
+        },
+        "make": { "type": "string", "required": true, "maxLength": 60 },
+        "model": { "type": "string", "required": true, "maxLength": 60 },
+        "year": { "type": "integer", "required": true },
+        "color": { "type": "string", "maxLength": 30 },
+        "owner_id": {
+          "type": "ref",
+          "entity": "owners",
+          "required": true,
+          "onDelete": "restrict"
+        }
+      },
+      "rules": {
+        "list": "@user.id != null",
+        "get": "@user.id != null",
+        "create": "@user.role == 'admin'",
+        "update": "@user.role in ['admin', 'inspector']",
+        "delete": "@user.role == 'admin'"
+      },
+      "indexes": [
+        { "fields": ["make", "model"] }
+      ]
+    },
+    "inspections": {
+      "description": "A roadworthiness inspection performed on a vehicle.",
+      "fields": {
+        "vehicle_id": {
+          "type": "ref",
+          "entity": "vehicles",
+          "required": true,
+          "onDelete": "cascade"
+        },
+        "inspector_name": { "type": "string", "required": true, "maxLength": 120 },
+        "inspected_on": { "type": "date", "required": true },
+        "passed": { "type": "boolean", "default": true },
+        "notes": { "type": "text" }
+      },
+      "rules": {
+        "list": "@user.id != null",
+        "get": "@user.id != null",
+        "create": "@user.role in ['admin', 'inspector']",
+        "update": "@user.role in ['admin', 'inspector']",
+        "delete": "@user.role == 'admin'"
+      },
+      "indexes": [
+        { "fields": ["vehicle_id", "inspected_on"] }
+      ]
+    }
+  }
+}

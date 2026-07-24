@@ -61,12 +61,15 @@ public class SolutionConventionTests
     [Fact]
     public void All_projects_follow_the_family_naming()
     {
+        // "MMLib.Alvo" itself (the core, no suffix) is the root of the family,
+        // not a violation of it — everything else must be "MMLib.Alvo.<Something>".
         var offenders = _projects
+            .Where(project => project.Name != "MMLib.Alvo")
             .Where(project => !project.Name.StartsWith("MMLib.Alvo.", StringComparison.Ordinal))
             .Select(project => project.RelativePath)
             .ToList();
 
-        offenders.ShouldBeEmpty("All projects must be named MMLib.Alvo.*.");
+        offenders.ShouldBeEmpty("All projects must be named MMLib.Alvo or MMLib.Alvo.*.");
     }
 
     [Fact]
