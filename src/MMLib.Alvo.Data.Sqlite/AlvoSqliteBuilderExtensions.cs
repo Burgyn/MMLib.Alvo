@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Metadata.Conventions;
 using Microsoft.EntityFrameworkCore.Sqlite.Scaffolding.Internal;
 using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo;
 using MMLib.Alvo.Data.EntityFrameworkCore;
@@ -14,9 +15,13 @@ namespace Microsoft.Extensions.DependencyInjection;
 /// <summary>Registers SQLite as Alvo's database provider on an <see cref="IAlvoBuilder"/>.</summary>
 public static class AlvoSqliteBuilderExtensions
 {
+    /// <summary>The default <c>ConnectionStrings</c> entry name the configuration overloads resolve.</summary>
+    public const string DefaultConnectionName = "Alvo";
+
     private const string MissingConnectionStringMessage =
-        "No SQLite connection string was configured. Pass one to UseSqlite(connectionString), or " +
-        "set SqliteProviderOptions.ConnectionString inside UseSqlite(configure).";
+        "No SQLite connection string was configured. Pass one to UseSqlite(connectionString), set " +
+        "SqliteProviderOptions.ConnectionString inside UseSqlite(configure), or add a " +
+        "\"ConnectionStrings:Alvo\" entry to configuration for the parameterless UseSqlite().";
 
     /// <summary>
     /// Registers SQLite as Alvo's database provider using the given connection string. Today this
@@ -73,6 +78,49 @@ public static class AlvoSqliteBuilderExtensions
 
         builder.Services.Configure<SqliteProviderOptions>(options => options.ConnectionString = connectionString);
         builder.Services.Configure(configure);
+
+        return AddSqliteProvider(builder);
+    }
+
+    /// <summary>
+    /// Registers SQLite as Alvo's database provider, resolving the connection string from the
+    /// application's <see cref="IConfiguration"/> when the provider is built — the standard
+    /// <c>ConnectionStrings:Alvo</c> entry (see <see cref="ConfigurationExtensions.GetConnectionString"/>).
+    /// Use this parameterless overload when the connection string lives in configuration
+    /// (appsettings.json, environment variables, ...) under the default
+    /// <see cref="DefaultConnectionName"/> name; the resolution is deferred, so the host's
+    /// <see cref="IConfiguration"/> only has to be registered by the time the provider is built.
+    /// </summary>
+    /// <param name="builder">The Alvo builder.</param>
+    /// <returns>The same builder, for chaining.</returns>
+    public static IAlvoBuilder UseSqlite(this IAlvoBuilder builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.Services.AddOptions<SqliteProviderOptions>()
+            .Configure<IConfiguration>(static (options, configuration) =>
+                options.ConnectionString ??= configuration.GetConnectionString(DefaultConnectionName));
+
+        return AddSqliteProvider(builder);
+    }
+
+    /// <summary>
+    /// Registers SQLite as Alvo's database provider, resolving the connection string by name from the
+    /// given <see cref="IConfiguration"/> — the standard <c>ConnectionStrings:{connectionName}</c>
+    /// entry. Use this when the connection string lives under a non-default name.
+    /// </summary>
+    /// <param name="builder">The Alvo builder.</param>
+    /// <param name="configuration">The configuration to read the connection string from.</param>
+    /// <param name="connectionName">The <c>ConnectionStrings</c> entry name (default <see cref="DefaultConnectionName"/>).</param>
+    /// <returns>The same builder, for chaining.</returns>
+    public static IAlvoBuilder UseSqlite(this IAlvoBuilder builder, IConfiguration configuration, string connectionName = DefaultConnectionName)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionName);
+
+        builder.Services.Configure<SqliteProviderOptions>(
+            options => options.ConnectionString = configuration.GetConnectionString(connectionName));
 
         return AddSqliteProvider(builder);
     }

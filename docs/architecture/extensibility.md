@@ -59,6 +59,21 @@ extension method in its own package, never an edit to `AddAlvo`/`IAlvoBuilder`.
    is typed options (`AlvoOptions`, and per-provider options), bound and validated
    with `ValidateDataAnnotations().ValidateOnStart()` / `IValidateOptions<T>` →
    fail-fast with a structured error + fix suggestion (agent-first, §0 principle 4).
+   - **Connection strings follow the `ConnectionStrings` convention, not a custom
+     section.** Every provider `Use*` ships the same overload set: a literal
+     `Use{Provider}(string connectionString)` (EF Core semantics — the string is a
+     literal, never a name, so there is no silent name/literal ambiguity), the
+     options-delegate and literal+delegate overloads, plus two configuration-bound
+     overloads — a parameterless `Use{Provider}()` that resolves the default
+     `ConnectionStrings:Alvo` entry from the ambient `IConfiguration`, and
+     `Use{Provider}(IConfiguration, string connectionName = "Alvo")` for a
+     non-default name. Resolution uses `IConfiguration.GetConnectionString(name)`;
+     the parameterless overload defers it via `OptionsBuilder.Configure<IConfiguration>`
+     (never `BuildServiceProvider`, see Pitfalls). Default connection name is
+     `"Alvo"`, uniform across providers (the provider is chosen by which `Use*` is
+     called, not by the connection name). A `Use{Provider}(string name)`
+     name-overload is deliberately **not** added — it would collide with the literal
+     `(string)` overload and turn a pasted connection string into a silent lookup miss.
 6. **Descriptor ≠ options (hard).** The project descriptor is domain input via
    `IDescriptorSource` (a file, or a DB record) — never the options pattern.
    Options carry infrastructure only. Upholds the invariant "descriptor ≠ infra
