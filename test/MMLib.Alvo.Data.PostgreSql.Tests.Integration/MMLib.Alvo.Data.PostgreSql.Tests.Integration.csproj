@@ -10,6 +10,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- MMLib.Alvo (core) is not otherwise on this project's reference chain — Data.PostgreSql only
+         depends on Data.EntityFrameworkCore + Abstractions — but RuntimeSchemaService and AddAlvo
+         live in core, so the runtime-versioning integration tests need it directly, mirroring
+         MMLib.Alvo.Data.Sqlite.Tests' reference to both core and its provider. -->
+    <ProjectReference Include="../../src/MMLib.Alvo/MMLib.Alvo.csproj" />
     <ProjectReference Include="../../src/MMLib.Alvo.Data.PostgreSql/MMLib.Alvo.Data.PostgreSql.csproj" />
   </ItemGroup>
 
