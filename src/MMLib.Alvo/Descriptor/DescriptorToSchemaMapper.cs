@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Schema;
+using SchemaFieldType = MMLib.Alvo.Schema.FieldType;
 
 namespace MMLib.Alvo.Descriptor;
 
@@ -12,18 +13,20 @@ internal static class DescriptorToSchemaMapper
     {
         bool tenancyEnabled = d.Tenancy?.Enabled == true;
         var entities = d.Entities
-            .Where(kvp => (kvp.Value.Storage ?? "physical") == "physical")   // dynamic store is F7
+            .Where(kvp => IsPhysical(kvp.Value))
             .Select(kvp => MapEntity(kvp.Key, kvp.Value, tenancyEnabled))
             .ToList();
         return new SchemaModel(entities);
     }
 
-    private static EntitySchema MapEntity(string name, EntityDto e, bool tenancyEnabled)
+    private static bool IsPhysical(EntityDescriptor e) => (e.Storage ?? StorageMode.Physical) == StorageMode.Physical;
+
+    private static EntitySchema MapEntity(string name, EntityDescriptor e, bool tenancyEnabled)
     {
         var fields = new List<FieldSchema>();
         if (!e.Fields.ContainsKey("id"))
         {
-            fields.Add(new FieldSchema { Name = "id", Type = FieldType.Uuid, Required = true });
+            fields.Add(new FieldSchema { Name = "id", Type = SchemaFieldType.Uuid, Required = true });
         }
 
         foreach (var (fname, f) in e.Fields)
@@ -32,26 +35,12 @@ internal static class DescriptorToSchemaMapper
         }
 
         var tenancy = ResolveTenancy(e.Tenancy, tenancyEnabled);
-        if (tenancy == TenancyMode.Scoped)
-        {
-            fields.Add(new FieldSchema { Name = "tenant_id", Type = FieldType.Uuid, Required = true, Indexed = true });
-        }
-
-        if (e.Audit)
-        {
-            fields.Add(new FieldSchema { Name = "created_at", Type = FieldType.DateTime, Required = true });
-            fields.Add(new FieldSchema { Name = "created_by", Type = FieldType.Uuid, Nullable = true });
-            fields.Add(new FieldSchema { Name = "updated_at", Type = FieldType.DateTime, Required = true });
-            fields.Add(new FieldSchema { Name = "updated_by", Type = FieldType.Uuid, Nullable = true });
-        }
-
-        if (e.SoftDelete)
-        {
-            fields.Add(new FieldSchema { Name = "deleted_at", Type = FieldType.DateTime, Nullable = true });
-        }
+        bool audit = e.Audit == true;
+        bool softDelete = e.SoftDelete == true;
+        AddManagedColumns(fields, tenancy, audit, softDelete);
 
         var indexes = (e.Indexes ?? [])
-            .Select(i => new IndexSchema(i.Fields, i.Unique)).ToList();
+            .Select(i => new IndexSchema(i.Fields, i.Unique == true)).ToList();
 
         return new EntitySchema
         {
@@ -59,57 +48,78 @@ internal static class DescriptorToSchemaMapper
             RenamedFrom = e.RenamedFrom,
             Storage = EntityStorage.Physical,
             Tenancy = tenancy,
-            SoftDelete = e.SoftDelete,
-            Audit = e.Audit,
+            SoftDelete = softDelete,
+            Audit = audit,
             Fields = fields,
             Indexes = indexes,
         };
     }
 
-    private static TenancyMode? ResolveTenancy(string? entityTenancy, bool tenancyEnabled) => entityTenancy switch
+    private static void AddManagedColumns(List<FieldSchema> fields, TenancyMode? tenancy, bool audit, bool softDelete)
     {
-        "global" => TenancyMode.Global,
-        "scoped" => TenancyMode.Scoped,
+        if (tenancy == TenancyMode.Scoped)
+        {
+            fields.Add(new FieldSchema { Name = "tenant_id", Type = SchemaFieldType.Uuid, Required = true, Indexed = true });
+        }
+
+        if (audit)
+        {
+            fields.Add(new FieldSchema { Name = "created_at", Type = SchemaFieldType.DateTime, Required = true });
+            fields.Add(new FieldSchema { Name = "created_by", Type = SchemaFieldType.Uuid, Nullable = true });
+            fields.Add(new FieldSchema { Name = "updated_at", Type = SchemaFieldType.DateTime, Required = true });
+            fields.Add(new FieldSchema { Name = "updated_by", Type = SchemaFieldType.Uuid, Nullable = true });
+        }
+
+        if (softDelete)
+        {
+            fields.Add(new FieldSchema { Name = "deleted_at", Type = SchemaFieldType.DateTime, Nullable = true });
+        }
+    }
+
+    private static TenancyMode? ResolveTenancy(EntityTenancy? entityTenancy, bool tenancyEnabled) => entityTenancy switch
+    {
+        EntityTenancy.Global => TenancyMode.Global,
+        EntityTenancy.Scoped => TenancyMode.Scoped,
         _ => tenancyEnabled ? TenancyMode.Scoped : null,
     };
 
-    private static FieldSchema MapField(string name, FieldDto f) => new()
+    private static FieldSchema MapField(string name, FieldDescriptor f) => new()
     {
         Name = name,
-        Type = ParseType(f.Type),
+        Type = MapType(f.Type),
         RenamedFrom = f.RenamedFrom,
-        Required = f.Required,
-        Unique = f.Unique,
-        Nullable = f.Nullable ?? !f.Required,
+        Required = f.Required == true,
+        Unique = f.Unique == true,
+        Nullable = f.Nullable ?? f.Required != true,
         MaxLength = f.MaxLength,
         Precision = f.Precision,
         Scale = f.Scale,
         EnumValues = f.Values,
-        Reference = f.Entity is null ? null : new RefSchema(f.Entity, ParseOnDelete(f.OnDelete)),
-        Indexed = f.Index,
+        Reference = f.Entity is null ? null : new RefSchema(f.Entity, MapOnDelete(f.OnDelete)),
+        Indexed = f.Index == true,
         ComputedExpression = f.Computed,
     };
 
-    private static FieldType ParseType(string t) => t switch
+    private static SchemaFieldType MapType(FieldType t) => t switch
     {
-        "string" => FieldType.String,
-        "text" => FieldType.Text,
-        "integer" => FieldType.Integer,
-        "decimal" => FieldType.Decimal,
-        "boolean" => FieldType.Boolean,
-        "date" => FieldType.Date,
-        "datetime" => FieldType.DateTime,
-        "uuid" => FieldType.Uuid,
-        "json" => FieldType.Json,
-        "enum" => FieldType.Enum,
-        "ref" => FieldType.Ref,
+        FieldType.String => SchemaFieldType.String,
+        FieldType.Text => SchemaFieldType.Text,
+        FieldType.Integer => SchemaFieldType.Integer,
+        FieldType.Decimal => SchemaFieldType.Decimal,
+        FieldType.Boolean => SchemaFieldType.Boolean,
+        FieldType.Date => SchemaFieldType.Date,
+        FieldType.DateTime => SchemaFieldType.DateTime,
+        FieldType.Uuid => SchemaFieldType.Uuid,
+        FieldType.Json => SchemaFieldType.Json,
+        FieldType.Enum => SchemaFieldType.Enum,
+        FieldType.Ref => SchemaFieldType.Ref,
         _ => throw new InvalidDataException($"Unknown field type '{t}'."),
     };
 
-    private static OnDelete ParseOnDelete(string? od) => od switch
+    private static OnDelete MapOnDelete(OnDeleteAction? od) => od switch
     {
-        "cascade" => OnDelete.Cascade,
-        "setNull" => OnDelete.SetNull,
+        OnDeleteAction.Cascade => OnDelete.Cascade,
+        OnDeleteAction.SetNull => OnDelete.SetNull,
         _ => OnDelete.Restrict,
     };
 }

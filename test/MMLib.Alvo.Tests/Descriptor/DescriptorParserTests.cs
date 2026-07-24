@@ -12,7 +12,7 @@ public class DescriptorParserTests
     [Fact]
     public void Parses_name_and_entities()
     {
-        AlvoDescriptor d = DescriptorParser.Parse(SimpleTasks());
+        AlvoDescriptor d = AlvoDescriptor.Parse(SimpleTasks());
         Assert.Equal("simple-tasks", d.Name);
         Assert.Contains("tasks", d.Entities.Keys);
         Assert.NotEmpty(d.Entities["tasks"].Fields);

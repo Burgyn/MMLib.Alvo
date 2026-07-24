@@ -54,7 +54,7 @@ internal sealed class SchemaMigrationRunner
         ArgumentNullException.ThrowIfNull(options);
 
         var descriptorJson = await _source.LoadAsync(ct).ConfigureAwait(false);
-        var descriptor = DescriptorParser.Parse(descriptorJson);
+        var descriptor = AlvoDescriptor.Parse(descriptorJson);
         var desired = DescriptorToSchemaMapper.Map(descriptor);
 
         var appliedSnapshot = await _store.GetCurrentAsync(descriptor.Name, ct).ConfigureAwait(false);

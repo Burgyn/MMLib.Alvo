@@ -1,12 +1,13 @@
 ﻿using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Schema;
+using FieldType = MMLib.Alvo.Schema.FieldType;
 
 namespace MMLib.Alvo.Tests.Descriptor;
 
 public class DescriptorToSchemaMapperTests
 {
     private static SchemaModel Map(string file)
-        => DescriptorToSchemaMapper.Map(DescriptorParser.Parse(
+        => DescriptorToSchemaMapper.Map(AlvoDescriptor.Parse(
             File.ReadAllText(Path.Combine(RepositoryRoot.Find(), "examples", file))));
 
     [Fact]

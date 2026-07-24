@@ -4,6 +4,7 @@ using MMLib.Alvo.Schema;
 using MMLib.Alvo.Testing.Migrations;
 using NSubstitute;
 using NSubstitute.Core;
+using FieldType = MMLib.Alvo.Schema.FieldType;
 
 namespace MMLib.Alvo.Tests.Migrations;
 
@@ -100,7 +101,7 @@ public sealed class SchemaMigrationRunnerTests
     }
 
     private static SchemaModel MapFleetDescriptor()
-        => DescriptorToSchemaMapper.Map(DescriptorParser.Parse(FleetDescriptorJson));
+        => DescriptorToSchemaMapper.Map(AlvoDescriptor.Parse(FleetDescriptorJson));
 
     private static List<string> VehicleFieldNames(SchemaModel schema)
         => schema.Entities.Single(e => e.Name == "vehicles").Fields.Select(f => f.Name).ToList();
