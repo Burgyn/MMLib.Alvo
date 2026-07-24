@@ -17,7 +17,7 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// lossy on engines with weak column typing (e.g. SQLite's type affinities), so it only recovers
 /// what round-tripping and drift detection need: names, coarse field types, nullability, indexes,
 /// and foreign keys. The optional <c>excludedTableName</c> keeps Alvo's own bookkeeping table
-/// (<see cref="SystemSchemaInitializer.AppliedSchemaTableName"/>) out of the introspected schema —
+/// (<see cref="SystemSchemaInitializer.DescriptorVersionsTableName"/>) out of the introspected schema —
 /// without it, the code-first diff would see its own applied-schema table as a rogue user entity.
 ///
 /// <para>
@@ -37,7 +37,7 @@ public sealed class EfCoreSchemaIntrospector : ISchemaIntrospector
     /// </summary>
     /// <param name="databaseModelFactory">EF Core's provider-flavored reverse-engineering / scaffolding factory.</param>
     /// <param name="connections">Creates a fresh ADO.NET connection per <see cref="IntrospectAsync"/> call; each connection is owned and disposed within that call.</param>
-    /// <param name="excludedTableName">Optional table to omit from the introspected schema (e.g. Alvo's applied-schema bookkeeping table).</param>
+    /// <param name="excludedTableName">Optional table to omit from the introspected schema (e.g. Alvo's descriptor-versions bookkeeping table).</param>
     internal EfCoreSchemaIntrospector(IDatabaseModelFactory databaseModelFactory, RelationalConnectionFactory connections, string? excludedTableName = null)
     {
         ArgumentNullException.ThrowIfNull(databaseModelFactory);

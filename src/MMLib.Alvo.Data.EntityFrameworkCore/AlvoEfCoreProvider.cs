@@ -15,9 +15,10 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// glue that is identical across relational providers — resolving EF Core's migrations differ, SQL
 /// generator, model-runtime initializer, and scaffolding factory from a throwaway
 /// <see cref="DbContext"/>, then wiring <see cref="ISchemaMigrator"/>,
-/// <see cref="ISchemaIntrospector"/>, and <see cref="IAppliedSchemaStore"/> — so a provider package
-/// (SQLite, PostgreSQL, or an out-of-repo engine such as Oracle) only supplies the handful of
-/// provider-specific callbacks on <see cref="RelationalProviderRegistration"/>.
+/// <see cref="ISchemaIntrospector"/>, <see cref="IDescriptorVersionStore"/>, and
+/// <see cref="IAppliedSchemaStore"/> — so a provider package (SQLite, PostgreSQL, or an
+/// out-of-repo engine such as Oracle) only supplies the handful of provider-specific callbacks on
+/// <see cref="RelationalProviderRegistration"/>.
 /// </summary>
 public static class AlvoEfCoreProvider
 {
@@ -31,13 +32,17 @@ public static class AlvoEfCoreProvider
     /// <param name="registration">The provider-specific building blocks (connection, EF services, model factory).</param>
     /// <returns>The same builder, for chaining.</returns>
     /// <remarks>
-    /// All three services are registered as idempotent (<c>TryAdd</c>) singletons, backed by one
-    /// shared <see cref="RelationalConnectionFactory"/> singleton: the migrator and introspector
-    /// each open a fresh ADO.NET connection per call instead of holding one for the container's
-    /// lifetime, so two concurrent callers never race on a shared connection. The connection string
-    /// is resolved from <paramref name="registration"/> at provider-build time (when a service is
-    /// first materialized), never eagerly at call time, so an options-bound connection string is
-    /// honored.
+    /// All services are registered as idempotent (<c>TryAdd</c>) singletons, backed by one shared
+    /// <see cref="RelationalConnectionFactory"/> singleton: the migrator, introspector, and
+    /// descriptor-version store each open a fresh ADO.NET connection per call instead of holding
+    /// one for the container's lifetime, so two concurrent callers never race on a shared
+    /// connection. <see cref="IDescriptorVersionStore"/> and <see cref="IAppliedSchemaStore"/> both
+    /// resolve to the same <see cref="EfCoreDescriptorVersionStore"/> singleton, so the code-first
+    /// <c>SchemaMigrationRunner</c> (built against <see cref="IAppliedSchemaStore"/>) and any future
+    /// runtime caller (built against <see cref="IDescriptorVersionStore"/>) share one append-only
+    /// history. The connection string is resolved from <paramref name="registration"/> at
+    /// provider-build time (when a service is first materialized), never eagerly at call time, so
+    /// an options-bound connection string is honored.
     /// </remarks>
     public static IAlvoBuilder AddRelationalProvider(this IAlvoBuilder builder, RelationalProviderRegistration registration)
     {
@@ -52,7 +57,9 @@ public static class AlvoEfCoreProvider
         builder.Services.TryAddSingleton(sp => CreateConnectionFactory(sp, registration));
         builder.Services.TryAddSingleton<ISchemaMigrator>(sp => CreateMigrator(sp, registration));
         builder.Services.TryAddSingleton<ISchemaIntrospector>(sp => CreateIntrospector(sp, registration));
-        builder.Services.TryAddSingleton<IAppliedSchemaStore>(sp => CreateAppliedSchemaStore(sp, registration));
+        builder.Services.TryAddSingleton(CreateDescriptorVersionStore);
+        builder.Services.TryAddSingleton<IDescriptorVersionStore>(sp => sp.GetRequiredService<EfCoreDescriptorVersionStore>());
+        builder.Services.TryAddSingleton<IAppliedSchemaStore>(sp => sp.GetRequiredService<EfCoreDescriptorVersionStore>());
 
         return builder;
     }
@@ -89,15 +96,15 @@ public static class AlvoEfCoreProvider
         return new EfCoreSchemaIntrospector(
             databaseModelFactory,
             connections,
-            SystemSchemaInitializer.AppliedSchemaTableName(schemaPrefix));
+            SystemSchemaInitializer.DescriptorVersionsTableName(schemaPrefix));
     }
 
-    private static AppliedSchemaStore CreateAppliedSchemaStore(IServiceProvider services, RelationalProviderRegistration registration)
+    private static EfCoreDescriptorVersionStore CreateDescriptorVersionStore(IServiceProvider services)
     {
-        var connectionString = registration.ConnectionString(services);
+        var connections = services.GetRequiredService<RelationalConnectionFactory>();
         var options = services.GetRequiredService<IOptions<AlvoOptions>>().Value;
 
-        return new AppliedSchemaStore(registration.CreateConnection(connectionString), options);
+        return new EfCoreDescriptorVersionStore(connections, options);
     }
 
     // A short-lived context configured with the provider's UseXxx, spun up only to reach its

@@ -5,8 +5,8 @@ using System.Text.RegularExpressions;
 namespace MMLib.Alvo.Data.EntityFrameworkCore;
 
 /// <summary>
-/// Idempotently creates Alvo's own fixed applied-schema table — the framework's bookkeeping
-/// table, not something produced by the declarative descriptor-diff engine
+/// Idempotently creates Alvo's own fixed append-only descriptor-versions table — the framework's
+/// bookkeeping table, not something produced by the declarative descriptor-diff engine
 /// (<see cref="Migrations.ISchemaMigrator"/>).
 /// </summary>
 /// <remarks>
@@ -30,21 +30,21 @@ internal sealed partial class SystemSchemaInitializer
         }
 
         _connection = connection;
-        TableName = AppliedSchemaTableName(schemaPrefix);
+        TableName = DescriptorVersionsTableName(schemaPrefix);
     }
 
-    /// <summary>Gets the fully-prefixed applied-schema table name, e.g. <c>alvo_applied_schema</c>.</summary>
+    /// <summary>Gets the fully-prefixed descriptor-versions table name, e.g. <c>alvo_descriptor_versions</c>.</summary>
     public string TableName { get; }
 
     /// <summary>
-    /// Computes the applied-schema table name for a given prefix — the single source of truth
+    /// Computes the descriptor-versions table name for a given prefix — the single source of truth
     /// <see cref="EfCoreSchemaIntrospector"/> reuses to exclude Alvo's own bookkeeping table from
     /// what it reports as the user's schema.
     /// </summary>
-    public static string AppliedSchemaTableName(string schemaPrefix) => $"{schemaPrefix}_applied_schema";
+    public static string DescriptorVersionsTableName(string schemaPrefix) => $"{schemaPrefix}_descriptor_versions";
 
     /// <summary>
-    /// Creates the applied-schema table if it does not already exist. Safe to call repeatedly —
+    /// Creates the descriptor-versions table if it does not already exist. Safe to call repeatedly —
     /// a second (or Nth) call is a no-op.
     /// </summary>
     // Deferred: Postgres schema cohabitation (spec §2.13) — embedded mode living inside a host's
@@ -67,11 +67,15 @@ internal sealed partial class SystemSchemaInitializer
             command.CommandText =
                 $"""
                 CREATE TABLE IF NOT EXISTS {TableName} (
-                    project TEXT PRIMARY KEY,
+                    project TEXT NOT NULL,
+                    revision INTEGER NOT NULL,
                     descriptor_json TEXT NOT NULL,
                     schema_json TEXT NOT NULL,
-                    revision INTEGER NOT NULL,
-                    updated_at TEXT NOT NULL
+                    author TEXT NULL,
+                    reason TEXT NULL,
+                    rolled_back_from INTEGER NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (project, revision)
                 )
                 """;
             await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);

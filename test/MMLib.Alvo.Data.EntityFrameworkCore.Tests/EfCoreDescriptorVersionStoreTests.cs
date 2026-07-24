@@ -1,29 +1,40 @@
 ﻿using Microsoft.Data.Sqlite;
-using MMLib.Alvo.Data.EntityFrameworkCore;
+using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Schema;
 using System.Text.Json;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore.Tests;
 
-public class AppliedSchemaStoreTests : IDisposable
+/// <summary>
+/// Unit-level coverage for <see cref="EfCoreDescriptorVersionStore"/>'s back-compatible
+/// <see cref="IAppliedSchemaStore"/> surface (the one <c>SchemaMigrationRunner</c> actually calls) —
+/// the cross-engine append-only contract itself is covered by
+/// <c>DescriptorVersionStoreContractTests</c> against real SQLite/PostgreSQL databases.
+/// </summary>
+public class EfCoreDescriptorVersionStoreTests : IDisposable
 {
-    // A single shared, already-open connection: ":memory:" SQLite DBs live only as long as their
-    // one connection stays open, so it must be kept open and reused across calls for the table
-    // (and its rows) to persist between them — same pattern as EfCoreSchemaMigratorApplyTests.
-    private readonly SqliteConnection _connection = new("Data Source=:memory:");
-    private readonly AppliedSchemaStore _store;
+    // A named, shared-cache SQLite in-memory database: distinct connections that share the same
+    // "Data Source" name + Cache=Shared attach to the SAME in-memory database, which is what lets
+    // the store's per-call connections (RelationalConnectionFactory) see each other's writes. A
+    // shared-cache in-memory database is destroyed once its last connection closes, so _keepAlive
+    // holds one dedicated, never-handed-out connection open for the fixture's lifetime.
+    private readonly string _connectionString = $"Data Source={Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+    private readonly SqliteConnection _keepAlive;
+    private readonly IAppliedSchemaStore _store;
 
-    public AppliedSchemaStoreTests()
+    public EfCoreDescriptorVersionStoreTests()
     {
-        _connection.Open();
-        _store = new AppliedSchemaStore(_connection, new AlvoOptions());
+        _keepAlive = new SqliteConnection(_connectionString);
+        _keepAlive.Open();
+
+        var connections = new RelationalConnectionFactory(() => new SqliteConnection(_connectionString));
+        _store = new EfCoreDescriptorVersionStore(connections, new AlvoOptions());
     }
 
     public void Dispose()
     {
-        _store.Dispose();
-        _connection.Dispose();
+        _keepAlive.Dispose();
         GC.SuppressFinalize(this);
     }
 
@@ -68,7 +79,7 @@ public class AppliedSchemaStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task SaveAsync_twice_for_the_same_project_upserts_instead_of_duplicating()
+    public async Task SaveAsync_twice_for_the_same_project_appends_a_new_revision_instead_of_duplicating_it()
     {
         var ct = TestContext.Current.CancellationToken;
         await _store.SaveAsync("demo", new AppliedSchema(Vehicles, "{}", 1, DateTimeOffset.UtcNow), ct);
@@ -81,17 +92,29 @@ public class AppliedSchemaStoreTests : IDisposable
         current.Revision.ShouldBe(2);
         current.Schema.Entities.Count.ShouldBe(2);
 
-        var command = _connection.CreateCommand();
-        command.CommandText = "SELECT COUNT(*) FROM alvo_applied_schema WHERE project = 'demo'";
+        var command = _keepAlive.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM alvo_descriptor_versions WHERE project = 'demo'";
         var count = (long)(await command.ExecuteScalarAsync(ct))!;
-        count.ShouldBe(1L);
+        count.ShouldBe(2L);
+    }
+
+    [Fact]
+    public async Task SaveAsync_with_a_stale_revision_throws_a_concurrency_exception()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await _store.SaveAsync("demo", new AppliedSchema(Vehicles, "{}", 1, DateTimeOffset.UtcNow), ct);
+
+        // Re-saving at revision 1 again (instead of 2) means SaveAsync computes the same
+        // expectedRevision (0) it already consumed — the append must be rejected, not overwrite.
+        await Should.ThrowAsync<DescriptorConcurrencyException>(
+            () => _store.SaveAsync("demo", new AppliedSchema(Vehicles, "{}", 1, DateTimeOffset.UtcNow), ct));
     }
 
     [Fact]
     public async Task A_second_EnsureAsync_is_a_noop()
     {
         var ct = TestContext.Current.CancellationToken;
-        var initializer = new SystemSchemaInitializer(_connection, "alvo");
+        var initializer = new SystemSchemaInitializer(_keepAlive, "alvo");
 
         await initializer.EnsureAsync(ct);
         await Should.NotThrowAsync(() => initializer.EnsureAsync(ct));
