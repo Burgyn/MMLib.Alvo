@@ -461,6 +461,24 @@ namespace MMLib.Alvo.Migrations
         public MMLib.Alvo.Schema.SchemaModel Schema { get; init; }
         public System.DateTimeOffset UpdatedAt { get; init; }
     }
+    public sealed class DescriptorConcurrencyException : System.Exception
+    {
+        public DescriptorConcurrencyException(string project, int expectedRevision, int actualRevision) { }
+        public int ActualRevision { get; }
+        public int ExpectedRevision { get; }
+        public string Project { get; }
+    }
+    public sealed class DescriptorVersion : System.IEquatable<MMLib.Alvo.Migrations.DescriptorVersion>
+    {
+        public DescriptorVersion(MMLib.Alvo.Schema.SchemaModel Schema, string DescriptorJson, int Revision, System.DateTimeOffset CreatedAt, string? Author = null, string? Reason = null, int? RolledBackFrom = default) { }
+        public string? Author { get; init; }
+        public System.DateTimeOffset CreatedAt { get; init; }
+        public string DescriptorJson { get; init; }
+        public string? Reason { get; init; }
+        public int Revision { get; init; }
+        public int? RolledBackFrom { get; init; }
+        public MMLib.Alvo.Schema.SchemaModel Schema { get; init; }
+    }
     public interface IAppliedSchemaStore
     {
         System.Threading.Tasks.Task<MMLib.Alvo.Migrations.AppliedSchema?> GetCurrentAsync(string project, System.Threading.CancellationToken ct = default);
@@ -469,6 +487,13 @@ namespace MMLib.Alvo.Migrations
     public interface IDescriptorSource
     {
         System.Threading.Tasks.Task<string> LoadAsync(System.Threading.CancellationToken ct = default);
+    }
+    public interface IDescriptorVersionStore
+    {
+        System.Threading.Tasks.Task<MMLib.Alvo.Migrations.DescriptorVersion> AppendAsync(string project, MMLib.Alvo.Migrations.DescriptorVersion candidate, int expectedRevision, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Migrations.DescriptorVersion?> GetAsync(string project, int revision, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Migrations.DescriptorVersion?> GetCurrentAsync(string project, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Migrations.DescriptorVersion>> ListAsync(string project, System.Threading.CancellationToken ct = default);
     }
     public interface ISchemaMigrator
     {
