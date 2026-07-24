@@ -52,24 +52,19 @@ jobs:
         if: runner.os == 'Linux'
         run: dotnet format --verify-no-changes
 
-      # The PR is the single full gate. ring2 (= ring1 + affected integration,
+      # The PR is the single full gate: ring2 (= ring1 + affected integration,
       # incl. the Testcontainers/PostgreSQL integration project + API-invariant/
-      # Vacuum placeholders) needs Linux containers, which Windows GitHub runners
-      # cannot run (Windows-container mode has no postgres:16-alpine manifest) —
-      # so ring2 runs only on Linux; ring1 (unit + architecture + public-API,
-      # no Docker) covers the rest of the matrix, including Data.Sqlite.Tests.
-      # Same scripts the agent runs locally. bash is available on the Windows
-      # runner.
+      # Vacuum placeholders) runs on both OSes. Windows GitHub runners run
+      # Docker in Windows-container mode and cannot run the Linux
+      # postgres:16-alpine image — the PostgreSQL Testcontainers integration
+      # tests self-skip there (see PostgresFixture / EnsureEngineAvailable)
+      # rather than the CI matrix branching around them. Same script the
+      # agent runs locally. bash is available on the Windows runner.
       - name: Test (rings)
         shell: bash
         env:
           ALVO_CONFIGURATION: Release
-        run: |
-          if [ "$RUNNER_OS" = "Linux" ]; then
-            scripts/test-ring2
-          else
-            scripts/test-ring1
-          fi
+        run: scripts/test-ring2
 
       # Pack-only on the PR (issue #14): prove packaging works and publish the
       # .nupkg as an artifact. No feed publish — that lands with v0.1.

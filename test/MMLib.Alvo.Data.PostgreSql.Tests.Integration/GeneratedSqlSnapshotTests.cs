@@ -29,6 +29,16 @@ public sealed class GeneratedSqlSnapshotTests : IClassFixture<PostgresFixture>, 
     {
         ArgumentNullException.ThrowIfNull(fixture);
 
+        if (OperatingSystem.IsWindows())
+        {
+            // The fixture never started a container (Windows-container runners can't run the
+            // Linux postgres:16-alpine image), so fixture.ConnectionString is empty here — every
+            // test below calls Assert.SkipUnless as its first statement and skips before
+            // touching _services.
+            _services = new ServiceCollection().BuildServiceProvider();
+            return;
+        }
+
         var builder = new TestAlvoBuilder(new ServiceCollection());
         builder.UsePostgreSql(fixture.ConnectionString);
         _services = builder.Services.BuildServiceProvider();
@@ -38,6 +48,7 @@ public sealed class GeneratedSqlSnapshotTests : IClassFixture<PostgresFixture>, 
     [Fact]
     public async Task Create_vehicles_table_sql_is_stable()
     {
+        Assert.SkipUnless(!OperatingSystem.IsWindows(), "PostgreSQL Testcontainers requires a Linux Docker daemon; unavailable on Windows-container runners.");
         var plan = await Migrator().PlanAsync(Empty(), Model(Vehicles()), new MigrationOptions(), TestContext.Current.CancellationToken);
         await Verify(Sql(plan));
     }
@@ -46,6 +57,7 @@ public sealed class GeneratedSqlSnapshotTests : IClassFixture<PostgresFixture>, 
     [Fact]
     public async Task Add_column_sql_is_stable()
     {
+        Assert.SkipUnless(!OperatingSystem.IsWindows(), "PostgreSQL Testcontainers requires a Linux Docker daemon; unavailable on Windows-container runners.");
         var before = Model(Vehicles());
         var after = Model(Vehicles([new FieldSchema { Name = "mileage", Type = FieldType.Integer }]));
 
@@ -57,6 +69,7 @@ public sealed class GeneratedSqlSnapshotTests : IClassFixture<PostgresFixture>, 
     [Fact]
     public async Task Rename_column_sql_is_stable()
     {
+        Assert.SkipUnless(!OperatingSystem.IsWindows(), "PostgreSQL Testcontainers requires a Linux Docker daemon; unavailable on Windows-container runners.");
         var before = Model(Vehicles([new FieldSchema { Name = "colour", Type = FieldType.String, MaxLength = 30 }]));
         var after = Model(Vehicles(
         [
@@ -71,6 +84,7 @@ public sealed class GeneratedSqlSnapshotTests : IClassFixture<PostgresFixture>, 
     [Fact]
     public async Task Drop_column_sql_is_stable()
     {
+        Assert.SkipUnless(!OperatingSystem.IsWindows(), "PostgreSQL Testcontainers requires a Linux Docker daemon; unavailable on Windows-container runners.");
         var before = Model(Vehicles([new FieldSchema { Name = "mileage", Type = FieldType.Integer }]));
         var after = Model(Vehicles());
 
@@ -82,6 +96,7 @@ public sealed class GeneratedSqlSnapshotTests : IClassFixture<PostgresFixture>, 
     [Fact]
     public async Task Add_composite_index_sql_is_stable()
     {
+        Assert.SkipUnless(!OperatingSystem.IsWindows(), "PostgreSQL Testcontainers requires a Linux Docker daemon; unavailable on Windows-container runners.");
         var before = Model(Vehicles());
         var after = Model(Vehicles(indexes: [new IndexSchema(["make", "model"], Unique: false)]));
 
@@ -93,6 +108,7 @@ public sealed class GeneratedSqlSnapshotTests : IClassFixture<PostgresFixture>, 
     [Fact]
     public async Task Add_ref_foreign_key_sql_is_stable()
     {
+        Assert.SkipUnless(!OperatingSystem.IsWindows(), "PostgreSQL Testcontainers requires a Linux Docker daemon; unavailable on Windows-container runners.");
         var before = Model(Owners(), Vehicles());
         var after = Model(Owners(), Vehicles(
         [

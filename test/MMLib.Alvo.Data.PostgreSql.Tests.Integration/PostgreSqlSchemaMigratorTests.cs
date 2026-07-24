@@ -35,6 +35,17 @@ public sealed class PostgreSqlSchemaMigratorTests : SchemaMigratorContractTests,
     {
         ArgumentNullException.ThrowIfNull(fixture);
 
+        if (OperatingSystem.IsWindows())
+        {
+            // The fixture never started a container (Windows-container runners can't run the
+            // Linux postgres:16-alpine image), so fixture.ConnectionString is empty here — every
+            // test below calls EnsureEngineAvailable() as its first statement and skips before
+            // touching _services/_connectionString.
+            _connectionString = string.Empty;
+            _services = new ServiceCollection().BuildServiceProvider();
+            return;
+        }
+
         CreateDatabase(fixture.ConnectionString, _databaseName);
         _connectionString = WithDatabase(fixture.ConnectionString, _databaseName);
 
@@ -42,6 +53,9 @@ public sealed class PostgreSqlSchemaMigratorTests : SchemaMigratorContractTests,
         builder.UsePostgreSql(_connectionString);
         _services = builder.Services.BuildServiceProvider();
     }
+
+    protected override void EnsureEngineAvailable() =>
+        Assert.SkipUnless(!OperatingSystem.IsWindows(), "PostgreSQL Testcontainers requires a Linux Docker daemon; unavailable on Windows-container runners.");
 
     protected override ISchemaMigrator CreateMigrator() => _services.GetRequiredService<ISchemaMigrator>();
 
@@ -68,6 +82,7 @@ public sealed class PostgreSqlSchemaMigratorTests : SchemaMigratorContractTests,
         // Drop undeclared "a" + add same-type "d": EF guesses a single RenameColumn a->d. Accepting
         // it would bypass AllowDestructive and carry "a"'s data into the unrelated "d". The splitter
         // must reclassify it into a destructive Drop + a fresh Add. (Finding A, PostgreSQL leg.)
+        EnsureEngineAvailable();
         var ct = TestContext.Current.CancellationToken;
         var migrator = CreateMigrator();
         var before = OneField("a");
@@ -99,6 +114,7 @@ public sealed class PostgreSqlSchemaMigratorTests : SchemaMigratorContractTests,
     {
         // Drop "a" (text) + add "n" (bigint): two ops. Whole-plan SQL generation must apply cleanly
         // (the per-op shortcut is the SQLite failure mode; Postgres is the parity leg). (Finding B.)
+        EnsureEngineAvailable();
         var ct = TestContext.Current.CancellationToken;
         var migrator = CreateMigrator();
         var before = OneField("a");
@@ -120,6 +136,7 @@ public sealed class PostgreSqlSchemaMigratorTests : SchemaMigratorContractTests,
     {
         // Regression guard: a DECLARED rename must stay a genuine, data-preserving rename after the
         // Finding-A fix.
+        EnsureEngineAvailable();
         var ct = TestContext.Current.CancellationToken;
         var migrator = CreateMigrator();
         var before = OneField("colour");

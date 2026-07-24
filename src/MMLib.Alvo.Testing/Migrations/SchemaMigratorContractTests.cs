@@ -21,6 +21,16 @@ public abstract class SchemaMigratorContractTests
     /// <returns>The introspected schema model.</returns>
     protected abstract Task<SchemaModel> IntrospectAsync();
 
+    /// <summary>
+    /// Hook called as the first statement of every real test below. No-op for engines that are
+    /// always available (SQLite, in-memory); a real-engine provider overrides this to
+    /// dynamically skip when its engine cannot run in the current environment (e.g. PostgreSQL
+    /// Testcontainers on a Windows-container CI runner).
+    /// </summary>
+    protected virtual void EnsureEngineAvailable()
+    {
+    }
+
     private static SchemaModel Empty() => new([]);
 
     private static SchemaModel Vehicles(params FieldSchema[] extra) =>
@@ -41,6 +51,7 @@ public abstract class SchemaMigratorContractTests
     [Fact]
     public async Task Create_then_introspect_matches_desired()
     {
+        EnsureEngineAvailable();
         var migrator = CreateMigrator();
         var plan = await migrator.PlanAsync(Empty(), Vehicles(), new MigrationOptions());
         await migrator.ApplyAsync(plan, new MigrationOptions());
@@ -54,6 +65,7 @@ public abstract class SchemaMigratorContractTests
     [Fact]
     public async Task Reapply_is_idempotent()
     {
+        EnsureEngineAvailable();
         var migrator = CreateMigrator();
         await migrator.ApplyAsync(await migrator.PlanAsync(Empty(), Vehicles(), new MigrationOptions()), new MigrationOptions());
 
@@ -66,6 +78,7 @@ public abstract class SchemaMigratorContractTests
     [Fact]
     public async Task Drop_without_AllowDestructive_is_refused()
     {
+        EnsureEngineAvailable();
         var migrator = CreateMigrator();
         var withColour = Vehicles(new FieldSchema { Name = "colour", Type = FieldType.String });
         await migrator.ApplyAsync(await migrator.PlanAsync(Empty(), withColour, new MigrationOptions()), new MigrationOptions());
@@ -81,6 +94,7 @@ public abstract class SchemaMigratorContractTests
     [Fact]
     public async Task Rename_preserves_data()
     {
+        EnsureEngineAvailable();
         var migrator = CreateMigrator();
         var before = Vehicles(new FieldSchema { Name = "colour", Type = FieldType.String });
         await migrator.ApplyAsync(await migrator.PlanAsync(Empty(), before, new MigrationOptions()), new MigrationOptions());
