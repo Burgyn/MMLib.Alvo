@@ -1,8 +1,10 @@
 {
   "stryker-config": {
-    "mutate": [
-      "src/MMLib.Alvo/**/*.cs"
+    "project": "MMLib.Alvo.csproj",
+    "test-projects": [
+      "test/MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj"
     ],
+    "test-runner": "mtp",
     "thresholds": {
       "high": 90,
       "low": 85,
