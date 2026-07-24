@@ -1,0 +1,10 @@
+﻿CREATE TABLE "vehicles" (
+    "id" TEXT NOT NULL CONSTRAINT "PK_vehicles" PRIMARY KEY,
+    "make" TEXT NOT NULL,
+    "model" TEXT NOT NULL,
+    "vin" TEXT NOT NULL,
+    "year" INTEGER NOT NULL
+);
+
+;
+CREATE UNIQUE INDEX "IX_vehicles_vin" ON "vehicles" ("vin");

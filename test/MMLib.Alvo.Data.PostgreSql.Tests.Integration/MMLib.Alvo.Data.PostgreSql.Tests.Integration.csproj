@@ -15,6 +15,15 @@
 
   <ItemGroup>
     <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="Verify.XunitV3" />
+  </ItemGroup>
+
+  <!-- Only the path-derivation module initializer from test/_shared — this project opts out of
+       the shared arch/public-API gate above (AlvoSharedArchTests=false), but the generated-SQL
+       snapshot tests still want their Verify baselines to live next to this project, not in
+       test/_shared. -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/VerifyModuleInit.cs" Link="_shared/VerifyModuleInit.cs" />
   </ItemGroup>
 
 </Project>

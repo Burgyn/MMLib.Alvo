@@ -1,0 +1,21 @@
+﻿CREATE TABLE "ef_temp_vehicles" (
+    "id" TEXT NOT NULL CONSTRAINT "PK_vehicles" PRIMARY KEY,
+    "make" TEXT NOT NULL,
+    "model" TEXT NOT NULL,
+    "vin" TEXT NOT NULL,
+    "year" INTEGER NOT NULL
+);
+
+INSERT INTO "ef_temp_vehicles" ("id", "make", "model", "vin", "year")
+SELECT "id", "make", "model", "vin", "year"
+FROM "vehicles";
+
+PRAGMA foreign_keys = 0;
+
+DROP TABLE "vehicles";
+
+ALTER TABLE "ef_temp_vehicles" RENAME TO "vehicles";
+
+PRAGMA foreign_keys = 1;
+
+CREATE UNIQUE INDEX "IX_vehicles_vin" ON "vehicles" ("vin");
