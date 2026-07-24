@@ -36,7 +36,7 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// that is governed by descriptor optimistic locking (PR-B), not by this type.
 /// </para>
 /// </remarks>
-internal sealed class EfCoreSchemaMigrator : ISchemaMigrator, IDisposable
+public sealed class EfCoreSchemaMigrator : ISchemaMigrator, IDisposable
 {
     private readonly IMigrationsModelDiffer _differ;
     private readonly IMigrationsSqlGenerator _sqlGenerator;
@@ -50,6 +50,14 @@ internal sealed class EfCoreSchemaMigrator : ISchemaMigrator, IDisposable
     private readonly DbConnection _connection;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
+    /// <summary>
+    /// Initializes a new migrator from a provider's EF Core services and an owned ADO.NET connection.
+    /// </summary>
+    /// <param name="differ">EF Core's provider-flavored migrations model differ.</param>
+    /// <param name="sqlGenerator">EF Core's provider-flavored migrations SQL generator.</param>
+    /// <param name="modelRuntimeInitializer">Runs the runtime-model initialization the relational model requires.</param>
+    /// <param name="newModelBuilder">Creates a conventionless <see cref="ModelBuilder"/> seeded with the provider's convention set.</param>
+    /// <param name="connection">The provider's ADO.NET connection; owned and disposed by this instance.</param>
     public EfCoreSchemaMigrator(
         IMigrationsModelDiffer differ,
         IMigrationsSqlGenerator sqlGenerator,

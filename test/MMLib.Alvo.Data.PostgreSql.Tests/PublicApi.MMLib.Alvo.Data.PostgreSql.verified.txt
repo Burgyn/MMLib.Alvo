@@ -1,9 +1,19 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/Burgyn/MMLib.Alvo")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace MMLib.Alvo.Data.PostgreSql
+{
+    public sealed class PostgreSqlProviderOptions
+    {
+        public PostgreSqlProviderOptions() { }
+        public string? ConnectionString { get; set; }
+    }
+}
 namespace Microsoft.Extensions.DependencyInjection
 {
     public static class AlvoPostgreSqlBuilderExtensions
     {
+        public static MMLib.Alvo.IAlvoBuilder UsePostgreSql(this MMLib.Alvo.IAlvoBuilder builder, System.Action<MMLib.Alvo.Data.PostgreSql.PostgreSqlProviderOptions> configure) { }
         public static MMLib.Alvo.IAlvoBuilder UsePostgreSql(this MMLib.Alvo.IAlvoBuilder builder, string connectionString) { }
+        public static MMLib.Alvo.IAlvoBuilder UsePostgreSql(this MMLib.Alvo.IAlvoBuilder builder, string connectionString, System.Action<MMLib.Alvo.Data.PostgreSql.PostgreSqlProviderOptions> configure) { }
     }
 }

@@ -57,6 +57,38 @@ public sealed class AddAlvoIntegrationTests : IDisposable
     }
 
     [Fact]
+    public async Task AddAlvo_UseSqlite_options_only_migrates_the_real_tasks_descriptor()
+    {
+        var descriptorPath = Path.Combine(RepositoryRoot.Find(), "examples", "simple-tasks", "tasks.alvo.json");
+
+        var services = new ServiceCollection();
+        services.AddAlvo(alvo => alvo
+            .UseSqlite(options => options.ConnectionString = $"Data Source={_databasePath}")
+            .FromDescriptor(descriptorPath));
+
+        using var sp = services.BuildServiceProvider();
+
+        var result = await sp.GetRequiredService<SchemaMigrationRunner>()
+            .RunAsync(new MigrationOptions(), TestContext.Current.CancellationToken);
+
+        result.Applied.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void UseSqlite_without_a_connection_string_fails_fast_when_the_provider_is_built()
+    {
+        var services = new ServiceCollection();
+        services.AddAlvo(alvo => alvo.UseSqlite(options => { }));
+
+        using var sp = services.BuildServiceProvider();
+
+        var exception = Should.Throw<InvalidOperationException>(
+            () => sp.GetRequiredService<ISchemaMigrator>());
+
+        exception.Message.ShouldContain("No SQLite connection string was configured");
+    }
+
+    [Fact]
     public void AddAlvo_without_a_provider_fails_fast_at_startup_validation()
     {
         var services = new ServiceCollection();

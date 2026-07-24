@@ -26,12 +26,18 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// (e.g. the underlying file handle on SQLite) instead of relying on process exit.
 /// </para>
 /// </remarks>
-internal sealed class EfCoreSchemaIntrospector : ISchemaIntrospector, IDisposable
+public sealed class EfCoreSchemaIntrospector : ISchemaIntrospector, IDisposable
 {
     private readonly IDatabaseModelFactory _databaseModelFactory;
     private readonly DbConnection _connection;
     private readonly string? _excludedTableName;
 
+    /// <summary>
+    /// Initializes a new introspector from a provider's scaffolding factory and an owned ADO.NET connection.
+    /// </summary>
+    /// <param name="databaseModelFactory">EF Core's provider-flavored reverse-engineering / scaffolding factory.</param>
+    /// <param name="connection">The provider's ADO.NET connection; owned and disposed by this instance.</param>
+    /// <param name="excludedTableName">Optional table to omit from the introspected schema (e.g. Alvo's applied-schema bookkeeping table).</param>
     public EfCoreSchemaIntrospector(IDatabaseModelFactory databaseModelFactory, DbConnection connection, string? excludedTableName = null)
     {
         ArgumentNullException.ThrowIfNull(databaseModelFactory);
