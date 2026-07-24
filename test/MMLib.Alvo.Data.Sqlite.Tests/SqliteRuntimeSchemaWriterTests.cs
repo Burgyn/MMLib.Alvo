@@ -1,7 +1,9 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using MMLib.Alvo;
 using MMLib.Alvo.Migrations;
+using MMLib.Alvo.Schema;
 using MMLib.Alvo.Testing.Migrations;
+using System.Data.Common;
 
 namespace MMLib.Alvo.Data.Sqlite.Tests;
 
@@ -26,6 +28,38 @@ public sealed class SqliteRuntimeSchemaWriterTests : RuntimeSchemaWriterContract
     }
 
     protected override IRuntimeSchemaWriter CreateWriter() => _services.GetRequiredService<IRuntimeSchemaWriter>();
+
+    /// <summary>
+    /// A failing DDL statement at an uncontested expected revision must (a) surface the ORIGINAL
+    /// provider exception, never <see cref="DescriptorConcurrencyException"/> — nobody else moved the
+    /// revision, so the post-failure re-read finds <c>actual == expectedRevision</c> and the writer's
+    /// conflict-translation must fall through to rethrow rather than mint a spurious conflict — and
+    /// (b) roll back the version-row insert together with the DDL: the insert-then-DDL-then-commit
+    /// steps share one transaction, so a mid-transaction DDL failure must leave no orphaned version
+    /// row behind, exactly as if the call had never happened.
+    /// </summary>
+    [Fact]
+    public async Task DDL_failure_at_an_uncontested_revision_propagates_the_original_error_and_appends_nothing()
+    {
+        var writer = CreateWriter();
+        var store = _services.GetRequiredService<IDescriptorVersionStore>();
+        var ct = TestContext.Current.CancellationToken;
+
+        // Valid DDL syntax, invalid semantically (the table does not exist) — SQLite raises this as
+        // a genuine DbException, not a lock/constraint conflict, at an expectedRevision (0) nothing
+        // else is contending for.
+        var plan = new MigrationPlan { Steps = [], Sql = ["DROP TABLE nonexistent_xyz"] };
+        var candidate = new DescriptorVersion(new SchemaModel([]), "{}", Revision: 0, CreatedAt: DateTimeOffset.UnixEpoch);
+
+        var ex = await Should.ThrowAsync<DbException>(
+            () => writer.ApplyAndAppendAsync("ddl-failure", plan, candidate, expectedRevision: 0, new MigrationOptions(), ct));
+
+        // DescriptorConcurrencyException does not derive from DbException, so Should.ThrowAsync<DbException>
+        // above already rules it out; this is belt-and-suspenders against a future base-type change.
+        ex.ShouldNotBeOfType<DescriptorConcurrencyException>();
+
+        (await store.ListAsync("ddl-failure", ct)).ShouldBeEmpty();
+    }
 
     public void Dispose()
     {

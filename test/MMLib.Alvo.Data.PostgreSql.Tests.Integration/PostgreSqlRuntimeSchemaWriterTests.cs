@@ -1,8 +1,10 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using MMLib.Alvo;
 using MMLib.Alvo.Migrations;
+using MMLib.Alvo.Schema;
 using MMLib.Alvo.Testing.Migrations;
 using Npgsql;
+using System.Data.Common;
 using Xunit;
 
 namespace MMLib.Alvo.Data.PostgreSql.Tests.Integration;
@@ -50,6 +52,31 @@ public sealed class PostgreSqlRuntimeSchemaWriterTests : RuntimeSchemaWriterCont
         Assert.SkipUnless(!OperatingSystem.IsWindows(), "PostgreSQL Testcontainers requires a Linux Docker daemon; unavailable on Windows-container runners.");
 
     protected override IRuntimeSchemaWriter CreateWriter() => _services.GetRequiredService<IRuntimeSchemaWriter>();
+
+    /// <summary>
+    /// Engine-parity leg to <c>SqliteRuntimeSchemaWriterTests</c>'s equivalent: a failing DDL
+    /// statement at an uncontested expected revision must surface the ORIGINAL provider exception
+    /// (never <see cref="DescriptorConcurrencyException"/>) and roll back the version-row insert
+    /// together with the DDL, on real PostgreSQL transactional DDL.
+    /// </summary>
+    [Fact]
+    public async Task DDL_failure_at_an_uncontested_revision_propagates_the_original_error_and_appends_nothing()
+    {
+        EnsureEngineAvailable();
+        var writer = CreateWriter();
+        var store = _services.GetRequiredService<IDescriptorVersionStore>();
+        var ct = TestContext.Current.CancellationToken;
+
+        var plan = new MigrationPlan { Steps = [], Sql = ["DROP TABLE nonexistent_xyz"] };
+        var candidate = new DescriptorVersion(new SchemaModel([]), "{}", Revision: 0, CreatedAt: DateTimeOffset.UnixEpoch);
+
+        var ex = await Should.ThrowAsync<DbException>(
+            () => writer.ApplyAndAppendAsync("ddl-failure", plan, candidate, expectedRevision: 0, new MigrationOptions(), ct));
+
+        ex.ShouldNotBeOfType<DescriptorConcurrencyException>();
+
+        (await store.ListAsync("ddl-failure", ct)).ShouldBeEmpty();
+    }
 
     public void Dispose()
     {

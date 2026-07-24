@@ -63,6 +63,24 @@ public class DescriptorValidatorTests
     }
 
     [Fact]
+    public void Ref_to_built_in_users_entity_is_accepted()
+    {
+        // "users" is never declared under "entities" (it's schema-reserved as a declared key), but
+        // a ref field targeting it is a legitimate reference to the built-in auth entity, not an
+        // unknown-entity error — the only thing under test here is that exemption.
+        var json = """
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "orders": { "fields": {
+            "owner": { "type": "ref", "entity": "users" } } } } }
+        """;
+
+        var result = _validator.Validate(json);
+
+        result.IsValid.ShouldBeTrue();
+        result.Errors.ShouldNotContain(e => e.Message.Contains("users"));
+    }
+
+    [Fact]
     public void Malformed_json_is_a_single_structured_error()
     {
         var json = """{ "apiVersion": "alvo.dev/v1", "name": "demo", """;

@@ -1,6 +1,7 @@
 ﻿using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Descriptor.Internal;
 using MMLib.Alvo.Migrations;
+using MMLib.Alvo.Schema;
 using MMLib.Alvo.Testing.Migrations;
 
 namespace MMLib.Alvo.Tests.Migrations;
@@ -82,6 +83,52 @@ public sealed class RuntimeSchemaServiceTests
 
         await Should.ThrowAsync<DescriptorValidationException>(
             () => service.ApplyAsync("demo", "{ \"apiVersion\": \"alvo.dev/v1\" }", 0, new MigrationOptions(), TestContext.Current.CancellationToken));
+    }
+
+    // Isolates RuntimeSchemaService's own staleness fail-fast (before planning) from the writer's
+    // optimistic-lock re-check (after planning): Apply_with_stale_revision_conflicts above throws
+    // DescriptorConcurrencyException even if the fail-fast block were deleted, because the writer's
+    // own AppendAsync would independently reject the same stale expectedRevision. Only counting
+    // PlanAsync invocations tells the fail-fast apart from that downstream guard.
+    [Fact]
+    public async Task Apply_with_stale_revision_never_calls_PlanAsync()
+    {
+        var store = new InMemoryDescriptorVersionStore();
+        var writer = new InMemoryRuntimeSchemaWriter(store);
+        var migrator = new RecordingSchemaMigrator(new InMemorySchemaMigrator());
+        var validator = new DescriptorValidator();
+        var service = new RuntimeSchemaService(validator, migrator, store, writer);
+
+        await service.ApplyAsync("demo", TasksV1, expectedRevision: 0, new MigrationOptions(), TestContext.Current.CancellationToken); // -> rev 1
+        var callsAfterFirstApply = migrator.PlanAsyncCallCount;
+        callsAfterFirstApply.ShouldBeGreaterThan(0);
+
+        // expectedRevision 0 is stale now (current is 1). AllowDestructive: true so that, absent the
+        // fail-fast, the flow would proceed to plan + apply rather than being stopped by the
+        // destructive guardrail — the fail-fast is the ONLY thing that can prevent planning here.
+        await Should.ThrowAsync<DescriptorConcurrencyException>(
+            () => service.ApplyAsync(
+                "demo", TasksV2, expectedRevision: 0, new MigrationOptions { AllowDestructive = true }, TestContext.Current.CancellationToken));
+
+        migrator.PlanAsyncCallCount.ShouldBe(callsAfterFirstApply);
+        (await store.ListAsync("demo", TestContext.Current.CancellationToken)).Count.ShouldBe(1);
+    }
+
+    // Test-only recording wrapper: delegates to an inner ISchemaMigrator (so PlanAsync's real
+    // diff/plan behavior is preserved) while counting invocations, so a test can assert planning
+    // never happened rather than merely asserting the eventual exception type.
+    private sealed class RecordingSchemaMigrator(ISchemaMigrator inner) : ISchemaMigrator
+    {
+        public int PlanAsyncCallCount { get; private set; }
+
+        public Task<MigrationPlan> PlanAsync(SchemaModel current, SchemaModel desired, MigrationOptions options, CancellationToken ct = default)
+        {
+            PlanAsyncCallCount++;
+            return inner.PlanAsync(current, desired, options, ct);
+        }
+
+        public Task<MigrationResult> ApplyAsync(MigrationPlan plan, MigrationOptions options, CancellationToken ct = default) =>
+            inner.ApplyAsync(plan, options, ct);
     }
 
     [Fact]
