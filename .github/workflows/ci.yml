@@ -64,7 +64,17 @@ jobs:
         shell: bash
         env:
           ALVO_CONFIGURATION: Release
-        run: scripts/test-ring2
+        # On Windows, Docker runs Windows containers, so the Testcontainers
+        # PostgreSQL integration tests self-skip — leaving that assembly with
+        # zero executed tests, which MTP reports as exit code 8 ("ran zero
+        # tests"). Treat only code 8 as success on Windows; Linux stays strict
+        # so a genuine zero-tests regression is still caught there.
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            TESTINGPLATFORM_EXITCODE_IGNORE=8 scripts/test-ring2
+          else
+            scripts/test-ring2
+          fi
 
       # Pack-only on the PR (issue #14): prove packaging works and publish the
       # .nupkg as an artifact. No feed publish — that lands with v0.1.
