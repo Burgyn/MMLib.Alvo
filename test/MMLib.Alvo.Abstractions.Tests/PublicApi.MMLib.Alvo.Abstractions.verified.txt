@@ -155,6 +155,34 @@ namespace MMLib.Alvo.Descriptor
         [System.Text.Json.Serialization.JsonStringEnumMemberName("batch")]
         Batch = 1,
     }
+    public sealed class DescriptorValidationError : System.IEquatable<MMLib.Alvo.Descriptor.DescriptorValidationError>
+    {
+        public DescriptorValidationError(string Path, string Message, string? FixSuggestion, MMLib.Alvo.Descriptor.DescriptorValidationSeverity Severity) { }
+        public string? FixSuggestion { get; init; }
+        public string Message { get; init; }
+        public string Path { get; init; }
+        public MMLib.Alvo.Descriptor.DescriptorValidationSeverity Severity { get; init; }
+    }
+    public sealed class DescriptorValidationException : System.Exception
+    {
+        public DescriptorValidationException() { }
+        public DescriptorValidationException(MMLib.Alvo.Descriptor.DescriptorValidationResult result) { }
+        public DescriptorValidationException(string message) { }
+        public DescriptorValidationException(string message, System.Exception innerException) { }
+        public MMLib.Alvo.Descriptor.DescriptorValidationResult Result { get; }
+    }
+    public sealed class DescriptorValidationResult : System.IEquatable<MMLib.Alvo.Descriptor.DescriptorValidationResult>
+    {
+        public DescriptorValidationResult(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Descriptor.DescriptorValidationError> Errors) { }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Descriptor.DescriptorValidationError> Errors { get; init; }
+        public bool IsValid { get; }
+        public static MMLib.Alvo.Descriptor.DescriptorValidationResult Valid { get; }
+    }
+    public enum DescriptorValidationSeverity
+    {
+        Error = 0,
+        Warning = 1,
+    }
     public sealed class DynamicEntities : System.IEquatable<MMLib.Alvo.Descriptor.DynamicEntities>
     {
         public DynamicEntities() { }
@@ -329,6 +357,10 @@ namespace MMLib.Alvo.Descriptor
         Patch = 3,
         [System.Text.Json.Serialization.JsonStringEnumMemberName("DELETE")]
         Delete = 4,
+    }
+    public interface IDescriptorValidator
+    {
+        MMLib.Alvo.Descriptor.DescriptorValidationResult Validate(string descriptorJson);
     }
     public sealed class MessageTemplate : System.IEquatable<MMLib.Alvo.Descriptor.MessageTemplate>
     {

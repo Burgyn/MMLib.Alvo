@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo;
+using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Internal;
 using MMLib.Alvo.Migrations;
 
@@ -30,6 +31,7 @@ public static class AlvoServiceCollectionExtensions
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IValidateOptions<AlvoOptions>, AlvoProviderValidation>());
 
+        services.TryAddSingleton<IDescriptorValidator, MMLib.Alvo.Descriptor.Internal.DescriptorValidator>();
         services.TryAddSingleton<SchemaMigrationRunner>();
 
         // TODO(#19): register ISchemaRegistry once the Data API needs it — deferred to avoid the

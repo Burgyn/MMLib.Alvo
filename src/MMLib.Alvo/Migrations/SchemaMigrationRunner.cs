@@ -15,22 +15,26 @@ namespace MMLib.Alvo.Migrations;
 internal sealed class SchemaMigrationRunner
 {
     private readonly IDescriptorSource _source;
+    private readonly IDescriptorValidator _validator;
     private readonly ISchemaMigrator _migrator;
     private readonly ISchemaIntrospector _introspector;
     private readonly IAppliedSchemaStore _store;
 
     public SchemaMigrationRunner(
         IDescriptorSource source,
+        IDescriptorValidator validator,
         ISchemaMigrator migrator,
         ISchemaIntrospector introspector,
         IAppliedSchemaStore store)
     {
         ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(validator);
         ArgumentNullException.ThrowIfNull(migrator);
         ArgumentNullException.ThrowIfNull(introspector);
         ArgumentNullException.ThrowIfNull(store);
 
         _source = source;
+        _validator = validator;
         _migrator = migrator;
         _introspector = introspector;
         _store = store;
@@ -54,6 +58,12 @@ internal sealed class SchemaMigrationRunner
         ArgumentNullException.ThrowIfNull(options);
 
         var descriptorJson = await _source.LoadAsync(ct).ConfigureAwait(false);
+        var validation = _validator.Validate(descriptorJson);
+        if (!validation.IsValid)
+        {
+            throw new DescriptorValidationException(validation);
+        }
+
         var descriptor = AlvoDescriptor.Parse(descriptorJson);
         var desired = DescriptorToSchemaMapper.Map(descriptor);
 

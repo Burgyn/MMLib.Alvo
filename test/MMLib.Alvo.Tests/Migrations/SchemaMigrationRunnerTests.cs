@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Descriptor.Internal;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Schema;
 using MMLib.Alvo.Testing.Migrations;
@@ -36,7 +37,7 @@ public sealed class SchemaMigrationRunnerTests
     public SchemaMigrationRunnerTests()
     {
         _source.LoadAsync(Arg.Any<CancellationToken>()).Returns(FleetDescriptorJson);
-        _runner = new SchemaMigrationRunner(_source, _migrator, _introspector, _store);
+        _runner = new SchemaMigrationRunner(_source, new DescriptorValidator(), _migrator, _introspector, _store);
     }
 
     [Fact]
