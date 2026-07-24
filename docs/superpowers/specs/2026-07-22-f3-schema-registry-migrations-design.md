@@ -417,6 +417,16 @@ dry-run, idempotent re-apply.
      violation on `(project, revision)` or zero rows affected).
    - `DescriptorVersion` record: schema snapshot + descriptor JSON + revision +
      author/reason + timestamp + `RolledBackFrom` (git-revert provenance).
+   - `IRuntimeSchemaWriter` (new port) — the **atomicity seam**:
+     `ApplyAndAppendAsync(project, plan, candidate, expectedRevision, options)`
+     executes `plan.Sql` **and** the conditional version-insert in a *single*
+     transaction, throwing `DescriptorConcurrencyException` on lock loss. Core is
+     EF/ADO-free, so the transaction owner must live behind a port in the EF
+     package; this is that seam. Without it, a loser in a two-client race could
+     apply its DDL before its append is refused, leaving the schema changed but
+     never-versioned. `IDescriptorVersionStore.AppendAsync` remains the *non-atomic*
+     append the code-first path (single writer at startup) and the contract tests
+     use.
 
 2. **Optimistic locking (revision → conflict).** Engine-agnostic (identical on
    SQLite + PostgreSQL): the conflict is a *conditional write*, not a DB row lock —
@@ -446,13 +456,17 @@ dry-run, idempotent re-apply.
    optimistic locking relies on is preserved. "Undo the last apply" is just a
    rollback to `latest-1`.
 
-5. **Runtime apply service.** `RuntimeSchemaService` (internal for now) — a sibling
-   of `SchemaMigrationRunner` sharing the same lower ports:
-   `ApplyAsync(project, descriptorJson, expectedRevision, options)` →
-   validate → parse → map → `Plan(current=latest, desired)` → guardrail → apply in
-   a transaction → `AppendAsync(expectedRevision)`. The HTTP Management-API endpoint
-   that drives runtime apply belongs with the Management API; **PR-B delivers only
-   the service-level operation it will call.**
+5. **Runtime apply service.** `RuntimeSchemaService` (internal, core) — a sibling
+   of `SchemaMigrationRunner` that composes the ports without owning a DB
+   connection: `ApplyAsync(project, descriptorJson, expectedRevision, options)` →
+   validate (`IDescriptorValidator`) → parse → map desired → read current = latest
+   version → `ISchemaMigrator.PlanAsync(current, desired)` (connection-free) →
+   guardrail → **`IRuntimeSchemaWriter.ApplyAndAppendAsync(...)`** (the one atomic
+   transaction). `RollbackAsync(project, targetRevision, options)` loads
+   `version@target`, plans the reverse, runs the guardrail, and calls the same
+   writer with a git-revert `candidate` (`RolledBackFrom=target`). The HTTP
+   Management-API endpoint that drives runtime apply belongs with the Management
+   API; **PR-B delivers only the service-level operation it will call.**
 
 **Folded-in #20 prerequisites (the untrusted-path guardrails):**
 
