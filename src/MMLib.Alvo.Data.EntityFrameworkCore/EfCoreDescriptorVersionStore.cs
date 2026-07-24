@@ -100,10 +100,71 @@ internal sealed class EfCoreDescriptorVersionStore : IDescriptorVersionStore, IA
                 }
 
                 var appended = candidate with { Revision = expectedRevision + 1 };
-                await InsertAsync(connection, transaction, project, appended, ct).ConfigureAwait(false);
-                await transaction.CommitAsync(ct).ConfigureAwait(false);
+                await CommitInsertOrThrowConflictAsync(connection, transaction, project, appended, expectedRevision, ct).ConfigureAwait(false);
                 return appended;
             }
+        }
+    }
+
+    // The pre-check in AppendAsync (read-max, compare, then insert on the same transaction) gives a
+    // clean, fast rejection for the SEQUENTIAL conflict case, but it is not sufficient under GENUINE
+    // concurrency: two independent connections can both read the same MAX(revision) before either
+    // commits — both SQLite's deferred transactions and PostgreSQL's default READ COMMITTED allow
+    // two readers to see the same snapshot — so both can pass the pre-check and race the INSERT. The
+    // composite PRIMARY KEY (project, revision) is what actually protects data integrity in that
+    // race; this method's job is to turn the loser's raw constraint-violation DbException into the
+    // contractually-promised DescriptorConcurrencyException instead of letting it leak to the caller.
+    //
+    // Engine-agnostic by construction: it never inspects a provider-specific error code
+    // (SqliteErrorCode / SqlState). Instead, after ANY DbException from the insert/commit, it rolls
+    // back and re-reads the current max revision on a fresh connection:
+    //  - if the fresh max no longer equals expectedRevision, someone else's append won the race →
+    //    throw DescriptorConcurrencyException with the now-current revision.
+    //  - if the fresh max is STILL expectedRevision, our insert didn't land for some OTHER reason
+    //    (e.g. a dropped connection) and nobody else advanced the history → rethrow the original
+    //    DbException so a genuine failure is never masked as a (spurious) concurrency conflict.
+    private async Task CommitInsertOrThrowConflictAsync(
+        DbConnection connection, DbTransaction transaction, string project, DescriptorVersion appended, int expectedRevision, CancellationToken ct)
+    {
+        try
+        {
+            await InsertAsync(connection, transaction, project, appended, ct).ConfigureAwait(false);
+            await transaction.CommitAsync(ct).ConfigureAwait(false);
+        }
+        catch (DbException)
+        {
+            await RollbackQuietlyAsync(transaction, ct).ConfigureAwait(false);
+            var actual = await ReadCurrentRevisionOnFreshConnectionAsync(project, ct).ConfigureAwait(false);
+            if (actual != expectedRevision)
+            {
+                throw new DescriptorConcurrencyException(project, expectedRevision, actual);
+            }
+
+            throw;
+        }
+    }
+
+    // Best-effort: the connection behind `transaction` may already be broken by whatever caused the
+    // insert/commit to fail, in which case the rollback itself can throw. That failure is not the
+    // signal we care about here — the fresh re-read right after this is.
+    private static async Task RollbackQuietlyAsync(DbTransaction transaction, CancellationToken ct)
+    {
+        try
+        {
+            await transaction.RollbackAsync(ct).ConfigureAwait(false);
+        }
+        catch (DbException)
+        {
+        }
+    }
+
+    private async Task<int> ReadCurrentRevisionOnFreshConnectionAsync(string project, CancellationToken ct)
+    {
+        var connection = _connections.Create();
+        await using (connection.ConfigureAwait(false))
+        {
+            await EnsureReadyAsync(connection, ct).ConfigureAwait(false);
+            return await ReadCurrentRevisionAsync(connection, transaction: null, project, ct).ConfigureAwait(false);
         }
     }
 
@@ -123,6 +184,9 @@ internal sealed class EfCoreDescriptorVersionStore : IDescriptorVersionStore, IA
         await AppendAsync(project, candidate, snapshot.Revision - 1, ct).ConfigureAwait(false);
     }
 
+    // Intentionally narrows: AppliedSchema has no Author/Reason/RolledBackFrom, so this mapping
+    // drops them by design — IAppliedSchemaStore is the back-compat, revision-only view onto the
+    // richer DescriptorVersion history, not a bug or missing feature.
     private static AppliedSchema ToAppliedSchema(DescriptorVersion version) =>
         new(version.Schema, version.DescriptorJson, version.Revision, version.CreatedAt);
 
@@ -156,10 +220,11 @@ internal sealed class EfCoreDescriptorVersionStore : IDescriptorVersionStore, IA
     private static ValueTask<DbTransaction> BeginAsync(DbConnection connection, CancellationToken ct) =>
         connection.BeginTransactionAsync(ct);
 
-    // Reads the current max revision inside the SAME transaction as the insert below, so the
-    // check-then-insert is atomic on this one connection — no other transaction can slip a
-    // conflicting append between the read and the write.
-    private async Task<int> ReadCurrentRevisionAsync(DbConnection connection, DbTransaction transaction, string project, CancellationToken ct)
+    // Reads the current max revision. Pass the in-flight transaction when this is the atomic
+    // check-then-insert pre-check (so no other transaction can slip a conflicting append between the
+    // read and the write); pass null for the post-conflict re-read on a fresh connection, where there
+    // is no ambient transaction to join.
+    private async Task<int> ReadCurrentRevisionAsync(DbConnection connection, DbTransaction? transaction, string project, CancellationToken ct)
     {
         var command = connection.CreateCommand();
         await using (command.ConfigureAwait(false))

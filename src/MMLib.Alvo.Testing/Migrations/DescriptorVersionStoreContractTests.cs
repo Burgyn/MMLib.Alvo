@@ -1,6 +1,7 @@
 ﻿using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Schema;
 using Shouldly;
+using System.Threading;
 using Xunit;
 
 namespace MMLib.Alvo.Testing.Migrations;
@@ -83,5 +84,52 @@ public abstract class DescriptorVersionStoreContractTests
 
         (await store.GetCurrentAsync("unknown-project")).ShouldBeNull();
         (await store.GetAsync("p", revision: 99)).ShouldBeNull();
+    }
+
+    /// <summary>
+    /// Two callers racing the SAME <c>expectedRevision</c> under GENUINE concurrency — not merely
+    /// sequential calls — must yield exactly one winner. The loser must surface as
+    /// <see cref="DescriptorConcurrencyException"/>, never a raw provider-specific error (e.g. a
+    /// unique-constraint <c>DbException</c> escaping an EF-backed store) and the two must never both
+    /// succeed. A <see cref="Barrier"/> releases both appends at (as close to) the same instant, and a
+    /// warm-up call before the race forces any one-time setup (e.g. lazy table creation) to happen
+    /// beforehand so it cannot accidentally serialize the two attempts.
+    /// </summary>
+    [Fact]
+    public async Task Concurrent_appends_at_same_expected_revision_yield_exactly_one_winner()
+    {
+        EnsureEngineAvailable();
+        var store = CreateStore();
+
+        // Warm up any one-time, store-instance-wide setup (e.g. lazy CREATE TABLE) so it cannot
+        // accidentally serialize the two racing appends below.
+        await store.ListAsync("p");
+
+        using var barrier = new Barrier(2);
+        var first = Task.Run(() => RaceAppendAsync(store, barrier));
+        var second = Task.Run(() => RaceAppendAsync(store, barrier));
+
+        var outcomes = await Task.WhenAll(first, second);
+
+        outcomes.Count(o => o.Conflict is null).ShouldBe(1);
+        outcomes.Count(o => o.Conflict is not null).ShouldBe(1);
+
+        var history = await store.ListAsync("p");
+        history.Count.ShouldBe(1);
+        history[0].Revision.ShouldBe(1);
+    }
+
+    private static async Task<(DescriptorVersion? Version, DescriptorConcurrencyException? Conflict)> RaceAppendAsync(
+        IDescriptorVersionStore store, Barrier barrier)
+    {
+        barrier.SignalAndWait();
+        try
+        {
+            return (await store.AppendAsync("p", Candidate(), expectedRevision: 0), null);
+        }
+        catch (DescriptorConcurrencyException ex)
+        {
+            return (null, ex);
+        }
     }
 }
