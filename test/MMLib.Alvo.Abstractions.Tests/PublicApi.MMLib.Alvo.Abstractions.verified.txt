@@ -92,6 +92,7 @@ namespace MMLib.Alvo.Migrations
         AlterField = 6,
         AddIndex = 7,
         DropIndex = 8,
+        RenameIndex = 9,
     }
 }
 namespace MMLib.Alvo.Schema

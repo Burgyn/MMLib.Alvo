@@ -29,4 +29,7 @@ public enum SchemaChangeKind
 
     /// <summary>Drop an index.</summary>
     DropIndex,
+
+    /// <summary>Rename an index.</summary>
+    RenameIndex,
 }

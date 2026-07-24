@@ -18,6 +18,26 @@ internal static class DestructiveScan
     /// <summary>Maps a single EF migration operation to its Alvo <see cref="SchemaChange"/>.</summary>
     public static SchemaChange Classify(MigrationOperation operation) => operation switch
     {
+        CreateTableOperation or DropTableOperation or RenameTableOperation => ClassifyTable(operation),
+        AddColumnOperation or DropColumnOperation or RenameColumnOperation or AlterColumnOperation => ClassifyColumn(operation),
+        CreateIndexOperation or DropIndexOperation or RenameIndexOperation => ClassifyIndex(operation),
+        AddForeignKeyOperation op => ForeignKeyChange(op.Table, op.Columns, added: true),
+        DropForeignKeyOperation op => ForeignKeyChange(op.Table, columns: null, added: false),
+        AddPrimaryKeyOperation op => TableConstraintChange(op.Table, "Add primary key."),
+        DropPrimaryKeyOperation op => TableConstraintChange(op.Table, "Drop primary key."),
+        AddUniqueConstraintOperation op => TableConstraintChange(op.Table, "Add unique constraint."),
+        DropUniqueConstraintOperation op => TableConstraintChange(op.Table, "Drop unique constraint."),
+        _ => new SchemaChange
+        {
+            Kind = SchemaChangeKind.AlterField,
+            Entity = TableOf(operation) ?? string.Empty,
+            Detail = operation.GetType().Name,
+        },
+    };
+
+    // Table-level operations: create, drop, rename.
+    private static SchemaChange ClassifyTable(MigrationOperation operation) => operation switch
+    {
         CreateTableOperation op => new SchemaChange
         {
             Kind = SchemaChangeKind.CreateEntity,
@@ -36,6 +56,13 @@ internal static class DestructiveScan
             Entity = op.NewName ?? op.Name,
             FromName = op.Name,
         },
+        _ => throw new NotSupportedException($"{operation.GetType().Name} is not a table operation."),
+    };
+
+    // Column-level operations: add, drop, rename, alter (the latter delegates to
+    // ClassifyAlterColumn/NarrowingReason for the destructive-narrowing analysis).
+    private static SchemaChange ClassifyColumn(MigrationOperation operation) => operation switch
+    {
         AddColumnOperation op => new SchemaChange
         {
             Kind = SchemaChangeKind.AddField,
@@ -58,6 +85,12 @@ internal static class DestructiveScan
             FromName = op.Name,
         },
         AlterColumnOperation op => ClassifyAlterColumn(op),
+        _ => throw new NotSupportedException($"{operation.GetType().Name} is not a column operation."),
+    };
+
+    // Index-level operations: create, drop, rename.
+    private static SchemaChange ClassifyIndex(MigrationOperation operation) => operation switch
+    {
         CreateIndexOperation op => new SchemaChange
         {
             Kind = SchemaChangeKind.AddIndex,
@@ -70,25 +103,13 @@ internal static class DestructiveScan
             Entity = op.Table ?? string.Empty,
             Detail = op.Name,
         },
-        // TODO(triage): SchemaChangeKind has no RenameIndex; AddIndex is a cosmetic mislabel here.
         RenameIndexOperation op => new SchemaChange
         {
-            Kind = SchemaChangeKind.AddIndex,
+            Kind = SchemaChangeKind.RenameIndex,
             Entity = op.Table ?? string.Empty,
             Detail = $"Rename index '{op.Name}' to '{op.NewName}'.",
         },
-        AddForeignKeyOperation op => ForeignKeyChange(op.Table, op.Columns, added: true),
-        DropForeignKeyOperation op => ForeignKeyChange(op.Table, columns: null, added: false),
-        AddPrimaryKeyOperation op => TableConstraintChange(op.Table, "Add primary key."),
-        DropPrimaryKeyOperation op => TableConstraintChange(op.Table, "Drop primary key."),
-        AddUniqueConstraintOperation op => TableConstraintChange(op.Table, "Add unique constraint."),
-        DropUniqueConstraintOperation op => TableConstraintChange(op.Table, "Drop unique constraint."),
-        _ => new SchemaChange
-        {
-            Kind = SchemaChangeKind.AlterField,
-            Entity = TableOf(operation) ?? string.Empty,
-            Detail = operation.GetType().Name,
-        },
+        _ => throw new NotSupportedException($"{operation.GetType().Name} is not an index operation."),
     };
 
     // Best-effort table name for operations we do not model explicitly (there is no common

@@ -43,10 +43,10 @@ internal sealed class EfCoreSchemaMigrator : ISchemaMigrator, IDisposable
     private readonly IModelRuntimeInitializer _modelRuntimeInitializer;
     private readonly Func<ModelBuilder> _newModelBuilder;
 
-    // TODO(PR-B): replace this single shared connection with a per-call connection (factory)
-    // once runtime concurrent schema changes need real parallelism instead of serialization.
-    // Owned by this instance (the provider constructs it solely to hand it to us) — disposed
-    // alongside the gate; see Dispose().
+    // Deferred to PR-B (runtime concurrent schema changes): replace this single shared connection
+    // with a per-call connection (factory) once that work needs real parallelism instead of the
+    // serialization this instance provides today. Owned by this instance (the provider constructs
+    // it solely to hand it to us) — disposed alongside the gate; see Dispose().
     private readonly DbConnection _connection;
     private readonly SemaphoreSlim _gate = new(1, 1);
 

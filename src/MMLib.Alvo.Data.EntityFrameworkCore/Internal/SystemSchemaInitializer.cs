@@ -47,9 +47,10 @@ internal sealed partial class SystemSchemaInitializer
     /// Creates the applied-schema table if it does not already exist. Safe to call repeatedly —
     /// a second (or Nth) call is a no-op.
     /// </summary>
-    // TODO(triage): Postgres schema cohabitation (spec §2.13) — embedded mode living inside a
-    // host's own Postgres schema is deferred; this uses a plain table-name prefix identically on
-    // both engines rather than a real Postgres DB schema.
+    // Deferred: Postgres schema cohabitation (spec §2.13) — embedded mode living inside a host's
+    // own Postgres schema — is intentionally out of scope for this PR and tracked as follow-up
+    // work. PR-A deliberately uses a plain, cross-engine table-name prefix instead, identically on
+    // both SQLite and PostgreSQL, rather than a real Postgres DB schema.
     public async Task EnsureAsync(CancellationToken ct = default)
     {
         if (_connection.State != ConnectionState.Open)
