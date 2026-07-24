@@ -482,6 +482,15 @@ namespace MMLib.Alvo.Migrations
         public int? RolledBackFrom { get; init; }
         public MMLib.Alvo.Schema.SchemaModel Schema { get; init; }
     }
+    public sealed class DestructiveChangeNotAllowedException : System.Exception
+    {
+        public DestructiveChangeNotAllowedException() { }
+        public DestructiveChangeNotAllowedException(string message) { }
+        public DestructiveChangeNotAllowedException(string message, System.Exception innerException) { }
+        public DestructiveChangeNotAllowedException(string project, MMLib.Alvo.Migrations.MigrationPlan plan) { }
+        public MMLib.Alvo.Migrations.MigrationPlan Plan { get; }
+        public string Project { get; }
+    }
     public interface IAppliedSchemaStore
     {
         System.Threading.Tasks.Task<MMLib.Alvo.Migrations.AppliedSchema?> GetCurrentAsync(string project, System.Threading.CancellationToken ct = default);
@@ -511,7 +520,9 @@ namespace MMLib.Alvo.Migrations
     {
         public MigrationOptions() { }
         public bool AllowDestructive { get; init; }
+        public string? Author { get; init; }
         public bool DryRun { get; init; }
+        public string? Reason { get; init; }
     }
     public sealed class MigrationPlan : System.IEquatable<MMLib.Alvo.Migrations.MigrationPlan>
     {
