@@ -587,6 +587,21 @@ namespace MMLib.Alvo.Expressions
         public CelChanged(string FieldName) { }
         public string FieldName { get; init; }
     }
+    public sealed class CelCompilationError : System.IEquatable<MMLib.Alvo.Expressions.CelCompilationError>
+    {
+        public CelCompilationError(string Message, string? FixSuggestion, int Position) { }
+        public string? FixSuggestion { get; init; }
+        public string Message { get; init; }
+        public int Position { get; init; }
+    }
+    public sealed class CelCompilationResult : System.IEquatable<MMLib.Alvo.Expressions.CelCompilationResult>
+    {
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Expressions.CelCompilationError> Errors { get; }
+        public MMLib.Alvo.Expressions.CompiledExpression? Expression { get; }
+        public bool IsSuccess { get; }
+        public static MMLib.Alvo.Expressions.CelCompilationResult Failure(params MMLib.Alvo.Expressions.CelCompilationError[] errors) { }
+        public static MMLib.Alvo.Expressions.CelCompilationResult Success(MMLib.Alvo.Expressions.CompiledExpression expression) { }
+    }
     public sealed class CelConditional : MMLib.Alvo.Expressions.CelNode, System.IEquatable<MMLib.Alvo.Expressions.CelConditional>
     {
         public CelConditional(MMLib.Alvo.Expressions.CelNode Condition, MMLib.Alvo.Expressions.CelNode WhenTrue, MMLib.Alvo.Expressions.CelNode WhenFalse) { }
@@ -671,6 +686,19 @@ namespace MMLib.Alvo.Expressions
         Json = 6,
         StringList = 7,
         Null = 8,
+    }
+    public sealed class CompiledExpression : System.IEquatable<MMLib.Alvo.Expressions.CompiledExpression>
+    {
+        public CompiledExpression() { }
+        public required string EntityName { get; init; }
+        public required MMLib.Alvo.Expressions.CelProfile Profile { get; init; }
+        public required MMLib.Alvo.Expressions.CelValueType ResultType { get; init; }
+        public required MMLib.Alvo.Expressions.CelNode Root { get; init; }
+        public required string Source { get; init; }
+    }
+    public interface ICelCompiler
+    {
+        MMLib.Alvo.Expressions.CelCompilationResult Compile(string source, MMLib.Alvo.Expressions.CelProfile profile, MMLib.Alvo.Schema.EntitySchema entity);
     }
 }
 namespace MMLib.Alvo.Migrations
