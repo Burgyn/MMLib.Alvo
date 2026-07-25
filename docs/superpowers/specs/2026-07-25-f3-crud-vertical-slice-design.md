@@ -102,8 +102,8 @@ Numeric criteria are lifted from `baas-analyza.md` rather than invented.
   SQLite and PostgreSQL; a rule referencing a nonexistent column **fails at save,
   not at request time**; a property test proves the translation never
   interpolates user input; the filter parser survives fuzzing without a crash and
-  injection is attempted through **every** operator; Stryker over `Expressions` +
-  `Rules` is above threshold; the diff is read line by line.
+  injection is attempted through **every** operator; the mutation score stays
+  above the break threshold; the diff is read line by line.
 - **#19** — CRUD works over a demo entity; validation returns RFC 7807 with a list
   of violations; **p95 of a filtered list over 100k rows on an indexed column
   < 50 ms locally**; **keyset pagination stable over 1M rows**; a repeated POST
@@ -677,10 +677,27 @@ Same test types as #18 — nothing new is invented.
 | Race test | concurrent child changes leave the parent rollup consistent |
 | Transition test | `changed(status) && new.status == 'approved'` fires exactly once |
 | TeaPie E2E | black box over the running compose stack (PR4) |
-| Stryker | `Expressions` + `Rules` |
+| Stryker | the whole core, so `Expressions` + `Rules` are covered with no config change — but it runs **post-merge on `main`**, not on the PR |
 
 `TeaPie.Tool` is installed as a local dotnet tool and its agent skill lives in
 `.claude/skills/teapie/`.
+
+Two repo mechanisms this milestone has to work with, both added to `main` while
+this design was being written:
+
+- **Mutation is no longer a PR signal.** `stryker-config.json` already mutates all
+  of `src/MMLib.Alvo`, so the new `Expressions` and `Rules` namespaces are covered
+  automatically — but nothing blocks a merge on the score. For the three
+  security-core PRs (1, 2, 5) the mutation run is therefore triggered **on demand
+  via `workflow_dispatch` before merging**, exactly as `CLAUDE.md` prescribes for a
+  risky core merge. Pure-wiring files we add (each feature's `Setup.cs`) belong on
+  the config's exclusion list, like the existing builder/extension entries.
+- **The snapshot-judge turn gate.** `.claude/hooks/turn-review-gate` blocks a turn
+  whose `*.verified.*` baselines moved until `alvo-snapshot-judge` has reviewed
+  them. This milestone adds a lot of Verify baselines (CEL→SQL per engine, the
+  OpenAPI document), so expect the gate to fire routinely — a moved golden SQL
+  snapshot is precisely the case it exists for, since a rule engine's test can be
+  made green by accepting the wrong SQL.
 
 ## PR split
 
@@ -705,7 +722,9 @@ fallback and the `IAlvoData` port makes the swap non-breaking.
 
 PR4 starts #24 but does not close it — the published image and the full standalone
 story stay in F4. PRs 1, 2 and 5 touch the security core: `/security-review` plus
-the `alvo-security-core-review` checklist, not only `/code-review`.
+the `alvo-security-core-review` checklist, not only `/code-review`, and a
+`workflow_dispatch` mutation run before the merge (mutation is post-merge now, so
+it is no longer reached automatically on the PR).
 
 ## New issues to open
 
