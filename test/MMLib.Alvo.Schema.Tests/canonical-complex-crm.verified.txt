@@ -302,6 +302,7 @@
           "type": "string"
         },
         "line_total": {
+          "computed": "unit_price * amount",
           "precision": 12,
           "scale": 2,
           "type": "decimal"
@@ -330,6 +331,7 @@
           "type": "ref"
         },
         "gross_total": {
+          "computed": "net_total + vat_total",
           "precision": 12,
           "scale": 2,
           "type": "decimal"

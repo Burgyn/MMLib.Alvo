@@ -59,7 +59,7 @@ public class DescriptorRoundTripTests
         var descriptor = AlvoDescriptor.Parse(File.ReadAllText(path));
 
         AssertExtensionKeysSurvive(descriptor);
-        AssertTaggedCelSurvives(descriptor);
+        AssertTaggedCelAndComputedSurvive(descriptor);
         AssertAutomationSurvives(descriptor);
         AssertWebhooksAndFunctionsSurvive(descriptor);
         AssertRenameAndRollupViaSurvive(descriptor);
@@ -73,15 +73,15 @@ public class DescriptorRoundTripTests
         vatTotal.Extensions.ShouldNotBeNull().ShouldContainKey("x-note");
     }
 
-    private static void AssertTaggedCelSurvives(AlvoDescriptor descriptor)
+    private static void AssertTaggedCelAndComputedSurvive(AlvoDescriptor descriptor)
     {
         var ownerDefault = descriptor.Entities["companies"].Fields["owner_id"].Default.ShouldNotBeNull();
         ownerDefault.IsExpression.ShouldBeTrue();
         ownerDefault.Expression.ShouldBe("@user.id");
 
-        // #20: 'computed' is refused at mapping time until the CEL→SQL compiler (#21) lands,
-        // so the fixture no longer carries it; gross_total is now a plain column.
-        descriptor.Entities["invoices"].Fields["gross_total"].Computed.ShouldBeNull();
+        // 'computed' is just descriptor JSON here — parse → serialize must preserve it losslessly
+        // even though #20 refuses it at mapping time until the CEL→SQL compiler (#21) lands.
+        descriptor.Entities["invoices"].Fields["gross_total"].Computed.ShouldBe("net_total + vat_total");
 
         var commissionHidden = descriptor.Entities["deals"].Fields["commission_note"].Hidden.ShouldNotBeNull();
         commissionHidden.IsExpression.ShouldBeTrue();
