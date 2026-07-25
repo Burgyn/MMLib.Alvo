@@ -96,6 +96,88 @@ printf '{"tool_name":"Edit","tool_input":{}}' \
 assert_empty "$(cat "$(ledger_path "$repo")" 2>/dev/null)" \
   "survives a payload with no file_path"
 
+# ======================================================================== gate
+
+echo "turn-review-gate"
+
+run_gate() { # <repo> [stop_hook_active]
+  local repo="$1" active="${2:-false}"
+  printf '{"stop_hook_active":%s}' "$active" \
+    | CLAUDE_PROJECT_DIR="$repo" bash "$HOOKS_DIR/turn-review-gate"
+}
+
+repo="$(setup_repo)"
+assert_empty "$(run_gate "$repo")" "silent when there is no ledger"
+
+repo="$(setup_repo)"
+: >"$(ledger_path "$repo")"
+assert_empty "$(run_gate "$repo")" "silent when the ledger is empty"
+
+# A touched-but-unchanged baseline is a no-op: the agent rewrote identical bytes,
+# or edited and reverted inside the run. Nothing to judge.
+repo="$(setup_repo)"
+printf 'test/Some.Tests/Thing.verified.txt\n' >"$(ledger_path "$repo")"
+assert_empty "$(run_gate "$repo")" "drops a tracked no-op candidate"
+
+# A really-changed baseline must block.
+repo="$(setup_repo)"
+printf 'changed\n' >"$repo/test/Some.Tests/Thing.verified.txt"
+printf 'test/Some.Tests/Thing.verified.txt\n' >"$(ledger_path "$repo")"
+out="$(run_gate "$repo")"
+assert_contains '"decision":"block"' "$(printf '%s' "$out" | jq -c .)" \
+  "blocks on a changed baseline"
+assert_contains 'alvo-snapshot-judge' "$out" \
+  "block reason names the judge agent"
+assert_contains 'Thing.verified.txt' "$out" \
+  "block reason names the changed baseline"
+
+# A brand-new baseline does not appear in `git diff`, so it must be kept.
+repo="$(setup_repo)"
+printf 'new\n' >"$repo/test/Some.Tests/Fresh.verified.txt"
+printf 'test/Some.Tests/Fresh.verified.txt\n' >"$(ledger_path "$repo")"
+assert_contains 'Fresh.verified.txt' "$(run_gate "$repo")" \
+  "keeps an untracked (new) baseline"
+
+# An edit followed by a delete inside the run leaves nothing on disk.
+repo="$(setup_repo)"
+printf 'test/Some.Tests/Gone.verified.txt\n' >"$(ledger_path "$repo")"
+assert_empty "$(run_gate "$repo")" "drops a candidate that no longer exists"
+
+# The ACCEPT marker carries no path; the gate resolves paths from git.
+repo="$(setup_repo)"
+printf 'changed\n' >"$repo/test/Some.Tests/Thing.verified.txt"
+printf 'ACCEPT\n' >"$(ledger_path "$repo")"
+assert_contains 'Thing.verified.txt' "$(run_gate "$repo")" \
+  "ACCEPT marker resolves paths from git"
+
+# Two baselines, one block — not one block per file.
+repo="$(setup_repo)"
+printf 'changed\n' >"$repo/test/Some.Tests/Thing.verified.txt"
+printf 'new\n' >"$repo/test/Some.Tests/Fresh.verified.txt"
+printf 'test/Some.Tests/Thing.verified.txt\ntest/Some.Tests/Fresh.verified.txt\n' \
+  >"$(ledger_path "$repo")"
+assert_eq "1" "$(run_gate "$repo" | jq -s 'length')" \
+  "emits exactly one block for two baselines"
+
+# The ledger has ONE owner: it is gone after a single read, so a block-induced
+# re-Stop finds nothing and cannot loop.
+repo="$(setup_repo)"
+printf 'changed\n' >"$repo/test/Some.Tests/Thing.verified.txt"
+printf 'test/Some.Tests/Thing.verified.txt\n' >"$(ledger_path "$repo")"
+run_gate "$repo" >/dev/null
+if [ -f "$(ledger_path "$repo")" ]; then
+  fail "clears the ledger after one read" "(no ledger file)" "ledger still present"
+else
+  pass "clears the ledger after one read"
+fi
+assert_empty "$(run_gate "$repo")" "second run is silent"
+
+# stop_hook_active is the belt-and-braces guard against a block-induced re-Stop.
+repo="$(setup_repo)"
+printf 'changed\n' >"$repo/test/Some.Tests/Thing.verified.txt"
+printf 'test/Some.Tests/Thing.verified.txt\n' >"$(ledger_path "$repo")"
+assert_empty "$(run_gate "$repo" true)" "silent when stop_hook_active is true"
+
 # ======================================================================= total
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
