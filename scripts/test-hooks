@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# Tests for the Claude Code hooks in .claude/hooks/. Plain bash, no dependency:
+# each hook is a process that reads a JSON payload on stdin, so the test drives
+# it exactly the way Claude Code does — with a crafted payload and a throwaway
+# git repo as CLAUDE_PROJECT_DIR.
+#
+# Run: scripts/test-hooks
+set -uo pipefail
+
+HOOKS_DIR="$(cd "$(dirname "$0")/../.claude/hooks" && pwd)"
+TMP_ROOT="$(mktemp -d)"
+trap 'rm -rf "$TMP_ROOT"' EXIT
+
+PASS=0
+FAIL=0
+
+pass() { PASS=$((PASS + 1)); printf '  ok   %s\n' "$1"; }
+fail() {
+  FAIL=$((FAIL + 1))
+  printf '  FAIL %s\n' "$1"
+  printf '       expected: %s\n' "$2"
+  printf '       actual:   %s\n' "$3"
+}
+
+assert_eq() { # <expected> <actual> <label>
+  if [ "$1" = "$2" ]; then pass "$3"; else fail "$3" "$1" "$2"; fi
+}
+
+assert_empty() { # <actual> <label>
+  if [ -z "$1" ]; then pass "$2"; else fail "$2" "(empty)" "$1"; fi
+}
+
+assert_contains() { # <needle> <haystack> <label>
+  case "$2" in *"$1"*) pass "$3" ;; *) fail "$3" "contains '$1'" "$2" ;; esac
+}
+
+# A throwaway git repo with one committed baseline, so tests can distinguish
+# "tracked and unchanged" from "tracked and modified" from "untracked".
+setup_repo() { # -> prints the repo path
+  local repo
+  repo="$(mktemp -d "$TMP_ROOT/repo.XXXXXX")"
+  git -C "$repo" init -q
+  git -C "$repo" config user.email test@example.com
+  git -C "$repo" config user.name test
+  mkdir -p "$repo/test/Some.Tests" "$repo/src"
+  printf 'committed\n' >"$repo/test/Some.Tests/Thing.verified.txt"
+  printf 'x\n' >"$repo/src/Thing.cs"
+  git -C "$repo" add -A
+  git -C "$repo" commit -qm init
+  printf '%s\n' "$repo"
+}
+
+ledger_path() { # <repo>
+  local repo="$1" p
+  p="$(git -C "$repo" rev-parse --git-path edited-paths 2>/dev/null)"
+  case "$p" in /*) printf '%s\n' "$p" ;; *) printf '%s\n' "$repo/$p" ;; esac
+}
+
+# ==================================================================== recorder
+
+echo "record-edited-paths"
+
+repo="$(setup_repo)"
+printf '{"tool_name":"Edit","tool_input":{"file_path":"%s/test/Some.Tests/Thing.verified.txt"}}' "$repo" \
+  | CLAUDE_PROJECT_DIR="$repo" bash "$HOOKS_DIR/record-edited-paths"
+assert_eq "test/Some.Tests/Thing.verified.txt" "$(cat "$(ledger_path "$repo")" 2>/dev/null)" \
+  "records a baseline path, repo-relative"
+
+repo="$(setup_repo)"
+printf '{"tool_name":"Edit","tool_input":{"file_path":"%s/src/Thing.cs"}}' "$repo" \
+  | CLAUDE_PROJECT_DIR="$repo" bash "$HOOKS_DIR/record-edited-paths"
+assert_empty "$(cat "$(ledger_path "$repo")" 2>/dev/null)" \
+  "ignores a non-baseline path"
+
+repo="$(setup_repo)"
+printf '{"tool_name":"Bash","tool_input":{"command":"dotnet verify accept"}}' \
+  | CLAUDE_PROJECT_DIR="$repo" bash "$HOOKS_DIR/record-edited-paths"
+assert_eq "ACCEPT" "$(cat "$(ledger_path "$repo")" 2>/dev/null)" \
+  "records ACCEPT for a shell-side baseline accept"
+
+repo="$(setup_repo)"
+printf '{"tool_name":"Bash","tool_input":{"command":"cp a.received.txt a.verified.txt"}}' \
+  | CLAUDE_PROJECT_DIR="$repo" bash "$HOOKS_DIR/record-edited-paths"
+assert_eq "ACCEPT" "$(cat "$(ledger_path "$repo")" 2>/dev/null)" \
+  "records ACCEPT for a received->verified copy"
+
+repo="$(setup_repo)"
+printf '{"tool_name":"Bash","tool_input":{"command":"dotnet test"}}' \
+  | CLAUDE_PROJECT_DIR="$repo" bash "$HOOKS_DIR/record-edited-paths"
+assert_empty "$(cat "$(ledger_path "$repo")" 2>/dev/null)" \
+  "ignores an unrelated Bash command"
+
+repo="$(setup_repo)"
+printf '{"tool_name":"Edit","tool_input":{}}' \
+  | CLAUDE_PROJECT_DIR="$repo" bash "$HOOKS_DIR/record-edited-paths"
+assert_empty "$(cat "$(ledger_path "$repo")" 2>/dev/null)" \
+  "survives a payload with no file_path"
+
+# ======================================================================= total
+
+printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
+[ "$FAIL" -eq 0 ]
