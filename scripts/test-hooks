@@ -172,11 +172,18 @@ else
 fi
 assert_empty "$(run_gate "$repo")" "second run is silent"
 
-# stop_hook_active is the belt-and-braces guard against a block-induced re-Stop.
+# stop_hook_active suppresses the decision but NOT the ledger drainage. The ledger
+# is owned by this hook alone and must be drained every run, so a block-induced
+# re-Stop does not ping-pong.
 repo="$(setup_repo)"
 printf 'changed\n' >"$repo/test/Some.Tests/Thing.verified.txt"
 printf 'test/Some.Tests/Thing.verified.txt\n' >"$(ledger_path "$repo")"
 assert_empty "$(run_gate "$repo" true)" "silent when stop_hook_active is true"
+if [ -f "$(ledger_path "$repo")" ]; then
+  fail "drains ledger even when stop_hook_active is true" "(no ledger file)" "ledger still present"
+else
+  pass "drains ledger even when stop_hook_active is true"
+fi
 
 # ======================================================================= total
 

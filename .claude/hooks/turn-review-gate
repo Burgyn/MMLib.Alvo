@@ -19,11 +19,10 @@ set -uo pipefail
 command -v jq >/dev/null 2>&1 || exit 0
 payload="$(cat)" || payload=''
 
-# Belt-and-braces against a block-induced re-Stop; clearing the ledger below is
-# the real guard.
+# Parse stop_hook_active from the payload.
+active="false"
 if [ -n "$payload" ]; then
   active="$(printf '%s' "$payload" | jq -r '.stop_hook_active // false' 2>/dev/null)"
-  [ "$active" = "true" ] && exit 0
 fi
 
 root="${CLAUDE_PROJECT_DIR:-$(pwd)}"
@@ -33,10 +32,16 @@ ledger="$(git -C "$root" rev-parse --git-path edited-paths 2>/dev/null)"
 case "$ledger" in /*) ;; *) ledger="$root/$ledger" ;; esac
 [ -f "$ledger" ] || exit 0
 
-# Read this run's ledger, then clear it immediately. Single owner => no race with
-# a sibling hook, and nothing left to re-read on a re-Stop => no loop.
+# The ledger is owned by this hook alone: it is read and drained unconditionally,
+# so a block-induced re-Stop cannot re-read stale entries. stop_hook_active
+# suppresses only the decision, never the ledger ownership — one pass per turn.
 entries="$(sort -u "$ledger" 2>/dev/null)"
 rm -f "$ledger" 2>/dev/null || true
+
+# If this re-Stop was triggered by a block, exit before running checks. The ledger
+# has already been drained, so the next re-Stop will find nothing.
+[ "$active" = "true" ] && exit 0
+
 [ -n "$entries" ] || exit 0
 
 # =============================================================================
