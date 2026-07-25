@@ -16,7 +16,7 @@ Spec: `docs/superpowers/specs/2026-07-25-snapshot-judge-gate-design.md`. Branch:
 - **Fail open, but not silently.** A hook that cannot do its job exits 0. The judge, when it cannot judge (oversized diff), says so rather than guessing.
 - **`jq` is a soft dependency.** `command -v jq >/dev/null 2>&1 || exit 0` at the top of every hook that parses a payload.
 - **The ledger path is resolved via `git rev-parse --git-path edited-paths`**, never hardcoded to `.git/edited-paths` — this repo is worked on through worktrees, where `.git` is a file. The result may be relative and must be joined to the project root.
-- **The ledger has exactly one owner.** Only `turn-review-gate` reads and deletes it. Claude Code runs an event's hooks in parallel, so a sibling Stop hook would race it. Future checks are functions inside `turn-review-gate`, never a second Stop hook.
+- **The ledger has exactly one owner, and it drains unconditionally.** Only `turn-review-gate` reads and deletes it, and it does so **before any decision** — including the `stop_hook_active` check, which suppresses only the decision. Guarding first would leave the edits made while addressing a block in the ledger, to fire on a later, unrelated turn. Claude Code runs an event's hooks in parallel, so a sibling Stop hook would race the drain. Future checks are functions inside `turn-review-gate`, never a second Stop hook.
 - **The gate scopes by tool name in `matcher` and by path inside the recorder.** The `matcher` field filters tool names only; it cannot filter paths.
 - **The judge is read-only:** `tools: Read, Grep, Bash`, no `Edit`/`Write`.
 - **`suspicious` requires positive evidence from the closed fingerprint list; uncertainty resolves to `ok`.**
@@ -348,11 +348,17 @@ else
 fi
 assert_empty "$(run_gate "$repo")" "second run is silent"
 
-# stop_hook_active is the belt-and-braces guard against a block-induced re-Stop.
+# stop_hook_active suppresses the DECISION only — the ledger must still be drained,
+# or the edits made while addressing a block leak into a later, unrelated turn.
 repo="$(setup_repo)"
 printf 'changed\n' >"$repo/test/Some.Tests/Thing.verified.txt"
 printf 'test/Some.Tests/Thing.verified.txt\n' >"$(ledger_path "$repo")"
 assert_empty "$(run_gate "$repo" true)" "silent when stop_hook_active is true"
+if [ -f "$(ledger_path "$repo")" ]; then
+  fail "drains the ledger even when stop_hook_active is true" "(no ledger file)" "ledger still present"
+else
+  pass "drains the ledger even when stop_hook_active is true"
+fi
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -387,11 +393,10 @@ set -uo pipefail
 command -v jq >/dev/null 2>&1 || exit 0
 payload="$(cat)" || payload=''
 
-# Belt-and-braces against a block-induced re-Stop; clearing the ledger below is
-# the real guard.
+# Parse stop_hook_active now, but act on it only AFTER the ledger is drained.
+active="false"
 if [ -n "$payload" ]; then
   active="$(printf '%s' "$payload" | jq -r '.stop_hook_active // false' 2>/dev/null)"
-  [ "$active" = "true" ] && exit 0
 fi
 
 root="${CLAUDE_PROJECT_DIR:-$(pwd)}"
@@ -401,10 +406,17 @@ ledger="$(git -C "$root" rev-parse --git-path edited-paths 2>/dev/null)"
 case "$ledger" in /*) ;; *) ledger="$root/$ledger" ;; esac
 [ -f "$ledger" ] || exit 0
 
-# Read this run's ledger, then clear it immediately. Single owner => no race with
-# a sibling hook, and nothing left to re-read on a re-Stop => no loop.
+# The ledger is owned by this hook alone: it is read and drained UNCONDITIONALLY,
+# before any decision. Guarding on stop_hook_active first would leave the edits
+# made while addressing a block sitting in the ledger, to fire on a later,
+# unrelated turn — the exact spurious block this design exists to avoid.
 entries="$(sort -u "$ledger" 2>/dev/null)"
 rm -f "$ledger" 2>/dev/null || true
+
+# Now the decision. A block-induced re-Stop stops here: the ledger is already
+# drained, so there is nothing to ping-pong on. One judge pass per turn.
+[ "$active" = "true" ] && exit 0
+
 [ -n "$entries" ] || exit 0
 
 # =============================================================================
@@ -490,7 +502,7 @@ chmod +x .claude/hooks/turn-review-gate
 
 Run: `scripts/test-hooks`
 
-Expected: PASS — `19 passed, 0 failed`, exit code 0.
+Expected: PASS — `20 passed, 0 failed`, exit code 0.
 
 - [ ] **Step 5: Commit**
 
@@ -548,7 +560,7 @@ assert_eq "0" "$?" "exits 0 when there is no ledger"
 
 Run: `scripts/test-hooks`
 
-Expected: the 19 earlier assertions pass; `deletes an orphaned ledger` fails because the hook does not exist. Exit code non-zero.
+Expected: the 20 earlier assertions pass; `deletes an orphaned ledger` fails because the hook does not exist. Exit code non-zero.
 
 - [ ] **Step 3: Write the reset hook**
 
@@ -586,7 +598,7 @@ chmod +x .claude/hooks/reset-edited-paths
 
 Run: `scripts/test-hooks`
 
-Expected: PASS — `21 passed, 0 failed`, exit code 0.
+Expected: PASS — `22 passed, 0 failed`, exit code 0.
 
 - [ ] **Step 5: Wire all three hooks into settings**
 
@@ -804,7 +816,7 @@ hook (an event's hooks run in parallel and would race the ledger). Tests:
 
 Run: `scripts/test-hooks`
 
-Expected: PASS — `21 passed, 0 failed`, exit code 0.
+Expected: PASS — `22 passed, 0 failed`, exit code 0.
 
 - [ ] **Step 5: Commit**
 

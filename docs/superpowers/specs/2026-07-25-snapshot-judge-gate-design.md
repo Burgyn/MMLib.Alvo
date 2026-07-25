@@ -103,19 +103,22 @@ other:
 
 Sequence in `turn-review-gate`:
 
-1. `stop_hook_active == true` → `exit 0` (belt-and-braces against a
-   block-induced re-Stop; clearing the ledger is the real guard).
-2. Ledger missing or empty → `exit 0`. **No conversation can ever trigger a
-   judge.**
-3. Read the ledger, then delete it immediately — single owner, so no sibling
-   hook can race it and a block-induced re-Stop reads nothing.
-4. Candidates = ledger entries matching `*.verified.*`, plus — if the ledger
+1. Ledger missing → `exit 0`. **No conversation can ever trigger a judge.**
+2. Read the ledger, then delete it immediately — single owner, so no sibling
+   hook can race it. The drain is **unconditional**: it happens before any
+   decision, including the `stop_hook_active` check below.
+3. `stop_hook_active == true` → `exit 0` without deciding anything. The ledger
+   is already drained, so a block-induced re-Stop cannot ping-pong, and nothing
+   it recorded leaks into a later turn. This ordering is load-bearing — see
+   below.
+4. Entries empty → `exit 0`.
+5. Candidates = ledger entries matching `*.verified.*`, plus — if the ledger
    contains an `ACCEPT` marker — every `*.verified.*` path reported by
    `git status --porcelain --untracked-files=all`.
-5. Drop no-ops: a tracked candidate whose `git diff HEAD -- <file>` is empty
+6. Drop no-ops: a tracked candidate whose `git diff HEAD -- <file>` is empty
    is discarded. An untracked candidate is kept (that is a new baseline).
-6. No candidates survive → `exit 0`, silently.
-7. Otherwise emit a single `{"decision":"block","reason":...}` listing the
+7. No candidates survive → `exit 0`, silently.
+8. Otherwise emit a single `{"decision":"block","reason":...}` listing the
    surviving files and instructing the agent to invoke
    `alvo-snapshot-judge` and address its findings.
 
@@ -136,11 +139,21 @@ earlier turns that are not yet committed. This is intended: the judge should
 weigh the whole uncommitted baseline change, not its most recent fragment.
 Per-run scoping stays on the *trigger*, not on the content.
 
-**A `suspicious` finding costs up to two judge passes.** The agent fixes the
-code and regenerates the baseline; that is a new edit, so the next Stop
-blocks again and the judge confirms `ok`. This is correct verify-after-fix
-behaviour, not a loop. A "content already judged" memo would not help — the
-fix changes the content, so its hash differs — and is therefore left out.
+**One judge pass per turn, and the ledger is always drained.** The tempting
+ordering — check `stop_hook_active` first, drain the ledger second — is wrong,
+and wrong in exactly the way this design exists to avoid. After a block the
+agent fixes the code and regenerates the baseline; those edits land in a fresh
+ledger. If the block-induced re-Stop exits at the guard without draining, they
+survive into a later, unrelated turn and produce a block on a turn where nothing
+happened.
+
+So the drain is unconditional and `stop_hook_active` suppresses only the
+decision. The cost is honest: the fix's own baseline edits are **not** re-judged
+in that turn. That is acceptable — the fix was made under the judge's finding,
+the next turn's edits are judged normally, and the PR-level gates still see the
+committed baseline. Buying the re-check instead would mean a bounded-retry
+marker in the git dir: more state and another branch to test, for a second
+opinion on a change the judge already caused.
 
 ## The judge
 
