@@ -43,7 +43,19 @@ namespace MMLib.Alvo.Expressions.Internal;
 /// parses as one, and a timestamp may be compared across <see cref="DateTimeOffset"/>,
 /// <see cref="DateTime"/>, and a round-trip-parseable string, all using
 /// <see cref="CultureInfo.InvariantCulture"/>. Any other cross-kind comparison is
-/// <see langword="false"/> rather than throwing.
+/// <see langword="false"/> rather than throwing. When normalization fails for any reason — a
+/// cross-kind pairing, an unrecognized CLR value — both <c>==</c> and <c>!=</c> evaluate to
+/// <see langword="false"/>; <c>!=</c> is not "true by default" when the operands cannot even be
+/// compared. This matches a SQL predicate wrapped in <c>COALESCE(..., FALSE)</c> rather than
+/// three-valued <c>NULL</c> logic, and the SQL renderer must not "fix" this into a
+/// <see langword="true"/> for <c>!=</c>.
+/// </para>
+/// <para>
+/// A null literal (<c>== null</c>/<c>!= null</c>) never reaches this interpreter — the compiler
+/// rejects it and directs the author to <c>has(field)</c>/<c>!has(field)</c> instead, because
+/// <c>owner_id == null</c> would otherwise always be <see langword="false"/> (per the null rule
+/// above) regardless of whether <c>owner_id</c> is actually <see langword="null"/>, silently
+/// making <c>!(owner_id == null)</c> always <see langword="true"/>.
 /// </para>
 /// <para>
 /// No exception ever escapes <see cref="EvaluatePredicate"/> or <see cref="EvaluateScalar"/> for
@@ -60,7 +72,15 @@ internal static class CelInterpreter
     /// <see langword="false"/> unless the tree evaluates to exactly <see langword="true"/>.
     /// </summary>
     /// <param name="expression">The compiled Rule or Condition expression.</param>
-    /// <param name="current">The row being written — the candidate image on a create/update.</param>
+    /// <param name="current">
+    /// The row being written — the candidate image on a create/update. This must be the
+    /// <b>complete post-image</b> of the row, every persisted field, never a partial PATCH
+    /// payload: a field the caller simply didn't mention is indistinguishable from one explicitly
+    /// set to <see langword="null"/>, so <c>changed(f)</c> (and any comparison reading <c>f</c>)
+    /// reports a field a partial payload omits as changed to <see langword="null"/> even when its
+    /// stored value never moved — turning a guard like <c>!changed(tenant_id)</c> into a denial
+    /// of every ordinary PATCH that doesn't happen to repeat <c>tenant_id</c>.
+    /// </param>
     /// <param name="previous">
     /// The row as it was before the change, or <see langword="null"/> on a create; only read by
     /// <c>old.</c> field references and <c>changed(...)</c>.
@@ -378,44 +398,63 @@ internal static class CelInterpreter
 
     private static bool TryDoubleToDecimal(double value, out decimal result)
     {
-        if (double.IsNaN(value) || double.IsInfinity(value) || value < (double)decimal.MinValue || value > (double)decimal.MaxValue)
+        if (double.IsNaN(value) || double.IsInfinity(value) || value <= (double)decimal.MinValue || value >= (double)decimal.MaxValue)
         {
             result = default;
             return false;
         }
 
-        result = (decimal)value;
-        return true;
+        try
+        {
+            result = (decimal)value;
+            return true;
+        }
+        catch (OverflowException)
+        {
+            result = default;
+            return false;
+        }
     }
 
-    private static object? EvaluateArithmetic(CelBinaryOperator op, object? left, object? right)
+    private static decimal? EvaluateArithmetic(CelBinaryOperator op, object? left, object? right)
     {
-        if (left is null || right is null || !TryToDecimal(left, out var leftDecimal) || !TryToDecimal(right, out var rightDecimal))
-        {
-            return null;
-        }
-
-        if (op == CelBinaryOperator.Divide && rightDecimal == 0m)
+        if (!TryPrepareArithmeticOperands(left, right, op, out var leftDecimal, out var rightDecimal))
         {
             return null;
         }
 
         try
         {
-            return op switch
-            {
-                CelBinaryOperator.Add => leftDecimal + rightDecimal,
-                CelBinaryOperator.Subtract => leftDecimal - rightDecimal,
-                CelBinaryOperator.Multiply => leftDecimal * rightDecimal,
-                CelBinaryOperator.Divide => leftDecimal / rightDecimal,
-                _ => (object?)null,
-            };
+            return ApplyArithmetic(op, leftDecimal, rightDecimal);
         }
         catch (OverflowException)
         {
             return null;
         }
     }
+
+    private static bool TryPrepareArithmeticOperands(
+        object? left, object? right, CelBinaryOperator op, out decimal leftDecimal, out decimal rightDecimal)
+    {
+        leftDecimal = default;
+        rightDecimal = default;
+
+        if (left is null || right is null || !TryToDecimal(left, out leftDecimal) || !TryToDecimal(right, out rightDecimal))
+        {
+            return false;
+        }
+
+        return op != CelBinaryOperator.Divide || rightDecimal != 0m;
+    }
+
+    private static decimal? ApplyArithmetic(CelBinaryOperator op, decimal left, decimal right) => op switch
+    {
+        CelBinaryOperator.Add => left + right,
+        CelBinaryOperator.Subtract => left - right,
+        CelBinaryOperator.Multiply => left * right,
+        CelBinaryOperator.Divide => left / right,
+        _ => null,
+    };
 
     private static object? Negate(object? value) => value is not null && TryToDecimal(value, out var decimalValue)
         ? -decimalValue

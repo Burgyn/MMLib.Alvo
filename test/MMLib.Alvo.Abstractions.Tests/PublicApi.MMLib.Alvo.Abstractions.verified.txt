@@ -130,10 +130,12 @@ namespace MMLib.Alvo.Data
 {
     public sealed class AlvoRecord : System.IEquatable<MMLib.Alvo.Data.AlvoRecord>
     {
-        public AlvoRecord(System.Collections.Generic.IReadOnlyDictionary<string, object?> Values) { }
+        public AlvoRecord(System.Collections.Generic.IReadOnlyDictionary<string, object?> values) { }
         public object? this[string field] { get; }
-        public System.Collections.Generic.IReadOnlyDictionary<string, object?> Values { get; init; }
+        public System.Collections.Generic.IReadOnlyDictionary<string, object?> Values { get; }
         public static MMLib.Alvo.Data.AlvoRecord Empty { get; }
+        public bool Equals(MMLib.Alvo.Data.AlvoRecord? other) { }
+        public override int GetHashCode() { }
         public bool TryGetValue(string field, out object? value) { }
         public MMLib.Alvo.Data.AlvoRecord With(string field, object? value) { }
     }

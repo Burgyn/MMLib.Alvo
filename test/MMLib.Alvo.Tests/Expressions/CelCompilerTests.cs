@@ -108,6 +108,7 @@ public class CelCompilerTests
 
         result.Errors.Count.ShouldBe(2);
         result.Errors[0].Position.ShouldNotBe(result.Errors[1].Position);
+        result.Errors[0].Position.ShouldBe(0);
     }
 
     [Fact]
@@ -117,6 +118,7 @@ public class CelCompilerTests
 
         result.Errors.Count.ShouldBe(2);
         result.Errors[0].Position.ShouldNotBe(result.Errors[1].Position);
+        result.Errors[0].Position.ShouldBe(0);
     }
 
     [Theory]
@@ -156,6 +158,50 @@ public class CelCompilerTests
     public void Relational_operators_reject_null()
     {
         Compile("total < null").IsSuccess.ShouldBeFalse();
+    }
+
+    [Theory]
+    [InlineData("owner_id == null")]
+    [InlineData("owner_id != null")]
+    [InlineData("null == owner_id")]
+    [InlineData("null != owner_id")]
+    public void Equality_against_a_null_literal_is_rejected_with_a_has_suggestion(string source)
+    {
+        var result = Compile(source);
+
+        result.IsSuccess.ShouldBeFalse();
+        result.Errors[0].FixSuggestion.ShouldNotBeNull().ShouldContain("has(");
+    }
+
+    [Fact]
+    public void Negating_a_rejected_null_literal_equality_still_fails_to_compile()
+    {
+        Compile("!(owner_id == null)").IsSuccess.ShouldBeFalse();
+    }
+
+    [Theory]
+    [InlineData("title < 'a'")]
+    [InlineData("title <= 'a'")]
+    [InlineData("title > 'a'")]
+    [InlineData("title >= 'a'")]
+    public void Relational_operators_reject_string_operands_in_rule(string source)
+    {
+        Compile(source).IsSuccess.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Relational_operators_reject_string_operands_in_condition()
+    {
+        CelFixtures.Compiler.Compile("title > 'a'", CelProfile.Condition, CelFixtures.Orders)
+            .IsSuccess.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Relational_operators_on_strings_are_legal_in_computed_evaluated_purely_by_the_database()
+    {
+        var result = CelFixtures.Compiler.Compile("title > 'a' ? 1 : 2", CelProfile.Computed, CelFixtures.Orders);
+
+        result.IsSuccess.ShouldBeTrue();
     }
 
     [Fact]

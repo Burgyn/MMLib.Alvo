@@ -90,6 +90,9 @@ internal static class CelTypeChecker
         private const string ComputedNoContextMessage =
             "A computed column is evaluated by the database with no caller context.";
 
+        private const string NullPresenceFixSuggestion =
+            "Use has(field) to test presence, or !has(field) to test absence.";
+
         private int _cursor;
 
         public List<CelCompilationError> Errors { get; } = [];
@@ -296,7 +299,7 @@ internal static class CelTypeChecker
             return (binary, CelValueType.Bool, profileBad, position);
         }
 
-        private static CelCompilationError? ValidateComparisonTypes(CelBinaryOperator op, CelValueType left, CelValueType right, int position)
+        private CelCompilationError? ValidateComparisonTypes(CelBinaryOperator op, CelValueType left, CelValueType right, int position)
         {
             if (left == CelValueType.Json || right == CelValueType.Json)
             {
@@ -314,7 +317,24 @@ internal static class CelTypeChecker
             {
                 return new CelCompilationError(
                     "Relational operators (<, <=, >, >=) cannot be compared against null.",
-                    "Use has(field) to test presence, or == null / != null to test equality.",
+                    NullPresenceFixSuggestion,
+                    position);
+            }
+
+            if (IsEqualityAgainstNullLiteral(op, left, right))
+            {
+                return new CelCompilationError(
+                    "'==' and '!=' cannot be compared against a null literal — every comparison already treats a missing " +
+                    "value as false, so this always evaluates the same way regardless of the field's actual value.",
+                    NullPresenceFixSuggestion,
+                    position);
+            }
+
+            if (IsRelational(op) && profile != CelProfile.Computed && (left == CelValueType.String || right == CelValueType.String))
+            {
+                return new CelCompilationError(
+                    $"Relational operators (<, <=, >, >=) on a string are collation-dependent and are not available in the {profile} profile.",
+                    "Compare with == or != instead, or move this comparison into a computed field, which only the database evaluates.",
                     position);
             }
 
@@ -334,6 +354,9 @@ internal static class CelTypeChecker
                     position)
                 : null;
         }
+
+        private static bool IsEqualityAgainstNullLiteral(CelBinaryOperator op, CelValueType left, CelValueType right) =>
+            (op is CelBinaryOperator.Equal or CelBinaryOperator.NotEqual) && (left == CelValueType.Null || right == CelValueType.Null);
 
         private CelCompilationError? ValidateEnumLiteral(CelBinaryOperator op, CelNode left, CelNode right, int position)
         {
