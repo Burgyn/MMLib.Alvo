@@ -13,15 +13,13 @@ namespace MMLib.Alvo.Tests.Expressions;
 public class SqlPredicateRendererTests
 {
     private static readonly IFieldSqlRenderer _fields = new TestFieldSqlRenderer();
-
-    // Deliberately typed as the interface — this is the public contract under test, not a
-    // performance-sensitive path CA1859 would improve by narrowing to the concrete renderer.
-#pragma warning disable CA1859
-    private static readonly IPredicateRenderer _renderer = new SqlPredicateRenderer();
-#pragma warning restore CA1859
+    private static readonly SqlPredicateRenderer _renderer = new();
 
     private static SqlPredicate Render(string source, AlvoContext context) =>
         _renderer.Render(CelFixtures.CompileRule(source), context, _fields);
+
+    private static SqlExpression RenderScalar(string source) =>
+        _renderer.Render(CelFixtures.CompileComputed(source), _fields);
 
     [Fact]
     public void A_comparison_is_collapsed_so_null_reads_as_false()
@@ -90,6 +88,27 @@ public class SqlPredicateRendererTests
     }
 
     [Fact]
+    public void A_boolean_field_used_as_a_predicate_is_collapsed_so_a_null_flag_reads_as_false()
+    {
+        Render("is_public", CelFixtures.Alice).Sql.ShouldBe("COALESCE(\"is_public\", FALSE)");
+    }
+
+    [Fact]
+    public void Negating_a_boolean_field_negates_the_collapsed_value()
+    {
+        Render("!is_public", CelFixtures.Alice).Sql.ShouldBe("(NOT COALESCE(\"is_public\", FALSE))");
+    }
+
+    [Fact]
+    public void A_boolean_field_composes_with_a_comparison_over_and()
+    {
+        var predicate = Render("is_public && owner_id == @user.id", CelFixtures.Alice);
+
+        predicate.Sql.ShouldBe("(COALESCE(\"is_public\", FALSE) AND COALESCE(\"owner_id\" = @p0, FALSE))");
+        predicate.Parameters["p0"].ShouldBe(CelFixtures.Alice.User.Value);
+    }
+
+    [Fact]
     public void Parameter_names_are_generated_not_taken_from_the_source()
     {
         var predicate = Render("title == 'p0' && owner_id == @user.id", CelFixtures.Alice);
@@ -155,5 +174,83 @@ public class SqlPredicateRendererTests
         var expression = CelFixtures.CompileComputed("total + 1");
 
         Should.Throw<InvalidOperationException>(() => _renderer.Render(expression, CelFixtures.Alice, _fields));
+    }
+
+    [Fact]
+    public void The_returned_parameter_dictionary_is_not_the_renderers_mutable_instance()
+    {
+        var predicate = Render("owner_id == @user.id", CelFixtures.Alice);
+
+        Should.Throw<InvalidCastException>(() => _ = (Dictionary<string, object?>)predicate.Parameters);
+    }
+
+    [Fact]
+    public void A_condition_referencing_old_and_new_fields_throws_not_supported_since_hooks_are_interpreter_evaluated()
+    {
+        var expression = CelFixtures.CompileCondition("old.status != new.status");
+
+        Should.Throw<NotSupportedException>(() => _renderer.Render(expression, CelFixtures.Alice, _fields));
+    }
+
+    [Fact]
+    public void A_condition_using_changed_throws_not_supported_since_hooks_are_interpreter_evaluated()
+    {
+        var expression = CelFixtures.CompileCondition("changed(status)");
+
+        Should.Throw<NotSupportedException>(() => _renderer.Render(expression, CelFixtures.Alice, _fields));
+    }
+
+    [Theory]
+    [InlineData("total + 1", "(\"total\" + @p0)")]
+    [InlineData("total - 1", "(\"total\" - @p0)")]
+    [InlineData("total * 2", "(\"total\" * @p0)")]
+    [InlineData("total / 2", "(\"total\" / @p0)")]
+    public void Each_arithmetic_operator_renders_unwrapped_over_a_field_and_a_parameter(string source, string expectedSql)
+    {
+        RenderScalar(source).Sql.ShouldBe(expectedSql);
+    }
+
+    [Fact]
+    public void Arithmetic_precedence_is_preserved_by_the_parsed_tree_shape_not_the_renderer()
+    {
+        RenderScalar("total * 2 + 1").Sql.ShouldBe("((\"total\" * @p0) + @p1)");
+    }
+
+    [Fact]
+    public void A_nested_arithmetic_tree_renders_with_matching_parentheses()
+    {
+        RenderScalar("(total + 1) * (total - 1)").Sql.ShouldBe("((\"total\" + @p0) * (\"total\" - @p1))");
+    }
+
+    [Fact]
+    public void A_logical_and_composes_two_collapsed_comparisons_inside_a_ternary_condition()
+    {
+        var scalar = RenderScalar("(total > 5 && total < 10) ? 1 : 2");
+
+        scalar.Sql.ShouldBe(
+            "(CASE WHEN (COALESCE(\"total\" > @p0, FALSE) AND COALESCE(\"total\" < @p1, FALSE)) THEN @p2 ELSE @p3 END)");
+    }
+
+    [Fact]
+    public void A_ternary_renders_as_a_case_expression_with_an_unwrapped_comparison_condition()
+    {
+        var scalar = RenderScalar("total > 5 ? 1 : 2");
+
+        scalar.Sql.ShouldBe("(CASE WHEN COALESCE(\"total\" > @p0, FALSE) THEN @p1 ELSE @p2 END)");
+    }
+
+    /// <summary>
+    /// Without collapsing the comparison first, <c>NOT (total &gt; 5)</c> over a null <c>total</c>
+    /// would render <c>NOT UNKNOWN</c> = <c>UNKNOWN</c>, falling to the <c>ELSE</c> branch — but the
+    /// interpreter's null rule makes <c>!(total &gt; 5)</c> true for a null <c>total</c>, selecting
+    /// the <c>THEN</c> branch. Collapsing first (<c>NOT COALESCE(...)</c>) keeps the two backends in
+    /// agreement.
+    /// </summary>
+    [Fact]
+    public void Negating_a_comparison_inside_a_ternary_condition_is_collapsed_so_a_null_field_does_not_diverge()
+    {
+        var scalar = RenderScalar("!(total > 5) ? 1 : 2");
+
+        scalar.Sql.ShouldBe("(CASE WHEN (NOT COALESCE(\"total\" > @p0, FALSE)) THEN @p1 ELSE @p2 END)");
     }
 }

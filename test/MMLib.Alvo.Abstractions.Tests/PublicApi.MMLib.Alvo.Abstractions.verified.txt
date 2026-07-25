@@ -705,7 +705,6 @@ namespace MMLib.Alvo.Expressions
     public sealed class CompiledExpression : System.IEquatable<MMLib.Alvo.Expressions.CompiledExpression>
     {
         public MMLib.Alvo.Schema.EntitySchema Entity { get; }
-        public string EntityName { get; }
         public MMLib.Alvo.Expressions.CelProfile Profile { get; }
         public MMLib.Alvo.Expressions.CelValueType ResultType { get; }
         public MMLib.Alvo.Expressions.CelNode Root { get; }

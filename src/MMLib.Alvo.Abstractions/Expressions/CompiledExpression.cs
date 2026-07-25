@@ -9,6 +9,7 @@ namespace MMLib.Alvo.Expressions;
 /// matches what that profile requires.
 /// </summary>
 /// <remarks>
+/// <para>
 /// A <see cref="CompiledExpression"/> is only ever produced by a successful
 /// <see cref="ICelCompiler.Compile"/>, so a renderer may assume it is type-checked and
 /// in-profile — it never needs to re-validate the tree it renders. The constructor is
@@ -16,6 +17,14 @@ namespace MMLib.Alvo.Expressions;
 /// provider or host can assemble one from a raw, unchecked parser tree — or <c>with</c>-mutate
 /// <see cref="Root"/> back into one — re-introducing an untyped <see cref="CelValueType.Null"/>
 /// field reference past this trust boundary.
+/// </para>
+/// <para>
+/// Any cache keyed on a compiled expression (to avoid recompiling a rule on every request) must be
+/// keyed on the descriptor's revision, not only the entity name and source text: a
+/// <see cref="CompiledExpression"/> holds a specific <see cref="Entity"/> snapshot, and a cache entry
+/// that outlives a re-apply would render against a stale schema — silently wrong if a column was
+/// renamed and the old name reused for something else.
+/// </para>
 /// </remarks>
 public sealed record CompiledExpression
 {
@@ -32,7 +41,6 @@ public sealed record CompiledExpression
         ResultType = resultType;
         Source = source;
         Entity = entity;
-        EntityName = entity.Name;
     }
 
     /// <summary>Gets the type-checked, profile-filtered expression tree.</summary>
@@ -47,13 +55,11 @@ public sealed record CompiledExpression
     /// <summary>Gets the original CEL source this expression was compiled from.</summary>
     public string Source { get; }
 
-    /// <summary>Gets the name of the entity <see cref="Root"/> was checked against.</summary>
-    public string EntityName { get; }
-
     /// <summary>
     /// Gets the entity <see cref="Root"/> was checked against — a SQL renderer needs the full
     /// schema, not only its name, to resolve a field to a physical column or, on a dynamic entity
-    /// (F7), a JSON path.
+    /// (F7), a JSON path. Use <c>Entity.Name</c> where only the name is needed; the type no longer
+    /// exposes a separate <c>EntityName</c> string alongside it.
     /// </summary>
     public EntitySchema Entity { get; }
 }

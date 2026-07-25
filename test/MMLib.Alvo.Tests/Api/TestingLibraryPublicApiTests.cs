@@ -14,12 +14,15 @@ namespace MMLib.Alvo.Tests.Api;
 /// </summary>
 public class TestingLibraryPublicApiTests
 {
-    // MMLib.Alvo.Testing ships xunit [Fact]-decorated contract-test base classes
-    // (SchemaMigratorContractTests et al.) as part of its public surface. Xunit's Fact/Theory
-    // attributes capture the declaring source file's absolute path via [CallerFilePath], which
-    // PublicApiGenerator would otherwise render into the baseline — making it different on every
-    // machine/CI checkout location, not just on a real API change. Excluding those two attributes
-    // keeps the baseline about the actual public surface (types/members), not test metadata.
+    /// <summary>
+    /// <c>MMLib.Alvo.Testing</c> ships xunit <c>[Fact]</c>-decorated contract-test base classes
+    /// (<c>SchemaMigratorContractTests</c> et al.) as part of its public surface. Xunit's
+    /// Fact/Theory attributes capture the declaring source file's absolute path via
+    /// <c>[CallerFilePath]</c>, which <c>PublicApiGenerator</c> would otherwise render into the
+    /// baseline — making it different on every machine/CI checkout location, not just on a real API
+    /// change. Excluding those two attributes keeps the baseline about the actual public surface
+    /// (types/members), not test metadata.
+    /// </summary>
     private static readonly ApiGeneratorOptions _options = new()
     {
         UseDenyNamespacePrefixesForExtensionMethods = false,
@@ -34,11 +37,14 @@ public class TestingLibraryPublicApiTests
         return Verify(publicApi).UseFileName("PublicApi.MMLib.Alvo.Testing");
     }
 
-    // This assembly references Verify.XunitV3 directly (for SchemaSqlSnapshotTests), which injects
-    // [assembly: AssemblyMetadata("Verify.ProjectDirectory", ...)] / ("Verify.SolutionDirectory", ...)
-    // carrying the absolute checkout path — non-reproducible across machines/CI, unlike everything
-    // else PublicApiGenerator emits here. Strip just those two entries; every other AssemblyMetadata
-    // entry (e.g. RepositoryUrl) is stable and stays.
+    /// <summary>
+    /// This assembly references <c>Verify.XunitV3</c> directly (for <c>SchemaSqlSnapshotTests</c>),
+    /// which injects <c>[assembly: AssemblyMetadata("Verify.ProjectDirectory", ...)]</c> /
+    /// <c>("Verify.SolutionDirectory", ...)</c> carrying the absolute checkout path —
+    /// non-reproducible across machines/CI, unlike everything else <c>PublicApiGenerator</c> emits
+    /// here. Strips just those two entries; every other <c>AssemblyMetadata</c> entry (e.g.
+    /// <c>RepositoryUrl</c>) is stable and stays.
+    /// </summary>
     private static string RemoveVerifyDirectoryMetadata(string publicApi) => Regex.Replace(
         publicApi,
         "\\[assembly: System\\.Reflection\\.AssemblyMetadata\\(\"Verify\\.(?:Project|Solution)Directory\", .*?\\)\\]\r?\n",

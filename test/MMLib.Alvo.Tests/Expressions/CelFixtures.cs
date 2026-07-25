@@ -36,6 +36,7 @@ internal static class CelFixtures
             new FieldSchema { Name = "tenant_id", Type = FieldType.Uuid },
             new FieldSchema { Name = "created_at", Type = FieldType.DateTime, Nullable = true },
             new FieldSchema { Name = "approved_at", Type = FieldType.DateTime, Nullable = true },
+            new FieldSchema { Name = "is_public", Type = FieldType.Boolean, Nullable = true },
         ],
     };
 

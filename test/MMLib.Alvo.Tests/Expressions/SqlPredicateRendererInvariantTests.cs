@@ -14,10 +14,7 @@ namespace MMLib.Alvo.Tests.Expressions;
 public class SqlPredicateRendererInvariantTests
 {
     private static readonly IFieldSqlRenderer _fields = new TestFieldSqlRenderer();
-
-#pragma warning disable CA1859
-    private static readonly IPredicateRenderer _renderer = new SqlPredicateRenderer();
-#pragma warning restore CA1859
+    private static readonly SqlPredicateRenderer _renderer = new();
 
     private static readonly (string Source, AlvoContext Context)[] _rules =
     [
@@ -42,6 +39,9 @@ public class SqlPredicateRendererInvariantTests
         ("(owner_id == @user.id || status == 'approved') && !has(owner_id)", CelFixtures.Alice),
         ("true", CelFixtures.Alice),
         ("false", CelFixtures.Alice),
+        ("is_public", CelFixtures.Alice),
+        ("!is_public", CelFixtures.Alice),
+        ("is_public && owner_id == @user.id", CelFixtures.Alice),
     ];
 
     [Fact]

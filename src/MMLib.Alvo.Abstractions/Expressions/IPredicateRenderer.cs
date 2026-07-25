@@ -18,6 +18,12 @@ public interface IPredicateRenderer
     /// <param name="context">The caller/tenant context <c>@user</c>/<c>@tenant</c> resolve against.</param>
     /// <param name="fields">The storage driver's field/dialect renderer.</param>
     /// <exception cref="InvalidOperationException"><paramref name="expression"/> was compiled for the Computed profile.</exception>
+    /// <exception cref="NotSupportedException">
+    /// <paramref name="expression"/> is a Condition tree that references <c>old.</c>/<c>new.</c> or
+    /// <c>changed(...)</c>. A hook condition is evaluated entirely in-process by
+    /// <c>CelInterpreter</c> — it never runs as a SQL predicate — so this is by design, not a gap: a
+    /// Condition tree is only renderable here when it happens not to use those constructs.
+    /// </exception>
     SqlPredicate Render(CompiledExpression expression, AlvoContext context, IFieldSqlRenderer fields);
 
     /// <summary>

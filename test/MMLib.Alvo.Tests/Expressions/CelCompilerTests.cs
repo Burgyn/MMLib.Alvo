@@ -17,7 +17,7 @@ public class CelCompilerTests
 
         result.IsSuccess.ShouldBeTrue();
         result.Expression!.ResultType.ShouldBe(CelValueType.Bool);
-        result.Expression.EntityName.ShouldBe("orders");
+        result.Expression.Entity.Name.ShouldBe("orders");
     }
 
     [Fact]

@@ -32,6 +32,28 @@ public class CelInterpreterTests
     }
 
     [Fact]
+    public void A_boolean_field_used_directly_as_a_predicate_is_true_only_when_set_true()
+    {
+        Evaluate("is_public", Row([("is_public", true)]), CelFixtures.Alice).ShouldBeTrue();
+        Evaluate("is_public", Row([("is_public", false)]), CelFixtures.Alice).ShouldBeFalse();
+        Evaluate("is_public", Row([("is_public", null)]), CelFixtures.Alice).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void A_boolean_field_composes_with_a_comparison_over_and()
+    {
+        Evaluate(
+            "is_public && owner_id == @user.id",
+            Row([("is_public", true), ("owner_id", null)]),
+            CelFixtures.Alice).ShouldBeFalse();
+
+        Evaluate(
+            "is_public && owner_id == @user.id",
+            Row([("is_public", true), ("owner_id", CelFixtures.Alice.User.Value)]),
+            CelFixtures.Alice).ShouldBeTrue();
+    }
+
+    [Fact]
     public void Role_membership_reads_the_context_role_set()
     {
         Evaluate("'editor' in @user.roles", AlvoRecord.Empty, CelFixtures.Editor).ShouldBeTrue();
