@@ -1,5 +1,6 @@
 ﻿using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Schema;
+using System.Text.Json.Nodes;
 using FieldType = MMLib.Alvo.Schema.FieldType;
 
 namespace MMLib.Alvo.Tests.Descriptor;
@@ -60,6 +61,33 @@ public class DescriptorToSchemaMapperTests
 
         ex.Message.ShouldContain("computed");
         ex.Message.ShouldContain("#21");
+    }
+
+    // Full-model regression freeze: the rich complex-crm fixture exercises every mapping
+    // concern in one place (managed-column injection, ref FKs, tenancy, audit, softDelete,
+    // renamedFrom, indexes, all field types) across multiple entities — a breadth the
+    // narrower, branch-level tests above don't give. 'computed' (gross_total/line_total) is
+    // rejected by the mapper until #21 (CEL→SQL compiler), so it is stripped at the JSON level
+    // here — the one not-yet-supported feature — before mapping; everything else in the
+    // fixture stays intact. Drop the stripping and snapshot the descriptor directly once #21 lands.
+    [Fact]
+    public async Task Complex_crm_without_computed_maps_to_a_stable_model()
+    {
+        var path = Path.Combine(RepositoryRoot.Find(), "examples", "complex-crm", "crm.alvo.json");
+        var json = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+
+        foreach (var (_, entity) in json["entities"]!.AsObject())
+        {
+            foreach (var (_, field) in entity!["fields"]!.AsObject())
+            {
+                field!.AsObject().Remove("computed");
+            }
+        }
+
+        var descriptor = AlvoDescriptor.Parse(json.ToJsonString());
+        var m = DescriptorToSchemaMapper.Map(descriptor);
+
+        await Verify(m);
     }
 
     private const string WithComputed = """
