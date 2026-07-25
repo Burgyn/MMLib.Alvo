@@ -1,5 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <PropertyGroup>
+    <!-- Force ALL Corvus-generated types (root + every $defs type) to internal, regardless of
+         the source generator's own default — the descriptor schema types must never leak onto
+         MMLib.Alvo's public API surface. -->
+    <CorvusJsonSchemaDefaultAccessibility>Internal</CorvusJsonSchemaDefaultAccessibility>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="../MMLib.Alvo.Abstractions/MMLib.Alvo.Abstractions.csproj" />
   </ItemGroup>
@@ -7,6 +14,22 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Options" />
     <PackageReference Include="Microsoft.Extensions.Options.DataAnnotations" />
+    <!-- Build-time source generator only: emits the descriptor schema's validator types into this
+         assembly at compile time, then drops out of the dependency graph (PrivateAssets=all), so
+         it never flows to consumers of MMLib.Alvo. -->
+    <PackageReference Include="Corvus.Json.SourceGenerator">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <!-- Runtime support types (JsonAny/ValidationContext/etc.) the generated code needs at
+         execution time — a normal lightweight runtime dependency, no Roslyn. -->
+    <PackageReference Include="Corvus.Json.ExtendedTypes" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Consumed at BUILD time by Corvus.Json.SourceGenerator (see GeneratedProjectDescriptor.cs)
+         to emit strongly-typed validator types; no longer embedded/read at runtime. -->
+    <AdditionalFiles Include="../../schema/project.schema.json" />
   </ItemGroup>
 
 </Project>

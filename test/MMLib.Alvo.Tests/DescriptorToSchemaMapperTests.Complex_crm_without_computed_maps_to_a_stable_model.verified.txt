@@ -439,8 +439,7 @@
           Nullable: true,
           Precision: 12,
           Scale: 2,
-          Indexed: false,
-          ComputedExpression: net_total + vat_total
+          Indexed: false
         },
         {
           Name: tenant_id,
@@ -546,8 +545,7 @@
           Nullable: true,
           Precision: 12,
           Scale: 2,
-          Indexed: false,
-          ComputedExpression: unit_price * amount
+          Indexed: false
         },
         {
           Name: tenant_id,

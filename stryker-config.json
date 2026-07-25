@@ -5,6 +5,16 @@
       "test/MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj"
     ],
     "test-runner": "mtp",
+    "coverage-analysis": "off",
+    "mutate": [
+      "**/*.cs",
+      "!**/AssemblyInfo.cs",
+      "!**/Schema/SchemaRegistry.cs",
+      "!**/Internal/AlvoBuilder.cs",
+      "!**/Migrations/Internal/FileDescriptorSource.cs",
+      "!**/AlvoServiceCollectionExtensions.cs",
+      "!**/AlvoBuilderExtensions.cs"
+    ],
     "thresholds": {
       "high": 90,
       "low": 85,

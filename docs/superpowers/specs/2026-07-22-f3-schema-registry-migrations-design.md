@@ -392,12 +392,129 @@ guardrail + dry-run · applied-snapshot system table + runner · `AddAlvo()` /
 dry-run, idempotent re-apply.
 
 ### PR-B — runtime / dashboard-first
-`IDescriptorVersionStore` (append-only) + impl · optimistic locking (revision ->
-conflict) · rollback (reverse plan via swapped inputs) + DROP guardrail ·
-two-client concurrency conflict · service-level runtime apply. **DoD:** runtime
-change versioned + rollback-able; concurrent change conflicts via `revision`.
-*(The HTTP Management-API endpoint that drives runtime apply belongs with the
-Management API; PR-B delivers the service-level operation it will call.)*
+
+> **Scope decided 2026-07-24 (brainstorm).** PR-B is the runtime-versioning
+> slice **plus the two #20 prerequisites it makes acute** — because PR-B is
+> precisely the change that exposes the descriptor pipeline to *untrusted input*
+> (an API payload / DB record instead of a git-reviewed file), the guardrails
+> that make that path safe belong in the same PR for review and security
+> coherence. Pure cleanups stay out (see "Deferred", below).
+
+**Delivered in PR-B:**
+
+1. **`IDescriptorVersionStore` (append-only) + impl.** The PR-A single-row
+   `applied_schema` table becomes an append-only `descriptor_versions` table keyed
+   `(project, revision)` (unique). **Code-first and runtime apply write to the same
+   history** — they differ only in the *source* of the desired state (file vs API
+   payload), not in how it is versioned. `IAppliedSchemaStore.GetCurrentAsync` is
+   reimplemented as "latest version", so the PR-A `SchemaMigrationRunner` keeps
+   working unchanged. Port shape:
+   - `GetCurrentAsync(project)` → latest revision;
+   - `GetAsync(project, revision)` → a specific historical version (rollback source);
+   - `ListAsync(project)` → history metadata (dashboard / audit);
+   - `AppendAsync(project, candidate, expectedRevision)` → **conditional insert**;
+     `DescriptorConcurrencyException` when `expectedRevision != current` (unique
+     violation on `(project, revision)` or zero rows affected).
+   - `DescriptorVersion` record: schema snapshot + descriptor JSON + revision +
+     author/reason + timestamp + `RolledBackFrom` (git-revert provenance).
+   - `IRuntimeSchemaWriter` (new port) — the **atomicity seam**:
+     `ApplyAndAppendAsync(project, plan, candidate, expectedRevision, options)`
+     executes `plan.Sql` **and** the conditional version-insert in a *single*
+     transaction, throwing `DescriptorConcurrencyException` on lock loss. Core is
+     EF/ADO-free, so the transaction owner must live behind a port in the EF
+     package; this is that seam. Without it, a loser in a two-client race could
+     apply its DDL before its append is refused, leaving the schema changed but
+     never-versioned. `IDescriptorVersionStore.AppendAsync` remains the *non-atomic*
+     append the code-first path (single writer at startup) and the contract tests
+     use.
+
+2. **Optimistic locking (revision → conflict).** Engine-agnostic (identical on
+   SQLite + PostgreSQL): the conflict is a *conditional write*, not a DB row lock —
+   SQLite has no `SELECT … FOR UPDATE`, so pessimistic locking is out. Two clients
+   appending at the same `expectedRevision` → one wins, one gets a structured
+   conflict, never a silent overwrite.
+
+3. **Connection model refactor (per-call).** The PR-A model — migrator /
+   introspector / store each own **one** long-lived `DbConnection` for the
+   container lifetime — cannot express two genuinely concurrent clients. PR-B
+   replaces it with a **connection factory** (`Func<DbConnection>` built from
+   `RelationalProviderRegistration.CreateConnection` + the resolved connection
+   string): each operation opens its own connection and wraps writes in a
+   transaction. This is what makes the two-client conflict *real* (two independent
+   connections/transactions) rather than faked on a shared connection. The public
+   port shapes are unchanged; the refactor is internal to
+   `MMLib.Alvo.Data.EntityFrameworkCore` + the provider registration. SQLite's
+   `WithoutPooling` note still applies per-connection.
+
+4. **Rollback — git-revert append (not truncate).** `RollbackAsync(project,
+   targetRevision)` loads `version@target`, plans the reverse
+   (`Plan(current=latest, desired=target.schema)` — the same differ with swapped
+   inputs), runs it through the **same DROP guardrail** (reversing an added
+   required column is a DROP → needs `AllowDestructive`), applies, and **appends a
+   NEW revision** whose schema equals the target's, marked `RolledBackFrom=target`.
+   History stays immutable and audited; the monotonic-revision invariant that
+   optimistic locking relies on is preserved. "Undo the last apply" is just a
+   rollback to `latest-1`.
+
+5. **Runtime apply service.** `RuntimeSchemaService` (internal, core) — a sibling
+   of `SchemaMigrationRunner` that composes the ports without owning a DB
+   connection: `ApplyAsync(project, descriptorJson, expectedRevision, options)` →
+   validate (`IDescriptorValidator`) → parse → map desired → read current = latest
+   version → `ISchemaMigrator.PlanAsync(current, desired)` (connection-free) →
+   guardrail → **`IRuntimeSchemaWriter.ApplyAndAppendAsync(...)`** (the one atomic
+   transaction). `RollbackAsync(project, targetRevision, options)` loads
+   `version@target`, plans the reverse, runs the guardrail, and calls the same
+   writer with a git-revert `candidate` (`RolledBackFrom=target`). The HTTP
+   Management-API endpoint that drives runtime apply belongs with the Management
+   API; **PR-B delivers only the service-level operation it will call.**
+
+**Folded-in #20 prerequisites (the untrusted-path guardrails):**
+
+6. **Reject `computed` — close the raw-DDL-splice vector (#20 HIGH).** Today
+   `DescriptorModelBuilder` splices the raw `computed` string straight into
+   `GENERATED ALWAYS AS (<raw>) STORED` — tolerable for a git-reviewed file, an
+   *arbitrary-DDL-injection vector the moment a runtime/dashboard payload feeds it*.
+   Until the CEL→SQL compiler lands (#21), `computed` is **rejected** — in the
+   validator (semantic layer) and defensively in the mapper — with a structured
+   error + fix suggestion ("computed fields require the CEL→SQL compiler arriving
+   in #21; remove `computed` or track #21"), on **both** paths. `DescriptorModelBuilder`
+   stops emitting `HasComputedColumnSql` from a raw string until #21.
+   *Fixture consequence:* `complex-crm` uses `computed`; the plan decides whether to
+   drop that field from the fixture or scope validation so existing examples still
+   parse while `computed` is refused at apply.
+
+7. **Runtime descriptor validation with structured fix-suggestions (#20 MEDIUM).**
+   Today **no shipped code validates the descriptor against `project.schema.json`** —
+   Corvus.Json.Validator lives only in the test project, and `AlvoDescriptor.Parse`
+   is bare `System.Text.Json` (catches shape/type, not schema semantics). A new
+   `IDescriptorValidator` port with a **layered** implementation:
+   (a) a Corvus JSON-schema pass against `project.schema.json` — **promoted into
+   shipped code** (a new shipped dependency → licence/packaging check via
+   `alvo-dotnet-conventions`); (b) a thin semantic pass (ref targets exist, no
+   duplicate names, `computed` rejected, revision sanity); (c) a fix-suggestion
+   adapter mapping failures to `DescriptorValidationError { Path, Message,
+   FixSuggestion, Severity }` (Corvus emits no message for some keyword failures —
+   see `SnapshotTests` — so the adapter supplies them). Wired into **both** the
+   runtime apply path and code-first `FromDescriptor` (closing the gap that neither
+   validates today).
+
+**Testing.** `DescriptorVersionStoreContractTests` (abstract → SQLite + PostgreSQL:
+append-only, optimistic-lock conflict, rollback provenance) with an in-memory fake
+in `MMLib.Alvo.Testing`; integration (Testcontainers PG + SQLite): runtime change →
+rollback → introspect = prior schema, rollback of a data-dropping change trips the
+guardrail, two concurrent appends → one conflict; validator tests (invalid →
+structured errors + fix-suggestions; `computed` → rejected); property-based rollback
+round-trip; public-API approval baselines for the new ports.
+
+**DoD:** a runtime change is append-only versioned + rollback-able; a concurrent
+change conflicts via `revision`, not a silent overwrite; a rollback of a
+data-dropping change hits the guardrail; the runtime path validates its input and
+refuses `computed`.
+
+**Deferred (out of PR-B — a possible small follow-up "PR-C"):** ambiguous-provider
+fail-fast, the PostgreSQL mirror no-`IConfiguration` test, `json`→`jsonb`,
+Postgres schema cohabitation (§2.13), and the HTTP Management-API endpoint (arrives
+with the Management API).
 
 ## Package layout (pre-blessed by `docs/architecture/package-boundary.md`)
 

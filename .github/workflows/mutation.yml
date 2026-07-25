@@ -1,35 +1,52 @@
 name: Mutation
 
-# Mutation testing of the security core (rule engine, CEL, tenancy). Path-filtered
-# so it runs only when the core changes. The core exists as of F3
-# (src/MMLib.Alvo) and this workflow triggers on every PR that touches it — the
-# guard step below is a second safety net for the (now rare) case the project
-# is absent, not the primary reason this job might not run.
+# Mutation testing of the security-relevant logic. Path-filtered so it runs only
+# when a mutated project changes. Two targets run in parallel via a matrix:
+#   - "security core"  → src/MMLib.Alvo            (stryker-config.json)
+#   - "data-ef"        → the EF provider's PURE-LOGIC only: DestructiveScan,
+#                        RenamePrePass, RenameGuessSplitter, DescriptorModelBuilder
+#                        (stryker-config.data-ef.json). The EF project's
+#                        transaction/DB-round-trip code is deliberately excluded —
+#                        its defects only manifest against a real database, so
+#                        mutation there is noise; it's covered by the SQLite +
+#                        PostgreSQL integration tests instead.
 #
-# stryker-config.json pins `test-runner: mtp` because Stryker 4.16's default
-# VSTest-based test runner cannot discover tests in xUnit v3 projects built for
-# Microsoft.Testing.Platform (our primary runner — see global.json) and
-# silently tests zero mutants (stryker-net#3094). The "Mutation test" step
-# below fails loudly if that ever regresses (e.g. a Stryker/xUnit update
-# reintroduces it) instead of reporting a false green.
+# Each config pins `test-runner: mtp` + `coverage-analysis: off` because Stryker
+# 4.16's default VSTest runner cannot discover tests in xUnit v3 / Microsoft.Testing.Platform
+# projects (our primary runner — see global.json) and its per-test coverage capture
+# under MTP is preview-quality and reports false "NoCoverage" (stryker-net#3094).
+# The "Mutation test" step below fails loudly on a vacuous (zero-mutant) run
+# instead of reporting a false green.
 on:
   pull_request:
     paths:
       - 'src/MMLib.Alvo/**'
+      - 'src/MMLib.Alvo.Data.EntityFrameworkCore/**'
       - 'stryker-config.json'
+      - 'stryker-config.data-ef.json'
 
 permissions:
   contents: read
 
 concurrency:
-  group: mutation-${{ github.ref }}
+  group: mutation-${{ github.ref }}-${{ github.workflow }}
   cancel-in-progress: true
 
 jobs:
   mutation:
-    name: Stryker (security core)
+    name: Stryker (${{ matrix.name }})
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: security core
+            config: stryker-config.json
+            project: src/MMLib.Alvo/MMLib.Alvo.csproj
+          - name: data-ef
+            config: stryker-config.data-ef.json
+            project: src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -41,14 +58,14 @@ jobs:
         with:
           global-json-file: global.json
 
-      - name: Guard — security core must exist
+      - name: Guard — mutated project must exist
         id: guard
         run: |
-          if [ -f src/MMLib.Alvo/MMLib.Alvo.csproj ]; then
+          if [ -f "${{ matrix.project }}" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "No security core project yet — skipping mutation."
+            echo "Project ${{ matrix.project }} not present — skipping mutation."
           fi
 
       - name: Restore tools
@@ -60,7 +77,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          dotnet tool run dotnet-stryker 2>&1 | tee stryker-output.log
+          dotnet tool run dotnet-stryker -f "${{ matrix.config }}" 2>&1 | tee stryker-output.log
           stryker_exit="${PIPESTATUS[0]}"
 
           # Fail loud instead of showing a false green: a run that discovered
@@ -70,7 +87,7 @@ jobs:
           # mtp` configured (e.g. a tool upgrade, or a new test project that
           # isn't MTP-compatible).
           if grep -qE '0 total mutants will be tested|unable to calculate a mutation score|Number of tests found: 0' stryker-output.log; then
-            echo "::error::Mutation run tested zero mutants (vacuous run) — see stryker-output.log above. Failing the gate instead of a false green (stryker-net#3094)."
+            echo "::error::Mutation run (${{ matrix.name }}) tested zero mutants (vacuous run) — see stryker-output.log above. Failing the gate instead of a false green (stryker-net#3094)."
             exit 1
           fi
 

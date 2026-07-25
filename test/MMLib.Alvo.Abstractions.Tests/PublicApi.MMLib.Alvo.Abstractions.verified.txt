@@ -155,6 +155,34 @@ namespace MMLib.Alvo.Descriptor
         [System.Text.Json.Serialization.JsonStringEnumMemberName("batch")]
         Batch = 1,
     }
+    public sealed class DescriptorValidationError : System.IEquatable<MMLib.Alvo.Descriptor.DescriptorValidationError>
+    {
+        public DescriptorValidationError(string Path, string Message, string? FixSuggestion, MMLib.Alvo.Descriptor.DescriptorValidationSeverity Severity) { }
+        public string? FixSuggestion { get; init; }
+        public string Message { get; init; }
+        public string Path { get; init; }
+        public MMLib.Alvo.Descriptor.DescriptorValidationSeverity Severity { get; init; }
+    }
+    public sealed class DescriptorValidationException : System.Exception
+    {
+        public DescriptorValidationException() { }
+        public DescriptorValidationException(MMLib.Alvo.Descriptor.DescriptorValidationResult result) { }
+        public DescriptorValidationException(string message) { }
+        public DescriptorValidationException(string message, System.Exception innerException) { }
+        public MMLib.Alvo.Descriptor.DescriptorValidationResult Result { get; }
+    }
+    public sealed class DescriptorValidationResult : System.IEquatable<MMLib.Alvo.Descriptor.DescriptorValidationResult>
+    {
+        public DescriptorValidationResult(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Descriptor.DescriptorValidationError> Errors) { }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Descriptor.DescriptorValidationError> Errors { get; init; }
+        public bool IsValid { get; }
+        public static MMLib.Alvo.Descriptor.DescriptorValidationResult Valid { get; }
+    }
+    public enum DescriptorValidationSeverity
+    {
+        Error = 0,
+        Warning = 1,
+    }
     public sealed class DynamicEntities : System.IEquatable<MMLib.Alvo.Descriptor.DynamicEntities>
     {
         public DynamicEntities() { }
@@ -330,6 +358,10 @@ namespace MMLib.Alvo.Descriptor
         [System.Text.Json.Serialization.JsonStringEnumMemberName("DELETE")]
         Delete = 4,
     }
+    public interface IDescriptorValidator
+    {
+        MMLib.Alvo.Descriptor.DescriptorValidationResult Validate(string descriptorJson);
+    }
     public sealed class MessageTemplate : System.IEquatable<MMLib.Alvo.Descriptor.MessageTemplate>
     {
         public MessageTemplate() { }
@@ -429,6 +461,36 @@ namespace MMLib.Alvo.Migrations
         public MMLib.Alvo.Schema.SchemaModel Schema { get; init; }
         public System.DateTimeOffset UpdatedAt { get; init; }
     }
+    public sealed class DescriptorConcurrencyException : System.Exception
+    {
+        public DescriptorConcurrencyException() { }
+        public DescriptorConcurrencyException(string message) { }
+        public DescriptorConcurrencyException(string message, System.Exception innerException) { }
+        public DescriptorConcurrencyException(string project, int expectedRevision, int actualRevision) { }
+        public int ActualRevision { get; }
+        public int ExpectedRevision { get; }
+        public string Project { get; }
+    }
+    public sealed class DescriptorVersion : System.IEquatable<MMLib.Alvo.Migrations.DescriptorVersion>
+    {
+        public DescriptorVersion(MMLib.Alvo.Schema.SchemaModel Schema, string DescriptorJson, int Revision, System.DateTimeOffset CreatedAt, string? Author = null, string? Reason = null, int? RolledBackFrom = default) { }
+        public string? Author { get; init; }
+        public System.DateTimeOffset CreatedAt { get; init; }
+        public string DescriptorJson { get; init; }
+        public string? Reason { get; init; }
+        public int Revision { get; init; }
+        public int? RolledBackFrom { get; init; }
+        public MMLib.Alvo.Schema.SchemaModel Schema { get; init; }
+    }
+    public sealed class DestructiveChangeNotAllowedException : System.Exception
+    {
+        public DestructiveChangeNotAllowedException() { }
+        public DestructiveChangeNotAllowedException(string message) { }
+        public DestructiveChangeNotAllowedException(string message, System.Exception innerException) { }
+        public DestructiveChangeNotAllowedException(string project, MMLib.Alvo.Migrations.MigrationPlan plan) { }
+        public MMLib.Alvo.Migrations.MigrationPlan Plan { get; }
+        public string Project { get; }
+    }
     public interface IAppliedSchemaStore
     {
         System.Threading.Tasks.Task<MMLib.Alvo.Migrations.AppliedSchema?> GetCurrentAsync(string project, System.Threading.CancellationToken ct = default);
@@ -437,6 +499,17 @@ namespace MMLib.Alvo.Migrations
     public interface IDescriptorSource
     {
         System.Threading.Tasks.Task<string> LoadAsync(System.Threading.CancellationToken ct = default);
+    }
+    public interface IDescriptorVersionStore
+    {
+        System.Threading.Tasks.Task<MMLib.Alvo.Migrations.DescriptorVersion> AppendAsync(string project, MMLib.Alvo.Migrations.DescriptorVersion candidate, int expectedRevision, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Migrations.DescriptorVersion?> GetAsync(string project, int revision, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Migrations.DescriptorVersion?> GetCurrentAsync(string project, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Migrations.DescriptorVersion>> ListAsync(string project, System.Threading.CancellationToken ct = default);
+    }
+    public interface IRuntimeSchemaWriter
+    {
+        System.Threading.Tasks.Task<MMLib.Alvo.Migrations.DescriptorVersion> ApplyAndAppendAsync(string project, MMLib.Alvo.Migrations.MigrationPlan plan, MMLib.Alvo.Migrations.DescriptorVersion candidate, int expectedRevision, MMLib.Alvo.Migrations.MigrationOptions options, System.Threading.CancellationToken ct = default);
     }
     public interface ISchemaMigrator
     {
@@ -447,7 +520,9 @@ namespace MMLib.Alvo.Migrations
     {
         public MigrationOptions() { }
         public bool AllowDestructive { get; init; }
+        public string? Author { get; init; }
         public bool DryRun { get; init; }
+        public string? Reason { get; init; }
     }
     public sealed class MigrationPlan : System.IEquatable<MMLib.Alvo.Migrations.MigrationPlan>
     {

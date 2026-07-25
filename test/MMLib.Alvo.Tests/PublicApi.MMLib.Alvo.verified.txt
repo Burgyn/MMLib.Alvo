@@ -2,6 +2,15 @@
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Data.Sqlite.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Tests")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace MMLib.Alvo.Migrations
+{
+    public sealed class RuntimeSchemaService
+    {
+        public RuntimeSchemaService(MMLib.Alvo.Descriptor.IDescriptorValidator validator, MMLib.Alvo.Migrations.ISchemaMigrator migrator, MMLib.Alvo.Migrations.IDescriptorVersionStore store, MMLib.Alvo.Migrations.IRuntimeSchemaWriter writer) { }
+        public System.Threading.Tasks.Task<MMLib.Alvo.Migrations.DescriptorVersion> ApplyAsync(string project, string descriptorJson, int expectedRevision, MMLib.Alvo.Migrations.MigrationOptions options, System.Threading.CancellationToken ct = default) { }
+        public System.Threading.Tasks.Task<MMLib.Alvo.Migrations.DescriptorVersion> RollbackAsync(string project, int targetRevision, MMLib.Alvo.Migrations.MigrationOptions options, System.Threading.CancellationToken ct = default) { }
+    }
+}
 namespace Microsoft.Extensions.DependencyInjection
 {
     public static class AlvoBuilderExtensions

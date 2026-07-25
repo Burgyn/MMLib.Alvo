@@ -63,11 +63,6 @@ internal static class DescriptorModelBuilder
             property = field.Scale is { } scale ? property.HasPrecision(precision, scale) : property.HasPrecision(precision);
         }
 
-        if (field.ComputedExpression is { } computedExpression)
-        {
-            property.HasComputedColumnSql(computedExpression, stored: true);
-        }
-
         if (field.Unique)
         {
             entityBuilder.HasIndex(field.Name).IsUnique();

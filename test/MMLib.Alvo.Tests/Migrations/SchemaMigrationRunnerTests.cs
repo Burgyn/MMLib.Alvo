@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Descriptor.Internal;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Schema;
 using MMLib.Alvo.Testing.Migrations;
@@ -36,7 +37,7 @@ public sealed class SchemaMigrationRunnerTests
     public SchemaMigrationRunnerTests()
     {
         _source.LoadAsync(Arg.Any<CancellationToken>()).Returns(FleetDescriptorJson);
-        _runner = new SchemaMigrationRunner(_source, _migrator, _introspector, _store);
+        _runner = new SchemaMigrationRunner(_source, new DescriptorValidator(), _migrator, _introspector, _store);
     }
 
     [Fact]
@@ -98,6 +99,51 @@ public sealed class SchemaMigrationRunnerTests
         await _store.DidNotReceive().SaveAsync(Arg.Any<string>(), Arg.Any<AppliedSchema>(), Arg.Any<CancellationToken>());
 
         DestructiveChangeGuard.Describe(result.Plan).ShouldContain("vehicles.license_plate");
+    }
+
+    [Fact]
+    public async Task Invalid_descriptor_throws_before_parsing()
+    {
+        _source.LoadAsync(Arg.Any<CancellationToken>()).Returns("""{ "apiVersion": "alvo.dev/v1", "entities": {} }""");
+
+        await Should.ThrowAsync<DescriptorValidationException>(
+            () => _runner.RunAsync(new MigrationOptions(), TestContext.Current.CancellationToken));
+
+        await _introspector.DidNotReceive().IntrospectAsync(Arg.Any<CancellationToken>());
+        await _store.DidNotReceive().SaveAsync(Arg.Any<string>(), Arg.Any<AppliedSchema>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task DryRun_previews_a_non_empty_non_destructive_plan_without_applying_or_saving()
+    {
+        _store.GetCurrentAsync("fleet", Arg.Any<CancellationToken>()).Returns((AppliedSchema?)null);
+        _introspector.IntrospectAsync(Arg.Any<CancellationToken>()).Returns(new SchemaModel([]));
+
+        var result = await _runner.RunAsync(new MigrationOptions { DryRun = true }, TestContext.Current.CancellationToken);
+
+        result.Applied.ShouldBeFalse();
+        result.WasDryRun.ShouldBeTrue();
+        result.Plan.IsEmpty.ShouldBeFalse();
+        SavedSchemas().ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task DryRun_never_invokes_the_migrators_ApplyAsync()
+    {
+        var migrator = Substitute.For<ISchemaMigrator>();
+        var nonEmptyPlan = new MigrationPlan
+        {
+            Steps = [new MigrationStep(new SchemaChange { Kind = SchemaChangeKind.AddField, Entity = "vehicles", Field = "color" }, IsDestructive: false, Reason: null)],
+        };
+        migrator.PlanAsync(Arg.Any<SchemaModel>(), Arg.Any<SchemaModel>(), Arg.Any<MigrationOptions>(), Arg.Any<CancellationToken>())
+            .Returns(nonEmptyPlan);
+        var runner = new SchemaMigrationRunner(_source, new DescriptorValidator(), migrator, _introspector, _store);
+        _store.GetCurrentAsync("fleet", Arg.Any<CancellationToken>()).Returns((AppliedSchema?)null);
+        _introspector.IntrospectAsync(Arg.Any<CancellationToken>()).Returns(new SchemaModel([]));
+
+        await runner.RunAsync(new MigrationOptions { DryRun = true }, TestContext.Current.CancellationToken);
+
+        await migrator.DidNotReceive().ApplyAsync(Arg.Any<MigrationPlan>(), Arg.Any<MigrationOptions>(), Arg.Any<CancellationToken>());
     }
 
     private static SchemaModel MapFleetDescriptor()

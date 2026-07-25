@@ -79,6 +79,8 @@ public class DescriptorRoundTripTests
         ownerDefault.IsExpression.ShouldBeTrue();
         ownerDefault.Expression.ShouldBe("@user.id");
 
+        // 'computed' is just descriptor JSON here — parse → serialize must preserve it losslessly
+        // even though #20 refuses it at mapping time until the CEL→SQL compiler (#21) lands.
         descriptor.Entities["invoices"].Fields["gross_total"].Computed.ShouldBe("net_total + vat_total");
 
         var commissionHidden = descriptor.Entities["deals"].Fields["commission_note"].Hidden.ShouldNotBeNull();

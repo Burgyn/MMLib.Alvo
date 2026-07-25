@@ -1,8 +1,8 @@
 ﻿using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Scaffolding;
 using Microsoft.EntityFrameworkCore.Scaffolding.Metadata;
+using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Schema;
-using System.Data.Common;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore;
 
@@ -17,53 +17,57 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// lossy on engines with weak column typing (e.g. SQLite's type affinities), so it only recovers
 /// what round-tripping and drift detection need: names, coarse field types, nullability, indexes,
 /// and foreign keys. The optional <c>excludedTableName</c> keeps Alvo's own bookkeeping table
-/// (<see cref="SystemSchemaInitializer.AppliedSchemaTableName"/>) out of the introspected schema —
+/// (<see cref="SystemSchemaInitializer.DescriptorVersionsTableName"/>) out of the introspected schema —
 /// without it, the code-first diff would see its own applied-schema table as a rogue user entity.
 ///
 /// <para>
-/// The provider constructs the <see cref="DbConnection"/> solely to hand it to this instance, so
-/// this type owns it and implements <see cref="IDisposable"/> to release it deterministically
-/// (e.g. the underlying file handle on SQLite) instead of relying on process exit.
+/// <see cref="IntrospectAsync"/> opens a fresh connection from the injected
+/// <see cref="RelationalConnectionFactory"/> for each call, scoped to a <c>using</c> block, so two
+/// concurrent callers never race on a shared connection.
 /// </para>
 /// </remarks>
-public sealed class EfCoreSchemaIntrospector : ISchemaIntrospector, IDisposable
+public sealed class EfCoreSchemaIntrospector : ISchemaIntrospector
 {
     private readonly IDatabaseModelFactory _databaseModelFactory;
-    private readonly DbConnection _connection;
+    private readonly RelationalConnectionFactory _connections;
     private readonly string? _excludedTableName;
 
     /// <summary>
-    /// Initializes a new introspector from a provider's scaffolding factory and an owned ADO.NET connection.
+    /// Initializes a new introspector from a provider's scaffolding factory and a per-call connection factory.
     /// </summary>
     /// <param name="databaseModelFactory">EF Core's provider-flavored reverse-engineering / scaffolding factory.</param>
-    /// <param name="connection">The provider's ADO.NET connection; owned and disposed by this instance.</param>
-    /// <param name="excludedTableName">Optional table to omit from the introspected schema (e.g. Alvo's applied-schema bookkeeping table).</param>
-    public EfCoreSchemaIntrospector(IDatabaseModelFactory databaseModelFactory, DbConnection connection, string? excludedTableName = null)
+    /// <param name="connections">Creates a fresh ADO.NET connection per <see cref="IntrospectAsync"/> call; each connection is owned and disposed within that call.</param>
+    /// <param name="excludedTableName">Optional table to omit from the introspected schema (e.g. Alvo's descriptor-versions bookkeeping table).</param>
+    internal EfCoreSchemaIntrospector(IDatabaseModelFactory databaseModelFactory, RelationalConnectionFactory connections, string? excludedTableName = null)
     {
         ArgumentNullException.ThrowIfNull(databaseModelFactory);
-        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(connections);
 
         _databaseModelFactory = databaseModelFactory;
-        _connection = connection;
+        _connections = connections;
         _excludedTableName = excludedTableName;
     }
 
     /// <inheritdoc/>
-    public Task<SchemaModel> IntrospectAsync(CancellationToken ct = default)
+    public async Task<SchemaModel> IntrospectAsync(CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
 
-        var databaseModel = _databaseModelFactory.Create(_connection, new DatabaseModelFactoryOptions());
-        var entities = databaseModel.Tables
-            .Where(table => table.Name != _excludedTableName)
-            .Select(ToEntitySchema)
-            .ToList();
+        // Handed to the factory unopened: IDatabaseModelFactory.Create opens the connection itself
+        // when it isn't already open, and closes it again afterwards — the same contract the
+        // previous single-connection implementation relied on, just against a fresh connection now.
+        var connection = _connections.Create();
+        await using (connection.ConfigureAwait(false))
+        {
+            var databaseModel = _databaseModelFactory.Create(connection, new DatabaseModelFactoryOptions());
+            var entities = databaseModel.Tables
+                .Where(table => table.Name != _excludedTableName)
+                .Select(ToEntitySchema)
+                .ToList();
 
-        return Task.FromResult(new SchemaModel(entities));
+            return new SchemaModel(entities);
+        }
     }
-
-    /// <summary>Disposes the provider-supplied <see cref="DbConnection"/> this instance owns.</summary>
-    public void Dispose() => _connection.Dispose();
 
     private static EntitySchema ToEntitySchema(DatabaseTable table)
     {

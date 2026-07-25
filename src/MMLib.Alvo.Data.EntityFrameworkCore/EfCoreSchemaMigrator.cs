@@ -3,9 +3,9 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Migrations.Operations;
+using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Schema;
-using System.Data;
 using System.Data.Common;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore;
@@ -13,7 +13,7 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// <summary>
 /// An <see cref="ISchemaMigrator"/> that reuses EF Core's migrations differ and per-provider SQL
 /// generator to turn a (current, desired) pair of <see cref="SchemaModel"/>s into a
-/// <see cref="MigrationPlan"/>, and executes the resulting plan over a provider-supplied ADO.NET
+/// <see cref="MigrationPlan"/>, and executes the resulting plan over a fresh, per-call ADO.NET
 /// connection.
 /// </summary>
 /// <remarks>
@@ -23,59 +23,52 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// (SQLite/PostgreSQL packages), so this type only depends on EFCore.Relational abstractions and
 /// stays provider-agnostic. The <see cref="DbConnection"/> is likewise provider-supplied: plain
 /// ADO.NET is enough to execute the already-generated SQL, so no relational-command infrastructure
-/// is needed here. The provider constructs that connection solely to hand it to this instance, so
-/// this type owns it and disposes it in <see cref="Dispose"/>.
+/// is needed here.
 ///
 /// <para>
-/// <see cref="ApplyAsync"/> serializes its connection-touching work within one instance (an
-/// internal gate around open/transaction/execute), so two concurrent callers sharing the same
-/// migrator instance never race on its single <see cref="DbConnection"/>. This makes the type
-/// safe under a long-lived (e.g. singleton) registration, but it is still intended for
-/// controlled use — startup migrations or a single orchestrator (CLI/dashboard) — not as the
-/// concurrency-control mechanism for many independent clients changing the schema at runtime;
-/// that is governed by descriptor optimistic locking (PR-B), not by this type.
+/// <see cref="ApplyAsync"/> opens a fresh connection from the injected
+/// <see cref="RelationalConnectionFactory"/> for each call, scoped to a <c>using</c> block that
+/// opens it, runs the whole plan in one transaction, and disposes the connection when done. This
+/// gives two concurrent callers independent connections/transactions instead of serializing on one
+/// shared connection — the shape runtime concurrent schema changes (PR-B) need. Concurrency control
+/// across independent clients changing the schema at runtime is governed by descriptor optimistic
+/// locking (PR-B), not by this type.
 /// </para>
 /// </remarks>
-public sealed class EfCoreSchemaMigrator : ISchemaMigrator, IDisposable
+public sealed class EfCoreSchemaMigrator : ISchemaMigrator
 {
     private readonly IMigrationsModelDiffer _differ;
     private readonly IMigrationsSqlGenerator _sqlGenerator;
     private readonly IModelRuntimeInitializer _modelRuntimeInitializer;
     private readonly Func<ModelBuilder> _newModelBuilder;
-
-    // Deferred to PR-B (runtime concurrent schema changes): replace this single shared connection
-    // with a per-call connection (factory) once that work needs real parallelism instead of the
-    // serialization this instance provides today. Owned by this instance (the provider constructs
-    // it solely to hand it to us) — disposed alongside the gate; see Dispose().
-    private readonly DbConnection _connection;
-    private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly RelationalConnectionFactory _connections;
 
     /// <summary>
-    /// Initializes a new migrator from a provider's EF Core services and an owned ADO.NET connection.
+    /// Initializes a new migrator from a provider's EF Core services and a per-call connection factory.
     /// </summary>
     /// <param name="differ">EF Core's provider-flavored migrations model differ.</param>
     /// <param name="sqlGenerator">EF Core's provider-flavored migrations SQL generator.</param>
     /// <param name="modelRuntimeInitializer">Runs the runtime-model initialization the relational model requires.</param>
     /// <param name="newModelBuilder">Creates a conventionless <see cref="ModelBuilder"/> seeded with the provider's convention set.</param>
-    /// <param name="connection">The provider's ADO.NET connection; owned and disposed by this instance.</param>
-    public EfCoreSchemaMigrator(
+    /// <param name="connections">Creates a fresh ADO.NET connection per <see cref="ApplyAsync"/> call; each connection is owned and disposed within that call.</param>
+    internal EfCoreSchemaMigrator(
         IMigrationsModelDiffer differ,
         IMigrationsSqlGenerator sqlGenerator,
         IModelRuntimeInitializer modelRuntimeInitializer,
         Func<ModelBuilder> newModelBuilder,
-        DbConnection connection)
+        RelationalConnectionFactory connections)
     {
         ArgumentNullException.ThrowIfNull(differ);
         ArgumentNullException.ThrowIfNull(sqlGenerator);
         ArgumentNullException.ThrowIfNull(modelRuntimeInitializer);
         ArgumentNullException.ThrowIfNull(newModelBuilder);
-        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(connections);
 
         _differ = differ;
         _sqlGenerator = sqlGenerator;
         _modelRuntimeInitializer = modelRuntimeInitializer;
         _newModelBuilder = newModelBuilder;
-        _connection = connection;
+        _connections = connections;
     }
 
     /// <inheritdoc/>
@@ -161,57 +154,17 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator, IDisposable
             return new MigrationResult(false, plan, true);
         }
 
-        // Serialize connection-touching work: this instance's single DbConnection cannot safely
-        // run two open/transaction/execute sequences at once (see the class remarks).
-        await _gate.WaitAsync(ct).ConfigureAwait(false);
-        try
+        // Own connection: opened, transacted, and disposed entirely within this call, so two
+        // concurrent ApplyAsync calls never race on a shared connection. The open->begin->execute
+        // -each->commit sequence lives in the shared RelationalSqlBatch, which both this migrator
+        // and the atomic runtime writer reuse (an uncommitted transaction rolls back on disposal).
+        var connection = _connections.Create();
+        await using (connection.ConfigureAwait(false))
         {
-            if (_connection.State != ConnectionState.Open)
-            {
-                await _connection.OpenAsync(ct).ConfigureAwait(false);
-            }
-
-            var transaction = await _connection.BeginTransactionAsync(ct).ConfigureAwait(false);
-            try
-            {
-                await ExecuteInTransactionAsync(plan.Sql, transaction, ct).ConfigureAwait(false);
-                await transaction.CommitAsync(ct).ConfigureAwait(false);
-            }
-            catch
-            {
-                await transaction.RollbackAsync(ct).ConfigureAwait(false);
-                throw;
-            }
-            finally
-            {
-                await transaction.DisposeAsync().ConfigureAwait(false);
-            }
-        }
-        finally
-        {
-            _gate.Release();
+            await RelationalSqlBatch.ExecuteAsync(connection, plan.Sql, ct).ConfigureAwait(false);
         }
 
         return new MigrationResult(true, plan, false);
-    }
-
-    private async Task ExecuteInTransactionAsync(IReadOnlyList<string> sql, DbTransaction transaction, CancellationToken ct)
-    {
-        foreach (var commandText in sql)
-        {
-            if (string.IsNullOrWhiteSpace(commandText))
-            {
-                continue;
-            }
-
-            var command = _connection.CreateCommand();
-            await using (command.ConfigureAwait(false))
-            {
-                command.CommandText = commandText;
-                command.Transaction = transaction;
-                await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-            }
-        }
     }
 
     // A step is purely semantic now: it names the change and whether it destroys data. The
@@ -225,16 +178,5 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator, IDisposable
         // additionally requires the runtime initializer to have run (Task 0 report, gotcha #1).
         var model = DescriptorModelBuilder.Build(schema, _newModelBuilder);
         return _modelRuntimeInitializer.Initialize(model, designTime: true);
-    }
-
-    /// <summary>
-    /// Disposes the internal serialization gate and the provider-supplied <see cref="DbConnection"/>
-    /// this instance owns, releasing (e.g.) the underlying file handle deterministically instead of
-    /// relying on process exit or connection-pool finalization.
-    /// </summary>
-    public void Dispose()
-    {
-        _gate.Dispose();
-        _connection.Dispose();
     }
 }

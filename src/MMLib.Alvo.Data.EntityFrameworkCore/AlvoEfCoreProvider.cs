@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
+using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Schema;
 
@@ -14,9 +15,10 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// glue that is identical across relational providers — resolving EF Core's migrations differ, SQL
 /// generator, model-runtime initializer, and scaffolding factory from a throwaway
 /// <see cref="DbContext"/>, then wiring <see cref="ISchemaMigrator"/>,
-/// <see cref="ISchemaIntrospector"/>, and <see cref="IAppliedSchemaStore"/> — so a provider package
-/// (SQLite, PostgreSQL, or an out-of-repo engine such as Oracle) only supplies the handful of
-/// provider-specific callbacks on <see cref="RelationalProviderRegistration"/>.
+/// <see cref="ISchemaIntrospector"/>, <see cref="IDescriptorVersionStore"/>, and
+/// <see cref="IAppliedSchemaStore"/> — so a provider package (SQLite, PostgreSQL, or an
+/// out-of-repo engine such as Oracle) only supplies the handful of provider-specific callbacks on
+/// <see cref="RelationalProviderRegistration"/>.
 /// </summary>
 public static class AlvoEfCoreProvider
 {
@@ -30,13 +32,17 @@ public static class AlvoEfCoreProvider
     /// <param name="registration">The provider-specific building blocks (connection, EF services, model factory).</param>
     /// <returns>The same builder, for chaining.</returns>
     /// <remarks>
-    /// All three services are registered as idempotent (<c>TryAdd</c>) singletons: each owns one
-    /// ADO.NET connection for the container's lifetime.
-    /// Schema migration is an administrative operation invoked rarely — never per request — so a
-    /// single long-lived connection per service is the appropriate shape, not a scoped or transient
-    /// one. The connection string is resolved from <paramref name="registration"/> at provider-build
-    /// time (when a service is first materialized), never eagerly at call time, so an options-bound
-    /// connection string is honored.
+    /// All services are registered as idempotent (<c>TryAdd</c>) singletons, backed by one shared
+    /// <see cref="RelationalConnectionFactory"/> singleton: the migrator, introspector, and
+    /// descriptor-version store each open a fresh ADO.NET connection per call instead of holding
+    /// one for the container's lifetime, so two concurrent callers never race on a shared
+    /// connection. <see cref="IDescriptorVersionStore"/> and <see cref="IAppliedSchemaStore"/> both
+    /// resolve to the same <see cref="EfCoreDescriptorVersionStore"/> singleton, so the code-first
+    /// <c>SchemaMigrationRunner</c> (built against <see cref="IAppliedSchemaStore"/>) and any future
+    /// runtime caller (built against <see cref="IDescriptorVersionStore"/>) share one append-only
+    /// history. The connection string is resolved from <paramref name="registration"/> at
+    /// provider-build time (when a service is first materialized), never eagerly at call time, so
+    /// an options-bound connection string is honored.
     /// </remarks>
     public static IAlvoBuilder AddRelationalProvider(this IAlvoBuilder builder, RelationalProviderRegistration registration)
     {
@@ -48,11 +54,21 @@ public static class AlvoEfCoreProvider
         // IAlvoBuilder — a provider must not assume a particular caller.
         builder.Services.AddOptions<AlvoOptions>();
 
+        builder.Services.TryAddSingleton(sp => CreateConnectionFactory(sp, registration));
         builder.Services.TryAddSingleton<ISchemaMigrator>(sp => CreateMigrator(sp, registration));
         builder.Services.TryAddSingleton<ISchemaIntrospector>(sp => CreateIntrospector(sp, registration));
-        builder.Services.TryAddSingleton<IAppliedSchemaStore>(sp => CreateAppliedSchemaStore(sp, registration));
+        builder.Services.TryAddSingleton(CreateDescriptorVersionStore);
+        builder.Services.TryAddSingleton<IDescriptorVersionStore>(sp => sp.GetRequiredService<EfCoreDescriptorVersionStore>());
+        builder.Services.TryAddSingleton<IAppliedSchemaStore>(sp => sp.GetRequiredService<EfCoreDescriptorVersionStore>());
+        builder.Services.TryAddSingleton<IRuntimeSchemaWriter>(CreateRuntimeSchemaWriter);
 
         return builder;
+    }
+
+    private static RelationalConnectionFactory CreateConnectionFactory(IServiceProvider services, RelationalProviderRegistration registration)
+    {
+        var connectionString = registration.ConnectionString(services);
+        return new RelationalConnectionFactory(() => registration.CreateConnection(connectionString));
     }
 
     private static EfCoreSchemaMigrator CreateMigrator(IServiceProvider services, RelationalProviderRegistration registration)
@@ -60,13 +76,14 @@ public static class AlvoEfCoreProvider
         var connectionString = registration.ConnectionString(services);
         using var context = CreateThrowawayContext(registration, connectionString);
         var efServices = context.GetInfrastructure();
+        var connections = services.GetRequiredService<RelationalConnectionFactory>();
 
         return new EfCoreSchemaMigrator(
             efServices.GetRequiredService<IMigrationsModelDiffer>(),
             efServices.GetRequiredService<IMigrationsSqlGenerator>(),
             efServices.GetRequiredService<IModelRuntimeInitializer>(),
             registration.CreateModelBuilder,
-            registration.CreateConnection(connectionString));
+            connections);
     }
 
     private static EfCoreSchemaIntrospector CreateIntrospector(IServiceProvider services, RelationalProviderRegistration registration)
@@ -75,19 +92,28 @@ public static class AlvoEfCoreProvider
         var schemaPrefix = services.GetRequiredService<IOptions<AlvoOptions>>().Value.SchemaPrefix;
         using var context = CreateThrowawayContext(registration, connectionString);
         var databaseModelFactory = registration.CreateDatabaseModelFactory(context.GetInfrastructure());
+        var connections = services.GetRequiredService<RelationalConnectionFactory>();
 
         return new EfCoreSchemaIntrospector(
             databaseModelFactory,
-            registration.CreateConnection(connectionString),
-            SystemSchemaInitializer.AppliedSchemaTableName(schemaPrefix));
+            connections,
+            SystemSchemaInitializer.DescriptorVersionsTableName(schemaPrefix));
     }
 
-    private static AppliedSchemaStore CreateAppliedSchemaStore(IServiceProvider services, RelationalProviderRegistration registration)
+    private static EfCoreDescriptorVersionStore CreateDescriptorVersionStore(IServiceProvider services)
     {
-        var connectionString = registration.ConnectionString(services);
+        var connections = services.GetRequiredService<RelationalConnectionFactory>();
         var options = services.GetRequiredService<IOptions<AlvoOptions>>().Value;
 
-        return new AppliedSchemaStore(registration.CreateConnection(connectionString), options);
+        return new EfCoreDescriptorVersionStore(connections, options);
+    }
+
+    private static EfCoreRuntimeSchemaWriter CreateRuntimeSchemaWriter(IServiceProvider services)
+    {
+        var connections = services.GetRequiredService<RelationalConnectionFactory>();
+        var options = services.GetRequiredService<IOptions<AlvoOptions>>().Value;
+
+        return new EfCoreRuntimeSchemaWriter(connections, options);
     }
 
     // A short-lived context configured with the provider's UseXxx, spun up only to reach its

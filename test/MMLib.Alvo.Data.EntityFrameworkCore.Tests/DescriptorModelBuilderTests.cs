@@ -240,8 +240,11 @@ public class DescriptorModelBuilderTests
     }
 
     [Fact]
-    public void Computed_field_produces_a_stored_computed_column()
+    public void Computed_expression_is_ignored_until_the_cel_sql_compiler_lands()
     {
+        // #20: the raw descriptor-string -> GENERATED ALWAYS AS (...) STORED splice was an
+        // arbitrary-DDL-injection vector, so the builder no longer honors ComputedExpression.
+        // DescriptorToSchemaMapper already refuses 'computed' at mapping time (#21 revives this).
         var model = new SchemaModel([
             new EntitySchema
             {
@@ -263,8 +266,8 @@ public class DescriptorModelBuilderTests
         IModel efModel = DescriptorModelBuilder.Build(model, NewSqliteBuilder);
 
         var fullName = efModel.FindEntityType("vehicles")!.FindProperty("full_name")!;
-        fullName.GetComputedColumnSql().ShouldBe("make || ' ' || model");
-        fullName.GetIsStored().ShouldBe(true);
+        fullName.GetComputedColumnSql().ShouldBeNull();
+        fullName.GetIsStored().ShouldBeNull();
     }
 
     [Theory]

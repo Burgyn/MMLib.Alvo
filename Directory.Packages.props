@@ -20,6 +20,12 @@
          inherit, so it takes the attribute/extensibility surface alone. -->
     <PackageVersion Include="xunit.v3.extensibility.core" Version="3.2.2" />
     <PackageVersion Include="Corvus.Json.Validator" Version="5.2.7" />
+    <!-- Corvus.Json.SourceGenerator + Corvus.Json.ExtendedTypes replace JsonSchema.Net (whose 9.x
+         line carries a maintenance-fee EULA on top of MIT) as the descriptor schema-pass
+         validator: Apache-2.0, build-time source generation only (no runtime Roslyn, no
+         PreserveCompilationContext), used by core MMLib.Alvo. -->
+    <PackageVersion Include="Corvus.Json.SourceGenerator" Version="5.2.9" />
+    <PackageVersion Include="Corvus.Json.ExtendedTypes" Version="5.2.9" />
     <PackageVersion Include="CsCheck" Version="4.7.0" />
     <PackageVersion Include="NetArchTest.Rules" Version="1.3.2" />
     <PackageVersion Include="Shouldly" Version="4.3.0" />
