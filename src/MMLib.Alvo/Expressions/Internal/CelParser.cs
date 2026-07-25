@@ -430,7 +430,9 @@ internal static class CelParser
             if (identifierToken.Text is not ("old" or "new"))
             {
                 throw new CelSyntaxException(
-                    "Alvo has no nested field access; use a single field name.", identifierToken.Position);
+                    "Alvo has no nested field access; use a single field name.",
+                    identifierToken.Position,
+                    MacroNotSupportedSuggestion);
             }
 
             Expect(CelTokenKind.Dot);

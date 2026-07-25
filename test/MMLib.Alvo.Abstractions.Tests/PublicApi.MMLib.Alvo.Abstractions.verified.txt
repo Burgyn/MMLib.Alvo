@@ -1,4 +1,5 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/Burgyn/MMLib.Alvo")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace MMLib.Alvo
 {
@@ -689,12 +690,11 @@ namespace MMLib.Alvo.Expressions
     }
     public sealed class CompiledExpression : System.IEquatable<MMLib.Alvo.Expressions.CompiledExpression>
     {
-        public CompiledExpression() { }
-        public required string EntityName { get; init; }
-        public required MMLib.Alvo.Expressions.CelProfile Profile { get; init; }
-        public required MMLib.Alvo.Expressions.CelValueType ResultType { get; init; }
-        public required MMLib.Alvo.Expressions.CelNode Root { get; init; }
-        public required string Source { get; init; }
+        public string EntityName { get; }
+        public MMLib.Alvo.Expressions.CelProfile Profile { get; }
+        public MMLib.Alvo.Expressions.CelValueType ResultType { get; }
+        public MMLib.Alvo.Expressions.CelNode Root { get; }
+        public string Source { get; }
     }
     public interface ICelCompiler
     {

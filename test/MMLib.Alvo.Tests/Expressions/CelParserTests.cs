@@ -88,6 +88,13 @@ public class CelParserTests
     }
 
     [Fact]
+    public void Dotted_macro_style_access_suggests_a_hook_condition()
+    {
+        Should.Throw<CelSyntaxException>(() => CelParser.Parse("fields.all(f, f > 0)"))
+            .FixSuggestion.ShouldNotBeNull().ShouldContain("hooks.beforeUpdate");
+    }
+
+    [Fact]
     public void Has_parses_as_a_presence_test_over_a_field()
     {
         CelParser.Parse("has(owner_id)").ShouldBeOfType<CelHas>()

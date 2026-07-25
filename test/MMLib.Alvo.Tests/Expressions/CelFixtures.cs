@@ -20,7 +20,7 @@ internal static class CelFixtures
 
     private static readonly TenantId _otherTenantId = TenantId.New();
 
-    internal static readonly EntitySchema _orders = new()
+    internal static EntitySchema Orders { get; } = new()
     {
         Name = "orders",
         Tenancy = TenancyMode.Scoped,
@@ -36,7 +36,7 @@ internal static class CelFixtures
         ],
     };
 
-    internal static readonly ICelCompiler _compiler = new CelCompiler();
+    internal static ICelCompiler Compiler { get; } = new CelCompiler();
 
     /// <summary>An authenticated caller in the Acme tenant.</summary>
     internal static AlvoContext Alice { get; } = new()
@@ -62,11 +62,15 @@ internal static class CelFixtures
         Tenant = _acmeTenantId,
     };
 
-    /// <summary>An Acme-tenant caller holding the built-in <see cref="Role.Admin"/> role.</summary>
+    /// <summary>
+    /// An Acme-tenant caller holding <see cref="Role.Admin"/> plus <see cref="Role.Authenticated"/>
+    /// — an admin is also an authenticated caller, so a rule like <c>'authenticated' in @user.roles</c>
+    /// must pass for this context too, not only the built-in-admin-specific ones.
+    /// </summary>
     internal static AlvoContext Admin { get; } = new()
     {
         User = UserId.New(),
-        Roles = new HashSet<Role> { Role.Admin },
+        Roles = new HashSet<Role> { Role.Authenticated, Role.Admin },
         Tenant = _acmeTenantId,
     };
 
@@ -89,24 +93,24 @@ internal static class CelFixtures
     /// <summary><see cref="Alice"/> with no tenant — must be denied on a tenant-scoped entity, never widened to "all tenants".</summary>
     internal static AlvoContext TenantlessAlice { get; } = Alice with { Tenant = null };
 
-    /// <summary>Compiles CEL source against <see cref="_orders"/> for the <see cref="CelProfile.Rule"/> profile.</summary>
+    /// <summary>Compiles CEL source against <see cref="Orders"/> for the <see cref="CelProfile.Rule"/> profile.</summary>
     /// <param name="source">The CEL expression source.</param>
     /// <exception cref="InvalidOperationException">Compilation failed; the message joins every compiler error.</exception>
     internal static CompiledExpression CompileRule(string source) => Compile(source, CelProfile.Rule);
 
-    /// <summary>Compiles CEL source against <see cref="_orders"/> for the <see cref="CelProfile.Condition"/> profile.</summary>
+    /// <summary>Compiles CEL source against <see cref="Orders"/> for the <see cref="CelProfile.Condition"/> profile.</summary>
     /// <param name="source">The CEL expression source.</param>
     /// <exception cref="InvalidOperationException">Compilation failed; the message joins every compiler error.</exception>
     internal static CompiledExpression CompileCondition(string source) => Compile(source, CelProfile.Condition);
 
-    /// <summary>Compiles CEL source against <see cref="_orders"/> for the <see cref="CelProfile.Computed"/> profile.</summary>
+    /// <summary>Compiles CEL source against <see cref="Orders"/> for the <see cref="CelProfile.Computed"/> profile.</summary>
     /// <param name="source">The CEL expression source.</param>
     /// <exception cref="InvalidOperationException">Compilation failed; the message joins every compiler error.</exception>
     internal static CompiledExpression CompileComputed(string source) => Compile(source, CelProfile.Computed);
 
     private static CompiledExpression Compile(string source, CelProfile profile)
     {
-        var result = _compiler.Compile(source, profile, _orders);
+        var result = Compiler.Compile(source, profile, Orders);
         if (result.IsSuccess)
         {
             return result.Expression!;

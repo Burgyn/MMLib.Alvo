@@ -9,22 +9,41 @@
 /// <remarks>
 /// A <see cref="CompiledExpression"/> is only ever produced by a successful
 /// <see cref="ICelCompiler.Compile"/>, so a renderer may assume it is type-checked and
-/// in-profile — it never needs to re-validate the tree it renders.
+/// in-profile — it never needs to re-validate the tree it renders. The constructor is
+/// <see langword="internal"/> (the core is granted access via <c>InternalsVisibleTo</c>), so no
+/// provider or host can assemble one from a raw, unchecked parser tree — or <c>with</c>-mutate
+/// <see cref="Root"/> back into one — re-introducing an untyped <see cref="CelValueType.Null"/>
+/// field reference past this trust boundary.
 /// </remarks>
 public sealed record CompiledExpression
 {
+    /// <summary>Initializes a new instance of the <see cref="CompiledExpression"/> class.</summary>
+    /// <param name="root">The type-checked, profile-filtered expression tree.</param>
+    /// <param name="profile">The profile this expression was compiled against.</param>
+    /// <param name="resultType">The runtime type the whole expression evaluates to.</param>
+    /// <param name="source">The original CEL source this expression was compiled from.</param>
+    /// <param name="entityName">The name of the entity <paramref name="root"/> was checked against.</param>
+    internal CompiledExpression(CelNode root, CelProfile profile, CelValueType resultType, string source, string entityName)
+    {
+        Root = root;
+        Profile = profile;
+        ResultType = resultType;
+        Source = source;
+        EntityName = entityName;
+    }
+
     /// <summary>Gets the type-checked, profile-filtered expression tree.</summary>
-    public required CelNode Root { get; init; }
+    public CelNode Root { get; }
 
     /// <summary>Gets the profile this expression was compiled against.</summary>
-    public required CelProfile Profile { get; init; }
+    public CelProfile Profile { get; }
 
     /// <summary>Gets the runtime type the whole expression evaluates to.</summary>
-    public required CelValueType ResultType { get; init; }
+    public CelValueType ResultType { get; }
 
     /// <summary>Gets the original CEL source this expression was compiled from.</summary>
-    public required string Source { get; init; }
+    public string Source { get; }
 
     /// <summary>Gets the name of the entity <see cref="Root"/> was checked against.</summary>
-    public required string EntityName { get; init; }
+    public string EntityName { get; }
 }

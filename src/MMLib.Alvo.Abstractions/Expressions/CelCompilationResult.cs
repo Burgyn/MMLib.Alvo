@@ -43,10 +43,11 @@ public sealed record CelCompilationResult
     }
 
     /// <summary>Creates a failed result.</summary>
-    /// <param name="errors">Every problem found while compiling the source.</param>
+    /// <param name="errors">Every problem found while compiling the source; must be non-empty.</param>
     public static CelCompilationResult Failure(params CelCompilationError[] errors)
     {
         ArgumentNullException.ThrowIfNull(errors);
+        ArgumentOutOfRangeException.ThrowIfZero(errors.Length);
         return new CelCompilationResult(false, null, errors);
     }
 }

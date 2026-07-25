@@ -18,5 +18,6 @@ public interface ICelCompiler
     /// A successful result carrying a <see cref="CompiledExpression"/>, or a failed result
     /// carrying every problem found. Never throws for any <paramref name="source"/> string.
     /// </returns>
+    /// <exception cref="ArgumentNullException"><paramref name="source"/> or <paramref name="entity"/> is <see langword="null"/>.</exception>
     CelCompilationResult Compile(string source, CelProfile profile, EntitySchema entity);
 }

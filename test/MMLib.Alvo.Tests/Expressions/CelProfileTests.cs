@@ -12,16 +12,17 @@ namespace MMLib.Alvo.Tests.Expressions;
 /// allowing the ternary, whose condition must itself be a comparison — a contradiction. The
 /// corrected rule this test asserts: Computed allows comparisons, <c>&amp;&amp;</c>/<c>||</c>/<c>!</c>,
 /// arithmetic, <c>has</c>, and the ternary, but never a context reference or <c>old</c>/<c>new</c>/
-/// <c>changed</c>; and Computed's whole expression must be a non-boolean scalar, not merely "not
-/// forbidden of the wrong node kind" — so a bare comparison is rejected there for its result type,
-/// not for using a banned operator.
+/// <c>changed</c>; and Computed's whole expression must be a non-boolean <em>scalar</em> — not
+/// <c>Bool</c>, not <c>Json</c>, not <c>Null</c>, not a role list — not merely "not forbidden of
+/// the wrong node kind", so a bare comparison is rejected there for its result type, not for using
+/// a banned operator.
 /// </remarks>
 public class CelProfileTests
 {
     [Fact]
     public void Arithmetic_is_computed_only()
     {
-        CelFixtures._compiler.Compile("total + total", CelProfile.Rule, CelFixtures._orders)
+        CelFixtures.Compiler.Compile("total + total", CelProfile.Rule, CelFixtures.Orders)
             .IsSuccess.ShouldBeFalse();
 
         CelFixtures.CompileComputed("total + total").ResultType.ShouldBe(CelValueType.Decimal);
@@ -30,7 +31,7 @@ public class CelProfileTests
     [Fact]
     public void Context_references_are_unavailable_in_computed()
     {
-        var result = CelFixtures._compiler.Compile("@user.id", CelProfile.Computed, CelFixtures._orders);
+        var result = CelFixtures.Compiler.Compile("@user.id", CelProfile.Computed, CelFixtures.Orders);
 
         result.IsSuccess.ShouldBeFalse();
         result.Errors[0].Message.ShouldContain("A computed column is evaluated by the database with no caller context");
@@ -39,7 +40,7 @@ public class CelProfileTests
     [Fact]
     public void Changed_is_condition_only()
     {
-        CelFixtures._compiler.Compile("changed(status)", CelProfile.Rule, CelFixtures._orders)
+        CelFixtures.Compiler.Compile("changed(status)", CelProfile.Rule, CelFixtures.Orders)
             .IsSuccess.ShouldBeFalse();
 
         CelFixtures.CompileCondition("changed(status)").ResultType.ShouldBe(CelValueType.Bool);
@@ -48,7 +49,7 @@ public class CelProfileTests
     [Fact]
     public void New_and_old_field_qualifiers_are_condition_only()
     {
-        CelFixtures._compiler.Compile("new.status == 'draft'", CelProfile.Rule, CelFixtures._orders)
+        CelFixtures.Compiler.Compile("new.status == 'draft'", CelProfile.Rule, CelFixtures.Orders)
             .IsSuccess.ShouldBeFalse();
 
         CelFixtures.CompileCondition("new.status == 'draft'").ResultType.ShouldBe(CelValueType.Bool);
@@ -60,7 +61,7 @@ public class CelProfileTests
     [InlineData(CelProfile.Computed)]
     public void A_comprehension_macro_is_rejected_in_every_profile_toward_a_hook(CelProfile profile)
     {
-        var result = CelFixtures._compiler.Compile("all(f, f > 0)", profile, CelFixtures._orders);
+        var result = CelFixtures.Compiler.Compile("all(f, f > 0)", profile, CelFixtures.Orders);
 
         result.IsSuccess.ShouldBeFalse();
         result.Errors[0].FixSuggestion.ShouldNotBeNull().ShouldContain("hooks.beforeUpdate");
@@ -69,10 +70,20 @@ public class CelProfileTests
     [Fact]
     public void A_bare_comparison_is_rejected_in_computed_for_its_result_type_not_its_operator()
     {
-        var result = CelFixtures._compiler.Compile("status == 'draft'", CelProfile.Computed, CelFixtures._orders);
+        var result = CelFixtures.Compiler.Compile("status == 'draft'", CelProfile.Computed, CelFixtures.Orders);
 
         result.IsSuccess.ShouldBeFalse();
         result.Errors[0].Message.ShouldContain("non-boolean scalar");
+    }
+
+    [Theory]
+    [InlineData("payload")]
+    [InlineData("null")]
+    [InlineData("@user.roles")]
+    public void Computed_rejects_every_non_scalar_result_type(string source)
+    {
+        CelFixtures.Compiler.Compile(source, CelProfile.Computed, CelFixtures.Orders)
+            .IsSuccess.ShouldBeFalse();
     }
 
     [Fact]
@@ -94,7 +105,7 @@ public class CelProfileTests
     [Fact]
     public void Role_membership_is_unavailable_in_computed()
     {
-        var result = CelFixtures._compiler.Compile("'editor' in @user.roles", CelProfile.Computed, CelFixtures._orders);
+        var result = CelFixtures.Compiler.Compile("'editor' in @user.roles", CelProfile.Computed, CelFixtures.Orders);
 
         result.IsSuccess.ShouldBeFalse();
     }
@@ -105,7 +116,7 @@ public class CelProfileTests
         CelFixtures.CompileRule("has(owner_id)").ResultType.ShouldBe(CelValueType.Bool);
         CelFixtures.CompileCondition("has(owner_id)").ResultType.ShouldBe(CelValueType.Bool);
 
-        CelFixtures._compiler.Compile("has(owner_id) ? 1 : 2", CelProfile.Computed, CelFixtures._orders)
+        CelFixtures.Compiler.Compile("has(owner_id) ? 1 : 2", CelProfile.Computed, CelFixtures.Orders)
             .IsSuccess.ShouldBeTrue();
     }
 }

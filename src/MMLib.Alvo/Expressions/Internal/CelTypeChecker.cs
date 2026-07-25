@@ -20,15 +20,67 @@ internal static class CelTypeChecker
     /// <param name="profile">Which constructs are legal.</param>
     /// <returns>
     /// The rewritten tree (every <see cref="CelFieldRef"/> carries its resolved type), the whole
-    /// expression's result type, and every error found.
+    /// expression's result type, the position its result-type check should be anchored to, and
+    /// every error found.
     /// </returns>
-    public static (CelNode Root, CelValueType ResultType, IReadOnlyList<CelCompilationError> Errors) Check(
+    public static (CelNode Root, CelValueType ResultType, int Position, IReadOnlyList<CelCompilationError> Errors) Check(
         CelNode root, string source, EntitySchema entity, CelProfile profile)
     {
         var visitor = new Visitor(source, entity, profile);
-        var (node, type, _) = visitor.CheckNode(root);
-        return (node, type, visitor.Errors);
+        var (node, type, _, position) = visitor.CheckNode(root);
+        return (node, type, position, visitor.Errors);
     }
+
+    /// <summary>
+    /// A construct whose legality varies by <see cref="CelProfile"/>. Every <see cref="CelNode"/>
+    /// kind (disambiguated by operator where one node type covers several constructs) maps to
+    /// exactly one of these, and <see cref="_allowedProfiles"/> is the single positive table that
+    /// decides where each one is legal — deny by default, so a kind missing from the table (a
+    /// future construct nobody wired up yet) compiles in no profile rather than every profile.
+    /// </summary>
+    private enum CelConstructKind
+    {
+        Literal,
+        FieldRefCurrent,
+        FieldRefPastFuture,
+        ContextRef,
+        Logical,
+        Comparison,
+        In,
+        Has,
+        Arithmetic,
+        Conditional,
+        Changed,
+    }
+
+    private static readonly IReadOnlySet<CelProfile> _allProfiles =
+        new HashSet<CelProfile> { CelProfile.Rule, CelProfile.Computed, CelProfile.Condition };
+
+    private static readonly IReadOnlySet<CelProfile> _computedOnly = new HashSet<CelProfile> { CelProfile.Computed };
+
+    private static readonly IReadOnlySet<CelProfile> _conditionOnly = new HashSet<CelProfile> { CelProfile.Condition };
+
+    private static readonly IReadOnlySet<CelProfile> _ruleAndCondition =
+        new HashSet<CelProfile> { CelProfile.Rule, CelProfile.Condition };
+
+    private static readonly Dictionary<CelConstructKind, IReadOnlySet<CelProfile>> _allowedProfiles =
+        new()
+        {
+            [CelConstructKind.Literal] = _allProfiles,
+            [CelConstructKind.FieldRefCurrent] = _allProfiles,
+            [CelConstructKind.FieldRefPastFuture] = _conditionOnly,
+            [CelConstructKind.ContextRef] = _ruleAndCondition,
+            [CelConstructKind.Logical] = _allProfiles,
+            [CelConstructKind.Comparison] = _allProfiles,
+            [CelConstructKind.In] = _ruleAndCondition,
+            [CelConstructKind.Has] = _allProfiles,
+            [CelConstructKind.Arithmetic] = _computedOnly,
+            [CelConstructKind.Conditional] = _computedOnly,
+            [CelConstructKind.Changed] = _conditionOnly,
+        };
+
+    private static bool IsAllowed(CelProfile profile, CelConstructKind kind) =>
+        _allowedProfiles.TryGetValue(kind, out var profiles) && profiles.Contains(profile);
 
     private sealed class Visitor(string source, EntitySchema entity, CelProfile profile)
     {
@@ -42,9 +94,9 @@ internal static class CelTypeChecker
 
         public List<CelCompilationError> Errors { get; } = [];
 
-        public (CelNode Node, CelValueType Type, bool HasError) CheckNode(CelNode node) => node switch
+        public (CelNode Node, CelValueType Type, bool HasError, int Position) CheckNode(CelNode node) => node switch
         {
-            CelLiteral literal => (literal, literal.Type, false),
+            CelLiteral literal => CheckLiteral(literal),
             CelFieldRef fieldRef => CheckFieldRef(fieldRef),
             CelContextRef contextRef => CheckContextRef(contextRef),
             CelUnary unary => CheckUnary(unary),
@@ -52,14 +104,32 @@ internal static class CelTypeChecker
             CelHas has => CheckHas(has),
             CelConditional conditional => CheckConditional(conditional),
             CelChanged changed => CheckChanged(changed),
-            _ => throw new ArgumentOutOfRangeException(nameof(node), node, "Unknown CEL node kind."),
+            _ => UnrecognizedNode(node),
         };
 
-        private (CelNode, CelValueType, bool) CheckFieldRef(CelFieldRef fieldRef)
+        private (CelNode, CelValueType, bool, int) UnrecognizedNode(CelNode node)
+        {
+            Errors.Add(new CelCompilationError(
+                $"'{node.GetType().Name}' is not a supported CEL construct in this compiler.",
+                null,
+                _cursor));
+            return (node, CelValueType.Null, true, _cursor);
+        }
+
+        private (CelNode, CelValueType, bool, int) CheckLiteral(CelLiteral literal)
+        {
+            var profileBad = CheckConstruct(CelConstructKind.Literal, "Literals are not legal in this profile.", null, _cursor);
+            return (literal, literal.Type, profileBad, _cursor);
+        }
+
+        private (CelNode, CelValueType, bool, int) CheckFieldRef(CelFieldRef fieldRef)
         {
             var position = FindPosition(fieldRef.FieldName);
-            var stateBad = CheckProfileConstraint(
-                fieldRef.State == CelRecordState.Current || profile == CelProfile.Condition,
+            var kind = fieldRef.State == CelRecordState.Current
+                ? CelConstructKind.FieldRefCurrent
+                : CelConstructKind.FieldRefPastFuture;
+            var stateBad = CheckConstruct(
+                kind,
                 $"'{StatePrefix(fieldRef.State)}{fieldRef.FieldName}' is legal only in the Condition profile (a hook condition).",
                 "Reference the current row instead, or move this check into a hook condition.",
                 position);
@@ -71,201 +141,280 @@ internal static class CelTypeChecker
                     $"'{fieldRef.FieldName}' is not a field of entity '{entity.Name}'.",
                     BuildUnknownFieldSuggestion(fieldRef.FieldName),
                     position));
-                return (fieldRef, CelValueType.Null, true);
+                return (fieldRef, CelValueType.Null, true, position);
+            }
+
+            if (!IsKnownFieldType(field.Type))
+            {
+                Errors.Add(new CelCompilationError(
+                    $"Field '{fieldRef.FieldName}' has an unrecognized type ({field.Type}) in the schema.",
+                    "This indicates a corrupt or unsupported schema; fix the entity's field type.",
+                    position));
+                return (fieldRef, CelValueType.Null, true, position);
             }
 
             var type = MapFieldType(field.Type);
-            return (fieldRef with { Type = type }, type, stateBad);
+            return (fieldRef with { Type = type }, type, stateBad, position);
         }
 
-        private (CelNode, CelValueType, bool) CheckContextRef(CelContextRef contextRef)
+        private (CelNode, CelValueType, bool, int) CheckContextRef(CelContextRef contextRef)
         {
             var position = FindPosition(ContextRefText(contextRef));
-            var profileBad = CheckProfileConstraint(
-                profile != CelProfile.Computed,
+            var profileBad = CheckConstruct(
+                CelConstructKind.ContextRef,
                 ComputedNoContextMessage,
                 "Move the caller-dependent check into a rule or a hook condition.",
                 position);
 
-            return (contextRef, contextRef.Type, profileBad);
+            return (contextRef, contextRef.Type, profileBad, position);
         }
 
-        private (CelNode, CelValueType, bool) CheckUnary(CelUnary unary)
+        private (CelNode, CelValueType, bool, int) CheckUnary(CelUnary unary)
         {
-            var (operand, operandType, operandError) = CheckNode(unary.Operand);
+            var (operand, operandType, operandError, position) = CheckNode(unary.Operand);
             var rewritten = unary with { Operand = operand };
 
             return unary.Operator switch
             {
-                CelUnaryOperator.Not => CheckLogicalNot(rewritten, operandType, operandError),
-                CelUnaryOperator.Negate => CheckNegate(rewritten, operandType, operandError),
-                _ => throw new ArgumentOutOfRangeException(nameof(unary), unary.Operator, "Unknown CEL unary operator."),
+                CelUnaryOperator.Not => CheckLogicalNot(rewritten, operandType, operandError, position),
+                CelUnaryOperator.Negate => CheckNegate(rewritten, operandType, operandError, position),
+                _ => UnrecognizedNode(rewritten),
             };
         }
 
-        private (CelNode, CelValueType, bool) CheckLogicalNot(CelUnary unary, CelValueType operandType, bool operandError)
+        private (CelNode, CelValueType, bool, int) CheckLogicalNot(CelUnary unary, CelValueType operandType, bool operandError, int position)
         {
-            var hasError = RequireBool(operandType, operandError, "'!' operand");
-            return (unary, CelValueType.Bool, hasError);
+            var profileBad = CheckConstruct(CelConstructKind.Logical, "'!' is not legal in this profile.", null, position);
+            var operandBad = RequireBool(operandType, operandError, "'!' operand", position);
+            return (unary, CelValueType.Bool, profileBad || operandBad, position);
         }
 
-        private (CelNode, CelValueType, bool) CheckNegate(CelUnary unary, CelValueType operandType, bool operandError)
+        private (CelNode, CelValueType, bool, int) CheckNegate(CelUnary unary, CelValueType operandType, bool operandError, int position)
         {
-            var profileBad = CheckProfileConstraint(
-                profile == CelProfile.Computed,
+            var profileBad = CheckConstruct(
+                CelConstructKind.Arithmetic,
                 "Arithmetic negation ('-') is legal only in the Computed profile.",
                 "Move this calculation into a computed field.",
-                0);
-            var operandBad = RequireNumeric(operandType, operandError, "Unary '-' operand");
+                position);
+            var operandBad = RequireNumeric(operandType, operandError, "Unary '-' operand", position);
             var resultType = operandError ? CelValueType.Decimal : operandType;
-            return (unary, resultType, profileBad || operandBad);
+            return (unary, resultType, profileBad || operandBad, position);
         }
 
-        private (CelNode, CelValueType, bool) CheckBinary(CelBinary binary)
+        private (CelNode, CelValueType, bool, int) CheckBinary(CelBinary binary)
         {
-            var (left, leftType, leftError) = CheckNode(binary.Left);
-            var (right, rightType, rightError) = CheckNode(binary.Right);
+            var (left, leftType, leftError, _) = CheckNode(binary.Left);
+            var (right, rightType, rightError, rightPosition) = CheckNode(binary.Right);
             var rewritten = binary with { Left = left, Right = right };
 
             return binary.Operator switch
             {
                 CelBinaryOperator.And or CelBinaryOperator.Or =>
-                    CheckLogical(rewritten, leftType, rightType, leftError, rightError),
+                    CheckLogical(rewritten, leftType, rightType, leftError, rightError, rightPosition),
                 CelBinaryOperator.In =>
-                    CheckIn(rewritten, leftType, rightType, leftError, rightError),
+                    CheckIn(rewritten, leftType, rightType, leftError, rightError, rightPosition),
                 CelBinaryOperator.Add or CelBinaryOperator.Subtract or CelBinaryOperator.Multiply or CelBinaryOperator.Divide =>
-                    CheckArithmetic(rewritten, leftType, rightType, leftError, rightError),
+                    CheckArithmetic(rewritten, leftType, rightType, leftError, rightError, rightPosition),
                 CelBinaryOperator.Equal or CelBinaryOperator.NotEqual or CelBinaryOperator.Less
                     or CelBinaryOperator.LessOrEqual or CelBinaryOperator.Greater or CelBinaryOperator.GreaterOrEqual =>
-                    CheckComparison(rewritten, binary.Operator, leftType, rightType, leftError, rightError),
-                _ => throw new ArgumentOutOfRangeException(nameof(binary), binary.Operator, "Unknown CEL binary operator."),
+                    CheckComparison(rewritten, binary.Operator, leftType, rightType, leftError, rightError, rightPosition),
+                _ => UnrecognizedNode(rewritten),
             };
         }
 
-        private (CelNode, CelValueType, bool) CheckLogical(
-            CelBinary binary, CelValueType leftType, CelValueType rightType, bool leftError, bool rightError)
+        private (CelNode, CelValueType, bool, int) CheckLogical(
+            CelBinary binary, CelValueType leftType, CelValueType rightType, bool leftError, bool rightError, int position)
         {
-            var leftBad = RequireBool(leftType, leftError, "'&&'/'||' left operand");
-            var rightBad = RequireBool(rightType, rightError, "'&&'/'||' right operand");
-            return (binary, CelValueType.Bool, leftBad || rightBad);
+            var profileBad = CheckConstruct(CelConstructKind.Logical, "'&&'/'||' are not legal in this profile.", null, position);
+            var leftBad = RequireBool(leftType, leftError, "'&&'/'||' left operand", position);
+            var rightBad = RequireBool(rightType, rightError, "'&&'/'||' right operand", position);
+            return (binary, CelValueType.Bool, profileBad || leftBad || rightBad, position);
         }
 
-        private (CelNode, CelValueType, bool) CheckIn(
-            CelBinary binary, CelValueType leftType, CelValueType rightType, bool leftError, bool rightError)
+        private (CelNode, CelValueType, bool, int) CheckIn(
+            CelBinary binary, CelValueType leftType, CelValueType rightType, bool leftError, bool rightError, int position)
         {
-            var profileBad = CheckProfileConstraint(
-                profile != CelProfile.Computed,
+            var profileBad = CheckConstruct(
+                CelConstructKind.In,
                 $"'in' (role membership) is not available in the Computed profile: {ComputedNoContextMessage}",
                 "Move this check into a rule or a hook condition.",
-                0);
+                position);
 
             if (leftError || rightError)
             {
-                return (binary, CelValueType.Bool, true);
+                return (binary, CelValueType.Bool, true, position);
             }
 
             if (leftType == CelValueType.String && rightType == CelValueType.StringList)
             {
-                return (binary, CelValueType.Bool, profileBad);
+                return (binary, CelValueType.Bool, profileBad, position);
             }
 
             Errors.Add(new CelCompilationError(
                 $"'in' requires a string on the left and a role list (@user.roles) on the right; found {leftType} and {rightType}.",
-                null,
-                0));
-            return (binary, CelValueType.Bool, true);
+                "Compare a string field or literal on the left against @user.roles on the right.",
+                position));
+            return (binary, CelValueType.Bool, true, position);
         }
 
-        private (CelNode, CelValueType, bool) CheckArithmetic(
-            CelBinary binary, CelValueType leftType, CelValueType rightType, bool leftError, bool rightError)
+        private (CelNode, CelValueType, bool, int) CheckArithmetic(
+            CelBinary binary, CelValueType leftType, CelValueType rightType, bool leftError, bool rightError, int position)
         {
-            var profileBad = CheckProfileConstraint(
-                profile == CelProfile.Computed,
+            var profileBad = CheckConstruct(
+                CelConstructKind.Arithmetic,
                 $"Arithmetic is legal only in the Computed profile; '{OperatorText(binary.Operator)}' is not allowed here.",
                 "Move this calculation into a computed field.",
-                0);
+                position);
 
-            var leftBad = RequireNumeric(leftType, leftError, "Arithmetic left operand");
-            var rightBad = RequireNumeric(rightType, rightError, "Arithmetic right operand");
+            var leftBad = RequireNumeric(leftType, leftError, "Arithmetic left operand", position);
+            var rightBad = RequireNumeric(rightType, rightError, "Arithmetic right operand", position);
             var resultType = leftType == CelValueType.Decimal || rightType == CelValueType.Decimal
                 ? CelValueType.Decimal
                 : CelValueType.Int;
 
-            return (binary, resultType, profileBad || leftBad || rightBad);
+            return (binary, resultType, profileBad || leftBad || rightBad, position);
         }
 
-        private (CelNode, CelValueType, bool) CheckComparison(
-            CelBinary binary, CelBinaryOperator op, CelValueType leftType, CelValueType rightType, bool leftError, bool rightError)
+        private (CelNode, CelValueType, bool, int) CheckComparison(
+            CelBinary binary, CelBinaryOperator op, CelValueType leftType, CelValueType rightType, bool leftError, bool rightError, int position)
         {
+            var profileBad = CheckConstruct(CelConstructKind.Comparison, "Comparisons are not legal in this profile.", null, position);
+
             if (leftError || rightError)
             {
-                return (binary, CelValueType.Bool, true);
+                return (binary, CelValueType.Bool, true, position);
             }
 
-            var error = ValidateComparisonTypes(op, leftType, rightType);
+            var error = ValidateComparisonTypes(op, leftType, rightType, position)
+                ?? ValidateEnumLiteral(op, binary.Left, binary.Right, position);
             if (error is not null)
             {
                 Errors.Add(error);
-                return (binary, CelValueType.Bool, true);
+                return (binary, CelValueType.Bool, true, position);
             }
 
-            return (binary, CelValueType.Bool, false);
+            return (binary, CelValueType.Bool, profileBad, position);
         }
 
-        private static CelCompilationError? ValidateComparisonTypes(CelBinaryOperator op, CelValueType left, CelValueType right)
+        private static CelCompilationError? ValidateComparisonTypes(CelBinaryOperator op, CelValueType left, CelValueType right, int position)
         {
             if (left == CelValueType.Json || right == CelValueType.Json)
             {
                 return new CelCompilationError(
-                    "Json fields cannot be compared directly.", "Compare a scalar field, or defer to a hook.", 0);
+                    "Json fields cannot be compared directly.", "Compare a scalar field, or defer to a hook.", position);
             }
 
             if (left == CelValueType.StringList || right == CelValueType.StringList)
             {
                 return new CelCompilationError(
-                    "A role list cannot be compared with equality.", RoleMembershipFixSuggestion, 0);
+                    "A role list cannot be compared with equality.", RoleMembershipFixSuggestion, position);
+            }
+
+            if (IsRelational(op) && (left == CelValueType.Null || right == CelValueType.Null))
+            {
+                return new CelCompilationError(
+                    "Relational operators (<, <=, >, >=) cannot be compared against null.",
+                    "Use has(field) to test presence, or == null / != null to test equality.",
+                    position);
             }
 
             if (left != CelValueType.Null && right != CelValueType.Null
                 && left != right && !(IsNumeric(left) && IsNumeric(right)))
             {
-                return new CelCompilationError($"Cannot compare {left} to {right}.", null, 0);
+                return new CelCompilationError(
+                    $"Cannot compare {left} to {right}.",
+                    "Compare operands of the same type, or two numeric (Int/Decimal) operands.",
+                    position);
             }
 
             return IsRelational(op) && (IsRelationRejected(left) || IsRelationRejected(right))
                 ? new CelCompilationError(
                     "Relational operators (<, <=, >, >=) do not support boolean or UUID operands; use == or != instead.",
-                    null,
-                    0)
+                    "Use == or != instead.",
+                    position)
                 : null;
         }
 
-        private (CelNode, CelValueType, bool) CheckHas(CelHas has)
+        private CelCompilationError? ValidateEnumLiteral(CelBinaryOperator op, CelNode left, CelNode right, int position)
         {
-            var (field, _, fieldError) = CheckFieldRef(has.Field);
-            return (has with { Field = (CelFieldRef)field }, CelValueType.Bool, fieldError);
+            if (op is not (CelBinaryOperator.Equal or CelBinaryOperator.NotEqual))
+            {
+                return null;
+            }
+
+            return ValidateEnumLiteralSide(left, right, position) ?? ValidateEnumLiteralSide(right, left, position);
         }
 
-        private (CelNode, CelValueType, bool) CheckConditional(CelConditional conditional)
+        private CelCompilationError? ValidateEnumLiteralSide(CelNode enumSide, CelNode literalSide, int position)
         {
-            var profileBad = CheckProfileConstraint(
-                profile == CelProfile.Computed,
-                "The ternary conditional is legal only in the Computed profile.",
-                "Split this into separate computed fields, or move the branching into a hook.",
-                0);
+            var enumValues = EnumValuesOf(enumSide);
+            if (enumValues is null || literalSide is not CelLiteral { Type: CelValueType.String, Value: string text })
+            {
+                return null;
+            }
 
-            var (condition, conditionType, conditionError) = CheckNode(conditional.Condition);
-            var (whenTrue, trueType, trueError) = CheckNode(conditional.WhenTrue);
-            var (whenFalse, falseType, falseError) = CheckNode(conditional.WhenFalse);
+            if (enumValues.Contains(text, StringComparer.Ordinal))
+            {
+                return null;
+            }
+
+            return new CelCompilationError(
+                $"'{text}' is not a declared value of this enum field.",
+                BuildEnumSuggestion(text, enumValues),
+                position);
+        }
+
+        private IReadOnlyList<string>? EnumValuesOf(CelNode node)
+        {
+            if (node is not CelFieldRef fieldRef)
+            {
+                return null;
+            }
+
+            var field = ResolveField(fieldRef.FieldName);
+            return field is { Type: FieldType.Enum } ? field.EnumValues : null;
+        }
+
+        private static string BuildEnumSuggestion(string value, IReadOnlyList<string> enumValues)
+        {
+            var closest = enumValues
+                .Select(candidate => (candidate, Distance: LevenshteinDistance(value, candidate)))
+                .Where(candidate => candidate.Distance <= 2)
+                .OrderBy(candidate => candidate.Distance)
+                .ThenBy(candidate => candidate.candidate, StringComparer.Ordinal)
+                .Select(candidate => candidate.candidate)
+                .FirstOrDefault();
+
+            var known = string.Join(", ", enumValues.OrderBy(candidate => candidate, StringComparer.Ordinal));
+            return closest is not null ? $"Did you mean '{closest}'? Declared values: {known}." : $"Declared values: {known}.";
+        }
+
+        private (CelNode, CelValueType, bool, int) CheckHas(CelHas has)
+        {
+            var (field, _, fieldError, position) = CheckFieldRef(has.Field);
+            var profileBad = CheckConstruct(CelConstructKind.Has, "has(...) is not legal in this profile.", null, position);
+            return (has with { Field = (CelFieldRef)field }, CelValueType.Bool, fieldError || profileBad, position);
+        }
+
+        private (CelNode, CelValueType, bool, int) CheckConditional(CelConditional conditional)
+        {
+            var (condition, conditionType, conditionError, conditionPosition) = CheckNode(conditional.Condition);
+            var (whenTrue, trueType, trueError, _) = CheckNode(conditional.WhenTrue);
+            var (whenFalse, falseType, falseError, falsePosition) = CheckNode(conditional.WhenFalse);
             var rewritten = conditional with { Condition = condition, WhenTrue = whenTrue, WhenFalse = whenFalse };
 
-            var conditionBad = RequireBool(conditionType, conditionError, "The ternary condition");
-            var branchesBad = RequireMatchingBranches(trueType, falseType, trueError, falseError);
+            var profileBad = CheckConstruct(
+                CelConstructKind.Conditional,
+                "The ternary conditional is legal only in the Computed profile.",
+                "Split this into separate computed fields, or move the branching into a hook.",
+                conditionPosition);
+            var conditionBad = RequireBool(conditionType, conditionError, "The ternary condition", conditionPosition);
+            var branchesBad = RequireMatchingBranches(trueType, falseType, trueError, falseError, falsePosition);
 
-            return (rewritten, trueError ? falseType : trueType, profileBad || conditionBad || branchesBad);
+            return (rewritten, trueError ? falseType : trueType, profileBad || conditionBad || branchesBad, conditionPosition);
         }
 
-        private bool RequireMatchingBranches(CelValueType trueType, CelValueType falseType, bool trueError, bool falseError)
+        private bool RequireMatchingBranches(CelValueType trueType, CelValueType falseType, bool trueError, bool falseError, int position)
         {
             if (trueError || falseError)
             {
@@ -278,32 +427,34 @@ internal static class CelTypeChecker
             }
 
             Errors.Add(new CelCompilationError(
-                $"The ternary's branches must have the same type; found {trueType} and {falseType}.", null, 0));
+                $"The ternary's branches must have the same type; found {trueType} and {falseType}.",
+                "Make both branches the same type, e.g. both numbers or both strings.",
+                position));
             return true;
         }
 
-        private (CelNode, CelValueType, bool) CheckChanged(CelChanged changed)
+        private (CelNode, CelValueType, bool, int) CheckChanged(CelChanged changed)
         {
             var position = FindPosition(changed.FieldName);
-            var profileBad = CheckProfileConstraint(
-                profile == CelProfile.Condition,
+            var profileBad = CheckConstruct(
+                CelConstructKind.Changed,
                 "changed(...) is legal only in the Condition profile (a hook condition).",
                 "Move this check into hooks.beforeUpdate/afterUpdate.",
                 position);
 
             if (ResolveField(changed.FieldName) is not null)
             {
-                return (changed, CelValueType.Bool, profileBad);
+                return (changed, CelValueType.Bool, profileBad, position);
             }
 
             Errors.Add(new CelCompilationError(
                 $"'{changed.FieldName}' is not a field of entity '{entity.Name}'.",
                 BuildUnknownFieldSuggestion(changed.FieldName),
                 position));
-            return (changed, CelValueType.Bool, true);
+            return (changed, CelValueType.Bool, true, position);
         }
 
-        private bool RequireBool(CelValueType type, bool childError, string subject)
+        private bool RequireBool(CelValueType type, bool childError, string subject, int position)
         {
             if (childError)
             {
@@ -315,11 +466,14 @@ internal static class CelTypeChecker
                 return false;
             }
 
-            Errors.Add(new CelCompilationError($"{subject} must be boolean; found {type}.", null, 0));
+            Errors.Add(new CelCompilationError(
+                $"{subject} must be boolean; found {type}.",
+                "Use a comparison (field == value) or has(field) so this operand evaluates to true/false.",
+                position));
             return true;
         }
 
-        private bool RequireNumeric(CelValueType type, bool childError, string subject)
+        private bool RequireNumeric(CelValueType type, bool childError, string subject, int position)
         {
             if (childError)
             {
@@ -331,13 +485,16 @@ internal static class CelTypeChecker
                 return false;
             }
 
-            Errors.Add(new CelCompilationError($"{subject} must be numeric; found {type}.", null, 0));
+            Errors.Add(new CelCompilationError(
+                $"{subject} must be numeric; found {type}.",
+                "Use an Integer/Decimal field or literal, or convert this value before the arithmetic.",
+                position));
             return true;
         }
 
-        private bool CheckProfileConstraint(bool allowedInProfile, string message, string? fixSuggestion, int position)
+        private bool CheckConstruct(CelConstructKind kind, string message, string? fixSuggestion, int position)
         {
-            if (allowedInProfile)
+            if (IsAllowed(profile, kind))
             {
                 return false;
             }
@@ -414,7 +571,7 @@ internal static class CelTypeChecker
             CelContextValue.UserId => "@user.id",
             CelContextValue.UserRoles => "@user.roles",
             CelContextValue.TenantId => "@tenant.id",
-            _ => throw new ArgumentOutOfRangeException(nameof(contextRef), contextRef.Value, "Unknown CEL context value."),
+            _ => "@" + contextRef.Value,
         };
 
         private static string OperatorText(CelBinaryOperator op) => op switch
@@ -433,6 +590,10 @@ internal static class CelTypeChecker
 
         private static bool IsNumeric(CelValueType type) => type is CelValueType.Int or CelValueType.Decimal;
 
+        private static bool IsKnownFieldType(FieldType type) => type is
+            FieldType.String or FieldType.Text or FieldType.Integer or FieldType.Decimal or FieldType.Boolean
+            or FieldType.Date or FieldType.DateTime or FieldType.Uuid or FieldType.Json or FieldType.Enum or FieldType.Ref;
+
         private static CelValueType MapFieldType(FieldType type) => type switch
         {
             FieldType.String or FieldType.Text or FieldType.Enum => CelValueType.String,
@@ -442,7 +603,7 @@ internal static class CelTypeChecker
             FieldType.Date or FieldType.DateTime => CelValueType.Timestamp,
             FieldType.Uuid or FieldType.Ref => CelValueType.Uuid,
             FieldType.Json => CelValueType.Json,
-            _ => throw new ArgumentOutOfRangeException(nameof(type), type, "Unknown field type."),
+            _ => CelValueType.Json,
         };
 
         private static int LevenshteinDistance(string a, string b)

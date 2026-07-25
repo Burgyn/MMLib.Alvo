@@ -58,43 +58,55 @@ internal sealed class CelCompiler : ICelCompiler
 
     private static CelCompilationResult CheckAndAssemble(string source, CelProfile profile, EntitySchema entity, CelNode parsed)
     {
-        var (root, resultType, errors) = CelTypeChecker.Check(parsed, source, entity, profile);
-        var allErrors = AppendResultTypeError(errors, profile, resultType);
+        var (root, resultType, position, errors) = CelTypeChecker.Check(parsed, source, entity, profile);
+        var allErrors = AppendResultTypeError(errors, profile, resultType, position);
 
         if (allErrors.Count > 0)
         {
             return CelCompilationResult.Failure([.. allErrors]);
         }
 
-        return CelCompilationResult.Success(new CompiledExpression
-        {
-            Root = root,
-            Profile = profile,
-            ResultType = resultType,
-            Source = source,
-            EntityName = entity.Name,
-        });
+        return CelCompilationResult.Success(new CompiledExpression(root, profile, resultType, source, entity.Name));
     }
 
     private static List<CelCompilationError> AppendResultTypeError(
-        IReadOnlyList<CelCompilationError> errors, CelProfile profile, CelValueType resultType)
+        IReadOnlyList<CelCompilationError> errors, CelProfile profile, CelValueType resultType, int position)
     {
-        var resultTypeError = ValidateResultType(profile, resultType);
+        var resultTypeError = ValidateResultType(profile, resultType, position);
         return resultTypeError is null ? [.. errors] : [.. errors, resultTypeError];
     }
 
-    private static CelCompilationError? ValidateResultType(CelProfile profile, CelValueType resultType) => profile switch
+    private static CelCompilationError? ValidateResultType(CelProfile profile, CelValueType resultType, int position)
     {
-        CelProfile.Computed when resultType == CelValueType.Bool => new CelCompilationError(
-            "A computed-field expression must evaluate to a non-boolean scalar; a bare boolean expression cannot be a computed column's value.",
-            "Wrap the condition in a ternary, e.g. condition ? whenTrue : whenFalse.",
-            0),
-        CelProfile.Rule or CelProfile.Condition when resultType != CelValueType.Bool => new CelCompilationError(
-            $"A {profile} expression must evaluate to a boolean; this expression evaluates to {resultType}.",
-            "Add a comparison, e.g. field == value, so the expression yields true/false.",
-            0),
-        _ => null,
-    };
+        if (profile == CelProfile.Computed && resultType == CelValueType.Bool)
+        {
+            return new CelCompilationError(
+                "A computed-field expression must evaluate to a non-boolean scalar; a bare boolean expression cannot be a computed column's value.",
+                "Wrap the condition in a ternary, e.g. condition ? whenTrue : whenFalse.",
+                position);
+        }
+
+        if (profile == CelProfile.Computed && !IsScalar(resultType))
+        {
+            return new CelCompilationError(
+                $"A computed-field expression must evaluate to a non-boolean scalar; {resultType} is not a scalar value a database column can hold.",
+                "Compare, extract, or convert to a scalar (string/number/date/uuid) before assigning it as the computed value.",
+                position);
+        }
+
+        if ((profile == CelProfile.Rule || profile == CelProfile.Condition) && resultType != CelValueType.Bool)
+        {
+            return new CelCompilationError(
+                $"A {profile} expression must evaluate to a boolean; this expression evaluates to {resultType}.",
+                "Add a comparison, e.g. field == value, so the expression yields true/false.",
+                position);
+        }
+
+        return null;
+    }
+
+    private static bool IsScalar(CelValueType type) => type is
+        CelValueType.Int or CelValueType.Decimal or CelValueType.String or CelValueType.Timestamp or CelValueType.Uuid;
 
     private static CelCompilationError? ValidateTreeDepth(CelNode root)
     {
@@ -130,12 +142,24 @@ internal sealed class CelCompiler : ICelCompiler
         return maxDepth;
     }
 
+    /// <summary>
+    /// Enumerates a node's direct children for the depth walk. Every known leaf kind is named
+    /// explicitly (never via a wildcard) so that a genuinely unrecognized node — one CheckNode
+    /// itself would also reject — fails loudly instead of silently hiding its subtree from the
+    /// depth cap; this can only be reached by a compiler defect (a new CelNode case added here
+    /// without a matching case here), never by any source string a caller passes to Compile.
+    /// </summary>
     private static IEnumerable<CelNode> Children(CelNode node) => node switch
     {
+        CelLiteral => [],
+        CelFieldRef => [],
+        CelContextRef => [],
+        CelChanged => [],
         CelUnary unary => [unary.Operand],
         CelBinary binary => [binary.Left, binary.Right],
         CelConditional conditional => [conditional.Condition, conditional.WhenTrue, conditional.WhenFalse],
         CelHas has => [has.Field],
-        _ => [],
+        _ => throw new InvalidOperationException(
+            $"'{node.GetType().Name}' is not a known CEL node kind; the depth cap cannot verify its subtree."),
     };
 }
