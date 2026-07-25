@@ -51,6 +51,17 @@ namespace MMLib.Alvo.Expressions.Internal;
 /// <see langword="true"/> for <c>!=</c>.
 /// </para>
 /// <para>
+/// <b>String collation caveat.</b> This interpreter compares strings with ordinal semantics
+/// (<see cref="StringComparer.Ordinal"/>) — case-sensitive, culture-invariant, byte-for-byte. A SQL
+/// backend's <c>==</c>/<c>!=</c> instead uses the compared column's collation, which on a
+/// case-insensitive or otherwise non-deterministic collation can disagree with this ordinal
+/// comparison for two strings that differ only in case or normalization. F3 does not support a
+/// non-default column collation, so the two backends agree in every configuration F3 ships, but this
+/// is a real divergence risk the differential test cannot see (it only proves the two backends agree
+/// under the ordinal/default-collation assumption both are built on) — a future collation-aware
+/// storage driver must revisit this class's remarks and <see cref="SqlPredicateRenderer"/>'s.
+/// </para>
+/// <para>
 /// A null literal (<c>== null</c>/<c>!= null</c>) never reaches this interpreter — the compiler
 /// rejects it and directs the author to <c>has(field)</c>/<c>!has(field)</c> instead, because
 /// <c>owner_id == null</c> would otherwise always be <see langword="false"/> (per the null rule

@@ -241,6 +241,16 @@ public class CelInterpreterTests
     }
 
     [Fact]
+    public void A_failed_comparison_at_the_decimal_overflow_boundary_composes_correctly_under_not_and_or()
+    {
+        var total = (double)decimal.MaxValue;
+
+        Evaluate("!(total > 5)", Row([("total", total)]), CelFixtures.Alice).ShouldBeTrue();
+        Evaluate("total > 5 || 'admin' in @user.roles", Row([("total", total)]), CelFixtures.Alice).ShouldBeFalse();
+        Evaluate("total > 5 || 'admin' in @user.roles", Row([("total", total)]), CelFixtures.Admin).ShouldBeTrue();
+    }
+
+    [Fact]
     public void A_guid_field_compares_equal_to_its_string_representation()
     {
         var id = Guid.NewGuid();

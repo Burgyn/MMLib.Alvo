@@ -1,0 +1,161 @@
+﻿[
+  {
+    source: owner_id == @user.id,
+    context: Alice,
+    Sql: COALESCE("owner_id" = @p0, FALSE),
+    Parameters: [
+      {
+        Key: p0,
+        Value: {alice-user-id}
+      }
+    ]
+  },
+  {
+    source: status != 'draft',
+    context: Alice,
+    Sql: COALESCE("status" <> @p0, FALSE),
+    Parameters: [
+      {
+        Key: p0,
+        Value: draft
+      }
+    ]
+  },
+  {
+    source: total > 100,
+    context: Alice,
+    Sql: COALESCE("total" > @p0, FALSE),
+    Parameters: [
+      {
+        Key: p0,
+        Value: 100
+      }
+    ]
+  },
+  {
+    source: total >= 100,
+    context: Alice,
+    Sql: COALESCE("total" >= @p0, FALSE),
+    Parameters: [
+      {
+        Key: p0,
+        Value: 100
+      }
+    ]
+  },
+  {
+    source: total < 100,
+    context: Alice,
+    Sql: COALESCE("total" < @p0, FALSE),
+    Parameters: [
+      {
+        Key: p0,
+        Value: 100
+      }
+    ]
+  },
+  {
+    source: total <= 100,
+    context: Alice,
+    Sql: COALESCE("total" <= @p0, FALSE),
+    Parameters: [
+      {
+        Key: p0,
+        Value: 100
+      }
+    ]
+  },
+  {
+    source: created_at == approved_at,
+    context: Alice,
+    Sql: COALESCE("created_at" = "approved_at", FALSE),
+    Parameters: []
+  },
+  {
+    source: !(owner_id == @user.id),
+    context: Alice,
+    Sql: (NOT COALESCE("owner_id" = @p0, FALSE)),
+    Parameters: [
+      {
+        Key: p0,
+        Value: {alice-user-id}
+      }
+    ]
+  },
+  {
+    source: has(owner_id),
+    context: Alice,
+    Sql: ("owner_id" IS NOT NULL),
+    Parameters: []
+  },
+  {
+    source: 'editor' in @user.roles,
+    context: Editor,
+    Sql: TRUE,
+    Parameters: []
+  },
+  {
+    source: 'editor' in @user.roles,
+    context: Alice,
+    Sql: FALSE,
+    Parameters: []
+  },
+  {
+    source: status in @user.roles,
+    context: Editor,
+    Sql: COALESCE("status" IN (@p0, @p1), FALSE),
+    Parameters: [
+      {
+        Key: p0,
+        Value: authenticated
+      },
+      {
+        Key: p1,
+        Value: editor
+      }
+    ]
+  },
+  {
+    source: tenant_id == @tenant.id,
+    context: Alice,
+    Sql: COALESCE("tenant_id" = @p0, FALSE),
+    Parameters: [
+      {
+        Key: p0,
+        Value: {acme-tenant-id}
+      }
+    ]
+  },
+  {
+    source: tenant_id == @tenant.id,
+    context: TenantlessAlice,
+    Sql: FALSE,
+    Parameters: []
+  },
+  {
+    source: owner_id == @user.id && status == 'approved',
+    context: Alice,
+    Sql: (COALESCE("owner_id" = @p0, FALSE) AND COALESCE("status" = @p1, FALSE)),
+    Parameters: [
+      {
+        Key: p0,
+        Value: {alice-user-id}
+      },
+      {
+        Key: p1,
+        Value: approved
+      }
+    ]
+  },
+  {
+    source: owner_id == @user.id || 'editor' in @user.roles,
+    context: Editor,
+    Sql: (COALESCE("owner_id" = @p0, FALSE) OR TRUE),
+    Parameters: [
+      {
+        Key: p0,
+        Value: {editor-user-id}
+      }
+    ]
+  }
+]

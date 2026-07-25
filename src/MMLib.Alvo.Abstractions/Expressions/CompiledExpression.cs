@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Expressions;
+﻿using MMLib.Alvo.Schema;
+
+namespace MMLib.Alvo.Expressions;
 
 /// <summary>
 /// A CEL expression that has passed the type checker and the profile filter: every
@@ -22,14 +24,15 @@ public sealed record CompiledExpression
     /// <param name="profile">The profile this expression was compiled against.</param>
     /// <param name="resultType">The runtime type the whole expression evaluates to.</param>
     /// <param name="source">The original CEL source this expression was compiled from.</param>
-    /// <param name="entityName">The name of the entity <paramref name="root"/> was checked against.</param>
-    internal CompiledExpression(CelNode root, CelProfile profile, CelValueType resultType, string source, string entityName)
+    /// <param name="entity">The entity <paramref name="root"/> was checked against.</param>
+    internal CompiledExpression(CelNode root, CelProfile profile, CelValueType resultType, string source, EntitySchema entity)
     {
         Root = root;
         Profile = profile;
         ResultType = resultType;
         Source = source;
-        EntityName = entityName;
+        Entity = entity;
+        EntityName = entity.Name;
     }
 
     /// <summary>Gets the type-checked, profile-filtered expression tree.</summary>
@@ -46,4 +49,11 @@ public sealed record CompiledExpression
 
     /// <summary>Gets the name of the entity <see cref="Root"/> was checked against.</summary>
     public string EntityName { get; }
+
+    /// <summary>
+    /// Gets the entity <see cref="Root"/> was checked against — a SQL renderer needs the full
+    /// schema, not only its name, to resolve a field to a physical column or, on a dynamic entity
+    /// (F7), a JSON path.
+    /// </summary>
+    public EntitySchema Entity { get; }
 }

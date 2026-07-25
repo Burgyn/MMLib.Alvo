@@ -66,7 +66,7 @@ internal sealed class CelCompiler : ICelCompiler
             return CelCompilationResult.Failure([.. allErrors]);
         }
 
-        return CelCompilationResult.Success(new CompiledExpression(root, profile, resultType, source, entity.Name));
+        return CelCompilationResult.Success(new CompiledExpression(root, profile, resultType, source, entity));
     }
 
     private static List<CelCompilationError> AppendResultTypeError(

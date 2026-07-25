@@ -704,6 +704,7 @@ namespace MMLib.Alvo.Expressions
     }
     public sealed class CompiledExpression : System.IEquatable<MMLib.Alvo.Expressions.CompiledExpression>
     {
+        public MMLib.Alvo.Schema.EntitySchema Entity { get; }
         public string EntityName { get; }
         public MMLib.Alvo.Expressions.CelProfile Profile { get; }
         public MMLib.Alvo.Expressions.CelValueType ResultType { get; }
@@ -713,6 +714,32 @@ namespace MMLib.Alvo.Expressions
     public interface ICelCompiler
     {
         MMLib.Alvo.Expressions.CelCompilationResult Compile(string source, MMLib.Alvo.Expressions.CelProfile profile, MMLib.Alvo.Schema.EntitySchema entity);
+    }
+    public interface IFieldSqlRenderer
+    {
+        string FalseLiteral { get; }
+        string TrueLiteral { get; }
+        string RenderCaseInsensitiveLike(string left, string right);
+        string RenderField(MMLib.Alvo.Schema.EntitySchema entity, string fieldName);
+        string RenderParameter(string parameterName);
+    }
+    public interface IPredicateRenderer
+    {
+        MMLib.Alvo.Expressions.SqlExpression Render(MMLib.Alvo.Expressions.CompiledExpression expression, MMLib.Alvo.Expressions.IFieldSqlRenderer fields);
+        MMLib.Alvo.Expressions.SqlPredicate Render(MMLib.Alvo.Expressions.CompiledExpression expression, MMLib.Alvo.AlvoContext context, MMLib.Alvo.Expressions.IFieldSqlRenderer fields);
+    }
+    public sealed class SqlExpression : System.IEquatable<MMLib.Alvo.Expressions.SqlExpression>
+    {
+        public SqlExpression(string sql, System.Collections.Generic.IReadOnlyDictionary<string, object?> parameters) { }
+        public System.Collections.Generic.IReadOnlyDictionary<string, object?> Parameters { get; }
+        public string Sql { get; }
+    }
+    public sealed class SqlPredicate : System.IEquatable<MMLib.Alvo.Expressions.SqlPredicate>
+    {
+        public SqlPredicate(string sql, System.Collections.Generic.IReadOnlyDictionary<string, object?> parameters) { }
+        public System.Collections.Generic.IReadOnlyDictionary<string, object?> Parameters { get; }
+        public string Sql { get; }
+        public static MMLib.Alvo.Expressions.SqlPredicate AlwaysFalse(MMLib.Alvo.Expressions.IFieldSqlRenderer fields) { }
     }
 }
 namespace MMLib.Alvo.Migrations
