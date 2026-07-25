@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Auth;
+﻿using System.Text;
+
+namespace MMLib.Alvo.Auth;
 
 /// <summary>The stored record of an issued API key, as persisted by an <see cref="IApiKeyStore"/>.</summary>
 public sealed record ApiKeyRecord
@@ -33,4 +35,18 @@ public sealed record ApiKeyRecord
     /// <summary>Answers whether this key is usable at <paramref name="now"/>: not revoked and not expired.</summary>
     /// <param name="now">The instant to evaluate usability at.</param>
     public bool IsUsable(DateTimeOffset now) => RevokedAt is null && (ExpiresAt is null || ExpiresAt > now);
+
+    private bool PrintMembers(StringBuilder builder)
+    {
+        builder.Append("KeyId = ").Append(KeyId);
+        builder.Append(", Sha256Hash = ***");
+        builder.Append(", User = ").Append(User);
+        builder.Append(", RoleNames = [").Append(string.Join(", ", RoleNames)).Append(']');
+        builder.Append(", Tenant = ").Append(Tenant);
+        builder.Append(", Scopes = ").Append(Scopes.Count).Append(" scope(s)");
+        builder.Append(", ExpiresAt = ").Append(ExpiresAt);
+        builder.Append(", RevokedAt = ").Append(RevokedAt);
+        builder.Append(", LastUsedAt = ").Append(LastUsedAt);
+        return true;
+    }
 }

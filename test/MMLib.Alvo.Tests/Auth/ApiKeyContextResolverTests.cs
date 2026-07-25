@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Options;
+﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Auth.Internal;
 
@@ -23,9 +24,10 @@ public class ApiKeyContextResolverTests
         });
         configure?.Invoke(options);
 
-        var store = new InMemoryApiKeyStore(Options.Create(options), TimeProvider.System);
+        var store = new InMemoryApiKeyStore(Options.Create(options));
 #pragma warning disable CA1859
-        IAlvoContextResolver resolver = new ApiKeyContextResolver(store, RoleCatalog.Create(["editor"]), TimeProvider.System);
+        IAlvoContextResolver resolver = new ApiKeyContextResolver(
+            store, RoleCatalog.Create(["editor"]), TimeProvider.System, new TenantResolver());
 #pragma warning restore CA1859
         return resolver;
     }
@@ -79,9 +81,10 @@ public class ApiKeyContextResolverTests
             Scopes = { "orders:read" },
         });
         var resolver = new ApiKeyContextResolver(
-            new InMemoryApiKeyStore(Options.Create(options), TimeProvider.System),
+            new InMemoryApiKeyStore(Options.Create(options)),
             RoleCatalog.Create(["editor"]),
-            TimeProvider.System);
+            TimeProvider.System,
+            new TenantResolver());
 
         var principal = await resolver.ResolveAsync("dev.s3cret", requestedTenant: null, TestContext.Current.CancellationToken);
 
@@ -106,5 +109,19 @@ public class ApiKeyContextResolverTests
 
         principal.ShouldNotBeNull();
         new ScopeGate().Allows(principal, "orders", Rules.DataOperation.List).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Authentication_consults_the_DI_registered_TenantResolver_not_a_hard_wired_one()
+    {
+        var services = new ServiceCollection();
+        var registeredTenantResolver = new TenantResolver();
+        services.AddSingleton(registeredTenantResolver);
+        services.AddAlvo();
+
+        using var provider = services.BuildServiceProvider();
+        var resolver = (ApiKeyContextResolver)provider.GetRequiredService<IAlvoContextResolver>();
+
+        resolver.TenantResolver.ShouldBeSameAs(registeredTenantResolver);
     }
 }

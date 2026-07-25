@@ -55,4 +55,12 @@ public class TenantResolverTests
 
         tenant.ShouldBeNull();
     }
+
+    [Fact]
+    public void A_tenantless_key_cannot_be_widened_by_a_requested_tenant()
+    {
+        new TenantResolver().TryResolve(KeyWithTenant(null), TenantId.New().ToString(), out var tenant).ShouldBeFalse();
+
+        tenant.ShouldBeNull();
+    }
 }

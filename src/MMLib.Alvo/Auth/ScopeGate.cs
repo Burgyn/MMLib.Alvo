@@ -17,6 +17,7 @@ public sealed class ScopeGate
     /// <param name="principal">The resolved caller.</param>
     /// <param name="entity">The entity the operation targets.</param>
     /// <param name="operation">The operation being performed.</param>
+    /// <returns><see langword="true"/> when at least one scope allows the operation; an empty scope set always denies.</returns>
     [SuppressMessage(
         "Performance",
         "CA1822:Mark members as static",

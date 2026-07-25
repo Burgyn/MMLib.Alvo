@@ -10,14 +10,20 @@ namespace MMLib.Alvo.Auth.Internal;
 /// unknown key id still runs a hash comparison against a same-length dummy hash, so the response
 /// time does not reveal whether the key id exists.
 /// </summary>
-internal sealed class ApiKeyContextResolver(IApiKeyStore store, RoleCatalog roleCatalog, TimeProvider clock)
+internal sealed class ApiKeyContextResolver(
+    IApiKeyStore store, RoleCatalog roleCatalog, TimeProvider clock, TenantResolver tenantResolver)
     : IAlvoContextResolver
 {
     private const char KeySeparator = '.';
 
     private static readonly string _dummyHash = ApiKeyHash.Compute(Guid.NewGuid().ToString());
 
-    private readonly TenantResolver _tenantResolver = new();
+    /// <summary>
+    /// The <see cref="TenantResolver"/> this instance was constructed with — exposed internally
+    /// so a test can prove the DI-registered singleton, not a hard-wired instance, is what
+    /// authentication actually consults.
+    /// </summary>
+    internal TenantResolver TenantResolver => tenantResolver;
 
     /// <inheritdoc/>
     public async ValueTask<AlvoPrincipal?> ResolveAsync(
@@ -45,7 +51,7 @@ internal sealed class ApiKeyContextResolver(IApiKeyStore store, RoleCatalog role
             return null;
         }
 
-        if (!_tenantResolver.TryResolve(usable, requestedTenant, out var tenant))
+        if (!tenantResolver.TryResolve(usable, requestedTenant, out var tenant))
         {
             return null;
         }

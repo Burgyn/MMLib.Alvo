@@ -17,14 +17,9 @@ internal sealed class InMemoryApiKeyStore : IApiKeyStore
 
     /// <summary>Initializes a new instance of <see cref="InMemoryApiKeyStore"/> from configured dev keys.</summary>
     /// <param name="options">The configured dev API keys.</param>
-    /// <param name="clock">
-    /// The clock this store is created under; kept for signature parity with a future
-    /// persisted <see cref="IApiKeyStore"/> that would need one.
-    /// </param>
-    public InMemoryApiKeyStore(IOptions<AlvoAuthOptions> options, TimeProvider clock)
+    public InMemoryApiKeyStore(IOptions<AlvoAuthOptions> options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        ArgumentNullException.ThrowIfNull(clock);
         _records = BuildRecords(options.Value.DevKeys);
     }
 

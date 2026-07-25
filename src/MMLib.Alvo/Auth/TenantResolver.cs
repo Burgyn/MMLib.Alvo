@@ -4,10 +4,13 @@ namespace MMLib.Alvo.Auth;
 
 /// <summary>
 /// Resolves which tenant a caller acts in from the API key and the tenant the caller requested.
-/// The key's own tenant always wins: a caller cannot widen a key's scope by requesting a
-/// different tenant. A key with no tenant and no request resolves to <see langword="null"/>
-/// with a successful result — that denial belongs to the policy engine, which is the one that
-/// knows whether the target entity is tenant-scoped.
+/// A requested tenant is only ever honoured as a <em>confirmation</em> of the key's own tenant —
+/// it can never grant a tenant the key itself was not issued for. A key with no tenant of its own
+/// is not cross-tenant capable: a request naming any tenant is refused, exactly as if the key had
+/// no tenant at all (that capability is a deliberate, audited grant, deferred to #42). A key with
+/// no tenant and no request resolves to <see langword="null"/> with a successful result — that
+/// denial belongs to the policy engine, which is the one that knows whether the target entity is
+/// tenant-scoped.
 /// </summary>
 public sealed class TenantResolver
 {
@@ -19,8 +22,8 @@ public sealed class TenantResolver
     /// on denial and when the key has no tenant and none was requested.
     /// </param>
     /// <returns>
-    /// <see langword="false"/> when <paramref name="requestedTenant"/> is malformed or differs
-    /// from the key's own tenant.
+    /// <see langword="false"/> when <paramref name="requestedTenant"/> is malformed, differs from
+    /// the key's own tenant, or is present while the key has no tenant of its own.
     /// </returns>
     [SuppressMessage(
         "Performance",
@@ -47,7 +50,7 @@ public sealed class TenantResolver
             return false;
         }
 
-        if (keyTenant is { } ownedTenant && ownedTenant != parsedRequested)
+        if (keyTenant is not { } ownedTenant || ownedTenant != parsedRequested)
         {
             tenant = null;
             return false;
