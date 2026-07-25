@@ -551,16 +551,33 @@ else
   pass "deletes an orphaned ledger"
 fi
 
+# Assert file-system invariants, NOT the exit code: the hook exits 0 on every
+# path, so an exit-code assertion would pass even with the logic wholly broken.
 repo="$(setup_repo)"
 CLAUDE_PROJECT_DIR="$repo" bash "$HOOKS_DIR/reset-edited-paths" </dev/null
-assert_eq "0" "$?" "exits 0 when there is no ledger"
+ledger="$(ledger_path "$repo")"
+if [ -f "$ledger" ]; then
+  fail "no ledger present: does not create ledger file" "(no ledger file)" "ledger created"
+else
+  pass "no ledger present: does not create ledger file"
+fi
+
+# Outside a git repo `git rev-parse` fails — this is the only case that actually
+# exercises the hook's early-return guard.
+plain_dir="$(mktemp -d "$TMP_ROOT/plain.XXXXXX")"
+CLAUDE_PROJECT_DIR="$plain_dir" bash "$HOOKS_DIR/reset-edited-paths" </dev/null
+if [ -z "$(find "$plain_dir" -type f 2>/dev/null)" ]; then
+  pass "outside git repo: does not create any files"
+else
+  fail "outside git repo: does not create any files" "(empty directory)" "$(find "$plain_dir" -type f)"
+fi
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `scripts/test-hooks`
 
-Expected: the 20 earlier assertions pass; `deletes an orphaned ledger` fails because the hook does not exist. Exit code non-zero.
+Expected: the 20 earlier assertions pass; all three new reset assertions fail because the hook does not exist. Exit code non-zero.
 
 - [ ] **Step 3: Write the reset hook**
 
@@ -598,7 +615,7 @@ chmod +x .claude/hooks/reset-edited-paths
 
 Run: `scripts/test-hooks`
 
-Expected: PASS — `22 passed, 0 failed`, exit code 0.
+Expected: PASS — `23 passed, 0 failed`, exit code 0.
 
 - [ ] **Step 5: Wire all three hooks into settings**
 
@@ -816,7 +833,7 @@ hook (an event's hooks run in parallel and would race the ledger). Tests:
 
 Run: `scripts/test-hooks`
 
-Expected: PASS — `22 passed, 0 failed`, exit code 0.
+Expected: PASS — `23 passed, 0 failed`, exit code 0.
 
 - [ ] **Step 5: Commit**
 

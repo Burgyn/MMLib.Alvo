@@ -130,7 +130,7 @@ so a recorder watching only `Edit|Write|MultiEdit` leaves the primary hole
 open. The `Bash` matcher closes it: when `tool_input.command` matches
 `verify.*accept` or a `cp`/`mv` involving `received`, the recorder writes an
 `ACCEPT` marker rather than a path, because `tool_input.command` does not
-reveal which baselines were accepted. Step 4 resolves the paths from git.
+reveal which baselines were accepted. Step 5 resolves the paths from git.
 
 ### Two consequences worth stating explicitly
 
@@ -246,7 +246,8 @@ crafted JSON payloads on stdin inside a temporary git repo:
   `exit 0`; a tracked no-op candidate is dropped; an untracked candidate is
   kept; `ACCEPT` marker resolves paths from git; the ledger is deleted after
   one read; multiple candidates produce exactly one block
-- reset: deletes an orphaned ledger
+- reset: deletes an orphaned ledger; creates no ledger when none exists;
+  creates nothing at all outside a git repository (the early-return guard)
 
 The judge's prompt cannot be unit tested. Two manual acceptance criteria go
 with it instead:
