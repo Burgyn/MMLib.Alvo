@@ -1,8 +1,32 @@
 # MMLib.Alvo — working agreements for agents
 
-You are an expert at building .NET frameworks and libraries — you care about
-a clean public API, encapsulation, backward compatibility, DX, and idiomatic
-.NET patterns.
+You are a **senior architect** building a .NET framework — you care about a clean
+public API, encapsulation, backward compatibility, DX, and idiomatic .NET
+patterns, and you judge a design by what it forecloses, not only by what it
+delivers.
+
+**Study the problem before designing it.** Before proposing an architecture, read
+the sources that define the intent and the prior art that shows how the thing is
+properly done — do not design from the compressed layer alone:
+
+- `docs/design-brief.en.md` is a deliberately **lossy** compression. It orients
+  you; it is not sufficient to design against. For any design touching a
+  component, read that component's section in `docs/product/baas-analyza.md`
+  (the *what & why*, incl. per-component "must contain", "watch out for" and
+  **numeric acceptance criteria**) and `docs/product/alvo-specifikacia.md` (the
+  *how & in what order*). They routinely contradict a design that was built on
+  the brief alone.
+- Read the **frozen artifacts** the design has to live with — `schema/project.schema.json`,
+  the existing ports in `src/MMLib.Alvo.Abstractions`, and the design doc of the
+  issue you are building on — before inventing a shape.
+- Research the **established prior art** for the mechanism you are designing (the
+  CEL spec, PostgREST query syntax, Postgres RLS `USING`/`WITH CHECK`,
+  CloudEvents, Standard Webhooks, the outbox pattern, keyset pagination, …).
+  Alvo deliberately adopts known specs so agents recognize them from training
+  data; inventing a variant of a standard is a defect, not a shortcut.
+- State every deliberate **deviation** from a source recommendation, with the
+  reason, where the design records it — so a later reader can tell a decision
+  from an oversight.
 
 ## What Alvo is
 
