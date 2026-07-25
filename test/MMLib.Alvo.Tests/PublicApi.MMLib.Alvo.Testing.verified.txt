@@ -11,6 +11,25 @@ namespace MMLib.Alvo.Testing
         public ArchTargetAttribute(string targetAssemblyName) { }
         public string TargetAssemblyName { get; }
     }
+    public sealed class DifferentialRuleCase : System.IEquatable<MMLib.Alvo.Testing.DifferentialRuleCase>
+    {
+        public DifferentialRuleCase(string Rule, MMLib.Alvo.Data.AlvoRecord Row, string ContextName) { }
+        public string ContextName { get; init; }
+        public MMLib.Alvo.Data.AlvoRecord Row { get; init; }
+        public string Rule { get; init; }
+    }
+    public static class DifferentialRuleCases
+    {
+        public static MMLib.Alvo.AlvoContext AcmeUser { get; }
+        public static MMLib.Alvo.AlvoContext Admin { get; }
+        public static MMLib.Alvo.AlvoContext Alice { get; }
+        public static System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Testing.DifferentialRuleCase> All { get; }
+        public static MMLib.Alvo.AlvoContext Bob { get; }
+        public static MMLib.Alvo.AlvoContext Editor { get; }
+        public static MMLib.Alvo.AlvoContext OtherTenantUser { get; }
+        public static MMLib.Alvo.AlvoContext TenantlessAlice { get; }
+        public static MMLib.Alvo.AlvoContext ContextFor(string name) { }
+    }
     public static class RepositoryRoot
     {
         public static string Find() { }

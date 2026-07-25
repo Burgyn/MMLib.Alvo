@@ -13,14 +13,15 @@ namespace MMLib.Alvo.Tests.Expressions;
 /// predicate renderer, the policy engine) compile against the exact same fixture the checker
 /// itself was proven against.
 /// </summary>
+/// <remarks>
+/// The named callers below are not redeclared here — they delegate to
+/// <see cref="DifferentialRuleCases"/>, which cannot itself depend on this test project (a shared
+/// library cannot reference a test project), so the one true definition lives there and the
+/// differential test (Task 10) and this fixture agree on every caller by construction, never by
+/// two definitions that happen to match.
+/// </remarks>
 internal static class CelFixtures
 {
-    private static readonly RoleCatalog _roleCatalog = RoleCatalog.Create(["editor"]);
-
-    private static readonly TenantId _acmeTenantId = TenantId.New();
-
-    private static readonly TenantId _otherTenantId = TenantId.New();
-
     internal static EntitySchema Orders { get; } = new()
     {
         Name = "orders",
@@ -43,62 +44,32 @@ internal static class CelFixtures
     internal static ICelCompiler Compiler { get; } = new CelCompiler();
 
     /// <summary>The tenant every Acme-tenant context (<see cref="Alice"/>, <see cref="AcmeUser"/>, ...) acts in.</summary>
-    internal static TenantId AcmeTenant => _acmeTenantId;
+    internal static TenantId AcmeTenant => Alice.Tenant!.Value;
 
     /// <summary>An authenticated caller in the Acme tenant.</summary>
-    internal static AlvoContext Alice { get; } = new()
-    {
-        User = UserId.New(),
-        Roles = new HashSet<Role> { Role.Authenticated },
-        Tenant = _acmeTenantId,
-    };
+    internal static AlvoContext Alice => DifferentialRuleCases.Alice;
 
     /// <summary>A second, distinct authenticated caller in the Acme tenant — never <see cref="Alice"/>'s own row.</summary>
-    internal static AlvoContext Bob { get; } = new()
-    {
-        User = UserId.New(),
-        Roles = new HashSet<Role> { Role.Authenticated },
-        Tenant = _acmeTenantId,
-    };
+    internal static AlvoContext Bob => DifferentialRuleCases.Bob;
 
     /// <summary>An Acme-tenant caller holding the declared application role <c>editor</c>.</summary>
-    internal static AlvoContext Editor { get; } = new()
-    {
-        User = UserId.New(),
-        Roles = new HashSet<Role> { Role.Authenticated, _roleCatalog.Get("editor") },
-        Tenant = _acmeTenantId,
-    };
+    internal static AlvoContext Editor => DifferentialRuleCases.Editor;
 
     /// <summary>
     /// An Acme-tenant caller holding <see cref="Role.Admin"/> plus <see cref="Role.Authenticated"/>
     /// — an admin is also an authenticated caller, so a rule like <c>'authenticated' in @user.roles</c>
     /// must pass for this context too, not only the built-in-admin-specific ones.
     /// </summary>
-    internal static AlvoContext Admin { get; } = new()
-    {
-        User = UserId.New(),
-        Roles = new HashSet<Role> { Role.Authenticated, Role.Admin },
-        Tenant = _acmeTenantId,
-    };
+    internal static AlvoContext Admin => DifferentialRuleCases.Admin;
 
     /// <summary>A plain authenticated caller in the Acme tenant, for tenant-isolation tests.</summary>
-    internal static AlvoContext AcmeUser { get; } = new()
-    {
-        User = UserId.New(),
-        Roles = new HashSet<Role> { Role.Authenticated },
-        Tenant = _acmeTenantId,
-    };
+    internal static AlvoContext AcmeUser => DifferentialRuleCases.AcmeUser;
 
     /// <summary>An authenticated caller in a different tenant than <see cref="AcmeUser"/>, for tenant-isolation tests.</summary>
-    internal static AlvoContext OtherTenantUser { get; } = new()
-    {
-        User = UserId.New(),
-        Roles = new HashSet<Role> { Role.Authenticated },
-        Tenant = _otherTenantId,
-    };
+    internal static AlvoContext OtherTenantUser => DifferentialRuleCases.OtherTenantUser;
 
     /// <summary><see cref="Alice"/> with no tenant — must be denied on a tenant-scoped entity, never widened to "all tenants".</summary>
-    internal static AlvoContext TenantlessAlice { get; } = Alice with { Tenant = null };
+    internal static AlvoContext TenantlessAlice => DifferentialRuleCases.TenantlessAlice;
 
     /// <summary>Compiles CEL source against <see cref="Orders"/> for the <see cref="CelProfile.Rule"/> profile.</summary>
     /// <param name="source">The CEL expression source.</param>
