@@ -1,5 +1,5 @@
 <!-- GENERATED — do not hand-edit. Regenerate via the alvo-regen-brief skill. -->
-<!-- brief-source: docs/product/alvo-specifikacia.md sha256:9665ba17a5d783b7525c23685e8439dd709b1e3e8dfd5bd55636951a5c32878b -->
+<!-- brief-source: docs/product/alvo-specifikacia.md sha256:b68ea0e0f3be283122eeb8214560136d737bc8baf5b33f17d3cc2db7c330d5c9 -->
 <!-- brief-source: docs/product/baas-analyza.md sha256:1a1d038e7aae03da549f2caec4b43da84088b8510d3855afebc76fa6f6e99bbb -->
 
 # Alvo design brief (compressed)
@@ -291,8 +291,8 @@ another port**; lockstep SemVer (everything released together as one version).
   post-merge on `main`** — a ~20-min run is a real tax on every core PR, and it
   answers "is the suite still adversarial?" (fix = add a test) rather than "is
   this change correct?" (fix = don't merge). Cost accepted: nothing blocks a
-  merge on mutation score, so a red run on `main` is a notification someone must
-  act on. Direct push to `main` is forbidden.
+  merge on mutation score, so a red run on `main` opens a `mutation-gate` tracking
+  issue that someone must act on. Direct push to `main` is forbidden.
 - **Mediator ≠ MediatR** (commercial). Consider Wolverine (MIT: outbox +
   in-process mediator). Avoid MassTransit v9, ImageSharp, Duende, AutoMapper,
   FluentAssertions v8+ (licensing).

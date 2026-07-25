@@ -26,9 +26,15 @@ name: Mutation
 # later, on main, because the fix is to add a test, not to revert the merge.
 # Every other layer (contract, snapshot, public-API, arch, integration, e2e)
 # stays on the PR. Consequence, accepted: main can go red on mutation score, and
-# nothing blocks a merge on it — a failure here is a notification, not a gate, so
-# it needs someone to actually act on it. Run it on demand before a risky merge
-# via workflow_dispatch.
+# nothing blocks a merge on it — a failure here is a notification, not a gate.
+# The `notify` job below is what makes that notification durable instead of a
+# grey X nobody opens. Run it on demand before a risky merge via
+# workflow_dispatch.
+#
+# Note this removes a signal, not a gate: the repo's `main` ruleset requires
+# only `Build & test`, `Brief freshness`, `dependency-review` and
+# `Analyze (csharp)` — the Stryker contexts were never required, so mutation
+# never blocked a merge even while it ran on the PR.
 on:
   push:
     branches:
@@ -38,16 +44,24 @@ on:
       - 'src/MMLib.Alvo.Data.EntityFrameworkCore/**'
       - 'stryker-config.json'
       - 'stryker-config.data-ef.json'
+      # The test projects belong in the filter too: mutation judges the test
+      # suite, so deleting or loosening an adversarial test drops the score
+      # without touching src/. Post-merge is now the only run that can catch it.
+      - 'test/MMLib.Alvo.Tests/**'
+      - 'test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/**'
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# Serialize rather than cancel: on main each merge commit deserves its own
-# verdict. Cancelling in-progress runs would silently drop the signal for the
-# commit that actually broke the score.
+# Key the group on the COMMIT, not the ref. On main every merge commit deserves
+# its own verdict, and a ref-keyed group cannot deliver that even with
+# cancel-in-progress off: GitHub keeps at most one pending run per group, so a
+# third merge landing during a 40-minute run cancels the second one as
+# superseded — dropping exactly the commit whose score you needed, as a grey
+# "cancelled" nobody reads.
 concurrency:
-  group: mutation-${{ github.ref }}-${{ github.workflow }}
+  group: mutation-${{ github.sha }}-${{ github.workflow }}
   cancel-in-progress: false
 
 jobs:
@@ -110,3 +124,61 @@ jobs:
           fi
 
           exit "$stryker_exit"
+
+  # Post-merge, nothing blocks on this workflow, so a failure has to leave a mark
+  # somebody trips over. Without this the only signal is GitHub's default email to
+  # whoever clicked merge — which is precisely how a quietly-rotting main happens.
+  # One open tracking issue at a time: later failures comment on it rather than
+  # spawning a pile.
+  notify:
+    name: Report a failed mutation run
+    needs: mutation
+    if: failure() && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Open or update the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          body="$(cat <<EOF
+          The post-merge mutation run failed for \`$SHA\`.
+
+          Run: $RUN_URL
+
+          Mutation runs post-merge by design, so this did not block the merge —
+          it needs someone to act. Two shapes of failure:
+
+          - **Mutation score below threshold** — the adversarial suite stopped
+            biting. The fix is to add or strengthen a test, not to revert.
+          - **Vacuous run (zero mutants tested)** — the gate itself is broken
+            (see stryker-net#3094). That is more urgent than a low score: it
+            means the previous greens were meaningless.
+          EOF
+          )"
+
+          # The label may not exist yet; creating it must not fail the job.
+          gh label create mutation-gate \
+            --repo "$REPO" \
+            --description "Post-merge mutation run needs attention" \
+            --color B60205 2>/dev/null || true
+
+          existing="$(gh issue list --repo "$REPO" --state open \
+            --label mutation-gate --limit 1 --json number --jq '.[0].number // empty')"
+
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$REPO" --body "$body"
+          else
+            gh issue create --repo "$REPO" \
+              --title "Mutation gate failed on main" \
+              --label mutation-gate \
+              --body "$body"
+          fi
