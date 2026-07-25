@@ -18,6 +18,26 @@ namespace MMLib.Alvo
     {
         Microsoft.Extensions.DependencyInjection.IServiceCollection Services { get; }
     }
+    public readonly struct Role : System.IEquatable<MMLib.Alvo.Role>
+    {
+        public string Name { get; }
+        public static MMLib.Alvo.Role Admin { get; }
+        public static MMLib.Alvo.Role Anon { get; }
+        public static MMLib.Alvo.Role Authenticated { get; }
+        public bool Equals(MMLib.Alvo.Role other) { }
+        public override int GetHashCode() { }
+        public override string ToString() { }
+    }
+    public sealed class RoleCatalog
+    {
+        public System.Collections.Generic.IReadOnlySet<MMLib.Alvo.Role> All { get; }
+        public static MMLib.Alvo.RoleCatalog BuiltInOnly { get; }
+        public MMLib.Alvo.Role Get(string name) { }
+        public System.Collections.Generic.IReadOnlySet<MMLib.Alvo.Role> Resolve(System.Collections.Generic.IEnumerable<string> names) { }
+        public bool TryGet(string name, out MMLib.Alvo.Role role) { }
+        public static MMLib.Alvo.RoleCatalog Create(System.Collections.Generic.IEnumerable<string> applicationRoles) { }
+        public static MMLib.Alvo.RoleCatalog FromDescriptor(MMLib.Alvo.Descriptor.AlvoDescriptor descriptor) { }
+    }
     [System.Text.Json.Serialization.JsonConverter(typeof(MMLib.Alvo.TenantIdJsonConverter))]
     public readonly struct TenantId : System.IEquatable<MMLib.Alvo.TenantId>, System.IParsable<MMLib.Alvo.TenantId>
     {
@@ -27,6 +47,13 @@ namespace MMLib.Alvo
         public static MMLib.Alvo.TenantId New() { }
         public static MMLib.Alvo.TenantId Parse(string s, System.IFormatProvider? provider) { }
         public static bool TryParse([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] string? s, System.IFormatProvider? provider, out MMLib.Alvo.TenantId result) { }
+    }
+    public sealed class UnknownRoleException : System.Exception
+    {
+        public UnknownRoleException() { }
+        public UnknownRoleException(string message) { }
+        public UnknownRoleException(string message, System.Exception innerException) { }
+        public string RoleName { get; }
     }
     [System.Text.Json.Serialization.JsonConverter(typeof(MMLib.Alvo.UserIdJsonConverter))]
     public readonly struct UserId : System.IEquatable<MMLib.Alvo.UserId>, System.IParsable<MMLib.Alvo.UserId>
