@@ -18,6 +18,26 @@ namespace MMLib.Alvo
     {
         Microsoft.Extensions.DependencyInjection.IServiceCollection Services { get; }
     }
+    [System.Text.Json.Serialization.JsonConverter(typeof(MMLib.Alvo.TenantIdJsonConverter))]
+    public readonly struct TenantId : System.IEquatable<MMLib.Alvo.TenantId>, System.IParsable<MMLib.Alvo.TenantId>
+    {
+        public TenantId(System.Guid Value) { }
+        public System.Guid Value { get; init; }
+        public override string ToString() { }
+        public static MMLib.Alvo.TenantId New() { }
+        public static MMLib.Alvo.TenantId Parse(string s, System.IFormatProvider? provider) { }
+        public static bool TryParse([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] string? s, System.IFormatProvider? provider, out MMLib.Alvo.TenantId result) { }
+    }
+    [System.Text.Json.Serialization.JsonConverter(typeof(MMLib.Alvo.UserIdJsonConverter))]
+    public readonly struct UserId : System.IEquatable<MMLib.Alvo.UserId>, System.IParsable<MMLib.Alvo.UserId>
+    {
+        public UserId(System.Guid Value) { }
+        public System.Guid Value { get; init; }
+        public override string ToString() { }
+        public static MMLib.Alvo.UserId New() { }
+        public static MMLib.Alvo.UserId Parse(string s, System.IFormatProvider? provider) { }
+        public static bool TryParse([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] string? s, System.IFormatProvider? provider, out MMLib.Alvo.UserId result) { }
+    }
 }
 namespace MMLib.Alvo.Descriptor
 {
