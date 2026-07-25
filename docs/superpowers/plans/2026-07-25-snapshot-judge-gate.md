@@ -555,29 +555,41 @@ fi
 # path, so an exit-code assertion would pass even with the logic wholly broken.
 repo="$(setup_repo)"
 CLAUDE_PROJECT_DIR="$repo" bash "$HOOKS_DIR/reset-edited-paths" </dev/null
+rc=$?
 ledger="$(ledger_path "$repo")"
 if [ -f "$ledger" ]; then
   fail "no ledger present: does not create ledger file" "(no ledger file)" "ledger created"
 else
   pass "no ledger present: does not create ledger file"
 fi
+assert_eq "0" "$rc" "no ledger present: exits 0"
 
 # Outside a git repo `git rev-parse` fails — this is the only case that actually
 # exercises the hook's early-return guard.
 plain_dir="$(mktemp -d "$TMP_ROOT/plain.XXXXXX")"
 CLAUDE_PROJECT_DIR="$plain_dir" bash "$HOOKS_DIR/reset-edited-paths" </dev/null
+rc=$?
 if [ -z "$(find "$plain_dir" -type f 2>/dev/null)" ]; then
   pass "outside git repo: does not create any files"
 else
   fail "outside git repo: does not create any files" "(empty directory)" "$(find "$plain_dir" -type f)"
 fi
+assert_eq "0" "$rc" "outside git repo: exits 0"
+
+Assert the exit code alongside the file-system invariant, not instead of it: a
+hook that dies early (unbound variable, command not found) aborts non-zero under
+`set -uo pipefail` while still creating no files, which is exactly the
+"a hook must never break a turn" regression this suite exists to catch. Note the
+outside-a-repo case does NOT prove the early-return guard fires — without the
+guard, `rm -f "$root/"` fails silently on a directory and the hook stays inert
+either way.
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `scripts/test-hooks`
 
-Expected: the 20 earlier assertions pass; all three new reset assertions fail because the hook does not exist. Exit code non-zero.
+Expected: the 20 earlier assertions pass; all five new reset assertions fail because the hook does not exist. Exit code non-zero.
 
 - [ ] **Step 3: Write the reset hook**
 
@@ -615,7 +627,7 @@ chmod +x .claude/hooks/reset-edited-paths
 
 Run: `scripts/test-hooks`
 
-Expected: PASS — `23 passed, 0 failed`, exit code 0.
+Expected: PASS — `25 passed, 0 failed`, exit code 0.
 
 - [ ] **Step 5: Wire all three hooks into settings**
 
@@ -833,7 +845,7 @@ hook (an event's hooks run in parallel and would race the ledger). Tests:
 
 Run: `scripts/test-hooks`
 
-Expected: PASS — `23 passed, 0 failed`, exit code 0.
+Expected: PASS — `25 passed, 0 failed`, exit code 0.
 
 - [ ] **Step 5: Commit**
 

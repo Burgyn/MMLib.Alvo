@@ -126,6 +126,21 @@ brief-freshness on a staged spec/analysis/brief (regenerate via
 `alvo-regen-brief` if it fires), plus `dotnet format` and ring0 on staged code.
 **commit-msg**: Conventional Commits. Details in `.husky/task-runner.json`.
 
+## Claude Code hooks
+
+Distinct from the Husky git hooks above: these run inside an agent's turn, not
+around a commit. `.claude/hooks/record-edited-paths` (PostToolUse) records every
+touched `*.verified.*` baseline into a per-turn ledger in the git dir;
+`.claude/hooks/turn-review-gate` (Stop) drains that ledger — always, before any
+decision — and, if a baseline really moved, blocks the turn with an instruction
+to dispatch the read-only `alvo-snapshot-judge`, because a Verify baseline is the
+one place a test can be made green with no product-code change.
+`reset-edited-paths` clears a ledger orphaned by an ungraceful exit. The gate is
+a **registry**: add a future judgment check as a function inside
+`turn-review-gate`, never as a second Stop hook (an event's hooks run in
+parallel and would race the drain). Tests: `scripts/test-hooks`. Design:
+`docs/superpowers/specs/2026-07-25-snapshot-judge-gate-design.md`.
+
 ## Always on
 
 - **Package boundary** — a package is earned, not assumed; default to

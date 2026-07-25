@@ -198,22 +198,35 @@ else
   pass "deletes an orphaned ledger"
 fi
 
+# Assert the file-system invariant AND the exit code. The invariant alone cannot
+# see a script that dies early (unbound variable, command not found): under
+# `set -uo pipefail` that aborts with a non-zero status before the trailing
+# `exit 0`, while still creating no files — exactly the "a hook must never break
+# a turn" regression this suite exists to catch.
 repo="$(setup_repo)"
 CLAUDE_PROJECT_DIR="$repo" bash "$HOOKS_DIR/reset-edited-paths" </dev/null
+rc=$?
 ledger="$(ledger_path "$repo")"
 if [ -f "$ledger" ]; then
   fail "no ledger present: does not create ledger file" "(no ledger file)" "ledger created"
 else
   pass "no ledger present: does not create ledger file"
 fi
+assert_eq "0" "$rc" "no ledger present: exits 0"
 
+# Outside a git repo `git rev-parse` fails. This asserts the weaker invariant
+# that the hook writes nothing there — it does NOT prove the early-return guard
+# fires, because without the guard `rm -f "$root/"` fails silently on a
+# directory and the hook stays inert either way.
 plain_dir="$(mktemp -d "$TMP_ROOT/plain.XXXXXX")"
 CLAUDE_PROJECT_DIR="$plain_dir" bash "$HOOKS_DIR/reset-edited-paths" </dev/null
+rc=$?
 if [ -z "$(find "$plain_dir" -type f 2>/dev/null)" ]; then
   pass "outside git repo: does not create any files"
 else
   fail "outside git repo: does not create any files" "(empty directory)" "$(find "$plain_dir" -type f)"
 fi
+assert_eq "0" "$rc" "outside git repo: exits 0"
 
 # ======================================================================= total
 
