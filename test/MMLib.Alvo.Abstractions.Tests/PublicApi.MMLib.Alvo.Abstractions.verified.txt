@@ -557,6 +557,122 @@ namespace MMLib.Alvo.Descriptor
         public System.Collections.Generic.IReadOnlyDictionary<string, MMLib.Alvo.Descriptor.WebhookEndpoint>? Endpoints { get; init; }
     }
 }
+namespace MMLib.Alvo.Expressions
+{
+    public sealed class CelBinary : MMLib.Alvo.Expressions.CelNode, System.IEquatable<MMLib.Alvo.Expressions.CelBinary>
+    {
+        public CelBinary(MMLib.Alvo.Expressions.CelBinaryOperator Operator, MMLib.Alvo.Expressions.CelNode Left, MMLib.Alvo.Expressions.CelNode Right) { }
+        public MMLib.Alvo.Expressions.CelNode Left { get; init; }
+        public MMLib.Alvo.Expressions.CelBinaryOperator Operator { get; init; }
+        public MMLib.Alvo.Expressions.CelNode Right { get; init; }
+    }
+    public enum CelBinaryOperator
+    {
+        Equal = 0,
+        NotEqual = 1,
+        Less = 2,
+        LessOrEqual = 3,
+        Greater = 4,
+        GreaterOrEqual = 5,
+        And = 6,
+        Or = 7,
+        In = 8,
+        Add = 9,
+        Subtract = 10,
+        Multiply = 11,
+        Divide = 12,
+    }
+    public sealed class CelChanged : MMLib.Alvo.Expressions.CelNode, System.IEquatable<MMLib.Alvo.Expressions.CelChanged>
+    {
+        public CelChanged(string FieldName) { }
+        public string FieldName { get; init; }
+    }
+    public sealed class CelConditional : MMLib.Alvo.Expressions.CelNode, System.IEquatable<MMLib.Alvo.Expressions.CelConditional>
+    {
+        public CelConditional(MMLib.Alvo.Expressions.CelNode Condition, MMLib.Alvo.Expressions.CelNode WhenTrue, MMLib.Alvo.Expressions.CelNode WhenFalse) { }
+        public MMLib.Alvo.Expressions.CelNode Condition { get; init; }
+        public MMLib.Alvo.Expressions.CelNode WhenFalse { get; init; }
+        public MMLib.Alvo.Expressions.CelNode WhenTrue { get; init; }
+    }
+    public sealed class CelContextRef : MMLib.Alvo.Expressions.CelNode, System.IEquatable<MMLib.Alvo.Expressions.CelContextRef>
+    {
+        public CelContextRef(MMLib.Alvo.Expressions.CelContextValue Value, MMLib.Alvo.Expressions.CelValueType Type) { }
+        public MMLib.Alvo.Expressions.CelValueType Type { get; init; }
+        public MMLib.Alvo.Expressions.CelContextValue Value { get; init; }
+    }
+    public enum CelContextValue
+    {
+        UserId = 0,
+        UserRoles = 1,
+        TenantId = 2,
+    }
+    public sealed class CelFieldRef : MMLib.Alvo.Expressions.CelNode, System.IEquatable<MMLib.Alvo.Expressions.CelFieldRef>
+    {
+        public CelFieldRef(string FieldName, MMLib.Alvo.Expressions.CelValueType Type, MMLib.Alvo.Expressions.CelRecordState State) { }
+        public string FieldName { get; init; }
+        public MMLib.Alvo.Expressions.CelRecordState State { get; init; }
+        public MMLib.Alvo.Expressions.CelValueType Type { get; init; }
+    }
+    public sealed class CelHas : MMLib.Alvo.Expressions.CelNode, System.IEquatable<MMLib.Alvo.Expressions.CelHas>
+    {
+        public CelHas(MMLib.Alvo.Expressions.CelFieldRef Field) { }
+        public MMLib.Alvo.Expressions.CelFieldRef Field { get; init; }
+    }
+    public sealed class CelLiteral : MMLib.Alvo.Expressions.CelNode, System.IEquatable<MMLib.Alvo.Expressions.CelLiteral>
+    {
+        public CelLiteral(MMLib.Alvo.Expressions.CelValueType Type, object? Value) { }
+        public MMLib.Alvo.Expressions.CelValueType Type { get; init; }
+        public object? Value { get; init; }
+    }
+    public abstract class CelNode : System.IEquatable<MMLib.Alvo.Expressions.CelNode>
+    {
+        protected CelNode() { }
+    }
+    public enum CelProfile
+    {
+        Rule = 0,
+        Computed = 1,
+        Condition = 2,
+    }
+    public enum CelRecordState
+    {
+        Current = 0,
+        New = 1,
+        Old = 2,
+    }
+    public sealed class CelSyntaxException : System.Exception
+    {
+        public CelSyntaxException() { }
+        public CelSyntaxException(string message) { }
+        public CelSyntaxException(string message, System.Exception innerException) { }
+        public CelSyntaxException(string message, int position, string? fixSuggestion = null) { }
+        public string? FixSuggestion { get; }
+        public int Position { get; }
+    }
+    public sealed class CelUnary : MMLib.Alvo.Expressions.CelNode, System.IEquatable<MMLib.Alvo.Expressions.CelUnary>
+    {
+        public CelUnary(MMLib.Alvo.Expressions.CelUnaryOperator Operator, MMLib.Alvo.Expressions.CelNode Operand) { }
+        public MMLib.Alvo.Expressions.CelNode Operand { get; init; }
+        public MMLib.Alvo.Expressions.CelUnaryOperator Operator { get; init; }
+    }
+    public enum CelUnaryOperator
+    {
+        Not = 0,
+        Negate = 1,
+    }
+    public enum CelValueType
+    {
+        Bool = 0,
+        Int = 1,
+        Decimal = 2,
+        String = 3,
+        Timestamp = 4,
+        Uuid = 5,
+        Json = 6,
+        StringList = 7,
+        Null = 8,
+    }
+}
 namespace MMLib.Alvo.Migrations
 {
     public sealed class AppliedSchema : System.IEquatable<MMLib.Alvo.Migrations.AppliedSchema>
