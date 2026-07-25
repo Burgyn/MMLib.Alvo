@@ -101,11 +101,14 @@ public readonly record struct TenantId(Guid Value);
 public sealed record AlvoContext
 {
     public required UserId User { get; init; }
-    public TenantId? Tenant { get; init; }          // null denies on scoped entities
-    public required IReadOnlySet<string> Roles { get; init; }
-    public required IReadOnlyDictionary<string, string> Claims { get; init; }
+    public required IReadOnlySet<Role> Roles { get; init; }   // never empty; anonymous = { Role.Anon }
+    public TenantId? Tenant { get; init; }                    // null denies on scoped entities
 }
 ```
+
+That is the whole context. It carries exactly the vocabulary the frozen F2 schema
+can address (`@user.id`, roles, `@tenant`) and nothing speculative — see
+*Claims are deliberately absent* below.
 
 `Guid` is the right underlying primitive because the schema mapper already emits
 `id`, `tenant_id`, `created_by` and `updated_by` as `uuid`. The consequence, taken
@@ -126,11 +129,91 @@ Record `id` stays a plain `Guid`. Records are weakly-typed JSON payloads with no
 per-entity types, so a generic `RecordId` would add a wrapper that catches
 nothing.
 
+### Roles are a set, and `Role` is not a string
+
+**Decision: a caller holds a *set* of roles, and CEL exposes `@user.roles` with
+membership via `in` (`'editor' in @user.roles`).**
+
+The frozen F2 schema documents the singular `@user.role`. That prose is
+documentation, not validation — `$defs/cel` is an unconstrained
+`{"type":"string","minLength":1,"maxLength":2000}` with no pattern — so changing
+the vocabulary invalidates no descriptor and alters no validation behaviour. Two
+description strings in `schema/project.schema.json` (the `auth.roles` description
+and the `hidden` example) are updated in PR1.
+
+Two reasons the singular reading is wrong:
+
+1. **The built-in trio is not one axis.** `anon` / `authenticated` describe
+   *whether the caller is logged in*; `admin` describes *privilege*. With a single
+   slot an admin's role is `admin`, so `@user.role == 'authenticated'` is **false**
+   for an admin — and "any logged-in user may read" is the most common rule anyone
+   writes. This is not an edge case; it breaks the first descriptor someone
+   authors.
+2. **Multi-role is already on the plan.** #37 (RBAC) is scheduled and the brief
+   names `@user.teams` — plural — beside roles. If `@user.role` shipped
+   single-valued, the arrival of multi-role would leave it with no correct
+   answer: returning a "primary" role silently changes which rows existing rules
+   match, and a silent change inside an authorization predicate is the worst
+   failure mode this system has. Shipping the set now means never having to make
+   that choice.
+
+`==` is not bent into "contains": CEL is typed, so comparing a list to a string is
+a type error. `@user.role` (singular) is **rejected at apply** with a fix
+suggestion pointing at `'x' in @user.roles` — not silently accepted and not
+silently reinterpreted, so anyone who read the old schema prose gets an actionable
+message instead of a rule that appears to work.
+
+`Role` is a value type, not a string:
+
+```csharp
+public readonly record struct Role
+{
+    private const string AnonName = "anon";
+    private readonly string? _name;
+    private Role(string name) => _name = name;
+
+    /// default(Role) is anon — the least-privileged value, so a forgotten
+    /// initialization fails safe instead of open.
+    public string Name => _name ?? AnonName;
+
+    public static readonly Role Anon = new(AnonName);
+    public static readonly Role Authenticated = new("authenticated");
+    public static readonly Role Admin = new("admin");
+
+    internal static Role Application(string name) => new(name);
+}
+```
+
+Two properties make this more than a wrapper:
+
+- **`default(Role)` is `anon`** — the least-privileged value, so an uninitialized
+  field fails safe. A bare `string` defaults to `null`, which is undefined
+  behaviour waiting to happen.
+- **An undeclared role cannot be constructed.** There is no public constructor;
+  application roles are minted only by a `RoleCatalog` built from the descriptor's
+  `auth.roles` plus the three built-ins. A typo is rejected where it enters rather
+  than quietly matching no rule.
+
+**Deferred:** when #36 adds external identity providers, a policy is needed for
+*unknown* roles arriving in a token (reject the request versus ignore that role).
+In F3 roles come from Alvo's own configuration, so rejecting loudly is correct.
+
+### Claims are deliberately absent
+
+`AlvoContext` carries no claims dictionary. The reason is not YAGNI but the
+fail-fast contract: rules compile **at apply**, so type-checking
+`@user.claims['department_id'] == department_id` requires knowing that claim's
+type at apply time. A runtime `IReadOnlyDictionary<string, string>` says nothing
+at compile time, so it would either forfeit fail-fast or force a typed claim
+declaration into the descriptor (`auth.claims`) — a change to the frozen F2 schema
+made before we know what RBAC needs. The brief ties custom claims and
+`@user.teams` to RBAC (#37); the declaration belongs there, with them.
+
 ### Ports (all in `Abstractions`, which stays ASP.NET-free)
 
 | Namespace | Port / type | Guarantee |
 |---|---|---|
-| `MMLib.Alvo` | `AlvoContext`, `UserId`, `TenantId` | identity, roles/claims, tenant |
+| `MMLib.Alvo` | `AlvoContext`, `UserId`, `TenantId`, `Role`, `RoleCatalog` | identity, roles, tenant |
 | `MMLib.Alvo.Expressions` | `ICelCompiler` → `CompiledPredicate` (SQL fragment + named parameters) / `CompiledDelegate` | fail-fast at save; input is never interpolated |
 | `MMLib.Alvo.Rules` | `IPolicyEngine` | for (entity, operation, context) returns a predicate or deny; field-level `hidden` / `readOnly` |
 | `MMLib.Alvo.Data` | `IAlvoData`, `AlvoQuery`, `AlvoRecord` | policy is applied **inside** the port |
@@ -367,7 +450,7 @@ Same test types as #18 — nothing new is invented.
 
 | PR | Content | Closes |
 |---|---|---|
-| **1** | `AlvoContext` + dev auth / tenant resolution · CEL parser + AST · the three profiles · `IPolicyEngine` · adversarial suite written red | `[15a]` |
+| **1** | `AlvoContext` (+ `Role` / `RoleCatalog`) + dev auth / tenant resolution · CEL parser + AST · the three profiles · `IPolicyEngine` · the two `@user.roles` description strings in `schema/project.schema.json` · adversarial suite written red | `[15a]` |
 | **2** | `IAlvoData` + EF implementation · policy in the `WHERE` clause · adversarial suite green on SQLite + PostgreSQL | #20 |
 | **3** | generated HTTP Data API · filters / sort / paging · schema-derived validation · RFC 7807 · `Idempotency-Key` · OpenAPI 3.1 | — |
 | **4** | `MMLib.Alvo.Host` + docker-compose + TeaPie + Scalar UI | #19, `[15b]` |
@@ -411,7 +494,12 @@ cursors.
    stubbed. **Decided with the maintainer** — the adversarial suite is
    unwritable without them.
 3. `UserId` / `TenantId` wrap `Guid`, consistent with the `uuid` managed columns
-   already emitted by the mapper.
+   already emitted by the mapper. Relatedly: a caller holds a **set** of roles and
+   CEL exposes `@user.roles`, superseding the singular `@user.role` documented in
+   the F2 schema prose. The schema's `cel` type has no pattern, so this
+   invalidates no descriptor — but it does edit a frozen-schema description, which
+   is the part worth vetoing if the maintainer disagrees. Rationale in *Roles are
+   a set, and `Role` is not a string*.
 4. The host and compose are pulled forward into F3 so #19 closes against its
    literal DoD. **Decided with the maintainer**; PLAN.md already says F4 runs in
    parallel with F3.
