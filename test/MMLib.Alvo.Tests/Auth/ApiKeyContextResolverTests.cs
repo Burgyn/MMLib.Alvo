@@ -108,7 +108,7 @@ public class ApiKeyContextResolverTests
         var principal = await resolver.ResolveAsync("dev.s3cret", requestedTenant: null, TestContext.Current.CancellationToken);
 
         principal.ShouldNotBeNull();
-        new ScopeGate().Allows(principal, "orders", Rules.DataOperation.List).ShouldBeFalse();
+        new ScopeGate().Allows(principal, "orders", MMLib.Alvo.Rules.DataOperation.List).ShouldBeFalse();
     }
 
     [Fact]

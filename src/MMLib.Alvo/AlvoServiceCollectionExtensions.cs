@@ -6,6 +6,7 @@ using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Internal;
 using MMLib.Alvo.Migrations;
+using MMLib.Alvo.Rules;
 
 namespace Microsoft.Extensions.DependencyInjection;
 
@@ -38,6 +39,7 @@ public static class AlvoServiceCollectionExtensions
         services.TryAddSingleton<RuntimeSchemaService>();
         services.AddAlvoAuth();
         services.AddAlvoExpressions();
+        services.AddAlvoRules();
 
         // TODO(#19): register ISchemaRegistry once the Data API needs it — deferred to avoid the
         // chicken/egg of seeding it from an applied model that migration itself produces.

@@ -870,6 +870,21 @@ namespace MMLib.Alvo.Rules
         Update = 3,
         Delete = 4,
     }
+    public interface IPolicyEngine
+    {
+        MMLib.Alvo.Rules.PolicyDecision Resolve(string entity, MMLib.Alvo.Rules.DataOperation operation, MMLib.Alvo.AlvoContext context);
+    }
+    public sealed class PolicyDecision : System.IEquatable<MMLib.Alvo.Rules.PolicyDecision>
+    {
+        public string? DenyReason { get; }
+        public System.Collections.Generic.IReadOnlySet<string> HiddenFields { get; }
+        public bool IsDenied { get; }
+        public System.Collections.Generic.IReadOnlySet<string> ReadOnlyFields { get; }
+        public MMLib.Alvo.Expressions.CompiledExpression? TenantScope { get; }
+        public MMLib.Alvo.Expressions.CompiledExpression? Using { get; }
+        public MMLib.Alvo.Expressions.CompiledExpression? WithCheck { get; }
+        public static MMLib.Alvo.Rules.PolicyDecision Deny(string reason) { }
+    }
 }
 namespace MMLib.Alvo.Schema
 {

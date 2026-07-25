@@ -164,6 +164,7 @@ public static class DifferentialRuleCases
             new("tenant_id == @tenant.id", Row(("tenant_id", _acmeTenant.Value)), nameof(AcmeUser)),
             new("tenant_id == @tenant.id", Row(("tenant_id", _otherTenant.Value)), nameof(AcmeUser)),
             new("tenant_id == @tenant.id", Row(("tenant_id", _acmeTenant.Value)), nameof(TenantlessAlice)),
+            new("tenant_id == @tenant.id", Row(("tenant_id", null)), nameof(TenantlessAlice)),
             new("is_public", Row(("is_public", null)), nameof(Alice)),
             new("is_public", Row(("is_public", true)), nameof(Alice)),
             new("!is_public", Row(("is_public", null)), nameof(Alice)),

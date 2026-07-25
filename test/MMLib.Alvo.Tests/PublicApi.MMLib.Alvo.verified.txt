@@ -41,6 +41,14 @@ namespace MMLib.Alvo.Migrations
         public System.Threading.Tasks.Task<MMLib.Alvo.Migrations.DescriptorVersion> RollbackAsync(string project, int targetRevision, MMLib.Alvo.Migrations.MigrationOptions options, System.Threading.CancellationToken ct = default) { }
     }
 }
+namespace MMLib.Alvo.Rules
+{
+    public sealed class PolicyCatalog
+    {
+        public static MMLib.Alvo.Rules.PolicyCatalog Build(MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Expressions.ICelCompiler compiler) { }
+        public static bool TryBuild(MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Expressions.ICelCompiler compiler, out MMLib.Alvo.Rules.PolicyCatalog? catalog, out System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Descriptor.DescriptorValidationError> errors) { }
+    }
+}
 namespace Microsoft.Extensions.DependencyInjection
 {
     public static class AlvoBuilderExtensions

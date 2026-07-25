@@ -107,6 +107,13 @@ file sealed class SqlCursor(string text, AlvoRecord row, IReadOnlyDictionary<str
         return TryConsume("(") ? ParseParenthesized() : ParseValueOrComparison();
     }
 
+    /// <summary>
+    /// The <c>"`/`@</c> lookahead below (to special-case a bare <c>IS NOT NULL</c> operand) is safe
+    /// because the renderer never places a bare, un-collapsed operand directly under <c>AND</c>/<c>OR</c> —
+    /// every such slot is always itself a full <c>ParseTri</c> production (<c>COALESCE(...)</c>,
+    /// <c>TRUE</c>/<c>FALSE</c>, or a nested parenthesized form), so a leading quote or <c>@</c> can only
+    /// ever mean the <c>IS NOT NULL</c> shape this method special-cases.
+    /// </summary>
     private SqlTri ParseParenthesized()
     {
         if (TryConsume("NOT "))
