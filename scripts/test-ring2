@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # ring2 — run before opening a PR (ring1 + integration (affected) + API
 # invariant + Vacuum). None of those exist yet — add them here when they land.
-# Full run (+ mutation + e2e) stays in CI on the PR; do not run it locally.
+# Full run (+ e2e) stays in CI on the PR; mutation runs post-merge on `main`.
+# Do not run either locally.
 set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$DIR/.." && pwd)"

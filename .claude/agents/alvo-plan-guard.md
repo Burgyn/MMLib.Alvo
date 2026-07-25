@@ -151,7 +151,8 @@ separately if you see it, otherwise omit it.
   couldn't fully read (truncated, binary, out of scope for your tools) is an
   `ISSUES` finding ("could not review X"), not a silent `PASS`.
 - Never forget the plan's own hard rule while judging others: **no direct
-  pushes to `main`; the PR is the only full gate.** If the diff you're
+  pushes to `main`; the PR is the gate for every layer but mutation** (Stryker
+  runs post-merge on `main` by deliberate exception). If the diff you're
   reviewing is itself sitting on `main` rather than a feature branch, that is
   a finding, not background noise.
 

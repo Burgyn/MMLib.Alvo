@@ -101,7 +101,8 @@ are numbered independently of the plan's own bracketed `[N]` step numbers
 - **CEL for conditions, JSONata for transforms** — CEL is safe-by-construction
   and runs in-transaction; JSONata is Turing-complete and **never** runs
   in-transaction.
-- **Never merge to `main` directly** — the PR is the only full gate.
+- **Never merge to `main` directly** — the PR is the gate for every layer
+  but mutation (Stryker runs post-merge on `main`; see `CLAUDE.md`).
 - **The core is one big package** — a package is earned (foreign dependency,
   real swap point, or distinct license policy), not assumed. See
   `docs/architecture/package-boundary.md`.

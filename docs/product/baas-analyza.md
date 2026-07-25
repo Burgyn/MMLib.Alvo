@@ -1098,7 +1098,7 @@ Tento dokument definuje **cieľový stav** — čo má kompletný BaaS obsahova�
 | Verify | Snapshot testy | `MIT` | OpenAPI, CEL→SQL, migrácie; Verify.HeadlessBrowsers pre admin UI |
 | PublicApiGenerator / Roslyn PublicApiAnalyzers | Public API approval | `MIT / Apache` | Breaking-change gate na Abstractions |
 | NetArchTest.Rules | Architektúrne testy | `MIT` | Pravidlá závislostí balíkov, encapsulation, vertical slice |
-| Stryker.NET | Mutation testy | `Apache 2.0` | Len security-core, path-filtered v PR |
+| Stryker.NET | Mutation testy | `Apache 2.0` | Len security-core, path-filtered, post-merge na `main` |
 | Vacuum | OpenAPI linting | `MIT` | Go binárka (žiadny Node), Spectral-kompatibilné rulesety; nie Spectral (dormantný) |
 | Microsoft.Playwright (.NET) | Admin E2E | `Apache 2.0` | Blazor dashboard flows; Verify.HeadlessBrowsers na vizuálne snapshoty |
 | TeaPie | E2E (API demo) | `MIT` | Kros-sk; čierna skrinka nad bežiacim demo API |

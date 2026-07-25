@@ -51,7 +51,8 @@ compresses out. Violating one of these is a bug, not a style nit.
 - `.claude/agents/` — subagents, e.g. `alvo-plan-guard`.
 - `scripts/` — `test-ring0`/`test-ring1`/`test-ring2` plus `check-brief-freshness`.
 - `.husky/` — Husky.Net git hooks (`pre-commit`, `commit-msg`) + `task-runner.json`; auto-installed on build.
-- `.github/` — CI workflows; this is where the full run (mutation + e2e) lives.
+- `.github/` — CI workflows; the PR run (everything but mutation) plus
+  `mutation.yml`, which runs post-merge on `main`.
 
 ## Build, test & rings
 
@@ -65,7 +66,8 @@ compresses out. Violating one of these is a bug, not a style nit.
 | ring0 | `scripts/test-ring0` | after every small step |
 | ring1 | `scripts/test-ring1` | after finishing a slice |
 | ring2 | `scripts/test-ring2` | before opening a PR |
-| full (+ mutation + e2e) | CI on the PR | never run locally |
+| full (+ e2e) | CI on the PR | never run locally |
+| mutation | CI post-merge on `main` | never run locally |
 
 Each ring wraps the previous one and adds a layer: ring1 adds architecture
 tests (already inside `dotnet test`) and, once it lands, public-API
@@ -77,8 +79,16 @@ today.
 
 - **NEVER merge or push directly to `main`.** Branch → PR → a human merges
   after review.
-- **The PR is the only full gate** — there is no nightly or post-merge
-  safety net catching what the PR missed.
+- **The PR is the gate for everything except mutation** — contract,
+  snapshot, public-API, arch, integration and e2e all run there, and nothing
+  else catches what they miss. **Mutation (Stryker) is the one exception: it
+  runs post-merge on `main`** (`.github/workflows/mutation.yml`), because a
+  ~20-minute run is a real tax on every core PR and it answers "is the suite
+  still adversarial?" rather than "is this change correct?" — a question whose
+  fix is a new test, not a revert. The cost is explicit: nothing blocks a merge
+  on mutation score, so a red mutation run on `main` is a notification someone
+  has to act on. Before a risky core merge, run it on demand via
+  `workflow_dispatch`.
 - **Before opening a PR, dispatch the `alvo-plan-guard` subagent** as the
   last check — it flags drift from `docs/PLAN.md`, violated §0 principles,
   and shortcuts in the security core. It is read-only and advisory: it
