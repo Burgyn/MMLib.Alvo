@@ -2,6 +2,16 @@
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace MMLib.Alvo
 {
+    public sealed class AlvoContext : System.IEquatable<MMLib.Alvo.AlvoContext>
+    {
+        public AlvoContext() { }
+        public required System.Collections.Generic.IReadOnlySet<MMLib.Alvo.Role> Roles { get; init; }
+        public MMLib.Alvo.TenantId? Tenant { get; init; }
+        public required MMLib.Alvo.UserId User { get; init; }
+        public static MMLib.Alvo.AlvoContext Anonymous { get; }
+        public bool HasRole(MMLib.Alvo.Role role) { }
+        public static MMLib.Alvo.AlvoContext System(MMLib.Alvo.TenantId? tenant) { }
+    }
     public enum AlvoMode
     {
         Standalone = 0,
@@ -64,6 +74,55 @@ namespace MMLib.Alvo
         public static MMLib.Alvo.UserId New() { }
         public static MMLib.Alvo.UserId Parse(string s, System.IFormatProvider? provider) { }
         public static bool TryParse([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] string? s, System.IFormatProvider? provider, out MMLib.Alvo.UserId result) { }
+    }
+}
+namespace MMLib.Alvo.Auth
+{
+    public sealed class AlvoPrincipal : System.IEquatable<MMLib.Alvo.Auth.AlvoPrincipal>
+    {
+        public AlvoPrincipal() { }
+        public required MMLib.Alvo.AlvoContext Context { get; init; }
+        public required string KeyId { get; init; }
+        public required System.Collections.Generic.IReadOnlySet<MMLib.Alvo.Auth.ApiKeyScope> Scopes { get; init; }
+    }
+    public sealed class ApiKeyRecord : System.IEquatable<MMLib.Alvo.Auth.ApiKeyRecord>
+    {
+        public ApiKeyRecord() { }
+        public System.DateTimeOffset? ExpiresAt { get; init; }
+        public required string KeyId { get; init; }
+        public System.DateTimeOffset? LastUsedAt { get; init; }
+        public System.DateTimeOffset? RevokedAt { get; init; }
+        public required System.Collections.Generic.IReadOnlyList<string> RoleNames { get; init; }
+        public required System.Collections.Generic.IReadOnlySet<MMLib.Alvo.Auth.ApiKeyScope> Scopes { get; init; }
+        public required string Sha256Hash { get; init; }
+        public MMLib.Alvo.TenantId? Tenant { get; init; }
+        public required MMLib.Alvo.UserId User { get; init; }
+        public bool IsUsable(System.DateTimeOffset now) { }
+    }
+    public readonly struct ApiKeyScope : System.IEquatable<MMLib.Alvo.Auth.ApiKeyScope>
+    {
+        public required MMLib.Alvo.Auth.ScopeAccess Access { get; init; }
+        public required string Entity { get; init; }
+        public bool Allows(string entity, MMLib.Alvo.Rules.DataOperation operation) { }
+        public static bool TryParse(string value, out MMLib.Alvo.Auth.ApiKeyScope scope) { }
+    }
+    public interface IAlvoContextAccessor
+    {
+        MMLib.Alvo.Auth.AlvoPrincipal? Principal { get; set; }
+    }
+    public interface IAlvoContextResolver
+    {
+        System.Threading.Tasks.ValueTask<MMLib.Alvo.Auth.AlvoPrincipal?> ResolveAsync(string? presentedKey, string? requestedTenant, System.Threading.CancellationToken cancellationToken);
+    }
+    public interface IApiKeyStore
+    {
+        System.Threading.Tasks.ValueTask<MMLib.Alvo.Auth.ApiKeyRecord?> FindAsync(string keyId, System.Threading.CancellationToken cancellationToken);
+        System.Threading.Tasks.ValueTask TouchAsync(string keyId, System.DateTimeOffset usedAt, System.Threading.CancellationToken cancellationToken);
+    }
+    public enum ScopeAccess
+    {
+        Read = 0,
+        Write = 1,
     }
 }
 namespace MMLib.Alvo.Descriptor
@@ -615,6 +674,17 @@ namespace MMLib.Alvo.Migrations
         AddIndex = 7,
         DropIndex = 8,
         RenameIndex = 9,
+    }
+}
+namespace MMLib.Alvo.Rules
+{
+    public enum DataOperation
+    {
+        List = 0,
+        Get = 1,
+        Create = 2,
+        Update = 3,
+        Delete = 4,
     }
 }
 namespace MMLib.Alvo.Schema
