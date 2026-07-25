@@ -44,11 +44,14 @@
   </ItemGroup>
 
   <!-- Installs the Husky.Net git hooks on restore/build so no manual `git config`
-       step is needed. Runs only until the hooks exist (i.e. once per fresh clone),
+       step is needed. The sentinel is the `.husky/_` directory `husky install`
+       creates (Husky.Net 0.9.x no longer emits the old `_/husky.sh` shim, so
+       guarding on that file made this target re-run on every build). Runs only
+       until the hooks exist (i.e. once per fresh clone / worktree),
        never on CI (GitHub via ContinuousIntegrationBuild, Azure via TF_BUILD) or
        when HUSKY=0, and is best-effort (ContinueOnError) so it can never break a build. -->
   <Target Name="HuskyInstall" BeforeTargets="Restore;CollectPackageReferences"
-          Condition="'$(HUSKY)' != '0' and '$(TF_BUILD)' == '' and '$(ContinuousIntegrationBuild)' != 'true' and !Exists('$(MSBuildThisFileDirectory).husky/_/husky.sh')">
+          Condition="'$(HUSKY)' != '0' and '$(TF_BUILD)' == '' and '$(ContinuousIntegrationBuild)' != 'true' and !Exists('$(MSBuildThisFileDirectory).husky/_')">
     <Exec Command="dotnet tool restore" WorkingDirectory="$(MSBuildThisFileDirectory)" ContinueOnError="true" />
     <Exec Command="dotnet husky install" WorkingDirectory="$(MSBuildThisFileDirectory)" ContinueOnError="true" />
   </Target>
