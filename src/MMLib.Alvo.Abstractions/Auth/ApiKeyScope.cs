@@ -57,12 +57,17 @@ public readonly record struct ApiKeyScope
         return true;
     }
 
-    /// <summary>Answers whether this scope allows <paramref name="operation"/> against <paramref name="entity"/>.</summary>
+    /// <summary>
+    /// Answers whether this scope allows <paramref name="operation"/> against <paramref name="entity"/>.
+    /// An unrecognized <paramref name="operation"/> is denied rather than mapped to a guessed access
+    /// level.
+    /// </summary>
     /// <param name="entity">The entity the operation targets.</param>
     /// <param name="operation">The operation being performed.</param>
     public bool Allows(string entity, DataOperation operation) =>
-        (Entity == Wildcard || string.Equals(Entity, entity, StringComparison.Ordinal))
-        && Access == RequiredAccess(operation);
+        TryGetRequiredAccess(operation, out var requiredAccess)
+        && (Entity == Wildcard || string.Equals(Entity, entity, StringComparison.Ordinal))
+        && Access == requiredAccess;
 
     private static bool TryParseAccess(ReadOnlySpan<char> text, out ScopeAccess access)
     {
@@ -82,9 +87,22 @@ public readonly record struct ApiKeyScope
         return false;
     }
 
-    private static ScopeAccess RequiredAccess(DataOperation operation) => operation switch
+    private static bool TryGetRequiredAccess(DataOperation operation, out ScopeAccess access)
     {
-        DataOperation.List or DataOperation.Get => ScopeAccess.Read,
-        _ => ScopeAccess.Write,
-    };
+        switch (operation)
+        {
+            case DataOperation.List:
+            case DataOperation.Get:
+                access = ScopeAccess.Read;
+                return true;
+            case DataOperation.Create:
+            case DataOperation.Update:
+            case DataOperation.Delete:
+                access = ScopeAccess.Write;
+                return true;
+            default:
+                access = default;
+                return false;
+        }
+    }
 }

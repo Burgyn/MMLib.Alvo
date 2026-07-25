@@ -20,6 +20,12 @@ public class AlvoContextTests
     }
 
     [Fact]
+    public void An_empty_role_set_is_rejected_through_a_with_expression_too()
+    {
+        Should.Throw<ArgumentException>(() => AlvoContext.Anonymous with { Roles = new HashSet<Role>() });
+    }
+
+    [Fact]
     public void HasRole_answers_over_the_whole_set()
     {
         var context = new AlvoContext

@@ -2,6 +2,36 @@
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Data.Sqlite.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Tests")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace MMLib.Alvo.Auth
+{
+    public sealed class AlvoAuthOptions
+    {
+        public AlvoAuthOptions() { }
+        public System.Collections.Generic.IList<MMLib.Alvo.Auth.AlvoDevApiKey> DevKeys { get; }
+        public string HeaderName { get; init; }
+    }
+    public sealed class AlvoDevApiKey
+    {
+        public AlvoDevApiKey() { }
+        public System.DateTimeOffset? ExpiresAt { get; set; }
+        public string KeyId { get; set; }
+        public System.Collections.Generic.IList<string> Roles { get; set; }
+        public System.Collections.Generic.IList<string> Scopes { get; set; }
+        public string Secret { get; set; }
+        public System.Guid? Tenant { get; set; }
+        public System.Guid User { get; set; }
+    }
+    public sealed class ScopeGate
+    {
+        public ScopeGate() { }
+        public bool Allows(MMLib.Alvo.Auth.AlvoPrincipal principal, string entity, MMLib.Alvo.Rules.DataOperation operation) { }
+    }
+    public sealed class TenantResolver
+    {
+        public TenantResolver() { }
+        public bool TryResolve(MMLib.Alvo.Auth.ApiKeyRecord key, string? requestedTenant, out MMLib.Alvo.TenantId? tenant) { }
+    }
+}
 namespace MMLib.Alvo.Migrations
 {
     public sealed class RuntimeSchemaService

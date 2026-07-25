@@ -28,6 +28,14 @@ public class ApiKeyScopeTests
         scope.Allows("orders", DataOperation.List).ShouldBeFalse();
     }
 
+    [Fact]
+    public void An_unrecognized_operation_is_denied_rather_than_mapped_to_a_guessed_access_level()
+    {
+        ApiKeyScope.TryParse("orders:write", out var scope).ShouldBeTrue();
+
+        scope.Allows("orders", (DataOperation)999).ShouldBeFalse();
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("orders")]

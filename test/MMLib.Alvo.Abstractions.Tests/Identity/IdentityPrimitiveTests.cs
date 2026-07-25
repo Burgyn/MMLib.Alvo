@@ -46,4 +46,10 @@ public class IdentityPrimitiveTests
     {
         Should.Throw<JsonException>(() => JsonSerializer.Deserialize<UserId>("42"));
     }
+
+    [Fact]
+    public void Deserializing_a_non_string_token_fails_loudly_for_TenantId()
+    {
+        Should.Throw<JsonException>(() => JsonSerializer.Deserialize<TenantId>("42"));
+    }
 }
