@@ -1,0 +1,34 @@
+{
+  "stryker-config": {
+    "project": "MMLib.Alvo.Data.EntityFrameworkCore.csproj",
+    "test-projects": [
+      "test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/MMLib.Alvo.Data.EntityFrameworkCore.Tests.csproj"
+    ],
+    "test-runner": "mtp",
+    "coverage-analysis": "off",
+    "mutate": [
+      "**/*.cs",
+      "!**/AssemblyInfo.cs",
+      "!Internal/AppliedSchemaJsonContext.cs",
+      "!Internal/RelationalConnectionFactory.cs",
+      "!Internal/RelationalSqlBatch.cs",
+      "!Internal/SystemSchemaInitializer.cs",
+      "!Internal/VersionRowWriter.cs",
+      "!EfCoreDescriptorVersionStore.cs",
+      "!EfCoreRuntimeSchemaWriter.cs",
+      "!EfCoreSchemaIntrospector.cs",
+      "!EfCoreSchemaMigrator.cs",
+      "!AlvoEfCoreProvider.cs",
+      "!RelationalProviderRegistration.cs"
+    ],
+    "thresholds": {
+      "high": 90,
+      "low": 85,
+      "break": 80
+    },
+    "reporters": [
+      "progress",
+      "cleartext"
+    ]
+  }
+}
