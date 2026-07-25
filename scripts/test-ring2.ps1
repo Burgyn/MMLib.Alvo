@@ -1,6 +1,7 @@
 #!/usr/bin/env pwsh
 # ring2 — run before opening a PR (ring1 + integration (affected) + API
-# invariant + Vacuum). Full run (+ mutation + e2e) stays in CI on the PR.
+# invariant + Vacuum). Full run (+ e2e) stays in CI on the PR; mutation runs
+# post-merge on `main`.
 # Mirrors scripts/test-ring2 for PowerShell.
 $ErrorActionPreference = 'Stop'
 $dir = Split-Path -Parent $MyInvocation.MyCommand.Path

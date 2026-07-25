@@ -1,0 +1,234 @@
+#!/usr/bin/env bash
+# Tests for the Claude Code hooks in .claude/hooks/. Plain bash, no dependency:
+# each hook is a process that reads a JSON payload on stdin, so the test drives
+# it exactly the way Claude Code does — with a crafted payload and a throwaway
+# git repo as CLAUDE_PROJECT_DIR.
+#
+# Run: scripts/test-hooks
+set -uo pipefail
+
+HOOKS_DIR="$(cd "$(dirname "$0")/../.claude/hooks" && pwd)"
+TMP_ROOT="$(mktemp -d)"
+trap 'rm -rf "$TMP_ROOT"' EXIT
+
+PASS=0
+FAIL=0
+
+pass() { PASS=$((PASS + 1)); printf '  ok   %s\n' "$1"; }
+fail() {
+  FAIL=$((FAIL + 1))
+  printf '  FAIL %s\n' "$1"
+  printf '       expected: %s\n' "$2"
+  printf '       actual:   %s\n' "$3"
+}
+
+assert_eq() { # <expected> <actual> <label>
+  if [ "$1" = "$2" ]; then pass "$3"; else fail "$3" "$1" "$2"; fi
+}
+
+assert_empty() { # <actual> <label>
+  if [ -z "$1" ]; then pass "$2"; else fail "$2" "(empty)" "$1"; fi
+}
+
+assert_contains() { # <needle> <haystack> <label>
+  case "$2" in *"$1"*) pass "$3" ;; *) fail "$3" "contains '$1'" "$2" ;; esac
+}
+
+# A throwaway git repo with one committed baseline, so tests can distinguish
+# "tracked and unchanged" from "tracked and modified" from "untracked".
+setup_repo() { # -> prints the repo path
+  local repo
+  repo="$(mktemp -d "$TMP_ROOT/repo.XXXXXX")"
+  git -C "$repo" init -q
+  git -C "$repo" config user.email test@example.com
+  git -C "$repo" config user.name test
+  mkdir -p "$repo/test/Some.Tests" "$repo/src"
+  printf 'committed\n' >"$repo/test/Some.Tests/Thing.verified.txt"
+  printf 'x\n' >"$repo/src/Thing.cs"
+  git -C "$repo" add -A
+  git -C "$repo" commit -qm init
+  printf '%s\n' "$repo"
+}
+
+ledger_path() { # <repo>
+  local repo="$1" p
+  p="$(git -C "$repo" rev-parse --git-path edited-paths 2>/dev/null)"
+  case "$p" in /*) printf '%s\n' "$p" ;; *) printf '%s\n' "$repo/$p" ;; esac
+}
+
+# ==================================================================== recorder
+
+echo "record-edited-paths"
+
+repo="$(setup_repo)"
+printf '{"tool_name":"Edit","tool_input":{"file_path":"%s/test/Some.Tests/Thing.verified.txt"}}' "$repo" \
+  | CLAUDE_PROJECT_DIR="$repo" bash "$HOOKS_DIR/record-edited-paths"
+assert_eq "test/Some.Tests/Thing.verified.txt" "$(cat "$(ledger_path "$repo")" 2>/dev/null)" \
+  "records a baseline path, repo-relative"
+
+repo="$(setup_repo)"
+printf '{"tool_name":"Edit","tool_input":{"file_path":"%s/src/Thing.cs"}}' "$repo" \
+  | CLAUDE_PROJECT_DIR="$repo" bash "$HOOKS_DIR/record-edited-paths"
+assert_empty "$(cat "$(ledger_path "$repo")" 2>/dev/null)" \
+  "ignores a non-baseline path"
+
+repo="$(setup_repo)"
+printf '{"tool_name":"Bash","tool_input":{"command":"dotnet verify accept"}}' \
+  | CLAUDE_PROJECT_DIR="$repo" bash "$HOOKS_DIR/record-edited-paths"
+assert_eq "ACCEPT" "$(cat "$(ledger_path "$repo")" 2>/dev/null)" \
+  "records ACCEPT for a shell-side baseline accept"
+
+repo="$(setup_repo)"
+printf '{"tool_name":"Bash","tool_input":{"command":"cp a.received.txt a.verified.txt"}}' \
+  | CLAUDE_PROJECT_DIR="$repo" bash "$HOOKS_DIR/record-edited-paths"
+assert_eq "ACCEPT" "$(cat "$(ledger_path "$repo")" 2>/dev/null)" \
+  "records ACCEPT for a received->verified copy"
+
+repo="$(setup_repo)"
+printf '{"tool_name":"Bash","tool_input":{"command":"dotnet test"}}' \
+  | CLAUDE_PROJECT_DIR="$repo" bash "$HOOKS_DIR/record-edited-paths"
+assert_empty "$(cat "$(ledger_path "$repo")" 2>/dev/null)" \
+  "ignores an unrelated Bash command"
+
+repo="$(setup_repo)"
+printf '{"tool_name":"Edit","tool_input":{}}' \
+  | CLAUDE_PROJECT_DIR="$repo" bash "$HOOKS_DIR/record-edited-paths"
+assert_empty "$(cat "$(ledger_path "$repo")" 2>/dev/null)" \
+  "survives a payload with no file_path"
+
+# ======================================================================== gate
+
+echo "turn-review-gate"
+
+run_gate() { # <repo> [stop_hook_active]
+  local repo="$1" active="${2:-false}"
+  printf '{"stop_hook_active":%s}' "$active" \
+    | CLAUDE_PROJECT_DIR="$repo" bash "$HOOKS_DIR/turn-review-gate"
+}
+
+repo="$(setup_repo)"
+assert_empty "$(run_gate "$repo")" "silent when there is no ledger"
+
+repo="$(setup_repo)"
+: >"$(ledger_path "$repo")"
+assert_empty "$(run_gate "$repo")" "silent when the ledger is empty"
+
+# A touched-but-unchanged baseline is a no-op: the agent rewrote identical bytes,
+# or edited and reverted inside the run. Nothing to judge.
+repo="$(setup_repo)"
+printf 'test/Some.Tests/Thing.verified.txt\n' >"$(ledger_path "$repo")"
+assert_empty "$(run_gate "$repo")" "drops a tracked no-op candidate"
+
+# A really-changed baseline must block.
+repo="$(setup_repo)"
+printf 'changed\n' >"$repo/test/Some.Tests/Thing.verified.txt"
+printf 'test/Some.Tests/Thing.verified.txt\n' >"$(ledger_path "$repo")"
+out="$(run_gate "$repo")"
+assert_contains '"decision":"block"' "$(printf '%s' "$out" | jq -c .)" \
+  "blocks on a changed baseline"
+assert_contains 'alvo-snapshot-judge' "$out" \
+  "block reason names the judge agent"
+assert_contains 'Thing.verified.txt' "$out" \
+  "block reason names the changed baseline"
+
+# A brand-new baseline does not appear in `git diff`, so it must be kept.
+repo="$(setup_repo)"
+printf 'new\n' >"$repo/test/Some.Tests/Fresh.verified.txt"
+printf 'test/Some.Tests/Fresh.verified.txt\n' >"$(ledger_path "$repo")"
+assert_contains 'Fresh.verified.txt' "$(run_gate "$repo")" \
+  "keeps an untracked (new) baseline"
+
+# An edit followed by a delete inside the run leaves nothing on disk.
+repo="$(setup_repo)"
+printf 'test/Some.Tests/Gone.verified.txt\n' >"$(ledger_path "$repo")"
+assert_empty "$(run_gate "$repo")" "drops a candidate that no longer exists"
+
+# The ACCEPT marker carries no path; the gate resolves paths from git.
+repo="$(setup_repo)"
+printf 'changed\n' >"$repo/test/Some.Tests/Thing.verified.txt"
+printf 'ACCEPT\n' >"$(ledger_path "$repo")"
+assert_contains 'Thing.verified.txt' "$(run_gate "$repo")" \
+  "ACCEPT marker resolves paths from git"
+
+# Two baselines, one block — not one block per file.
+repo="$(setup_repo)"
+printf 'changed\n' >"$repo/test/Some.Tests/Thing.verified.txt"
+printf 'new\n' >"$repo/test/Some.Tests/Fresh.verified.txt"
+printf 'test/Some.Tests/Thing.verified.txt\ntest/Some.Tests/Fresh.verified.txt\n' \
+  >"$(ledger_path "$repo")"
+assert_eq "1" "$(run_gate "$repo" | jq -s 'length')" \
+  "emits exactly one block for two baselines"
+
+# The ledger has ONE owner: it is gone after a single read, so a block-induced
+# re-Stop finds nothing and cannot loop.
+repo="$(setup_repo)"
+printf 'changed\n' >"$repo/test/Some.Tests/Thing.verified.txt"
+printf 'test/Some.Tests/Thing.verified.txt\n' >"$(ledger_path "$repo")"
+run_gate "$repo" >/dev/null
+if [ -f "$(ledger_path "$repo")" ]; then
+  fail "clears the ledger after one read" "(no ledger file)" "ledger still present"
+else
+  pass "clears the ledger after one read"
+fi
+assert_empty "$(run_gate "$repo")" "second run is silent"
+
+# stop_hook_active suppresses the decision but NOT the ledger drainage. The ledger
+# is owned by this hook alone and must be drained every run, so a block-induced
+# re-Stop does not ping-pong.
+repo="$(setup_repo)"
+printf 'changed\n' >"$repo/test/Some.Tests/Thing.verified.txt"
+printf 'test/Some.Tests/Thing.verified.txt\n' >"$(ledger_path "$repo")"
+assert_empty "$(run_gate "$repo" true)" "silent when stop_hook_active is true"
+if [ -f "$(ledger_path "$repo")" ]; then
+  fail "drains ledger even when stop_hook_active is true" "(no ledger file)" "ledger still present"
+else
+  pass "drains ledger even when stop_hook_active is true"
+fi
+
+# ======================================================================= reset
+
+echo "reset-edited-paths"
+
+repo="$(setup_repo)"
+printf 'test/Some.Tests/Thing.verified.txt\n' >"$(ledger_path "$repo")"
+CLAUDE_PROJECT_DIR="$repo" bash "$HOOKS_DIR/reset-edited-paths" </dev/null
+if [ -f "$(ledger_path "$repo")" ]; then
+  fail "deletes an orphaned ledger" "(no ledger file)" "ledger still present"
+else
+  pass "deletes an orphaned ledger"
+fi
+
+# Assert the file-system invariant AND the exit code. The invariant alone cannot
+# see a script that dies early (unbound variable, command not found): under
+# `set -uo pipefail` that aborts with a non-zero status before the trailing
+# `exit 0`, while still creating no files — exactly the "a hook must never break
+# a turn" regression this suite exists to catch.
+repo="$(setup_repo)"
+CLAUDE_PROJECT_DIR="$repo" bash "$HOOKS_DIR/reset-edited-paths" </dev/null
+rc=$?
+ledger="$(ledger_path "$repo")"
+if [ -f "$ledger" ]; then
+  fail "no ledger present: does not create ledger file" "(no ledger file)" "ledger created"
+else
+  pass "no ledger present: does not create ledger file"
+fi
+assert_eq "0" "$rc" "no ledger present: exits 0"
+
+# Outside a git repo `git rev-parse` fails. This asserts the weaker invariant
+# that the hook writes nothing there — it does NOT prove the early-return guard
+# fires, because without the guard `rm -f "$root/"` fails silently on a
+# directory and the hook stays inert either way.
+plain_dir="$(mktemp -d "$TMP_ROOT/plain.XXXXXX")"
+CLAUDE_PROJECT_DIR="$plain_dir" bash "$HOOKS_DIR/reset-edited-paths" </dev/null
+rc=$?
+if [ -z "$(find "$plain_dir" -type f 2>/dev/null)" ]; then
+  pass "outside git repo: does not create any files"
+else
+  fail "outside git repo: does not create any files" "(empty directory)" "$(find "$plain_dir" -type f)"
+fi
+assert_eq "0" "$rc" "outside git repo: exits 0"
+
+# ======================================================================= total
+
+printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
+[ "$FAIL" -eq 0 ]

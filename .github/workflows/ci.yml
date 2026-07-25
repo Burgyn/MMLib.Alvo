@@ -52,7 +52,8 @@ jobs:
         if: runner.os == 'Linux'
         run: dotnet format --verify-no-changes
 
-      # The PR is the single full gate: ring2 (= ring1 + affected integration,
+      # The PR is the gate for every layer but mutation (Stryker runs post-merge
+      # on `main` — see mutation.yml): ring2 (= ring1 + affected integration,
       # incl. the Testcontainers/PostgreSQL integration project + API-invariant/
       # Vacuum placeholders) runs on both OSes. Windows GitHub runners run
       # Docker in Windows-container mode and cannot run the Linux
