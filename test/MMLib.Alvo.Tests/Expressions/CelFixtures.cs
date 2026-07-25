@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Expressions;
+﻿using MMLib.Alvo.Data;
+using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Schema;
 
@@ -33,10 +34,15 @@ internal static class CelFixtures
             new FieldSchema { Name = "payload", Type = FieldType.Json, Nullable = true },
             new FieldSchema { Name = "title", Type = FieldType.String, MaxLength = 200 },
             new FieldSchema { Name = "tenant_id", Type = FieldType.Uuid },
+            new FieldSchema { Name = "created_at", Type = FieldType.DateTime, Nullable = true },
+            new FieldSchema { Name = "approved_at", Type = FieldType.DateTime, Nullable = true },
         ],
     };
 
     internal static ICelCompiler Compiler { get; } = new CelCompiler();
+
+    /// <summary>The tenant every Acme-tenant context (<see cref="Alice"/>, <see cref="AcmeUser"/>, ...) acts in.</summary>
+    internal static TenantId AcmeTenant => _acmeTenantId;
 
     /// <summary>An authenticated caller in the Acme tenant.</summary>
     internal static AlvoContext Alice { get; } = new()
@@ -107,6 +113,11 @@ internal static class CelFixtures
     /// <param name="source">The CEL expression source.</param>
     /// <exception cref="InvalidOperationException">Compilation failed; the message joins every compiler error.</exception>
     internal static CompiledExpression CompileComputed(string source) => Compile(source, CelProfile.Computed);
+
+    /// <summary>Builds an <see cref="AlvoRecord"/> from field/value pairs for an interpreter test.</summary>
+    /// <param name="fields">The record's field values.</param>
+    internal static AlvoRecord Row(params (string Field, object? Value)[] fields) =>
+        new(fields.ToDictionary(pair => pair.Field, pair => pair.Value));
 
     private static CompiledExpression Compile(string source, CelProfile profile)
     {

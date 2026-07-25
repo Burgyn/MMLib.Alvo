@@ -203,18 +203,18 @@ internal static class CelTypeChecker
 
         private (CelNode, CelValueType, bool, int) CheckBinary(CelBinary binary)
         {
-            var (left, leftType, leftError, _) = CheckNode(binary.Left);
+            var (left, leftType, leftError, leftPosition) = CheckNode(binary.Left);
             var (right, rightType, rightError, rightPosition) = CheckNode(binary.Right);
             var rewritten = binary with { Left = left, Right = right };
 
             return binary.Operator switch
             {
                 CelBinaryOperator.And or CelBinaryOperator.Or =>
-                    CheckLogical(rewritten, leftType, rightType, leftError, rightError, rightPosition),
+                    CheckLogical(rewritten, leftType, rightType, leftError, rightError, leftPosition, rightPosition),
                 CelBinaryOperator.In =>
                     CheckIn(rewritten, leftType, rightType, leftError, rightError, rightPosition),
                 CelBinaryOperator.Add or CelBinaryOperator.Subtract or CelBinaryOperator.Multiply or CelBinaryOperator.Divide =>
-                    CheckArithmetic(rewritten, leftType, rightType, leftError, rightError, rightPosition),
+                    CheckArithmetic(rewritten, leftType, rightType, leftError, rightError, leftPosition, rightPosition),
                 CelBinaryOperator.Equal or CelBinaryOperator.NotEqual or CelBinaryOperator.Less
                     or CelBinaryOperator.LessOrEqual or CelBinaryOperator.Greater or CelBinaryOperator.GreaterOrEqual =>
                     CheckComparison(rewritten, binary.Operator, leftType, rightType, leftError, rightError, rightPosition),
@@ -223,12 +223,12 @@ internal static class CelTypeChecker
         }
 
         private (CelNode, CelValueType, bool, int) CheckLogical(
-            CelBinary binary, CelValueType leftType, CelValueType rightType, bool leftError, bool rightError, int position)
+            CelBinary binary, CelValueType leftType, CelValueType rightType, bool leftError, bool rightError, int leftPosition, int rightPosition)
         {
-            var profileBad = CheckConstruct(CelConstructKind.Logical, "'&&'/'||' are not legal in this profile.", null, position);
-            var leftBad = RequireBool(leftType, leftError, "'&&'/'||' left operand", position);
-            var rightBad = RequireBool(rightType, rightError, "'&&'/'||' right operand", position);
-            return (binary, CelValueType.Bool, profileBad || leftBad || rightBad, position);
+            var profileBad = CheckConstruct(CelConstructKind.Logical, "'&&'/'||' are not legal in this profile.", null, rightPosition);
+            var leftBad = RequireBool(leftType, leftError, "'&&'/'||' left operand", leftPosition);
+            var rightBad = RequireBool(rightType, rightError, "'&&'/'||' right operand", rightPosition);
+            return (binary, CelValueType.Bool, profileBad || leftBad || rightBad, rightPosition);
         }
 
         private (CelNode, CelValueType, bool, int) CheckIn(
@@ -258,21 +258,21 @@ internal static class CelTypeChecker
         }
 
         private (CelNode, CelValueType, bool, int) CheckArithmetic(
-            CelBinary binary, CelValueType leftType, CelValueType rightType, bool leftError, bool rightError, int position)
+            CelBinary binary, CelValueType leftType, CelValueType rightType, bool leftError, bool rightError, int leftPosition, int rightPosition)
         {
             var profileBad = CheckConstruct(
                 CelConstructKind.Arithmetic,
                 $"Arithmetic is legal only in the Computed profile; '{OperatorText(binary.Operator)}' is not allowed here.",
                 "Move this calculation into a computed field.",
-                position);
+                rightPosition);
 
-            var leftBad = RequireNumeric(leftType, leftError, "Arithmetic left operand", position);
-            var rightBad = RequireNumeric(rightType, rightError, "Arithmetic right operand", position);
+            var leftBad = RequireNumeric(leftType, leftError, "Arithmetic left operand", leftPosition);
+            var rightBad = RequireNumeric(rightType, rightError, "Arithmetic right operand", rightPosition);
             var resultType = leftType == CelValueType.Decimal || rightType == CelValueType.Decimal
                 ? CelValueType.Decimal
                 : CelValueType.Int;
 
-            return (binary, resultType, profileBad || leftBad || rightBad, position);
+            return (binary, resultType, profileBad || leftBad || rightBad, rightPosition);
         }
 
         private (CelNode, CelValueType, bool, int) CheckComparison(

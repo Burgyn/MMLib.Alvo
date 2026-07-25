@@ -101,6 +101,24 @@ public class CelCompilerTests
         result.Errors.Count.ShouldBe(2);
     }
 
+    [Fact]
+    public void Each_non_boolean_operand_of_a_logical_operator_gets_its_own_error_position()
+    {
+        var result = Compile("status && total");
+
+        result.Errors.Count.ShouldBe(2);
+        result.Errors[0].Position.ShouldNotBe(result.Errors[1].Position);
+    }
+
+    [Fact]
+    public void Each_non_numeric_operand_of_an_arithmetic_operator_gets_its_own_error_position()
+    {
+        var result = CelFixtures.Compiler.Compile("status + owner_id", CelProfile.Computed, CelFixtures.Orders);
+
+        result.Errors.Count.ShouldBe(2);
+        result.Errors[0].Position.ShouldNotBe(result.Errors[1].Position);
+    }
+
     [Theory]
     [InlineData("status == 'aproved'")]
     [InlineData("status != 'aproved'")]
