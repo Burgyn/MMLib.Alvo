@@ -185,6 +185,23 @@ else
   pass "drains ledger even when stop_hook_active is true"
 fi
 
+# ======================================================================= reset
+
+echo "reset-edited-paths"
+
+repo="$(setup_repo)"
+printf 'test/Some.Tests/Thing.verified.txt\n' >"$(ledger_path "$repo")"
+CLAUDE_PROJECT_DIR="$repo" bash "$HOOKS_DIR/reset-edited-paths" </dev/null
+if [ -f "$(ledger_path "$repo")" ]; then
+  fail "deletes an orphaned ledger" "(no ledger file)" "ledger still present"
+else
+  pass "deletes an orphaned ledger"
+fi
+
+repo="$(setup_repo)"
+CLAUDE_PROJECT_DIR="$repo" bash "$HOOKS_DIR/reset-edited-paths" </dev/null
+assert_eq "0" "$?" "exits 0 when there is no ledger"
+
 # ======================================================================= total
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"

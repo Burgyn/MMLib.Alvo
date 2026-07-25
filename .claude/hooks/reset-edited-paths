@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# SessionStart hook (safety net): delete the per-turn ledger at a FRESH session
+# start, so a ledger orphaned by an ungraceful exit — process killed, or a crash
+# before the Stop gate ran — cannot cause a spurious review on the next
+# session's first turn.
+#
+# Wire ONLY on the fresh-start sources `startup|clear`, NEVER on
+# `compact`/`resume`, where a turn's already-recorded but not-yet-processed
+# edits would be wrongly dropped. Never blocks.
+set -uo pipefail
+
+root="${CLAUDE_PROJECT_DIR:-$(pwd)}"
+
+ledger="$(git -C "$root" rev-parse --git-path edited-paths 2>/dev/null)"
+[ -n "$ledger" ] || exit 0
+case "$ledger" in /*) ;; *) ledger="$root/$ledger" ;; esac
+
+rm -f "$ledger" 2>/dev/null || true
+exit 0
