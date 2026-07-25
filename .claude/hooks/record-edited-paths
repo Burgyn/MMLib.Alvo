@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# PostToolUse hook (GENERIC — no snapshot knowledge beyond its scope filter):
+# records what this run touched into a per-turn ledger that Stop-hook consumers
+# read and filter. Runs for the main agent and for subagents alike.
+#
+# WHY a ledger and not `git diff` in the Stop hook: git shows the working tree,
+# which still holds an uncommitted baseline change from an earlier turn — a gate
+# keyed on git alone fires on every turn of a pure conversation in which nothing
+# happened. The ledger is the per-run truth.
+#
+# Never blocks. Never fails a turn: no `set -e`, every path exits 0.
+set -uo pipefail
+
+command -v jq >/dev/null 2>&1 || exit 0
+payload="$(cat)" || exit 0
+[ -n "$payload" ] || exit 0
+
+root="${CLAUDE_PROJECT_DIR:-$(pwd)}"
+
+# Worktree-aware: `.git` is a file in a worktree, so never hardcode .git/.
+ledger="$(git -C "$root" rev-parse --git-path edited-paths 2>/dev/null)"
+[ -n "$ledger" ] || exit 0
+case "$ledger" in /*) ;; *) ledger="$root/$ledger" ;; esac
+
+tool="$(printf '%s' "$payload" | jq -r '.tool_name // ""' 2>/dev/null)"
+
+# Accepting a Verify baseline through the shell (`dotnet verify accept`, or a
+# received->verified copy) produces NO Edit event, and it is the most natural way
+# a baseline gets accepted. tool_input.command does not reveal WHICH baselines
+# were accepted, so record a marker and let the gate resolve paths from git.
+if [ "$tool" = "Bash" ]; then
+  cmd="$(printf '%s' "$payload" | jq -r '.tool_input.command // ""' 2>/dev/null)"
+  if printf '%s' "$cmd" | grep -Eqi 'verify[^|;&]*accept|(cp|mv)[^|;&]*received'; then
+    printf 'ACCEPT\n' >>"$ledger" 2>/dev/null || true
+  fi
+  exit 0
+fi
+
+file="$(printf '%s' "$payload" | jq -r '.tool_input.file_path // ""' 2>/dev/null)"
+[ -n "$file" ] || exit 0
+
+# Repo-relative when under the project root (stable, readable); absolute otherwise.
+rel="$file"
+rootnorm="${root%/}"
+case "$file" in "$rootnorm"/*) rel="${file#"$rootnorm"/}" ;; esac
+
+# Coarse SCOPE filter. The settings.json PostToolUse `matcher` filters by TOOL
+# NAME only, never by path, so path scoping lives here. Only Verify baselines
+# matter while the snapshot check is the ledger's one consumer — loosen this when
+# a future Stop check needs other paths.
+case "$rel" in *.verified.*) ;; *) exit 0 ;; esac
+
+printf '%s\n' "$rel" >>"$ledger" 2>/dev/null || true
+exit 0

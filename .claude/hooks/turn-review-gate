@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+# Stop hook: GENERIC post-turn review dispatcher.
+#
+# Reads the per-turn ledger (written by record-edited-paths) ONCE, clears it
+# ONCE, then runs a set of independent CHECKS over what this run touched. Each
+# check prints a block reason (or nothing). Reasons are aggregated into a single
+# Stop 'block' so the agent addresses them before finishing the turn.
+#
+# WHY one hook, not one-per-check: Claude Code runs an event's hooks in PARALLEL,
+# as separate processes. Cooperating logic (read the ledger, clear it, decide)
+# MUST live in ONE process — a sibling hook would race it. Add a future check as
+# a function below and register it in `checks` — NEVER as a second Stop hook.
+#
+# Holds no deterministic rule content (arch tests and the public-API approval
+# test own those). A check only decides "does what this run touched warrant a
+# judgment review, and what should the agent be told?".
+set -uo pipefail
+
+command -v jq >/dev/null 2>&1 || exit 0
+payload="$(cat)" || payload=''
+
+# Parse stop_hook_active from the payload.
+active="false"
+if [ -n "$payload" ]; then
+  active="$(printf '%s' "$payload" | jq -r '.stop_hook_active // false' 2>/dev/null)"
+fi
+
+root="${CLAUDE_PROJECT_DIR:-$(pwd)}"
+
+ledger="$(git -C "$root" rev-parse --git-path edited-paths 2>/dev/null)"
+[ -n "$ledger" ] || exit 0
+case "$ledger" in /*) ;; *) ledger="$root/$ledger" ;; esac
+[ -f "$ledger" ] || exit 0
+
+# The ledger is owned by this hook alone: it is read and drained unconditionally,
+# so a block-induced re-Stop cannot re-read stale entries. stop_hook_active
+# suppresses only the decision, never the ledger ownership — one pass per turn.
+entries="$(sort -u "$ledger" 2>/dev/null)"
+rm -f "$ledger" 2>/dev/null || true
+
+# If this re-Stop was triggered by a block, exit before running checks. The ledger
+# has already been drained, so the next re-Stop will find nothing.
+[ "$active" = "true" ] && exit 0
+
+[ -n "$entries" ] || exit 0
+
+# =============================================================================
+# CHECKS — each takes <entries> <root> and prints a block reason, or nothing.
+# Add a new check = write a function here + add it to `checks` below.
+# =============================================================================
+
+# --- Verify baselines: a *.verified.* file moved this run ---------------------
+check_verified_baselines() {
+  local entries="$1" root="$2"
+  local candidates listed f surviving=''
+
+  # Paths the recorder captured directly.
+  candidates="$(printf '%s\n' "$entries" | grep -E '\.verified\.' || true)"
+
+  # An ACCEPT marker means a baseline was accepted through the shell, which does
+  # not reveal paths — resolve them from git instead. `sed` strips the two status
+  # columns, then the rename arrow if present (`R old -> new` keeps `new`).
+  if printf '%s\n' "$entries" | grep -qx 'ACCEPT'; then
+    listed="$(git -C "$root" status --porcelain --untracked-files=all 2>/dev/null \
+      | sed -e 's/^...//' -e 's/.* -> //' | grep -E '\.verified\.' || true)"
+    candidates="$(printf '%s\n%s\n' "$candidates" "$listed")"
+  fi
+
+  candidates="$(printf '%s\n' "$candidates" | grep -v '^[[:space:]]*$' | sort -u || true)"
+  [ -n "$candidates" ] || return 0
+
+  # Drop no-ops. A TRACKED file whose content matches HEAD was rewritten
+  # byte-identically, or edited and reverted, inside this run — nothing to judge.
+  # An UNTRACKED file is a new baseline and never appears in a diff, so keep it
+  # as long as it is still on disk.
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    if git -C "$root" ls-files --error-unmatch -- "$f" >/dev/null 2>&1; then
+      git -C "$root" diff --quiet HEAD -- "$f" 2>/dev/null && continue
+    else
+      [ -e "$root/$f" ] || continue
+    fi
+    surviving="$surviving$f, "
+  done <<EOF
+$candidates
+EOF
+
+  [ -n "$surviving" ] || return 0
+
+  printf 'Verify baselines changed this run: %s. ' "${surviving%, }"
+  printf 'Before finishing, invoke the alvo-snapshot-judge agent on these files and address its findings. '
+  printf 'It judges only whether the new baseline is justified by the accompanying source change — '
+  printf 'do NOT re-check mechanical rules (the arch tests and the public-API approval test own those).'
+}
+
+# Registry of active checks — they run in THIS process, sequentially.
+checks="check_verified_baselines"
+
+# =============================================================================
+
+reasons=''
+for check in $checks; do
+  r="$("$check" "$entries" "$root" 2>/dev/null)" || r=''
+  [ -n "$r" ] || continue
+  if [ -n "$reasons" ]; then
+    reasons="$reasons
+
+$r"
+  else
+    reasons="$r"
+  fi
+done
+
+[ -n "$reasons" ] || exit 0
+
+jq -n --arg reason "$reasons" '{decision:"block", reason:$reason}'
+exit 0
