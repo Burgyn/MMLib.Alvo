@@ -37,7 +37,7 @@ public class CelLexerTests
     }
 
     [Theory]
-    [InlineData("'it''s'", "it's")]
+    [InlineData("'it\\'s'", "it's")]
     [InlineData("\"quoted\"", "quoted")]
     [InlineData("'a\\nb'", "a\nb")]
     public void Reads_string_literals_with_escapes(string source, string expected)
@@ -45,11 +45,23 @@ public class CelLexerTests
         CelLexer.Tokenize(source)[0].Text.ShouldBe(expected);
     }
 
+    [Fact]
+    public void Doubled_quotes_no_longer_escape_a_quote()
+    {
+        Kinds("'it''s'").ShouldBe(
+        [
+            CelTokenKind.StringLiteral,
+            CelTokenKind.StringLiteral,
+            CelTokenKind.EndOfInput,
+        ]);
+    }
+
     [Theory]
     [InlineData("'unterminated")]
     [InlineData("owner_id # 1")]
     [InlineData("@")]
     [InlineData("1.2.3")]
+    [InlineData("'a\nb'")]
     public void Refuses_input_it_cannot_tokenize(string source)
     {
         Should.Throw<CelSyntaxException>(() => CelLexer.Tokenize(source));

@@ -1,5 +1,6 @@
 ﻿using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
+using System.Globalization;
 
 namespace MMLib.Alvo.Tests.Expressions;
 
@@ -62,10 +63,42 @@ public class CelParserTests
     }
 
     [Fact]
+    public void Context_references_carry_the_accepted_runtime_type()
+    {
+        CelParser.Parse("@user.id").ShouldBeOfType<CelContextRef>().Type.ShouldBe(CelValueType.Uuid);
+        CelParser.Parse("@user.roles").ShouldBeOfType<CelContextRef>().Type.ShouldBe(CelValueType.StringList);
+        CelParser.Parse("@tenant.id").ShouldBeOfType<CelContextRef>().Type.ShouldBe(CelValueType.Uuid);
+    }
+
+    [Fact]
+    public void User_role_suggests_testing_membership_over_roles()
+    {
+        Should.Throw<CelSyntaxException>(() => CelParser.Parse("@user.role"))
+            .FixSuggestion.ShouldNotBeNull().ShouldContain("'editor' in @user.roles");
+    }
+
+    [Theory]
+    [InlineData("@user.claims")]
+    [InlineData("@user.claims['x']")]
+    [InlineData("@user.teams")]
+    public void User_claims_and_teams_suggest_the_rbac_issue(string source)
+    {
+        Should.Throw<CelSyntaxException>(() => CelParser.Parse(source))
+            .FixSuggestion.ShouldNotBeNull().ShouldContain("#37");
+    }
+
+    [Fact]
     public void Has_parses_as_a_presence_test_over_a_field()
     {
         CelParser.Parse("has(owner_id)").ShouldBeOfType<CelHas>()
             .Field.FieldName.ShouldBe("owner_id");
+    }
+
+    [Fact]
+    public void Has_accepts_a_state_qualified_field_path()
+    {
+        CelParser.Parse("has(new.status)").ShouldBeOfType<CelHas>().Field.State.ShouldBe(CelRecordState.New);
+        CelParser.Parse("has(old.status)").ShouldBeOfType<CelHas>().Field.State.ShouldBe(CelRecordState.Old);
     }
 
     [Fact]
@@ -82,6 +115,31 @@ public class CelParserTests
         CelParser.Parse("old.status").ShouldBeOfType<CelFieldRef>().State.ShouldBe(CelRecordState.Old);
     }
 
+    [Fact]
+    public void Decimal_literal_parses_to_a_decimal_value()
+    {
+        CelParser.Parse("1.5").ShouldBeOfType<CelLiteral>().Value.ShouldBe(1.5m);
+    }
+
+    [Fact]
+    public void Oversized_integer_literal_throws_a_syntax_error_not_an_overflow()
+    {
+        Should.Throw<CelSyntaxException>(() => CelParser.Parse(new string('9', 20)));
+    }
+
+    [Fact]
+    public void Oversized_decimal_literal_throws_a_syntax_error_not_an_overflow()
+    {
+        Should.Throw<CelSyntaxException>(() => CelParser.Parse(new string('9', 40) + ".5"));
+    }
+
+    [Fact]
+    public void List_literal_syntax_suggests_an_equality_chain()
+    {
+        Should.Throw<CelSyntaxException>(() => CelParser.Parse("status in ['draft', 'review']"))
+            .FixSuggestion.ShouldNotBeNull().ShouldContain("status == 'draft' || status == 'review'");
+    }
+
     [Theory]
     [InlineData("a ==")]
     [InlineData("== a")]
@@ -93,7 +151,10 @@ public class CelParserTests
     [InlineData("unknown_macro(a)")]
     [InlineData("a.b.c")]
     [InlineData("@user.unknown")]
+    [InlineData("@tenant.unknown")]
     [InlineData("[1, 2]")]
+    [InlineData("a[0]")]
+    [InlineData("'it''s'")]
     public void Refuses_input_outside_the_grammar(string source)
     {
         Should.Throw<CelSyntaxException>(() => CelParser.Parse(source));
@@ -114,5 +175,25 @@ public class CelParserTests
         var source = new string('(', 200) + "a" + new string(')', 200);
 
         Should.Throw<CelSyntaxException>(() => CelParser.Parse(source));
+    }
+
+    [Fact]
+    public void Refuses_nesting_past_the_documented_depth_and_says_so()
+    {
+        var source = new string('(', CelParser.MaxDepth + 1) + "a" + new string(')', CelParser.MaxDepth + 1);
+
+        var exception = Should.Throw<CelSyntaxException>(() => CelParser.Parse(source));
+
+        exception.Message.ShouldContain((CelParser.MaxDepth + 1).ToString(CultureInfo.InvariantCulture));
+        exception.Message.ShouldContain(CelParser.MaxDepth.ToString(CultureInfo.InvariantCulture));
+        exception.FixSuggestion.ShouldNotBeNullOrEmpty();
+    }
+
+    [Fact]
+    public void Accepts_exactly_the_documented_depth()
+    {
+        var source = new string('(', CelParser.MaxDepth) + "a" + new string(')', CelParser.MaxDepth);
+
+        Should.NotThrow(() => CelParser.Parse(source));
     }
 }

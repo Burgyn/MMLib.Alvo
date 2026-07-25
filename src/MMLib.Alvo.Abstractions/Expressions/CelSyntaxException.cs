@@ -12,6 +12,7 @@ public sealed class CelSyntaxException : Exception
     /// <summary>Initializes a new instance of the <see cref="CelSyntaxException"/> class.</summary>
     public CelSyntaxException()
     {
+        Position = -1;
     }
 
     /// <summary>Initializes a new instance of the <see cref="CelSyntaxException"/> class.</summary>
@@ -19,6 +20,7 @@ public sealed class CelSyntaxException : Exception
     public CelSyntaxException(string message)
         : base(message)
     {
+        Position = -1;
     }
 
     /// <summary>Initializes a new instance of the <see cref="CelSyntaxException"/> class.</summary>
@@ -27,6 +29,7 @@ public sealed class CelSyntaxException : Exception
     public CelSyntaxException(string message, Exception innerException)
         : base(message, innerException)
     {
+        Position = -1;
     }
 
     /// <summary>
@@ -43,7 +46,10 @@ public sealed class CelSyntaxException : Exception
         FixSuggestion = fixSuggestion;
     }
 
-    /// <summary>Gets the zero-based character offset of the offending token in the source.</summary>
+    /// <summary>
+    /// Gets the zero-based character offset of the offending token in the source, or <c>-1</c>
+    /// when no position is known (the parameterless/message-only constructors).
+    /// </summary>
     public int Position { get; }
 
     /// <summary>Gets a concrete fix suggestion the caller can apply, when one is available.</summary>

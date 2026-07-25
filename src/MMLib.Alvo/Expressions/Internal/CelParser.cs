@@ -23,11 +23,12 @@ internal static class CelParser
     public const int MaxSourceLength = 2000;
 
     /// <summary>
-    /// The maximum recursion depth through the grammar's three unbounded productions (ternary
-    /// chaining, unary-operator chaining, and parenthesised grouping) — the only three
-    /// derivations whose depth grows with adversarial input rather than with the fixed number of
-    /// precedence levels, so this is what stands between a pathological input and a stack
-    /// overflow.
+    /// The maximum number of genuine nesting levels — one unit is counted for each level of
+    /// parenthesised grouping, each level of ternary (<c>?:</c>) chaining, and each level of
+    /// unary-operator (<c>!</c>/<c>-</c>) chaining, the three productions whose depth grows with
+    /// adversarial input rather than with the fixed number of precedence levels. <c>MaxDepth =
+    /// 32</c> means exactly 32 such levels are accepted, combined across all three productions;
+    /// this is what stands between a pathological input and a stack overflow.
     /// </summary>
     public const int MaxDepth = 32;
 
@@ -36,11 +37,14 @@ internal static class CelParser
     /// <exception cref="CelSyntaxException">The source is too long, nests too deeply, or violates the grammar.</exception>
     public static CelNode Parse(string source)
     {
+        ArgumentNullException.ThrowIfNull(source);
+
         if (source.Length > MaxSourceLength)
         {
             throw new CelSyntaxException(
                 $"CEL expression is {source.Length} characters long, exceeding the maximum of {MaxSourceLength}.",
-                MaxSourceLength);
+                MaxSourceLength,
+                $"Split the condition across multiple rules/hooks, or shorten it below {MaxSourceLength} characters.");
         }
 
         var tokens = CelLexer.Tokenize(source);
@@ -106,29 +110,21 @@ internal static class CelParser
 
         private void EnterNestedProduction()
         {
-            _depth++;
-            if (_depth > MaxDepth)
+            if (_depth >= MaxDepth)
             {
-                throw new CelSyntaxException("CEL expression nests too deeply.", Current.Position);
+                throw new CelSyntaxException(
+                    $"CEL expression nests {_depth + 1} levels deep, exceeding the maximum of {MaxDepth}.",
+                    Current.Position,
+                    "Simplify the expression — reduce parenthesised grouping, ternary chaining, or "
+                    + "repeated negation, or split the condition across multiple rules/hooks.");
             }
+
+            _depth++;
         }
 
         private void ExitNestedProduction() => _depth--;
 
         private CelNode ParseConditional()
-        {
-            EnterNestedProduction();
-            try
-            {
-                return ParseConditionalBody();
-            }
-            finally
-            {
-                ExitNestedProduction();
-            }
-        }
-
-        private CelNode ParseConditionalBody()
         {
             var condition = ParseOr();
             if (!Match(CelTokenKind.Question))
@@ -136,10 +132,23 @@ internal static class CelParser
                 return condition;
             }
 
-            var whenTrue = ParseConditional();
+            var whenTrue = ParseNestedConditional();
             Expect(CelTokenKind.Colon);
-            var whenFalse = ParseConditional();
+            var whenFalse = ParseNestedConditional();
             return new CelConditional(condition, whenTrue, whenFalse);
+        }
+
+        private CelNode ParseNestedConditional()
+        {
+            EnterNestedProduction();
+            try
+            {
+                return ParseConditional();
+            }
+            finally
+            {
+                ExitNestedProduction();
+            }
         }
 
         private CelNode ParseOr()
@@ -228,38 +237,25 @@ internal static class CelParser
 
         private CelNode ParseUnary()
         {
-            EnterNestedProduction();
-            try
-            {
-                return ParseUnaryBody();
-            }
-            finally
-            {
-                ExitNestedProduction();
-            }
-        }
-
-        private CelNode ParseUnaryBody()
-        {
             if (Match(CelTokenKind.Not))
             {
-                return new CelUnary(CelUnaryOperator.Not, ParseUnary());
+                return new CelUnary(CelUnaryOperator.Not, ParseNestedUnary());
             }
 
             if (Match(CelTokenKind.Minus))
             {
-                return new CelUnary(CelUnaryOperator.Negate, ParseUnary());
+                return new CelUnary(CelUnaryOperator.Negate, ParseNestedUnary());
             }
 
             return ParsePrimary();
         }
 
-        private CelNode ParsePrimary()
+        private CelNode ParseNestedUnary()
         {
             EnterNestedProduction();
             try
             {
-                return ParsePrimaryBody();
+                return ParseUnary();
             }
             finally
             {
@@ -267,7 +263,7 @@ internal static class CelParser
             }
         }
 
-        private CelNode ParsePrimaryBody() => Current.Kind switch
+        private CelNode ParsePrimary() => Current.Kind switch
         {
             CelTokenKind.IntLiteral => ParseIntLiteral(),
             CelTokenKind.DecimalLiteral => ParseDecimalLiteral(),
@@ -279,15 +275,32 @@ internal static class CelParser
             CelTokenKind.Has => ParseHas(),
             CelTokenKind.Identifier => ParseIdentifierExpression(),
             CelTokenKind.LeftParen => ParseParenthesized(),
+            CelTokenKind.LeftBracket => throw new CelSyntaxException(
+                "Alvo has no list literals.",
+                Current.Position,
+                "Use an equality chain instead, e.g. status == 'draft' || status == 'review'."),
             var unexpected => throw new CelSyntaxException($"Unexpected token {unexpected}.", Current.Position),
         };
 
         private CelNode ParseParenthesized()
         {
             Expect(CelTokenKind.LeftParen);
-            var node = ParseConditional();
+            var node = ParseNestedGroup();
             Expect(CelTokenKind.RightParen);
             return node;
+        }
+
+        private CelNode ParseNestedGroup()
+        {
+            EnterNestedProduction();
+            try
+            {
+                return ParseConditional();
+            }
+            finally
+            {
+                ExitNestedProduction();
+            }
         }
 
         private CelLiteral ParseIntLiteral()
@@ -356,10 +369,10 @@ internal static class CelParser
         {
             Expect(CelTokenKind.Has);
             Expect(CelTokenKind.LeftParen);
-            var fieldToken = Expect(CelTokenKind.Identifier);
+            var field = ParseFieldRefArgument();
             RejectExtraArgument("has");
             Expect(CelTokenKind.RightParen);
-            return new CelHas(new CelFieldRef(fieldToken.Text, CelValueType.Null, CelRecordState.Current));
+            return new CelHas(field);
         }
 
         private CelNode ParseIdentifierExpression()
@@ -371,6 +384,13 @@ internal static class CelParser
                 return ParseCall(identifierToken);
             }
 
+            return ResolveFieldReference(identifierToken);
+        }
+
+        private CelFieldRef ParseFieldRefArgument() => ResolveFieldReference(Expect(CelTokenKind.Identifier));
+
+        private CelFieldRef ResolveFieldReference(CelToken identifierToken)
+        {
             if (Current.Kind == CelTokenKind.Dot)
             {
                 return ParseFieldPath(identifierToken);

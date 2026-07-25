@@ -151,44 +151,42 @@ internal static class CelLexer
 
         while (true)
         {
-            if (position >= source.Length)
-            {
-                throw new CelSyntaxException("Unterminated string literal.", start);
-            }
+            RequireMoreCharacters(source, position, start);
 
-            if (TryConsumeStringEnd(source, quote, ref position))
+            if (source[position] == quote)
             {
+                position++;
                 break;
             }
 
-            builder.Append(ReadStringChar(source, quote, ref position));
+            RejectRawNewline(source, position);
+            builder.Append(ReadStringChar(source, ref position));
         }
 
         return new CelToken(CelTokenKind.StringLiteral, builder.ToString(), start);
     }
 
-    private static bool TryConsumeStringEnd(string source, char quote, ref int position)
+    private static void RequireMoreCharacters(string source, int position, int start)
     {
-        if (source[position] != quote || IsDoubledQuote(source, quote, position))
+        if (position >= source.Length)
         {
-            return false;
+            throw new CelSyntaxException("Unterminated string literal.", start);
         }
-
-        position++;
-        return true;
     }
 
-    private static bool IsDoubledQuote(string source, char quote, int position) =>
-        source[position] == quote && position + 1 < source.Length && source[position + 1] == quote;
-
-    private static char ReadStringChar(string source, char quote, ref int position)
+    private static void RejectRawNewline(string source, int position)
     {
-        if (IsDoubledQuote(source, quote, position))
+        if (source[position] == '\n')
         {
-            position += 2;
-            return quote;
+            throw new CelSyntaxException(
+                "A string literal cannot contain a raw newline.",
+                position,
+                "Escape it instead: \\n.");
         }
+    }
 
+    private static char ReadStringChar(string source, ref int position)
+    {
         if (source[position] == '\\')
         {
             return ReadEscape(source, ref position);
