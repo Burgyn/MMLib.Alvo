@@ -200,7 +200,20 @@ fi
 
 repo="$(setup_repo)"
 CLAUDE_PROJECT_DIR="$repo" bash "$HOOKS_DIR/reset-edited-paths" </dev/null
-assert_eq "0" "$?" "exits 0 when there is no ledger"
+ledger="$(ledger_path "$repo")"
+if [ -f "$ledger" ]; then
+  fail "no ledger present: does not create ledger file" "(no ledger file)" "ledger created"
+else
+  pass "no ledger present: does not create ledger file"
+fi
+
+plain_dir="$(mktemp -d "$TMP_ROOT/plain.XXXXXX")"
+CLAUDE_PROJECT_DIR="$plain_dir" bash "$HOOKS_DIR/reset-edited-paths" </dev/null
+if [ -z "$(find "$plain_dir" -type f 2>/dev/null)" ]; then
+  pass "outside git repo: does not create any files"
+else
+  fail "outside git repo: does not create any files" "(empty directory)" "$(find "$plain_dir" -type f)"
+fi
 
 # ======================================================================= total
 
