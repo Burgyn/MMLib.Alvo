@@ -17,20 +17,38 @@ name: Mutation
 # under MTP is preview-quality and reports false "NoCoverage" (stryker-net#3094).
 # The "Mutation test" step below fails loudly on a vacuous (zero-mutant) run
 # instead of reporting a false green.
+#
+# WHY POST-MERGE AND NOT ON THE PR: this is the one deliberate exception to the
+# repo's "the PR is the only full gate" rule. A mutation run costs ~20 minutes,
+# which is a real tax on every PR touching the core, and unlike the other layers
+# it does not answer "is this change correct?" — it answers "is the test suite
+# still adversarial enough?". That question tolerates being answered minutes
+# later, on main, because the fix is to add a test, not to revert the merge.
+# Every other layer (contract, snapshot, public-API, arch, integration, e2e)
+# stays on the PR. Consequence, accepted: main can go red on mutation score, and
+# nothing blocks a merge on it — a failure here is a notification, not a gate, so
+# it needs someone to actually act on it. Run it on demand before a risky merge
+# via workflow_dispatch.
 on:
-  pull_request:
+  push:
+    branches:
+      - main
     paths:
       - 'src/MMLib.Alvo/**'
       - 'src/MMLib.Alvo.Data.EntityFrameworkCore/**'
       - 'stryker-config.json'
       - 'stryker-config.data-ef.json'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+# Serialize rather than cancel: on main each merge commit deserves its own
+# verdict. Cancelling in-progress runs would silently drop the signal for the
+# commit that actually broke the score.
 concurrency:
   group: mutation-${{ github.ref }}-${{ github.workflow }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   mutation:

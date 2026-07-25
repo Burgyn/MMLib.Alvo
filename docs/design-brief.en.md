@@ -1,6 +1,6 @@
 <!-- GENERATED — do not hand-edit. Regenerate via the alvo-regen-brief skill. -->
-<!-- brief-source: docs/product/alvo-specifikacia.md sha256:40f4293f8314ca04c790410b24647279a91f62df0703325b9aa923f8946a2ddc -->
-<!-- brief-source: docs/product/baas-analyza.md sha256:d3b8776861f1369381e34207a4843eed7d05d9e90ae942b3519c31571323ae47 -->
+<!-- brief-source: docs/product/alvo-specifikacia.md sha256:9665ba17a5d783b7525c23685e8439dd709b1e3e8dfd5bd55636951a5c32878b -->
+<!-- brief-source: docs/product/baas-analyza.md sha256:1a1d038e7aae03da549f2caec4b43da84088b8510d3855afebc76fa6f6e99bbb -->
 
 # Alvo design brief (compressed)
 
@@ -285,9 +285,14 @@ another port**; lockstep SemVer (everything released together as one version).
   NSubstitute, CsCheck (property-based), Verify (snapshot), PublicApiGenerator
   (API approval), NetArchTest, Testcontainers (3-engine matrix), Vacuum (OpenAPI
   lint), Stryker.NET (mutation, security-core only), Playwright (admin E2E),
-  TeaPie (API E2E). **The PR is the only full gate** — no nightly, no post-merge;
-  everything (including mutation + e2e) runs in the PR; `dotnet-affected` only
-  scopes integration tests. Direct push to `main` is forbidden.
+  TeaPie (API E2E). **The PR is the gate for everything except mutation** — no
+  nightly; e2e and integration run in the PR, `dotnet-affected` only scopes
+  integration tests. **Mutation is the one deliberate exception: it runs
+  post-merge on `main`** — a ~20-min run is a real tax on every core PR, and it
+  answers "is the suite still adversarial?" (fix = add a test) rather than "is
+  this change correct?" (fix = don't merge). Cost accepted: nothing blocks a
+  merge on mutation score, so a red run on `main` is a notification someone must
+  act on. Direct push to `main` is forbidden.
 - **Mediator ≠ MediatR** (commercial). Consider Wolverine (MIT: outbox +
   in-process mediator). Avoid MassTransit v9, ImageSharp, Duende, AutoMapper,
   FluentAssertions v8+ (licensing).
@@ -423,5 +428,6 @@ F1 Interfaces + packages → F2 README → F3 Contract tests → F4 CRUD core �
   M2M+OpenAPI/client codegen.
 - **Cross-cutting (from the start, not the end):** Docker images from F4, .NET
   Aspire from F6; GitHub Actions CI with a 3-engine matrix and MTP `dotnet test`;
-  the PR-only full gate; `dotnet-affected` scoping; Vacuum, Stryker.NET and
-  Playwright in the pipeline; local test rings; CHANGELOG + SemVer from v0.1.
+  the PR gate for every layer but mutation (Stryker runs post-merge on `main`);
+  `dotnet-affected` scoping; Vacuum and Playwright in the PR pipeline; local
+  test rings; CHANGELOG + SemVer from v0.1.
