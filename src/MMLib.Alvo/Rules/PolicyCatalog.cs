@@ -12,6 +12,19 @@ namespace MMLib.Alvo.Rules;
 /// than lazily, per request — is what makes "a rule referencing a nonexistent column fails at save,
 /// not at request time" true.
 /// </summary>
+/// <remarks>
+/// <see cref="Build"/>/<see cref="TryBuild"/> compile rules for exactly the entities present in the
+/// <c>schema</c> argument, not every entity the <c>descriptor</c> argument declares. This is correct
+/// for a descriptor entity that is legitimately absent from the mapped schema (a dynamic-storage
+/// entity, filtered out by <c>DescriptorToSchemaMapper</c>, which this compiler does not yet police),
+/// but it means a descriptor entity with no matching schema entry for some other reason — a caller
+/// building the two arguments by hand, inconsistently, rather than from
+/// <c>DescriptorToSchemaMapper.Map(descriptor)</c> — compiles with no error for rules on that entity: a
+/// mismatch neither <see cref="Build"/> nor <see cref="TryBuild"/> can detect from these two arguments
+/// alone. Callers must keep <c>schema</c> consistent with <c>descriptor</c> (in practice, by passing
+/// <c>DescriptorToSchemaMapper.Map(descriptor)</c>'s own output), which every call site in this
+/// codebase does by construction.
+/// </remarks>
 public sealed class PolicyCatalog
 {
     private readonly IReadOnlyDictionary<string, EntityPolicy> _entities;

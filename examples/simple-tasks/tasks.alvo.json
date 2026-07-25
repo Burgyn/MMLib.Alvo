@@ -28,7 +28,7 @@
       "rules": {
         "list": "owner_id == @user.id",
         "get": "owner_id == @user.id",
-        "create": "@user.id != null",
+        "create": "'authenticated' in @user.roles",
         "update": "owner_id == @user.id",
         "delete": "owner_id == @user.id"
       }
@@ -55,11 +55,11 @@
         "completed_at": { "type": "datetime", "readOnly": true }
       },
       "rules": {
-        "list": "project_id != null",
-        "get": "project_id != null",
-        "create": "@user.id != null",
-        "update": "@user.id != null",
-        "delete": "@user.id != null"
+        "list": "has(project_id)",
+        "get": "has(project_id)",
+        "create": "'authenticated' in @user.roles",
+        "update": "'authenticated' in @user.roles",
+        "delete": "'authenticated' in @user.roles"
       },
       "hooks": {
         "beforeUpdate": [

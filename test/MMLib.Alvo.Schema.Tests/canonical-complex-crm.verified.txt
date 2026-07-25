@@ -177,10 +177,10 @@
         ]
       },
       "rules": {
-        "create": "@user.id != null",
-        "get": "@user.id != null",
-        "list": "@user.id != null",
-        "update": "@user.id != null"
+        "create": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+        "list": "'authenticated' in @user.roles",
+        "update": "'authenticated' in @user.roles"
       }
     },
     "countries": {
@@ -205,8 +205,8 @@
       },
       "rules": {
         "create": "@user.role == 'manager'",
-        "get": "@user.id != null",
-        "list": "@user.id != null",
+        "get": "'authenticated' in @user.roles",
+        "list": "'authenticated' in @user.roles",
         "update": "@user.role == 'manager'"
       },
       "tenancy": "global"
@@ -317,8 +317,8 @@
       "renamedFrom": "line_items",
       "rules": {
         "create": "@user.role in ['manager', 'finance']",
-        "get": "@user.id != null",
-        "list": "@user.id != null",
+        "get": "'authenticated' in @user.roles",
+        "list": "'authenticated' in @user.roles",
         "update": "@user.role in ['manager', 'finance']"
       }
     },
@@ -365,8 +365,8 @@
       },
       "rules": {
         "create": "@user.role in ['manager', 'finance']",
-        "get": "@user.id != null",
-        "list": "@user.id != null",
+        "get": "'authenticated' in @user.roles",
+        "list": "'authenticated' in @user.roles",
         "update": "@user.role in ['manager', 'finance']"
       }
     }

@@ -68,11 +68,11 @@ internal static class PolicyCatalogBuilder
     private static Dictionary<DataOperation, OperationPolicy> CompileRules(
         string entityName, AccessRules? rules, EntitySchema schema, ICelCompiler compiler, List<DescriptorValidationError> errors)
     {
-        var list = CompileOperationRule(entityName, "list", rules?.List, schema, compiler, errors);
-        var get = CompileOperationRule(entityName, "get", rules?.Get, schema, compiler, errors);
-        var delete = CompileOperationRule(entityName, "delete", rules?.Delete, schema, compiler, errors);
-        var create = CompileOperationRule(entityName, "create", rules?.Create, schema, compiler, errors);
-        var update = CompileOperationRule(entityName, "update", rules?.Update, schema, compiler, errors);
+        var list = CompileOperationRule(entityName, DataOperation.List, rules?.List, schema, compiler, errors);
+        var get = CompileOperationRule(entityName, DataOperation.Get, rules?.Get, schema, compiler, errors);
+        var delete = CompileOperationRule(entityName, DataOperation.Delete, rules?.Delete, schema, compiler, errors);
+        var create = CompileOperationRule(entityName, DataOperation.Create, rules?.Create, schema, compiler, errors);
+        var update = CompileOperationRule(entityName, DataOperation.Update, rules?.Update, schema, compiler, errors);
 
         return new Dictionary<DataOperation, OperationPolicy>
         {
@@ -85,7 +85,7 @@ internal static class PolicyCatalogBuilder
     }
 
     private static CompiledExpression? CompileOperationRule(
-        string entityName, string operationName, string? source, EntitySchema schema, ICelCompiler compiler, List<DescriptorValidationError> errors)
+        string entityName, DataOperation operation, string? source, EntitySchema schema, ICelCompiler compiler, List<DescriptorValidationError> errors)
     {
         if (source is null)
         {
@@ -98,7 +98,8 @@ internal static class PolicyCatalogBuilder
             return result.Expression;
         }
 
-        errors.AddRange(result.Errors.Select(error => Error($"/entities/{entityName}/rules/{operationName}", error)));
+        var path = $"/entities/{entityName}/rules/{operation.ToWireName()}";
+        errors.AddRange(result.Errors.Select(error => Error(path, error)));
         return null;
     }
 
@@ -174,23 +175,32 @@ internal static class PolicyCatalogBuilder
             return FieldMask.FromExpression(result.Expression);
         }
 
-        errors.Add(new DescriptorValidationError(
-            path,
-            $"A '{flagName}' expression must not reference row fields; it is evaluated once per request against the caller/tenant context only.",
-            "Row-dependent masking would require post-processing the returned rows, which the 'no in-memory post-filter' invariant forbids. Use a static true/false, or defer the row-dependent check to a future post-processing feature.",
-            DescriptorValidationSeverity.Error));
+        errors.Add(RowDependentMaskError(path, flagName));
         return null;
     }
 
-    /// <summary>Walks a compiled tree for any reference to a row field — the construct <c>hidden</c>/<c>readOnly</c> must never contain.</summary>
-    private static bool ReferencesRowField(CelNode node) => node switch
+    /// <summary>Builds the "row-dependent mask" rejection: the one place this message/fix pair is assembled.</summary>
+    private static DescriptorValidationError RowDependentMaskError(string path, string flagName) => new(
+        path,
+        $"A '{flagName}' expression must not reference row fields; it is evaluated once per request against the caller/tenant context only.",
+        "Row-dependent masking would require post-processing the returned rows, which the 'no in-memory post-filter' invariant forbids. Use a static true/false, or defer the row-dependent check to a future post-processing feature.",
+        DescriptorValidationSeverity.Error);
+
+    /// <summary>
+    /// Walks a compiled tree for any reference to a row field — the construct <c>hidden</c>/<c>readOnly</c>
+    /// must never contain. Deny-by-default: only a literal or a caller/tenant context reference is
+    /// provably context-only, every composite recurses, and any other node kind — a row field, <c>has()</c>,
+    /// <c>changed(...)</c>, or a future construct this walk was never updated for — counts as
+    /// row-dependent rather than silently passing as safe.
+    /// </summary>
+    internal static bool ReferencesRowField(CelNode node) => node switch
     {
-        CelFieldRef or CelHas => true,
+        CelLiteral or CelContextRef => false,
         CelUnary unary => ReferencesRowField(unary.Operand),
         CelBinary binary => ReferencesRowField(binary.Left) || ReferencesRowField(binary.Right),
         CelConditional conditional =>
             ReferencesRowField(conditional.Condition) || ReferencesRowField(conditional.WhenTrue) || ReferencesRowField(conditional.WhenFalse),
-        _ => false,
+        _ => true,
     };
 
     private static DescriptorValidationError Error(string path, CelCompilationError error) =>

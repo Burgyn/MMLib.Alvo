@@ -63,8 +63,8 @@
         "vat_rate": { "type": "decimal", "precision": 5, "scale": 2, "required": true }
       },
       "rules": {
-        "list": "@user.id != null",
-        "get": "@user.id != null",
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
         "create": "@user.role == 'manager'",
         "update": "@user.role == 'manager'"
       }
@@ -99,10 +99,10 @@
         "phone": { "type": "string", "format": "phone" }
       },
       "rules": {
-        "list": "@user.id != null",
-        "get": "@user.id != null",
-        "create": "@user.id != null",
-        "update": "@user.id != null"
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+        "create": "'authenticated' in @user.roles",
+        "update": "'authenticated' in @user.roles"
       },
       "hooks": {
         "beforeCreate": [
@@ -178,8 +178,8 @@
         }
       },
       "rules": {
-        "list": "@user.id != null",
-        "get": "@user.id != null",
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
         "create": "@user.role in ['manager', 'finance']",
         "update": "@user.role in ['manager', 'finance']"
       }
@@ -199,8 +199,8 @@
         }
       },
       "rules": {
-        "list": "@user.id != null",
-        "get": "@user.id != null",
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
         "create": "@user.role in ['manager', 'finance']",
         "update": "@user.role in ['manager', 'finance']"
       }

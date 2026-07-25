@@ -1,7 +1,10 @@
 ﻿using MMLib.Alvo.Data;
+using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
+using MMLib.Alvo.Schema;
 using System.Collections;
 using System.Globalization;
+using System.Reflection;
 using System.Text.Json;
 
 namespace MMLib.Alvo.Tests.Expressions;
@@ -426,5 +429,77 @@ public class CelInterpreterTests
         var second = Row([("status", "approved")]);
 
         first.ShouldNotBe(second);
+    }
+
+    /// <summary>
+    /// <see cref="CelInterpreter.EvaluateMask"/> is the mirror image of <see cref="CelInterpreter.EvaluatePredicate"/>:
+    /// a mask must fail closed (masked) on anything that is not exactly <see langword="false"/>,
+    /// where a predicate fails closed (denied) on anything that is not exactly <see langword="true"/>.
+    /// A field author's context-only expression that resolves cleanly to a definite boolean behaves
+    /// identically either way; the two diverge only when evaluation produces something else entirely —
+    /// covered by <see cref="A_mask_that_evaluates_to_a_non_boolean_value_is_masked"/> and
+    /// <see cref="A_mask_whose_evaluation_throws_is_masked"/> below.
+    /// </summary>
+    [Fact]
+    public void A_mask_expression_that_evaluates_to_exactly_true_is_masked()
+    {
+        CelInterpreter.EvaluateMask(CelFixtures.CompileRule("'editor' in @user.roles"), CelFixtures.Editor).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void A_mask_expression_that_evaluates_to_exactly_false_is_not_masked()
+    {
+        CelInterpreter.EvaluateMask(CelFixtures.CompileRule("'editor' in @user.roles"), CelFixtures.Alice).ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// A hand-built (compiler-bypassing) tree whose claimed <c>ResultType</c> is <c>Bool</c> but whose
+    /// root actually evaluates to a decimal — the shape a compiler defect would produce, and the
+    /// closest this codebase's total-function interpreter can come to "unresolvable" for a boolean
+    /// root, since every legitimate context-only Rule-profile comparison collapses definitively to
+    /// <see langword="true"/>/<see langword="false"/> (see <see cref="CelInterpreter"/>'s own remarks
+    /// on the null rule). <see cref="CelInterpreter.EvaluatePredicate"/> would silently read this as
+    /// "false" (via its <c>is true</c> check); <see cref="CelInterpreter.EvaluateMask"/> must not make
+    /// the same value disclose a field.
+    /// </summary>
+    [Fact]
+    public void A_mask_that_evaluates_to_a_non_boolean_value_is_masked()
+    {
+        var root = new CelBinary(CelBinaryOperator.Add, new CelLiteral(CelValueType.Int, 1L), new CelLiteral(CelValueType.Int, 2L));
+        var malformed = BuildViaInternalConstructor(root, "1 + 2");
+
+        CelInterpreter.EvaluateMask(malformed, CelFixtures.Alice).ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// A hand-built tree that genuinely throws during evaluation (a row-field lookup with a
+    /// <see langword="null"/> field name, which <see cref="System.Collections.Generic.Dictionary{TKey,TValue}"/>
+    /// rejects) — <see cref="CelInterpreter.EvaluateMask"/> must convert the exception to "masked",
+    /// the opposite of <see cref="CelInterpreter.EvaluatePredicate"/>'s "denied".
+    /// </summary>
+    [Fact]
+    public void A_mask_whose_evaluation_throws_is_masked()
+    {
+        var root = new CelFieldRef(null!, CelValueType.Bool, CelRecordState.Current);
+        var throwing = BuildViaInternalConstructor(root, "<malformed>");
+
+        CelInterpreter.EvaluateMask(throwing, CelFixtures.Alice).ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// <see cref="CompiledExpression"/>'s constructor is <c>internal</c> to <c>MMLib.Alvo.Abstractions</c>,
+    /// visible only to <c>MMLib.Alvo</c> via <c>InternalsVisibleTo</c> — not to this test assembly. These
+    /// two adversarial-tree tests deliberately bypass the compiler/type-checker (the only way to reach a
+    /// tree an honest CEL author could never produce), so they reach the constructor via reflection
+    /// instead, which is unaffected by that assembly boundary.
+    /// </summary>
+    private static CompiledExpression BuildViaInternalConstructor(CelNode root, string source)
+    {
+        var constructor = typeof(CompiledExpression).GetConstructor(
+            BindingFlags.NonPublic | BindingFlags.Instance,
+            [typeof(CelNode), typeof(CelProfile), typeof(CelValueType), typeof(string), typeof(EntitySchema)])
+            ?? throw new MissingMethodException("CompiledExpression's internal constructor was not found by reflection.");
+
+        return (CompiledExpression)constructor.Invoke([root, CelProfile.Rule, CelValueType.Bool, source, CelFixtures.Orders]);
     }
 }

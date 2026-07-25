@@ -36,13 +36,18 @@ namespace MMLib.Alvo.Migrations
 {
     public sealed class RuntimeSchemaService
     {
-        public RuntimeSchemaService(MMLib.Alvo.Descriptor.IDescriptorValidator validator, MMLib.Alvo.Migrations.ISchemaMigrator migrator, MMLib.Alvo.Migrations.IDescriptorVersionStore store, MMLib.Alvo.Migrations.IRuntimeSchemaWriter writer) { }
+        public RuntimeSchemaService(MMLib.Alvo.Descriptor.IDescriptorValidator validator, MMLib.Alvo.Migrations.ISchemaMigrator migrator, MMLib.Alvo.Migrations.IDescriptorVersionStore store, MMLib.Alvo.Migrations.IRuntimeSchemaWriter writer, MMLib.Alvo.Expressions.ICelCompiler compiler, MMLib.Alvo.Rules.IPolicyCatalogProvider policyCatalogProvider) { }
         public System.Threading.Tasks.Task<MMLib.Alvo.Migrations.DescriptorVersion> ApplyAsync(string project, string descriptorJson, int expectedRevision, MMLib.Alvo.Migrations.MigrationOptions options, System.Threading.CancellationToken ct = default) { }
         public System.Threading.Tasks.Task<MMLib.Alvo.Migrations.DescriptorVersion> RollbackAsync(string project, int targetRevision, MMLib.Alvo.Migrations.MigrationOptions options, System.Threading.CancellationToken ct = default) { }
     }
 }
 namespace MMLib.Alvo.Rules
 {
+    public interface IPolicyCatalogProvider
+    {
+        MMLib.Alvo.Rules.PolicyCatalog? Current { get; }
+        void SetCurrent(MMLib.Alvo.Rules.PolicyCatalog catalog);
+    }
     public sealed class PolicyCatalog
     {
         public static MMLib.Alvo.Rules.PolicyCatalog Build(MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Expressions.ICelCompiler compiler) { }

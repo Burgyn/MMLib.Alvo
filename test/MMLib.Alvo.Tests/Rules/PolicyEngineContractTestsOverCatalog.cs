@@ -10,6 +10,8 @@ public class PolicyEngineContractTestsOverCatalog : PolicyEngineContractTests
     protected override IPolicyEngine CreateEngine(AlvoDescriptor descriptor, SchemaModel schema)
     {
         var catalog = PolicyCatalog.Build(descriptor, schema, MMLib.Alvo.Tests.Expressions.CelFixtures.Compiler);
-        return new MMLib.Alvo.Rules.Internal.PolicyEngine(() => catalog);
+        var provider = new MMLib.Alvo.Rules.Internal.PolicyCatalogProvider();
+        provider.SetCurrent(catalog);
+        return new MMLib.Alvo.Rules.Internal.PolicyEngine(provider);
     }
 }

@@ -117,6 +117,38 @@ internal static class CelInterpreter
     }
 
     /// <summary>
+    /// Evaluates a field-mask flag (<c>hidden</c>/<c>readOnly</c>) — a context-only Rule-profile
+    /// expression with no row to read, so it is always evaluated against <see cref="AlvoRecord.Empty"/>
+    /// and no previous row. This is deliberately the mirror image of <see cref="EvaluatePredicate"/>'s
+    /// fail-safe direction: an authorization predicate must fail closed to <see langword="false"/>
+    /// (deny) on anything it cannot resolve, but a mask fails closed the <b>other</b> way — a field is
+    /// masked unless the expression resolves to exactly <see langword="false"/>, so an exception, or
+    /// any evaluated value other than the two booleans, exposes nothing rather than silently
+    /// widening access. Collapsing both to "false on trouble" (as <see cref="EvaluatePredicate"/> does)
+    /// would be the wrong direction for a mask: it would disclose a field a rule author meant to hide
+    /// from exactly the callers a resolution failure is most likely to affect.
+    /// </summary>
+    /// <param name="expression">The compiled, context-only Rule-profile expression.</param>
+    /// <param name="context">The caller/tenant context <c>@user</c>/<c>@tenant</c> resolve against.</param>
+    public static bool EvaluateMask(CompiledExpression expression, AlvoContext context)
+    {
+        ArgumentNullException.ThrowIfNull(expression);
+        ArgumentNullException.ThrowIfNull(context);
+
+        try
+        {
+            var state = new EvalState(AlvoRecord.Empty, null, context);
+            return Evaluate(expression.Root, state) is not false;
+        }
+#pragma warning disable CA1031
+        catch (Exception)
+#pragma warning restore CA1031
+        {
+            return true;
+        }
+    }
+
+    /// <summary>
     /// Evaluates a Computed expression's scalar value. Arithmetic on a <see langword="null"/>
     /// operand, and a division by zero, both yield <see langword="null"/> rather than throwing —
     /// a generated column must never make a write crash.

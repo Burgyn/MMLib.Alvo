@@ -123,9 +123,13 @@ namespace MMLib.Alvo.Testing.Rules
     public abstract class PolicyEngineContractTests
     {
         protected PolicyEngineContractTests() { }
+        public void A_denied_decision_carries_no_predicate_and_no_mask() { }
+        public void A_field_declared_statically_hidden_is_in_the_hidden_mask() { }
+        public void A_field_declared_statically_read_only_is_in_the_read_only_mask() { }
         public void A_global_entity_ignores_a_tenantless_caller() { }
         public void A_null_rule_for_the_requested_operation_denies() { }
         public void A_scoped_entity_denies_a_tenantless_caller_before_any_rule_is_consulted() { }
+        public void A_scoped_entity_with_a_tenant_present_synthesizes_a_non_null_tenant_scope() { }
         public void A_true_rule_allows_with_a_non_null_predicate() { }
         public void An_entity_with_no_rules_block_denies_every_operation() { }
         public void An_unknown_entity_denies_rather_than_throwing() { }
@@ -138,6 +142,6 @@ namespace MMLib.Alvo.Testing.Rules
         [Xunit.InlineData(new object[] {
                 "List"})]
         public void List_get_and_delete_carry_using_only(string operationName) { }
-        public void Update_carries_both_using_and_with_check() { }
+        public void Update_carries_both_using_and_with_check_from_updates_own_distinctive_source() { }
     }
 }

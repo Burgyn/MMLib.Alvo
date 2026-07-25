@@ -1,4 +1,7 @@
 ﻿using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Expressions;
+using MMLib.Alvo.Rules;
+using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Migrations;
@@ -9,30 +12,46 @@ namespace MMLib.Alvo.Migrations;
 /// and append a new version. The service-level operation the Management-API runtime-apply endpoint
 /// will call; it owns no DB connection (the atomic transaction lives behind <see cref="IRuntimeSchemaWriter"/>).
 /// </summary>
+/// <remarks>
+/// Every branch that accepts a descriptor as the project's current, authoritative one (an idempotent
+/// re-apply, a genuine apply, or a rollback) also (re)primes <see cref="IPolicyCatalogProvider"/> from
+/// that same descriptor — see <see cref="PolicyCatalogPriming"/> — so a tightened or revoked rule
+/// takes effect for the very next <c>IPolicyEngine.Resolve</c> call, not merely after a process
+/// restart.
+/// </remarks>
 public sealed class RuntimeSchemaService
 {
     private readonly IDescriptorValidator _validator;
     private readonly ISchemaMigrator _migrator;
     private readonly IDescriptorVersionStore _store;
     private readonly IRuntimeSchemaWriter _writer;
+    private readonly ICelCompiler _compiler;
+    private readonly IPolicyCatalogProvider _policyCatalogProvider;
 
     /// <summary>Initializes a new instance of the <see cref="RuntimeSchemaService"/> class.</summary>
     /// <param name="validator">Validates untrusted descriptor JSON before it is parsed.</param>
     /// <param name="migrator">Plans the migration between the current and desired schema.</param>
     /// <param name="store">The append-only descriptor version history, read for the current/rollback source.</param>
     /// <param name="writer">The atomic apply-plan-and-append-version seam.</param>
+    /// <param name="compiler">Compiles the policy catalog primed after every accepted apply/rollback.</param>
+    /// <param name="policyCatalogProvider">Holds the currently effective <see cref="PolicyCatalog"/> for <c>IPolicyEngine</c>.</param>
     public RuntimeSchemaService(
         IDescriptorValidator validator, ISchemaMigrator migrator,
-        IDescriptorVersionStore store, IRuntimeSchemaWriter writer)
+        IDescriptorVersionStore store, IRuntimeSchemaWriter writer,
+        ICelCompiler compiler, IPolicyCatalogProvider policyCatalogProvider)
     {
         ArgumentNullException.ThrowIfNull(validator);
         ArgumentNullException.ThrowIfNull(migrator);
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(writer);
+        ArgumentNullException.ThrowIfNull(compiler);
+        ArgumentNullException.ThrowIfNull(policyCatalogProvider);
         _validator = validator;
         _migrator = migrator;
         _store = store;
         _writer = writer;
+        _compiler = compiler;
+        _policyCatalogProvider = policyCatalogProvider;
     }
 
     /// <summary>Validates, plans, guards, and atomically applies + versions a runtime descriptor change.</summary>
@@ -53,7 +72,8 @@ public sealed class RuntimeSchemaService
         RejectDryRun(options);
 
         Validate(descriptorJson);
-        var desired = DescriptorToSchemaMapper.Map(AlvoDescriptor.Parse(descriptorJson));
+        var descriptor = AlvoDescriptor.Parse(descriptorJson);
+        var desired = DescriptorToSchemaMapper.Map(descriptor);
         var current = await _store.GetCurrentAsync(project, ct).ConfigureAwait(false);
         var currentSchema = current?.Schema ?? new SchemaModel([]);
         var currentRevision = current?.Revision ?? 0;
@@ -81,11 +101,14 @@ public sealed class RuntimeSchemaService
             // version already exists — a fresh project (current is null) whose desired schema happens
             // to plan empty (e.g. an entity-less descriptor) still gets its rev-1 baseline appended
             // below, so ApplyAsync's Task<DescriptorVersion> contract never has to return null.
+            PolicyCatalogPriming.Prime(_policyCatalogProvider, _compiler, descriptor, desired);
             return current;
         }
 
         var candidate = new DescriptorVersion(desired, descriptorJson, 0, DateTimeOffset.UtcNow, options.Author, options.Reason);
-        return await _writer.ApplyAndAppendAsync(project, plan, candidate, expectedRevision, options, ct).ConfigureAwait(false);
+        var applied = await _writer.ApplyAndAppendAsync(project, plan, candidate, expectedRevision, options, ct).ConfigureAwait(false);
+        PolicyCatalogPriming.Prime(_policyCatalogProvider, _compiler, descriptor, desired);
+        return applied;
     }
 
     /// <summary>Rolls the project back to <paramref name="targetRevision"/> by appending a git-revert version.</summary>
@@ -115,7 +138,9 @@ public sealed class RuntimeSchemaService
         var candidate = new DescriptorVersion(
             target.Schema, target.DescriptorJson, 0, DateTimeOffset.UtcNow,
             options.Author, options.Reason ?? $"Rollback to revision {targetRevision}", RolledBackFrom: targetRevision);
-        return await _writer.ApplyAndAppendAsync(project, plan, candidate, currentVersion.Revision, options, ct).ConfigureAwait(false);
+        var reverted = await _writer.ApplyAndAppendAsync(project, plan, candidate, currentVersion.Revision, options, ct).ConfigureAwait(false);
+        PolicyCatalogPriming.Prime(_policyCatalogProvider, _compiler, AlvoDescriptor.Parse(target.DescriptorJson), target.Schema);
+        return reverted;
     }
 
     private void Validate(string descriptorJson)

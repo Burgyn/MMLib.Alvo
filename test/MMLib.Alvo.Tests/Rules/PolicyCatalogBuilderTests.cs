@@ -1,5 +1,7 @@
 ﻿using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Rules;
+using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Schema;
 using MMLib.Alvo.Tests.Expressions;
 
@@ -38,6 +40,72 @@ public class PolicyCatalogBuilderTests
         error.Path.ShouldBe("/entities/orders/fields/owner_id/hidden");
         error.FixSuggestion.ShouldNotBeNull();
         error.FixSuggestion.ShouldContain("defer");
+    }
+
+    [Fact]
+    public void A_row_dependent_readonly_flag_fails_with_a_deferral_fix_suggestion()
+    {
+        var fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
+        {
+            ["owner_id"] = new()
+            {
+                Type = MMLib.Alvo.Descriptor.FieldType.Uuid,
+                ReadOnly = BoolOrCel.FromExpression("owner_id != @user.id"),
+            },
+        };
+        var descriptor = Descriptor("orders", Entity(fields: fields));
+
+        PolicyCatalog.TryBuild(descriptor, Schema(), CelFixtures.Compiler, out var catalog, out var errors).ShouldBeFalse();
+
+        catalog.ShouldBeNull();
+        var error = errors.ShouldHaveSingleItem();
+        error.Path.ShouldBe("/entities/orders/fields/owner_id/readOnly");
+        error.FixSuggestion.ShouldNotBeNull();
+        error.FixSuggestion.ShouldContain("defer");
+    }
+
+    /// <summary>
+    /// Decision 3's loudest guarantee: a <c>Scoped</c> entity with no <c>tenant_id</c> field fails at
+    /// build, naming the entity's <c>/tenancy</c> path — not a silently-null <c>TenantScope</c> that
+    /// would let every tenant read every row.
+    /// </summary>
+    [Fact]
+    public void A_scoped_entity_with_no_tenant_id_field_fails_at_the_tenancy_path()
+    {
+        var schemaWithoutTenantId = new SchemaModel([
+            new EntitySchema
+            {
+                Name = "orders",
+                Tenancy = TenancyMode.Scoped,
+                Fields = [new FieldSchema { Name = "id", Type = MMLib.Alvo.Schema.FieldType.Uuid }],
+            },
+        ]);
+        var descriptor = Descriptor("orders", Entity());
+
+        PolicyCatalog.TryBuild(descriptor, schemaWithoutTenantId, CelFixtures.Compiler, out var catalog, out var errors).ShouldBeFalse();
+
+        catalog.ShouldBeNull();
+        errors.ShouldContain(e => e.Path == "/entities/orders/tenancy");
+    }
+
+    /// <summary>
+    /// Deny-by-default (Important 2): a node kind <see cref="PolicyCatalogBuilder.ReferencesRowField"/>
+    /// was never taught about — here <see cref="CelChanged"/>, itself already row-dependent and, before
+    /// this fix, silently absent from the switch — must count as row-dependent, never as safely
+    /// context-only. A permissive default arm here would let an as-yet-unrecognized construct compile
+    /// into an unmasked field mask.
+    /// </summary>
+    [Fact]
+    public void ReferencesRowField_denies_by_default_for_an_unrecognized_construct()
+    {
+        PolicyCatalogBuilder.ReferencesRowField(new CelChanged("owner_id")).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void ReferencesRowField_allows_a_literal_or_context_reference()
+    {
+        PolicyCatalogBuilder.ReferencesRowField(new CelLiteral(CelValueType.Bool, true)).ShouldBeFalse();
+        PolicyCatalogBuilder.ReferencesRowField(new CelContextRef(CelContextValue.TenantId, CelValueType.Uuid)).ShouldBeFalse();
     }
 
     [Fact]

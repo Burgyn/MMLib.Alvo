@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Expressions;
+using System.Collections.Frozen;
 
 namespace MMLib.Alvo.Rules;
 
@@ -13,7 +14,7 @@ namespace MMLib.Alvo.Rules;
 /// </summary>
 public sealed record PolicyDecision
 {
-    private static readonly IReadOnlySet<string> _empty = new HashSet<string>();
+    private static readonly FrozenSet<string> _empty = FrozenSet<string>.Empty;
 
     /// <summary>Initializes a new instance of the <see cref="PolicyDecision"/> class.</summary>
     /// <param name="isDenied">Whether the operation is denied.</param>
