@@ -46,4 +46,17 @@ internal static class RelationalSqlBatch
             await connection.OpenAsync(ct).ConfigureAwait(false);
         }
     }
+
+    /// <summary>Adds a named, valued parameter to <paramref name="command"/>.</summary>
+    /// <remarks>
+    /// Shared by <see cref="EfCoreDescriptorVersionStore"/> and <see cref="VersionRowWriter"/> so
+    /// both bind their SQL parameters identically instead of each keeping its own copy.
+    /// </remarks>
+    public static void AddParameter(DbCommand command, string name, object value)
+    {
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = name;
+        parameter.Value = value;
+        command.Parameters.Add(parameter);
+    }
 }

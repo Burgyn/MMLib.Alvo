@@ -149,10 +149,10 @@ internal sealed class EfCoreDescriptorVersionStore : IDescriptorVersionStore, IA
             command.CommandText = revision is null
                 ? $"SELECT {SelectColumns} FROM {TableName} WHERE project = @project ORDER BY revision DESC LIMIT 1"
                 : $"SELECT {SelectColumns} FROM {TableName} WHERE project = @project AND revision = @revision";
-            AddParameter(command, "@project", project);
+            RelationalSqlBatch.AddParameter(command, "@project", project);
             if (revision is not null)
             {
-                AddParameter(command, "@revision", revision.Value);
+                RelationalSqlBatch.AddParameter(command, "@revision", revision.Value);
             }
 
             var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
@@ -169,7 +169,7 @@ internal sealed class EfCoreDescriptorVersionStore : IDescriptorVersionStore, IA
         await using (command.ConfigureAwait(false))
         {
             command.CommandText = $"SELECT {SelectColumns} FROM {TableName} WHERE project = @project ORDER BY revision ASC";
-            AddParameter(command, "@project", project);
+            RelationalSqlBatch.AddParameter(command, "@project", project);
 
             var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
             await using (reader.ConfigureAwait(false))
@@ -200,14 +200,6 @@ internal sealed class EfCoreDescriptorVersionStore : IDescriptorVersionStore, IA
             ?? throw new InvalidOperationException("Descriptor version deserialized to a null schema.");
 
         return new DescriptorVersion(schema, descriptorJson, revision, createdAt, author, reason, rolledBackFrom);
-    }
-
-    private static void AddParameter(DbCommand command, string name, object value)
-    {
-        var parameter = command.CreateParameter();
-        parameter.ParameterName = name;
-        parameter.Value = value;
-        command.Parameters.Add(parameter);
     }
 
     /// <summary>

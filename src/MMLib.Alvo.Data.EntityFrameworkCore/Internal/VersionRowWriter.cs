@@ -75,7 +75,7 @@ internal sealed class VersionRowWriter : IDisposable
         {
             command.Transaction = transaction;
             command.CommandText = $"SELECT COALESCE(MAX(revision), 0) FROM {TableName} WHERE project = @project";
-            AddParameter(command, "@project", project);
+            RelationalSqlBatch.AddParameter(command, "@project", project);
 
             var result = await command.ExecuteScalarAsync(ct).ConfigureAwait(false);
             return Convert.ToInt32(result, CultureInfo.InvariantCulture);
@@ -97,14 +97,14 @@ internal sealed class VersionRowWriter : IDisposable
                 INSERT INTO {TableName} (project, revision, descriptor_json, schema_json, author, reason, rolled_back_from, created_at)
                 VALUES (@project, @revision, @descriptor_json, @schema_json, @author, @reason, @rolled_back_from, @created_at)
                 """;
-            AddParameter(command, "@project", project);
-            AddParameter(command, "@revision", version.Revision);
-            AddParameter(command, "@descriptor_json", version.DescriptorJson);
-            AddParameter(command, "@schema_json", schemaJson);
-            AddParameter(command, "@author", (object?)version.Author ?? DBNull.Value);
-            AddParameter(command, "@reason", (object?)version.Reason ?? DBNull.Value);
-            AddParameter(command, "@rolled_back_from", (object?)version.RolledBackFrom ?? DBNull.Value);
-            AddParameter(command, "@created_at", version.CreatedAt.ToString("O", CultureInfo.InvariantCulture));
+            RelationalSqlBatch.AddParameter(command, "@project", project);
+            RelationalSqlBatch.AddParameter(command, "@revision", version.Revision);
+            RelationalSqlBatch.AddParameter(command, "@descriptor_json", version.DescriptorJson);
+            RelationalSqlBatch.AddParameter(command, "@schema_json", schemaJson);
+            RelationalSqlBatch.AddParameter(command, "@author", (object?)version.Author ?? DBNull.Value);
+            RelationalSqlBatch.AddParameter(command, "@reason", (object?)version.Reason ?? DBNull.Value);
+            RelationalSqlBatch.AddParameter(command, "@rolled_back_from", (object?)version.RolledBackFrom ?? DBNull.Value);
+            RelationalSqlBatch.AddParameter(command, "@created_at", version.CreatedAt.ToString("O", CultureInfo.InvariantCulture));
 
             await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
@@ -161,13 +161,5 @@ internal sealed class VersionRowWriter : IDisposable
             await EnsureReadyAsync(connection, ct).ConfigureAwait(false);
             return await ReadCurrentRevisionAsync(connection, transaction: null, project, ct).ConfigureAwait(false);
         }
-    }
-
-    private static void AddParameter(DbCommand command, string name, object value)
-    {
-        var parameter = command.CreateParameter();
-        parameter.ParameterName = name;
-        parameter.Value = value;
-        command.Parameters.Add(parameter);
     }
 }
