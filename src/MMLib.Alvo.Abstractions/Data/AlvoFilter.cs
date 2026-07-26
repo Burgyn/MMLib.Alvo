@@ -22,6 +22,65 @@ public abstract record AlvoFilter
     private protected AlvoFilter()
     {
     }
+
+    /// <summary>
+    /// Enumerates every field name any <see cref="AlvoComparison"/> in this tree compares, in no
+    /// particular order and with duplicates. Lives here, on the closed hierarchy itself, rather than
+    /// in each <see cref="IAlvoData"/> implementation: every implementation has to validate a
+    /// caller's filter fields against the schema and against
+    /// <see cref="Rules.PolicyDecision.HiddenFields"/> before touching a row, and a per-provider copy
+    /// of a security-relevant tree walk is exactly the kind of divergence this hierarchy was closed to
+    /// prevent. Walks iteratively, so a hostile tree cannot exhaust the stack here on the way to being
+    /// rejected for being too deep.
+    /// </summary>
+    /// <param name="filter">The tree to walk, or <see langword="null"/> for no filter.</param>
+    public static IEnumerable<string> ReferencedFields(AlvoFilter? filter)
+    {
+        if (filter is null)
+        {
+            yield break;
+        }
+
+        var pending = new Stack<AlvoFilter>();
+        pending.Push(filter);
+
+        while (pending.Count > 0)
+        {
+            var node = pending.Pop();
+            if (node is AlvoComparison comparison)
+            {
+                yield return comparison.Field;
+            }
+
+            PushChildren(pending, node);
+        }
+    }
+
+    private static void PushChildren(Stack<AlvoFilter> pending, AlvoFilter node)
+    {
+        switch (node)
+        {
+            case AlvoAnd and:
+                PushRange(pending, and.Filters);
+                break;
+            case AlvoOr or:
+                PushRange(pending, or.Filters);
+                break;
+            case AlvoNot not:
+                pending.Push(not.Filter);
+                break;
+            default:
+                break;
+        }
+    }
+
+    private static void PushRange(Stack<AlvoFilter> pending, IReadOnlyList<AlvoFilter> filters)
+    {
+        foreach (var filter in filters)
+        {
+            pending.Push(filter);
+        }
+    }
 }
 
 /// <summary>A single field comparison, e.g. <c>owner_id.eq.&lt;value&gt;</c>.</summary>

@@ -80,6 +80,8 @@ public sealed class InMemoryAlvoData : IAlvoData
             throw Denied(decision);
         }
 
+        EnsureQueryFieldsAvailable(query, decision);
+
         List<AlvoRecord> snapshot;
         lock (_gate)
         {
@@ -211,6 +213,35 @@ public sealed class InMemoryAlvoData : IAlvoData
 
         return Task.CompletedTask;
     }
+
+    /// <summary>
+    /// Rejects a filter or sort key naming a field this caller may not read, <b>before</b> any row is
+    /// touched. Filtering, sorting and paging all happen over the raw row and masking is applied only
+    /// on the way out, so a filter over a <c>hidden</c> field would let a caller binary-search a value
+    /// they may never read (one comparison per request) and a sort over one would disclose its
+    /// ordering across the whole page — neither of which the response body ever shows. Masks fail
+    /// closed, so the query is refused rather than silently answered without the offending term.
+    /// </summary>
+    private static void EnsureQueryFieldsAvailable(AlvoQuery query, PolicyDecision decision)
+    {
+        foreach (var field in QueryFields(query))
+        {
+            if (decision.HiddenFields.Contains(field))
+            {
+                throw new AlvoAuthorizationException(UnavailableQueryFieldMessage);
+            }
+        }
+    }
+
+    private static IEnumerable<string> QueryFields(AlvoQuery query) =>
+        AlvoFilter.ReferencedFields(query.Filter).Concat(query.Sort.Select(sort => sort.Field));
+
+    /// <summary>
+    /// One message for every refused query field, naming neither the field nor why it is unavailable:
+    /// a caller must not be able to tell "this field exists but is hidden from you" from "this field
+    /// does not exist", and the name itself is caller-supplied text this port will not echo.
+    /// </summary>
+    private const string UnavailableQueryFieldMessage = "The query references a field that is not available to this caller.";
 
     private AlvoRecord? FindVisible(string entity, Guid id, PolicyDecision decision, AlvoContext context)
     {

@@ -76,11 +76,22 @@ public interface IAlvoData
     /// <see cref="AlvoQuery.Filter"/>. The caller's filter can only narrow this result, never
     /// widen it past what policy already allows.
     /// </summary>
+    /// <remarks>
+    /// <b>A filter or sort key may only name a field the caller can actually read.</b> Filtering,
+    /// sorting and paging are applied to the stored row while masking is applied to the response, so a
+    /// filter over a field in <see cref="PolicyDecision.HiddenFields"/> would leak that field one
+    /// comparison per request and a sort over one would leak its ordering across the whole page. An
+    /// implementation must reject both — masks fail closed, so the query is refused, never answered
+    /// with the offending term quietly dropped.
+    /// </remarks>
     /// <param name="query">The entity, filter, sort, and paging to apply.</param>
     /// <param name="context">The caller performing the query.</param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>Every visible, matching row, with every <c>hidden</c> field stripped.</returns>
-    /// <exception cref="AlvoAuthorizationException">No policy allows <c>list</c> on this entity for <paramref name="context"/>.</exception>
+    /// <exception cref="AlvoAuthorizationException">
+    /// No policy allows <c>list</c> on this entity for <paramref name="context"/>, or
+    /// <paramref name="query"/>'s filter or sort names a field this caller may not read.
+    /// </exception>
     Task<IReadOnlyList<AlvoRecord>> QueryAsync(AlvoQuery query, AlvoContext context, CancellationToken cancellationToken = default);
 
     /// <summary>Reads a single row by id.</summary>

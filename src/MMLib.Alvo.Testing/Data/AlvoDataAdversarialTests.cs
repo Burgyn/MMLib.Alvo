@@ -536,6 +536,62 @@ public abstract class AlvoDataAdversarialTests
     }
 
     /// <summary>
+    /// A <c>hidden</c> field is not merely stripped from the response — it must not be usable as a
+    /// filter operand at all. <see cref="IAlvoData.QueryAsync"/> filters and pages the <b>raw</b> row
+    /// and masks only on the way out, so a permitted <c>secret.gt.&lt;x&gt;</c> filter would let a
+    /// caller binary-search a value they may never read, one request per bit. Masking fails closed, so
+    /// the query is refused rather than answered — including when the field is buried inside a nested
+    /// <c>not(and(...))</c>, and including a field whose <c>hidden</c> expression only resolves to
+    /// hidden for <em>this</em> caller (the same filter must still work for the admin it is visible to,
+    /// so the refusal is really per-caller masking and not a blanket rejection of the field name).
+    /// </summary>
+    [Fact]
+    public async Task A_filter_naming_a_hidden_field_is_rejected_rather_than_answered()
+    {
+        var fixture = await AccountsFixtureAsync();
+        var member = NewContext(tenant: null);
+        var admin = NewContext(tenant: null, Role.Admin);
+
+        await Should.ThrowAsync<AlvoAuthorizationException>(() => fixture.Data.QueryAsync(
+            QueryFilteredBy(new AlvoComparison("secret", AlvoFilterOperator.Gt, "m")), member));
+
+        var nested = new AlvoNot(new AlvoAnd([
+            new AlvoComparison("title", AlvoFilterOperator.Eq, "Acct"),
+            new AlvoComparison("secret", AlvoFilterOperator.Eq, "shh"),
+        ]));
+        await Should.ThrowAsync<AlvoAuthorizationException>(() => fixture.Data.QueryAsync(QueryFilteredBy(nested), member));
+
+        var byNote = QueryFilteredBy(new AlvoComparison("note", AlvoFilterOperator.Eq, "internal"));
+        await Should.ThrowAsync<AlvoAuthorizationException>(() => fixture.Data.QueryAsync(byNote, member));
+
+        var asAdmin = await fixture.Data.QueryAsync(byNote, admin);
+        asAdmin.Count.ShouldBe(1);
+        asAdmin[0]["id"].ShouldBe(fixture.RowId);
+    }
+
+    /// <summary>
+    /// The sort channel leaks the same secret more cheaply: ordering by a hidden field discloses its
+    /// relative ordering across every returned row in a single request, with no value ever appearing
+    /// in the response. Refused for the same reason, and the visible sibling field still sorts.
+    /// </summary>
+    [Fact]
+    public async Task A_sort_naming_a_hidden_field_is_rejected_rather_than_leaking_its_ordering()
+    {
+        var fixture = await AccountsFixtureAsync();
+        var member = NewContext(tenant: null);
+
+        var byHidden = new AlvoQuery { Entity = "accounts", Sort = [new AlvoSort("secret", Descending: true)] };
+        await Should.ThrowAsync<AlvoAuthorizationException>(() => fixture.Data.QueryAsync(byHidden, member));
+
+        var byVisible = new AlvoQuery { Entity = "accounts", Sort = [new AlvoSort("title", Descending: true)] };
+        var sorted = await fixture.Data.QueryAsync(byVisible, member);
+        sorted.Count.ShouldBe(2);
+        sorted[0]["title"].ShouldBe("Acct-2");
+    }
+
+    private static AlvoQuery QueryFilteredBy(AlvoFilter filter) => new() { Entity = "accounts", Filter = filter };
+
+    /// <summary>
     /// A <b>global</b> entity whose rule references <c>@tenant.id</c> is not covered by the
     /// scoped-entity tenant guard, and the rule is <b>negated</b> — the shape that inverts an absent
     /// operand's collapse-to-false into "match every row". A tenantless caller must be refused

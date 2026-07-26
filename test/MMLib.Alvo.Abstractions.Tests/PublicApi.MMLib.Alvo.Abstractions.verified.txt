@@ -146,7 +146,10 @@ namespace MMLib.Alvo.Data
         public MMLib.Alvo.Data.AlvoFilterOperator Operator { get; init; }
         public object? Value { get; init; }
     }
-    public abstract class AlvoFilter : System.IEquatable<MMLib.Alvo.Data.AlvoFilter> { }
+    public abstract class AlvoFilter : System.IEquatable<MMLib.Alvo.Data.AlvoFilter>
+    {
+        public static System.Collections.Generic.IEnumerable<string> ReferencedFields(MMLib.Alvo.Data.AlvoFilter? filter) { }
+    }
     public enum AlvoFilterOperator
     {
         Eq = 0,

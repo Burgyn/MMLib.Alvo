@@ -24,12 +24,26 @@ public sealed record AlvoQuery
 
     /// <summary>
     /// Gets the caller-supplied filter, or <see langword="null"/> for none. An implementation
-    /// applies this <em>in addition to</em> the resolved policy predicate — it can only narrow
-    /// the caller's already-visible rows, never widen them.
+    /// applies this <em>in addition to</em> the resolved policy predicate, so it can only narrow the
+    /// set of rows the caller already sees, never widen it.
     /// </summary>
+    /// <remarks>
+    /// <b>"Can only narrow" is a statement about row visibility only — it is not true of field
+    /// confidentiality.</b> A filter is a comparison whose <em>outcome</em> is observable from the
+    /// result set, so a filter over a field the caller may not read leaks that field's value one
+    /// comparison at a time (<c>salary.gt.&lt;x&gt;</c>, repeated, is a binary search) even though the
+    /// value itself never appears in a response. An implementation must therefore reject a filter
+    /// naming a field in <see cref="Rules.PolicyDecision.HiddenFields"/> rather than answer it — see
+    /// <see cref="IAlvoData.QueryAsync"/>.
+    /// </remarks>
     public AlvoFilter? Filter { get; init; }
 
-    /// <summary>Gets the sort order to apply, outermost first; empty means implementation-defined (but stable) order.</summary>
+    /// <summary>
+    /// Gets the sort order to apply, outermost first; empty means implementation-defined (but stable)
+    /// order. A sort key is subject to the same confidentiality rule as <see cref="Filter"/>: ordering
+    /// by a hidden field discloses that field's ordering across the whole page, so an implementation
+    /// rejects it.
+    /// </summary>
     public IReadOnlyList<AlvoSort> Sort { get; init; } = [];
 
     /// <summary>Gets the maximum number of rows to return, or <see langword="null"/> for no explicit limit.</summary>

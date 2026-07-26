@@ -49,6 +49,7 @@ namespace MMLib.Alvo.Testing.Data
     public abstract class AlvoDataAdversarialTests
     {
         protected AlvoDataAdversarialTests() { }
+        public System.Threading.Tasks.Task A_filter_naming_a_hidden_field_is_rejected_rather_than_answered() { }
         public System.Threading.Tasks.Task A_global_entity_whose_negated_rule_references_the_tenant_denies_a_tenantless_caller() { }
         public System.Threading.Tasks.Task A_global_entity_whose_rule_references_the_user_denies_the_anonymous_caller() { }
         public System.Threading.Tasks.Task A_hidden_expression_that_cannot_resolve_still_masks_the_field() { }
@@ -56,6 +57,7 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task A_nullable_boolean_field_used_bare_in_a_rule_works_end_to_end() { }
         public System.Threading.Tasks.Task A_query_limit_is_applied_after_the_policy_predicate_not_before() { }
         public System.Threading.Tasks.Task A_query_with_no_tenant_context_fails_rather_than_returning_every_tenants_rows() { }
+        public System.Threading.Tasks.Task A_sort_naming_a_hidden_field_is_rejected_rather_than_leaking_its_ordering() { }
         public System.Threading.Tasks.Task A_tenant_scoped_entity_never_returns_another_tenants_rows() { }
         public System.Threading.Tasks.Task A_tenantless_context_cannot_create_into_a_scoped_entity() { }
         public System.Threading.Tasks.Task A_user_filter_cannot_widen_the_policy_predicate() { }
