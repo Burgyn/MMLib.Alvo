@@ -211,7 +211,7 @@ public class Order
 ```json
 {
   "list":   "@user.id != null && tenant_id == @tenant.id",
-  "update": "@user.role == 'editor' && owner_id == @user.id"
+  "update": "'editor' in @user.roles && owner_id == @user.id"
 }
 ```
 

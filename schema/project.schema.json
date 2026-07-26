@@ -142,7 +142,7 @@
           "items": {
             "$ref": "#/$defs/identifier"
           },
-          "description": "Application roles beyond the built-in ones (anon, authenticated, admin). Referenced in CEL via @user.role."
+          "description": "Application roles beyond the built-in ones (anon, authenticated, admin). Referenced in CEL via @user.roles (a set; test membership with 'editor' in @user.roles)."
         }
       }
     },
@@ -686,7 +686,7 @@
         },
         "hidden": {
           "$ref": "#/$defs/boolOrCel",
-          "description": "Field is never returned in API responses. true = always hidden; a CEL expression over @user makes visibility conditional (per-role masking, e.g. \"@user.role != 'compliance'\")."
+          "description": "Field is never returned in API responses. true = always hidden; a CEL expression over @user makes visibility conditional (per-role masking, e.g. \"!('compliance' in @user.roles)\")."
         },
         "readOnly": {
           "$ref": "#/$defs/boolOrCel",

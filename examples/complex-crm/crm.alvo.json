@@ -142,7 +142,7 @@
       "hooks": {
         "beforeUpdate": [
           {
-            "condition": "old.stage in ['won', 'lost'] && @user.role != 'manager'",
+            "condition": "old.stage in ['won', 'lost'] && !('manager' in @user.roles)",
             "action": { "reject": "Only a manager may change a closed deal" }
           },
           {

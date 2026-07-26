@@ -32,10 +32,11 @@ namespace MMLib.Alvo.Testing.Data;
 /// <b>Per-fact isolation is required, not optional.</b> A subclass's <see cref="CreateAsync"/> must
 /// return a store scoped to that one call — a fresh schema/table set, or at least data isolated
 /// from every other fact's — never a single store shared and never reset across the whole suite.
-/// Several facts (<c>logs</c>, <c>settings</c>, <c>posts</c>) declare no row-scoping predicate at
-/// all and assert an exact row count; those assertions are only valid if no other fact's rows have
-/// ever landed in the same entity. Facts may still run in any order or in parallel <em>relative to
-/// each other</em>, as long as each owns its own isolated data.
+/// Several facts (<c>logs</c>, <c>settings</c>, <c>posts</c>, <c>accounts</c>) declare no
+/// row-scoping predicate at all (a bare <c>"true"</c> rule, or none) and assert an exact row
+/// count; those assertions are only valid if no other fact's rows have ever landed in the same
+/// entity. Facts may still run in any order or in parallel <em>relative to each other</em>, as
+/// long as each owns its own isolated data.
 /// </para>
 /// </remarks>
 public abstract class AlvoDataAdversarialTests

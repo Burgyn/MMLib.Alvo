@@ -34,7 +34,7 @@ internal static class AlvoFilterEvaluator
         AlvoAnd and => EvaluateAnd(and.Filters, record),
         AlvoOr or => EvaluateOr(or.Filters, record),
         AlvoNot not => Negate(Evaluate(not.Filter, record)),
-        _ => false,
+        _ => null,
     };
 
     private static bool? EvaluateAnd(IReadOnlyList<AlvoFilter> filters, AlvoRecord record)
@@ -101,7 +101,7 @@ internal static class AlvoFilterEvaluator
         AlvoFilterOperator.ILike => Like(fieldValue, operand, ignoreCase: true),
         AlvoFilterOperator.In => In(fieldValue, operand),
         AlvoFilterOperator.Is => Is(fieldValue, operand),
-        _ => false,
+        _ => null,
     };
 
     /// <summary>

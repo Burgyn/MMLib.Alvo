@@ -44,6 +44,19 @@ namespace MMLib.Alvo.Data;
 /// that distinction must map the message to something more generic itself and log the original.
 /// </para>
 /// <para>
+/// <b>The framework-managed <c>id</c>/<c>tenant_id</c> columns are never caller-writable, but not
+/// symmetrically.</b> <c>id</c> is rejected in both a <see cref="CreateAsync"/> and an
+/// <see cref="UpdateAsync"/> payload — it is assigned once, by the implementation, and never
+/// rewritten. <c>tenant_id</c> is different: it is legitimately caller-supplied on
+/// <see cref="CreateAsync"/> (a tenant-scoped entity's <c>WITH CHECK</c>/<see cref="PolicyDecision.TenantScope"/>
+/// guards the candidate row's post-image there, exactly like every other field the check
+/// predicate constrains), but rejected outright on <see cref="UpdateAsync"/> — a row can never move
+/// to another tenant once created. Both rejections are checked against the payload alone, before
+/// any row lookup runs, so a caller cannot use "was my <c>id</c>/<c>tenant_id</c> write rejected or
+/// not" to learn whether a given row id exists; both raise <see cref="AlvoAuthorizationException"/>,
+/// never <see cref="AlvoRecordNotFoundException"/>, since the row (if any) was never consulted.
+/// </para>
+/// <para>
 /// <b>The returned key set and CLR types are part of the contract, not an implementation detail.</b>
 /// A returned <see cref="AlvoRecord"/> carries every non-hidden field the schema declares for that
 /// entity, including framework-managed columns (<c>id</c>, and — on a tenant-scoped entity —
@@ -89,9 +102,12 @@ public interface IAlvoData
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>The created row, with every <c>hidden</c> field stripped.</returns>
     /// <exception cref="AlvoAuthorizationException">
-    /// No policy allows <c>create</c> on this entity for <paramref name="context"/>, the candidate
-    /// row fails its <c>WITH CHECK</c> predicate, or <paramref name="values"/> writes a field the
-    /// policy marks read-only.
+    /// No policy allows <c>create</c> on this entity for <paramref name="context"/>,
+    /// <paramref name="values"/> supplies <c>id</c> (always rejected — see the type remarks),
+    /// the candidate row fails its <c>WITH CHECK</c> predicate, or <paramref name="values"/> writes
+    /// a field the policy marks read-only. <c>tenant_id</c> is not rejected here — see the type
+    /// remarks — but a value that fails the tenant scope still raises this exception via
+    /// <c>WITH CHECK</c>.
     /// </exception>
     Task<AlvoRecord> CreateAsync(string entity, IReadOnlyDictionary<string, object?> values, AlvoContext context, CancellationToken cancellationToken = default);
 
@@ -108,9 +124,12 @@ public interface IAlvoData
     /// <returns>The updated row, with every <c>hidden</c> field stripped.</returns>
     /// <exception cref="AlvoRecordNotFoundException">The row does not exist, or the caller's policy <c>USING</c> predicate excludes it.</exception>
     /// <exception cref="AlvoAuthorizationException">
-    /// No policy allows <c>update</c> on this entity for <paramref name="context"/>, the post-image
-    /// fails its <c>WITH CHECK</c> predicate, or <paramref name="values"/> writes a field the
-    /// policy marks read-only.
+    /// No policy allows <c>update</c> on this entity for <paramref name="context"/>;
+    /// <paramref name="values"/> supplies <c>id</c> or <c>tenant_id</c> (both always rejected on
+    /// update — see the type remarks — and checked against the payload before <paramref name="id"/>
+    /// is looked up, so this can never be used to probe whether a row exists); the post-image fails
+    /// its <c>WITH CHECK</c> predicate; or <paramref name="values"/> writes a field the policy marks
+    /// read-only.
     /// </exception>
     Task<AlvoRecord> UpdateAsync(string entity, Guid id, IReadOnlyDictionary<string, object?> values, AlvoContext context, CancellationToken cancellationToken = default);
 

@@ -189,6 +189,55 @@ public class InMemoryAlvoDataTests
     }
 
     /// <summary>
+    /// The round-trip case the cursor tests above never exercised: paging with a cursor the store
+    /// actually issued (the previous page's last row id) must resume immediately after that row,
+    /// not restart from the beginning and not skip a row — the only way a caller ever legitimately
+    /// obtains an <see cref="AlvoQuery.After"/> value.
+    /// </summary>
+    [Fact]
+    public async Task Paging_with_a_cursor_the_store_actually_issued_resumes_after_that_row()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var data = CreateStore(
+            "items", StringField(),
+            Row(Guid.NewGuid(), ("title", "a")),
+            Row(Guid.NewGuid(), ("title", "b")),
+            Row(Guid.NewGuid(), ("title", "c")));
+        var caller = Caller();
+
+        var everything = await data.QueryAsync(new AlvoQuery { Entity = "items" }, caller, ct);
+        var firstPage = await data.QueryAsync(new AlvoQuery { Entity = "items", Limit = 1 }, caller, ct);
+        var issuedCursor = firstPage[0]["id"]!.ToString();
+        var secondPage = await data.QueryAsync(new AlvoQuery { Entity = "items", Limit = 1, After = issuedCursor }, caller, ct);
+
+        firstPage.Select(row => row["id"]).ShouldBe([everything[0]["id"]]);
+        secondPage.Select(row => row["id"]).ShouldBe([everything[1]["id"]]);
+    }
+
+    /// <summary>
+    /// An unrecognized comparison operator is <c>UNKNOWN</c>, not <see langword="false"/> — so
+    /// negating it through <see cref="AlvoNot"/> must stay <c>UNKNOWN</c> (matching nothing) rather
+    /// than flipping into a match, exactly like every other unresolved comparison
+    /// <see cref="AlvoFilterEvaluator"/> handles. A naive "unrecognized operator = false" default
+    /// would incorrectly match every row here once negated.
+    /// </summary>
+    [Fact]
+    public async Task Not_of_an_unrecognized_operator_matches_nothing()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var data = CreateStore(
+            "items", StringField(),
+            Row(Guid.NewGuid(), ("title", "a")),
+            Row(Guid.NewGuid(), ("title", "b")));
+        var caller = Caller();
+
+        var result = await data.QueryAsync(
+            Query("items", new AlvoNot(new AlvoComparison("title", (AlvoFilterOperator)99, "a"))), caller, ct);
+
+        result.ShouldBeEmpty();
+    }
+
+    /// <summary>
     /// A payload key the entity's schema does not declare is rejected with an
     /// <see cref="ArgumentException"/> — the in-memory equivalent of the unknown-column SQL error a
     /// real provider would raise, so the fake and a real provider agree on what "not a field at all"
