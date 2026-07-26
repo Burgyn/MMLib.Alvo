@@ -174,8 +174,31 @@ namespace MMLib.Alvo.Testing.Rules
         public void A_denied_decision_carries_no_predicate_and_no_mask() { }
         public void A_field_declared_statically_hidden_is_in_the_hidden_mask() { }
         public void A_field_declared_statically_read_only_is_in_the_read_only_mask() { }
-        public void A_global_entity_ignores_a_tenantless_caller() { }
+        [Xunit.InlineData(new object[] {
+                "Create"})]
+        [Xunit.InlineData(new object[] {
+                "Delete"})]
+        [Xunit.InlineData(new object[] {
+                "Get"})]
+        [Xunit.InlineData(new object[] {
+                "List"})]
+        [Xunit.InlineData(new object[] {
+                "Update"})]
+        public void A_global_entity_whose_rule_reads_the_tenant_denies_a_tenantless_caller(string operationName) { }
+        public void A_global_entity_whose_rules_read_no_context_allows_a_tenantless_caller() { }
         public void A_null_rule_for_the_requested_operation_denies() { }
+        public void A_rule_reading_the_tenant_and_the_user_allows_a_caller_who_has_both() { }
+        [Xunit.InlineData(new object[] {
+                "Create"})]
+        [Xunit.InlineData(new object[] {
+                "Delete"})]
+        [Xunit.InlineData(new object[] {
+                "Get"})]
+        [Xunit.InlineData(new object[] {
+                "List"})]
+        [Xunit.InlineData(new object[] {
+                "Update"})]
+        public void A_rule_reading_the_user_denies_a_caller_with_no_identity(string operationName) { }
         public void A_scoped_entity_denies_a_tenantless_caller_before_any_rule_is_consulted() { }
         public void A_scoped_entity_with_a_tenant_present_synthesizes_a_non_null_tenant_scope() { }
         public void A_true_rule_allows_with_a_non_null_predicate() { }

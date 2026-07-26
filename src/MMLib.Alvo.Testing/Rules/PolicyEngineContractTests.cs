@@ -34,6 +34,13 @@ public abstract class PolicyEngineContractTests
     /// <summary>The same caller, but with no tenant at all.</summary>
     private static AlvoContext TenantlessCaller() => Caller() with { Tenant = null };
 
+    /// <summary>
+    /// A caller carrying the reserved all-zero <see cref="UserId"/> — no identity, exactly what
+    /// <see cref="AlvoContext.Anonymous"/> holds. Never a real caller who happens to own the all-zero
+    /// rows: the value is reserved.
+    /// </summary>
+    private static AlvoContext IdentitylessCaller() => Caller() with { User = default };
+
     /// <summary>No <c>rules</c> block at all denies every operation — secure-by-default, not merely the ones the descriptor happens to omit.</summary>
     [Fact]
     public void An_entity_with_no_rules_block_denies_every_operation()
@@ -132,13 +139,88 @@ public abstract class PolicyEngineContractTests
         decision.DenyReason.ShouldContain("tenant");
     }
 
-    /// <summary>A global entity ignores tenancy entirely; a tenantless caller is not penalized for it.</summary>
+    /// <summary>
+    /// A global entity's tenant guard never fires, so a tenantless caller passes it — but only
+    /// because none of this entity's rules reads <c>@tenant.id</c>. The rules here are
+    /// <c>"true"</c>, which reads no context at all; the moment a rule does, the required-context
+    /// gate below denies instead. Stated that narrowly on purpose: the general claim "a global
+    /// entity does not penalize a tenantless caller" is false, and false in precisely the
+    /// direction that was a real isolation hole.
+    /// </summary>
     [Fact]
-    public void A_global_entity_ignores_a_tenantless_caller()
+    public void A_global_entity_whose_rules_read_no_context_allows_a_tenantless_caller()
     {
         var engine = BuildEngine(TenancyMode.Global, AllTrueRules());
 
         var decision = engine.Resolve("widgets", DataOperation.List, TenantlessCaller());
+
+        decision.IsDenied.ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// The required-context gate, on the channel the entity-level tenant guard by definition cannot
+    /// speak on: a <b>global</b> entity whose rule reads <c>@tenant.id</c>, resolved for a caller
+    /// carrying no tenant. Every operation is asserted, because the gate has to see all three of an
+    /// operation's predicate slots — <c>create</c> has no <c>USING</c> and <c>delete</c> no
+    /// <c>WITH CHECK</c>, so an engine that only inspected one slot would leak on the other.
+    /// </summary>
+    /// <remarks>
+    /// Without this gate the absent operand simply collapses to <see langword="false"/> in the
+    /// backends, and a negated comparison (<c>!(id == @tenant.id)</c>) inverts that into "every
+    /// row" with an empty parameter bag. The engine must therefore refuse to hand the predicate
+    /// out at all rather than rely on how a backend folds a null operand.
+    /// </remarks>
+    /// <param name="operationName">The <see cref="DataOperation"/> member name under test.</param>
+    [Theory]
+    [InlineData(nameof(DataOperation.List))]
+    [InlineData(nameof(DataOperation.Get))]
+    [InlineData(nameof(DataOperation.Create))]
+    [InlineData(nameof(DataOperation.Update))]
+    [InlineData(nameof(DataOperation.Delete))]
+    public void A_global_entity_whose_rule_reads_the_tenant_denies_a_tenantless_caller(string operationName)
+    {
+        var operation = Enum.Parse<DataOperation>(operationName);
+        var engine = BuildEngine(TenancyMode.Global, AllRules(TenantOwnedRule));
+
+        var decision = engine.Resolve("widgets", operation, TenantlessCaller());
+
+        decision.IsDenied.ShouldBeTrue($"{operation} reads @tenant.id, which this caller does not have.");
+    }
+
+    /// <summary>
+    /// The same gate one operand over: a rule reading <c>@user.id</c> must deny a caller with no
+    /// identity, rather than resolving the reserved all-zero <see cref="UserId"/> against the rows
+    /// whose owner column happens to be all-zero — which would silently make an anonymous caller
+    /// their owner.
+    /// </summary>
+    /// <param name="operationName">The <see cref="DataOperation"/> member name under test.</param>
+    [Theory]
+    [InlineData(nameof(DataOperation.List))]
+    [InlineData(nameof(DataOperation.Get))]
+    [InlineData(nameof(DataOperation.Create))]
+    [InlineData(nameof(DataOperation.Update))]
+    [InlineData(nameof(DataOperation.Delete))]
+    public void A_rule_reading_the_user_denies_a_caller_with_no_identity(string operationName)
+    {
+        var operation = Enum.Parse<DataOperation>(operationName);
+        var engine = BuildEngine(TenancyMode.Global, AllRules(UserOwnedRule));
+
+        var decision = engine.Resolve("widgets", operation, IdentitylessCaller());
+
+        decision.IsDenied.ShouldBeTrue($"{operation} reads @user.id, which this caller does not have.");
+    }
+
+    /// <summary>
+    /// The gate must not over-deny: the very same rules that deny the callers above must allow a
+    /// caller who does carry both halves of the context. Without this leg, an engine that denied
+    /// every operation reading any context value would pass the two facts above.
+    /// </summary>
+    [Fact]
+    public void A_rule_reading_the_tenant_and_the_user_allows_a_caller_who_has_both()
+    {
+        var engine = BuildEngine(TenancyMode.Global, AllRules($"{TenantOwnedRule} && {UserOwnedRule}"));
+
+        var decision = engine.Resolve("widgets", DataOperation.List, Caller());
 
         decision.IsDenied.ShouldBeFalse();
     }
@@ -219,15 +301,23 @@ public abstract class PolicyEngineContractTests
         decision.ReadOnlyFields.ShouldBeEmpty();
     }
 
+    private const string TenantOwnedRule = "id == @tenant.id";
+
+    private const string UserOwnedRule = "id == @user.id";
+
     private static DataOperation[] AllOperations() => Enum.GetValues<DataOperation>();
 
-    private static AccessRules AllTrueRules() => new()
+    private static AccessRules AllTrueRules() => AllRules("true");
+
+    /// <summary>The same source on all five operations, so one fact can sweep every slot combination.</summary>
+    /// <param name="source">The Rule-profile source every operation is configured with.</param>
+    private static AccessRules AllRules(string source) => new()
     {
-        List = "true",
-        Get = "true",
-        Create = "true",
-        Update = "true",
-        Delete = "true",
+        List = source,
+        Get = source,
+        Create = source,
+        Update = source,
+        Delete = source,
     };
 
     private IPolicyEngine BuildEngine(TenancyMode tenancy, AccessRules? rules, BoolOrCel? hidden = null, BoolOrCel? readOnly = null)
