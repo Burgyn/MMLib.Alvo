@@ -56,10 +56,14 @@ verbatim under *Definition of Done*. **Closes issue #20.**
   `alvo_u` (`Using`), `alvo_c` (`WithCheck`, reserved — see *Deviations* 14), `alvo_t`
   (`TenantScope`). Statement-level values this PR binds itself use the fixed names `alvo_id` (the row
   id) and the families `alvo_f<n>` (caller filter) and `alvo_k<n>` (keyset cursor). **None of them
-  starts with `p`**: spike `Q6` proved the renderer's default prefix `p` collides with EF's own `p0`,
-  and EF then *silently renames* the bound parameter while the SQL text still says `@p0` — on SQLite
-  with no error at all, substituting the caller's value into the security predicate. Task 1 also
-  changes `IPredicateRenderer.Render`'s **default** prefix from `"p"` to `"alvo_p"`.
+  starts with `p`**: spike `Q6` proved a `p` prefix collides with EF's own `p0`, and EF then *silently
+  renames* the bound parameter while the SQL text still says `@p0` — on SQLite with no error at all,
+  substituting the caller's value into the security predicate. **PR1 already acted on that finding:**
+  `IPredicateRenderer.Render`'s default is now `"alvo_p"` (commit `54d612c`, pinned by the fact
+  `The_default_parameter_prefix_cannot_collide_with_an_orms_own_parameter_names`), so this PR changes no
+  default and moves no baseline for it. What it must still do is **pass an explicit prefix at every call
+  site**: a `PolicyDecision` carries three predicates, each render numbers its parameters from zero, and
+  one shared default would bind two values to one name.
 - **Every parameter value is bound through EF's own relational type mapping** —
   `IRelationalTypeMappingSource.FindMapping(clrType)` → `mapping.CreateParameter(command, name, value,
   nullable: true)`. **Never format a value into a string.** Spike `Q6d`/`X2c`: EF's SQLite `Guid`
@@ -133,17 +137,44 @@ leaves them.
 
 Each is a decision, not an oversight. If the maintainer disagrees, these are the vetoable spots.
 
-1. **`ISchemaRegistry` is served off the primed `PolicyCatalog`, not from a second primed holder.**
-   `AlvoServiceCollectionExtensions` carries `TODO(#19): register ISchemaRegistry once the Data API
-   needs it` — PR2 is that first consumer. `PolicyCatalog` gains a public `SchemaModel Schema`
-   (it is already *built from* one), and the core registers `ISchemaRegistry` as a shim over
-   `IPolicyCatalogProvider.Current?.Schema`, exactly as `IRoleCatalogProvider` is registered over the
-   same instance. Rationale is the design's own *Deviations* 10, applied verbatim: a second
-   independently primed holder could serve `IAlvoData` a schema the rules were never compiled
-   against — the mismatch `IAlvoData`'s own remarks call out ("a mismatch between the policy catalog
-   and the implementation's schema must not be the one path on which an unvalidated payload reaches
-   storage"). Unprimed reads as `new SchemaModel([])`, so every field name fails closed.
-   **Consequence:** #19's runtime-apply path re-primes both at once for free.
+1. **The applied schema reaches `IAlvoData` through the `ISchemaRegistry` *port*, implemented by the
+   policy catalog provider — not through a public member on `PolicyCatalog`, and not from a second
+   primed holder.** `AlvoServiceCollectionExtensions` carries `TODO(#19): register ISchemaRegistry once
+   the Data API needs it`; PR2 is that first consumer, so PR2 registers it.
+   `IPolicyCatalogProvider` also derives from `MMLib.Alvo.Schema.ISchemaRegistry`, one instance is
+   registered as both, and `PolicyCatalog.Schema` is **`internal`** — read only by the provider in the
+   same assembly.
+
+   *Why one primed source at all:* a schema the rules were never compiled against is exactly the
+   mismatch `IAlvoData`'s own remarks forbid being the one path an unvalidated payload reaches storage
+   on ("a mismatch between the policy catalog and the implementation's schema must not be the one path
+   on which an unvalidated payload reaches storage"), and a second independently primed holder is how
+   two sources come to drift.
+
+   *Why a port rather than a public property:* **this follows the precedent PR1's final review already
+   set for the sibling case.** PR1 briefly hung the descriptor's `RoleCatalog` off the catalog as a
+   public `PolicyCatalog.Roles`; review rejected it and the shape it landed with is
+   `IRoleCatalogProvider` — a role-shaped port in `Abstractions` that `IPolicyCatalogProvider` derives
+   from, with `PolicyCatalog.Roles` kept `internal`
+   (see `src/MMLib.Alvo.Abstractions/Identity/IRoleCatalogProvider.cs`, whose remarks state the
+   argument in full). The reasoning transfers unchanged: a public `PolicyCatalog.Schema` would make the
+   *policy* catalog the authoritative source of the *applied schema* and foreclose any other source —
+   F7's dynamic-entity registry being the obvious next one — without either routing the data path
+   through the rule engine or reintroducing the second holder. Applying the same rule here means a
+   later reader sees one consistent principle, not two similar-looking decisions made differently.
+
+   *Two deliberate differences from the role precedent, each with its reason.* `ISchemaRegistry` already
+   exists in `Abstractions` and is the design's named port for this, so no new port is invented. And its
+   `GetSchema()` returns a non-nullable `SchemaModel` (it shipped in F2 and narrowing it would be a
+   breaking change), so the unprimed value is `new SchemaModel([])` rather than `null`: that is the
+   fail-closed value here — no entity declared means every entity name and every field name is refused —
+   where `IRoleCatalogProvider` needs `null` because an empty role catalog and an undeclared one are
+   different things.
+
+   **Cost, stated plainly:** an implementer of `IPolicyCatalogProvider` must now also answer "what
+   schema is applied", exactly the cost the design's *Deviations* 10 already accepted for roles. A host
+   with its own schema source registers its own `ISchemaRegistry` and takes it over.
+   **Consequence:** #19's runtime-apply path re-primes rules and schema in one step for free.
 2. **The caller's filter, the keyset cursor predicate and the row id are rendered into the raw
    `FromSql` root through `IFieldSqlRenderer`, not composed as LINQ.** Two reasons, either alone
    sufficient. (a) EF translates C# `==`/`!=` with **C# null semantics**, adding
@@ -226,29 +257,26 @@ Each is a decision, not an oversight. If the maintainer disagrees, these are the
     a future SQL-side `WITH CHECK` (a `RETURNING`-based write, say) inherits a name that cannot
     collide.
 
-**Assumption written into this plan, flagged for the maintainer:** `IPredicateRenderer.Render`'s
-`parameterPrefix` currently still defaults to `"p"` in PR1's committed code. Task 1 changes the
-default to `"alvo_p"` **and** every call site passes an explicit prefix. Both, not either: the
-explicit prefix protects this PR, and the default protects the next driver author who forgets — for
-whom the failure mode is silently wrong SQL on SQLite (`Q6`).
-
 ---
 
 ## File Structure
 
 **`src/MMLib.Alvo.Abstractions/`** — ports + pure model (stays EF-, ADO- and ASP.NET-free)
 
-- Modify `Expressions/IPredicateRenderer.cs` — `parameterPrefix` default `"p"` → `"alvo_p"`, with the
-  `Q6` collision as the documented reason.
+- Unchanged. `IPredicateRenderer`'s `alvo_p` default and `ISchemaRegistry` both already ship; this PR
+  adds no port here.
 
 **`src/MMLib.Alvo/`** — core (still EF-free)
 
-- Modify `Rules/PolicyCatalog.cs` — add public `SchemaModel Schema { get; }`, set from `Build`'s own
-  `schema` argument.
-- Create `Schema/Internal/PrimedSchemaRegistry.cs` — `ISchemaRegistry` over
-  `IPolicyCatalogProvider.Current?.Schema`; unprimed ⇒ `new SchemaModel([])`.
-- Create `Schema/Setup.cs` — `AddAlvoSchema()` registering the above.
-- Modify `AlvoServiceCollectionExtensions.cs` — call `AddAlvoSchema()`, delete the `TODO(#19)`.
+- Modify `Rules/PolicyCatalog.cs` — add **`internal`** `SchemaModel Schema { get; }`, set from
+  `TryBuild`'s own `schema` argument. Internal, exactly like the sibling `Roles`.
+- Modify `Rules/IPolicyCatalogProvider.cs` — also derive from `MMLib.Alvo.Schema.ISchemaRegistry`.
+- Modify `Rules/Internal/PolicyCatalogProvider.cs` — implement `GetSchema()` off the same volatile
+  `Current`, beside the existing `DeclaredRoles`.
+- Modify `Rules/Setup.cs` — register `ISchemaRegistry` as the *same instance* as
+  `IPolicyCatalogProvider`, exactly as `IRoleCatalogProvider` already is.
+- Modify `AlvoServiceCollectionExtensions.cs` — delete the `TODO(#19)` and the remark saying
+  `ISchemaRegistry` is deliberately unregistered.
 
 **`src/MMLib.Alvo.Data.EntityFrameworkCore/`** — the shared EF layer (every EF type this PR adds)
 
@@ -305,11 +333,12 @@ whom the failure mode is silently wrong SQL on SQLite (`Q6`).
 - `MMLib.Alvo.Data.Sqlite.Tests/*` — `SqliteAlvoDataAdversarialTests`,
   `SqliteAlvoDataDifferentialTests`, `SqliteAlvoDataSqlSnapshotTests`, `SqliteAlvoDataFixture`.
 - `MMLib.Alvo.Data.PostgreSql.Tests.Integration/*` — the same three, over `PostgresFixture`.
-- `MMLib.Alvo.Tests/Schema/PrimedSchemaRegistryTests.cs`, `MMLib.Alvo.Tests/Rules/*` — the core half
-  of Task 2.
-- `test/_shared/PublicApi.*.verified.txt` — updated baselines for `MMLib.Alvo.Abstractions`,
-  `MMLib.Alvo`, `MMLib.Alvo.Data.EntityFrameworkCore`, `MMLib.Alvo.Data.Sqlite`,
-  `MMLib.Alvo.Data.PostgreSql`, `MMLib.Alvo.Testing`.
+- `MMLib.Alvo.Tests/Rules/PolicyCatalogProviderSchemaTests.cs` and a fact added to
+  `MMLib.Alvo.Tests/Rules/RulesSetupTests.cs` — the core half of Task 2.
+- `test/_shared/PublicApi.*.verified.txt` — updated baselines for `MMLib.Alvo` (one line:
+  `IPolicyCatalogProvider`'s base list), `MMLib.Alvo.Data.EntityFrameworkCore`,
+  `MMLib.Alvo.Data.Sqlite`, `MMLib.Alvo.Data.PostgreSql`, `MMLib.Alvo.Testing`.
+  **`MMLib.Alvo.Abstractions` does not move** — this PR adds no port and changes no default there.
 
 **Repo files**
 
@@ -333,8 +362,6 @@ have: a driver-owned way to name a table and to spell a typed SQL `NULL`. `IFiel
 it judges quoting unnecessary, which PostgreSQL then case-folds.
 
 **Files:**
-- Modify: `src/MMLib.Alvo.Abstractions/Expressions/IPredicateRenderer.cs`
-- Modify: `src/MMLib.Alvo/Expressions/Internal/SqlPredicateRenderer.cs`
 - Create: `src/MMLib.Alvo.Data.EntityFrameworkCore/IAlvoSqlDialect.cs`
 - Create: `src/MMLib.Alvo.Data.EntityFrameworkCore/AlvoSqlIdentifier.cs`
 - Modify: `src/MMLib.Alvo.Data.EntityFrameworkCore/RelationalProviderRegistration.cs`
@@ -348,8 +375,7 @@ it judges quoting unnecessary, which PostgreSQL then case-folds.
 - Test: `test/MMLib.Alvo.Data.Sqlite.Tests/SqliteAlvoDataSqlSnapshotTests.cs`
 - Test: `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/AlvoSqlIdentifierTests.cs`
 - Delete: `spike/MMLib.Alvo.Data.Spike/` (whole directory) and its `MMLib.Alvo.slnx` entry
-- Modify: `test/_shared/PublicApi.MMLib.Alvo.Abstractions.verified.txt`,
-  `PublicApi.MMLib.Alvo.Data.EntityFrameworkCore.verified.txt`,
+- Modify: `test/_shared/PublicApi.MMLib.Alvo.Data.EntityFrameworkCore.verified.txt`,
   `PublicApi.MMLib.Alvo.Data.Sqlite.verified.txt`,
   `PublicApi.MMLib.Alvo.Data.PostgreSql.verified.txt`,
   `PublicApi.MMLib.Alvo.Testing.verified.txt`
@@ -360,7 +386,9 @@ it judges quoting unnecessary, which PostgreSQL then case-folds.
   `RenderCaseInsensitiveLike(string left, string right)`, plus three **default interface members**
   `RenderTwoValued`, `RenderBooleanFieldAsPredicate`, `RenderBooleanPredicate` whose defaults are
   already the PostgreSQL/SQLite shape — **do not override them**, only T-SQL would);
-  `MMLib.Alvo.Expressions.IPredicateRenderer`; `MMLib.Alvo.Schema.EntitySchema` / `FieldSchema` /
+  `MMLib.Alvo.Expressions.IPredicateRenderer.Render(CompiledExpression, AlvoContext, IFieldSqlRenderer,
+  string parameterPrefix = "alvo_p")` — **already shipped by PR1 with that default; do not change it,
+  and always pass an explicit prefix anyway**; `MMLib.Alvo.Schema.EntitySchema` / `FieldSchema` /
   `FieldType`.
 - Produces:
   - `public interface MMLib.Alvo.Data.EntityFrameworkCore.IAlvoSqlDialect`
@@ -381,43 +409,7 @@ it judges quoting unnecessary, which PostgreSQL then case-folds.
     `protected abstract IPredicateRenderer Renderer { get; }`,
     `protected abstract IFieldSqlRenderer Fields { get; }`.
 
-- [ ] **Step 1: Change the renderer's default parameter prefix**
-
-In `src/MMLib.Alvo.Abstractions/Expressions/IPredicateRenderer.cs`, change the signature's default and
-extend the `<param>` doc:
-
-```csharp
-    /// <param name="parameterPrefix">
-    /// The prefix every generated parameter name in this render carries, so a caller composing several
-    /// predicates into one command can keep their names disjoint — see <see cref="SqlPredicate"/>, which
-    /// owns that contract. Must be a plain identifier (an ASCII letter or <c>_</c> followed by letters,
-    /// digits or <c>_</c>): it reaches the SQL text unparameterized, since a bind parameter's own name
-    /// has no bind-parameter form.
-    /// <para>
-    /// The default deliberately starts with <c>alvo_</c> rather than <c>p</c>. A <c>p</c>-prefixed
-    /// render collides with the <c>pN</c> names EF Core mints for its own positional arguments and
-    /// <c>ExecuteUpdate</c> setters, and the collision does not raise: EF renames the caller's
-    /// parameter while the SQL text still reads <c>@p0</c>, so the other predicate's value is
-    /// substituted into this one — silently, with no error at all on SQLite.
-    /// </para>
-    /// </param>
-    SqlPredicate Render(
-        CompiledExpression expression, AlvoContext context, IFieldSqlRenderer fields, string parameterPrefix = "alvo_p");
-```
-
-Make the same one-word change in `src/MMLib.Alvo/Expressions/Internal/SqlPredicateRenderer.cs`
-(`string parameterPrefix = "alvo_p"`).
-
-- [ ] **Step 2: Run ring0 and repair the core's own expectations**
-
-Run: `scripts/test-ring0`
-Expected: FAIL — `test/MMLib.Alvo.Tests/Expressions/SqlPredicateRendererTests.cs` and
-`SqlPredicateRendererSnapshotTests.cs` assert parameter names `p0`/`p1`. Update the expected names to
-`alvo_p0`/`alvo_p1` and accept the moved `cel-to-sql-core.verified.txt` baseline. Do **not** loosen an
-exact-SQL assertion into `ShouldContain` to make it pass. Re-run until green, then accept the moved
-`PublicApi.MMLib.Alvo.Abstractions.verified.txt`.
-
-- [ ] **Step 3: Write the identifier-quoting test**
+- [ ] **Step 1: Write the identifier-quoting test**
 
 Create `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/AlvoSqlIdentifierTests.cs`:
 
@@ -448,7 +440,7 @@ public class AlvoSqlIdentifierTests
 Run: `dotnet test --project test/MMLib.Alvo.Data.EntityFrameworkCore.Tests`
 Expected: FAIL — `AlvoSqlIdentifier` does not exist.
 
-- [ ] **Step 4: Implement the quoting helper and the dialect port**
+- [ ] **Step 2: Implement the quoting helper and the dialect port**
 
 Create `src/MMLib.Alvo.Data.EntityFrameworkCore/AlvoSqlIdentifier.cs`:
 
@@ -545,7 +537,7 @@ public interface IAlvoSqlDialect
 }
 ```
 
-- [ ] **Step 5: Write the failing golden CEL→SQL snapshot suite**
+- [ ] **Step 3: Write the failing golden CEL→SQL snapshot suite**
 
 Create `src/MMLib.Alvo.Testing/Data/AlvoDataSqlSnapshotTests.cs`. It renders one fixed table of rules
 through the engine's own `IFieldSqlRenderer` and `Verify`s the result, so each engine's dialect is
@@ -660,7 +652,7 @@ public abstract class AlvoDataSqlSnapshotTests
 `SnapshotEntity`/`SnapshotCaller` are lifted from the spike's `Fixture.Entity` — one column of every
 awkward type plus one `hidden` candidate (`secret_note`) — and every later task reuses them.
 
-- [ ] **Step 6: Implement the two renderers and the two dialects**
+- [ ] **Step 4: Implement the two renderers and the two dialects**
 
 `src/MMLib.Alvo.Data.Sqlite/SqliteFieldSqlRenderer.cs`:
 
@@ -765,7 +757,7 @@ public sealed class SqliteSqlDialect : IAlvoSqlDialect
 
 Both type tables are the spike's own `SpikeEngine.ColumnType` switches, verbatim.
 
-- [ ] **Step 7: Add the two members to the registration and pass them from both drivers**
+- [ ] **Step 5: Add the two members to the registration and pass them from both drivers**
 
 In `RelationalProviderRegistration.cs`, add:
 
@@ -806,7 +798,7 @@ npgsql.UseRelationalNulls())`, `new PostgreSqlFieldSqlRenderer()`, `new PostgreS
 compensating for C#'s — which is what `AlvoFilterOperator`'s documented contract requires. See
 *Deviations* 3.
 
-- [ ] **Step 8: Add the SQLite snapshot subclass**
+- [ ] **Step 6: Add the SQLite snapshot subclass**
 
 Create `test/MMLib.Alvo.Data.Sqlite.Tests/SqliteAlvoDataSqlSnapshotTests.cs`:
 
@@ -842,7 +834,7 @@ public sealed class SqliteAlvoDataSqlSnapshotTests : AlvoDataSqlSnapshotTests, I
 `AddAlvo()` returns an `IAlvoBuilder`, so `.Services` is how the collection comes back out; no database
 provider is attached because nothing here touches a database.
 
-- [ ] **Step 9: Delete the spike**
+- [ ] **Step 7: Delete the spike**
 
 ```bash
 rm -rf spike/MMLib.Alvo.Data.Spike
@@ -860,65 +852,110 @@ Then remove the whole `/spike/` folder element from `MMLib.Alvo.slnx`:
 The spike's verdict document stays — it is the citable evidence this plan rests on. Nothing else of the
 spike survives except the code this task lifted into the two drivers and `AlvoDataSqlSnapshotTests`.
 
-- [ ] **Step 10: Run ring1, accept baselines, commit**
+- [ ] **Step 8: Run ring1, accept baselines, commit**
 
-Run: `scripts/test-ring1`. Accept `cel-to-sql-sqlite.verified.txt` and the five moved public-API
-baselines. The turn gate will fire on the moved `*.verified.*` files — dispatch `alvo-snapshot-judge`.
+Run: `scripts/test-ring1`. Accept `cel-to-sql-sqlite.verified.txt` and the four moved public-API
+baselines (the three data assemblies plus `MMLib.Alvo.Testing`). `PublicApi.MMLib.Alvo.Abstractions`
+must **not** move — this task changes no port. The turn gate will fire on the moved `*.verified.*`
+files; dispatch `alvo-snapshot-judge`.
 
 ```bash
-git add src/MMLib.Alvo.Abstractions/Expressions src/MMLib.Alvo/Expressions src/MMLib.Alvo.Data.EntityFrameworkCore src/MMLib.Alvo.Data.Sqlite src/MMLib.Alvo.Data.PostgreSql src/MMLib.Alvo.Testing test MMLib.Alvo.slnx
+git add src/MMLib.Alvo.Data.EntityFrameworkCore src/MMLib.Alvo.Data.Sqlite src/MMLib.Alvo.Data.PostgreSql src/MMLib.Alvo.Testing test MMLib.Alvo.slnx
 git add -A spike
 git commit -m "feat(data): add the per-engine SQL renderers and the IAlvoSqlDialect seam"
 ```
 
 ---
 
-## Task 2: The primed schema — `ISchemaRegistry` served off the policy catalog
+## Task 2: The applied schema — `ISchemaRegistry` implemented by the policy catalog provider
 
 `AlvoServiceCollectionExtensions` carries `TODO(#19): register ISchemaRegistry once the Data API needs
 it`. PR2 is that consumer, and it must not get its schema from a second, independently primed holder:
 a schema the rules were never compiled against is precisely the catalog/schema mismatch `IAlvoData`'s
-remarks forbid being the one path an unvalidated payload reaches storage on. So the schema rides on the
-same primed slot as the compiled policy — the argument the design already made for
-`IRoleCatalogProvider` (*Deviations* 10), applied verbatim.
+remarks forbid being the one path an unvalidated payload reaches storage on.
+
+**Follow PR1's precedent exactly, and read it first.** The identical question was settled for the
+descriptor's `RoleCatalog` in PR1's final review: not a public member on `PolicyCatalog`, but a
+role-shaped **port** (`IRoleCatalogProvider`) that `IPolicyCatalogProvider` derives from, with
+`PolicyCatalog.Roles` kept `internal`. Read
+`src/MMLib.Alvo.Abstractions/Identity/IRoleCatalogProvider.cs` (its remarks carry the whole argument),
+`src/MMLib.Alvo/Rules/IPolicyCatalogProvider.cs` and
+`src/MMLib.Alvo/Rules/Internal/PolicyCatalogProvider.cs` before writing a line. This task does the same
+thing for the schema, through the `ISchemaRegistry` port that already ships. See *Deviations* 1 for why
+the two differences from that precedent (an existing port, a non-nullable return) are deliberate.
 
 **Files:**
 - Modify: `src/MMLib.Alvo/Rules/PolicyCatalog.cs`
-- Create: `src/MMLib.Alvo/Schema/Internal/PrimedSchemaRegistry.cs`
-- Create: `src/MMLib.Alvo/Schema/Setup.cs`
+- Modify: `src/MMLib.Alvo/Rules/IPolicyCatalogProvider.cs`
+- Modify: `src/MMLib.Alvo/Rules/Internal/PolicyCatalogProvider.cs`
+- Modify: `src/MMLib.Alvo/Rules/Setup.cs`
 - Modify: `src/MMLib.Alvo/AlvoServiceCollectionExtensions.cs`
-- Test: `test/MMLib.Alvo.Tests/Schema/PrimedSchemaRegistryTests.cs`
+- Test: `test/MMLib.Alvo.Tests/Rules/PolicyCatalogProviderSchemaTests.cs`
+- Modify: `test/MMLib.Alvo.Tests/Rules/RulesSetupTests.cs`
 - Modify: `test/_shared/PublicApi.MMLib.Alvo.verified.txt`
 
 **Interfaces:**
-- Consumes: `MMLib.Alvo.Schema.ISchemaRegistry` (`SchemaModel GetSchema()`);
-  `MMLib.Alvo.Rules.IPolicyCatalogProvider` (`PolicyCatalog? Current { get; }`,
-  `void SetCurrent(string project, PolicyCatalog catalog)`); `PolicyCatalog.Build(AlvoDescriptor,
-  SchemaModel, ICelCompiler)`.
+- Consumes: `MMLib.Alvo.Schema.ISchemaRegistry` (`SchemaModel GetSchema()` — already shipped in
+  `Abstractions`, do not change its shape); `MMLib.Alvo.IRoleCatalogProvider` (`RoleCatalog?
+  DeclaredRoles { get; }`) — the precedent to mirror; `MMLib.Alvo.Rules.IPolicyCatalogProvider`
+  (`PolicyCatalog? Current { get; }`, `void SetCurrent(string project, PolicyCatalog catalog)`);
+  `PolicyCatalog.Build(AlvoDescriptor, SchemaModel, ICelCompiler)`.
 - Produces:
-  - `PolicyCatalog` gains `public SchemaModel Schema { get; }`.
-  - `internal sealed class MMLib.Alvo.Schema.Internal.PrimedSchemaRegistry : ISchemaRegistry` —
-    constructor `PrimedSchemaRegistry(IPolicyCatalogProvider catalogs)`.
-  - `internal static IServiceCollection AddAlvoSchema(this IServiceCollection services)` in
-    `MMLib.Alvo.Schema.SchemaSetup`.
+  - `PolicyCatalog` gains **`internal`** `SchemaModel Schema { get; }` (not public — see *Deviations* 1).
+  - `IPolicyCatalogProvider` now derives from `IRoleCatalogProvider` **and**
+    `MMLib.Alvo.Schema.ISchemaRegistry`.
+  - `PolicyCatalogProvider` implements `SchemaModel GetSchema()` off the same `Current` reference as
+    `DeclaredRoles`.
+  - `RulesSetup.AddAlvoRules` registers `ISchemaRegistry` as the same singleton instance as
+    `IPolicyCatalogProvider`.
   - After this task, `ISchemaRegistry` resolves from `AddAlvo()` and returns the applied `SchemaModel`
     for whichever descriptor last primed the policy catalog.
 
 - [ ] **Step 1: Write the failing test**
 
-Create `test/MMLib.Alvo.Tests/Schema/PrimedSchemaRegistryTests.cs`:
+Create `test/MMLib.Alvo.Tests/Rules/PolicyCatalogProviderSchemaTests.cs`:
 
 ```csharp
 using Microsoft.Extensions.DependencyInjection;
 using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
 using DescField = MMLib.Alvo.Descriptor.FieldType;
 
-namespace MMLib.Alvo.Tests.Schema;
+namespace MMLib.Alvo.Tests.Rules;
 
-public class PrimedSchemaRegistryTests
+public class PolicyCatalogProviderSchemaTests
 {
+    /// <summary>
+    /// The invariant the port exists for: one instance answers both questions, so the schema a data port
+    /// validates against can never be a different apply's from the rules that judge the same request.
+    /// </summary>
+    [Fact]
+    public void The_schema_registry_and_the_policy_catalog_provider_are_one_instance()
+    {
+        using var services = new ServiceCollection().AddAlvo().Services.BuildServiceProvider();
+
+        services.GetRequiredService<ISchemaRegistry>()
+            .ShouldBeSameAs(services.GetRequiredService<IPolicyCatalogProvider>());
+    }
+
+    /// <summary>
+    /// A host with its own schema source registers its own <see cref="ISchemaRegistry"/> and takes it
+    /// over — the same escape hatch <see cref="IRoleCatalogProvider"/> gives an external identity source.
+    /// </summary>
+    [Fact]
+    public void A_host_can_replace_the_schema_registry_without_touching_the_policy_catalog()
+    {
+        var collection = new ServiceCollection();
+        collection.AddSingleton<ISchemaRegistry>(new FixedSchemaRegistry(new SchemaModel([])));
+        collection.AddAlvo();
+        using var services = collection.BuildServiceProvider();
+
+        services.GetRequiredService<ISchemaRegistry>().ShouldBeOfType<FixedSchemaRegistry>();
+        services.GetRequiredService<IPolicyCatalogProvider>().ShouldNotBeNull();
+    }
+
     [Fact]
     public void An_unprimed_registry_declares_no_entity_rather_than_throwing()
     {
@@ -934,7 +971,7 @@ public class PrimedSchemaRegistryTests
         var (descriptor, schema) = Fixture("vehicle");
 
         services.GetRequiredService<IPolicyCatalogProvider>().SetCurrent(
-            descriptor.Name, PolicyCatalog.Build(descriptor, schema, services.GetRequiredService<Expressions.ICelCompiler>()));
+            descriptor.Name, PolicyCatalog.Build(descriptor, schema, services.GetRequiredService<ICelCompiler>()));
 
         var published = services.GetRequiredService<ISchemaRegistry>().GetSchema();
         published.ShouldBeSameAs(schema);
@@ -944,7 +981,7 @@ public class PrimedSchemaRegistryTests
     public void Re_priming_publishes_the_new_schema_not_the_previous_one()
     {
         using var services = new ServiceCollection().AddAlvo().Services.BuildServiceProvider();
-        var compiler = services.GetRequiredService<Expressions.ICelCompiler>();
+        var compiler = services.GetRequiredService<ICelCompiler>();
         var catalogs = services.GetRequiredService<IPolicyCatalogProvider>();
         var (first, firstSchema) = Fixture("vehicle");
         var (second, secondSchema) = Fixture("vehicle", extraField: "colour");
@@ -979,6 +1016,11 @@ public class PrimedSchemaRegistryTests
 
         return (descriptor, DescriptorToSchemaMapper.Map(descriptor));
     }
+
+    private sealed class FixedSchemaRegistry(SchemaModel schema) : ISchemaRegistry
+    {
+        public SchemaModel GetSchema() => schema;
+    }
 }
 ```
 
@@ -992,10 +1034,10 @@ whose output `PolicyCatalog.Build`'s own remarks require callers to pass, so do 
 Run: `dotnet test --project test/MMLib.Alvo.Tests`
 Expected: FAIL — `No service for type 'MMLib.Alvo.Schema.ISchemaRegistry' has been registered.`
 
-- [ ] **Step 3: Add `PolicyCatalog.Schema`**
+- [ ] **Step 3: Add the internal `PolicyCatalog.Schema`**
 
-In `src/MMLib.Alvo/Rules/PolicyCatalog.cs`, add the property, set it from the constructor, and pass
-`schema` through from `TryBuild`:
+In `src/MMLib.Alvo/Rules/PolicyCatalog.cs`, add the property directly beneath the existing `Roles`, so
+the two siblings read as one rule:
 
 ```csharp
     /// <summary>
@@ -1003,87 +1045,102 @@ In `src/MMLib.Alvo/Rules/PolicyCatalog.cs`, add the property, set it from the co
     /// <see cref="SchemaModel"/> handed to <see cref="Build"/>.
     /// </summary>
     /// <remarks>
-    /// Public, unlike <see cref="Roles"/>: a data port has to validate a caller's filter/sort keys and a
-    /// write payload against the entity's declared fields, and it must be the <em>same</em> schema the
-    /// rules were compiled against — a port holding an independently primed schema could be handed a
-    /// field the type checker never saw, which is the one path on which an unvalidated payload reaches
-    /// storage (see <c>IAlvoData</c>'s remarks). Exposing it here means there is one primed source, not
-    /// two that can drift.
+    /// <see langword="internal"/> for exactly the reason <see cref="Roles"/> is: a consumer reads the
+    /// applied schema through <see cref="Schema.ISchemaRegistry"/>, which
+    /// <see cref="IPolicyCatalogProvider"/> implements, so nothing above the engine has to know that the
+    /// authoritative schema currently happens to arrive with a policy catalog. A public member here would
+    /// make the <em>policy</em> catalog the authoritative source of the <em>applied schema</em> and
+    /// foreclose any other source — F7's dynamic-entity registry being the obvious next one.
     /// </remarks>
-    public SchemaModel Schema { get; }
+    internal SchemaModel Schema { get; }
 ```
 
-Constructor: add a `SchemaModel schema` parameter (the type is `internal`-constructed only, so this is
-not a public break), `ArgumentNullException.ThrowIfNull(schema)`, `Schema = schema;`. Update the single
+Constructor: add a `SchemaModel schema` parameter (the constructor is already `internal`, so this is not
+a public break), `ArgumentNullException.ThrowIfNull(schema)`, `Schema = schema;`. Update the single
 `new PolicyCatalog(...)` call inside `TryBuild` to pass its own `schema` argument.
 
-- [ ] **Step 4: Add the registry and its registration**
+- [ ] **Step 4: Derive the provider port from `ISchemaRegistry` and implement it**
 
-Create `src/MMLib.Alvo/Schema/Internal/PrimedSchemaRegistry.cs`:
+In `src/MMLib.Alvo/Rules/IPolicyCatalogProvider.cs`, widen the base list and add the paragraph that
+explains why, mirroring the `IRoleCatalogProvider` paragraph already there:
 
 ```csharp
-using MMLib.Alvo.Rules;
+public interface IPolicyCatalogProvider : IRoleCatalogProvider, MMLib.Alvo.Schema.ISchemaRegistry
+```
 
-namespace MMLib.Alvo.Schema.Internal;
+```csharp
+/// <para>
+/// It likewise serves as the default <see cref="Schema.ISchemaRegistry"/>. A data port has to validate a
+/// caller's filter and sort keys, and a write payload, against the entity's declared fields — and it must
+/// be the <em>same</em> schema the rules were compiled against, or the one path on which an unvalidated
+/// payload reaches storage is a mismatch between two independently primed holders. One instance
+/// registered as both means the rules that judge a request and the schema that validates it always come
+/// from one apply. A host with its own schema source registers its own
+/// <see cref="Schema.ISchemaRegistry"/> and takes it over, exactly as an external identity source does
+/// for <see cref="IRoleCatalogProvider"/>.
+/// </para>
+```
 
-/// <summary>
-/// Serves the applied <see cref="SchemaModel"/> off the primed <see cref="PolicyCatalog"/>, so the
-/// schema a data port validates against and the schema its rules were compiled against are the same
-/// object by construction. A second, independently primed holder would be able to serve a data port a
-/// schema the type checker never saw — the same failure mode that put identity roles behind
-/// <see cref="IRoleCatalogProvider"/> instead of on a holder of their own.
-/// </summary>
-/// <remarks>
-/// An unprimed provider yields an empty model rather than throwing. That is the fail-closed direction:
-/// every field name a caller supplies is then undeclared and refused, and every operation is denied by
-/// <see cref="IPolicyEngine"/> one layer earlier anyway, so this value is unreachable in practice and
-/// harmless where it is not.
-/// </remarks>
-internal sealed class PrimedSchemaRegistry(IPolicyCatalogProvider catalogs) : ISchemaRegistry
-{
-    private static readonly SchemaModel _unprimed = new([]);
+In `src/MMLib.Alvo/Rules/Internal/PolicyCatalogProvider.cs`, add the member beside `DeclaredRoles`:
 
+```csharp
     /// <inheritdoc/>
-    public SchemaModel GetSchema() => catalogs.Current?.Schema ?? _unprimed;
-}
+    /// <remarks>
+    /// The same single volatile read <see cref="Current"/> and <see cref="DeclaredRoles"/> take, so a
+    /// request's rules, its role set and the schema validating its field names always come from one
+    /// applied descriptor. An unprimed provider reports an <em>empty</em> model rather than
+    /// <see langword="null"/> — unlike <see cref="DeclaredRoles"/>, whose port distinguishes "no set
+    /// declared" from "an empty set". Empty is the fail-closed value here: no entity declared means every
+    /// entity name and every field name a caller supplies is refused, and <c>IPolicyEngine</c> has already
+    /// denied the operation one layer earlier anyway.
+    /// </remarks>
+    public SchemaModel GetSchema() => Current?.Schema ?? _unprimedSchema;
+
+    private static readonly SchemaModel _unprimedSchema = new([]);
 ```
 
-Create `src/MMLib.Alvo/Schema/Setup.cs`:
+In `src/MMLib.Alvo/Rules/Setup.cs`, add `using MMLib.Alvo.Schema;` and register the port to the same
+instance, immediately after the existing `IRoleCatalogProvider` line and for the same stated reason:
 
 ```csharp
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
-using MMLib.Alvo.Schema.Internal;
-
-namespace MMLib.Alvo.Schema;
-
-/// <summary>Registers <see cref="ISchemaRegistry"/>: the applied schema, read off the primed policy catalog.</summary>
-internal static class SchemaSetup
-{
-    /// <summary>Adds <see cref="ISchemaRegistry"/> as a singleton over <see cref="Rules.IPolicyCatalogProvider"/>.</summary>
-    /// <param name="services">The service collection.</param>
-    /// <returns><paramref name="services"/>, for chaining.</returns>
-    internal static IServiceCollection AddAlvoSchema(this IServiceCollection services)
-    {
-        services.TryAddSingleton<ISchemaRegistry, PrimedSchemaRegistry>();
-        return services;
-    }
-}
+        services.TryAddSingleton<ISchemaRegistry>(
+            provider => provider.GetRequiredService<IPolicyCatalogProvider>());
 ```
 
-In `AlvoServiceCollectionExtensions.AddAlvo`, add `services.AddAlvoSchema();` after
-`services.AddAlvoRules();`, delete the `// TODO(#19): register ISchemaRegistry …` line, and replace the
-`<remarks>` paragraph that says it is deliberately not registered with one that states where it now
-comes from and that it reads empty until a descriptor is applied.
+Extend `AddAlvoRules`'s `<remarks>` with one sentence naming the second port and why it resolves to the
+same instance rather than to a second registration.
 
-- [ ] **Step 5: Run ring1, accept the baseline, commit**
+In `AlvoServiceCollectionExtensions.AddAlvo`, delete the `// TODO(#19): register ISchemaRegistry …` line
+and replace the `<remarks>` paragraph saying `ISchemaRegistry` is deliberately not registered with one
+stating that it now arrives with the policy catalog provider and reads empty until a descriptor is
+applied.
 
-Run: `scripts/test-ring1`. Accept the moved `PublicApi.MMLib.Alvo.verified.txt`
-(`PolicyCatalog.Schema` plus nothing else — `PrimedSchemaRegistry` and `SchemaSetup` are internal).
+- [ ] **Step 5: Add the wiring fact and run ring1, accept the baseline, commit**
+
+Add one fact to `test/MMLib.Alvo.Tests/Rules/RulesSetupTests.cs`, beside the existing
+`IRoleCatalogProvider` same-instance fact if there is one:
+
+```csharp
+    [Fact]
+    public void The_schema_registry_resolves_to_the_policy_catalog_provider_instance()
+    {
+        var services = new ServiceCollection();
+        services.AddAlvoRules();
+        using var provider = services.BuildServiceProvider();
+
+        provider.GetRequiredService<ISchemaRegistry>()
+            .ShouldBeSameAs(provider.GetRequiredService<IPolicyCatalogProvider>());
+    }
+```
+
+Run: `scripts/test-ring1`. Accept the moved `PublicApi.MMLib.Alvo.verified.txt` — the only public change
+is `IPolicyCatalogProvider`'s base list gaining `ISchemaRegistry`. `PolicyCatalog.Schema` and
+`PolicyCatalogProvider` are internal, so **neither appears in the baseline**; if `Schema` shows up there,
+it was made public by mistake.
 
 ```bash
 git add src/MMLib.Alvo test/MMLib.Alvo.Tests test/_shared
-git commit -m "feat(schema): serve ISchemaRegistry off the primed policy catalog"
+git commit -m "feat(schema): serve ISchemaRegistry from the policy catalog provider"
 ```
 
 ---
@@ -5057,11 +5114,14 @@ namespace MMLib.Alvo.Data.PostgreSql.Tests.Integration;
 /// </summary>
 public sealed class PostgreSqlAlvoDataFixture : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _container = new PostgreSqlBuilder("postgres:16-alpine").Build();
+    // Built inside InitializeAsync, never in a field initializer. Testcontainers' Build() itself talks
+    // to the Docker daemon, so on a host with no reachable daemon it throws while the fixture is being
+    // *constructed*, which xUnit reports as every test in the sharing class failing before any of them
+    // reaches its own skip. PostgresFixture was fixed for exactly this; do not reintroduce it here.
+    private PostgreSqlContainer? _container;
     private readonly List<ServiceProvider> _providers = [];
-    private bool _started;
 
-    public bool Available => _started;
+    public bool Available => _container is not null;
 
     public async ValueTask InitializeAsync()
     {
@@ -5070,13 +5130,14 @@ public sealed class PostgreSqlAlvoDataFixture : IAsyncLifetime
             return;
         }
 
-        await _container.StartAsync();
-        _started = true;
+        var container = new PostgreSqlBuilder("postgres:16-alpine").Build();
+        await container.StartAsync();
+        _container = container;
     }
 
     public async Task<AlvoDataHost> StartAsync(SchemaModel schema, AlvoDescriptor? descriptor = null)
     {
-        Assert.SkipUnless(_started, "Docker is unavailable on this platform, so the PostgreSQL engine cannot be started.");
+        Assert.SkipUnless(Available, "Docker is unavailable on this platform, so the PostgreSQL engine cannot be started.");
 
         var connectionString = await CreateDatabaseAsync();
         var builder = new FixtureAlvoBuilder(new ServiceCollection());
@@ -5094,16 +5155,21 @@ public sealed class PostgreSqlAlvoDataFixture : IAsyncLifetime
         return host;
     }
 
+    /// <summary>
+    /// A fresh database per call, created off the container's own admin connection. The name is a
+    /// <see cref="Guid"/>, so it cannot collide and needs no quoting beyond the identifier quotes.
+    /// </summary>
     private async Task<string> CreateDatabaseAsync()
     {
+        var adminConnectionString = _container!.GetConnectionString();
         var name = $"alvo_{Guid.NewGuid():N}";
-        await using var admin = new NpgsqlConnection(_container.GetConnectionString());
+        await using var admin = new NpgsqlConnection(adminConnectionString);
         await admin.OpenAsync();
         await using var create = admin.CreateCommand();
         create.CommandText = $"CREATE DATABASE \"{name}\"";
         await create.ExecuteNonQueryAsync();
 
-        return new NpgsqlConnectionStringBuilder(_container.GetConnectionString()) { Database = name }.ToString();
+        return new NpgsqlConnectionStringBuilder(adminConnectionString) { Database = name }.ToString();
     }
 
     public async ValueTask DisposeAsync()
@@ -5113,7 +5179,7 @@ public sealed class PostgreSqlAlvoDataFixture : IAsyncLifetime
             await provider.DisposeAsync();
         }
 
-        if (_started)
+        if (_container is not null)
         {
             await _container.DisposeAsync();
         }
@@ -5341,16 +5407,19 @@ findings shape the implementation and are worth a reviewer's attention:
 - a tracked `SaveChanges` emits an `UPDATE` with **no policy predicate**, so writes go through
   `ExecuteUpdate`/`ExecuteDelete` over the policy-carrying `FromSql` root and the `DbContext` is
   unreachable from outside the port — enforced by three tests, not a convention;
-- the renderer's `p` parameter prefix collides with EF's own and EF then renames *our* parameter while the
-  SQL text keeps the old name, silently substituting the caller's value into the security predicate on
-  SQLite; the default is now `alvo_p` and every call site passes an explicit prefix;
+- a `p` parameter prefix collides with EF's own and EF then renames *our* parameter while the SQL text
+  keeps the old name, silently substituting the caller's value into the security predicate on SQLite.
+  That finding went back into PR1, which changed the renderer's default to `alvo_p` (`54d612c`); this PR
+  additionally passes an explicit, distinct prefix for each of the three predicates a `PolicyDecision`
+  carries;
 - a `hidden` field is removed by projecting `CAST(NULL AS <type>)` over an all-optional runtime read
   model, because omitting the column throws and NULL-projecting a `NOT NULL` one throws differently per
   engine.
 
 Deliberate deviations (14 of them, each with its reason) are recorded in the plan's
-*Deliberate decisions and deviations* section — most consequentially: `ISchemaRegistry` is served off the
-primed policy catalog rather than a second holder; the caller filter is rendered to SQL rather than
+*Deliberate decisions and deviations* section — most consequentially: `ISchemaRegistry` is implemented by
+the policy catalog provider, following the `IRoleCatalogProvider` shape PR1's review settled, so there is
+one primed source and no public member on `PolicyCatalog`; the caller filter is rendered to SQL rather than
 composed as LINQ, because EF's C# null semantics would break `AlvoFilterOperator`'s documented
 three-valued contract; and `AlvoSort.Nulls` keeps the portable `CASE WHEN` emulation, leaving #19's
 p95-on-an-indexed-column target to PR3 with the seam named.
@@ -5396,7 +5465,7 @@ revert — add the test.
 | a query issued without a context throws | 7 |
 | golden CEL→SQL snapshots per engine | 1 (SQLite), 11 (PostgreSQL) |
 | green on SQLite + PostgreSQL | 10, 11 |
-| three disjoint non-`p` prefixes, every value bound through `FindMapping(...).CreateParameter(...)` | 1 (the default), 4 (the prefixes and the binder) |
+| three disjoint non-`p` prefixes, every value bound through `FindMapping(...).CreateParameter(...)` | 4 (the prefixes, their disjointness test, and the binder). The renderer's `alvo_p` **default** was already landed by PR1 (`54d612c`) in response to the spike, so this PR only ever passes explicit prefixes |
 | a tracked `SaveChanges` bypasses policy ⇒ writes via `ExecuteUpdate`/`ExecuteDelete`, `DbContext` unreachable, **as an architecture test** | 9 (the writes), 10 (the three tests) |
 | hidden fields ⇒ `CAST(NULL AS <type>)` over an all-optional read model + a custom `IModelCacheKeyFactory` | 3 (model + cache key), 5 (projection) |
 | `ISqlGenerationHelper` drops the schema / returns unquoted ⇒ what `IFieldSqlRenderer` does about it | 1 (always quote, never delegate; no DB schema) |
