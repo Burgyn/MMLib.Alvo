@@ -57,7 +57,7 @@ permissions:
 # Key the group on the COMMIT, not the ref. On main every merge commit deserves
 # its own verdict, and a ref-keyed group cannot deliver that even with
 # cancel-in-progress off: GitHub keeps at most one pending run per group, so a
-# third merge landing during a 40-minute run cancels the second one as
+# third merge landing during a long run cancels the second one as
 # superseded — dropping exactly the commit whose score you needed, as a grey
 # "cancelled" nobody reads.
 concurrency:
@@ -68,7 +68,13 @@ jobs:
   mutation:
     name: Stryker (${{ matrix.name }})
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    # The security-core run outgrew a 40-minute budget the moment F3's PR1 landed the CEL
+    # compiler, both rule backends and the policy engine: it was cancelled at exactly 40:00
+    # with the run still in progress, which reads as a grey "cancelled" rather than as a
+    # verdict — the same silent-non-answer this workflow's own fail-loud step exists to
+    # prevent. Nothing waits on this run (it is post-merge, or dispatched on demand), so the
+    # budget is generous on purpose; a genuinely hung run still ends, just later.
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -109,7 +115,12 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          dotnet tool run dotnet-stryker -f "${{ matrix.config }}" 2>&1 | tee stryker-output.log
+          # --concurrency: Stryker defaults to half the logical cores, i.e. 2 test runners on a
+          # GitHub-hosted 4-vCPU runner, leaving half the machine idle for a run whose whole cost
+          # is wall-clock. The runner has ~16 GB, comfortably more than four MTP hosts need for
+          # this suite. Set on the command line rather than in the config so this reasoning has
+          # somewhere to live — the config files are strict JSON with nowhere to put a comment.
+          dotnet tool run dotnet-stryker -f "${{ matrix.config }}" --concurrency 4 2>&1 | tee stryker-output.log
           stryker_exit="${PIPESTATUS[0]}"
 
           # Fail loud instead of showing a false green: a run that discovered
