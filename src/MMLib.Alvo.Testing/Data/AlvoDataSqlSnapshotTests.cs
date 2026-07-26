@@ -47,6 +47,16 @@ public abstract class AlvoDataSqlSnapshotTests
     /// <summary>Gets the driver's own field/dialect renderer.</summary>
     protected abstract IFieldSqlRenderer Fields { get; }
 
+    /// <summary>
+    /// Gets the rules this engine's snapshot renders. Overridable so a dialect whose boolean handling
+    /// genuinely differs — T-SQL is the named case, and the only reason
+    /// <see cref="IFieldSqlRenderer"/>'s three two-valued members ship as default interface members —
+    /// can append its own cases without editing this shipped base class. An override should keep the
+    /// inherited rules and add to them, since a subclass that replaced them would stop comparing like
+    /// with like against the other engines.
+    /// </summary>
+    protected virtual IEnumerable<string> Rules => _rules;
+
     /// <summary>The caller every snapshot renders against — a fixed, tenanted, admin-holding identity.</summary>
     protected static AlvoContext SnapshotCaller { get; } = new()
     {
@@ -75,11 +85,22 @@ public abstract class AlvoDataSqlSnapshotTests
         ],
     };
 
-    /// <summary>Freezes the SQL this engine's dialect renders the fixed rule table into.</summary>
+    /// <summary>
+    /// Freezes the SQL this engine's dialect renders the fixed rule table into.
+    /// </summary>
+    /// <remarks>
+    /// This suite's job is dialect <em>shape</em>, and the parameter list deliberately records each bound
+    /// value's CLR type rather than the value: recording values would make the row for
+    /// <c>status in @user.roles</c> depend on <c>HashSet&lt;Role&gt;</c> enumeration order. So it does not
+    /// prove that the <em>right</em> context value was bound — a renderer swapping <c>@tenant.id</c> for
+    /// <c>@user.id</c>, both <see cref="Guid"/>, would produce a byte-identical baseline. That property
+    /// belongs to the core, where <c>cel-to-sql-core</c> records the values themselves and
+    /// <c>SqlPredicateRendererTests</c> asserts the binding directly.
+    /// </remarks>
     [Fact]
     public Task Cel_renders_to_this_engines_sql()
     {
-        var rendered = _rules.Select(rule => Snapshot(rule, Render(rule))).ToList();
+        var rendered = Rules.Select(rule => Snapshot(rule, Render(rule))).ToList();
 
         return Verify(rendered).UseFileName($"cel-to-sql-{EngineName}");
     }

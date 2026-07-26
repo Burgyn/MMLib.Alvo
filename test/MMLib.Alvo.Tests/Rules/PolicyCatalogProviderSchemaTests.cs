@@ -72,6 +72,7 @@ public class PolicyCatalogProviderSchemaTests
         catalogs.SetCurrent(second.Name, PolicyCatalog.Build(second, secondSchema, compiler));
 
         var published = services.GetRequiredService<ISchemaRegistry>().GetSchema();
+        published.ShouldBeSameAs(secondSchema);
         published.Entities[0].Fields.Select(f => f.Name).ShouldContain("colour");
     }
 

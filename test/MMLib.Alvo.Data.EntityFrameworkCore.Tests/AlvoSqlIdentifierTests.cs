@@ -16,6 +16,18 @@ public class AlvoSqlIdentifierTests
             .ShouldBe("\"title\"\"; DROP TABLE items; --\"");
 
     [Fact]
-    public void An_empty_or_whitespace_identifier_is_refused()
+    public void A_null_identifier_is_refused()
+        => Should.Throw<ArgumentNullException>(() => AlvoSqlIdentifier.Quote(null!));
+
+    [Fact]
+    public void An_empty_identifier_is_refused()
+        => Should.Throw<ArgumentException>(() => AlvoSqlIdentifier.Quote(string.Empty));
+
+    /// <summary>
+    /// The case that distinguishes <c>ThrowIfNullOrWhiteSpace</c> from <c>ThrowIfNullOrEmpty</c>: a
+    /// whitespace-only name would otherwise render as <c>"  "</c>, a legal-looking identifier nothing owns.
+    /// </summary>
+    [Fact]
+    public void A_whitespace_only_identifier_is_refused()
         => Should.Throw<ArgumentException>(() => AlvoSqlIdentifier.Quote("  "));
 }

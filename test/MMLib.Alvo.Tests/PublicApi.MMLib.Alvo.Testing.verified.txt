@@ -85,6 +85,7 @@ namespace MMLib.Alvo.Testing.Data
         protected abstract string EngineName { get; }
         protected abstract MMLib.Alvo.Expressions.IFieldSqlRenderer Fields { get; }
         protected abstract MMLib.Alvo.Expressions.IPredicateRenderer Renderer { get; }
+        protected virtual System.Collections.Generic.IEnumerable<string> Rules { get; }
         protected static MMLib.Alvo.AlvoContext SnapshotCaller { get; }
         protected static MMLib.Alvo.Schema.EntitySchema SnapshotEntity { get; }
         public System.Threading.Tasks.Task Cel_renders_to_this_engines_sql() { }
