@@ -523,13 +523,26 @@ public abstract class AlvoDataAdversarialTests
     /// independent of any predicate bug. Acme's caller asks for at most one row and must still get
     /// exactly its own, never Globex's or the third tenant's.
     /// </summary>
+    /// <remarks>
+    /// The descending <c>Sort</c> is what makes this fact deterministic rather than a coin flip:
+    /// the seed order puts Acme's row first, so an implementation that truncated before filtering
+    /// would happen to return the right row anyway. Sorted by <c>title</c> descending, Acme's row
+    /// (<c>Acme-doc</c>) is the <em>last</em> of the three, so a limit applied to the pre-filter row
+    /// set returns another tenant's row, which the policy then strips — an empty page, not this one.
+    /// </remarks>
     [Fact]
     public async Task A_query_limit_is_applied_after_the_policy_predicate_not_before()
     {
         var fixture = await DocumentsFixtureAsync();
         var acmeUser = NewContext(fixture.Acme);
 
-        var result = await fixture.Data.QueryAsync(new AlvoQuery { Entity = "documents", Limit = 1 }, acmeUser);
+        var query = new AlvoQuery
+        {
+            Entity = "documents",
+            Limit = 1,
+            Sort = [new AlvoSort("title", Descending: true)],
+        };
+        var result = await fixture.Data.QueryAsync(query, acmeUser);
 
         result.Count.ShouldBe(1);
         result[0]["id"].ShouldBe(fixture.AcmeRowId);
