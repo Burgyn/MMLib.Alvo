@@ -65,6 +65,31 @@ gets a synthesized `tenant_id == @tenant.id` scope, compiled through the same `I
 authored rule (never hand-built), so it is type-checked and fails loudly, naming the entity, if the
 schema has no `tenant_id` column.
 
+### The required-context gate: a predicate never runs against a context value the caller lacks
+
+`PolicyCatalogBuilder` also precomputes, per operation and at **apply** time (walking the compiled
+tree, never re-parsing the source), whether any of that operation's three predicates — `Using`,
+`WithCheck`, and the entity's `TenantScope` — reads `@tenant.id` or `@user.id`. `IPolicyEngine` then
+**denies** when the operation reads `@tenant.id` and the caller has no tenant, or reads `@user.id` and
+the caller carries the reserved all-zero `UserId` (`AlvoContext.Anonymous`, i.e. no identity).
+
+This is a *different* gate from the tenant guard, and both are needed:
+
+| Gate | Question | Fires on |
+|---|---|---|
+| Tenant guard | is this entity tenant-scoped while the caller has no tenant? | `Scoped` entities only, before any operation lookup |
+| Required-context gate | does the rule this operation would hand out read a context value the caller cannot supply? | any entity, incl. `Global`, after the operation lookup |
+
+The guard runs first, so a tenant-scoped entity's tenantless caller still gets the guard's own reason.
+The gate is what closes the **global**-entity hole: a global entity gets no tenant guard, so
+`!(region_id == @tenant.id)` for a tenantless caller used to render as `(NOT FALSE)` with an empty
+parameter bag — every row. Same shape for `@user.id`, where the all-zero uuid would otherwise make the
+anonymous caller the owner of every all-zero-owner row.
+
+An unrecognized `CelNode` kind counts as *referencing* the value (deny-by-default), so a future
+construct added without updating the walk errs towards denying rather than towards resolving a
+predicate against an absent operand.
+
 ## Two-valued rendering: the rule both backends must agree on
 
 Alvo has two `CompiledExpression` backends — `CelInterpreter` (in-memory, used for `WITH CHECK`
@@ -85,6 +110,15 @@ So a row with no owner matches the negated rule — this is deliberate (a `null`
 "nobody's row, hide it from everyone", it is a row the negated condition is stated to include), but
 it means an author negating an ownership check must reason about the null case explicitly, not
 assume "the opposite of who I excluded before."
+
+**An absent `@tenant.id`/`@user.id` is not covered by this rule — it is refused upstream.** Both
+backends *would* collapse a comparison against an absent context value to `false`, and that collapse
+inverts under negation (`!(region_id == @tenant.id)` becomes `true` for every row), so it was never a
+safe guarantee. The required-context gate above denies such a call before either backend sees the
+predicate, which makes the collapse **unreachable defence-in-depth** for anything driven by
+`IPolicyEngine`: it stays only because `IPredicateRenderer`/`IPredicateEvaluator` are public seams a
+provider may drive directly, where rendering `FALSE` is still the right answer. Never read
+"it renders `FALSE`" as the tenant- or owner-isolation guarantee itself.
 
 `SqlPredicateRenderer` reproduces this by wrapping every place `UNKNOWN` could otherwise leak into
 Postgres's own three-valued semantics in `COALESCE(<value>, FALSE)`: a raw comparison, a nullable

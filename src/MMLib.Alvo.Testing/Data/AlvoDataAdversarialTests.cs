@@ -535,6 +535,63 @@ public abstract class AlvoDataAdversarialTests
         result[0]["id"].ShouldBe(fixture.AcmeRowId);
     }
 
+    /// <summary>
+    /// A <b>global</b> entity whose rule references <c>@tenant.id</c> is not covered by the
+    /// scoped-entity tenant guard, and the rule is <b>negated</b> — the shape that inverts an absent
+    /// operand's collapse-to-false into "match every row". A tenantless caller must be refused
+    /// outright, with no row set ever materialized, rather than served the whole table.
+    /// </summary>
+    [Fact]
+    public async Task A_global_entity_whose_negated_rule_references_the_tenant_denies_a_tenantless_caller()
+    {
+        var fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
+        {
+            ["region_id"] = new() { Type = DescField.Uuid, Required = true },
+            ["title"] = new() { Type = DescField.String },
+        };
+        var rules = new AccessRules { List = "!(region_id == @tenant.id)", Get = "!(region_id == @tenant.id)" };
+        var (descriptor, schema) = BuildFixture("ledgers", fields, EntityTenancy.Global, rules);
+        var rowId = Guid.NewGuid();
+        var seed = SeedOf("ledgers", Row(rowId, ("region_id", Guid.NewGuid()), ("title", "Ledger")));
+        var data = await CreateAsync(schema, descriptor, seed);
+        var tenantless = NewContext(tenant: null);
+
+        IReadOnlyList<AlvoRecord>? captured = null;
+        await Should.ThrowAsync<AlvoAuthorizationException>(async () =>
+            captured = await data.QueryAsync(new AlvoQuery { Entity = "ledgers" }, tenantless));
+
+        captured.ShouldBeNull();
+        await Should.ThrowAsync<AlvoAuthorizationException>(() => data.GetAsync("ledgers", rowId, tenantless));
+    }
+
+    /// <summary>
+    /// The identity half: <see cref="AlvoContext.Anonymous"/> carries the reserved all-zero user id,
+    /// so an ownership rule would otherwise hand it every row whose owner column is all-zero — a row
+    /// a partially-migrated or defaulted dataset really does contain. The seeded row is deliberately
+    /// owned by exactly that all-zero uuid, so an implementation missing the gate returns it.
+    /// </summary>
+    [Fact]
+    public async Task A_global_entity_whose_rule_references_the_user_denies_the_anonymous_caller()
+    {
+        var fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
+        {
+            ["owner_id"] = new() { Type = DescField.Uuid, Required = true },
+            ["title"] = new() { Type = DescField.String },
+        };
+        var rules = new AccessRules { List = "owner_id == @user.id", Get = "owner_id == @user.id" };
+        var (descriptor, schema) = BuildFixture("journals", fields, EntityTenancy.Global, rules);
+        var rowId = Guid.NewGuid();
+        var seed = SeedOf("journals", Row(rowId, ("owner_id", Guid.Empty), ("title", "Journal")));
+        var data = await CreateAsync(schema, descriptor, seed);
+
+        IReadOnlyList<AlvoRecord>? captured = null;
+        await Should.ThrowAsync<AlvoAuthorizationException>(async () =>
+            captured = await data.QueryAsync(new AlvoQuery { Entity = "journals" }, AlvoContext.Anonymous));
+
+        captured.ShouldBeNull();
+        await Should.ThrowAsync<AlvoAuthorizationException>(() => data.GetAsync("journals", rowId, AlvoContext.Anonymous));
+    }
+
     private sealed record NotesFixture(IAlvoData Data, AlvoContext Alice, AlvoContext Bob, TenantId Tenant, Guid AliceRow1Id, Guid AliceRow2Id, Guid BobRowId);
 
     private sealed record DocumentsFixture(

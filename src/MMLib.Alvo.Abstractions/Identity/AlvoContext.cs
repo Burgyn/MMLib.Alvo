@@ -33,7 +33,12 @@ public sealed record AlvoContext
     /// <summary>Gets the tenant the caller acts in; <see langword="null"/> denies on a tenant-scoped entity.</summary>
     public TenantId? Tenant { get; init; }
 
-    /// <summary>The anonymous caller: a fixed all-zero identity holding only <see cref="Role.Anon"/>.</summary>
+    /// <summary>
+    /// The anonymous caller: the reserved all-zero <see cref="UserId"/> — which means "no identity",
+    /// never a caller who owns the all-zero rows (see <see cref="UserId"/>'s own remarks) — holding
+    /// only <see cref="Role.Anon"/>. An operation whose policy reads <c>@user.id</c> is therefore
+    /// denied for this caller rather than evaluated against the all-zero uuid.
+    /// </summary>
     public static AlvoContext Anonymous { get; } = new()
     {
         User = default,

@@ -13,9 +13,19 @@ namespace MMLib.Alvo.Rules.Internal;
 /// the correct default-deny answer for "no descriptor has been applied yet"), look up the entity (deny
 /// if unknown or blank, never throw), the tenant guard (deny before any rule is consulted when a
 /// tenant-scoped entity's caller carries no tenant), the operation lookup (deny when the relevant rule
-/// was never configured), then assemble the allow decision from the catalog's compiled predicates and
-/// the field masks resolved against this call's context.
+/// was never configured), the required-context gate (deny when the operation's predicates read a
+/// context value this caller does not have), then assemble the allow decision from the catalog's
+/// compiled predicates and the field masks resolved against this call's context.
 /// </summary>
+/// <remarks>
+/// The tenant guard and the required-context gate are two different questions and both are needed.
+/// The guard asks "is this entity tenant-scoped while the caller has no tenant" — an entity-level
+/// question, answered before an operation is even looked up. The gate asks "does the rule this
+/// operation would hand out read a context value this caller cannot supply" — which fires for a
+/// <b>global</b> entity too, where the guard by definition never speaks, and is the only thing
+/// standing between a rule like <c>!(region_id == @tenant.id)</c> and a tenantless caller reading
+/// every row (the absent operand collapses to false in the backends, and the negation inverts it).
+/// </remarks>
 internal sealed class PolicyEngine : IPolicyEngine
 {
     private static readonly FrozenSet<string> _emptyFieldMask = FrozenSet<string>.Empty;
@@ -75,13 +85,45 @@ internal sealed class PolicyEngine : IPolicyEngine
             return PolicyDecision.Deny(DenyReasonForOperation(operation));
         }
 
-        return PolicyDecision.Allow(
+        return CheckRequiredContext(operationPolicy, context)
+            ?? Allow(policy, operationPolicy, context);
+    }
+
+    /// <summary>
+    /// Denies when a predicate this operation would hand out reads a caller/tenant context value the
+    /// caller does not have. Neither reason names the entity, and neither distinguishes which of the
+    /// operation's three predicates asked for the value — an operator only needs to know which half of
+    /// the caller's identity was missing.
+    /// </summary>
+    private static PolicyDecision? CheckRequiredContext(OperationPolicy policy, AlvoContext context)
+    {
+        if (policy.RequiresTenantId && context.Tenant is null)
+        {
+            return PolicyDecision.Deny("The caller has no tenant, and the policy for this operation reads one.");
+        }
+
+        if (policy.RequiresUserId && HasNoIdentity(context))
+        {
+            return PolicyDecision.Deny("The caller has no identity, and the policy for this operation reads one.");
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The reserved all-zero <see cref="UserId"/> means "no identity" (see
+    /// <see cref="AlvoContext.Anonymous"/>) — never a real caller who happens to own the all-zero
+    /// rows.
+    /// </summary>
+    private static bool HasNoIdentity(AlvoContext context) => context.User.Value == Guid.Empty;
+
+    private static PolicyDecision Allow(EntityPolicy policy, OperationPolicy operationPolicy, AlvoContext context) =>
+        PolicyDecision.Allow(
             operationPolicy.Using,
             operationPolicy.WithCheck,
             policy.TenantScope,
             ResolveFieldMask(policy.Hidden, context),
             ResolveFieldMask(policy.ReadOnly, context));
-    }
 
     private static bool IsUnconfigured(DataOperation operation, OperationPolicy policy) => operation switch
     {

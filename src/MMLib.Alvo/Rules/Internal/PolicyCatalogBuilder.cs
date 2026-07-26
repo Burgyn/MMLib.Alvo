@@ -52,8 +52,8 @@ internal static class PolicyCatalogBuilder
     private static EntityPolicy BuildEntity(
         string name, EntityDescriptor? descriptor, EntitySchema schema, ICelCompiler compiler, List<DescriptorValidationError> errors)
     {
-        var operations = CompileRules(name, descriptor?.Rules, schema, compiler, errors);
         var tenantScope = SynthesizeTenantScope(name, schema, compiler, errors);
+        var operations = CompileRules(name, descriptor?.Rules, tenantScope, schema, compiler, errors);
         var fields = descriptor?.Fields ?? new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal);
         var hidden = CompileFieldFlags(name, "hidden", fields, field => field.Hidden, schema, compiler, errors);
         var readOnly = CompileFieldFlags(name, "readOnly", fields, field => field.ReadOnly, schema, compiler, errors);
@@ -66,7 +66,12 @@ internal static class PolicyCatalogBuilder
     /// and reuses the same <see cref="CompiledExpression"/> instance for both slots.
     /// </summary>
     private static Dictionary<DataOperation, OperationPolicy> CompileRules(
-        string entityName, AccessRules? rules, EntitySchema schema, ICelCompiler compiler, List<DescriptorValidationError> errors)
+        string entityName,
+        AccessRules? rules,
+        CompiledExpression? tenantScope,
+        EntitySchema schema,
+        ICelCompiler compiler,
+        List<DescriptorValidationError> errors)
     {
         var list = CompileOperationRule(entityName, DataOperation.List, rules?.List, schema, compiler, errors);
         var get = CompileOperationRule(entityName, DataOperation.Get, rules?.Get, schema, compiler, errors);
@@ -76,13 +81,48 @@ internal static class PolicyCatalogBuilder
 
         return new Dictionary<DataOperation, OperationPolicy>
         {
-            [DataOperation.List] = new(list, null),
-            [DataOperation.Get] = new(get, null),
-            [DataOperation.Delete] = new(delete, null),
-            [DataOperation.Create] = new(null, create),
-            [DataOperation.Update] = new(update, update),
+            [DataOperation.List] = Operation(list, null, tenantScope),
+            [DataOperation.Get] = Operation(get, null, tenantScope),
+            [DataOperation.Delete] = Operation(delete, null, tenantScope),
+            [DataOperation.Create] = Operation(null, create, tenantScope),
+            [DataOperation.Update] = Operation(update, update, tenantScope),
         };
     }
+
+    /// <summary>
+    /// Assembles one <see cref="OperationPolicy"/>, precomputing here — once per apply, never per
+    /// request — which caller/tenant context values the operation's predicates actually read.
+    /// </summary>
+    private static OperationPolicy Operation(
+        CompiledExpression? @using, CompiledExpression? withCheck, CompiledExpression? tenantScope) => new(
+            @using,
+            withCheck,
+            RequiresContextValue(CelContextValue.TenantId, @using, withCheck, tenantScope),
+            RequiresContextValue(CelContextValue.UserId, @using, withCheck, tenantScope));
+
+    private static bool RequiresContextValue(CelContextValue value, params CompiledExpression?[] predicates) =>
+        predicates.Any(predicate => predicate is not null && ReferencesContextValue(predicate.Root, value));
+
+    /// <summary>
+    /// Walks a compiled tree for any reference to one caller/tenant context value. Deny-by-default in
+    /// the same direction as <see cref="ReferencesRowField"/>: only the node kinds that provably
+    /// cannot contain a context reference answer <see langword="false"/>, every composite recurses,
+    /// and an unrecognized kind — a future construct this walk was never updated for — is treated as
+    /// referencing the value, so the policy engine's gate errs towards denying rather than towards
+    /// resolving a predicate against an absent operand.
+    /// </summary>
+    internal static bool ReferencesContextValue(CelNode node, CelContextValue value) => node switch
+    {
+        CelContextRef contextRef => contextRef.Value == value,
+        CelLiteral or CelFieldRef or CelHas or CelChanged => false,
+        CelUnary unary => ReferencesContextValue(unary.Operand, value),
+        CelBinary binary => ReferencesContextValue(binary.Left, value) || ReferencesContextValue(binary.Right, value),
+        CelConditional conditional =>
+            ReferencesContextValue(conditional.Condition, value)
+            || ReferencesContextValue(conditional.WhenTrue, value)
+            || ReferencesContextValue(conditional.WhenFalse, value),
+        _ => true,
+    };
 
     private static CompiledExpression? CompileOperationRule(
         string entityName, DataOperation operation, string? source, EntitySchema schema, ICelCompiler compiler, List<DescriptorValidationError> errors)

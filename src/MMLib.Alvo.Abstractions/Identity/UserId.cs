@@ -10,6 +10,16 @@ namespace MMLib.Alvo;
 /// a record, so the framework-managed <c>created_by</c> / <c>updated_by</c> columns stay
 /// <c>uuid</c>.
 /// </summary>
+/// <remarks>
+/// <b>The all-zero uuid (<see langword="default"/>, <see cref="Guid.Empty"/>) is reserved to mean "no
+/// identity" and must never be minted for a real caller.</b> <see cref="AlvoContext.Anonymous"/>
+/// carries exactly that value, and the rule engine reads it as the absence of an identity rather than
+/// as a caller: an operation whose policy reads <c>@user.id</c> is denied outright for such a caller,
+/// instead of resolving the comparison against the all-zero uuid and thereby making the anonymous
+/// caller the "owner" of every row whose owner column is all-zero — which a partially-migrated or
+/// defaulted dataset really does contain. A host mapping an external subject (an OIDC <c>sub</c>, an
+/// API key identifier) onto a <see cref="UserId"/> must therefore never map it onto the all-zero value.
+/// </remarks>
 /// <param name="Value">The underlying identifier.</param>
 [JsonConverter(typeof(UserIdJsonConverter))]
 public readonly record struct UserId(Guid Value) : IParsable<UserId>

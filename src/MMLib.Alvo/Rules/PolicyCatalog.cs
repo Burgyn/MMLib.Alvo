@@ -101,7 +101,22 @@ internal sealed record EntityPolicy(
 /// </summary>
 /// <param name="Using">The <c>USING</c>-equivalent predicate, or <see langword="null"/> when this operation has none configured or does not consult one.</param>
 /// <param name="WithCheck">The <c>WITH CHECK</c>-equivalent predicate, or <see langword="null"/> when this operation has none configured or does not consult one.</param>
-internal sealed record OperationPolicy(CompiledExpression? Using, CompiledExpression? WithCheck);
+/// <param name="RequiresTenantId">
+/// Whether any of this operation's predicates — <see cref="Using"/>, <see cref="WithCheck"/>, or the
+/// entity's <see cref="EntityPolicy.TenantScope"/> — reads <c>@tenant.id</c>. Precomputed here, at
+/// build time, from the compiled tree; <see cref="IPolicyEngine"/> denies a caller carrying no tenant
+/// rather than letting the absent operand collapse to a value a negation can invert.
+/// </param>
+/// <param name="RequiresUserId">
+/// The same question for <c>@user.id</c>. A caller with the reserved all-zero
+/// <see cref="UserId"/> (<see cref="AlvoContext.Anonymous"/>) has no identity to compare against, so
+/// such an operation is denied rather than resolved against the all-zero uuid as if it were an owner.
+/// </param>
+internal sealed record OperationPolicy(
+    CompiledExpression? Using,
+    CompiledExpression? WithCheck,
+    bool RequiresTenantId,
+    bool RequiresUserId);
 
 /// <summary>
 /// A compiled <c>hidden</c>/<c>readOnly</c> field flag: either always on (a static <see langword="true"/>),

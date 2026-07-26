@@ -24,14 +24,18 @@ namespace MMLib.Alvo.Expressions.Internal;
 /// (deny) instead of leaking <c>UNKNOWN</c> to the caller.
 /// </para>
 /// <para>
-/// <b>A tenantless caller is the policy engine's job to reject, not this renderer's.</b> A
-/// <c>@tenant.id</c> reference against a <see cref="AlvoContext"/> with no
-/// <see cref="AlvoContext.Tenant"/> renders <c>FALSE</c> (see <see cref="IsAbsentContextOperand"/>).
-/// That is correct in isolation, but it inverts under negation like any other collapsed comparison
-/// (<c>!(tenant_id == @tenant.id)</c> renders <c>NOT FALSE</c>, matching every tenant's rows) — so
-/// "renders FALSE here" must never be read as the tenant-isolation guarantee itself. A tenantless
-/// caller against a tenant-scoped entity has to be rejected upstream, before a rule ever reaches this
-/// renderer (Task 11's policy engine).
+/// <b>An absent context value is the policy engine's job to reject, and it now does — the collapse
+/// here is unreachable defence-in-depth, not the load-bearing guard.</b> A <c>@tenant.id</c> reference
+/// against an <see cref="AlvoContext"/> with no <see cref="AlvoContext.Tenant"/> renders <c>FALSE</c>
+/// (see <see cref="IsAbsentContextOperand"/>). That is correct in isolation but it inverts under
+/// negation like any other collapsed comparison (<c>!(tenant_id == @tenant.id)</c> renders
+/// <c>NOT FALSE</c>, matching every tenant's rows), so it was never a safe guarantee to rely on.
+/// <c>PolicyEngine</c>'s required-context gate therefore denies before a predicate reading a context
+/// value the caller does not have is ever handed to a data port — for a global entity as much as a
+/// tenant-scoped one — which means no policy-driven call can reach this branch. It stays because this
+/// renderer is a public seam a provider may drive directly, and rendering <c>FALSE</c> is the right
+/// answer for a caller who bypasses the engine; it must never again be read as the isolation
+/// guarantee itself.
 /// </para>
 /// <para>
 /// <b>The scalar (Computed) path can diverge from the interpreter in two ways this renderer does not

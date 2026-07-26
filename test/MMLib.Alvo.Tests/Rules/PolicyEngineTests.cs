@@ -178,6 +178,57 @@ public class PolicyEngineTests
         guardFirst.DenyReason.ShouldNotBe(lookupFirst.DenyReason);
     }
 
+    /// <summary>
+    /// A <b>global</b> entity whose rule references <c>@tenant.id</c> gets no tenant guard from
+    /// <c>CheckTenantGuard</c> (it only fires on a <c>Scoped</c> entity), so before the
+    /// required-context gate the absent operand collapsed to <c>FALSE</c> in the renderer — and a
+    /// <b>negated</b> comparison turned that into <c>NOT FALSE</c>, matching every row with an empty
+    /// parameter bag. The gate has to deny before any predicate is handed out.
+    /// </summary>
+    [Fact]
+    public void A_global_entity_whose_rule_references_the_tenant_denies_a_tenantless_caller()
+    {
+        var decision = Engine("""{"list": "!(owner_id == @tenant.id)"}""", TenancyMode.Global)
+            .Resolve("orders", DataOperation.List, CelFixtures.TenantlessAlice);
+
+        decision.IsDenied.ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// The same shape one operand over: <see cref="AlvoContext.Anonymous"/>'s user is the all-zero
+    /// uuid, so <c>owner_id == @user.id</c> silently made the anonymous caller the owner of every
+    /// row whose owner column happens to be all-zero.
+    /// </summary>
+    [Fact]
+    public void A_global_entity_whose_rule_references_the_user_denies_an_identityless_caller()
+    {
+        var decision = Engine("""{"list": "owner_id == @user.id"}""", TenancyMode.Global)
+            .Resolve("orders", DataOperation.List, AlvoContext.Anonymous);
+
+        decision.IsDenied.ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// The two gates are distinct and ordered: the entity-level scoped-tenancy guard answers first
+    /// (naming "tenant-scoped"), and the per-operation required-context gate only speaks for an
+    /// entity the first guard has nothing to say about — a global one. Both legs use the same
+    /// identityless, tenantless caller, so only the ordering can explain the two different reasons.
+    /// </summary>
+    [Fact]
+    public void The_scoped_tenant_guard_denies_before_the_required_context_gate()
+    {
+        const string UserScopedList = """{"list": "owner_id == @user.id"}""";
+        var identityless = CelFixtures.TenantlessAlice with { User = default };
+
+        var scoped = Engine(UserScopedList).Resolve("orders", DataOperation.List, identityless);
+        var global = Engine(UserScopedList, TenancyMode.Global).Resolve("orders", DataOperation.List, identityless);
+
+        scoped.DenyReason.ShouldNotBeNull();
+        scoped.DenyReason.ShouldContain("tenant-scoped");
+        global.DenyReason.ShouldNotBeNull();
+        global.DenyReason.ShouldNotContain("tenant");
+    }
+
     [Fact]
     public void A_static_true_hidden_field_is_always_in_the_mask()
     {
