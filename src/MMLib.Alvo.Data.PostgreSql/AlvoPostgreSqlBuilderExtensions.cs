@@ -135,10 +135,13 @@ public static class AlvoPostgreSqlBuilderExtensions
         builder.AddRelationalProvider(new RelationalProviderRegistration
         {
             ConnectionString = ResolveConnectionString,
-            ConfigureProvider = static (options, connectionString) => options.UseNpgsql(connectionString),
+            ConfigureProvider = static (options, connectionString) =>
+                options.UseNpgsql(connectionString, static npgsql => npgsql.UseRelationalNulls()),
             CreateModelBuilder = static () => new ModelBuilder(NpgsqlConventionSetBuilder.Build()),
             CreateDatabaseModelFactory = CreateDatabaseModelFactory,
             CreateConnection = static connectionString => new NpgsqlConnection(connectionString),
+            Fields = new PostgreSqlFieldSqlRenderer(),
+            Dialect = new PostgreSqlSqlDialect(),
         });
 
     private static string ResolveConnectionString(IServiceProvider services)

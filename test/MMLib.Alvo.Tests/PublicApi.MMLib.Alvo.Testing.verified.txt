@@ -78,6 +78,17 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task Update_of_an_unrelated_field_succeeds_when_the_post_image_still_satisfies_the_rule() { }
         public System.Threading.Tasks.Task Update_of_another_users_row_reports_not_found() { }
     }
+    public abstract class AlvoDataSqlSnapshotTests
+    {
+        protected AlvoDataSqlSnapshotTests() { }
+        protected abstract MMLib.Alvo.Expressions.ICelCompiler Compiler { get; }
+        protected abstract string EngineName { get; }
+        protected abstract MMLib.Alvo.Expressions.IFieldSqlRenderer Fields { get; }
+        protected abstract MMLib.Alvo.Expressions.IPredicateRenderer Renderer { get; }
+        protected static MMLib.Alvo.AlvoContext SnapshotCaller { get; }
+        protected static MMLib.Alvo.Schema.EntitySchema SnapshotEntity { get; }
+        public System.Threading.Tasks.Task Cel_renders_to_this_engines_sql() { }
+    }
     public sealed class InMemoryAlvoData : MMLib.Alvo.Data.IAlvoData
     {
         public InMemoryAlvoData(MMLib.Alvo.Rules.IPolicyEngine policy, MMLib.Alvo.Expressions.IPredicateEvaluator evaluator, MMLib.Alvo.Schema.SchemaModel schema) { }

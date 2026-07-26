@@ -1,5 +1,6 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Scaffolding;
+using MMLib.Alvo.Expressions;
 using System.Data.Common;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore;
@@ -13,7 +14,8 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// </summary>
 /// <remarks>
 /// This is the public authoring contract for an out-of-repo EF-based provider: a provider package
-/// supplies these five callbacks and lets <see cref="AlvoEfCoreProvider"/> resolve EF Core's
+/// supplies these five callbacks plus its two SQL renderers (<see cref="Fields"/>,
+/// <see cref="Dialect"/>) and lets <see cref="AlvoEfCoreProvider"/> resolve EF Core's
 /// migrations differ, SQL generator, model-runtime initializer, and scaffolding factory. Nothing
 /// here reaches into Alvo internals — the callbacks compose only public EFCore.Relational and
 /// provider-package abstractions, exactly as Npgsql or Pomelo build on the public EF base rather
@@ -59,4 +61,15 @@ public sealed class RelationalProviderRegistration
     /// store each own one such connection for the container's lifetime.
     /// </summary>
     public required Func<string, DbConnection> CreateConnection { get; init; }
+
+    /// <summary>
+    /// The driver's <see cref="IFieldSqlRenderer"/> — how a field, a bind parameter, a boolean literal
+    /// and a case-insensitive <c>LIKE</c> are spelled in this dialect. Required rather than optional: a
+    /// provider that cannot render an expression cannot serve <c>IAlvoData</c> at all, so a nullable
+    /// member would only move the failure from registration time to request time.
+    /// </summary>
+    public required IFieldSqlRenderer Fields { get; init; }
+
+    /// <summary>The driver's <see cref="IAlvoSqlDialect"/> — how a table, a column, a typed SQL <c>NULL</c> and a row lock are spelled.</summary>
+    public required IAlvoSqlDialect Dialect { get; init; }
 }
