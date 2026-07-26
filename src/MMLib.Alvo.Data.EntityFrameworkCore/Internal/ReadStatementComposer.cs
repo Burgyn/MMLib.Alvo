@@ -50,8 +50,14 @@ internal sealed class ReadStatementComposer
     /// <summary>What one operation adds to the policy-filtered read.</summary>
     internal sealed record ReadStatementOptions
     {
+        /// <summary>The caller's filter, or <see langword="null"/> for none.</summary>
+        internal AlvoFilter? Filter { get; init; }
+
         /// <summary>A single row's id, for a get/pre-image read.</summary>
         internal Guid? RowId { get; init; }
+
+        /// <summary>The keyset cursor anchor, for a page after the first.</summary>
+        internal KeysetAnchor? Anchor { get; init; }
 
         /// <summary>
         /// The mutation this read's row is a pre-image for, or <see langword="null"/> for a read that takes
@@ -89,6 +95,8 @@ internal sealed class ReadStatementComposer
         AddPredicate(terms, parameters, decision.Using, context, PolicyParameterPrefix.Using);
         AddPredicate(terms, parameters, decision.TenantScope, context, PolicyParameterPrefix.TenantScope);
         AddRowId(terms, parameters, entity, options.RowId);
+        AddFilter(terms, parameters, entity, options.Filter);
+        AddAnchor(terms, parameters, entity, options.Anchor);
 
         var sql = new StringBuilder("SELECT ")
             .Append(ReadProjection.Compose(entity, decision.HiddenFields, _dialect, rows))
@@ -143,6 +151,32 @@ internal sealed class ReadStatementComposer
         terms.Add(
             $"{_fields.RenderField(entity, AlvoDataContext.IdColumn)} = {_fields.RenderParameter(PolicyParameterPrefix.RowId)}");
         parameters[PolicyParameterPrefix.RowId] = id;
+    }
+
+    private void AddFilter(
+        List<string> terms, Dictionary<string, object?> parameters, EntitySchema entity, AlvoFilter? filter)
+    {
+        if (filter is null)
+        {
+            return;
+        }
+
+        var rendered = FilterSqlRenderer.Render(filter, entity, _fields, PolicyParameterPrefix.Filter);
+        terms.Add(rendered.Sql);
+        Collect(parameters, rendered.Parameters);
+    }
+
+    private void AddAnchor(
+        List<string> terms, Dictionary<string, object?> parameters, EntitySchema entity, KeysetAnchor? anchor)
+    {
+        if (anchor is null)
+        {
+            return;
+        }
+
+        var rendered = KeysetSqlRenderer.Render(anchor, entity, _fields, PolicyParameterPrefix.Keyset);
+        terms.Add(rendered.Sql);
+        Collect(parameters, rendered.Parameters);
     }
 
     /// <summary>

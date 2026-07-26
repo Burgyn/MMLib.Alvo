@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <!-- EF1001: IDatabaseModelFactory is design-time-only and never registered by the runtime
@@ -25,6 +25,9 @@
     <!-- Bootstraps SqliteDesignTimeServices reflectively (it's internal to the Sqlite
          assembly) to resolve IDatabaseModelFactory for EfCoreSchemaIntrospector tests. -->
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" />
+    <!-- The property/fuzz arms of the caller-filter suite (#20's "no interpolation" and
+         "fuzzing filtra bez pádu" criteria). -->
+    <PackageReference Include="CsCheck" />
   </ItemGroup>
 
 </Project>

@@ -56,6 +56,27 @@ internal static class QueryFieldGuard
     }
 
     /// <summary>
+    /// Resolves a caller-supplied field name against the entity's declared fields and returns the
+    /// <b>declared</b> field, so the string a renderer interpolates is one the schema owns rather than the
+    /// caller's own bytes — and so the comparison's type comes from the schema too.
+    /// </summary>
+    /// <remarks>
+    /// The local half of the same check <see cref="EnsureAvailable"/> makes for a whole statement, raising the
+    /// identical message. Both a filter renderer and a keyset renderer need it, and one implementation is the
+    /// point: a second copy is how a name refused on one path becomes an identifier on another.
+    /// </remarks>
+    /// <param name="entity">The entity being queried, as the applied schema declares it.</param>
+    /// <param name="field">The caller-supplied field name.</param>
+    /// <exception cref="AlvoAuthorizationException"><paramref name="field"/> is not declared.</exception>
+    internal static FieldSchema DeclaredField(EntitySchema entity, string field)
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+
+        return entity.Fields.FirstOrDefault(candidate => string.Equals(candidate.Name, field, StringComparison.Ordinal))
+            ?? throw new AlvoAuthorizationException(UnavailableQueryFieldMessage);
+    }
+
+    /// <summary>
     /// Refuses a write payload naming a field the entity does not declare. A masked field is deliberately
     /// <em>allowed</em> here: <c>hidden</c> is a read restriction, and refusing a write to one would tell the
     /// caller the field exists.

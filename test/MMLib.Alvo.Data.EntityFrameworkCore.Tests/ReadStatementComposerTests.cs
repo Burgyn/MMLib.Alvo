@@ -107,6 +107,63 @@ public class ReadStatementComposerTests
         statement.Sql.ShouldContain("@alvo_t0");
     }
 
+    /// <summary>
+    /// The caller's filter can only ever narrow: it arrives as one more parenthesised term <c>AND</c>-ed onto
+    /// a fully parenthesised policy predicate, so nothing a caller supplies reaches the policy term's nesting
+    /// level, let alone gets <c>OR</c>-ed beside it.
+    /// </summary>
+    [Fact]
+    public void The_callers_filter_is_one_more_and_ed_term_and_never_replaces_the_policy_predicate()
+    {
+        var statement = Compose(new ReadStatementComposer.ReadStatementOptions
+        {
+            Filter = new AlvoComparison("status", AlvoFilterOperator.Eq, "open"),
+        });
+
+        statement.Sql.ShouldContain("@alvo_u0");
+        statement.Sql.ShouldContain("AND (\"status\" = @alvo_f0)");
+        statement.Parameters[PolicyParameterPrefix.Filter + "0"].ShouldBe("open");
+    }
+
+    [Fact]
+    public void A_keyset_cursor_is_one_more_and_ed_term_too()
+    {
+        var anchor = new KeysetAnchor([new AlvoSort("plate")], ["ACME-001"], Guid.NewGuid());
+        var statement = Compose(new ReadStatementComposer.ReadStatementOptions { Anchor = anchor });
+
+        statement.Sql.ShouldContain("AND ((\"plate\" > @alvo_k0 OR (\"plate\" = @alvo_k0 AND \"id\" > @alvo_k1)))");
+        statement.Parameters[PolicyParameterPrefix.Keyset + "0"].ShouldBe("ACME-001");
+    }
+
+    /// <summary>
+    /// The reason the prefixes are reserved: four fragments number their parameters from zero independently,
+    /// so in one statement they must still be pairwise disjoint.
+    /// </summary>
+    [Fact]
+    public void Every_fragment_of_one_statement_binds_under_its_own_reserved_prefix()
+    {
+        var statement = Compose(new ReadStatementComposer.ReadStatementOptions
+        {
+            RowId = Guid.NewGuid(),
+            Filter = new AlvoComparison("status", AlvoFilterOperator.Eq, "open"),
+            Anchor = new KeysetAnchor([new AlvoSort("plate")], ["ACME-001"], Guid.NewGuid()),
+        });
+
+        statement.Parameters.Keys.ShouldBeUnique();
+        statement.Parameters.Keys.ShouldContain(PolicyParameterPrefix.Using + "0");
+        statement.Parameters.Keys.ShouldContain(PolicyParameterPrefix.TenantScope + "0");
+        statement.Parameters.Keys.ShouldContain(PolicyParameterPrefix.Filter + "0");
+        statement.Parameters.Keys.ShouldContain(PolicyParameterPrefix.Keyset + "0");
+        statement.Parameters.Keys.ShouldContain(PolicyParameterPrefix.RowId);
+    }
+
+    [Fact]
+    public void A_filter_naming_an_undeclared_field_is_refused_before_any_statement_exists()
+        => Should.Throw<AlvoAuthorizationException>(() => Compose(new ReadStatementComposer.ReadStatementOptions
+        {
+            Filter = new AlvoComparison("nope\"; DROP TABLE vehicle; --", AlvoFilterOperator.Eq, "x"),
+        }));
+
     [Fact]
     public void Every_argument_is_required()
     {
