@@ -65,7 +65,7 @@ public class NoInterpolationPropertyTests
                 $"title == '{EscapeForCel(literal)}'", CelProfile.Rule, CelFixtures.Orders);
             result.IsSuccess.ShouldBeTrue($"'{literal}' against a String field must always compile.");
 
-            var predicate = _renderer.Render(result.Expression!, CelFixtures.Alice, _fields);
+            var predicate = _renderer.Render(result.Expression!, CelFixtures.Alice, _fields, "p");
             Interlocked.Increment(ref rendered);
 
             return predicate.Sql == ExpectedSql && predicate.Parameters.Values.Contains(literal);

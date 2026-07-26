@@ -2,10 +2,10 @@
   {
     source: owner_id == @user.id,
     context: Alice,
-    Sql: COALESCE("owner_id" = @p0, FALSE),
+    Sql: COALESCE("owner_id" = @alvo_p0, FALSE),
     Parameters: [
       {
-        Key: p0,
+        Key: alvo_p0,
         Value: {alice-user-id}
       }
     ]
@@ -13,10 +13,10 @@
   {
     source: status != 'draft',
     context: Alice,
-    Sql: COALESCE("status" <> @p0, FALSE),
+    Sql: COALESCE("status" <> @alvo_p0, FALSE),
     Parameters: [
       {
-        Key: p0,
+        Key: alvo_p0,
         Value: draft
       }
     ]
@@ -24,10 +24,10 @@
   {
     source: total > 100,
     context: Alice,
-    Sql: COALESCE("total" > @p0, FALSE),
+    Sql: COALESCE("total" > @alvo_p0, FALSE),
     Parameters: [
       {
-        Key: p0,
+        Key: alvo_p0,
         Value: 100
       }
     ]
@@ -35,10 +35,10 @@
   {
     source: total >= 100,
     context: Alice,
-    Sql: COALESCE("total" >= @p0, FALSE),
+    Sql: COALESCE("total" >= @alvo_p0, FALSE),
     Parameters: [
       {
-        Key: p0,
+        Key: alvo_p0,
         Value: 100
       }
     ]
@@ -46,10 +46,10 @@
   {
     source: total < 100,
     context: Alice,
-    Sql: COALESCE("total" < @p0, FALSE),
+    Sql: COALESCE("total" < @alvo_p0, FALSE),
     Parameters: [
       {
-        Key: p0,
+        Key: alvo_p0,
         Value: 100
       }
     ]
@@ -57,10 +57,10 @@
   {
     source: total <= 100,
     context: Alice,
-    Sql: COALESCE("total" <= @p0, FALSE),
+    Sql: COALESCE("total" <= @alvo_p0, FALSE),
     Parameters: [
       {
-        Key: p0,
+        Key: alvo_p0,
         Value: 100
       }
     ]
@@ -74,10 +74,10 @@
   {
     source: !(owner_id == @user.id),
     context: Alice,
-    Sql: (NOT COALESCE("owner_id" = @p0, FALSE)),
+    Sql: (NOT COALESCE("owner_id" = @alvo_p0, FALSE)),
     Parameters: [
       {
-        Key: p0,
+        Key: alvo_p0,
         Value: {alice-user-id}
       }
     ]
@@ -121,14 +121,14 @@
   {
     source: status in @user.roles,
     context: Editor,
-    Sql: COALESCE("status" IN (@p0, @p1), FALSE),
+    Sql: COALESCE("status" IN (@alvo_p0, @alvo_p1), FALSE),
     Parameters: [
       {
-        Key: p0,
+        Key: alvo_p0,
         Value: authenticated
       },
       {
-        Key: p1,
+        Key: alvo_p1,
         Value: editor
       }
     ]
@@ -136,10 +136,10 @@
   {
     source: tenant_id == @tenant.id,
     context: Alice,
-    Sql: COALESCE("tenant_id" = @p0, FALSE),
+    Sql: COALESCE("tenant_id" = @alvo_p0, FALSE),
     Parameters: [
       {
-        Key: p0,
+        Key: alvo_p0,
         Value: {acme-tenant-id}
       }
     ]
@@ -153,14 +153,14 @@
   {
     source: owner_id == @user.id && status == 'approved',
     context: Alice,
-    Sql: (COALESCE("owner_id" = @p0, FALSE) AND COALESCE("status" = @p1, FALSE)),
+    Sql: (COALESCE("owner_id" = @alvo_p0, FALSE) AND COALESCE("status" = @alvo_p1, FALSE)),
     Parameters: [
       {
-        Key: p0,
+        Key: alvo_p0,
         Value: {alice-user-id}
       },
       {
-        Key: p1,
+        Key: alvo_p1,
         Value: approved
       }
     ]
@@ -168,10 +168,10 @@
   {
     source: owner_id == @user.id || 'editor' in @user.roles,
     context: Editor,
-    Sql: (COALESCE("owner_id" = @p0, FALSE) OR TRUE),
+    Sql: (COALESCE("owner_id" = @alvo_p0, FALSE) OR TRUE),
     Parameters: [
       {
-        Key: p0,
+        Key: alvo_p0,
         Value: {editor-user-id}
       }
     ]
@@ -179,14 +179,14 @@
   {
     source: (owner_id == @user.id || status == 'approved') && !has(owner_id),
     context: Alice,
-    Sql: ((COALESCE("owner_id" = @p0, FALSE) OR COALESCE("status" = @p1, FALSE)) AND (NOT ("owner_id" IS NOT NULL))),
+    Sql: ((COALESCE("owner_id" = @alvo_p0, FALSE) OR COALESCE("status" = @alvo_p1, FALSE)) AND (NOT ("owner_id" IS NOT NULL))),
     Parameters: [
       {
-        Key: p0,
+        Key: alvo_p0,
         Value: {alice-user-id}
       },
       {
-        Key: p1,
+        Key: alvo_p1,
         Value: approved
       }
     ]

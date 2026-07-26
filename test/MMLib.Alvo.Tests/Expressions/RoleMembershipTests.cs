@@ -53,8 +53,8 @@ public class RoleMembershipTests
         var renderer = new SqlPredicateRenderer();
         var fields = new TestFieldSqlRenderer();
 
-        renderer.Render(CelFixtures.CompileRule("'editor' in @user.roles"), CelFixtures.Editor, fields).Sql.ShouldBe("TRUE");
-        renderer.Render(CelFixtures.CompileRule("status in @user.roles"), CelFixtures.Editor, fields).Sql
+        renderer.Render(CelFixtures.CompileRule("'editor' in @user.roles"), CelFixtures.Editor, fields, "p").Sql.ShouldBe("TRUE");
+        renderer.Render(CelFixtures.CompileRule("status in @user.roles"), CelFixtures.Editor, fields, "p").Sql
             .ShouldBe("COALESCE(\"status\" IN (@p0, @p1), FALSE)");
 
         CelInterpreter.EvaluatePredicate(

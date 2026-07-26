@@ -23,6 +23,19 @@ public interface IPredicateRenderer
     /// owns that contract. Must be a plain identifier (an ASCII letter or <c>_</c> followed by letters,
     /// digits or <c>_</c>): it reaches the SQL text unparameterized, since a bind parameter's own name
     /// has no bind-parameter form.
+    /// <para>
+    /// The default is deliberately <c>alvo_p</c> rather than the obvious <c>p</c>, and a driver must
+    /// not "simplify" it back: a rendered predicate is composed into a command that also carries the
+    /// data-access layer's own parameters, and EF Core names those <c>p0</c>, <c>p1</c>, … . A
+    /// <c>p</c>-prefixed render therefore collides, and the failure mode found in PR2's spike is
+    /// silent rather than loud — EF keeps its own <c>p0</c> and renames the colliding one to
+    /// <c>p00</c> while both occurrences in the SQL text still read <c>@p0</c>, so a caller-supplied
+    /// value is substituted into the <b>security predicate</b>. On SQLite that returns the wrong rows
+    /// with no error at all; on PostgreSQL it happens to throw only when the two values' types
+    /// differ. Any prefix an ORM would not mint is safe; distinct prefixes per predicate
+    /// (<c>alvo_u</c> / <c>alvo_c</c> / <c>alvo_t</c>) additionally keep one decision's three
+    /// predicates disjoint from each other.
+    /// </para>
     /// </param>
     /// <exception cref="InvalidOperationException"><paramref name="expression"/> was compiled for the Computed profile.</exception>
     /// <exception cref="ArgumentException"><paramref name="parameterPrefix"/> is not a plain identifier.</exception>
@@ -33,7 +46,7 @@ public interface IPredicateRenderer
     /// Condition tree is only renderable here when it happens not to use those constructs.
     /// </exception>
     SqlPredicate Render(
-        CompiledExpression expression, AlvoContext context, IFieldSqlRenderer fields, string parameterPrefix = "p");
+        CompiledExpression expression, AlvoContext context, IFieldSqlRenderer fields, string parameterPrefix = "alvo_p");
 
     /// <summary>
     /// Renders a Computed expression's scalar value to SQL. The result is <b>not</b> wrapped in

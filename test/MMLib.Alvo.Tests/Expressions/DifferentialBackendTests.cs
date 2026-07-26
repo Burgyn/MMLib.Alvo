@@ -174,7 +174,10 @@ public class DifferentialBackendTests
     private static void AssertAgreement(CompiledExpression compiled, string rule, AlvoContext context, string contextName, AlvoRecord row)
     {
         var inMemory = CelInterpreter.EvaluatePredicate(compiled, row, previous: null, context);
-        var predicate = _renderer.Render(compiled, context, _fields);
+        // Prefix is incidental here — the differential test is about backend agreement, not the
+        // default parameter name — and "p" is what SqlVerdict's hand-rolled parameter-name parser
+        // (letters/digits only) understands.
+        var predicate = _renderer.Render(compiled, context, _fields, "p");
         var viaSql = SqlVerdict.Evaluate(predicate, row);
 
         viaSql.ShouldBe(inMemory, DivergenceMessage(rule, contextName, row, predicate, inMemory, viaSql));

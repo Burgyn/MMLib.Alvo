@@ -16,8 +16,12 @@ public class TSqlSeamTests
     private static readonly IFieldSqlRenderer _tsql = new TSqlFieldSqlRenderer();
     private static readonly SqlPredicateRenderer _renderer = new();
 
-    private static SqlPredicate Render(string source, AlvoContext context) =>
-        _renderer.Render(CelFixtures.CompileRule(source), context, _tsql);
+    /// <summary>
+    /// Defaults to <c>"p"</c> explicitly — the prefix is incidental to the dialect shapes these facts
+    /// pin, not the renderer's default.
+    /// </summary>
+    private static SqlPredicate Render(string source, AlvoContext context, string parameterPrefix = "p") =>
+        _renderer.Render(CelFixtures.CompileRule(source), context, _tsql, parameterPrefix);
 
     [Fact]
     public void A_comparison_collapses_through_the_dialects_own_two_valued_shape()

@@ -60,7 +60,7 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
 {
     /// <inheritdoc />
     public SqlPredicate Render(
-        CompiledExpression expression, AlvoContext context, IFieldSqlRenderer fields, string parameterPrefix = "p")
+        CompiledExpression expression, AlvoContext context, IFieldSqlRenderer fields, string parameterPrefix = "alvo_p")
     {
         ArgumentNullException.ThrowIfNull(expression);
         ArgumentNullException.ThrowIfNull(context);
