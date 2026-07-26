@@ -6,12 +6,19 @@ namespace MMLib.Alvo.Rules;
 /// <summary>
 /// The verdict <see cref="IPolicyEngine.Resolve"/> returns for one entity/operation/caller triple:
 /// either a denial, or every compiled predicate and resolved field mask a data port must apply
-/// unconditionally. Follows the same anti-forgery shape as <see cref="CompiledExpression"/> and
-/// <see cref="SqlPredicate"/> (get-only properties, no public parameterless construction path) so a
-/// caller can never assemble a permissive decision by hand, nor <c>with</c>-mutate a denial into an
-/// allow — the only public way to produce one is <see cref="Deny"/>; an allow is only ever produced
-/// by an <see cref="IPolicyEngine"/> implementation in the core, via <c>InternalsVisibleTo</c>.
+/// unconditionally. Follows the same shape as <see cref="CompiledExpression"/> and
+/// <see cref="SqlPredicate"/> (get-only properties, no public parameterless construction path), so the
+/// only public way to produce one is <see cref="Deny"/> and an allow is only ever produced by an
+/// <see cref="IPolicyEngine"/> implementation in the core, via <c>InternalsVisibleTo</c>.
 /// </summary>
+/// <remarks>
+/// That prevents a caller from <em>accidentally</em> assembling a permissive decision by hand, or
+/// <c>with</c>-mutating a denial into an allow — the shape a data port's own code could otherwise
+/// slip into. It is not proof against a deliberate forgery: the assemblies are unsigned, so
+/// <c>InternalsVisibleTo</c> is an encapsulation boundary and reflection walks straight past it. The
+/// guarantee that matters is the one above it — a port that never constructs a decision itself, only
+/// applies the one the engine returned.
+/// </remarks>
 public sealed record PolicyDecision
 {
     private static readonly FrozenSet<string> _empty = FrozenSet<string>.Empty;
@@ -84,7 +91,7 @@ public sealed record PolicyDecision
         return new PolicyDecision(true, null, null, null, _empty, _empty, reason);
     }
 
-    /// <summary>Creates an allow decision. Only reachable from the core (<c>InternalsVisibleTo</c>) — never from outside the trust boundary.</summary>
+    /// <summary>Creates an allow decision. Reachable only from the core (<c>InternalsVisibleTo</c>), so no code outside it constructs an allow by accident.</summary>
     /// <param name="using">The <c>USING</c>-equivalent predicate, when this operation consults one.</param>
     /// <param name="withCheck">The <c>WITH CHECK</c>-equivalent predicate, when this operation consults one.</param>
     /// <param name="tenantScope">The synthesized tenant scope, on a tenant-scoped entity.</param>

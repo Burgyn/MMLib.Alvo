@@ -13,10 +13,17 @@ namespace MMLib.Alvo.Expressions;
 /// A <see cref="CompiledExpression"/> is only ever produced by a successful
 /// <see cref="ICelCompiler.Compile"/>, so a renderer may assume it is type-checked and
 /// in-profile — it never needs to re-validate the tree it renders. The constructor is
-/// <see langword="internal"/> (the core is granted access via <c>InternalsVisibleTo</c>), so no
-/// provider or host can assemble one from a raw, unchecked parser tree — or <c>with</c>-mutate
-/// <see cref="Root"/> back into one — re-introducing an untyped <see cref="CelValueType.Null"/>
-/// field reference past this trust boundary.
+/// <see langword="internal"/> (the core is granted access via <c>InternalsVisibleTo</c>), which
+/// prevents a provider or host from <em>accidentally</em> assembling one from a raw, unchecked parser
+/// tree — or <c>with</c>-mutating <see cref="Root"/> back into one — and so re-introducing an untyped
+/// <see cref="CelValueType.Null"/> field reference.
+/// </para>
+/// <para>
+/// <strong>This is an encapsulation boundary, not a trust boundary.</strong> These assemblies are
+/// unsigned, so <c>InternalsVisibleTo</c> stops nothing a determined caller cannot do anyway —
+/// reflection reaches an internal constructor, and an attacker who can load code into the host has
+/// already won. What it buys is that the compiler is the only <em>reachable</em> way to make one, so
+/// no honest mistake produces an unchecked tree the renderer would trust.
 /// </para>
 /// <para>
 /// Any cache keyed on a compiled expression (to avoid recompiling a rule on every request) must be

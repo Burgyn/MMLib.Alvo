@@ -5,7 +5,7 @@
 /// expression's value, e.g. for a generated column. Unlike <see cref="SqlPredicate"/> this is not
 /// two-valued (it is not necessarily boolean at all), and it is never wrapped in <c>COALESCE</c>: a
 /// generated column has no caller to deny. Deliberately not a positional record, for the same
-/// forgery-resistance reason as <see cref="SqlPredicate"/>.
+/// no-<c>with</c>-mutation reason as <see cref="SqlPredicate"/>.
 /// </summary>
 public sealed record SqlExpression
 {
