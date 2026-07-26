@@ -65,20 +65,38 @@ gets a synthesized `tenant_id == @tenant.id` scope, compiled through the same `I
 authored rule (never hand-built), so it is type-checked and fails loudly, naming the entity, if the
 schema has no `tenant_id` column.
 
-### The required-context gate: a predicate never runs against a context value the caller lacks
+### The required-context gate: no expression runs against a context value the caller lacks
 
-`PolicyCatalogBuilder` also precomputes, per operation and at **apply** time (walking the compiled
-tree, never re-parsing the source), whether any of that operation's three predicates — `Using`,
-`WithCheck`, and the entity's `TenantScope` — reads `@tenant.id` or `@user.id`. `IPolicyEngine` then
-**denies** when the operation reads `@tenant.id` and the caller has no tenant, or reads `@user.id` and
-the caller carries the reserved all-zero `UserId` (`AlvoContext.Anonymous`, i.e. no identity).
+`PolicyCatalogBuilder` also precomputes, at **apply** time (walking the compiled tree, never
+re-parsing the source), whether an expression reads `@tenant.id` or `@user.id`. The measurement is one
+type — `RequiredContext` — and it is recorded for **every** compiled expression the engine hands out
+or evaluates, in two groups:
 
-This is a *different* gate from the tenant guard, and both are needed:
+- **per operation**, over its three predicate slots together — `Using`, `WithCheck`, and the entity's
+  `TenantScope`;
+- **per `hidden` / `readOnly` mask**, over that one field's expression.
+
+`IPolicyEngine` then refuses to resolve any of them against a caller who has no tenant, or who carries
+the reserved all-zero `UserId` (`AlvoContext.Anonymous`, i.e. no identity). **The two channels fail in
+opposite directions, and both directions are "closed":**
+
+| Channel | Caller lacks what the expression reads → |
+|---|---|
+| An operation's predicate (`Using` / `WithCheck` / `TenantScope`) | **deny the call**, before any predicate is assembled into a `PolicyDecision` |
+| A `hidden` / `readOnly` mask | **keep the field masked** — hidden stays hidden, read-only stays read-only — without evaluating the expression |
+
+Neither direction may be inferred from the other, and the mask half is not optional. `CelInterpreter`
+fails closed on an *exception*, but an absent `@tenant.id` is not an exception: it resolves to `null`,
+collapses the comparison to `false`, and a **positive-form** mask (`hidden: "@tenant.id == @user.id"`)
+would therefore report the field **visible** — the same two-valued collapse as below, one channel over,
+on the one invariant that has to fail the other way.
+
+This gate is *different* from the tenant guard, and both are needed:
 
 | Gate | Question | Fires on |
 |---|---|---|
 | Tenant guard | is this entity tenant-scoped while the caller has no tenant? | `Scoped` entities only, before any operation lookup |
-| Required-context gate | does the rule this operation would hand out read a context value the caller cannot supply? | any entity, incl. `Global`, after the operation lookup |
+| Required-context gate | does an expression this call would resolve read a context value the caller cannot supply? | any entity, incl. `Global`; predicates after the operation lookup, masks while assembling the allow decision |
 
 The guard runs first, so a tenant-scoped entity's tenantless caller still gets the guard's own reason.
 The gate is what closes the **global**-entity hole: a global entity gets no tenant guard, so
@@ -87,8 +105,8 @@ parameter bag — every row. Same shape for `@user.id`, where the all-zero uuid 
 anonymous caller the owner of every all-zero-owner row.
 
 An unrecognized `CelNode` kind counts as *referencing* the value (deny-by-default), so a future
-construct added without updating the walk errs towards denying rather than towards resolving a
-predicate against an absent operand.
+construct added without updating the walk errs towards refusing rather than towards resolving an
+expression against an absent operand.
 
 ### Role literals are validated at apply, not at request time
 

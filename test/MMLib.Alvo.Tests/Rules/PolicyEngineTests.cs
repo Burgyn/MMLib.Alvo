@@ -295,7 +295,79 @@ public class PolicyEngineTests
         decision.HiddenFields.ShouldContain("owner_id");
     }
 
+    /// <summary>
+    /// The <b>positive</b>-form mirror of
+    /// <see cref="A_hidden_expression_over_tenant_id_masks_a_tenantless_caller"/>, and the direction
+    /// that used to fail <em>open</em>. <c>EvaluateMask</c> only fails closed on an exception, and an
+    /// absent <c>@tenant.id</c> is not an exception — it resolves to <see langword="null"/>, collapses
+    /// the comparison to <see langword="false"/>, and reported the field <b>visible</b>. The
+    /// required-context gate has to cover a mask expression too, and for a mask "deny" means
+    /// <em>stay masked</em>, not "deny the call".
+    /// </summary>
+    [Fact]
+    public void A_positive_hidden_expression_over_tenant_id_still_hides_from_a_tenantless_caller()
+    {
+        var engine = Build(DescriptorHiding(OwnTenantIsOwnUser), TenancyMode.Global);
+
+        var decision = engine.Resolve("orders", DataOperation.List, CelFixtures.TenantlessAlice);
+
+        decision.IsDenied.ShouldBeFalse();
+        decision.HiddenFields.ShouldContain("owner_id");
+    }
+
+    /// <summary>
+    /// The <c>readOnly</c> mirror, which is worse in kind: the same collapse left a field the
+    /// descriptor's author froze <em>writable</em> for a caller missing the context the expression
+    /// reads.
+    /// </summary>
+    [Fact]
+    public void A_positive_readonly_expression_over_tenant_id_still_freezes_for_a_tenantless_caller()
+    {
+        var engine = Build(DescriptorFreezing(OwnTenantIsOwnUser), TenancyMode.Global);
+
+        var decision = engine.Resolve("orders", DataOperation.List, CelFixtures.TenantlessAlice);
+
+        decision.IsDenied.ShouldBeFalse();
+        decision.ReadOnlyFields.ShouldContain("owner_id");
+    }
+
+    /// <summary>
+    /// The gate must not collapse into "any mask reading context always masks": the very same
+    /// expression, for a caller who <em>has</em> both values and for whom it evaluates to
+    /// <see langword="false"/>, must leave the field visible and writable. Without this leg an
+    /// implementation that masked unconditionally would pass the two facts above.
+    /// </summary>
+    [Fact]
+    public void A_mask_over_context_the_caller_has_is_still_evaluated_rather_than_assumed()
+    {
+        var hiding = Build(DescriptorHiding(OwnTenantIsOwnUser), TenancyMode.Global);
+        var freezing = Build(DescriptorFreezing(OwnTenantIsOwnUser), TenancyMode.Global);
+
+        hiding.Resolve("orders", DataOperation.List, CelFixtures.Alice).HiddenFields.ShouldNotContain("owner_id");
+        freezing.Resolve("orders", DataOperation.List, CelFixtures.Alice).ReadOnlyFields.ShouldNotContain("owner_id");
+    }
+
+    /// <summary>
+    /// The one <c>@tenant.id</c>-reading mask shape the type checker actually permits.
+    /// <c>CelTypeChecker</c> rejects comparing a uuid context value against a string literal, so a
+    /// mask can only read <c>@tenant.id</c> against another context value of the same type — which is
+    /// why the exploitable surface was narrow, and why it is still worth closing as a stated invariant.
+    /// </summary>
+    private const string OwnTenantIsOwnUser = "@tenant.id == @user.id";
+
     private const string AllTrueRules = """{"list": "true", "get": "true", "create": "true", "update": "true", "delete": "true"}""";
+
+    private static AlvoDescriptor DescriptorHiding(string expression) =>
+        Descriptor(AllTrueRules, fields: new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
+        {
+            ["owner_id"] = new() { Type = MMLib.Alvo.Descriptor.FieldType.Uuid, Hidden = BoolOrCel.FromExpression(expression) },
+        });
+
+    private static AlvoDescriptor DescriptorFreezing(string expression) =>
+        Descriptor(AllTrueRules, fields: new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
+        {
+            ["owner_id"] = new() { Type = MMLib.Alvo.Descriptor.FieldType.Uuid, ReadOnly = BoolOrCel.FromExpression(expression) },
+        });
 
     private static MMLib.Alvo.Rules.Internal.PolicyEngine Engine(string rulesJson, TenancyMode tenancy = TenancyMode.Scoped) =>
         Build(Descriptor(rulesJson), tenancy);

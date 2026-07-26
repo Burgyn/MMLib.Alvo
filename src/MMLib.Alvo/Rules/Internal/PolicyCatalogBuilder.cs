@@ -106,13 +106,20 @@ internal static class PolicyCatalogBuilder
     /// request — which caller/tenant context values the operation's predicates actually read.
     /// </summary>
     private static OperationPolicy Operation(
-        CompiledExpression? @using, CompiledExpression? withCheck, CompiledExpression? tenantScope) => new(
-            @using,
-            withCheck,
-            RequiresContextValue(CelContextValue.TenantId, @using, withCheck, tenantScope),
-            RequiresContextValue(CelContextValue.UserId, @using, withCheck, tenantScope));
+        CompiledExpression? @using, CompiledExpression? withCheck, CompiledExpression? tenantScope) =>
+        new(@using, withCheck, ContextRead(@using, withCheck, tenantScope));
 
-    private static bool RequiresContextValue(CelContextValue value, params CompiledExpression?[] predicates) =>
+    /// <summary>
+    /// The one place a compiled expression's context reads are measured, for both channels the
+    /// required-context gate covers: an operation's predicates and a <c>hidden</c>/<c>readOnly</c>
+    /// mask. A <see langword="null"/> slot contributes nothing, so an operation missing a
+    /// <c>USING</c> or a <c>WITH CHECK</c> is measured over exactly the slots it has.
+    /// </summary>
+    private static RequiredContext ContextRead(params CompiledExpression?[] expressions) => new(
+        RequiresContextValue(CelContextValue.TenantId, expressions),
+        RequiresContextValue(CelContextValue.UserId, expressions));
+
+    private static bool RequiresContextValue(CelContextValue value, CompiledExpression?[] predicates) =>
         predicates.Any(predicate => predicate is not null && ReferencesContextValue(predicate.Root, value));
 
     /// <summary>
@@ -273,7 +280,7 @@ internal static class PolicyCatalogBuilder
 
         if (!ReferencesRowField(compiled.Root))
         {
-            return FieldMask.FromExpression(compiled);
+            return FieldMask.FromExpression(compiled, ContextRead(compiled));
         }
 
         build.Errors.Add(RowDependentMaskError(path, flagName));

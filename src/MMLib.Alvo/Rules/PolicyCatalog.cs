@@ -117,22 +117,56 @@ internal sealed record EntityPolicy(
 /// </summary>
 /// <param name="Using">The <c>USING</c>-equivalent predicate, or <see langword="null"/> when this operation has none configured or does not consult one.</param>
 /// <param name="WithCheck">The <c>WITH CHECK</c>-equivalent predicate, or <see langword="null"/> when this operation has none configured or does not consult one.</param>
-/// <param name="RequiresTenantId">
-/// Whether any of this operation's predicates — <see cref="Using"/>, <see cref="WithCheck"/>, or the
-/// entity's <see cref="EntityPolicy.TenantScope"/> — reads <c>@tenant.id</c>. Precomputed here, at
-/// build time, from the compiled tree; <see cref="IPolicyEngine"/> denies a caller carrying no tenant
-/// rather than letting the absent operand collapse to a value a negation can invert.
-/// </param>
-/// <param name="RequiresUserId">
-/// The same question for <c>@user.id</c>. A caller with the reserved all-zero
-/// <see cref="UserId"/> (<see cref="AlvoContext.Anonymous"/>) has no identity to compare against, so
-/// such an operation is denied rather than resolved against the all-zero uuid as if it were an owner.
+/// <param name="Required">
+/// The caller/tenant context values any of this operation's predicates — <see cref="Using"/>,
+/// <see cref="WithCheck"/>, or the entity's <see cref="EntityPolicy.TenantScope"/> — actually reads.
 /// </param>
 internal sealed record OperationPolicy(
     CompiledExpression? Using,
     CompiledExpression? WithCheck,
-    bool RequiresTenantId,
-    bool RequiresUserId);
+    RequiredContext Required);
+
+/// <summary>
+/// The caller/tenant context values one compiled expression — or a set of them — actually reads,
+/// precomputed at apply time by walking the compiled tree, never per request and never by
+/// re-parsing the source. The one shape both halves of the required-context gate are expressed in:
+/// an operation's predicates (where a missing value <b>denies the call</b>) and a
+/// <c>hidden</c>/<c>readOnly</c> mask (where it <b>keeps the field masked</b>).
+/// </summary>
+/// <remarks>
+/// Both directions exist because neither backend can be trusted to answer a comparison against an
+/// operand the caller never supplied: an absent value resolves to <see langword="null"/> and
+/// collapses the comparison to <see langword="false"/>, which a negation inverts into "every row"
+/// for a predicate and which a positive-form mask reads as "this field is visible". Neither is a
+/// safe answer, so the value is refused upstream in both channels rather than folded.
+/// </remarks>
+/// <param name="TenantId">Whether <c>@tenant.id</c> is read.</param>
+/// <param name="UserId">Whether <c>@user.id</c> is read.</param>
+internal readonly record struct RequiredContext(bool TenantId, bool UserId)
+{
+    /// <summary>An expression that reads no caller/tenant context value at all.</summary>
+    public static RequiredContext None { get; } = new(false, false);
+
+    /// <summary>Whether this expression reads <c>@tenant.id</c> and <paramref name="context"/> carries no tenant.</summary>
+    /// <param name="context">The caller resolving against the expression.</param>
+    public bool TenantIdMissingFrom(AlvoContext context) => TenantId && context.Tenant is null;
+
+    /// <summary>Whether this expression reads <c>@user.id</c> and <paramref name="context"/> carries no identity.</summary>
+    /// <param name="context">The caller resolving against the expression.</param>
+    public bool UserIdMissingFrom(AlvoContext context) => UserId && HasNoIdentity(context);
+
+    /// <summary>Whether <paramref name="context"/> is missing either value this expression reads.</summary>
+    /// <param name="context">The caller resolving against the expression.</param>
+    public bool IsMissingFrom(AlvoContext context) =>
+        TenantIdMissingFrom(context) || UserIdMissingFrom(context);
+
+    /// <summary>
+    /// The reserved all-zero <see cref="UserId"/> means "no identity" (see
+    /// <see cref="AlvoContext.Anonymous"/>) — never a real caller who happens to own the all-zero
+    /// rows.
+    /// </summary>
+    private static bool HasNoIdentity(AlvoContext context) => context.User.Value == Guid.Empty;
+}
 
 /// <summary>
 /// A compiled <c>hidden</c>/<c>readOnly</c> field flag: either always on (a static <see langword="true"/>),
@@ -142,10 +176,11 @@ internal sealed record OperationPolicy(
 /// </summary>
 internal readonly record struct FieldMask
 {
-    private FieldMask(bool alwaysOn, CompiledExpression? expression)
+    private FieldMask(bool alwaysOn, CompiledExpression? expression, RequiredContext required)
     {
         AlwaysOn = alwaysOn;
         Expression = expression;
+        Required = required;
     }
 
     /// <summary>Gets a value indicating whether this field is always in the mask, regardless of caller.</summary>
@@ -154,14 +189,23 @@ internal readonly record struct FieldMask
     /// <summary>Gets the compiled context-only expression to evaluate per request, when <see cref="AlwaysOn"/> is <see langword="false"/>.</summary>
     public CompiledExpression? Expression { get; }
 
+    /// <summary>
+    /// Gets the caller/tenant context values <see cref="Expression"/> reads. A caller missing one of
+    /// them leaves the field masked without the expression ever being evaluated — the fail-closed
+    /// direction for a mask, since evaluating it would collapse the absent operand to
+    /// <see langword="false"/> and report a hidden field visible or a frozen field writable.
+    /// </summary>
+    public RequiredContext Required { get; }
+
     /// <summary>A flag that is always on (the descriptor declared a static <see langword="true"/>).</summary>
-    public static FieldMask Always { get; } = new(true, null);
+    public static FieldMask Always { get; } = new(true, null, RequiredContext.None);
 
     /// <summary>Creates a flag evaluated per request from a compiled context-only expression.</summary>
     /// <param name="expression">The compiled, context-only Rule-profile expression.</param>
-    public static FieldMask FromExpression(CompiledExpression expression)
+    /// <param name="required">The context values <paramref name="expression"/> reads.</param>
+    public static FieldMask FromExpression(CompiledExpression expression, RequiredContext required)
     {
         ArgumentNullException.ThrowIfNull(expression);
-        return new FieldMask(false, expression);
+        return new FieldMask(false, expression, required);
     }
 }

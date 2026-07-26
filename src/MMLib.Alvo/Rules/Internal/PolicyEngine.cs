@@ -15,9 +15,11 @@ namespace MMLib.Alvo.Rules.Internal;
 /// tenant-scoped entity's caller carries no tenant), the operation lookup (deny when the relevant rule
 /// was never configured), the required-context gate (deny when the operation's predicates read a
 /// context value this caller does not have), then assemble the allow decision from the catalog's
-/// compiled predicates and the field masks resolved against this call's context.
+/// compiled predicates and the field masks resolved against this call's context — where the same
+/// gate applies once more, in the other direction (see <see cref="IsMasked"/>).
 /// </summary>
 /// <remarks>
+/// <para>
 /// The tenant guard and the required-context gate are two different questions and both are needed.
 /// The guard asks "is this entity tenant-scoped while the caller has no tenant" — an entity-level
 /// question, answered before an operation is even looked up. The gate asks "does the rule this
@@ -25,6 +27,16 @@ namespace MMLib.Alvo.Rules.Internal;
 /// <b>global</b> entity too, where the guard by definition never speaks, and is the only thing
 /// standing between a rule like <c>!(region_id == @tenant.id)</c> and a tenantless caller reading
 /// every row (the absent operand collapses to false in the backends, and the negation inverts it).
+/// </para>
+/// <para>
+/// The gate covers <b>every</b> compiled expression this engine hands out or evaluates — the
+/// operation's <c>USING</c>/<c>WITH CHECK</c>, the entity's tenant scope, <em>and</em> the
+/// <c>hidden</c>/<c>readOnly</c> masks — measured once per apply into a
+/// <see cref="RequiredContext"/>. The two channels differ only in what "the caller lacks it" means:
+/// a predicate denies the call, a mask stays on. Never one without the other; a mask evaluated
+/// against an absent operand is the same two-valued collapse one channel over, on the one invariant
+/// that has to fail the other way.
+/// </para>
 /// </remarks>
 internal sealed class PolicyEngine : IPolicyEngine
 {
@@ -97,25 +109,18 @@ internal sealed class PolicyEngine : IPolicyEngine
     /// </summary>
     private static PolicyDecision? CheckRequiredContext(OperationPolicy policy, AlvoContext context)
     {
-        if (policy.RequiresTenantId && context.Tenant is null)
+        if (policy.Required.TenantIdMissingFrom(context))
         {
             return PolicyDecision.Deny("The caller has no tenant, and the policy for this operation reads one.");
         }
 
-        if (policy.RequiresUserId && HasNoIdentity(context))
+        if (policy.Required.UserIdMissingFrom(context))
         {
             return PolicyDecision.Deny("The caller has no identity, and the policy for this operation reads one.");
         }
 
         return null;
     }
-
-    /// <summary>
-    /// The reserved all-zero <see cref="UserId"/> means "no identity" (see
-    /// <see cref="AlvoContext.Anonymous"/>) — never a real caller who happens to own the all-zero
-    /// rows.
-    /// </summary>
-    private static bool HasNoIdentity(AlvoContext context) => context.User.Value == Guid.Empty;
 
     private static PolicyDecision Allow(EntityPolicy policy, OperationPolicy operationPolicy, AlvoContext context) =>
         PolicyDecision.Allow(
@@ -152,7 +157,7 @@ internal sealed class PolicyEngine : IPolicyEngine
         var resolved = new HashSet<string>(StringComparer.Ordinal);
         foreach (var (field, mask) in masks)
         {
-            if (mask.AlwaysOn || CelInterpreter.EvaluateMask(mask.Expression!, context))
+            if (IsMasked(mask, context))
             {
                 resolved.Add(field);
             }
@@ -160,4 +165,19 @@ internal sealed class PolicyEngine : IPolicyEngine
 
         return resolved.ToFrozenSet(StringComparer.Ordinal);
     }
+
+    /// <summary>
+    /// The required-context gate's mask half. A mask reading a context value this caller lacks stays
+    /// <b>on</b> without being evaluated: for a mask, fail-closed means the field stays hidden or
+    /// stays read-only, which is the opposite direction from the predicate half (deny the call) and
+    /// the reason the two are separate reads of the same precomputed <see cref="RequiredContext"/>.
+    /// Evaluating it instead would resolve the absent operand to <see langword="null"/>, collapse the
+    /// comparison to <see langword="false"/>, and report a hidden field visible — the one place
+    /// <c>CelInterpreter.EvaluateMask</c>'s "masked unless exactly false" rule cannot help, because
+    /// an absent context value is not an exception.
+    /// </summary>
+    private static bool IsMasked(FieldMask mask, AlvoContext context) =>
+        mask.AlwaysOn
+        || mask.Required.IsMissingFrom(context)
+        || CelInterpreter.EvaluateMask(mask.Expression!, context);
 }
