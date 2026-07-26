@@ -182,6 +182,7 @@ public class ApiKeyContextResolverTests
         PolicyCatalogPriming.Prime(
             host.GetRequiredService<IPolicyCatalogProvider>(),
             new CelCompiler(),
+            descriptor.Name,
             descriptor,
             DescriptorToSchemaMapper.Map(descriptor));
     }

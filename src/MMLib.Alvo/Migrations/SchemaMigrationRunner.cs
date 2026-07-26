@@ -94,7 +94,7 @@ internal sealed class SchemaMigrationRunner
 
         if (plan.IsEmpty)
         {
-            PolicyCatalogPriming.Prime(_policyCatalogProvider, _compiler, descriptor, desired);
+            PolicyCatalogPriming.Prime(_policyCatalogProvider, _compiler, descriptor.Name, descriptor, desired);
             return new MigrationResult(Applied: false, plan, WasDryRun: options.DryRun);
         }
 

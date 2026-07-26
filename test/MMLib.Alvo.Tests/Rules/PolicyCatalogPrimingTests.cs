@@ -186,9 +186,35 @@ public class PolicyCatalogPrimingTests
         return PolicyCatalog.Build(descriptor, DescriptorToSchemaMapper.Map(descriptor), new CelCompiler());
     }
 
-    private static (RuntimeSchemaService Service, PolicyCatalogProvider Provider, InMemoryDescriptorVersionStore Store) CreateService()
+    /// <summary>
+    /// The restart case: nothing primes the catalog at startup in runtime-apply mode, so what a
+    /// restarted host has to lean on is the idempotent re-apply of the descriptor already stored —
+    /// the one accepting branch that writes nothing and used to return before priming. Without it the
+    /// project denies every request until someone happens to apply a <em>changed</em> descriptor.
+    /// </summary>
+    [Fact]
+    public async Task Re_applying_the_stored_descriptor_primes_a_restarted_host()
     {
         var store = new InMemoryDescriptorVersionStore();
+        var descriptor = Descriptor("""{"list": "true"}""");
+        var (before, _, _) = CreateService(store);
+        await before.ApplyAsync("demo", descriptor, expectedRevision: 0, new MigrationOptions(), TestContext.Current.CancellationToken);
+
+        var (afterRestart, provider, _) = CreateService(store);
+        var engine = new PolicyEngine(provider);
+        engine.Resolve("orders", DataOperation.List, CelFixtures.Alice).IsDenied.ShouldBeTrue();
+
+        await afterRestart.ApplyAsync("demo", descriptor, expectedRevision: 1, new MigrationOptions(), TestContext.Current.CancellationToken);
+
+        engine.Resolve("orders", DataOperation.List, CelFixtures.Alice).IsDenied.ShouldBeFalse();
+    }
+
+    private static (RuntimeSchemaService Service, PolicyCatalogProvider Provider, InMemoryDescriptorVersionStore Store) CreateService() =>
+        CreateService(new InMemoryDescriptorVersionStore());
+
+    private static (RuntimeSchemaService Service, PolicyCatalogProvider Provider, InMemoryDescriptorVersionStore Store) CreateService(
+        InMemoryDescriptorVersionStore store)
+    {
         var writer = new InMemoryRuntimeSchemaWriter(store);
         var migrator = new InMemorySchemaMigrator();
         var validator = new DescriptorValidator();

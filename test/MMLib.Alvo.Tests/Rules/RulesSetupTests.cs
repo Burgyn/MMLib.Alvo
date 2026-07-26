@@ -43,6 +43,7 @@ public class RulesSetupTests
         PolicyCatalogPriming.Prime(
             provider.GetRequiredService<IPolicyCatalogProvider>(),
             provider.GetRequiredService<ICelCompiler>(),
+            descriptor.Name,
             descriptor,
             schema);
 

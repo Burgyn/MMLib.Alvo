@@ -1,6 +1,7 @@
 ﻿using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Rules;
+using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Migrations;
@@ -12,16 +13,29 @@ namespace MMLib.Alvo.Migrations;
 /// will call; it owns no DB connection (the atomic transaction lives behind <see cref="IRuntimeSchemaWriter"/>).
 /// </summary>
 /// <remarks>
+/// <para>
 /// Every branch that accepts a descriptor as the project's current, authoritative one (a genuine
-/// apply, a rules-only idempotent re-apply, or a rollback) also (re)primes
-/// <see cref="IPolicyCatalogProvider"/> from that same descriptor, so a tightened or revoked rule
-/// takes effect for the very next <c>IPolicyEngine.Resolve</c> call, not merely after a process
-/// restart. The catalog is always built — a step that can throw <see cref="DescriptorValidationException"/>
-/// when a rule fails to compile — <em>before</em> <see cref="IRuntimeSchemaWriter.ApplyAndAppendAsync"/>
-/// durably commits the schema/version change, and published via
-/// <see cref="IPolicyCatalogProvider.SetCurrent"/> only <em>after</em> that commit succeeds: an
-/// uncompilable rule set rejects the whole apply rather than leaving a committed schema paired with a
-/// stale (possibly too-permissive) catalog.
+/// apply, a rules-only change, a re-apply of the descriptor already stored, or a rollback) also
+/// (re)primes <see cref="IPolicyCatalogProvider"/> from that same descriptor, so a tightened or
+/// revoked rule takes effect for the very next <c>IPolicyEngine.Resolve</c> call, not merely after a
+/// process restart. On the branches that write something durable the catalog is always built — a step
+/// that can throw <see cref="DescriptorValidationException"/> when a rule fails to compile —
+/// <em>before</em> <see cref="IRuntimeSchemaWriter.ApplyAndAppendAsync"/> commits the schema/version
+/// change, and published via <see cref="IPolicyCatalogProvider.SetCurrent"/> only <em>after</em> that
+/// commit succeeds: an uncompilable rule set rejects the whole apply rather than leaving a committed
+/// schema paired with a stale (possibly too-permissive) catalog. The re-apply of an identical
+/// descriptor writes nothing at all, so it builds and publishes in one step
+/// (<c>PolicyCatalogPriming</c>) — and rejects the call if a rule no longer compiles, rather than
+/// reporting success while leaving the catalog as it was.
+/// </para>
+/// <para>
+/// <strong>Nothing primes at startup.</strong> This service is driven by a request, so a host that
+/// only ever applies descriptors at runtime comes back from a restart with an unprimed provider,
+/// which <c>IPolicyEngine</c> treats as deny-everything until something applies. That is the safe
+/// direction, but it is a real gap rather than a design intent: re-applying the stored descriptor is
+/// what closes it (which is why the branch above primes), and the HTTP/host wiring that will do so on
+/// startup is not part of this milestone.
+/// </para>
 /// </remarks>
 public sealed class RuntimeSchemaService
 {
@@ -99,6 +113,7 @@ public sealed class RuntimeSchemaService
 
         if (IsUnchangedReapply(plan, current, descriptor))
         {
+            PolicyCatalogPriming.Prime(_policyCatalogProvider, _compiler, project, descriptor, desired);
             return current!;
         }
 
