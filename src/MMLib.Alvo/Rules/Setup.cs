@@ -18,11 +18,22 @@ internal static class RulesSetup
     /// <see cref="IPolicyEngine.Resolve"/> call made before anything has been applied denies, with a
     /// message that says exactly that.
     /// </summary>
+    /// <remarks>
+    /// <see cref="IRoleCatalogProvider"/> resolves to the <em>same instance</em> as
+    /// <see cref="IPolicyCatalogProvider"/> rather than to a second registration of the concrete
+    /// type: two independently primed holders could serve authentication a role set the rules were
+    /// never compiled against, and a host replacing the policy catalog provider must not silently
+    /// keep the default one's roles. Registered with <c>TryAddSingleton</c>, so a host with an
+    /// external identity source (OIDC groups, a directory — #36) registers its own role provider and
+    /// takes identity roles over without touching the policy catalog.
+    /// </remarks>
     /// <param name="services">The service collection to add the rules services to.</param>
     /// <returns><paramref name="services"/>, for chaining.</returns>
     internal static IServiceCollection AddAlvoRules(this IServiceCollection services)
     {
         services.TryAddSingleton<IPolicyCatalogProvider, PolicyCatalogProvider>();
+        services.TryAddSingleton<IRoleCatalogProvider>(
+            provider => provider.GetRequiredService<IPolicyCatalogProvider>());
         services.TryAddSingleton<IPolicyEngine, PolicyEngine>();
         return services;
     }

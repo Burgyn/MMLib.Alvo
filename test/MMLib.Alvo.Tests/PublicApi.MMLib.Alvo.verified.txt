@@ -43,14 +43,13 @@ namespace MMLib.Alvo.Migrations
 }
 namespace MMLib.Alvo.Rules
 {
-    public interface IPolicyCatalogProvider
+    public interface IPolicyCatalogProvider : MMLib.Alvo.IRoleCatalogProvider
     {
         MMLib.Alvo.Rules.PolicyCatalog? Current { get; }
         void SetCurrent(string project, MMLib.Alvo.Rules.PolicyCatalog catalog);
     }
     public sealed class PolicyCatalog
     {
-        public MMLib.Alvo.RoleCatalog Roles { get; }
         public static MMLib.Alvo.Rules.PolicyCatalog Build(MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Expressions.ICelCompiler compiler) { }
         public static bool TryBuild(MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Expressions.ICelCompiler compiler, out MMLib.Alvo.Rules.PolicyCatalog? catalog, out System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Descriptor.DescriptorValidationError> errors) { }
     }

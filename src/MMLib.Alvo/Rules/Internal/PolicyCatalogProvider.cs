@@ -19,6 +19,14 @@ internal sealed class PolicyCatalogProvider : IPolicyCatalogProvider
     public PolicyCatalog? Current => Volatile.Read(ref _current);
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// One volatile read of the same reference <see cref="Current"/> serves, so the roles a request
+    /// authenticates against and the rules that judge it always come from the same applied
+    /// descriptor — never from two holders primed a moment apart.
+    /// </remarks>
+    public RoleCatalog? DeclaredRoles => Current?.Roles;
+
+    /// <inheritdoc/>
     public void SetCurrent(string project, PolicyCatalog catalog)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(project);

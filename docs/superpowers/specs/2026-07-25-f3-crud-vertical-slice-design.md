@@ -259,6 +259,19 @@ rather than quietly matching no rule.
 *unknown* roles arriving in a token (reject the request versus ignore that role).
 In F3 roles come from Alvo's own configuration, so rejecting loudly is correct.
 
+**The role set in effect reaches authentication through `IRoleCatalogProvider`.**
+The descriptor's `auth.roles` is the one source for both halves of authorization —
+the roles a rule's literal is validated against, and the roles a credential may
+mint — so a second, independently primed holder is ruled out: it could serve a role
+set the rules were never compiled against. That single primed source is the compiled
+policy catalog, but nothing above the rule engine reads it directly: the *provider*
+of the policy catalog implements `IRoleCatalogProvider` (`IPolicyCatalogProvider`
+derives from it, one instance registered as both), and `PolicyCatalog.Roles` stays
+`internal`. Authentication therefore depends on a role-shaped port, not on the policy
+catalog, which is what keeps #36's external identity source a matter of registering
+another implementation rather than routing identity through the rule engine. See
+deviation 10.
+
 ### Minimal dev auth
 
 An API key maps to `(UserId, roles, tenant)`. Per the brief, **scopes are
@@ -278,7 +291,7 @@ it is deferred and explicitly tied to #42.
 
 | Namespace | Port / type | Guarantee |
 |---|---|---|
-| `MMLib.Alvo` | `AlvoContext`, `UserId`, `TenantId`, `Role`, `RoleCatalog` | identity, roles, tenant |
+| `MMLib.Alvo` | `AlvoContext`, `UserId`, `TenantId`, `Role`, `RoleCatalog`, `IRoleCatalogProvider` | identity, roles, tenant; the role set in effect arrives through a port, so authentication never depends on who holds it |
 | `MMLib.Alvo.Expressions` | `ICelCompiler` → `CompiledExpression` (a validated, typed tree) + `IPredicateRenderer` + `IPredicateEvaluator` | fail-fast at apply; input is never interpolated; the two Rule backends are symmetric ports — SQL for the stored row, rows for the candidate one |
 | `MMLib.Alvo.Rules` | `IPolicyEngine` | for (entity, operation, context) returns a compiled predicate or deny; field-level `hidden` / `readOnly` |
 | `MMLib.Alvo.Data` | `IAlvoData`, `AlvoQuery`, `AlvoRecord` | policy is applied **inside** the port |
@@ -794,6 +807,23 @@ Recorded so a later reader can tell a decision from an oversight.
    SQL and in-memory verdicts silently diverge — the exact failure the differential
    test exists to catch. Cost: a dialect with different boolean handling (T-SQL) has to
    override three members rather than write its own predicate renderer.
+10. **Identity roles are primed by the rule engine's own machinery, behind an identity
+   port.** The Ports table assigns identity to `MMLib.Alvo` and rules to
+   `MMLib.Alvo.Rules`, which reads as two independent lifecycles. They are not: the
+   descriptor declares `auth.roles` once, and a role set authentication may mint from
+   that the rules were never compiled against is exactly the inconsistency "one
+   descriptor, one catalog, one guard" exists to prevent. So there is one primed source
+   — the compiled `PolicyCatalog` — and the *provider* holding it implements
+   `IRoleCatalogProvider`, the port `Auth` actually depends on. `PolicyCatalog.Roles`
+   is `internal`: a public one would make the *policy* catalog the authoritative source
+   of *identity* roles and foreclose roles arriving from anywhere else. Cost, stated
+   plainly: `IPolicyCatalogProvider` derives from an identity port, so an implementer
+   of the policy provider must also answer "which roles are in effect" — accepted,
+   because the alternative (two registrations of one concrete type) lets a host replace
+   the policy provider and silently keep the default one's roles. A host with an
+   external identity source (#36) registers its own `IRoleCatalogProvider` and takes
+   identity roles over; the descriptor still governs which literals a rule may name,
+   and the two can then legitimately differ.
 
 ## Assumptions (veto candidates)
 

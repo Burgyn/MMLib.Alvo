@@ -22,8 +22,14 @@
 /// first <see cref="SetCurrent"/> call fixes the project this provider instance serves for the rest
 /// of the process; a later call naming a different project throws rather than mixing the two in.
 /// </para>
+/// <para>
+/// It also serves as the default <see cref="IRoleCatalogProvider"/> — see that port's remarks for
+/// why identity roles arrive through a role-shaped port rather than off the policy catalog itself.
+/// One instance is registered as both, so the descriptor's <c>auth.roles</c> reaches authentication
+/// and rule validation from one apply, primed at one instant, behind one project-identity guard.
+/// </para>
 /// </remarks>
-public interface IPolicyCatalogProvider
+public interface IPolicyCatalogProvider : IRoleCatalogProvider
 {
     /// <summary>Gets the most recently primed catalog, or <see langword="null"/> when no descriptor has been applied yet.</summary>
     PolicyCatalog? Current { get; }

@@ -12,20 +12,21 @@ namespace MMLib.Alvo.Auth.Internal;
 /// time does not reveal whether the key id exists.
 /// </summary>
 /// <remarks>
-/// A role name on a key is resolved against the <b>applied project's</b> declared roles — the
-/// <see cref="RoleCatalog"/> the primed <see cref="PolicyCatalog"/> carries — so the descriptor's
-/// <c>auth.roles</c> governs both halves of authorization from one declaration, and adding or
-/// removing a role takes effect on the very next request. The injected <see cref="RoleCatalog"/>
-/// serves only until a project is applied, when there is no descriptor to read roles from; it holds
-/// the built-ins alone unless a host replaced the registration, so an unprimed host refuses an
-/// application role rather than minting one nothing has declared.
+/// A role name on a key is resolved against <see cref="IRoleCatalogProvider.DeclaredRoles"/> — by
+/// default the <b>applied project's</b> <c>auth.roles</c>, since the policy catalog provider
+/// implements that port, so one declaration governs both halves of authorization and adding or
+/// removing a role takes effect on the very next request. Authentication depends on the role-shaped
+/// port and not on the policy catalog, so an external identity source can supply roles instead
+/// without this type changing. The injected <see cref="RoleCatalog"/> serves only while the provider
+/// has nothing to declare; it holds the built-ins alone unless a host replaced the registration, so
+/// an unprimed host refuses an application role rather than minting one nothing has declared.
 /// </remarks>
 internal sealed class ApiKeyContextResolver(
     IApiKeyStore store,
     RoleCatalog roleCatalog,
     TimeProvider clock,
     TenantResolver tenantResolver,
-    IPolicyCatalogProvider policyCatalogProvider)
+    IRoleCatalogProvider roleCatalogProvider)
     : IAlvoContextResolver
 {
     private const char KeySeparator = '.';
@@ -102,7 +103,7 @@ internal sealed class ApiKeyContextResolver(
         return record is not null && hashMatches;
     }
 
-    private RoleCatalog DeclaredRoles => policyCatalogProvider.Current?.Roles ?? roleCatalog;
+    private RoleCatalog DeclaredRoles => roleCatalogProvider.DeclaredRoles ?? roleCatalog;
 
     private bool TryResolveRoles(IReadOnlyList<string> roleNames, out IReadOnlySet<Role> roles)
     {

@@ -44,14 +44,16 @@ public sealed class PolicyCatalog
     /// Gets the roles this project recognises: the built-ins plus the descriptor's <c>auth.roles</c>.
     /// </summary>
     /// <remarks>
-    /// It rides on the catalog rather than on a provider of its own because the descriptor is the one
-    /// source of truth for both halves of authorization and they must never disagree: the same
-    /// declaration a rule's role literal is validated against is the one authentication may mint a
-    /// <see cref="Role"/> from, primed at the same instant, from the same descriptor, behind the same
-    /// project-identity guard. A second, independently primed holder could serve a role set the rules
-    /// were never compiled against.
+    /// The role set rides on the catalog because it is compiled from the same descriptor in the same
+    /// pass — every role literal in every rule is validated against exactly this set. It is
+    /// <see langword="internal"/> on purpose: consumers outside the rule engine read roles through
+    /// <see cref="IRoleCatalogProvider"/>, which <see cref="IPolicyCatalogProvider"/> implements, so
+    /// nothing above the engine has to know that the authoritative role set currently happens to
+    /// arrive with a policy catalog. Making it public would make the <em>policy</em> catalog the
+    /// authoritative source of <em>identity</em> roles and foreclose any other source — see that
+    /// port's remarks.
     /// </remarks>
-    public RoleCatalog Roles { get; }
+    internal RoleCatalog Roles { get; }
 
     /// <summary>Builds a <see cref="PolicyCatalog"/> from a descriptor and its mapped schema.</summary>
     /// <param name="descriptor">The project descriptor whose <c>rules</c>/<c>hidden</c>/<c>readOnly</c> are compiled.</param>

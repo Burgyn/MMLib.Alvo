@@ -157,6 +157,36 @@ public class ApiKeyContextResolverTests
         principal.ShouldBeNull();
     }
 
+    /// <summary>
+    /// Authentication reads roles through the <see cref="IRoleCatalogProvider"/> port, not through the
+    /// policy catalog: a host registering its own provider — the shape an external identity source
+    /// (OIDC group claims, a directory) takes — governs the roles a credential may mint, and keeps
+    /// governing them after a descriptor is applied. The applied descriptor still declares nothing
+    /// about <c>reviewer</c>, so an engine that reached past the port into
+    /// <c>PolicyCatalog</c> would refuse this key.
+    /// </summary>
+    [Fact]
+    public async Task A_host_registered_role_catalog_provider_governs_the_roles_a_key_may_mint()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IRoleCatalogProvider>(new FixedRoleCatalogProvider(RoleCatalog.Create(["reviewer"])));
+        services.Configure<AlvoAuthOptions>(options => options.DevKeys.Add(DevKeyGranting("reviewer")));
+        services.AddAlvo();
+        using var host = services.BuildServiceProvider();
+        Apply(host, DescriptorDeclaringRoles("editor"));
+
+        var principal = await ResolveDevKeyAsync(host);
+
+        principal.ShouldNotBeNull();
+        principal.Context.Roles.Select(role => role.Name).ShouldContain("reviewer");
+    }
+
+    /// <summary>An identity source that is not the policy catalog — what #36's OIDC providers will be.</summary>
+    private sealed class FixedRoleCatalogProvider(RoleCatalog roles) : IRoleCatalogProvider
+    {
+        public RoleCatalog? DeclaredRoles => roles;
+    }
+
     private static async Task<AlvoPrincipal?> ResolveDevKeyAsync(ServiceProvider host) =>
         await host.GetRequiredService<IAlvoContextResolver>()
             .ResolveAsync("dev.s3cret", requestedTenant: null, TestContext.Current.CancellationToken);
@@ -164,17 +194,19 @@ public class ApiKeyContextResolverTests
     private static ServiceProvider HostGranting(string roleName)
     {
         var services = new ServiceCollection();
-        services.Configure<AlvoAuthOptions>(options => options.DevKeys.Add(new AlvoDevApiKey
-        {
-            KeyId = "dev",
-            Secret = "s3cret",
-            User = _user,
-            Roles = { roleName },
-            Scopes = { "orders:read" },
-        }));
+        services.Configure<AlvoAuthOptions>(options => options.DevKeys.Add(DevKeyGranting(roleName)));
         services.AddAlvo();
         return services.BuildServiceProvider();
     }
+
+    private static AlvoDevApiKey DevKeyGranting(string roleName) => new()
+    {
+        KeyId = "dev",
+        Secret = "s3cret",
+        User = _user,
+        Roles = { roleName },
+        Scopes = { "orders:read" },
+    };
 
     private static void Apply(ServiceProvider host, string descriptorJson)
     {

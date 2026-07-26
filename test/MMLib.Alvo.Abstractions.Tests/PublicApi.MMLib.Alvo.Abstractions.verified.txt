@@ -29,6 +29,10 @@ namespace MMLib.Alvo
     {
         Microsoft.Extensions.DependencyInjection.IServiceCollection Services { get; }
     }
+    public interface IRoleCatalogProvider
+    {
+        MMLib.Alvo.RoleCatalog? DeclaredRoles { get; }
+    }
     public readonly struct Role : System.IEquatable<MMLib.Alvo.Role>
     {
         public string Name { get; }
