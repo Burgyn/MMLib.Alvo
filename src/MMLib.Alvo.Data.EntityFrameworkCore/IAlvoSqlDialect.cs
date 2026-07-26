@@ -32,15 +32,32 @@ public interface IAlvoSqlDialect
     /// a physical entity.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// A driver must not qualify the name with a database schema unless it actually has one: SQLite has
     /// no schemas at all, and <c>AlvoOptions.SchemaPrefix</c> is a framework-<em>table</em> name prefix,
     /// not a schema. Both in-repo drivers return the bare quoted entity name, matching the
     /// <c>ToTable(entity.Name)</c> the migration model already uses.
+    /// </para>
+    /// <para>
+    /// <b>Return grammar.</b> The result is interpolated verbatim as the <c>FROM</c> clause's table
+    /// source. It must not include the <c>FROM</c> keyword, must not carry an alias, and must not carry a
+    /// statement terminator or any surrounding whitespace. A dialect whose table source is a query rather
+    /// than a name — F7's dynamic driver, which projects JSON paths out of one shared partitioned store —
+    /// must return it <b>parenthesised</b> (<c>(SELECT … FROM …)</c>), because the composer adds no
+    /// parentheses of its own; EF then wraps the whole <c>FromSql</c> root in its own derived table and
+    /// supplies the alias.
+    /// </para>
     /// </remarks>
     /// <param name="entity">The entity being read.</param>
     string RenderTable(EntitySchema entity);
 
     /// <summary>Renders a column reference in a <c>SELECT</c> list or an <c>ORDER BY</c>.</summary>
+    /// <remarks>
+    /// <b>Return grammar.</b> A bare column reference: quoted per this dialect, with no table or alias
+    /// qualifier, no <c>AS</c> alias of its own, and no separating comma — the composer joins the
+    /// <c>SELECT</c> list and appends an alias where one is needed (see
+    /// <see cref="RenderNullProjection"/>).
+    /// </remarks>
     /// <param name="columnName">The column's name.</param>
     string RenderColumn(string columnName);
 

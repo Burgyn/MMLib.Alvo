@@ -1,12 +1,32 @@
-﻿namespace MMLib.Alvo.Data.Sqlite.Tests;
+﻿using MMLib.Alvo.Schema;
+
+namespace MMLib.Alvo.Data.Sqlite.Tests;
 
 public class SqliteSqlDialectTests
 {
     private static readonly SqliteSqlDialect _dialect = new();
 
+    /// <summary>
+    /// The whole documented grammar in one assertion: a bare quoted table source, no surrounding
+    /// parentheses, no alias, no <c>FROM</c> keyword, no terminator, nothing to trim.
+    /// </summary>
     [Fact]
-    public void A_null_projection_casts_to_the_store_type_it_was_given()
+    public void A_table_is_a_bare_quoted_name_with_no_alias_and_no_from_keyword()
+        => _dialect.RenderTable(Entity("vehicle")).ShouldBe("\"vehicle\"");
+
+    [Fact]
+    public void A_null_projection_is_a_bare_expression_with_no_column_alias()
         => _dialect.RenderNullProjection("TEXT").ShouldBe("CAST(NULL AS TEXT)");
+
+    [Fact]
+    public void A_column_is_a_bare_quoted_reference_with_no_table_qualifier_and_no_alias()
+        => _dialect.RenderColumn("secret_note").ShouldBe("\"secret_note\"");
+
+    private static EntitySchema Entity(string name) => new()
+    {
+        Name = name,
+        Fields = [new FieldSchema { Name = "id", Type = FieldType.Uuid, Required = true }],
+    };
 
     [Fact]
     public void A_parameterised_store_type_reaches_the_cast_unrewritten()

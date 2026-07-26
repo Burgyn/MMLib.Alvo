@@ -1,12 +1,33 @@
-﻿namespace MMLib.Alvo.Data.PostgreSql.Tests;
+﻿using MMLib.Alvo.Schema;
+
+namespace MMLib.Alvo.Data.PostgreSql.Tests;
 
 public class PostgreSqlSqlDialectTests
 {
     private static readonly PostgreSqlSqlDialect _dialect = new();
 
+    /// <summary>
+    /// The whole documented grammar in one assertion: a bare quoted table source, no surrounding
+    /// parentheses, no alias, no <c>FROM</c> keyword, no terminator, nothing to trim. In particular no
+    /// database schema qualifier — <c>AlvoOptions.SchemaPrefix</c> is a table-name prefix, not a schema.
+    /// </summary>
     [Fact]
-    public void A_null_projection_casts_to_the_store_type_it_was_given()
+    public void A_table_is_a_bare_quoted_name_with_no_alias_and_no_from_keyword()
+        => _dialect.RenderTable(Entity("vehicle")).ShouldBe("\"vehicle\"");
+
+    [Fact]
+    public void A_null_projection_is_a_bare_expression_with_no_column_alias()
         => _dialect.RenderNullProjection("text").ShouldBe("CAST(NULL AS text)");
+
+    [Fact]
+    public void A_column_is_a_bare_quoted_reference_with_no_table_qualifier_and_no_alias()
+        => _dialect.RenderColumn("secret_note").ShouldBe("\"secret_note\"");
+
+    private static EntitySchema Entity(string name) => new()
+    {
+        Name = name,
+        Fields = [new FieldSchema { Name = "id", Type = FieldType.Uuid, Required = true }],
+    };
 
     /// <summary>
     /// The regression this signature exists for: the dialect used to derive the type from a
