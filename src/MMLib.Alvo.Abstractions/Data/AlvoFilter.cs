@@ -32,7 +32,16 @@ public abstract record AlvoFilter
     /// deliberately tighter (a filter's breadth carries the term count; only genuine nesting counts
     /// towards this, so 32 levels is far past any query string a human or agent writes on purpose).
     /// </summary>
-    public const int MaxDepth = 32;
+    /// <remarks>
+    /// Deliberately a get-only property, not a <see langword="const"/>. A public
+    /// <see langword="const"/> is inlined at each consumer's compile time, so every driver, every
+    /// query-string parser and every host comparing against it would bake the literal in — and the
+    /// cap could then never be changed, nor made configurable, without recompiling all of them,
+    /// while a consumer compiled against the old value and a framework enforcing a new one would
+    /// disagree silently. A property keeps every current call site source-compatible and leaves an
+    /// options-backed cap open as a purely internal change.
+    /// </remarks>
+    public static int MaxDepth { get; } = 32;
 
     /// <summary>
     /// Throws when <paramref name="filter"/> nests deeper than <see cref="MaxDepth"/>. Every
