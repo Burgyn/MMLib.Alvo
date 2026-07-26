@@ -1,7 +1,6 @@
 ﻿using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Rules;
-using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Migrations;
@@ -13,11 +12,16 @@ namespace MMLib.Alvo.Migrations;
 /// will call; it owns no DB connection (the atomic transaction lives behind <see cref="IRuntimeSchemaWriter"/>).
 /// </summary>
 /// <remarks>
-/// Every branch that accepts a descriptor as the project's current, authoritative one (an idempotent
-/// re-apply, a genuine apply, or a rollback) also (re)primes <see cref="IPolicyCatalogProvider"/> from
-/// that same descriptor — see <see cref="PolicyCatalogPriming"/> — so a tightened or revoked rule
+/// Every branch that accepts a descriptor as the project's current, authoritative one (a genuine
+/// apply, a rules-only idempotent re-apply, or a rollback) also (re)primes
+/// <see cref="IPolicyCatalogProvider"/> from that same descriptor, so a tightened or revoked rule
 /// takes effect for the very next <c>IPolicyEngine.Resolve</c> call, not merely after a process
-/// restart.
+/// restart. The catalog is always built — a step that can throw <see cref="DescriptorValidationException"/>
+/// when a rule fails to compile — <em>before</em> <see cref="IRuntimeSchemaWriter.ApplyAndAppendAsync"/>
+/// durably commits the schema/version change, and published via
+/// <see cref="IPolicyCatalogProvider.SetCurrent"/> only <em>after</em> that commit succeeds: an
+/// uncompilable rule set rejects the whole apply rather than leaving a committed schema paired with a
+/// stale (possibly too-permissive) catalog.
 /// </remarks>
 public sealed class RuntimeSchemaService
 {
@@ -93,23 +97,30 @@ public sealed class RuntimeSchemaService
         var plan = await _migrator.PlanAsync(currentSchema, desired, options, ct).ConfigureAwait(false);
         Guard(project, plan, options);
 
-        if (plan.IsEmpty && current is not null)
+        if (IsUnchangedReapply(plan, current, descriptor))
         {
-            // Idempotent re-apply of an unchanged descriptor, mirroring the code-first runner's
-            // plan.IsEmpty no-op: nothing to append, and the optimistic-lock head must not advance
-            // just because the caller resubmitted the same schema. Only skip the writer when a prior
-            // version already exists — a fresh project (current is null) whose desired schema happens
-            // to plan empty (e.g. an entity-less descriptor) still gets its rev-1 baseline appended
-            // below, so ApplyAsync's Task<DescriptorVersion> contract never has to return null.
-            PolicyCatalogPriming.Prime(_policyCatalogProvider, _compiler, descriptor, desired);
-            return current;
+            return current!;
         }
 
+        var catalog = PolicyCatalog.Build(descriptor, desired, _compiler);
         var candidate = new DescriptorVersion(desired, descriptorJson, 0, DateTimeOffset.UtcNow, options.Author, options.Reason);
         var applied = await _writer.ApplyAndAppendAsync(project, plan, candidate, expectedRevision, options, ct).ConfigureAwait(false);
-        PolicyCatalogPriming.Prime(_policyCatalogProvider, _compiler, descriptor, desired);
+        _policyCatalogProvider.SetCurrent(project, catalog);
         return applied;
     }
+
+    // SchemaModel/FieldSchema carry no rule content, so a rules-only change (tighten or loosen a CEL
+    // string, same fields) plans empty exactly like a true no-op resubmission of the same descriptor
+    // does. Only the latter must skip the writer; the descriptors' own canonical content — not the
+    // plan — is what tells the two apart.
+    private static bool IsUnchangedReapply(MigrationPlan plan, DescriptorVersion? current, AlvoDescriptor descriptor) =>
+        plan.IsEmpty && current is not null && IsSameDescriptorContent(descriptor, current.DescriptorJson);
+
+    private static bool IsSameDescriptorContent(AlvoDescriptor descriptor, string storedDescriptorJson) =>
+        string.Equals(
+            AlvoDescriptor.Serialize(descriptor),
+            AlvoDescriptor.Serialize(AlvoDescriptor.Parse(storedDescriptorJson)),
+            StringComparison.Ordinal);
 
     /// <summary>Rolls the project back to <paramref name="targetRevision"/> by appending a git-revert version.</summary>
     /// <param name="project">The project to roll back.</param>
@@ -135,11 +146,12 @@ public sealed class RuntimeSchemaService
         var plan = await _migrator.PlanAsync(currentVersion.Schema, target.Schema, options, ct).ConfigureAwait(false);
         Guard(project, plan, options);
 
+        var catalog = PolicyCatalog.Build(AlvoDescriptor.Parse(target.DescriptorJson), target.Schema, _compiler);
         var candidate = new DescriptorVersion(
             target.Schema, target.DescriptorJson, 0, DateTimeOffset.UtcNow,
             options.Author, options.Reason ?? $"Rollback to revision {targetRevision}", RolledBackFrom: targetRevision);
         var reverted = await _writer.ApplyAndAppendAsync(project, plan, candidate, currentVersion.Revision, options, ct).ConfigureAwait(false);
-        PolicyCatalogPriming.Prime(_policyCatalogProvider, _compiler, AlvoDescriptor.Parse(target.DescriptorJson), target.Schema);
+        _policyCatalogProvider.SetCurrent(project, catalog);
         return reverted;
     }
 

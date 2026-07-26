@@ -17,7 +17,11 @@ namespace MMLib.Alvo.Migrations;
 /// branch that accepts the descriptor as authoritative for the schema actually in the database (an
 /// empty plan, or a genuinely applied one) also (re)primes <see cref="IPolicyCatalogProvider"/>
 /// from the same parsed descriptor, so <c>IPolicyEngine</c> is never left serving a stale or
-/// never-primed catalog after a successful run — see <see cref="PolicyCatalogPriming"/>.
+/// never-primed catalog after a successful run. The empty-plan branch — nothing to durably change —
+/// uses <see cref="PolicyCatalogPriming"/> to build and publish together. The genuinely-applied
+/// branch builds the catalog before <see cref="ISchemaMigrator.ApplyAsync"/> runs any DDL — so an
+/// uncompilable rule set rejects the run before anything is durable — and publishes it via
+/// <see cref="IPolicyCatalogProvider.SetCurrent"/> only after the applied snapshot is saved.
 /// </remarks>
 internal sealed class SchemaMigrationRunner
 {
@@ -104,6 +108,7 @@ internal sealed class SchemaMigrationRunner
             return new MigrationResult(Applied: false, plan, WasDryRun: true);
         }
 
+        var catalog = PolicyCatalog.Build(descriptor, desired, _compiler);
         var result = await _migrator.ApplyAsync(plan, options, ct).ConfigureAwait(false);
 
         if (result.Applied)
@@ -111,7 +116,7 @@ internal sealed class SchemaMigrationRunner
             var revision = (appliedSnapshot?.Revision ?? 0) + 1;
             var snapshot = new AppliedSchema(desired, descriptorJson, revision, DateTimeOffset.UtcNow);
             await _store.SaveAsync(descriptor.Name, snapshot, ct).ConfigureAwait(false);
-            PolicyCatalogPriming.Prime(_policyCatalogProvider, _compiler, descriptor, desired);
+            _policyCatalogProvider.SetCurrent(descriptor.Name, catalog);
         }
 
         return result;

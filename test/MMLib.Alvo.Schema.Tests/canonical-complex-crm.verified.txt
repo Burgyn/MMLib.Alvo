@@ -84,11 +84,11 @@
       "ref"
     ],
     "defaultRules": {
-      "create": "@user.role in ['manager', 'sales']",
-      "delete": "@user.role == 'manager'",
+      "create": "'manager' in @user.roles || 'sales' in @user.roles",
+      "delete": "'manager' in @user.roles",
       "get": "tenant_id == @tenant.id",
       "list": "tenant_id == @tenant.id",
-      "update": "@user.role == 'manager'"
+      "update": "'manager' in @user.roles"
     },
     "defaultTenancy": "scoped",
     "enabled": true,
@@ -133,10 +133,10 @@
         }
       },
       "rules": {
-        "create": "@user.role in ['sales', 'manager']",
-        "get": "@user.role in ['sales', 'manager']",
-        "list": "@user.role in ['sales', 'manager']",
-        "update": "@user.role == 'manager' || owner_id == @user.id"
+        "create": "'sales' in @user.roles || 'manager' in @user.roles",
+        "get": "'sales' in @user.roles || 'manager' in @user.roles",
+        "list": "'sales' in @user.roles || 'manager' in @user.roles",
+        "update": "'manager' in @user.roles || owner_id == @user.id"
       },
       "softDelete": true
     },
@@ -204,10 +204,10 @@
         }
       },
       "rules": {
-        "create": "@user.role == 'manager'",
+        "create": "'manager' in @user.roles",
         "get": "'authenticated' in @user.roles",
         "list": "'authenticated' in @user.roles",
-        "update": "@user.role == 'manager'"
+        "update": "'manager' in @user.roles"
       },
       "tenancy": "global"
     },
@@ -225,7 +225,7 @@
           "type": "datetime"
         },
         "commission_note": {
-          "hidden": "@user.role != 'finance'",
+          "hidden": "!('finance' in @user.roles)",
           "type": "string"
         },
         "company_id": {
@@ -276,10 +276,10 @@
         ]
       },
       "rules": {
-        "create": "@user.role in ['sales', 'manager']",
-        "get": "@user.role == 'manager' || owner_id == @user.id",
-        "list": "@user.role == 'manager' || owner_id == @user.id",
-        "update": "@user.role == 'manager' || owner_id == @user.id"
+        "create": "'sales' in @user.roles || 'manager' in @user.roles",
+        "get": "'manager' in @user.roles || owner_id == @user.id",
+        "list": "'manager' in @user.roles || owner_id == @user.id",
+        "update": "'manager' in @user.roles || owner_id == @user.id"
       },
       "softDelete": true
     },
@@ -316,10 +316,10 @@
       },
       "renamedFrom": "line_items",
       "rules": {
-        "create": "@user.role in ['manager', 'finance']",
+        "create": "'manager' in @user.roles || 'finance' in @user.roles",
         "get": "'authenticated' in @user.roles",
         "list": "'authenticated' in @user.roles",
-        "update": "@user.role in ['manager', 'finance']"
+        "update": "'manager' in @user.roles || 'finance' in @user.roles"
       }
     },
     "invoices": {
@@ -364,10 +364,10 @@
         }
       },
       "rules": {
-        "create": "@user.role in ['manager', 'finance']",
+        "create": "'manager' in @user.roles || 'finance' in @user.roles",
         "get": "'authenticated' in @user.roles",
         "list": "'authenticated' in @user.roles",
-        "update": "@user.role in ['manager', 'finance']"
+        "update": "'manager' in @user.roles || 'finance' in @user.roles"
       }
     }
   },

@@ -50,6 +50,14 @@ internal sealed class PolicyEngine : IPolicyEngine
             ?? ResolveOperation(operation, policy, context);
     }
 
+    /// <summary>
+    /// Denies a tenant-scoped entity's tenantless caller before any rule is consulted. The deny
+    /// reason deliberately names "tenant" — distinct from <see cref="DenyReasonForOperation"/>'s
+    /// generic text — which is a conscious decision, not an oversight: it gives a tenantless caller
+    /// a narrow oracle (whether the named entity is tenant-scoped at all), but an operator debugging
+    /// "why was this call refused" needs that distinction, and a test depends on the guard's reason
+    /// staying distinguishable from a missing-rule denial.
+    /// </summary>
     private static PolicyDecision? CheckTenantGuard(EntityPolicy policy, AlvoContext context)
     {
         if (policy.Tenancy != TenancyMode.Scoped || context.Tenant is not null)

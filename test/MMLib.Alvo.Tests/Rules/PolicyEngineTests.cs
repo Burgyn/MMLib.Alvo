@@ -254,7 +254,7 @@ public class PolicyEngineTests
         var schema = new SchemaModel([CelFixtures.Orders with { Tenancy = tenancy }]);
         var catalog = PolicyCatalog.Build(descriptor, schema, CelFixtures.Compiler);
         var provider = new MMLib.Alvo.Rules.Internal.PolicyCatalogProvider();
-        provider.SetCurrent(catalog);
+        provider.SetCurrent(descriptor.Name, catalog);
         return new MMLib.Alvo.Rules.Internal.PolicyEngine(provider);
     }
 

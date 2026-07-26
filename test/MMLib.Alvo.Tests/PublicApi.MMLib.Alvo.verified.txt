@@ -46,7 +46,7 @@ namespace MMLib.Alvo.Rules
     public interface IPolicyCatalogProvider
     {
         MMLib.Alvo.Rules.PolicyCatalog? Current { get; }
-        void SetCurrent(MMLib.Alvo.Rules.PolicyCatalog catalog);
+        void SetCurrent(string project, MMLib.Alvo.Rules.PolicyCatalog catalog);
     }
     public sealed class PolicyCatalog
     {

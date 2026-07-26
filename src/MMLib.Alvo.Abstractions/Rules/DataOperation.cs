@@ -30,6 +30,7 @@ internal static class DataOperationNames
 {
     /// <summary>Gets <paramref name="operation"/>'s lowercase wire name.</summary>
     /// <param name="operation">The operation to name.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="operation"/> is not one of the named cases.</exception>
     internal static string ToWireName(this DataOperation operation) => operation switch
     {
         DataOperation.List => "list",
@@ -37,6 +38,6 @@ internal static class DataOperationNames
         DataOperation.Create => "create",
         DataOperation.Update => "update",
         DataOperation.Delete => "delete",
-        _ => operation.ToString(),
+        _ => throw new ArgumentOutOfRangeException(nameof(operation), operation, "Unmapped DataOperation; add its lowercase wire name here rather than falling back to PascalCase."),
     };
 }

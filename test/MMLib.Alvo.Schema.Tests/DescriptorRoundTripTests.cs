@@ -85,7 +85,7 @@ public class DescriptorRoundTripTests
 
         var commissionHidden = descriptor.Entities["deals"].Fields["commission_note"].Hidden.ShouldNotBeNull();
         commissionHidden.IsExpression.ShouldBeTrue();
-        commissionHidden.Expression.ShouldBe("@user.role != 'finance'");
+        commissionHidden.Expression.ShouldBe("!('finance' in @user.roles)");
     }
 
     private static void AssertAutomationSurvives(AlvoDescriptor descriptor)

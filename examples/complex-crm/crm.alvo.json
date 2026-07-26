@@ -27,9 +27,9 @@
     "defaultRules": {
       "list": "tenant_id == @tenant.id",
       "get": "tenant_id == @tenant.id",
-      "create": "@user.role in ['manager', 'sales']",
-      "update": "@user.role == 'manager'",
-      "delete": "@user.role == 'manager'"
+      "create": "'manager' in @user.roles || 'sales' in @user.roles",
+      "update": "'manager' in @user.roles",
+      "delete": "'manager' in @user.roles"
     },
     "allowedFieldTypes": ["string", "text", "integer", "decimal", "boolean", "date", "datetime", "enum", "ref"],
     "maxFieldsPerEntity": 40,
@@ -65,8 +65,8 @@
       "rules": {
         "list": "'authenticated' in @user.roles",
         "get": "'authenticated' in @user.roles",
-        "create": "@user.role == 'manager'",
-        "update": "@user.role == 'manager'"
+        "create": "'manager' in @user.roles",
+        "update": "'manager' in @user.roles"
       }
     },
     "companies": {
@@ -84,10 +84,10 @@
         }
       },
       "rules": {
-        "list": "@user.role in ['sales', 'manager']",
-        "get": "@user.role in ['sales', 'manager']",
-        "create": "@user.role in ['sales', 'manager']",
-        "update": "@user.role == 'manager' || owner_id == @user.id"
+        "list": "'sales' in @user.roles || 'manager' in @user.roles",
+        "get": "'sales' in @user.roles || 'manager' in @user.roles",
+        "create": "'sales' in @user.roles || 'manager' in @user.roles",
+        "update": "'manager' in @user.roles || owner_id == @user.id"
       }
     },
     "contacts": {
@@ -128,16 +128,16 @@
         },
         "commission_note": {
           "type": "string",
-          "hidden": "@user.role != 'finance'"
+          "hidden": "!('finance' in @user.roles)"
         },
         "owner_id": { "type": "ref", "entity": "users", "default": { "$cel": "@user.id" } },
         "closed_at": { "type": "datetime", "readOnly": true }
       },
       "rules": {
-        "list": "@user.role == 'manager' || owner_id == @user.id",
-        "get": "@user.role == 'manager' || owner_id == @user.id",
-        "create": "@user.role in ['sales', 'manager']",
-        "update": "@user.role == 'manager' || owner_id == @user.id"
+        "list": "'manager' in @user.roles || owner_id == @user.id",
+        "get": "'manager' in @user.roles || owner_id == @user.id",
+        "create": "'sales' in @user.roles || 'manager' in @user.roles",
+        "update": "'manager' in @user.roles || owner_id == @user.id"
       },
       "hooks": {
         "beforeUpdate": [
@@ -180,8 +180,8 @@
       "rules": {
         "list": "'authenticated' in @user.roles",
         "get": "'authenticated' in @user.roles",
-        "create": "@user.role in ['manager', 'finance']",
-        "update": "@user.role in ['manager', 'finance']"
+        "create": "'manager' in @user.roles || 'finance' in @user.roles",
+        "update": "'manager' in @user.roles || 'finance' in @user.roles"
       }
     },
     "invoice_items": {
@@ -201,8 +201,8 @@
       "rules": {
         "list": "'authenticated' in @user.roles",
         "get": "'authenticated' in @user.roles",
-        "create": "@user.role in ['manager', 'finance']",
-        "update": "@user.role in ['manager', 'finance']"
+        "create": "'manager' in @user.roles || 'finance' in @user.roles",
+        "update": "'manager' in @user.roles || 'finance' in @user.roles"
       }
     }
   },

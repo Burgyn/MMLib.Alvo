@@ -11,7 +11,7 @@ public class PolicyEngineContractTestsOverCatalog : PolicyEngineContractTests
     {
         var catalog = PolicyCatalog.Build(descriptor, schema, MMLib.Alvo.Tests.Expressions.CelFixtures.Compiler);
         var provider = new MMLib.Alvo.Rules.Internal.PolicyCatalogProvider();
-        provider.SetCurrent(catalog);
+        provider.SetCurrent(descriptor.Name, catalog);
         return new MMLib.Alvo.Rules.Internal.PolicyEngine(provider);
     }
 }

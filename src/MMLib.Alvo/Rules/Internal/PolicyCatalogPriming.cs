@@ -5,13 +5,26 @@ using MMLib.Alvo.Schema;
 namespace MMLib.Alvo.Rules.Internal;
 
 /// <summary>
-/// The single call shared by every place that accepts a descriptor as authoritative for a project's
-/// schema (the code-first startup path, the runtime dashboard-first apply/rollback path): compile a
-/// fresh <see cref="PolicyCatalog"/> from it and make it current. Deliberately a plain, eager
-/// <see cref="PolicyCatalog.Build"/> call — it throws <see cref="DescriptorValidationException"/> when
-/// a rule fails to compile, which rejects the apply rather than silently keeping the previous
-/// (possibly wrong) catalog in effect.
+/// Builds a fresh <see cref="PolicyCatalog"/> from a descriptor and makes it current, for the one
+/// kind of call site where nothing is durably changed by the call itself: a true no-op migration run
+/// (the code-first runner's empty-plan branch, where the schema in the database and the descriptor
+/// already agree). Because nothing is written either before or after this call, a rule that fails to
+/// compile simply rejects the run — <see cref="DescriptorValidationException"/> propagates before
+/// <see cref="IPolicyCatalogProvider.SetCurrent"/> ever runs — and the previously primed catalog is
+/// untouched.
 /// </summary>
+/// <remarks>
+/// Every call site that accepts a descriptor as authoritative for a change that <em>does</em> write
+/// something durable (a genuine runtime apply or idempotent rules-only re-apply, a rollback, a
+/// code-first migration that actually runs DDL) does <em>not</em> use this helper: it calls
+/// <see cref="PolicyCatalog.Build"/> directly, before the durable write, so an uncompilable rule set
+/// rejects the change before anything is committed; only once that write succeeds does it call
+/// <see cref="IPolicyCatalogProvider.SetCurrent"/>. Collapsing build-then-write-then-publish into one
+/// call — as this helper does — would be wrong there, because it would either publish before the
+/// write is known to have succeeded, or (as this type used to do) publish only after the write had
+/// already made the schema durable, leaving a rejected apply's still-committed schema paired with a
+/// stale catalog.
+/// </remarks>
 internal static class PolicyCatalogPriming
 {
     /// <summary>Compiles a <see cref="PolicyCatalog"/> from <paramref name="descriptor"/>/<paramref name="schema"/> and makes it current.</summary>
@@ -23,6 +36,6 @@ internal static class PolicyCatalogPriming
     internal static void Prime(IPolicyCatalogProvider provider, ICelCompiler compiler, AlvoDescriptor descriptor, SchemaModel schema)
     {
         var catalog = PolicyCatalog.Build(descriptor, schema, compiler);
-        provider.SetCurrent(catalog);
+        provider.SetCurrent(descriptor.Name, catalog);
     }
 }
