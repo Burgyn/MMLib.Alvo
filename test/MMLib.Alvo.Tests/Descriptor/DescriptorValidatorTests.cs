@@ -199,6 +199,7 @@ public class DescriptorValidatorTests
 
     private static string DescriptorWithHidden(string expression) => $$"""
     { "apiVersion": "alvo.dev/v1", "name": "demo",
+      "auth": { "roles": ["compliance"] },
       "entities": { "orders": {
         "fields": {
           "owner_id": { "type": "uuid" },

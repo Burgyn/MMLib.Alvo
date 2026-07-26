@@ -161,6 +161,93 @@ public class PolicyCatalogBuilderTests
         policy.Hidden["owner_id"].AlwaysOn.ShouldBeTrue();
     }
 
+    /// <summary>
+    /// A typo'd role literal is a silent authorization change — <c>'amdin' in @user.roles</c> compiles,
+    /// type-checks, and then simply never matches, so a rule an author wrote to admit admins admits
+    /// nobody (or, on the negated form, everybody). The compiler cannot catch it: it has no role catalog.
+    /// The catalog builder does, and reports it on the offending rule's own JSON path with the same
+    /// "did you mean" shape an unknown field or enum value gets.
+    /// </summary>
+    [Fact]
+    public void A_role_literal_that_is_not_a_declared_role_fails_with_a_did_you_mean_fix()
+    {
+        var descriptor = Descriptor("orders", Entity(rules: new AccessRules { List = "'amdin' in @user.roles" }));
+
+        PolicyCatalog.TryBuild(descriptor, Schema(), CelFixtures.Compiler, out var catalog, out var errors).ShouldBeFalse();
+
+        catalog.ShouldBeNull();
+        var error = errors.ShouldHaveSingleItem();
+        error.Path.ShouldBe("/entities/orders/rules/list");
+        error.FixSuggestion.ShouldNotBeNull();
+        error.FixSuggestion.ShouldContain("admin");
+    }
+
+    /// <summary>The negated form is the dangerous one — a typo there widens access instead of narrowing it.</summary>
+    [Fact]
+    public void A_negated_role_literal_that_is_not_a_declared_role_also_fails()
+    {
+        var descriptor = Descriptor("orders", Entity(rules: new AccessRules { Get = "!('amdin' in @user.roles)" }));
+
+        PolicyCatalog.TryBuild(descriptor, Schema(), CelFixtures.Compiler, out var catalog, out var errors).ShouldBeFalse();
+
+        catalog.ShouldBeNull();
+        errors.ShouldContain(e => e.Path == "/entities/orders/rules/get");
+    }
+
+    [Fact]
+    public void A_role_declared_in_auth_roles_is_accepted()
+    {
+        var descriptor = Descriptor("orders", Entity(rules: new AccessRules { List = "'editor' in @user.roles" }))
+            with
+        { Auth = new MMLib.Alvo.Descriptor.Auth { Roles = ["editor"] } };
+
+        PolicyCatalog.TryBuild(descriptor, Schema(), CelFixtures.Compiler, out var catalog, out var errors).ShouldBeTrue();
+
+        errors.ShouldBeEmpty();
+        catalog.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public void A_built_in_role_needs_no_auth_roles_declaration()
+    {
+        var descriptor = Descriptor("orders", Entity(rules: new AccessRules { List = "'authenticated' in @user.roles" }));
+
+        PolicyCatalog.TryBuild(descriptor, Schema(), CelFixtures.Compiler, out _, out var errors).ShouldBeTrue();
+
+        errors.ShouldBeEmpty();
+    }
+
+    /// <summary>A field-backed membership test names no role, so there is nothing to validate and it must still build.</summary>
+    [Fact]
+    public void A_field_backed_membership_test_is_not_treated_as_a_role_literal()
+    {
+        var descriptor = Descriptor("orders", Entity(rules: new AccessRules { List = "status in @user.roles" }));
+
+        PolicyCatalog.TryBuild(descriptor, Schema(), CelFixtures.Compiler, out _, out var errors).ShouldBeTrue();
+
+        errors.ShouldBeEmpty();
+    }
+
+    /// <summary>A field flag is a Rule-profile expression too, so its role literals get the same check.</summary>
+    [Fact]
+    public void A_role_literal_in_a_hidden_flag_is_validated_on_the_flags_own_path()
+    {
+        var fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
+        {
+            ["owner_id"] = new()
+            {
+                Type = MMLib.Alvo.Descriptor.FieldType.Uuid,
+                Hidden = BoolOrCel.FromExpression("!('amdin' in @user.roles)"),
+            },
+        };
+        var descriptor = Descriptor("orders", Entity(fields: fields));
+
+        PolicyCatalog.TryBuild(descriptor, Schema(), CelFixtures.Compiler, out var catalog, out var errors).ShouldBeFalse();
+
+        catalog.ShouldBeNull();
+        errors.ShouldContain(e => e.Path == "/entities/orders/fields/owner_id/hidden");
+    }
+
     private static SchemaModel Schema() => new([CelFixtures.Orders]);
 
     private static EntityDescriptor Entity(AccessRules? rules = null, IReadOnlyDictionary<string, FieldDescriptor>? fields = null) =>

@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Schema;
+﻿using MMLib.Alvo.Internal;
+using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Expressions.Internal;
 
@@ -400,14 +401,7 @@ internal static class CelTypeChecker
 
         private static string BuildEnumSuggestion(string value, IReadOnlyList<string> enumValues)
         {
-            var closest = enumValues
-                .Select(candidate => (candidate, Distance: LevenshteinDistance(value, candidate)))
-                .Where(candidate => candidate.Distance <= 2)
-                .OrderBy(candidate => candidate.Distance)
-                .ThenBy(candidate => candidate.candidate, StringComparer.Ordinal)
-                .Select(candidate => candidate.candidate)
-                .FirstOrDefault();
-
+            var closest = NameSuggestion.Closest(value, enumValues);
             var known = string.Join(", ", enumValues.OrderBy(candidate => candidate, StringComparer.Ordinal));
             return closest is not null ? $"Did you mean '{closest}'? Declared values: {known}." : $"Declared values: {known}.";
         }
@@ -531,13 +525,7 @@ internal static class CelTypeChecker
 
         private string BuildUnknownFieldSuggestion(string fieldName)
         {
-            var closest = entity.Fields
-                .Select(field => (field.Name, Distance: LevenshteinDistance(fieldName, field.Name)))
-                .Where(candidate => candidate.Distance <= 2)
-                .OrderBy(candidate => candidate.Distance)
-                .ThenBy(candidate => candidate.Name, StringComparer.Ordinal)
-                .Select(candidate => candidate.Name)
-                .FirstOrDefault();
+            var closest = NameSuggestion.Closest(fieldName, entity.Fields.Select(field => field.Name));
 
             if (closest is not null)
             {
@@ -628,30 +616,5 @@ internal static class CelTypeChecker
             FieldType.Json => CelValueType.Json,
             _ => CelValueType.Json,
         };
-
-        private static int LevenshteinDistance(string a, string b)
-        {
-            var distances = new int[a.Length + 1, b.Length + 1];
-            for (var i = 0; i <= a.Length; i++)
-            {
-                distances[i, 0] = i;
-            }
-
-            for (var j = 0; j <= b.Length; j++)
-            {
-                distances[0, j] = j;
-            }
-
-            for (var i = 1; i <= a.Length; i++)
-            {
-                for (var j = 1; j <= b.Length; j++)
-                {
-                    var cost = a[i - 1] == b[j - 1] ? 0 : 1;
-                    distances[i, j] = Math.Min(Math.Min(distances[i - 1, j] + 1, distances[i, j - 1] + 1), distances[i - 1, j - 1] + cost);
-                }
-            }
-
-            return distances[a.Length, b.Length];
-        }
     }
 }

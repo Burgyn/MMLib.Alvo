@@ -1,5 +1,7 @@
 ﻿using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Expressions;
+using MMLib.Alvo.Expressions.Internal;
+using MMLib.Alvo.Internal;
 using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Rules.Internal;
@@ -29,12 +31,14 @@ internal static class PolicyCatalogBuilder
         out IReadOnlyList<DescriptorValidationError> errors)
     {
         var errorList = new List<DescriptorValidationError>();
+        var roles = RoleCatalog.FromDescriptor(descriptor);
         var entities = new Dictionary<string, EntityPolicy>(StringComparer.Ordinal);
 
         foreach (var entitySchema in schema.Entities)
         {
             var entityDescriptor = descriptor.Entities.GetValueOrDefault(entitySchema.Name);
-            entities[entitySchema.Name] = BuildEntity(entitySchema.Name, entityDescriptor, entitySchema, compiler, errorList);
+            var build = new EntityBuild(entitySchema, compiler, roles, errorList);
+            entities[entitySchema.Name] = BuildEntity(entityDescriptor, build);
         }
 
         if (errorList.Count > 0)
@@ -49,15 +53,28 @@ internal static class PolicyCatalogBuilder
         return true;
     }
 
-    private static EntityPolicy BuildEntity(
-        string name, EntityDescriptor? descriptor, EntitySchema schema, ICelCompiler compiler, List<DescriptorValidationError> errors)
+    /// <summary>
+    /// The inputs one entity's whole compilation needs, bundled so every helper below reads as "compile
+    /// this source at this path" instead of re-threading four arguments that never vary within an entity.
+    /// </summary>
+    /// <param name="Schema">The entity every expression is type-checked against.</param>
+    /// <param name="Compiler">The CEL compiler every expression goes through.</param>
+    /// <param name="Roles">The project's declared roles, for validating role literals.</param>
+    /// <param name="Errors">The shared accumulator every problem is appended to.</param>
+    private sealed record EntityBuild(
+        EntitySchema Schema, ICelCompiler Compiler, RoleCatalog Roles, List<DescriptorValidationError> Errors)
     {
-        var tenantScope = SynthesizeTenantScope(name, schema, compiler, errors);
-        var operations = CompileRules(name, descriptor?.Rules, tenantScope, schema, compiler, errors);
+        public string Name => Schema.Name;
+    }
+
+    private static EntityPolicy BuildEntity(EntityDescriptor? descriptor, EntityBuild build)
+    {
+        var tenantScope = SynthesizeTenantScope(build);
+        var operations = CompileRules(descriptor?.Rules, tenantScope, build);
         var fields = descriptor?.Fields ?? new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal);
-        var hidden = CompileFieldFlags(name, "hidden", fields, field => field.Hidden, schema, compiler, errors);
-        var readOnly = CompileFieldFlags(name, "readOnly", fields, field => field.ReadOnly, schema, compiler, errors);
-        return new EntityPolicy(schema.Tenancy, tenantScope, operations, hidden, readOnly);
+        var hidden = CompileFieldFlags("hidden", fields, field => field.Hidden, build);
+        var readOnly = CompileFieldFlags("readOnly", fields, field => field.ReadOnly, build);
+        return new EntityPolicy(build.Schema.Tenancy, tenantScope, operations, hidden, readOnly);
     }
 
     /// <summary>
@@ -66,18 +83,13 @@ internal static class PolicyCatalogBuilder
     /// and reuses the same <see cref="CompiledExpression"/> instance for both slots.
     /// </summary>
     private static Dictionary<DataOperation, OperationPolicy> CompileRules(
-        string entityName,
-        AccessRules? rules,
-        CompiledExpression? tenantScope,
-        EntitySchema schema,
-        ICelCompiler compiler,
-        List<DescriptorValidationError> errors)
+        AccessRules? rules, CompiledExpression? tenantScope, EntityBuild build)
     {
-        var list = CompileOperationRule(entityName, DataOperation.List, rules?.List, schema, compiler, errors);
-        var get = CompileOperationRule(entityName, DataOperation.Get, rules?.Get, schema, compiler, errors);
-        var delete = CompileOperationRule(entityName, DataOperation.Delete, rules?.Delete, schema, compiler, errors);
-        var create = CompileOperationRule(entityName, DataOperation.Create, rules?.Create, schema, compiler, errors);
-        var update = CompileOperationRule(entityName, DataOperation.Update, rules?.Update, schema, compiler, errors);
+        var list = CompileOperationRule(DataOperation.List, rules?.List, build);
+        var get = CompileOperationRule(DataOperation.Get, rules?.Get, build);
+        var delete = CompileOperationRule(DataOperation.Delete, rules?.Delete, build);
+        var create = CompileOperationRule(DataOperation.Create, rules?.Create, build);
+        var update = CompileOperationRule(DataOperation.Update, rules?.Update, build);
 
         return new Dictionary<DataOperation, OperationPolicy>
         {
@@ -124,24 +136,8 @@ internal static class PolicyCatalogBuilder
         _ => true,
     };
 
-    private static CompiledExpression? CompileOperationRule(
-        string entityName, DataOperation operation, string? source, EntitySchema schema, ICelCompiler compiler, List<DescriptorValidationError> errors)
-    {
-        if (source is null)
-        {
-            return null;
-        }
-
-        var result = compiler.Compile(source, CelProfile.Rule, schema);
-        if (result.IsSuccess)
-        {
-            return result.Expression;
-        }
-
-        var path = $"/entities/{entityName}/rules/{operation.ToWireName()}";
-        errors.AddRange(result.Errors.Select(error => Error(path, error)));
-        return null;
-    }
+    private static CompiledExpression? CompileOperationRule(DataOperation operation, string? source, EntityBuild build) =>
+        source is null ? null : CompileRuleExpression(source, $"/entities/{build.Name}/rules/{operation.ToWireName()}", build);
 
     /// <summary>
     /// Synthesizes the tenant scope for a tenant-scoped entity by compiling
@@ -149,37 +145,104 @@ internal static class PolicyCatalogBuilder
     /// type-checked like any other rule and fails loudly (as a build error, naming the entity) if the
     /// entity has no <c>tenant_id</c> field. A global entity gets no tenant scope at all.
     /// </summary>
-    private static CompiledExpression? SynthesizeTenantScope(
-        string entityName, EntitySchema schema, ICelCompiler compiler, List<DescriptorValidationError> errors)
+    private static CompiledExpression? SynthesizeTenantScope(EntityBuild build) =>
+        build.Schema.Tenancy == TenancyMode.Scoped
+            ? CompileRuleExpression(TenantScopeSource, $"/entities/{build.Name}/tenancy", build)
+            : null;
+
+    /// <summary>
+    /// The one path from an authored Rule-profile source to a <see cref="CompiledExpression"/> this
+    /// builder trusts: compile, then validate the role literals the compiler cannot judge. Both kinds of
+    /// problem are reported on <paramref name="path"/> and both yield <see langword="null"/>, so a
+    /// rejected expression never reaches a rule slot or a field mask.
+    /// </summary>
+    private static CompiledExpression? CompileRuleExpression(string source, string path, EntityBuild build)
     {
-        if (schema.Tenancy != TenancyMode.Scoped)
+        var result = build.Compiler.Compile(source, CelProfile.Rule, build.Schema);
+        if (!result.IsSuccess)
         {
+            build.Errors.AddRange(result.Errors.Select(error => Error(path, error)));
             return null;
         }
 
-        var result = compiler.Compile(TenantScopeSource, CelProfile.Rule, schema);
-        if (result.IsSuccess)
-        {
-            return result.Expression;
-        }
+        return HasDeclaredRoleLiterals(result.Expression!, path, build) ? result.Expression : null;
+    }
 
-        errors.AddRange(result.Errors.Select(error => Error($"/entities/{entityName}/tenancy", error)));
-        return null;
+    /// <summary>
+    /// Validates every role literal in a compiled tree against the project's declared roles. A typo'd
+    /// literal (<c>'amdin' in @user.roles</c>) compiles and type-checks perfectly and then simply never
+    /// matches, so a rule written to admit admins admits nobody — or, negated, everybody.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately a post-compile walk here rather than a check inside <see cref="ICelCompiler.Compile"/>:
+    /// the compiler judges one expression against one entity schema and has no role catalog. Declared
+    /// roles are a project-level concern (the descriptor's <c>auth.roles</c> plus the built-ins), and the
+    /// compiler is reachable from callers holding no descriptor at all.
+    /// </remarks>
+    private static bool HasDeclaredRoleLiterals(CompiledExpression expression, string path, EntityBuild build)
+    {
+        var undeclared = RoleLiterals(expression.Root)
+            .Where(role => !build.Roles.TryGet(role, out _))
+            .ToList();
+
+        build.Errors.AddRange(undeclared.Select(role => UndeclaredRoleError(path, role, build.Roles)));
+        return undeclared.Count == 0;
+    }
+
+    /// <summary>
+    /// Every string literal tested for membership in <c>@user.roles</c>, walked iteratively. A
+    /// membership test whose left operand is a row field names no role and yields nothing —
+    /// <see cref="RoleMembership"/> already guarantees the right operand is the role set.
+    /// </summary>
+    private static IEnumerable<string> RoleLiterals(CelNode root)
+    {
+        var pending = new Stack<CelNode>();
+        pending.Push(root);
+
+        while (pending.Count > 0)
+        {
+            var node = pending.Pop();
+            if (node is CelBinary { Operator: CelBinaryOperator.In, Left: CelLiteral { Type: CelValueType.String, Value: string role } })
+            {
+                yield return role;
+            }
+
+            foreach (var child in CelTree.Children(node))
+            {
+                pending.Push(child);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Builds the "undeclared role" rejection, reusing the same "did you mean" shape an unknown field or
+    /// enum value gets — a typo is by far the likeliest cause, so the fix names the nearest declared role.
+    /// </summary>
+    private static DescriptorValidationError UndeclaredRoleError(string path, string role, RoleCatalog roles)
+    {
+        var declared = roles.All.Select(candidate => candidate.Name).OrderBy(name => name, StringComparer.Ordinal).ToList();
+        var closest = NameSuggestion.Closest(role, declared);
+        var known = string.Join(", ", declared);
+
+        return new(
+            path,
+            $"'{role}' is not a declared role, so this membership test can never match.",
+            closest is not null
+                ? $"Did you mean '{closest}'? Declared roles: {known}."
+                : $"Declared roles: {known}. Add the role to auth.roles in the descriptor.",
+            DescriptorValidationSeverity.Error);
     }
 
     private static Dictionary<string, FieldMask> CompileFieldFlags(
-        string entityName,
         string flagName,
         IReadOnlyDictionary<string, FieldDescriptor> fields,
         Func<FieldDescriptor, BoolOrCel?> selector,
-        EntitySchema schema,
-        ICelCompiler compiler,
-        List<DescriptorValidationError> errors)
+        EntityBuild build)
     {
         var result = new Dictionary<string, FieldMask>(StringComparer.Ordinal);
         foreach (var (fieldName, field) in fields)
         {
-            var mask = CompileFieldFlag(entityName, fieldName, flagName, selector(field), schema, compiler, errors);
+            var mask = CompileFieldFlag(fieldName, flagName, selector(field), build);
             if (mask is not null)
             {
                 result[fieldName] = mask.Value;
@@ -189,8 +252,7 @@ internal static class PolicyCatalogBuilder
         return result;
     }
 
-    private static FieldMask? CompileFieldFlag(
-        string entityName, string fieldName, string flagName, BoolOrCel? flag, EntitySchema schema, ICelCompiler compiler, List<DescriptorValidationError> errors)
+    private static FieldMask? CompileFieldFlag(string fieldName, string flagName, BoolOrCel? flag, EntityBuild build)
     {
         if (flag is null)
         {
@@ -202,20 +264,19 @@ internal static class PolicyCatalogBuilder
             return flag.Boolean == true ? FieldMask.Always : null;
         }
 
-        var path = $"/entities/{entityName}/fields/{fieldName}/{flagName}";
-        var result = compiler.Compile(flag.Expression!, CelProfile.Rule, schema);
-        if (!result.IsSuccess)
+        var path = $"/entities/{build.Name}/fields/{fieldName}/{flagName}";
+        var compiled = CompileRuleExpression(flag.Expression!, path, build);
+        if (compiled is null)
         {
-            errors.AddRange(result.Errors.Select(error => Error(path, error)));
             return null;
         }
 
-        if (!ReferencesRowField(result.Expression!.Root))
+        if (!ReferencesRowField(compiled.Root))
         {
-            return FieldMask.FromExpression(result.Expression);
+            return FieldMask.FromExpression(compiled);
         }
 
-        errors.Add(RowDependentMaskError(path, flagName));
+        build.Errors.Add(RowDependentMaskError(path, flagName));
         return null;
     }
 

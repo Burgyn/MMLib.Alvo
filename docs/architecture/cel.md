@@ -90,6 +90,19 @@ An unrecognized `CelNode` kind counts as *referencing* the value (deny-by-defaul
 construct added without updating the walk errs towards denying rather than towards resolving a
 predicate against an absent operand.
 
+### Role literals are validated at apply, not at request time
+
+`PolicyCatalogBuilder` also walks every compiled Rule-profile tree (rules *and* `hidden`/`readOnly`
+flags) for string literals tested against `@user.roles`, and rejects any that is neither a built-in role
+nor declared in the descriptor's `auth.roles` — with the same "did you mean" fix suggestion an unknown
+field or enum value gets. A typo'd literal (`'amdin' in @user.roles`) compiles and type-checks perfectly
+and then simply never matches, so a rule written to admit admins admits nobody — and, negated, everybody.
+
+This is deliberately a **post-compile walk in the catalog builder, not a check inside
+`ICelCompiler.Compile`**: the compiler judges one expression against one entity schema and holds no role
+catalog, declared roles are a project-level concern, and the compiler is reachable from callers with no
+descriptor at all.
+
 ## Two-valued rendering: the rule both backends must agree on
 
 Alvo has two `CompiledExpression` backends — `CelInterpreter` (in-memory, used for `WITH CHECK`

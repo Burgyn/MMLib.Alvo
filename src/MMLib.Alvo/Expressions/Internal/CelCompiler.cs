@@ -133,7 +133,7 @@ internal sealed class CelCompiler : ICelCompiler
             var (node, depth) = stack.Pop();
             maxDepth = Math.Max(maxDepth, depth);
 
-            foreach (var child in Children(node))
+            foreach (var child in CelTree.Children(node))
             {
                 stack.Push((child, depth + 1));
             }
@@ -141,25 +141,4 @@ internal sealed class CelCompiler : ICelCompiler
 
         return maxDepth;
     }
-
-    /// <summary>
-    /// Enumerates a node's direct children for the depth walk. Every known leaf kind is named
-    /// explicitly (never via a wildcard) so that a genuinely unrecognized node — one CheckNode
-    /// itself would also reject — fails loudly instead of silently hiding its subtree from the
-    /// depth cap; this can only be reached by a compiler defect (a new CelNode case added here
-    /// without a matching case here), never by any source string a caller passes to Compile.
-    /// </summary>
-    private static IEnumerable<CelNode> Children(CelNode node) => node switch
-    {
-        CelLiteral => [],
-        CelFieldRef => [],
-        CelContextRef => [],
-        CelChanged => [],
-        CelUnary unary => [unary.Operand],
-        CelBinary binary => [binary.Left, binary.Right],
-        CelConditional conditional => [conditional.Condition, conditional.WhenTrue, conditional.WhenFalse],
-        CelHas has => [has.Field],
-        _ => throw new InvalidOperationException(
-            $"'{node.GetType().Name}' is not a known CEL node kind; the depth cap cannot verify its subtree."),
-    };
 }

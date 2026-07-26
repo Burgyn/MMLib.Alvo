@@ -315,6 +315,7 @@ public class PolicyEngineTests
         {
           "apiVersion": "alvo.dev/v1",
           "name": "test",
+          "auth": { "roles": ["editor"] },
           "entities": {
             "orders": {
               "fields": {},
