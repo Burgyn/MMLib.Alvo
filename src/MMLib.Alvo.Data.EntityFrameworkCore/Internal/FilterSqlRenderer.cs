@@ -101,7 +101,7 @@ internal static class FilterSqlRenderer
         AlvoComparison comparison, EntitySchema entity, IFieldSqlRenderer fields, ParameterBag bag)
     {
         var declared = QueryFieldGuard.DeclaredField(entity, comparison.Field);
-        var type = FieldCelType.Of(declared);
+        var type = CelFieldType.Of(declared);
         var field = fields.RenderField(entity, declared.Name);
 
         return comparison.Operator switch

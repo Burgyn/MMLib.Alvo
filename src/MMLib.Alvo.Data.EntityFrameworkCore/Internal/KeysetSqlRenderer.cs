@@ -82,7 +82,7 @@ internal static class KeysetSqlRenderer
         var (column, parameter) = fields.RenderComparableOperands(
             fields.RenderField(entity, declared.Name),
             Bind(anchor.Values[index], fields, prefix, parameters),
-            FieldCelType.Of(declared));
+            CelFieldType.Of(declared));
         var strict = key.Descending ? "<" : ">";
         var tail = Level(index + 1, anchor, entity, fields, prefix, parameters);
 
@@ -97,7 +97,7 @@ internal static class KeysetSqlRenderer
         var (column, parameter) = fields.RenderComparableOperands(
             fields.RenderField(entity, declared.Name),
             Bind(anchor.RowId, fields, prefix, parameters),
-            FieldCelType.Of(declared));
+            CelFieldType.Of(declared));
 
         return $"{column} > {parameter}";
     }

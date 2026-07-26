@@ -157,7 +157,7 @@ internal static class CelTypeChecker
                 return (fieldRef, CelValueType.Null, true, position);
             }
 
-            var type = MapFieldType(field.Type);
+            var type = CelFieldType.Of(field.Type);
             return (fieldRef with { Type = type }, type, stateBad, position);
         }
 
@@ -604,17 +604,5 @@ internal static class CelTypeChecker
         private static bool IsKnownFieldType(FieldType type) => type is
             FieldType.String or FieldType.Text or FieldType.Integer or FieldType.Decimal or FieldType.Boolean
             or FieldType.Date or FieldType.DateTime or FieldType.Uuid or FieldType.Json or FieldType.Enum or FieldType.Ref;
-
-        private static CelValueType MapFieldType(FieldType type) => type switch
-        {
-            FieldType.String or FieldType.Text or FieldType.Enum => CelValueType.String,
-            FieldType.Integer => CelValueType.Int,
-            FieldType.Decimal => CelValueType.Decimal,
-            FieldType.Boolean => CelValueType.Bool,
-            FieldType.Date or FieldType.DateTime => CelValueType.Timestamp,
-            FieldType.Uuid or FieldType.Ref => CelValueType.Uuid,
-            FieldType.Json => CelValueType.Json,
-            _ => CelValueType.Json,
-        };
     }
 }

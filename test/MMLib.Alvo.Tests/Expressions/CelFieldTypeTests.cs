@@ -1,8 +1,7 @@
-﻿using Microsoft.Extensions.DependencyInjection;
-using MMLib.Alvo.Expressions;
+﻿using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Schema;
 
-namespace MMLib.Alvo.Data.EntityFrameworkCore.Tests;
+namespace MMLib.Alvo.Tests.Expressions;
 
 /// <summary>
 /// The "one answer per field type" invariant between the filter path and the CEL path. A filter is not CEL,
@@ -29,12 +28,12 @@ public class FieldCelTypeTests
     [InlineData(FieldType.Uuid)]
     [InlineData(FieldType.Ref)]
     [InlineData(FieldType.Json)]
-    public void The_filter_paths_type_is_the_one_the_cel_compiler_resolves(FieldType type)
-        => FieldCelType.Of(Field(type)).ShouldBe(CompilerResolvedType(type));
+    public void The_shared_mapping_is_the_one_the_cel_compiler_resolves(FieldType type)
+        => CelFieldType.Of(Field(type)).ShouldBe(CompilerResolvedType(type));
 
     [Fact]
     public void A_field_is_required()
-        => Should.Throw<ArgumentNullException>(() => FieldCelType.Of(null!));
+        => Should.Throw<ArgumentNullException>(() => CelFieldType.Of((FieldSchema)null!));
 
     /// <summary>
     /// <c>has(probe)</c> resolves the field's own type for every field type, where a comparison would first
@@ -43,14 +42,13 @@ public class FieldCelTypeTests
     /// </summary>
     private static CelValueType CompilerResolvedType(FieldType type)
     {
-        using var services = new ServiceCollection().AddAlvo().Services.BuildServiceProvider();
         var entity = new EntitySchema
         {
             Name = "probes",
             Fields = [new FieldSchema { Name = "id", Type = FieldType.Uuid, Required = true }, Field(type)],
         };
 
-        var compiled = services.GetRequiredService<ICelCompiler>().Compile("has(probe)", CelProfile.Rule, entity);
+        var compiled = CelFixtures.Compiler.Compile("has(probe)", CelProfile.Rule, entity);
         compiled.IsSuccess.ShouldBeTrue(
             $"'has(probe)' over a {type} field did not compile: "
             + string.Join("; ", compiled.Errors.Select(error => error.Message)));

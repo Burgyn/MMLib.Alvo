@@ -729,6 +729,11 @@ namespace MMLib.Alvo.Expressions
         public MMLib.Alvo.Expressions.CelRecordState State { get; init; }
         public MMLib.Alvo.Expressions.CelValueType Type { get; init; }
     }
+    public static class CelFieldType
+    {
+        public static MMLib.Alvo.Expressions.CelValueType Of(MMLib.Alvo.Schema.FieldSchema field) { }
+        public static MMLib.Alvo.Expressions.CelValueType Of(MMLib.Alvo.Schema.FieldType type) { }
+    }
     public sealed class CelHas : MMLib.Alvo.Expressions.CelNode, System.IEquatable<MMLib.Alvo.Expressions.CelHas>
     {
         public CelHas(MMLib.Alvo.Expressions.CelFieldRef Field) { }
