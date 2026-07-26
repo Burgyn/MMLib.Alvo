@@ -77,12 +77,24 @@ public interface IAlvoData
     /// widen it past what policy already allows.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <b>A filter or sort key may only name a field the caller can actually read.</b> Filtering,
     /// sorting and paging are applied to the stored row while masking is applied to the response, so a
     /// filter over a field in <see cref="PolicyDecision.HiddenFields"/> would leak that field one
     /// comparison per request and a sort over one would leak its ordering across the whole page. An
     /// implementation must reject both — masks fail closed, so the query is refused, never answered
     /// with the offending term quietly dropped.
+    /// </para>
+    /// <para>
+    /// <b>A filter or sort key must also name a field the entity's schema actually declares.</b> This
+    /// is the one caller-supplied string an implementation interpolates into <c>WHERE</c>/
+    /// <c>ORDER BY</c> as an <em>identifier</em> — SQL has no bind-parameter form of a column name — so
+    /// validating it here, against the schema, is what keeps that interpolation safe; an implementation
+    /// must not rely on the engine's own unknown-column error, which happens after the statement is
+    /// composed. The refusal must be indistinguishable from the hidden-field refusal above and must not
+    /// echo the offending name (it is attacker-controlled text): a caller must not be able to tell
+    /// "exists but hidden from you" from "does not exist".
+    /// </para>
     /// </remarks>
     /// <param name="query">The entity, filter, sort, and paging to apply.</param>
     /// <param name="context">The caller performing the query.</param>
@@ -90,7 +102,8 @@ public interface IAlvoData
     /// <returns>Every visible, matching row, with every <c>hidden</c> field stripped.</returns>
     /// <exception cref="AlvoAuthorizationException">
     /// No policy allows <c>list</c> on this entity for <paramref name="context"/>, or
-    /// <paramref name="query"/>'s filter or sort names a field this caller may not read.
+    /// <paramref name="query"/>'s filter or sort names a field this caller may not read or the schema
+    /// does not declare.
     /// </exception>
     Task<IReadOnlyList<AlvoRecord>> QueryAsync(AlvoQuery query, AlvoContext context, CancellationToken cancellationToken = default);
 

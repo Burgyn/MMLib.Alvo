@@ -215,22 +215,38 @@ public sealed class InMemoryAlvoData : IAlvoData
     }
 
     /// <summary>
-    /// Rejects a filter or sort key naming a field this caller may not read, <b>before</b> any row is
-    /// touched. Filtering, sorting and paging all happen over the raw row and masking is applied only
-    /// on the way out, so a filter over a <c>hidden</c> field would let a caller binary-search a value
-    /// they may never read (one comparison per request) and a sort over one would disclose its
-    /// ordering across the whole page — neither of which the response body ever shows. Masks fail
-    /// closed, so the query is refused rather than silently answered without the offending term.
+    /// Rejects a filter or sort key naming a field this caller may not read — either because the mask
+    /// hides it, or because the entity's schema never declared it — <b>before</b> any row is touched.
+    /// Filtering, sorting and paging all happen over the raw row and masking is applied only on the way
+    /// out, so a filter over a <c>hidden</c> field would let a caller binary-search a value they may
+    /// never read (one comparison per request) and a sort over one would disclose its ordering across
+    /// the whole page — neither of which the response body ever shows. An undeclared name is refused
+    /// here because this is the seam where a real backend interpolates it into <c>WHERE</c>/
+    /// <c>ORDER BY</c> as an identifier, which has no bind-parameter form. Masks fail closed, so the
+    /// query is refused rather than silently answered without the offending term.
     /// </summary>
-    private static void EnsureQueryFieldsAvailable(AlvoQuery query, PolicyDecision decision)
+    private void EnsureQueryFieldsAvailable(AlvoQuery query, PolicyDecision decision)
     {
+        var declared = DeclaredFields(query.Entity);
         foreach (var field in QueryFields(query))
         {
-            if (decision.HiddenFields.Contains(field))
+            if (decision.HiddenFields.Contains(field) || !declared.Contains(field))
             {
                 throw new AlvoAuthorizationException(UnavailableQueryFieldMessage);
             }
         }
+    }
+
+    /// <summary>
+    /// The entity's declared field names. An entity this store's schema does not know yields an empty
+    /// set, so every name fails closed rather than being waved through unchecked.
+    /// </summary>
+    private HashSet<string> DeclaredFields(string entity)
+    {
+        var entitySchema = _schema.Entities.FirstOrDefault(candidate => string.Equals(candidate.Name, entity, StringComparison.Ordinal));
+        return entitySchema is null
+            ? new HashSet<string>(StringComparer.Ordinal)
+            : entitySchema.Fields.Select(field => field.Name).ToHashSet(StringComparer.Ordinal);
     }
 
     private static IEnumerable<string> QueryFields(AlvoQuery query) =>

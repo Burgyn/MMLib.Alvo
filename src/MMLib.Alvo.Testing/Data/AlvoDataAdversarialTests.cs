@@ -589,6 +589,35 @@ public abstract class AlvoDataAdversarialTests
         sorted[0]["title"].ShouldBe("Acct-2");
     }
 
+    /// <summary>
+    /// A filter/sort field name is the one caller-supplied string a real backend interpolates into
+    /// <c>WHERE</c>/<c>ORDER BY</c> as an <em>identifier</em> — SQL has no bind-parameter form of a
+    /// column name — so it must be validated against the entity's declared fields at this port, before
+    /// it can ever reach that seam. The name used here is a quote-breaking payload; the refusal must
+    /// also not echo it back, since it is attacker-controlled text and a log-injection vector, and must
+    /// be indistinguishable from the refusal a merely-hidden field gets (otherwise the pair of messages
+    /// is itself a schema-shape oracle).
+    /// </summary>
+    [Fact]
+    public async Task A_filter_or_sort_naming_a_field_the_schema_does_not_declare_is_rejected()
+    {
+        const string InjectionAttempt = "title\"; DROP TABLE items; --";
+        var fixture = await AccountsFixtureAsync();
+        var member = NewContext(tenant: null);
+
+        var filtered = await Should.ThrowAsync<AlvoAuthorizationException>(() => fixture.Data.QueryAsync(
+            QueryFilteredBy(new AlvoComparison(InjectionAttempt, AlvoFilterOperator.Eq, "x")), member));
+        filtered.Message.ShouldNotContain("DROP TABLE");
+
+        var sorted = await Should.ThrowAsync<AlvoAuthorizationException>(() => fixture.Data.QueryAsync(
+            new AlvoQuery { Entity = "accounts", Sort = [new AlvoSort(InjectionAttempt)] }, member));
+        sorted.Message.ShouldNotContain("DROP TABLE");
+
+        var hidden = await Should.ThrowAsync<AlvoAuthorizationException>(() => fixture.Data.QueryAsync(
+            QueryFilteredBy(new AlvoComparison("secret", AlvoFilterOperator.Eq, "shh")), member));
+        filtered.Message.ShouldBe(hidden.Message);
+    }
+
     private static AlvoQuery QueryFilteredBy(AlvoFilter filter) => new() { Entity = "accounts", Filter = filter };
 
     /// <summary>
