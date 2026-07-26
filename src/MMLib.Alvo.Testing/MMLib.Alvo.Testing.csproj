@@ -23,21 +23,15 @@
   </ItemGroup>
 
   <!--
-    InMemoryAlvoData (Task 12) is a reference IAlvoData: it enforces the resolved policy
-    predicate per row through the exact same CEL backend a real provider evaluates WITH CHECK
-    with — MMLib.Alvo's internal CelInterpreter — rather than re-implementing CEL evaluation a
-    second time in this project. A second interpreter would be exactly the kind of divergence
-    Task 10's differential suite exists to catch between backends; referencing the one real
-    implementation avoids introducing a second one to keep in sync. Granted via
-    MMLib.Alvo's own InternalsVisibleTo("MMLib.Alvo.Testing"), the same mechanism
-    MMLib.Alvo.Tests already uses to construct PolicyEngine/PolicyCatalogProvider directly.
-    This does not weaken the package boundary: neither shared-architecture test constrains this
-    project's own dependencies (only MMLib.Alvo's — Abstractions-only — and
-    MMLib.Alvo.Abstractions's — nothing), and MMLib.Alvo itself never references this project back.
+    InMemoryAlvoData (Task 12) enforces the resolved policy predicate per row through
+    IPredicateEvaluator (MMLib.Alvo.Abstractions/Expressions) — a published port, not an
+    InternalsVisibleTo into the core. This project stays Abstractions-only: a prior revision
+    referenced MMLib.Alvo directly (via InternalsVisibleTo) to reach CelInterpreter, which review
+    correctly rejected — MMLib.Alvo.Testing is a package planned to ship, and an unsigned
+    InternalsVisibleTo to a published assembly name is forgeable by anyone naming their own
+    assembly the same. IPredicateEvaluator is the one real CEL evaluator, reached through a
+    contract instead, exactly like IPredicateRenderer is for SQL.
   -->
-  <ItemGroup>
-    <ProjectReference Include="../MMLib.Alvo/MMLib.Alvo.csproj" />
-  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="xunit.v3.extensibility.core" />

@@ -17,15 +17,26 @@ namespace MMLib.Alvo.Testing.Data;
 /// decision per row.
 /// </summary>
 /// <remarks>
-/// Sixteen facts come from the F3 design brief; two more (<see cref="A_nullable_boolean_field_used_bare_in_a_rule_works_end_to_end"/>
-/// and <see cref="A_hidden_expression_that_cannot_resolve_still_masks_the_field"/>) were added
-/// because earlier tasks found the exact bugs they guard against — a boolean row field used bare
-/// in a rule, and a <c>hidden</c> expression that cannot resolve for the caller — so this suite
-/// proves both fixes hold through the full port, not only at the CEL-interpreter unit-test level.
-/// Every fact builds its own descriptor, schema, and seed rows with freshly generated ids — no
-/// fact relies on another's data, on insertion order, or on a fixed literal id, so a real-database
-/// subclass (PR2) can run every fact in any order, in parallel, against a store it does not reset
-/// between facts.
+/// <para>
+/// Sixteen facts come from the F3 design brief; the rest were added because review or an earlier
+/// task found the exact bug they guard against, so this suite proves the fix holds through the
+/// full port, not only at the CEL-interpreter or policy-engine unit-test level — a bare boolean row
+/// field in a rule, a <c>hidden</c> expression that cannot resolve for the caller, a write that
+/// would place or move a row into another tenant, list-path field masking (not only single-row
+/// masking), a payload rewriting a row's own <c>id</c>, a legitimate write that must actually
+/// persist, and <c>Limit</c> applied after policy rather than before it. Every fact builds its own
+/// descriptor, schema, and seed rows with freshly generated ids — no fact relies on another's data,
+/// on insertion order, or on a fixed literal id.
+/// </para>
+/// <para>
+/// <b>Per-fact isolation is required, not optional.</b> A subclass's <see cref="CreateAsync"/> must
+/// return a store scoped to that one call — a fresh schema/table set, or at least data isolated
+/// from every other fact's — never a single store shared and never reset across the whole suite.
+/// Several facts (<c>logs</c>, <c>settings</c>, <c>posts</c>) declare no row-scoping predicate at
+/// all and assert an exact row count; those assertions are only valid if no other fact's rows have
+/// ever landed in the same entity. Facts may still run in any order or in parallel <em>relative to
+/// each other</em>, as long as each owns its own isolated data.
+/// </para>
 /// </remarks>
 public abstract class AlvoDataAdversarialTests
 {
@@ -33,7 +44,12 @@ public abstract class AlvoDataAdversarialTests
     /// Builds a fresh <see cref="IAlvoData"/> over <paramref name="descriptor"/>/<paramref name="schema"/>,
     /// seeded with <paramref name="seed"/>'s rows. A real provider creates its physical schema from
     /// <paramref name="descriptor"/>/<paramref name="schema"/> and inserts <paramref name="seed"/>
-    /// through its own write path before returning.
+    /// <b>out of band</b> — a raw <c>INSERT</c> (or equivalent), never through the port's own
+    /// <see cref="IAlvoData.CreateAsync"/>: several fixtures seed rows a policy-respecting write
+    /// could never produce (<c>notes</c> seeds rows for two different owners in one call; <c>logs</c>
+    /// and <c>vaults</c> declare no <c>create</c> rule at all, so any policy-respecting insert into
+    /// them would deny). Seeding therefore bypasses policy entirely, exactly like
+    /// <c>InMemoryAlvoData.Seed</c> does.
     /// </summary>
     /// <param name="schema">The schema every entity in <paramref name="descriptor"/> maps to.</param>
     /// <param name="descriptor">The project descriptor whose rules/tenancy/field flags apply.</param>
@@ -171,7 +187,14 @@ public abstract class AlvoDataAdversarialTests
         result[0]["tenant_id"].ShouldBe(fixture.Acme.Value);
     }
 
-    /// <summary>The §4 acceptance criterion: a throw, and no rows returned.</summary>
+    /// <summary>
+    /// The §4 acceptance criterion, made into a real, independently failing assertion: a tenantless
+    /// caller's query throws with no rows ever assigned to the caller's variable (an implementation
+    /// that throws only after materializing the rows would still fail this), <b>and</b> no
+    /// tenant-bearing caller over the very same store — Acme, Globex, or a third tenant — ever sees
+    /// more than exactly its own one row, proving the throw is not masking a leak everyone else
+    /// still gets.
+    /// </summary>
     [Fact]
     public async Task A_query_with_no_tenant_context_fails_rather_than_returning_every_tenants_rows()
     {
@@ -183,6 +206,14 @@ public abstract class AlvoDataAdversarialTests
             captured = await fixture.Data.QueryAsync(new AlvoQuery { Entity = "documents" }, tenantless));
 
         captured.ShouldBeNull();
+
+        var acmeResult = await fixture.Data.QueryAsync(new AlvoQuery { Entity = "documents" }, NewContext(fixture.Acme));
+        var globexResult = await fixture.Data.QueryAsync(new AlvoQuery { Entity = "documents" }, NewContext(fixture.Globex));
+        var thirdResult = await fixture.Data.QueryAsync(new AlvoQuery { Entity = "documents" }, NewContext(fixture.Third));
+
+        acmeResult.Count.ShouldBe(1);
+        globexResult.Count.ShouldBe(1);
+        thirdResult.Count.ShouldBe(1);
     }
 
     /// <summary>A tenantless context cannot create into a scoped entity, even with a permissive <c>"true"</c> rule.</summary>
@@ -208,7 +239,12 @@ public abstract class AlvoDataAdversarialTests
         result.ShouldBeNull();
     }
 
-    /// <summary>Both a statically <c>hidden: true</c> field and a context-conditional one never appear in a returned record.</summary>
+    /// <summary>
+    /// Both a statically <c>hidden: true</c> field and a context-conditional one never appear in a
+    /// returned record — on every path that returns one: a single-row read, a list of many rows
+    /// (masking every row, not only the first or only a single-row read), and the record a write
+    /// itself returns.
+    /// </summary>
     [Fact]
     public async Task A_hidden_field_never_appears_in_a_returned_record()
     {
@@ -225,6 +261,15 @@ public abstract class AlvoDataAdversarialTests
         asAdmin.ShouldNotBeNull();
         asAdmin!.Values.ContainsKey("secret").ShouldBeFalse();
         asAdmin.Values.ContainsKey("note").ShouldBeTrue();
+
+        var listedByMember = await fixture.Data.QueryAsync(new AlvoQuery { Entity = "accounts" }, member);
+        listedByMember.Count.ShouldBe(2);
+        listedByMember.ShouldAllBe(row => !row.Values.ContainsKey("secret") && !row.Values.ContainsKey("note"));
+
+        var updated = await fixture.Data.UpdateAsync(
+            "accounts", fixture.RowId, new Dictionary<string, object?> { ["title"] = "Renamed" }, member);
+        updated.Values.ContainsKey("secret").ShouldBeFalse();
+        updated.Values.ContainsKey("note").ShouldBeFalse();
     }
 
     /// <summary>Rejected, never silently dropped — and the stored value is unchanged.</summary>
@@ -243,7 +288,15 @@ public abstract class AlvoDataAdversarialTests
         unchanged!["status"].ShouldBe("active");
     }
 
-    /// <summary>The regression that justifies <c>@user.roles</c>: a caller holding {authenticated, admin} satisfies both rules.</summary>
+    /// <summary>
+    /// The regression that justifies <c>@user.roles</c>: a caller holding {authenticated, admin}
+    /// satisfies both rules. Also carries the negative leg a broken, always-<see langword="true"/>
+    /// <c>in</c> could otherwise hide behind: a plain authenticated, non-admin caller must see
+    /// <c>list</c> filtered down to nothing (the row-visibility predicate genuinely excludes it)
+    /// while <c>get</c> — gated only on <c>'authenticated' in @user.roles</c> — still works for the
+    /// very same caller, proving role membership is actually being evaluated, not merely allowed
+    /// through unconditionally.
+    /// </summary>
     [Fact]
     public async Task An_admin_rule_over_the_role_set_matches_a_multi_role_caller()
     {
@@ -257,12 +310,19 @@ public abstract class AlvoDataAdversarialTests
         var seed = SeedOf("settings", Row(rowId, ("title", "Config")));
         var data = await CreateAsync(schema, descriptor, seed);
         var multiRole = NewContext(tenant: null, Role.Admin);
+        var nonAdmin = NewContext(tenant: null);
 
         var listed = await data.QueryAsync(new AlvoQuery { Entity = "settings" }, multiRole);
         listed.Count.ShouldBe(1);
 
         var got = await data.GetAsync("settings", rowId, multiRole);
         got.ShouldNotBeNull();
+
+        var listedByNonAdmin = await data.QueryAsync(new AlvoQuery { Entity = "settings" }, nonAdmin);
+        listedByNonAdmin.ShouldBeEmpty();
+
+        var gotByNonAdmin = await data.GetAsync("settings", rowId, nonAdmin);
+        gotByNonAdmin.ShouldNotBeNull();
     }
 
     /// <summary>A caller-supplied <c>owner_id = &lt;Bob&gt;</c> filter returns nothing rather than Bob's rows.</summary>
@@ -345,11 +405,141 @@ public abstract class AlvoDataAdversarialTests
         result!.Values.ContainsKey("sensitive").ShouldBeFalse();
     }
 
+    /// <summary>
+    /// The write-side mirror of <see cref="A_tenant_scoped_entity_never_returns_another_tenants_rows"/>:
+    /// a permissive <c>"true"</c> create rule is not enough to place a row in another tenant. Only
+    /// the synthesized tenant scope, evaluated over the create post-image, can deny this — an
+    /// implementation that renders the tenant scope into the read <c>WHERE</c> but omits it from
+    /// the write-side <c>WITH CHECK</c> evaluation would otherwise let an Acme caller create rows
+    /// directly into Globex's tenant.
+    /// </summary>
+    [Fact]
+    public async Task Create_into_another_tenant_is_denied()
+    {
+        var fixture = await DocumentsFixtureAsync();
+        var acmeUser = NewContext(fixture.Acme);
+        var payload = new Dictionary<string, object?> { ["tenant_id"] = fixture.Globex.Value, ["title"] = "smuggled" };
+
+        await Should.ThrowAsync<AlvoAuthorizationException>(() => fixture.Data.CreateAsync("documents", payload, acmeUser));
+    }
+
+    /// <summary>
+    /// The update-side mirror: a caller cannot move an existing row into another tenant either.
+    /// <c>tenant_id</c> is a framework-managed column a payload may never touch on update at all
+    /// (see <see cref="Update_cannot_rewrite_the_row_id"/>'s sibling check), so this is denied
+    /// before any rule even runs — and the stored row is confirmed unchanged afterward.
+    /// </summary>
+    [Fact]
+    public async Task Update_cannot_move_a_row_into_another_tenant()
+    {
+        var fixture = await NotesFixtureAsync();
+        var otherTenant = TenantId.New();
+
+        await Should.ThrowAsync<AlvoAuthorizationException>(() => fixture.Data.UpdateAsync(
+            "notes", fixture.AliceRow1Id, new Dictionary<string, object?> { ["tenant_id"] = otherTenant.Value }, fixture.Alice));
+
+        var stillInOriginalTenant = await fixture.Data.GetAsync("notes", fixture.AliceRow1Id, fixture.Alice);
+        stillInOriginalTenant.ShouldNotBeNull();
+        stillInOriginalTenant!["tenant_id"].ShouldBe(fixture.Tenant.Value);
+    }
+
+    /// <summary>
+    /// <c>id</c> is assigned once, at creation, and a payload can never rewrite it — an
+    /// implementation that only checks a payload key against the policy's descriptor-declared
+    /// <c>ReadOnlyFields</c> would miss this entirely, since <c>id</c> is a framework-managed column
+    /// injected by schema mapping, never a descriptor field, so it can never appear in that set. A
+    /// port that let this through would corrupt row identity — two rows sharing one <c>id</c>, and
+    /// the row whose id was stolen becoming unreachable.
+    /// </summary>
+    [Fact]
+    public async Task Update_cannot_rewrite_the_row_id()
+    {
+        var fixture = await NotesFixtureAsync();
+
+        await Should.ThrowAsync<AlvoAuthorizationException>(() => fixture.Data.UpdateAsync(
+            "notes", fixture.AliceRow1Id, new Dictionary<string, object?> { ["id"] = fixture.BobRowId }, fixture.Alice));
+
+        var aliceRowIntact = await fixture.Data.GetAsync("notes", fixture.AliceRow1Id, fixture.Alice);
+        aliceRowIntact.ShouldNotBeNull();
+
+        var bobRowIntact = await fixture.Data.GetAsync("notes", fixture.BobRowId, fixture.Bob);
+        bobRowIntact.ShouldNotBeNull();
+    }
+
+    /// <summary>
+    /// The distinguishing case between post-image and payload-only evaluation: a payload that
+    /// touches only an unrelated field (never mentioning <c>owner_id</c>) must still succeed,
+    /// because the complete post-image (stored row merged with the payload) still satisfies
+    /// <c>owner_id == @user.id</c> — an implementation that evaluated <c>WITH CHECK</c> against the
+    /// payload alone would see <c>owner_id</c> as absent (reading as <see langword="null"/>) and
+    /// wrongly deny every such update.
+    /// </summary>
+    [Fact]
+    public async Task Update_of_an_unrelated_field_succeeds_when_the_post_image_still_satisfies_the_rule()
+    {
+        var fixture = await NotesFixtureAsync();
+
+        var updated = await fixture.Data.UpdateAsync(
+            "notes", fixture.AliceRow1Id, new Dictionary<string, object?> { ["title"] = "renamed" }, fixture.Alice);
+
+        updated["title"].ShouldBe("renamed");
+        updated["owner_id"].ShouldBe(fixture.Alice.User.Value);
+
+        var reread = await fixture.Data.GetAsync("notes", fixture.AliceRow1Id, fixture.Alice);
+        reread.ShouldNotBeNull();
+        reread!["title"].ShouldBe("renamed");
+    }
+
+    /// <summary>
+    /// A legitimate create must actually persist and be subsequently readable — otherwise an
+    /// implementation whose writes silently never land would still pass every other fact in this
+    /// suite (they all assert what a caller cannot do, never that an allowed write took effect).
+    /// </summary>
+    [Fact]
+    public async Task Create_of_an_allowed_row_persists_and_is_subsequently_readable()
+    {
+        var fixture = await NotesFixtureAsync();
+        var payload = new Dictionary<string, object?>
+        {
+            ["owner_id"] = fixture.Alice.User.Value,
+            ["tenant_id"] = fixture.Tenant.Value,
+            ["title"] = "brand new",
+        };
+
+        var created = await fixture.Data.CreateAsync("notes", payload, fixture.Alice);
+        created["title"].ShouldBe("brand new");
+        var createdId = (Guid)created["id"]!;
+
+        var reread = await fixture.Data.GetAsync("notes", createdId, fixture.Alice);
+        reread.ShouldNotBeNull();
+        reread!["title"].ShouldBe("brand new");
+    }
+
+    /// <summary>
+    /// <c>Limit</c> must be applied after the policy predicate (and the tenant scope), never
+    /// before — a <c>Limit</c> that truncated the pre-filter row set could return another tenant's
+    /// row from the head of the table just because the caller's own row landed later, entirely
+    /// independent of any predicate bug. Acme's caller asks for at most one row and must still get
+    /// exactly its own, never Globex's or the third tenant's.
+    /// </summary>
+    [Fact]
+    public async Task A_query_limit_is_applied_after_the_policy_predicate_not_before()
+    {
+        var fixture = await DocumentsFixtureAsync();
+        var acmeUser = NewContext(fixture.Acme);
+
+        var result = await fixture.Data.QueryAsync(new AlvoQuery { Entity = "documents", Limit = 1 }, acmeUser);
+
+        result.Count.ShouldBe(1);
+        result[0]["id"].ShouldBe(fixture.AcmeRowId);
+    }
+
     private sealed record NotesFixture(IAlvoData Data, AlvoContext Alice, AlvoContext Bob, TenantId Tenant, Guid AliceRow1Id, Guid AliceRow2Id, Guid BobRowId);
 
-    private sealed record DocumentsFixture(IAlvoData Data, TenantId Acme, TenantId Globex, Guid AcmeRowId, Guid GlobexRowId);
+    private sealed record DocumentsFixture(
+        IAlvoData Data, TenantId Acme, TenantId Globex, TenantId Third, Guid AcmeRowId, Guid GlobexRowId, Guid ThirdRowId);
 
-    private sealed record AccountsFixture(IAlvoData Data, Guid RowId);
+    private sealed record AccountsFixture(IAlvoData Data, Guid RowId, Guid SecondRowId);
 
     private async Task<NotesFixture> NotesFixtureAsync()
     {
@@ -389,6 +579,7 @@ public abstract class AlvoDataAdversarialTests
     {
         var acme = TenantId.New();
         var globex = TenantId.New();
+        var third = TenantId.New();
 
         var fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
         {
@@ -399,13 +590,15 @@ public abstract class AlvoDataAdversarialTests
 
         var acmeRow = Guid.NewGuid();
         var globexRow = Guid.NewGuid();
+        var thirdRow = Guid.NewGuid();
         var seed = SeedOf(
             "documents",
             Row(acmeRow, ("tenant_id", acme.Value), ("title", "Acme-doc")),
-            Row(globexRow, ("tenant_id", globex.Value), ("title", "Globex-doc")));
+            Row(globexRow, ("tenant_id", globex.Value), ("title", "Globex-doc")),
+            Row(thirdRow, ("tenant_id", third.Value), ("title", "Third-doc")));
 
         var data = await CreateAsync(schema, descriptor, seed);
-        return new DocumentsFixture(data, acme, globex, acmeRow, globexRow);
+        return new DocumentsFixture(data, acme, globex, third, acmeRow, globexRow, thirdRow);
     }
 
     private async Task<AccountsFixture> AccountsFixtureAsync()
@@ -421,10 +614,14 @@ public abstract class AlvoDataAdversarialTests
         var (descriptor, schema) = BuildFixture("accounts", fields, EntityTenancy.Global, rules);
 
         var rowId = Guid.NewGuid();
-        var seed = SeedOf("accounts", Row(rowId, ("title", "Acct"), ("secret", "shh"), ("note", "internal"), ("status", "active")));
+        var secondRowId = Guid.NewGuid();
+        var seed = SeedOf(
+            "accounts",
+            Row(rowId, ("title", "Acct"), ("secret", "shh"), ("note", "internal"), ("status", "active")),
+            Row(secondRowId, ("title", "Acct-2"), ("secret", "shh-2"), ("note", "internal-2"), ("status", "active")));
 
         var data = await CreateAsync(schema, descriptor, seed);
-        return new AccountsFixture(data, rowId);
+        return new AccountsFixture(data, rowId, secondRowId);
     }
 
     private static Dictionary<string, IReadOnlyList<AlvoRecord>> EmptySeed() =>

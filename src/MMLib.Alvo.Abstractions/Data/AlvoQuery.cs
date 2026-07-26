@@ -9,11 +9,13 @@
 /// land in PR3.
 /// </summary>
 /// <remarks>
-/// Every member beyond <see cref="Entity"/> is additive by construction — a new optional member
-/// (e.g. a future <c>Select</c> projection list) can be added without breaking an existing caller
-/// or provider, because §2.1 of the domain analysis warns that a badly designed query language
-/// cannot be fixed later without a breaking change. Do not narrow or repurpose an existing member
-/// to smuggle in a PR3 feature; add a new one instead.
+/// Every member of <b>this record</b> beyond <see cref="Entity"/> is additive by construction — a
+/// new optional member (e.g. a future <c>Select</c> projection list) can be added here without
+/// breaking an existing caller or provider, because §2.1 of the domain analysis warns that a badly
+/// designed query language cannot be fixed later without a breaking change. Do not narrow or
+/// repurpose an existing member to smuggle in a PR3 feature; add a new one instead. This promise is
+/// scoped to <see cref="AlvoQuery"/> itself — <see cref="AlvoSort"/> and <see cref="AlvoComparison"/>
+/// are positional records and do not carry the same guarantee; see their own remarks.
 /// </remarks>
 public sealed record AlvoQuery
 {
@@ -50,6 +52,11 @@ public sealed record AlvoQuery
 /// placement of <c>NULL</c> for a given sort direction — an explicit placement is the only way
 /// the same <see cref="AlvoQuery"/> produces the same order on both engines.
 /// </param>
+/// <remarks>
+/// A positional record with defaulted parameters: adding a parameter here, even a defaulted one,
+/// changes the constructor's signature and is a binary break for any compiled caller. This is a
+/// deliberate, narrower guarantee than <see cref="AlvoQuery"/>'s own additive-by-construction one.
+/// </remarks>
 public sealed record AlvoSort(string Field, bool Descending = false, AlvoNullPlacement Nulls = AlvoNullPlacement.Last);
 
 /// <summary>Where a <see langword="null"/> value sorts relative to every non-null value.</summary>

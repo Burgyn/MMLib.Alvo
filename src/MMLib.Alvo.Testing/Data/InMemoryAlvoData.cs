@@ -1,6 +1,5 @@
 ﻿using MMLib.Alvo.Data;
 using MMLib.Alvo.Expressions;
-using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
 
@@ -11,35 +10,46 @@ namespace MMLib.Alvo.Testing.Data;
 /// shortcut: policy is enforced <em>inside</em> this implementation exactly as a real provider
 /// must enforce it — <see cref="IPolicyEngine.Resolve"/> first, then every resolved predicate
 /// (<c>USING</c>, <c>WITH CHECK</c>, the synthesized tenant scope) evaluated per row through
-/// <c>MMLib.Alvo.Expressions.Internal.CelInterpreter</c> — the exact backend a real provider's
-/// <c>WITH CHECK</c> evaluates candidate rows with — rather than a second, independently written
-/// evaluator.
+/// <see cref="IPredicateEvaluator"/> — the same published evaluator a real provider's in-transaction
+/// paths use — rather than a second, independently written evaluator.
 /// </summary>
 /// <remarks>
-/// For a store that <em>is</em> memory, evaluating a predicate once per row through the CEL
-/// interpreter <b>is</b> the <c>WHERE</c> clause a real provider pushes into SQL — this class does
-/// not load every row and filter afterwards in some separate, redundant pass. Do not read this as
-/// license to post-filter a real database query in memory: a real provider must render <c>USING</c>/
-/// <c>WITH CHECK</c> into SQL and let the database apply it, never fetch unfiltered rows and filter
-/// them in the application tier. This class also applies a caller's own <see cref="AlvoQuery.Filter"/>
-/// in addition to the resolved policy predicate, never instead of it, so a caller-supplied filter can
-/// only narrow an already-visible result, never widen it.
+/// For a store that <em>is</em> memory, evaluating a predicate once per row through
+/// <see cref="IPredicateEvaluator"/> <b>is</b> the <c>WHERE</c> clause a real provider pushes into
+/// SQL — this class does not load every row and filter afterwards in some separate, redundant
+/// pass. Do not read this as license to post-filter a real database query in memory: a real
+/// provider must render <c>USING</c>/<c>WITH CHECK</c> into SQL and let the database apply it,
+/// never fetch unfiltered rows and filter them in the application tier. This class also applies a
+/// caller's own <see cref="AlvoQuery.Filter"/> in addition to the resolved policy predicate, never
+/// instead of it, so a caller-supplied filter can only narrow an already-visible result, never
+/// widen it.
 /// </remarks>
 public sealed class InMemoryAlvoData : IAlvoData
 {
+    private const string IdField = "id";
+    private const string TenantIdField = "tenant_id";
+
     private readonly IPolicyEngine _policy;
+    private readonly IPredicateEvaluator _evaluator;
     private readonly SchemaModel _schema;
     private readonly Dictionary<string, List<AlvoRecord>> _rows = new(StringComparer.Ordinal);
     private readonly Lock _gate = new();
 
     /// <summary>Initializes a new instance of the <see cref="InMemoryAlvoData"/> class.</summary>
     /// <param name="policy">Resolves the enforceable policy for every operation.</param>
-    /// <param name="schema">The schema this store's entities are shaped by.</param>
-    public InMemoryAlvoData(IPolicyEngine policy, SchemaModel schema)
+    /// <param name="evaluator">Evaluates every resolved predicate against a row.</param>
+    /// <param name="schema">
+    /// The schema this store's entities are shaped by — used to reject a payload key naming a
+    /// field the entity does not declare, so this fake and a real provider (which would reject the
+    /// same payload as an unknown-column SQL error) agree.
+    /// </param>
+    public InMemoryAlvoData(IPolicyEngine policy, IPredicateEvaluator evaluator, SchemaModel schema)
     {
         ArgumentNullException.ThrowIfNull(policy);
+        ArgumentNullException.ThrowIfNull(evaluator);
         ArgumentNullException.ThrowIfNull(schema);
         _policy = policy;
+        _evaluator = evaluator;
         _schema = schema;
     }
 
@@ -119,9 +129,11 @@ public sealed class InMemoryAlvoData : IAlvoData
             throw Denied(decision);
         }
 
+        EnsureFieldsDeclared(entity, values);
+        EnsureNotWriting(values, IdField, "is assigned by the store and cannot be supplied on create");
         EnsureNoReadOnlyWrite(values, decision.ReadOnlyFields);
 
-        var candidate = new Dictionary<string, object?>(values, StringComparer.Ordinal) { ["id"] = Guid.NewGuid() };
+        var candidate = new Dictionary<string, object?>(values, StringComparer.Ordinal) { [IdField] = Guid.NewGuid() };
         var postImage = new AlvoRecord(candidate);
         EnsureWriteAllowed(decision, postImage, previous: null, context);
 
@@ -148,6 +160,9 @@ public sealed class InMemoryAlvoData : IAlvoData
             throw Denied(decision);
         }
 
+        EnsureFieldsDeclared(entity, values);
+        EnsureNotWriting(values, IdField, "is assigned once at creation and can never be rewritten");
+        EnsureNotWriting(values, TenantIdField, "is fixed at creation and a row can never move to another tenant");
         EnsureNoReadOnlyWrite(values, decision.ReadOnlyFields);
 
         lock (_gate)
@@ -224,20 +239,23 @@ public sealed class InMemoryAlvoData : IAlvoData
     /// entity's synthesized tenant scope (either may be <see langword="null"/> — <c>create</c> has
     /// no <c>USING</c>, a global entity has no tenant scope).
     /// </summary>
-    private static bool IsVisible(AlvoRecord row, PolicyDecision decision, AlvoContext context) =>
-        (decision.Using is null || CelInterpreter.EvaluatePredicate(decision.Using, row, previous: null, context))
-        && (decision.TenantScope is null || CelInterpreter.EvaluatePredicate(decision.TenantScope, row, previous: null, context));
+    private bool IsVisible(AlvoRecord row, PolicyDecision decision, AlvoContext context) =>
+        (decision.Using is null || _evaluator.Evaluate(decision.Using, row, previous: null, context))
+        && (decision.TenantScope is null || _evaluator.Evaluate(decision.TenantScope, row, previous: null, context));
 
     /// <summary>
     /// Evaluates <c>WITH CHECK</c> and the tenant scope over the complete post-image (never the
-    /// payload alone), throwing if either predicate rejects the candidate row.
+    /// payload alone), throwing if either predicate rejects the candidate row. Evaluating
+    /// <see cref="PolicyDecision.TenantScope"/> here — not only on the read/visibility side — is
+    /// what stops a caller from writing (creating <em>or</em> updating) a row into a tenant other
+    /// than its own; <see cref="AlvoDataAdversarialTests"/>'s tenant-write facts pin this down.
     /// </summary>
-    private static void EnsureWriteAllowed(PolicyDecision decision, AlvoRecord postImage, AlvoRecord? previous, AlvoContext context)
+    private void EnsureWriteAllowed(PolicyDecision decision, AlvoRecord postImage, AlvoRecord? previous, AlvoContext context)
     {
         var passesCheck = decision.WithCheck is null
-            || CelInterpreter.EvaluatePredicate(decision.WithCheck, postImage, previous, context);
+            || _evaluator.Evaluate(decision.WithCheck, postImage, previous, context);
         var passesTenantScope = decision.TenantScope is null
-            || CelInterpreter.EvaluatePredicate(decision.TenantScope, postImage, previous, context);
+            || _evaluator.Evaluate(decision.TenantScope, postImage, previous, context);
 
         if (!passesCheck || !passesTenantScope)
         {
@@ -252,6 +270,46 @@ public sealed class InMemoryAlvoData : IAlvoData
             if (readOnlyFields.Contains(field))
             {
                 throw new AlvoAuthorizationException($"Field '{field}' is read-only and cannot be written.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Rejects a payload that names a framework-managed column (<c>id</c>, <c>tenant_id</c>).
+    /// Neither is ever a descriptor-declared field, so neither can ever appear in
+    /// <see cref="PolicyDecision.ReadOnlyFields"/> — <see cref="EnsureNoReadOnlyWrite"/> alone would
+    /// silently let a payload rewrite either one, corrupting row identity (two rows sharing one
+    /// <c>id</c>) or moving a row to another tenant with no rule ever consulted.
+    /// </summary>
+    private static void EnsureNotWriting(IReadOnlyDictionary<string, object?> values, string field, string reason)
+    {
+        if (values.ContainsKey(field))
+        {
+            throw new AlvoAuthorizationException($"Field '{field}' {reason}.");
+        }
+    }
+
+    /// <summary>
+    /// Rejects a payload key the entity's schema does not declare — the in-memory equivalent of the
+    /// unknown-column SQL error a real provider would raise. Full payload validation (types,
+    /// required fields, formats) is a PR3 concern layered above this port; this is only the part a
+    /// data port itself must refuse, so the fake and a real provider agree on what "not a field at
+    /// all" means.
+    /// </summary>
+    private void EnsureFieldsDeclared(string entity, IReadOnlyDictionary<string, object?> values)
+    {
+        var entitySchema = _schema.Entities.FirstOrDefault(candidate => string.Equals(candidate.Name, entity, StringComparison.Ordinal));
+        if (entitySchema is null)
+        {
+            return;
+        }
+
+        var declared = entitySchema.Fields.Select(field => field.Name).ToHashSet(StringComparer.Ordinal);
+        foreach (var field in values.Keys)
+        {
+            if (!declared.Contains(field))
+            {
+                throw new ArgumentException($"Entity '{entity}' has no field named '{field}'.", nameof(values));
             }
         }
     }
@@ -283,7 +341,10 @@ public sealed class InMemoryAlvoData : IAlvoData
     /// <summary>
     /// Applies every sort key in order via a stable <c>OrderBy</c>/<c>ThenBy</c> chain, seeded with a
     /// no-op ordering so the loop can always call <c>ThenBy</c> uniformly. With no sort keys, falls
-    /// back to ordering by <c>id</c> so paging over an unsorted query is still deterministic.
+    /// back to ordering by <c>id</c>'s string form so paging over an unsorted query is at least
+    /// deterministic — this is a fallback for this in-memory reference only, not a contract: no
+    /// real engine orders a <c>uuid</c> column by its string representation, so a caller that cares
+    /// about order must supply an explicit <see cref="AlvoQuery.Sort"/>.
     /// </summary>
     private static IEnumerable<AlvoRecord> ApplySort(IEnumerable<AlvoRecord> rows, IReadOnlyList<AlvoSort> sort)
     {
@@ -345,6 +406,12 @@ public sealed class InMemoryAlvoData : IAlvoData
         return limit is int max ? remaining.Take(max) : remaining;
     }
 
+    /// <summary>
+    /// Skips every row up to and including the one whose cursor matches <paramref name="after"/>.
+    /// A cursor this store never issued (stale, forged, or from a different store) matches nothing,
+    /// so the result reads as an empty final page rather than throwing or silently restarting from
+    /// the beginning.
+    /// </summary>
     private static IEnumerable<AlvoRecord> SkipUntilAfter(IEnumerable<AlvoRecord> rows, string after)
     {
         var seenCursor = false;
@@ -370,6 +437,14 @@ public sealed class InMemoryAlvoData : IAlvoData
     /// </summary>
     private static string Cursor(AlvoRecord row) => row["id"]?.ToString() ?? string.Empty;
 
+    /// <summary>
+    /// <see cref="PolicyDecision.DenyReason"/> is already designed, at the policy layer, never to
+    /// name the entity or echo caller-supplied text (see <c>PolicyEngine</c>'s own docs) — the
+    /// tenant guard's reason deliberately names "tenant" specifically, a conscious, narrow oracle an
+    /// operator needs and a test depends on. This port passes that reason through verbatim rather
+    /// than mapping it to one more-generic message, trusting the policy layer's own tradeoff instead
+    /// of re-deciding it here.
+    /// </summary>
     private static AlvoAuthorizationException Denied(PolicyDecision decision) =>
         new(decision.DenyReason ?? "The operation was not authorized.");
 }

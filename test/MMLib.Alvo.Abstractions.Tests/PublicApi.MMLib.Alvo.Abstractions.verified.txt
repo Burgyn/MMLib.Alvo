@@ -146,10 +146,7 @@ namespace MMLib.Alvo.Data
         public MMLib.Alvo.Data.AlvoFilterOperator Operator { get; init; }
         public object? Value { get; init; }
     }
-    public abstract class AlvoFilter : System.IEquatable<MMLib.Alvo.Data.AlvoFilter>
-    {
-        protected AlvoFilter() { }
-    }
+    public abstract class AlvoFilter : System.IEquatable<MMLib.Alvo.Data.AlvoFilter> { }
     public enum AlvoFilterOperator
     {
         Eq = 0,
@@ -801,6 +798,10 @@ namespace MMLib.Alvo.Expressions
         string RenderCaseInsensitiveLike(string left, string right);
         string RenderField(MMLib.Alvo.Schema.EntitySchema entity, string fieldName);
         string RenderParameter(string parameterName);
+    }
+    public interface IPredicateEvaluator
+    {
+        bool Evaluate(MMLib.Alvo.Expressions.CompiledExpression expression, MMLib.Alvo.Data.AlvoRecord current, MMLib.Alvo.Data.AlvoRecord? previous, MMLib.Alvo.AlvoContext context);
     }
     public interface IPredicateRenderer
     {

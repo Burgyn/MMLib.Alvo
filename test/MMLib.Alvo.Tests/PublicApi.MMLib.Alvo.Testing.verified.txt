@@ -52,6 +52,7 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task A_hidden_expression_that_cannot_resolve_still_masks_the_field() { }
         public System.Threading.Tasks.Task A_hidden_field_never_appears_in_a_returned_record() { }
         public System.Threading.Tasks.Task A_nullable_boolean_field_used_bare_in_a_rule_works_end_to_end() { }
+        public System.Threading.Tasks.Task A_query_limit_is_applied_after_the_policy_predicate_not_before() { }
         public System.Threading.Tasks.Task A_query_with_no_tenant_context_fails_rather_than_returning_every_tenants_rows() { }
         public System.Threading.Tasks.Task A_tenant_scoped_entity_never_returns_another_tenants_rows() { }
         public System.Threading.Tasks.Task A_tenantless_context_cannot_create_into_a_scoped_entity() { }
@@ -61,17 +62,22 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task An_entity_with_no_rule_denies_every_operation() { }
         public System.Threading.Tasks.Task An_operation_with_no_rule_denies_while_its_siblings_work() { }
         protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Data.IAlvoData> CreateAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, System.Collections.Generic.IReadOnlyDictionary<string, System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRecord>> seed);
+        public System.Threading.Tasks.Task Create_into_another_tenant_is_denied() { }
+        public System.Threading.Tasks.Task Create_of_an_allowed_row_persists_and_is_subsequently_readable() { }
         public System.Threading.Tasks.Task Create_that_would_place_the_row_outside_the_callers_scope_is_denied() { }
         public System.Threading.Tasks.Task Cross_tenant_get_by_id_is_indistinguishable_from_absent() { }
         public System.Threading.Tasks.Task Delete_of_another_users_row_reports_not_found_and_does_not_delete() { }
         public System.Threading.Tasks.Task Get_of_another_users_row_is_indistinguishable_from_absent() { }
         public System.Threading.Tasks.Task List_returns_only_the_callers_own_rows() { }
+        public System.Threading.Tasks.Task Update_cannot_move_a_row_into_another_tenant() { }
         public System.Threading.Tasks.Task Update_cannot_move_a_row_out_of_the_callers_scope() { }
+        public System.Threading.Tasks.Task Update_cannot_rewrite_the_row_id() { }
+        public System.Threading.Tasks.Task Update_of_an_unrelated_field_succeeds_when_the_post_image_still_satisfies_the_rule() { }
         public System.Threading.Tasks.Task Update_of_another_users_row_reports_not_found() { }
     }
     public sealed class InMemoryAlvoData : MMLib.Alvo.Data.IAlvoData
     {
-        public InMemoryAlvoData(MMLib.Alvo.Rules.IPolicyEngine policy, MMLib.Alvo.Schema.SchemaModel schema) { }
+        public InMemoryAlvoData(MMLib.Alvo.Rules.IPolicyEngine policy, MMLib.Alvo.Expressions.IPredicateEvaluator evaluator, MMLib.Alvo.Schema.SchemaModel schema) { }
         public System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord> CreateAsync(string entity, System.Collections.Generic.IReadOnlyDictionary<string, object?> values, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default) { }
         public System.Threading.Tasks.Task DeleteAsync(string entity, System.Guid id, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default) { }
         public System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord?> GetAsync(string entity, System.Guid id, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default) { }

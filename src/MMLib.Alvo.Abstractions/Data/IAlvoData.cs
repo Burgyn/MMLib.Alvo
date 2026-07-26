@@ -34,6 +34,26 @@ namespace MMLib.Alvo.Data;
 /// probing for a specific row's existence; they are attempting something no policy permits at
 /// all. Neither exception's message names the entity, the row id, or whether the row exists.
 /// </para>
+/// <para>
+/// <see cref="AlvoAuthorizationException"/>'s and <see cref="AlvoRecordNotFoundException"/>'s
+/// message reaches the caller verbatim at this port boundary (an implementation is not required to
+/// further generalize <c>IPolicyEngine</c>'s own deny reason). That reason is already designed, at the
+/// policy layer, never to name the entity or echo caller-supplied text — except the tenant guard's
+/// reason, which deliberately names "tenant" (a narrow, intentional oracle: whether an entity is
+/// tenant-scoped at all). A caller building an HTTP layer on this port that wants to withhold even
+/// that distinction must map the message to something more generic itself and log the original.
+/// </para>
+/// <para>
+/// <b>The returned key set and CLR types are part of the contract, not an implementation detail.</b>
+/// A returned <see cref="AlvoRecord"/> carries every non-hidden field the schema declares for that
+/// entity, including framework-managed columns (<c>id</c>, and — on a tenant-scoped entity —
+/// <c>tenant_id</c>); masking removes only descriptor-declared <c>hidden</c> fields, never a
+/// framework column. Field values use the same CLR types <see cref="AlvoRecord"/>'s own remarks
+/// describe the interpreter reading (<see cref="Guid"/> for a <c>uuid</c> field, never a
+/// <see cref="string"/> or a byte array; <see cref="DateTimeOffset"/> for a timestamp; <c>decimal</c>
+/// for a <c>decimal</c> field), so a caller of this port — and the adversarial suite itself — can
+/// assert on a field's value without first normalizing it.
+/// </para>
 /// </remarks>
 public interface IAlvoData
 {

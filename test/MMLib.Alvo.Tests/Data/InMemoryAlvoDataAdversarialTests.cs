@@ -1,5 +1,6 @@
 ﻿using MMLib.Alvo.Data;
 using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Schema;
@@ -21,8 +22,9 @@ public class InMemoryAlvoDataAdversarialTests : AlvoDataAdversarialTests
         var provider = new PolicyCatalogProvider();
         provider.SetCurrent(descriptor.Name, catalog);
         var engine = new PolicyEngine(provider);
+        var evaluator = new PredicateEvaluator();
 
-        var data = new InMemoryAlvoData(engine, schema);
+        var data = new InMemoryAlvoData(engine, evaluator, schema);
         foreach (var (entity, rows) in seed)
         {
             data.Seed(entity, [.. rows]);
