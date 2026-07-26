@@ -19,7 +19,7 @@
          declares [Fact] test methods for downstream Exe test projects to
          inherit, so it takes the attribute/extensibility surface alone. -->
     <PackageVersion Include="xunit.v3.extensibility.core" Version="3.2.2" />
-    <PackageVersion Include="Corvus.Json.Validator" Version="5.2.7" />
+    <PackageVersion Include="Corvus.Json.Validator" Version="5.2.9" />
     <!-- Corvus.Json.SourceGenerator + Corvus.Json.ExtendedTypes replace JsonSchema.Net (whose 9.x
          line carries a maintenance-fee EULA on top of MIT) as the descriptor schema-pass
          validator: Apache-2.0, build-time source generation only (no runtime Roslyn, no
@@ -31,7 +31,7 @@
     <PackageVersion Include="Shouldly" Version="4.3.0" />
     <PackageVersion Include="NSubstitute" Version="6.0.0" />
     <PackageVersion Include="PublicApiGenerator" Version="11.5.4" />
-    <PackageVersion Include="Verify.XunitV3" Version="31.25.0" />
+    <PackageVersion Include="Verify.XunitV3" Version="31.27.0" />
     <PackageVersion Include="Microsoft.Extensions.FileSystemGlobbing" Version="10.0.10" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.10" />
     <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.10" />
@@ -40,14 +40,14 @@
     <PackageVersion Include="Microsoft.Extensions.Options.DataAnnotations" Version="10.0.10" />
     <PackageVersion Include="Microsoft.SourceLink.GitHub" Version="10.0.301" />
     <PackageVersion Include="MinVer" Version="7.0.0" />
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.0" />
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.0" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.10" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.10" />
     <!-- Test-only: bootstraps each provider's design-time services (IDatabaseModelFactory is
          design-time-only in modern EF Core, never registered by the runtime AddDbContext/UseX
          pipeline) so EfCoreSchemaIntrospector has a real factory to drive in-process, without a
          dotnet-ef dependency. See EfCoreSchemaMigratorApplyTests. -->
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.0" />
-    <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.0" />
+    <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
     <PackageVersion Include="Testcontainers.PostgreSql" Version="4.13.0" />
     <PackageVersion Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.12" />
     <!-- Microsoft.EntityFrameworkCore.Design 10.0.0 transitively drags in
