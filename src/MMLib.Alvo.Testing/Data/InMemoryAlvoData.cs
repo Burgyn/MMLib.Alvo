@@ -244,11 +244,15 @@ public sealed class InMemoryAlvoData : IAlvoData
     /// </summary>
     private HashSet<string> DeclaredFields(string entity)
     {
-        var entitySchema = _schema.Entities.FirstOrDefault(candidate => string.Equals(candidate.Name, entity, StringComparison.Ordinal));
-        return entitySchema is null
-            ? new HashSet<string>(StringComparer.Ordinal)
-            : entitySchema.Fields.Select(field => field.Name).ToHashSet(StringComparer.Ordinal);
+        var entitySchema = FindEntity(entity);
+        return entitySchema is null ? new HashSet<string>(StringComparer.Ordinal) : DeclaredFieldsOf(entitySchema);
     }
+
+    private EntitySchema? FindEntity(string entity) =>
+        _schema.Entities.FirstOrDefault(candidate => string.Equals(candidate.Name, entity, StringComparison.Ordinal));
+
+    private static HashSet<string> DeclaredFieldsOf(EntitySchema entity) =>
+        entity.Fields.Select(field => field.Name).ToHashSet(StringComparer.Ordinal);
 
     private static IEnumerable<string> QueryFields(AlvoQuery query) =>
         AlvoFilter.ReferencedFields(query.Filter).Concat(query.Sort.Select(sort => sort.Field));
@@ -344,23 +348,31 @@ public sealed class InMemoryAlvoData : IAlvoData
     /// data port itself must refuse, so the fake and a real provider agree on what "not a field at
     /// all" means.
     /// </summary>
+    /// <remarks>
+    /// Refuses on the port's own documented failure contract — <see cref="AlvoAuthorizationException"/>,
+    /// the same class of refusal every other unwritable-field rejection raises — and names neither the
+    /// entity nor the offending key: the key is caller-supplied text this port will not echo, and a
+    /// message naming both would answer "does this entity have a field called X?" one request at a
+    /// time. An entity <see cref="_schema"/> does not know refuses every key rather than skipping the
+    /// check: an inconsistency between the catalog and this store's schema must not be the one path on
+    /// which an unvalidated payload reaches the rows.
+    /// </remarks>
     private void EnsureFieldsDeclared(string entity, IReadOnlyDictionary<string, object?> values)
     {
-        var entitySchema = _schema.Entities.FirstOrDefault(candidate => string.Equals(candidate.Name, entity, StringComparison.Ordinal));
-        if (entitySchema is null)
-        {
-            return;
-        }
+        var entitySchema = FindEntity(entity)
+            ?? throw new AlvoAuthorizationException(UndeclaredPayloadFieldMessage);
 
-        var declared = entitySchema.Fields.Select(field => field.Name).ToHashSet(StringComparer.Ordinal);
+        var declared = DeclaredFieldsOf(entitySchema);
         foreach (var field in values.Keys)
         {
             if (!declared.Contains(field))
             {
-                throw new ArgumentException($"Entity '{entity}' has no field named '{field}'.", nameof(values));
+                throw new AlvoAuthorizationException(UndeclaredPayloadFieldMessage);
             }
         }
     }
+
+    private const string UndeclaredPayloadFieldMessage = "The payload names a field that is not writable on this entity.";
 
     private static AlvoRecord Merge(AlvoRecord stored, IReadOnlyDictionary<string, object?> values)
     {

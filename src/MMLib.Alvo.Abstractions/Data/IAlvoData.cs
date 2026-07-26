@@ -57,6 +57,16 @@ namespace MMLib.Alvo.Data;
 /// never <see cref="AlvoRecordNotFoundException"/>, since the row (if any) was never consulted.
 /// </para>
 /// <para>
+/// <b>A write payload may only name fields the entity's schema declares.</b> A key naming no field at
+/// all is refused with <see cref="AlvoAuthorizationException"/> — the same class of refusal every other
+/// unwritable-field rejection uses, never an <see cref="ArgumentException"/> — and the message names
+/// neither the entity nor the key, since the key is caller-supplied text and a message naming both
+/// answers "does this entity have a field called X?" one request at a time. An entity the
+/// implementation's own schema does not know refuses the write outright rather than skipping the check:
+/// a mismatch between the policy catalog and the implementation's schema must not be the one path on
+/// which an unvalidated payload reaches storage.
+/// </para>
+/// <para>
 /// <b>The returned key set and CLR types are part of the contract, not an implementation detail.</b>
 /// A returned <see cref="AlvoRecord"/> carries every non-hidden field the schema declares for that
 /// entity, including framework-managed columns (<c>id</c>, and — on a tenant-scoped entity —

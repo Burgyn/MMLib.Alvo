@@ -238,10 +238,11 @@ public class InMemoryAlvoDataTests
     }
 
     /// <summary>
-    /// A payload key the entity's schema does not declare is rejected with an
-    /// <see cref="ArgumentException"/> — the in-memory equivalent of the unknown-column SQL error a
-    /// real provider would raise, so the fake and a real provider agree on what "not a field at all"
-    /// means.
+    /// A payload key the entity's schema does not declare is rejected on the port's own documented
+    /// failure contract — <see cref="AlvoAuthorizationException"/>, the same class of refusal every
+    /// other unwritable-field rejection uses — and names neither the entity nor the offending key: the
+    /// key is caller-supplied text, and a message naming both would be a schema-shape oracle answering
+    /// "does this entity have a field called X?" one request at a time.
     /// </summary>
     [Fact]
     public async Task A_payload_key_the_schema_does_not_declare_is_rejected()
@@ -250,8 +251,28 @@ public class InMemoryAlvoDataTests
         var data = CreateStore("items", StringField());
         var caller = Caller();
 
-        await Should.ThrowAsync<ArgumentException>(() => data.CreateAsync(
+        var ex = await Should.ThrowAsync<AlvoAuthorizationException>(() => data.CreateAsync(
             "items", new Dictionary<string, object?> { ["title"] = "x", ["bogus"] = "y" }, caller, ct));
+
+        ex.Message.ShouldNotContain("bogus");
+        ex.Message.ShouldNotContain("items");
+    }
+
+    /// <summary>
+    /// An entity this store's schema does not know must <b>deny</b> a write, never skip the payload
+    /// check and write it anyway. Reaching this needs a policy catalog that knows an entity the store's
+    /// own schema does not — the exact inconsistency the guard exists for — so the catalog here is
+    /// built over both entities and the store is handed the narrower schema.
+    /// </summary>
+    [Fact]
+    public async Task A_write_to_an_entity_absent_from_the_stores_schema_denies_rather_than_skipping_validation()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var data = CreateStoreWithUnknownEntity("items", "ghosts", StringField());
+        var caller = Caller();
+
+        await Should.ThrowAsync<AlvoAuthorizationException>(() => data.CreateAsync(
+            "ghosts", new Dictionary<string, object?> { ["title"] = "x" }, caller, ct));
     }
 
     private static Dictionary<string, FieldDescriptor> StringField() => new(StringComparer.Ordinal)
@@ -286,19 +307,46 @@ public class InMemoryAlvoDataTests
 
     private static InMemoryAlvoData CreateStore(string entity, Dictionary<string, FieldDescriptor> fields, params AlvoRecord[] seed)
     {
+        var schema = new SchemaModel([EntitySchemaOf(entity, fields)]);
+        var data = new InMemoryAlvoData(EngineOver(DescriptorOf(fields, entity), schema), new PredicateEvaluator(), schema);
+        data.Seed(entity, seed);
+        return data;
+    }
+
+    /// <summary>
+    /// A store whose policy catalog knows one more entity than the store's own schema does — the
+    /// descriptor/schema inconsistency <c>InMemoryAlvoData</c>'s entity-absent guard exists for, and the
+    /// only way to reach that guard, since a catalog built from the store's own schema would deny the
+    /// operation before any payload check runs.
+    /// </summary>
+    private static InMemoryAlvoData CreateStoreWithUnknownEntity(
+        string knownEntity, string absentEntity, Dictionary<string, FieldDescriptor> fields)
+    {
+        var storeSchema = new SchemaModel([EntitySchemaOf(knownEntity, fields)]);
+        var catalogSchema = new SchemaModel([EntitySchemaOf(knownEntity, fields), EntitySchemaOf(absentEntity, fields)]);
+        var descriptor = DescriptorOf(fields, knownEntity, absentEntity);
+        return new InMemoryAlvoData(EngineOver(descriptor, catalogSchema), new PredicateEvaluator(), storeSchema);
+    }
+
+    private static AlvoDescriptor DescriptorOf(Dictionary<string, FieldDescriptor> fields, params string[] entities)
+    {
         var entityDescriptor = new EntityDescriptor
         {
             Fields = fields,
             Tenancy = EntityTenancy.Global,
             Rules = new AccessRules { List = "true", Get = "true", Create = "true", Update = "true", Delete = "true" },
         };
-        var descriptor = new AlvoDescriptor
+
+        return new AlvoDescriptor
         {
             ApiVersion = "alvo.dev/v1",
             Name = "direct-tests",
-            Entities = new Dictionary<string, EntityDescriptor>(StringComparer.Ordinal) { [entity] = entityDescriptor },
+            Entities = entities.ToDictionary(entity => entity, _ => entityDescriptor, StringComparer.Ordinal),
         };
+    }
 
+    private static EntitySchema EntitySchemaOf(string entity, Dictionary<string, FieldDescriptor> fields)
+    {
         var schemaFields = new List<FieldSchema> { new() { Name = "id", Type = SchemaField.Uuid, Required = true } };
         foreach (var (name, field) in fields)
         {
@@ -312,17 +360,15 @@ public class InMemoryAlvoDataTests
             });
         }
 
-        var schema = new SchemaModel([new EntitySchema { Name = entity, Tenancy = TenancyMode.Global, Fields = schemaFields }]);
+        return new EntitySchema { Name = entity, Tenancy = TenancyMode.Global, Fields = schemaFields };
+    }
 
+    private static PolicyEngine EngineOver(AlvoDescriptor descriptor, SchemaModel schema)
+    {
         var catalog = PolicyCatalog.Build(descriptor, schema, MMLib.Alvo.Tests.Expressions.CelFixtures.Compiler);
         var provider = new PolicyCatalogProvider();
         provider.SetCurrent(descriptor.Name, catalog);
-        var engine = new PolicyEngine(provider);
-        var evaluator = new PredicateEvaluator();
-
-        var data = new InMemoryAlvoData(engine, evaluator, schema);
-        data.Seed(entity, seed);
-        return data;
+        return new PolicyEngine(provider);
     }
 
     private static SchemaField ToSchemaFieldType(DescField type) => type switch
