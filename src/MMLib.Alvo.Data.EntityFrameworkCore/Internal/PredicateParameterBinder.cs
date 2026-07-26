@@ -267,11 +267,36 @@ internal sealed class PredicateParameterBinder
         _ => DateOnly.Parse(AsText(value), CultureInfo.InvariantCulture),
     };
 
+    /// <summary>
+    /// A <c>timestamp</c> column takes the instant the caller meant, read <b>independently of the host's own
+    /// time zone</b>: an input carrying an offset is normalised to UTC, and one carrying none is read <em>as</em>
+    /// UTC.
+    /// </summary>
+    /// <remarks>
+    /// Both defaults are host-local without this. <see cref="DateTimeOffset.Parse(string, IFormatProvider?)"/>
+    /// reads an offset-less input in the <em>process's</em> zone, and <c>new DateTimeOffset(DateTime)</c> uses
+    /// the machine's current offset for a <see cref="DateTimeKind.Unspecified"/> value — which is what
+    /// <c>System.Text.Json</c> produces for an offset-less JSON timestamp. Two replicas of one service in two
+    /// regions would then bind two different instants for one request, and CI (UTC) would never show it: the
+    /// same class of divergence as §0's engine-agnostic rule, one axis over.
+    /// <para>
+    /// <see cref="DateTimeStyles.AssumeUniversal"/> supplies the missing offset and
+    /// <see cref="DateTimeStyles.AdjustToUniversal"/> normalises the result, so the bound value is one instant
+    /// per input string. <see cref="DateTimeStyles.RoundtripKind"/> was the alternative and does not solve
+    /// this: it governs a parsed <see cref="DateTime"/>'s <see cref="DateTimeKind"/>, and leaves an
+    /// offset-less input local. An explicit <see cref="DateTimeKind.Local"/> is honoured — there the caller
+    /// said which zone they meant.
+    /// </para>
+    /// </remarks>
     private static DateTimeOffset AsInstant(object value) => value switch
     {
+        DateTime { Kind: DateTimeKind.Unspecified } instant =>
+            new DateTimeOffset(DateTime.SpecifyKind(instant, DateTimeKind.Utc)),
         DateTime instant => new DateTimeOffset(instant),
         DateOnly date => new DateTimeOffset(date.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero),
-        _ => DateTimeOffset.Parse(AsText(value), CultureInfo.InvariantCulture),
+        _ => DateTimeOffset.Parse(
+            AsText(value), CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal),
     };
 
     private static string AsText(object value) =>

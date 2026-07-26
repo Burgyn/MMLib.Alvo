@@ -185,6 +185,62 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
             .Value.ShouldBe(12.7m);
     }
 
+    /// <summary>
+    /// An offset-less timestamp binds the same instant whatever time zone the host runs in. Parsing without
+    /// explicit styles reads it in the <em>process's local</em> zone, so two replicas of one service in two
+    /// regions answer <c>created_at=gte.2026-07-26T00:00:00</c> over different row sets — and CI, which runs
+    /// UTC, never sees it. The zone is set here rather than trusted, for exactly that reason.
+    /// </summary>
+    [Theory]
+    [InlineData("UTC")]
+    [InlineData("Pacific/Kiritimati")]
+    [InlineData("Pacific/Niue")]
+    public async Task An_offset_less_timestamp_binds_the_same_instant_in_every_host_time_zone(string timeZone)
+    {
+        var factory = await FactoryAsync();
+        using var context = factory.Create();
+        using var zone = new LocalTimeZone(timeZone);
+
+        new PredicateParameterBinder(context)
+            .Bind(Column(context, "created_at"), PolicyParameterPrefix.Filter + "0", "2026-07-26T10:00:00")
+            .Value.ShouldBe(new DateTimeOffset(2026, 7, 26, 10, 0, 0, TimeSpan.Zero));
+    }
+
+    /// <summary>
+    /// An input that <em>does</em> carry an offset keeps it — the caller said which instant they meant, and
+    /// only the offset-less case needed a default.
+    /// </summary>
+    [Fact]
+    public async Task A_timestamp_carrying_its_own_offset_is_read_at_that_offset()
+    {
+        var factory = await FactoryAsync();
+        using var context = factory.Create();
+        using var zone = new LocalTimeZone("Pacific/Kiritimati");
+
+        new PredicateParameterBinder(context)
+            .Bind(Column(context, "created_at"), PolicyParameterPrefix.Filter + "0", "2026-07-26T10:00:00+02:00")
+            .Value.ShouldBe(new DateTimeOffset(2026, 7, 26, 8, 0, 0, TimeSpan.Zero));
+    }
+
+    /// <summary>
+    /// The same rule for a <see cref="DateTime"/> that arrived with no <see cref="DateTimeKind"/> — which is
+    /// what <c>System.Text.Json</c> produces for an offset-less JSON timestamp.
+    /// </summary>
+    [Fact]
+    public async Task A_kindless_datetime_binds_as_utc_rather_than_as_the_hosts_local_time()
+    {
+        var factory = await FactoryAsync();
+        using var context = factory.Create();
+        using var zone = new LocalTimeZone("Pacific/Kiritimati");
+
+        new PredicateParameterBinder(context)
+            .Bind(
+                Column(context, "created_at"),
+                PolicyParameterPrefix.Filter + "0",
+                new DateTime(2026, 7, 26, 10, 0, 0, DateTimeKind.Unspecified))
+            .Value.ShouldBe(new DateTimeOffset(2026, 7, 26, 10, 0, 0, TimeSpan.Zero));
+    }
+
     [Fact]
     public async Task A_null_binds_against_a_column_as_the_ado_net_null_sentinel()
     {
