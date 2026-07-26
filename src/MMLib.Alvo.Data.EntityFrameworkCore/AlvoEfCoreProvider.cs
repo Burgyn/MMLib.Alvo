@@ -61,6 +61,9 @@ public static class AlvoEfCoreProvider
         builder.Services.TryAddSingleton<IDescriptorVersionStore>(sp => sp.GetRequiredService<EfCoreDescriptorVersionStore>());
         builder.Services.TryAddSingleton<IAppliedSchemaStore>(sp => sp.GetRequiredService<EfCoreDescriptorVersionStore>());
         builder.Services.TryAddSingleton<IRuntimeSchemaWriter>(CreateRuntimeSchemaWriter);
+        builder.Services.TryAddSingleton(services => new AlvoDataContextFactory(
+            services.GetRequiredService<ISchemaRegistry>(),
+            options => registration.ConfigureProvider(options, registration.ConnectionString(services))));
 
         return builder;
     }
