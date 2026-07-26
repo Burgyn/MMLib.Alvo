@@ -80,6 +80,7 @@ public sealed class InMemoryAlvoData : IAlvoData
             throw Denied(decision);
         }
 
+        AlvoFilter.EnsureWithinDepthLimit(query.Filter);
         EnsureQueryFieldsAvailable(query, decision);
 
         List<AlvoRecord> snapshot;

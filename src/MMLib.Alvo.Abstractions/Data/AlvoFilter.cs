@@ -24,6 +24,36 @@ public abstract record AlvoFilter
     }
 
     /// <summary>
+    /// The deepest an <see cref="AlvoFilter"/> tree may nest, counted as the number of nodes on the
+    /// longest root-to-leaf path. Every backend that renders or evaluates a filter walks it
+    /// recursively, so an uncapped tree from PR3's query-string parser is a denial of service against
+    /// the process itself — a <see cref="StackOverflowException"/> no <c>catch</c> can contain. This is
+    /// the <see cref="AlvoFilter"/> counterpart of the CEL compiler's own tree-depth cap, and it is
+    /// deliberately tighter (a filter's breadth carries the term count; only genuine nesting counts
+    /// towards this, so 32 levels is far past any query string a human or agent writes on purpose).
+    /// </summary>
+    public const int MaxDepth = 32;
+
+    /// <summary>
+    /// Throws when <paramref name="filter"/> nests deeper than <see cref="MaxDepth"/>. Every
+    /// <see cref="IAlvoData"/> implementation must call this before walking a caller's filter, and the
+    /// measurement is iterative so the check itself cannot overflow on the tree it is about to reject.
+    /// </summary>
+    /// <param name="filter">The tree to check, or <see langword="null"/> for no filter.</param>
+    /// <exception cref="ArgumentException"><paramref name="filter"/> nests deeper than <see cref="MaxDepth"/>.</exception>
+    public static void EnsureWithinDepthLimit(AlvoFilter? filter)
+    {
+        var depth = MeasureDepth(filter);
+        if (depth > MaxDepth)
+        {
+            throw new ArgumentException(
+                $"The filter nests {depth} levels deep, exceeding the maximum of {MaxDepth}. "
+                + "Flatten the nesting — an and/or over many terms is one level, not one level per term.",
+                nameof(filter));
+        }
+    }
+
+    /// <summary>
     /// Enumerates every field name any <see cref="AlvoComparison"/> in this tree compares, in no
     /// particular order and with duplicates. Lives here, on the closed hierarchy itself, rather than
     /// in each <see cref="IAlvoData"/> implementation: every implementation has to validate a
@@ -52,35 +82,54 @@ public abstract record AlvoFilter
                 yield return comparison.Field;
             }
 
-            PushChildren(pending, node);
+            foreach (var child in Children(node))
+            {
+                pending.Push(child);
+            }
         }
     }
 
-    private static void PushChildren(Stack<AlvoFilter> pending, AlvoFilter node)
+    private static int MeasureDepth(AlvoFilter? filter)
     {
-        switch (node)
+        if (filter is null)
         {
-            case AlvoAnd and:
-                PushRange(pending, and.Filters);
-                break;
-            case AlvoOr or:
-                PushRange(pending, or.Filters);
-                break;
-            case AlvoNot not:
-                pending.Push(not.Filter);
-                break;
-            default:
-                break;
+            return 0;
         }
+
+        var pending = new Stack<(AlvoFilter Node, int Depth)>();
+        pending.Push((filter, 1));
+        var deepest = 0;
+
+        while (pending.Count > 0)
+        {
+            var (node, depth) = pending.Pop();
+            deepest = Math.Max(deepest, depth);
+
+            foreach (var child in Children(node))
+            {
+                pending.Push((child, depth + 1));
+            }
+        }
+
+        return deepest;
     }
 
-    private static void PushRange(Stack<AlvoFilter> pending, IReadOnlyList<AlvoFilter> filters)
+    /// <summary>
+    /// A node's direct children, for both walks above. Every case is named explicitly and an
+    /// unrecognized one throws rather than reporting "no children": the hierarchy is closed
+    /// (<see langword="private protected"/>), so this can only be reached by adding a case to this file
+    /// without updating this method — and a silently childless node would hide its whole subtree from
+    /// the depth cap and its comparisons from the field walk.
+    /// </summary>
+    private static IReadOnlyList<AlvoFilter> Children(AlvoFilter node) => node switch
     {
-        foreach (var filter in filters)
-        {
-            pending.Push(filter);
-        }
-    }
+        AlvoComparison => [],
+        AlvoAnd and => and.Filters,
+        AlvoOr or => or.Filters,
+        AlvoNot not => [not.Filter],
+        _ => throw new InvalidOperationException(
+            $"'{node.GetType().Name}' is not a known {nameof(AlvoFilter)} case; its subtree cannot be walked."),
+    };
 }
 
 /// <summary>A single field comparison, e.g. <c>owner_id.eq.&lt;value&gt;</c>.</summary>

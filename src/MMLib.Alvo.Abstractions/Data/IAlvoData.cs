@@ -95,6 +95,14 @@ public interface IAlvoData
     /// echo the offending name (it is attacker-controlled text): a caller must not be able to tell
     /// "exists but hidden from you" from "does not exist".
     /// </para>
+    /// <para>
+    /// <b>A filter tree deeper than <see cref="AlvoFilter.MaxDepth"/> is refused, not walked.</b> Every
+    /// backend walks a filter recursively, so an implementation must call
+    /// <see cref="AlvoFilter.EnsureWithinDepthLimit"/> before doing so — the one malformed-argument
+    /// rejection on this port, deliberately an <see cref="ArgumentException"/> rather than an
+    /// authorization failure, because it discloses nothing about the schema or the caller's access and a
+    /// caller needs to know their query shape was refused rather than their permissions.
+    /// </para>
     /// </remarks>
     /// <param name="query">The entity, filter, sort, and paging to apply.</param>
     /// <param name="context">The caller performing the query.</param>
@@ -105,6 +113,7 @@ public interface IAlvoData
     /// <paramref name="query"/>'s filter or sort names a field this caller may not read or the schema
     /// does not declare.
     /// </exception>
+    /// <exception cref="ArgumentException"><paramref name="query"/>'s filter nests deeper than <see cref="AlvoFilter.MaxDepth"/>.</exception>
     Task<IReadOnlyList<AlvoRecord>> QueryAsync(AlvoQuery query, AlvoContext context, CancellationToken cancellationToken = default);
 
     /// <summary>Reads a single row by id.</summary>

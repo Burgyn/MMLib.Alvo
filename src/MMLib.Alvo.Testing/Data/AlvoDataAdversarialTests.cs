@@ -618,7 +618,43 @@ public abstract class AlvoDataAdversarialTests
         filtered.Message.ShouldBe(hidden.Message);
     }
 
+    /// <summary>
+    /// A caller-built filter tree is walked recursively by every backend that renders or evaluates it,
+    /// so an unbounded one is a denial-of-service against the process itself — a
+    /// <c>StackOverflowException</c> no <c>catch</c> can contain. The cap is enforced at the port, at
+    /// the boundary: exactly <see cref="AlvoFilter.MaxDepth"/> is answered normally, one level more is
+    /// rejected, and a tree far past any stack budget is still only a rejection.
+    /// </summary>
+    [Fact]
+    public async Task A_filter_tree_deeper_than_the_cap_is_rejected_rather_than_walked()
+    {
+        var fixture = await AccountsFixtureAsync();
+        var member = NewContext(tenant: null);
+
+        var atCap = await fixture.Data.QueryAsync(QueryFilteredBy(NestedFilter(AlvoFilter.MaxDepth)), member);
+        atCap.ShouldNotBeNull();
+
+        await Should.ThrowAsync<ArgumentException>(() => fixture.Data.QueryAsync(
+            QueryFilteredBy(NestedFilter(AlvoFilter.MaxDepth + 1)), member));
+
+        await Should.ThrowAsync<ArgumentException>(() => fixture.Data.QueryAsync(
+            QueryFilteredBy(NestedFilter(50_000)), member));
+    }
+
     private static AlvoQuery QueryFilteredBy(AlvoFilter filter) => new() { Entity = "accounts", Filter = filter };
+
+    /// <summary>Builds a filter nesting <paramref name="depth"/> levels of <see cref="AlvoNot"/> over one comparison.</summary>
+    /// <param name="depth">The number of nodes on the tree's single root-to-leaf path.</param>
+    private static AlvoFilter NestedFilter(int depth)
+    {
+        AlvoFilter node = new AlvoComparison("title", AlvoFilterOperator.Eq, "Acct");
+        for (var level = 1; level < depth; level++)
+        {
+            node = new AlvoNot(node);
+        }
+
+        return node;
+    }
 
     /// <summary>
     /// A <b>global</b> entity whose rule references <c>@tenant.id</c> is not covered by the
