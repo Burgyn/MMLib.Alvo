@@ -73,8 +73,13 @@ internal sealed class ReadStatementComposer
     /// <param name="context">The caller the predicates' context values are resolved against.</param>
     /// <param name="options">What this operation adds to the read.</param>
     /// <param name="rows">
-    /// The read model's entity type for <paramref name="entity"/> — the one authority for a masked column's
-    /// store type, and for which column the row key is.
+    /// The read model's entity type for <paramref name="entity"/> — EF's own metadata, and deliberately so.
+    /// It is the single authority for the two things this statement cannot compose without it: a masked
+    /// column's <em>store type</em>, which only the provider's type mapping knows (this port's first revision
+    /// derived one from <c>FieldSchema</c> instead and disagreed with the real columns for every faceted
+    /// type), and which column the row <em>key</em> is, which a field mask must never hide. A store-type
+    /// resolver callback would answer the first question and not the second, and would reintroduce exactly
+    /// the second authority that was deleted.
     /// </param>
     internal ReadStatement Compose(
         EntitySchema entity,
