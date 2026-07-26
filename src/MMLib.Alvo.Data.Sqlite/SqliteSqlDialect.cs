@@ -1,5 +1,4 @@
 ﻿using MMLib.Alvo.Data.EntityFrameworkCore;
-using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Data.Sqlite;
@@ -17,12 +16,7 @@ public sealed class SqliteSqlDialect : IAlvoSqlDialect
     /// answer is therefore the same for both mutations, and it is <see cref="string.Empty"/> rather than a
     /// clause the engine would reject.
     /// </remarks>
-    public string RowLockClause(DataOperation operation) => operation switch
-    {
-        DataOperation.Update or DataOperation.Delete => string.Empty,
-        _ => throw new ArgumentOutOfRangeException(
-            nameof(operation), operation, "Only an update or a delete reads a pre-image that can be locked."),
-    };
+    public string RowLockClause(PreImageMutation mutation) => string.Empty;
 
     /// <inheritdoc/>
     public string RenderTable(EntitySchema entity)

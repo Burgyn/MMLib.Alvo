@@ -25,7 +25,7 @@ public sealed class SqliteAlvoDataModelTests : IAsyncDisposable
             Properties(before, "vehicle").ShouldNotContain("colour");
         }
 
-        await host.RePrimeAsync(SchemaWith("plate", "colour"));
+        host.RePrime(SchemaWith("plate", "colour"));
 
         using var after = factory.Create();
         Properties(after, "vehicle").ShouldContain("colour");

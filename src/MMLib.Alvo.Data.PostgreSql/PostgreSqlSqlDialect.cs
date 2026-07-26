@@ -1,5 +1,4 @@
 ﻿using MMLib.Alvo.Data.EntityFrameworkCore;
-using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Data.PostgreSql;
@@ -23,13 +22,8 @@ public sealed class PostgreSqlSqlDialect : IAlvoSqlDialect
     /// take (<i>Explicit Locking</i> §13.3.2, which defines <c>FOR NO KEY UPDATE</c> as the mode that does
     /// not block it).
     /// </remarks>
-    public string RowLockClause(DataOperation operation) => operation switch
-    {
-        DataOperation.Update => NoKeyUpdate,
-        DataOperation.Delete => FullUpdate,
-        _ => throw new ArgumentOutOfRangeException(
-            nameof(operation), operation, "Only an update or a delete reads a pre-image that can be locked."),
-    };
+    public string RowLockClause(PreImageMutation mutation) =>
+        mutation == PreImageMutation.Delete ? FullUpdate : NoKeyUpdate;
 
     /// <inheritdoc/>
     public string RenderTable(EntitySchema entity)

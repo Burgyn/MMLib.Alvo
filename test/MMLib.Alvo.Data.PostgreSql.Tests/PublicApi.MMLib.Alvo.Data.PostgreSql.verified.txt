@@ -22,7 +22,7 @@ namespace MMLib.Alvo.Data.PostgreSql
         public string RenderColumn(string columnName) { }
         public string RenderNullProjection(string storeType) { }
         public string RenderTable(MMLib.Alvo.Schema.EntitySchema entity) { }
-        public string RowLockClause(MMLib.Alvo.Rules.DataOperation operation) { }
+        public string RowLockClause(MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation mutation) { }
     }
 }
 namespace Microsoft.Extensions.DependencyInjection

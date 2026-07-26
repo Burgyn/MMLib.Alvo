@@ -1,4 +1,4 @@
-﻿using MMLib.Alvo.Rules;
+﻿using MMLib.Alvo.Data.EntityFrameworkCore;
 using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Data.PostgreSql.Tests;
@@ -91,7 +91,7 @@ public class PostgreSqlSqlDialectTests
     /// </summary>
     [Fact]
     public void An_updates_pre_image_takes_the_weaker_no_key_lock()
-        => _dialect.RowLockClause(DataOperation.Update).ShouldBe("FOR NO KEY UPDATE");
+        => _dialect.RowLockClause(PreImageMutation.Update).ShouldBe("FOR NO KEY UPDATE");
 
     /// <summary>
     /// A delete removes the row's key, so it needs the stronger mode — and <c>FOR NO KEY UPDATE</c> is
@@ -100,7 +100,7 @@ public class PostgreSqlSqlDialectTests
     /// </summary>
     [Fact]
     public void A_deletes_pre_image_takes_the_full_row_lock()
-        => _dialect.RowLockClause(DataOperation.Delete).ShouldBe("FOR UPDATE");
+        => _dialect.RowLockClause(PreImageMutation.Delete).ShouldBe("FOR UPDATE");
 
     /// <summary>
     /// The clause carries no separator of its own — the composer inserts the space. A value that shipped
@@ -109,19 +109,14 @@ public class PostgreSqlSqlDialectTests
     /// <c>&lt;predicate&gt;FOR NO KEY UPDATE</c>.
     /// </summary>
     [Theory]
-    [InlineData(DataOperation.Update)]
-    [InlineData(DataOperation.Delete)]
-    public void The_row_lock_clause_carries_no_separator_of_its_own(DataOperation operation)
-        => _dialect.RowLockClause(operation).ShouldBe(_dialect.RowLockClause(operation).Trim());
+    [InlineData(PreImageMutation.Update)]
+    [InlineData(PreImageMutation.Delete)]
+    public void The_row_lock_clause_carries_no_separator_of_its_own(PreImageMutation mutation)
+        => _dialect.RowLockClause(mutation).ShouldBe(_dialect.RowLockClause(mutation).Trim());
 
-    /// <summary>
-    /// An operation with no pre-image to lock is refused rather than answered with an empty clause, which
-    /// on a dialect that does have row locks would silently drop the lock a caller asked for.
-    /// </summary>
-    [Theory]
-    [InlineData(DataOperation.List)]
-    [InlineData(DataOperation.Get)]
-    [InlineData(DataOperation.Create)]
-    public void An_operation_with_no_pre_image_has_no_row_lock_clause_to_render(DataOperation operation)
-        => Should.Throw<ArgumentOutOfRangeException>(() => _dialect.RowLockClause(operation));
+    /// <summary>The two mutations must not share a mode, or the distinction would be decorative.</summary>
+    [Fact]
+    public void The_two_mutations_take_different_modes()
+        => _dialect.RowLockClause(PreImageMutation.Update)
+            .ShouldNotBe(_dialect.RowLockClause(PreImageMutation.Delete));
 }

@@ -62,7 +62,33 @@ internal sealed class AlvoDataContext : DbContext
     /// </summary>
     internal Guid ModelToken { get; }
 
-    internal DbSet<Dictionary<string, object>> Rows(string entity) => Set<Dictionary<string, object>>(entity);
+    /// <summary>
+    /// The property-bag set for <paramref name="entity"/>, refusing anything this model does not map with
+    /// the same message an unknown entity gets.
+    /// </summary>
+    /// <remarks>
+    /// Fail-closed, and here rather than only at the caller: an <see cref="EntityStorage.Dynamic"/> entity
+    /// is absent from this model, so without this it would surface as a raw EF
+    /// <see cref="InvalidOperationException"/> naming the type — a different exception, a different
+    /// message, and one that tells an unauthorized caller the entity exists. The dynamic driver is a
+    /// different dialect (F7), never a branch here.
+    /// </remarks>
+    /// <exception cref="AlvoAuthorizationException"><paramref name="entity"/> is not mapped by this model.</exception>
+    internal DbSet<Dictionary<string, object>> Rows(string entity)
+    {
+        if (Model.FindEntityType(entity) is null)
+        {
+            throw new AlvoAuthorizationException(UnmappedEntityMessage);
+        }
+
+        return Set<Dictionary<string, object>>(entity);
+    }
+
+    /// <summary>
+    /// Deliberately the same text an unauthorized operation gets: whether an entity is undeclared, dynamic
+    /// or merely invisible to this caller must not be distinguishable from the outside.
+    /// </summary>
+    private const string UnmappedEntityMessage = "The operation was not authorized.";
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

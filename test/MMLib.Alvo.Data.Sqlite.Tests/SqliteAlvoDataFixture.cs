@@ -30,7 +30,7 @@ public sealed class SqliteAlvoDataFixture : IAsyncDisposable
         await MigrateAsync(services, schema);
 
         var host = new AlvoDataHost(services, descriptor ?? MinimalDescriptor(schema));
-        await host.RePrimeAsync(schema);
+        host.RePrime(schema);
         return host;
     }
 
@@ -117,11 +117,11 @@ public sealed class AlvoDataHost(ServiceProvider services, AlvoDescriptor descri
     public ServiceProvider Services => services;
 
     /// <summary>Re-primes the policy catalog (and therefore the applied schema) from <paramref name="schema"/>.</summary>
+    /// <remarks>Synchronous, because compiling and publishing a catalog is: nothing here awaits.</remarks>
     /// <param name="schema">The schema the rules are re-compiled against and that the read model is rebuilt from.</param>
-    public Task RePrimeAsync(SchemaModel schema)
+    public void RePrime(SchemaModel schema)
     {
         var catalog = PolicyCatalog.Build(descriptor, schema, services.GetRequiredService<ICelCompiler>());
         services.GetRequiredService<IPolicyCatalogProvider>().SetCurrent(descriptor.Name, catalog);
-        return Task.CompletedTask;
     }
 }

@@ -1,5 +1,4 @@
-﻿using MMLib.Alvo.Rules;
-using MMLib.Alvo.Schema;
+﻿using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore;
 
@@ -102,7 +101,7 @@ public interface IAlvoSqlDialect
 
     /// <summary>
     /// Renders the row-locking clause appended to the pre-image read that precedes
-    /// <paramref name="operation"/>, so a concurrent writer cannot change the row between the decision and
+    /// <paramref name="mutation"/>, so a concurrent writer cannot change the row between the decision and
     /// the write — <c>FOR NO KEY UPDATE</c> before an update and <c>FOR UPDATE</c> before a delete on
     /// PostgreSQL, the empty string where the engine has no such clause and serializes write transactions
     /// instead (SQLite).
@@ -134,17 +133,15 @@ public interface IAlvoSqlDialect
     /// block is the one that must be blocked, and the pre-image read takes the full <c>FOR UPDATE</c>.
     /// </para>
     /// <para>
-    /// Only <see cref="DataOperation.Update"/> and <see cref="DataOperation.Delete"/> have a pre-image to
-    /// lock. A dialect must refuse every other operation rather than answer it with
-    /// <see cref="string.Empty"/>: on an engine that has no locking clause the empty string already means
-    /// "nothing to append", so returning it for a list, a get or a create would make a caller's bug
-    /// indistinguishable from a legitimate answer.
+    /// The argument is <see cref="PreImageMutation"/> rather than the policy vocabulary's
+    /// <see cref="MMLib.Alvo.Rules.DataOperation"/> because only two operations read a row they are about
+    /// to change; the other three have no pre-image, and a dialect should not have to refuse them at
+    /// runtime — on an engine with no locking clause the empty string is a <em>legitimate</em> answer, so
+    /// answering a list or a create with it would make a caller's bug indistinguishable from a real
+    /// result. A two-member enum makes that mistake a compile error instead, in every dialect including
+    /// ones Alvo will never see.
     /// </para>
     /// </remarks>
-    /// <param name="operation">The mutation the locked pre-image read precedes.</param>
-    /// <exception cref="ArgumentOutOfRangeException">
-    /// <paramref name="operation"/> is not <see cref="DataOperation.Update"/> or
-    /// <see cref="DataOperation.Delete"/>, and therefore has no pre-image to lock.
-    /// </exception>
-    string RowLockClause(DataOperation operation);
+    /// <param name="mutation">The mutation the locked pre-image read precedes.</param>
+    string RowLockClause(PreImageMutation mutation);
 }

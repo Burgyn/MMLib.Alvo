@@ -12,9 +12,25 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 internal sealed class AlvoModelCacheKeyFactory : IModelCacheKeyFactory
 {
     /// <inheritdoc/>
+    /// <remarks>
+    /// Another context type reaching this factory is refused rather than defaulted. A shared fallback token
+    /// would make two context types silently share one cached model, which is the exact bug this factory
+    /// exists to prevent — and since <see cref="AlvoDataContext"/> installs the factory itself, no other
+    /// type can arrive here without someone having wired it in deliberately.
+    /// </remarks>
+    /// <exception cref="ArgumentException"><paramref name="context"/> is not an <see cref="AlvoDataContext"/>.</exception>
     public object Create(DbContext context, bool designTime)
     {
         ArgumentNullException.ThrowIfNull(context);
-        return (context.GetType(), (context as AlvoDataContext)?.ModelToken ?? Guid.Empty, designTime);
+
+        if (context is not AlvoDataContext alvo)
+        {
+            throw new ArgumentException(
+                $"'{context.GetType()}' is not an {nameof(AlvoDataContext)}, so it has no applied-schema token to key "
+                + "its model cache on.",
+                nameof(context));
+        }
+
+        return (context.GetType(), alvo.ModelToken, designTime);
     }
 }
