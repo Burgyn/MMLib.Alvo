@@ -140,15 +140,38 @@ driver must revisit `CelInterpreter`'s and `SqlPredicateRenderer`'s remarks befo
 
 ## The `IFieldSqlRenderer` seam
 
-`SqlPredicateRenderer` composes only SQL **structure** — `COALESCE`, `AND`/`OR`/`NOT`, parentheses,
-`CASE WHEN`. Every identifier and every dialect-specific keyword or literal crosses through
-`IFieldSqlRenderer` instead:
+`SqlPredicateRenderer` composes only SQL **structure** — `AND`/`OR`/`NOT`, parentheses, `CASE WHEN`.
+Every identifier, every dialect-specific keyword or literal, and the two-valued fold itself cross
+through `IFieldSqlRenderer` instead:
 
 - `RenderField(entity, fieldName)` — a quoted column on a physical entity.
 - `RenderParameter(parameterName)` — a bind-parameter reference (dialect-specific prefix).
-- `TrueLiteral` / `FalseLiteral` — the dialect's boolean literals (`TRUE`/`FALSE` on PostgreSQL,
-  `1`/`0` on SQLite).
+- `TrueLiteral` / `FalseLiteral` — the dialect's boolean literals in **value** position (`TRUE`/`FALSE`
+  on PostgreSQL, `1`/`0` on SQLite).
 - `RenderCaseInsensitiveLike(left, right)` — `ILIKE` on PostgreSQL, an upper-cased `LIKE` on SQLite.
+- `RenderTwoValued(predicate)` — fold a possibly-`UNKNOWN` **predicate** back into a two-valued one.
+- `RenderBooleanFieldAsPredicate(booleanValue)` — read a nullable boolean **value** (a column, or F7's
+  JSON path to one) as a two-valued predicate.
+- `RenderBooleanPredicate(bool)` — a boolean **constant** in predicate position.
+
+**Why the last three exist, and why they are default interface members: T-SQL has no boolean type.**
+PostgreSQL and SQLite fold with `COALESCE(<x>, FALSE)` in boolean position, which is exactly what the
+three defaults emit — so an existing implementation keeps compiling and keeps its current rendering, and
+`SqlPredicateRenderer` itself spells no `COALESCE` at all. SQL Server / Azure SQL, which §0 principle 3
+requires the engine-agnostic core to support, cannot use that shape: a `bit` is a value and never a
+predicate, so `COALESCE(<predicate>, 0)` is unparseable where a `WHERE` clause expects a predicate, and
+`WHERE 1` is not valid either. A T-SQL driver overrides the three with:
+
+| Member | T-SQL rendering |
+|---|---|
+| `RenderTwoValued(p)` | `(CASE WHEN <p> THEN 1 ELSE 0 END = 1)` |
+| `RenderBooleanFieldAsPredicate(v)` | `(COALESCE(<v>, 0) = 1)` — `COALESCE` in *value* position is fine |
+| `RenderBooleanPredicate(true/false)` | `(1 = 1)` / `(1 = 0)` |
+
+The predicate and the value fold are two members, not one, precisely because T-SQL treats them
+differently: wrapping a bare `bit` column in `CASE WHEN` would not parse, and comparing a predicate
+with `= 1` would not either. `TSqlSeamTests` renders the whole rule matrix through a T-SQL fake that
+implements *only* `IFieldSqlRenderer`, which is what proves the seam is sufficient.
 
 **Why this seam exists, not just "because it's an interface": F7's dynamic entities.** A physical
 entity's field is a real column; a dynamic (metadata-driven, `evidencie`) entity's field is a JSON

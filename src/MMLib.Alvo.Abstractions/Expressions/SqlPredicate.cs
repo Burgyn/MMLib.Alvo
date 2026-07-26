@@ -27,10 +27,14 @@ public sealed record SqlPredicate
     public IReadOnlyDictionary<string, object?> Parameters { get; }
 
     /// <summary>A predicate that always denies — the safe default when no rule applies.</summary>
-    /// <param name="fields">The storage driver's field/dialect renderer, for its false literal.</param>
+    /// <param name="fields">
+    /// The storage driver's field/dialect renderer, for its constant-false <em>predicate</em> — not its
+    /// bare false literal, which on a dialect with no boolean type is a value a <c>WHERE</c> clause
+    /// cannot evaluate.
+    /// </param>
     public static SqlPredicate AlwaysFalse(IFieldSqlRenderer fields)
     {
         ArgumentNullException.ThrowIfNull(fields);
-        return new SqlPredicate(fields.FalseLiteral, new Dictionary<string, object?>());
+        return new SqlPredicate(fields.RenderBooleanPredicate(false), new Dictionary<string, object?>());
     }
 }

@@ -6,22 +6,31 @@ namespace MMLib.Alvo.Expressions.Internal;
 /// <summary>
 /// Renders a <see cref="CompiledExpression"/> to SQL, tracking per rendered subtree whether it is
 /// already two-valued (evaluates to true or false and never SQL's three-valued <c>UNKNOWN</c>) and
-/// wrapping only what is not. A comparison and a nullable boolean field each render as
-/// <c>COALESCE(&lt;value&gt;, FALSE)</c> and are then two-valued; <c>AND</c>/<c>OR</c>/<c>NOT</c> over
-/// already two-valued operands stay two-valued without an extra wrap; <c>IS NOT NULL</c> and a
-/// boolean literal are two-valued from the start. This is what lets the SQL backend agree, term for
-/// term, with <see cref="CelInterpreter"/>'s in-memory null rule — see that type's class remarks for
-/// the exact semantics this renderer must match, including the string-collation caveat on
-/// <c>==</c>/<c>!=</c>.
+/// collapsing only what is not. A comparison and a nullable boolean field each collapse once, through
+/// <see cref="IFieldSqlRenderer.RenderTwoValued"/> / <see cref="IFieldSqlRenderer.RenderBooleanFieldAsPredicate"/>
+/// (<c>COALESCE(&lt;value&gt;, FALSE)</c> on PostgreSQL and SQLite, a dialect's own shape elsewhere), and
+/// are then two-valued; <c>AND</c>/<c>OR</c>/<c>NOT</c> over already two-valued operands stay two-valued
+/// without an extra collapse; <c>IS NOT NULL</c> and a boolean constant are two-valued from the start.
+/// This is what lets the SQL backend agree, term for term, with <see cref="CelInterpreter"/>'s in-memory
+/// null rule — see that type's class remarks for the exact semantics this renderer must match, including
+/// the string-collation caveat on <c>==</c>/<c>!=</c>.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Root-wrap is defense-in-depth, not the live mechanism.</b> <see cref="Render(CompiledExpression, AlvoContext, IFieldSqlRenderer)"/>
-/// wraps the whole rendered predicate in one more <c>COALESCE(..., FALSE)</c> only when the root
-/// fragment is not already marked two-valued. Every node kind the predicate path renders today
-/// already produces an already-two-valued fragment at its own level, so that branch is never taken —
-/// it exists so a future node kind that is added without also collapsing itself still fails safe
-/// (deny) instead of leaking <c>UNKNOWN</c> to the caller.
+/// <b>This type composes structure only; the two-valued fold is the dialect's.</b> No <c>COALESCE</c> is
+/// spelled here — every collapse goes through <see cref="IFieldSqlRenderer"/>, because a dialect with no
+/// boolean type (T-SQL, which §0 principle 3 requires) cannot use a value-returning
+/// <c>COALESCE(&lt;predicate&gt;, 0)</c> where a predicate is expected, and a driver author who can only
+/// implement field/parameter/literal rendering would have no way to fix that short of forking this
+/// renderer.
+/// </para>
+/// <para>
+/// <b>Root collapse is defense-in-depth, not the live mechanism.</b> <see cref="Render(CompiledExpression, AlvoContext, IFieldSqlRenderer)"/>
+/// collapses the whole rendered predicate once more only when the root fragment is not already marked
+/// two-valued. Every node kind the predicate path renders today already produces an
+/// already-two-valued fragment at its own level, so that branch is never taken — it exists so a future
+/// node kind that is added without also collapsing itself still fails safe (deny) instead of leaking
+/// <c>UNKNOWN</c> to the caller.
 /// </para>
 /// <para>
 /// <b>An absent context value is the policy engine's job to reject, and it now does — the collapse
@@ -59,7 +68,7 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
 
         var bag = new ParameterBag();
         var rendered = RenderPredicate(expression.Root, expression.Entity, context, fields, bag);
-        var sql = rendered.IsTwoValued ? rendered.Sql : Wrap(rendered.Sql, fields);
+        var sql = rendered.IsTwoValued ? rendered.Sql : fields.RenderTwoValued(rendered.Sql);
         return new SqlPredicate(sql, bag.Snapshot());
     }
 
@@ -95,8 +104,6 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
         }
     }
 
-    private static string Wrap(string sql, IFieldSqlRenderer fields) => $"COALESCE({sql}, {fields.FalseLiteral})";
-
     private static NotSupportedException Unsupported(CelNode node) =>
         new($"'{node.GetType().Name}' cannot be rendered to SQL by this entry point.");
 
@@ -131,12 +138,12 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
         };
 
     private static PredicateFragment RenderBoolLiteral(CelLiteral literal, IFieldSqlRenderer fields) =>
-        new(literal.Value is true ? fields.TrueLiteral : fields.FalseLiteral, true);
+        new(fields.RenderBooleanPredicate(literal.Value is true), true);
 
     private static PredicateFragment RenderBoolField(CelFieldRef fieldRef, EntitySchema entity, IFieldSqlRenderer fields)
     {
         var field = RenderField(fieldRef, entity, fields);
-        return new PredicateFragment(Wrap(field, fields), true);
+        return new PredicateFragment(fields.RenderBooleanFieldAsPredicate(field), true);
     }
 
     private PredicateFragment RenderNot(
@@ -166,13 +173,13 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
     {
         if (IsAbsentContextOperand(binary.Left, context) || IsAbsentContextOperand(binary.Right, context))
         {
-            return new PredicateFragment(fields.FalseLiteral, true);
+            return new PredicateFragment(fields.RenderBooleanPredicate(false), true);
         }
 
         var left = RenderOperand(binary.Left, entity, context, fields, bag);
         var right = RenderOperand(binary.Right, entity, context, fields, bag);
         var sql = $"{left} {ComparisonOperatorText(binary.Operator)} {right}";
-        return new PredicateFragment(Wrap(sql, fields), true);
+        return new PredicateFragment(fields.RenderTwoValued(sql), true);
     }
 
     private static PredicateFragment RenderIn(
@@ -181,19 +188,19 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
         if (binary.Left is CelLiteral { Type: CelValueType.String, Value: string text })
         {
             var isMember = context.Roles.Select(role => role.Name).Contains(text, StringComparer.Ordinal);
-            return new PredicateFragment(isMember ? fields.TrueLiteral : fields.FalseLiteral, true);
+            return new PredicateFragment(fields.RenderBooleanPredicate(isMember), true);
         }
 
         var roleNames = context.Roles.Select(role => role.Name).OrderBy(name => name, StringComparer.Ordinal).ToList();
         if (roleNames.Count == 0)
         {
-            return new PredicateFragment(fields.FalseLiteral, true);
+            return new PredicateFragment(fields.RenderBooleanPredicate(false), true);
         }
 
         var left = RenderOperand(binary.Left, entity, context, fields, bag);
         var roleParameters = roleNames.Select(name => RenderLiteralOperand(new CelLiteral(CelValueType.String, name), fields, bag));
         var sql = $"{left} IN ({string.Join(", ", roleParameters)})";
-        return new PredicateFragment(Wrap(sql, fields), true);
+        return new PredicateFragment(fields.RenderTwoValued(sql), true);
     }
 
     private static bool IsAbsentContextOperand(CelNode node, AlvoContext context) =>
@@ -316,12 +323,12 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
     /// </summary>
     private string RenderScalarBoolean(CelNode node, EntitySchema entity, IFieldSqlRenderer fields, ParameterBag bag) => node switch
     {
-        CelLiteral { Type: CelValueType.Bool } literal => literal.Value is true ? fields.TrueLiteral : fields.FalseLiteral,
-        CelFieldRef fieldRef => Wrap(RenderField(fieldRef, entity, fields), fields),
+        CelLiteral { Type: CelValueType.Bool } literal => fields.RenderBooleanPredicate(literal.Value is true),
+        CelFieldRef fieldRef => fields.RenderBooleanFieldAsPredicate(RenderField(fieldRef, entity, fields)),
         CelUnary { Operator: CelUnaryOperator.Not } unary => $"(NOT {RenderScalarBoolean(unary.Operand, entity, fields, bag)})",
         CelBinary { Operator: CelBinaryOperator.And or CelBinaryOperator.Or } logical => RenderScalarLogical(logical, entity, fields, bag),
         CelHas has => $"({RenderField(has.Field, entity, fields)} IS NOT NULL)",
-        CelBinary comparison => Wrap(RenderScalarComparison(comparison, entity, fields, bag), fields),
+        CelBinary comparison => fields.RenderTwoValued(RenderScalarComparison(comparison, entity, fields, bag)),
         CelConditional nested => RenderConditional(nested, entity, fields, bag),
         _ => throw Unsupported(node),
     };
