@@ -79,6 +79,48 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
     }
 
     /// <summary>
+    /// The same guarantee on the overload PR2's rule predicates actually take. A rendered
+    /// <c>SqlPredicate</c>'s bag carries names and values only, so this path binds by the <em>value's</em>
+    /// type — and it must still reach ADO.NET with EF's own <see cref="DbType"/> rather than the
+    /// <c>String</c> a provider infers for an unmapped value. Asserting that on the column overload alone
+    /// left the live path's premise unasserted.
+    /// </summary>
+    [Theory]
+    [InlineData("owner_id", DbType.Guid)]
+    [InlineData("plate", DbType.String)]
+    [InlineData("mileage", DbType.Int64)]
+    [InlineData("price", DbType.Decimal)]
+    [InlineData("is_public", DbType.Boolean)]
+    [InlineData("due_on", DbType.Date)]
+    [InlineData("created_at", DbType.DateTimeOffset)]
+    public async Task Every_value_typed_bind_carries_the_db_type_efs_own_mapping_chose(string field, DbType expected)
+    {
+        var factory = await FactoryAsync();
+        using var context = factory.Create();
+
+        new PredicateParameterBinder(context)
+            .Bind(PolicyParameterPrefix.Using + "0", SampleFor(field))
+            .DbType.ShouldBe(expected);
+    }
+
+    /// <summary>
+    /// The column overload's real advantage over the value-typed one: a <see langword="null"/> still gets the
+    /// <em>column's</em> <see cref="DbType"/>, where the value-typed path has no type to take it from. That is
+    /// what keeps a <c>NULL</c> comparison from reaching PostgreSQL as an untyped parameter
+    /// (<c>42P08 could not determine data type of parameter</c>).
+    /// </summary>
+    [Fact]
+    public async Task A_null_bound_against_a_column_still_carries_the_columns_db_type()
+    {
+        var factory = await FactoryAsync();
+        using var context = factory.Create();
+
+        new PredicateParameterBinder(context)
+            .Bind(Column(context, "created_at"), PolicyParameterPrefix.Filter + "0", null)
+            .DbType.ShouldBe(DbType.DateTimeOffset);
+    }
+
+    /// <summary>
     /// The shape C1 was: a <c>uuid</c> column compared against a value that arrived as a
     /// <see cref="string"/> — a caller filter's JSON value, say. Binding it by the <em>value's</em> type
     /// picks the <c>string</c> mapping and the comparison silently matches nothing; binding it by the
