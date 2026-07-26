@@ -82,6 +82,61 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task Update_of_an_unrelated_field_succeeds_when_the_post_image_still_satisfies_the_rule() { }
         public System.Threading.Tasks.Task Update_of_another_users_row_reports_not_found() { }
     }
+    public abstract class AlvoDataComparisonTests
+    {
+        protected AlvoDataComparisonTests() { }
+        [Xunit.InlineData(new object[] {
+                "price < 100",
+                1})]
+        [Xunit.InlineData(new object[] {
+                "price <= 2",
+                0})]
+        [Xunit.InlineData(new object[] {
+                "price > 100",
+                0})]
+        [Xunit.InlineData(new object[] {
+                "price > 12.34",
+                0})]
+        [Xunit.InlineData(new object[] {
+                "price > 2",
+                1})]
+        [Xunit.InlineData(new object[] {
+                "price >= 12.34",
+                1})]
+        public System.Threading.Tasks.Task A_decimal_comparison_answers_numerically_not_lexicographically(string rule, int expected) { }
+        [Xunit.InlineData(new object[] {
+                "!(price > 1)",
+                1})]
+        [Xunit.InlineData(new object[] {
+                "has(price)",
+                0})]
+        [Xunit.InlineData(new object[] {
+                "price > 1",
+                0})]
+        public System.Threading.Tasks.Task A_null_decimal_keeps_its_three_valued_answer(string rule, int expected) { }
+        [Xunit.InlineData(new object[] {
+                "price < 3",
+                1})]
+        [Xunit.InlineData(new object[] {
+                "price > 3",
+                0})]
+        public System.Threading.Tasks.Task A_whole_number_literal_against_a_decimal_column_answers_numerically(string rule, int expected) { }
+        [Xunit.InlineData(new object[] {
+                "mileage > 100",
+                1})]
+        [Xunit.InlineData(new object[] {
+                "mileage > 100000",
+                0})]
+        public System.Threading.Tasks.Task An_integer_comparison_answers_the_same_on_every_engine(string rule, int expected) { }
+        [Xunit.InlineData(new object[] {
+                "price != 100",
+                0})]
+        [Xunit.InlineData(new object[] {
+                "price == 100",
+                1})]
+        public System.Threading.Tasks.Task Equality_against_a_decimal_column_answers_numerically(string rule, int expected) { }
+        protected abstract System.Threading.Tasks.Task<int> MatchesAsync(string rule, decimal? price, long? mileage);
+    }
     public static class AlvoDataFixtures
     {
         public static MMLib.Alvo.AlvoContext Caller { get; }
