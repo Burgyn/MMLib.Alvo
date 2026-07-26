@@ -807,6 +807,7 @@ namespace MMLib.Alvo.Expressions
         string RenderBooleanFieldAsPredicate(string booleanValue);
         string RenderBooleanPredicate(bool value);
         string RenderCaseInsensitiveLike(string left, string right);
+        string RenderComparableOperand(string sql, MMLib.Alvo.Expressions.CelValueType type);
         string RenderField(MMLib.Alvo.Schema.EntitySchema entity, string fieldName);
         string RenderParameter(string parameterName);
         string RenderTwoValued(string predicate);

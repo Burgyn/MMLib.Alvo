@@ -61,6 +61,30 @@ public class SqliteFieldSqlRendererTests
         ((IFieldSqlRenderer)_fields).RenderBooleanPredicate(false).ShouldBe("0");
     }
 
+    /// <summary>
+    /// SQLite stores a decimal in a <c>TEXT</c> column, so a decimal comparison must be cast on both sides
+    /// or it is a string comparison — <c>price &gt; 100</c> would match a price of <c>12.34</c>.
+    /// </summary>
+    [Fact]
+    public void A_decimal_operand_is_cast_so_the_comparison_is_numeric()
+        => _fields.RenderComparableOperand("\"price\"", CelValueType.Decimal).ShouldBe("CAST(\"price\" AS REAL)");
+
+    /// <summary>
+    /// Every other type already has a storage class SQLite orders correctly — <c>INTEGER</c> for an int,
+    /// and a fixed-width ISO-8601 <c>TEXT</c> for a date, which orders lexicographically <em>and</em>
+    /// chronologically. Casting those would cost an index for nothing.
+    /// </summary>
+    [Theory]
+    [InlineData(CelValueType.Int)]
+    [InlineData(CelValueType.String)]
+    [InlineData(CelValueType.Timestamp)]
+    [InlineData(CelValueType.Uuid)]
+    [InlineData(CelValueType.Bool)]
+    [InlineData(CelValueType.Json)]
+    [InlineData(CelValueType.Null)]
+    public void Every_other_type_is_already_comparable_and_is_left_alone(CelValueType type)
+        => _fields.RenderComparableOperand("\"mileage\"", type).ShouldBe("\"mileage\"");
+
     private static EntitySchema Entity() => new()
     {
         Name = "vehicle",

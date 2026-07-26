@@ -78,6 +78,11 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task Update_of_an_unrelated_field_succeeds_when_the_post_image_still_satisfies_the_rule() { }
         public System.Threading.Tasks.Task Update_of_another_users_row_reports_not_found() { }
     }
+    public static class AlvoDataFixtures
+    {
+        public static MMLib.Alvo.AlvoContext Caller { get; }
+        public static MMLib.Alvo.Schema.EntitySchema Vehicle { get; }
+    }
     public abstract class AlvoDataSqlSnapshotTests
     {
         protected AlvoDataSqlSnapshotTests() { }
@@ -86,8 +91,8 @@ namespace MMLib.Alvo.Testing.Data
         protected abstract MMLib.Alvo.Expressions.IFieldSqlRenderer Fields { get; }
         protected abstract MMLib.Alvo.Expressions.IPredicateRenderer Renderer { get; }
         protected virtual System.Collections.Generic.IEnumerable<string> Rules { get; }
-        public static MMLib.Alvo.AlvoContext SnapshotCaller { get; }
-        public static MMLib.Alvo.Schema.EntitySchema SnapshotEntity { get; }
+        protected static MMLib.Alvo.AlvoContext SnapshotCaller { get; }
+        protected static MMLib.Alvo.Schema.EntitySchema SnapshotEntity { get; }
         public System.Threading.Tasks.Task Cel_renders_to_this_engines_sql() { }
     }
     public sealed class InMemoryAlvoData : MMLib.Alvo.Data.IAlvoData

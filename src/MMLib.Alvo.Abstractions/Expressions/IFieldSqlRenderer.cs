@@ -91,4 +91,40 @@ public interface IFieldSqlRenderer
     /// <param name="left">The already-rendered left operand.</param>
     /// <param name="right">The already-rendered right operand.</param>
     string RenderCaseInsensitiveLike(string left, string right);
+
+    /// <summary>
+    /// Wraps an already-rendered comparison operand so this dialect compares it by <b>value</b>. Both
+    /// operands of every comparison go through this, so a dialect whose storage for
+    /// <paramref name="type"/> does not order the way the type does can repair the comparison in one
+    /// place. The default returns <paramref name="sql"/> unchanged, which is right for any engine with a
+    /// real storage type per Alvo field type.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// SQLite is why this exists. It has no decimal storage class, so EF maps a
+    /// <see cref="CelValueType.Decimal"/> field to a <c>TEXT</c> column and an unguarded
+    /// <c>price &gt; 100</c> becomes a <em>string</em> comparison: it matches a row whose price is
+    /// <c>12.34</c>, and <c>price != 100</c> matches a row whose price <em>is</em> 100. On PostgreSQL's
+    /// <c>numeric</c> the same rule answers correctly — so a rule gating access on an amount admits
+    /// different rows per engine, which is a fail-open authorization outcome on one of them and exactly
+    /// what §0's engine-agnostic core principle forbids. SQLite's driver therefore returns
+    /// <c>CAST(&lt;sql&gt; AS REAL)</c> for a decimal operand.
+    /// </para>
+    /// <para>
+    /// <b>Both sides, always.</b> Wrapping only the column would replace one wrong answer with a
+    /// differently wrong one, because the bound parameter's own storage class takes part in the
+    /// comparison too. The caller passes the type the comparison is <em>evaluated</em> at, after CEL's
+    /// numeric promotion, so a whole-number literal compared against a decimal column arrives as
+    /// <see cref="CelValueType.Decimal"/> rather than <see cref="CelValueType.Int"/>.
+    /// </para>
+    /// <para>
+    /// An implementation must return an expression rather than a predicate, and must preserve
+    /// <see langword="null"/>: a wrapper that turned a <c>NULL</c> operand into a value would break the
+    /// three-valued fold every comparison goes through. A cast that costs an index scan is an accepted
+    /// price for a correct answer; a dialect with a cheaper repair should prefer it.
+    /// </para>
+    /// </remarks>
+    /// <param name="sql">The already-rendered operand.</param>
+    /// <param name="type">The type the comparison is evaluated at.</param>
+    string RenderComparableOperand(string sql, CelValueType type) => sql;
 }

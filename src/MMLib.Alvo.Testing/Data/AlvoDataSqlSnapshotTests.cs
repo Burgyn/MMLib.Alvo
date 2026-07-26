@@ -33,6 +33,9 @@ public abstract class AlvoDataSqlSnapshotTests
         "status == 'approved'",
         "status in @user.roles",
         "(owner_id == @user.id || status == 'approved') && !is_public",
+        "price > 100",
+        "price != 100",
+        "mileage > 100",
     ];
 
     /// <summary>Gets the engine's snapshot file suffix (<c>sqlite</c>, <c>postgresql</c>).</summary>
@@ -58,46 +61,15 @@ public abstract class AlvoDataSqlSnapshotTests
     protected virtual IEnumerable<string> Rules => _rules;
 
     /// <summary>
-    /// The caller every snapshot renders against — a fixed, tenanted, admin-holding identity.
+    /// The caller every snapshot renders against, and the entity every snapshot rule is compiled against.
+    /// Both forward to <see cref="AlvoDataFixtures"/> — the framework's one canonical data-path fixture —
+    /// rather than declaring a second copy, and stay <see langword="protected"/> here so this suite's own
+    /// surface stays the four abstract members a subclass supplies rather than a fixture library.
     /// </summary>
-    /// <remarks>
-    /// Public, not <see langword="protected"/>, together with <see cref="SnapshotEntity"/>: this pair is
-    /// the framework's one canonical data-path fixture, and every engine's data-path test project reads it
-    /// from classes that do not derive from this suite (a binder test, a statement-composer test, an
-    /// adversarial fixture). A second, per-project copy of a fixture entity is how two test suites come to
-    /// disagree about what they are testing over.
-    /// </remarks>
-    public static AlvoContext SnapshotCaller { get; } = new()
-    {
-        User = new UserId(Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001")),
-        Roles = new HashSet<Role> { Role.Authenticated, Role.Admin },
-        Tenant = new TenantId(Guid.Parse("11111111-0000-0000-0000-000000000001")),
-    };
+    protected static AlvoContext SnapshotCaller => AlvoDataFixtures.Caller;
 
-    /// <summary>
-    /// The entity every snapshot rule is compiled against, and the shared fixture entity every data-path
-    /// suite reads and writes — one column of every field type, one nullable owner reference, one field a
-    /// <c>hidden</c> rule can mask. See <see cref="SnapshotCaller"/> for why the pair is public.
-    /// </summary>
-    public static EntitySchema SnapshotEntity { get; } = new()
-    {
-        Name = "vehicle",
-        Tenancy = TenancyMode.Scoped,
-        Fields =
-        [
-            new FieldSchema { Name = "id", Type = FieldType.Uuid, Required = true },
-            new FieldSchema { Name = "tenant_id", Type = FieldType.Uuid, Required = true, Indexed = true },
-            new FieldSchema { Name = "owner_id", Type = FieldType.Uuid, Nullable = true },
-            new FieldSchema { Name = "plate", Type = FieldType.String, Required = true, MaxLength = 32 },
-            new FieldSchema { Name = "status", Type = FieldType.String, Nullable = true },
-            new FieldSchema { Name = "secret_note", Type = FieldType.String, Nullable = true },
-            new FieldSchema { Name = "mileage", Type = FieldType.Integer, Nullable = true },
-            new FieldSchema { Name = "price", Type = FieldType.Decimal, Nullable = true, Precision = 18, Scale = 2 },
-            new FieldSchema { Name = "is_public", Type = FieldType.Boolean, Nullable = true },
-            new FieldSchema { Name = "due_on", Type = FieldType.Date, Nullable = true },
-            new FieldSchema { Name = "created_at", Type = FieldType.DateTime, Nullable = true },
-        ],
-    };
+    /// <inheritdoc cref="SnapshotCaller"/>
+    protected static EntitySchema SnapshotEntity => AlvoDataFixtures.Vehicle;
 
     /// <summary>
     /// Freezes the SQL this engine's dialect renders the fixed rule table into.

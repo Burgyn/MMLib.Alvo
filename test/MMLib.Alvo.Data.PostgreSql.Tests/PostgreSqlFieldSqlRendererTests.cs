@@ -58,6 +58,20 @@ public class PostgreSqlFieldSqlRendererTests
         ((IFieldSqlRenderer)_fields).RenderBooleanPredicate(false).ShouldBe("FALSE");
     }
 
+    /// <summary>
+    /// PostgreSQL has a real <c>numeric</c>, which orders numerically, so no operand needs repairing — and
+    /// a cast here would cost the index for nothing. This is the port's default, asserted through the
+    /// interface so an accidental override on the class is caught.
+    /// </summary>
+    [Theory]
+    [InlineData(CelValueType.Decimal)]
+    [InlineData(CelValueType.Int)]
+    [InlineData(CelValueType.String)]
+    [InlineData(CelValueType.Timestamp)]
+    [InlineData(CelValueType.Uuid)]
+    public void Every_operand_is_already_comparable_and_is_left_alone(CelValueType type)
+        => ((IFieldSqlRenderer)_fields).RenderComparableOperand("\"price\"", type).ShouldBe("\"price\"");
+
     private static EntitySchema Entity() => new()
     {
         Name = "vehicle",

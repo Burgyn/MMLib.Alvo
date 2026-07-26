@@ -8,6 +8,7 @@ namespace MMLib.Alvo.Data.Sqlite
         public string FalseLiteral { get; }
         public string TrueLiteral { get; }
         public string RenderCaseInsensitiveLike(string left, string right) { }
+        public string RenderComparableOperand(string sql, MMLib.Alvo.Expressions.CelValueType type) { }
         public string RenderField(MMLib.Alvo.Schema.EntitySchema entity, string fieldName) { }
         public string RenderParameter(string parameterName) { }
     }

@@ -216,7 +216,7 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
         Should.Throw<InvalidOperationException>(() => binder.Bind(PolicyParameterPrefix.Filter + "0", new object()));
     }
 
-    private Task<AlvoDataContextFactory> FactoryAsync() => FactoryAsync(new SchemaModel([AlvoDataSqlSnapshotTests.SnapshotEntity]));
+    private Task<AlvoDataContextFactory> FactoryAsync() => FactoryAsync(new SchemaModel([AlvoDataFixtures.Vehicle]));
 
     private async Task<AlvoDataContextFactory> FactoryAsync(SchemaModel schema)
     {

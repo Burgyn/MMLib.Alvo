@@ -76,5 +76,26 @@
       alvo_u0:Guid,
       alvo_u1:String
     ]
+  },
+  {
+    Rule: price > 100,
+    Sql: COALESCE(CAST("price" AS REAL) > CAST(@alvo_u0 AS REAL), 0),
+    Parameters: [
+      alvo_u0:Int64
+    ]
+  },
+  {
+    Rule: price != 100,
+    Sql: COALESCE(CAST("price" AS REAL) <> CAST(@alvo_u0 AS REAL), 0),
+    Parameters: [
+      alvo_u0:Int64
+    ]
+  },
+  {
+    Rule: mileage > 100,
+    Sql: COALESCE("mileage" > @alvo_u0, 0),
+    Parameters: [
+      alvo_u0:Int64
+    ]
   }
 ]
