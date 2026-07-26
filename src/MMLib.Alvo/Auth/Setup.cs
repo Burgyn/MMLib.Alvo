@@ -9,11 +9,20 @@ internal static class AuthSetup
 {
     /// <summary>
     /// Adds the dev API-key <see cref="IAlvoContextResolver"/>, <see cref="ScopeGate"/> and
-    /// <see cref="TenantResolver"/>, plus a <see cref="RoleCatalog"/> holding only the built-in
-    /// roles until the descriptor pipeline (Task 13) replaces it. <see cref="AlvoAuthOptions"/>
-    /// fails fast at startup (<see cref="Internal.AlvoAuthOptionsValidator"/>) on a misconfigured
-    /// dev key, rather than silently dropping it.
+    /// <see cref="TenantResolver"/>, plus the pre-apply <see cref="RoleCatalog"/>.
+    /// <see cref="AlvoAuthOptions"/> fails fast at startup
+    /// (<see cref="Internal.AlvoAuthOptionsValidator"/>) on a misconfigured dev key, rather than
+    /// silently dropping it.
     /// </summary>
+    /// <remarks>
+    /// The registered <see cref="RoleCatalog"/> holds the built-in roles only, and is consulted
+    /// solely until a project is applied: from then on the applied descriptor's <c>auth.roles</c> is
+    /// authoritative, via the <see cref="RoleCatalog"/> the primed
+    /// <see cref="Rules.PolicyCatalog"/> carries (see
+    /// <see cref="Internal.ApiKeyContextResolver"/>). It is registered with
+    /// <c>TryAddSingleton</c> so a host with no descriptor at all — no <c>AddAlvo</c> descriptor
+    /// pipeline, roles configured in code — can still declare its roles by registering its own.
+    /// </remarks>
     /// <param name="services">The service collection to add the auth services to.</param>
     /// <returns><paramref name="services"/>, for chaining.</returns>
     internal static IServiceCollection AddAlvoAuth(this IServiceCollection services)

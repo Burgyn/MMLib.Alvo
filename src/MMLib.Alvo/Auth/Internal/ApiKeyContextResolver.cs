@@ -1,4 +1,5 @@
-﻿using System.Diagnostics.CodeAnalysis;
+﻿using MMLib.Alvo.Rules;
+using System.Diagnostics.CodeAnalysis;
 
 namespace MMLib.Alvo.Auth.Internal;
 
@@ -10,8 +11,21 @@ namespace MMLib.Alvo.Auth.Internal;
 /// unknown key id still runs a hash comparison against a same-length dummy hash, so the response
 /// time does not reveal whether the key id exists.
 /// </summary>
+/// <remarks>
+/// A role name on a key is resolved against the <b>applied project's</b> declared roles — the
+/// <see cref="RoleCatalog"/> the primed <see cref="PolicyCatalog"/> carries — so the descriptor's
+/// <c>auth.roles</c> governs both halves of authorization from one declaration, and adding or
+/// removing a role takes effect on the very next request. The injected <see cref="RoleCatalog"/>
+/// serves only until a project is applied, when there is no descriptor to read roles from; it holds
+/// the built-ins alone unless a host replaced the registration, so an unprimed host refuses an
+/// application role rather than minting one nothing has declared.
+/// </remarks>
 internal sealed class ApiKeyContextResolver(
-    IApiKeyStore store, RoleCatalog roleCatalog, TimeProvider clock, TenantResolver tenantResolver)
+    IApiKeyStore store,
+    RoleCatalog roleCatalog,
+    TimeProvider clock,
+    TenantResolver tenantResolver,
+    IPolicyCatalogProvider policyCatalogProvider)
     : IAlvoContextResolver
 {
     private const char KeySeparator = '.';
@@ -88,12 +102,15 @@ internal sealed class ApiKeyContextResolver(
         return record is not null && hashMatches;
     }
 
+    private RoleCatalog DeclaredRoles => policyCatalogProvider.Current?.Roles ?? roleCatalog;
+
     private bool TryResolveRoles(IReadOnlyList<string> roleNames, out IReadOnlySet<Role> roles)
     {
+        var declaredRoles = DeclaredRoles;
         var resolved = new HashSet<Role>();
         foreach (var name in roleNames)
         {
-            if (!roleCatalog.TryGet(name, out var role))
+            if (!declaredRoles.TryGet(name, out var role))
             {
                 roles = resolved;
                 return false;

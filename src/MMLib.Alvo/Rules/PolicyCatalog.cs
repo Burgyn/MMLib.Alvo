@@ -31,11 +31,27 @@ public sealed class PolicyCatalog
 
     /// <summary>Initializes a new instance of the <see cref="PolicyCatalog"/> class.</summary>
     /// <param name="entities">The compiled per-entity policy, keyed by entity name.</param>
-    internal PolicyCatalog(IReadOnlyDictionary<string, EntityPolicy> entities)
+    /// <param name="roles">The project's declared roles, built from the same descriptor.</param>
+    internal PolicyCatalog(IReadOnlyDictionary<string, EntityPolicy> entities, RoleCatalog roles)
     {
         ArgumentNullException.ThrowIfNull(entities);
+        ArgumentNullException.ThrowIfNull(roles);
         _entities = entities;
+        Roles = roles;
     }
+
+    /// <summary>
+    /// Gets the roles this project recognises: the built-ins plus the descriptor's <c>auth.roles</c>.
+    /// </summary>
+    /// <remarks>
+    /// It rides on the catalog rather than on a provider of its own because the descriptor is the one
+    /// source of truth for both halves of authorization and they must never disagree: the same
+    /// declaration a rule's role literal is validated against is the one authentication may mint a
+    /// <see cref="Role"/> from, primed at the same instant, from the same descriptor, behind the same
+    /// project-identity guard. A second, independently primed holder could serve a role set the rules
+    /// were never compiled against.
+    /// </remarks>
+    public RoleCatalog Roles { get; }
 
     /// <summary>Builds a <see cref="PolicyCatalog"/> from a descriptor and its mapped schema.</summary>
     /// <param name="descriptor">The project descriptor whose <c>rules</c>/<c>hidden</c>/<c>readOnly</c> are compiled.</param>

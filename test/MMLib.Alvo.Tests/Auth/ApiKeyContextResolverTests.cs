@@ -2,6 +2,10 @@
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Auth.Internal;
+using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Expressions.Internal;
+using MMLib.Alvo.Rules;
+using MMLib.Alvo.Rules.Internal;
 
 namespace MMLib.Alvo.Tests.Auth;
 
@@ -27,7 +31,7 @@ public class ApiKeyContextResolverTests
         var store = new InMemoryApiKeyStore(Options.Create(options));
 #pragma warning disable CA1859
         IAlvoContextResolver resolver = new ApiKeyContextResolver(
-            store, RoleCatalog.Create(["editor"]), TimeProvider.System, new TenantResolver());
+            store, RoleCatalog.Create(["editor"]), TimeProvider.System, new TenantResolver(), new PolicyCatalogProvider());
 #pragma warning restore CA1859
         return resolver;
     }
@@ -84,7 +88,8 @@ public class ApiKeyContextResolverTests
             new InMemoryApiKeyStore(Options.Create(options)),
             RoleCatalog.Create(["editor"]),
             TimeProvider.System,
-            new TenantResolver());
+            new TenantResolver(),
+            new PolicyCatalogProvider());
 
         var principal = await resolver.ResolveAsync("dev.s3cret", requestedTenant: null, TestContext.Current.CancellationToken);
 
@@ -110,6 +115,89 @@ public class ApiKeyContextResolverTests
         principal.ShouldNotBeNull();
         new ScopeGate().Allows(principal, "orders", MMLib.Alvo.Rules.DataOperation.List).ShouldBeFalse();
     }
+
+    /// <summary>
+    /// The descriptor's <c>auth.roles</c> has to reach authentication, not only rule validation: a key
+    /// granting an application role the applied project declares must resolve, and the very same key
+    /// must resolve to nothing before anything is applied — the recognised role set is the built-ins
+    /// until a descriptor widens it, so an unprimed host fails closed rather than minting a role
+    /// nothing has declared.
+    /// </summary>
+    [Fact]
+    public async Task A_role_the_applied_descriptor_declares_resolves_but_denies_before_the_apply()
+    {
+        using var host = HostGranting("editor");
+        var resolver = host.GetRequiredService<IAlvoContextResolver>();
+
+        var beforeApply = await resolver.ResolveAsync("dev.s3cret", requestedTenant: null, TestContext.Current.CancellationToken);
+
+        beforeApply.ShouldBeNull();
+
+        Apply(host, DescriptorDeclaringRoles("editor"));
+        var afterApply = await resolver.ResolveAsync("dev.s3cret", requestedTenant: null, TestContext.Current.CancellationToken);
+
+        afterApply.ShouldNotBeNull();
+        afterApply.Context.Roles.Select(role => role.Name).ShouldContain("editor");
+    }
+
+    /// <summary>
+    /// The mirror case, and the reason the descriptor rather than the injected catalog is
+    /// authoritative once a project is applied: a role the applied descriptor does <em>not</em>
+    /// declare stays unresolvable, so removing a role from <c>auth.roles</c> takes effect on the very
+    /// next request instead of only after a restart.
+    /// </summary>
+    [Fact]
+    public async Task A_role_the_applied_descriptor_does_not_declare_still_denies()
+    {
+        using var host = HostGranting("editor");
+        Apply(host, DescriptorDeclaringRoles("reviewer"));
+
+        var principal = await ResolveDevKeyAsync(host);
+
+        principal.ShouldBeNull();
+    }
+
+    private static async Task<AlvoPrincipal?> ResolveDevKeyAsync(ServiceProvider host) =>
+        await host.GetRequiredService<IAlvoContextResolver>()
+            .ResolveAsync("dev.s3cret", requestedTenant: null, TestContext.Current.CancellationToken);
+
+    private static ServiceProvider HostGranting(string roleName)
+    {
+        var services = new ServiceCollection();
+        services.Configure<AlvoAuthOptions>(options => options.DevKeys.Add(new AlvoDevApiKey
+        {
+            KeyId = "dev",
+            Secret = "s3cret",
+            User = _user,
+            Roles = { roleName },
+            Scopes = { "orders:read" },
+        }));
+        services.AddAlvo();
+        return services.BuildServiceProvider();
+    }
+
+    private static void Apply(ServiceProvider host, string descriptorJson)
+    {
+        var descriptor = AlvoDescriptor.Parse(descriptorJson);
+        PolicyCatalogPriming.Prime(
+            host.GetRequiredService<IPolicyCatalogProvider>(),
+            new CelCompiler(),
+            descriptor,
+            DescriptorToSchemaMapper.Map(descriptor));
+    }
+
+    private static string DescriptorDeclaringRoles(params string[] roleNames) => $$"""
+    {
+      "apiVersion": "alvo.dev/v1",
+      "name": "demo",
+      "auth": { "roles": [{{string.Join(", ", roleNames.Select(name => $"\"{name}\""))}}] },
+      "entities": {
+        "orders": {
+          "fields": { "title": { "type": "string" } }
+        }
+      }
+    }
+    """;
 
     [Fact]
     public void Authentication_consults_the_DI_registered_TenantResolver_not_a_hard_wired_one()
