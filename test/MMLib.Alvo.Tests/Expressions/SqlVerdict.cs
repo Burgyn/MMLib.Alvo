@@ -193,8 +193,25 @@ file sealed class SqlCursor(string text, AlvoRecord row, IReadOnlyDictionary<str
         return values;
     }
 
+    /// <summary>
+    /// Reads one operand, unwrapping the dialect's value repair around it. A repair is a
+    /// <em>representation</em> change, never a value change — <c>CAST("total" AS numeric)</c> is still
+    /// <c>total</c> — so this evaluator, which already compares by value rather than by storage class, sees
+    /// through it. That also means the differential proof runs over the <b>repaired</b> SQL: if a repair ever
+    /// altered what a comparison means rather than how the engine reads it, this suite is where the two
+    /// backends would stop agreeing.
+    /// </summary>
     private object? ParseValue()
     {
+        if (TryConsume("CAST("))
+        {
+            var inner = ParseValue();
+            Expect(" AS ");
+            ParseTypeName();
+            Expect(")");
+            return inner;
+        }
+
         if (Peek() == '"')
         {
             return row[ParseQuotedIdent()];
@@ -218,6 +235,33 @@ file sealed class SqlCursor(string text, AlvoRecord row, IReadOnlyDictionary<str
 
         throw Unexpected("a quoted field, an @parameter, TRUE, or FALSE");
     }
+
+    /// <summary>The store type a repair casts to, consumed and discarded — only the value matters here.</summary>
+    private void ParseTypeName()
+    {
+        var start = _pos;
+        while (_pos < text.Length && (char.IsAsciiLetterOrDigit(text[_pos]) || text[_pos] is ' ' or '(' or ')' or ','))
+        {
+            if (text[_pos] == ')' && _pos > start && !InsideFacet(start))
+            {
+                break;
+            }
+
+            _pos++;
+        }
+
+        if (_pos == start)
+        {
+            throw Unexpected("a store type name");
+        }
+    }
+
+    /// <summary>
+    /// A store type may carry a facet — <c>numeric(18,2)</c>, <c>character varying(32)</c> — so the first
+    /// <c>)</c> closes the facet rather than the <c>CAST</c> when one is open.
+    /// </summary>
+    private bool InsideFacet(int start) =>
+        text.AsSpan(start, _pos - start).Count('(') > text.AsSpan(start, _pos - start).Count(')');
 
     private string ParseQuotedIdent()
     {

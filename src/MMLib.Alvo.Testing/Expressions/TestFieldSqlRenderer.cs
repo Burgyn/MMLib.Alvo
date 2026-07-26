@@ -40,4 +40,23 @@ public sealed class TestFieldSqlRenderer : IFieldSqlRenderer
         ArgumentNullException.ThrowIfNull(right);
         return $"UPPER({left}) LIKE UPPER({right})";
     }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Overridden — and visibly, as <c>CAST(… AS numeric)</c> — on purpose, even though this fake has no real
+    /// storage that needs repairing. With the port's identity default, a renderer that stopped calling this
+    /// member would produce byte-identical SQL, so every assertion and every golden baseline written against
+    /// this renderer would keep passing while the repair that keeps a decimal comparison numeric on SQLite
+    /// quietly disappeared. A visible wrapper makes the call site part of the frozen text: remove it and a
+    /// named test fails.
+    /// </remarks>
+    public (string Left, string Right) RenderComparableOperands(string left, string right, CelValueType type)
+    {
+        ArgumentNullException.ThrowIfNull(left);
+        ArgumentNullException.ThrowIfNull(right);
+
+        return type == CelValueType.Decimal ? (AsNumeric(left), AsNumeric(right)) : (left, right);
+    }
+
+    private static string AsNumeric(string sql) => $"CAST({sql} AS numeric)";
 }
