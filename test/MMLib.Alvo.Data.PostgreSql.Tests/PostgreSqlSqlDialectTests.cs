@@ -23,6 +23,43 @@ public class PostgreSqlSqlDialectTests
     public void A_column_is_a_bare_quoted_reference_with_no_table_qualifier_and_no_alias()
         => _dialect.RenderColumn("secret_note").ShouldBe("\"secret_note\"");
 
+    /// <summary>
+    /// Spike Q8, and the reason this dialect does not delegate to Npgsql's own
+    /// <c>ISqlGenerationHelper.DelimitIdentifier</c>: that helper returns <c>plate</c> unquoted, which
+    /// PostgreSQL case-folds, so the same field would render differently per driver.
+    /// </summary>
+    [Theory]
+    [InlineData("plate")]
+    [InlineData("PLATE")]
+    [InlineData("select")]
+    public void A_name_that_would_not_strictly_need_quoting_is_quoted_anyway(string name)
+    {
+        _dialect.RenderColumn(name).ShouldBe($"\"{name}\"");
+        _dialect.RenderTable(Entity(name)).ShouldBe($"\"{name}\"");
+    }
+
+    /// <summary>
+    /// Proves both members route through <see cref="AlvoSqlIdentifier"/> rather than concatenating their
+    /// own quotes: a name carrying a double quote cannot terminate the identifier and reach the statement
+    /// as SQL.
+    /// </summary>
+    [Fact]
+    public void A_quote_breaking_name_cannot_escape_the_quoted_identifier()
+    {
+        _dialect.RenderColumn("a\"; DROP TABLE vehicle; --")
+            .ShouldBe("\"a\"\"; DROP TABLE vehicle; --\"");
+        _dialect.RenderTable(Entity("a\"; DROP TABLE vehicle; --"))
+            .ShouldBe("\"a\"\"; DROP TABLE vehicle; --\"");
+    }
+
+    [Fact]
+    public void A_missing_entity_is_refused_rather_than_rendering_an_empty_table_source()
+        => Should.Throw<ArgumentNullException>(() => _dialect.RenderTable(null!));
+
+    [Fact]
+    public void A_missing_column_name_is_refused_rather_than_rendering_empty_quotes()
+        => Should.Throw<ArgumentException>(() => _dialect.RenderColumn("  "));
+
     private static EntitySchema Entity(string name) => new()
     {
         Name = name,
