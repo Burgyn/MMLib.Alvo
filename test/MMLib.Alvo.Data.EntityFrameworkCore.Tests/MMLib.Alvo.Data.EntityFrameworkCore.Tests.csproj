@@ -10,6 +10,11 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj" />
+    <!-- The core, for the real ICelCompiler/IPolicyEngine/IPredicateRenderer the statement-composer and
+         filter tests resolve out of AddAlvo(). A PolicyDecision allow is internal to MMLib.Alvo by design,
+         so a composer test builds one the way production does — from a primed catalog — instead of by hand.
+         Test-only: the EF package itself still references MMLib.Alvo.Abstractions alone. -->
+    <ProjectReference Include="../../src/MMLib.Alvo/MMLib.Alvo.csproj" />
   </ItemGroup>
 
   <ItemGroup>
