@@ -15,8 +15,14 @@ public class SqlPredicateRendererTests
     private static readonly IFieldSqlRenderer _fields = new TestFieldSqlRenderer();
     private static readonly SqlPredicateRenderer _renderer = new();
 
-    private static SqlPredicate Render(string source, AlvoContext context) =>
-        _renderer.Render(CelFixtures.CompileRule(source), context, _fields);
+    /// <summary>
+    /// Defaults to <c>"p"</c> explicitly: the prefix is incidental to what these facts pin (a
+    /// rendering shape), not the default itself — see
+    /// <see cref="The_default_parameter_prefix_cannot_collide_with_an_orms_own_parameter_names"/> for
+    /// the one fact that exercises the real default.
+    /// </summary>
+    private static SqlPredicate Render(string source, AlvoContext context, string parameterPrefix = "p") =>
+        _renderer.Render(CelFixtures.CompileRule(source), context, _fields, parameterPrefix);
 
     private static SqlExpression RenderScalar(string source) =>
         _renderer.Render(CelFixtures.CompileComputed(source), _fields);
@@ -139,10 +145,25 @@ public class SqlPredicateRendererTests
         tenantScope.Sql.ShouldContain("@t0");
     }
 
+    /// <summary>
+    /// The default prefix must be one no ORM would mint, and this fact exists to stop it being
+    /// "simplified" back to <c>p</c>. PR2's spike proved why with a real query: EF Core names its own
+    /// parameters <c>p0</c>, <c>p1</c>, …, so a <c>p</c>-prefixed render composed into an EF command
+    /// collides — and EF resolves the collision by keeping its own <c>p0</c> and renaming ours to
+    /// <c>p00</c> while both occurrences in the SQL text still read <c>@p0</c>. The caller's value is
+    /// then substituted into the <b>security predicate</b>: wrong rows and no error at all on SQLite,
+    /// and on PostgreSQL an error only when the two values' types happen to differ.
+    /// </summary>
     [Fact]
-    public void The_default_parameter_prefix_keeps_the_established_names()
+    public void The_default_parameter_prefix_cannot_collide_with_an_orms_own_parameter_names()
     {
-        Render("owner_id == @user.id", CelFixtures.Alice).Parameters.Keys.ShouldBe(["p0"]);
+        // Calls the renderer directly (not the local Render helper, which pins "p" explicitly for the
+        // shape facts above) so this fact exercises the real, un-overridden default.
+        var parameters = _renderer.Render(
+            CelFixtures.CompileRule("owner_id == @user.id"), CelFixtures.Alice, _fields).Parameters;
+
+        parameters.Keys.ShouldBe(["alvo_p0"]);
+        parameters.Keys.ShouldAllBe(name => !name.StartsWith('p'));
     }
 
     /// <summary>
