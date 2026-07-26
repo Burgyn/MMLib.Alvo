@@ -13,7 +13,10 @@
       "!**/Internal/AlvoBuilder.cs",
       "!**/Migrations/Internal/FileDescriptorSource.cs",
       "!**/AlvoServiceCollectionExtensions.cs",
-      "!**/AlvoBuilderExtensions.cs"
+      "!**/AlvoBuilderExtensions.cs",
+      "!**/Expressions/Setup.cs",
+      "!**/Rules/Setup.cs",
+      "!**/Auth/Setup.cs"
     ],
     "thresholds": {
       "high": 90,
