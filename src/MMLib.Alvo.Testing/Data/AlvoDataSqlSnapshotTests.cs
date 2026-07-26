@@ -57,16 +57,29 @@ public abstract class AlvoDataSqlSnapshotTests
     /// </summary>
     protected virtual IEnumerable<string> Rules => _rules;
 
-    /// <summary>The caller every snapshot renders against — a fixed, tenanted, admin-holding identity.</summary>
-    protected static AlvoContext SnapshotCaller { get; } = new()
+    /// <summary>
+    /// The caller every snapshot renders against — a fixed, tenanted, admin-holding identity.
+    /// </summary>
+    /// <remarks>
+    /// Public, not <see langword="protected"/>, together with <see cref="SnapshotEntity"/>: this pair is
+    /// the framework's one canonical data-path fixture, and every engine's data-path test project reads it
+    /// from classes that do not derive from this suite (a binder test, a statement-composer test, an
+    /// adversarial fixture). A second, per-project copy of a fixture entity is how two test suites come to
+    /// disagree about what they are testing over.
+    /// </remarks>
+    public static AlvoContext SnapshotCaller { get; } = new()
     {
         User = new UserId(Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001")),
         Roles = new HashSet<Role> { Role.Authenticated, Role.Admin },
         Tenant = new TenantId(Guid.Parse("11111111-0000-0000-0000-000000000001")),
     };
 
-    /// <summary>The entity every snapshot rule is compiled against.</summary>
-    protected static EntitySchema SnapshotEntity { get; } = new()
+    /// <summary>
+    /// The entity every snapshot rule is compiled against, and the shared fixture entity every data-path
+    /// suite reads and writes — one column of every field type, one nullable owner reference, one field a
+    /// <c>hidden</c> rule can mask. See <see cref="SnapshotCaller"/> for why the pair is public.
+    /// </summary>
+    public static EntitySchema SnapshotEntity { get; } = new()
     {
         Name = "vehicle",
         Tenancy = TenancyMode.Scoped,
