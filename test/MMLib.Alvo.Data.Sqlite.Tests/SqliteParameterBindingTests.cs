@@ -1,9 +1,11 @@
 ﻿using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.Extensions.DependencyInjection;
 using MMLib.Alvo.Data.EntityFrameworkCore;
 using MMLib.Alvo.Schema;
 using MMLib.Alvo.Testing.Data;
+using System.Data;
 using System.Data.Common;
 using System.Globalization;
 
@@ -48,26 +50,109 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
     }
 
     /// <summary>
-    /// Every value the data path can bind reaches ADO.NET with a real provider type. <c>decimal</c>,
-    /// <c>bool</c>, <see cref="DateTimeOffset"/> and <see cref="DateOnly"/> are all stored as
-    /// <c>TEXT</c>/<c>INTEGER</c> on SQLite by mappings only EF knows, so the <see cref="Guid"/> case
-    /// above is the family, not the exception.
+    /// Every value the data path can bind reaches ADO.NET with the <see cref="DbType"/> EF's own mapping
+    /// chose — not with the <c>String</c> the provider infers for an unmapped value. That is the whole
+    /// premise of this class, and asserting the <see cref="DbType"/> rather than merely non-nullness is
+    /// what makes it testable: <c>Microsoft.Data.Sqlite</c> re-serialises a <see cref="Guid"/> to the same
+    /// text either way, so a positive round-trip alone cannot tell a mapped parameter from a naive one.
+    /// </summary>
+    [Theory]
+    [InlineData("owner_id", DbType.Guid)]
+    [InlineData("plate", DbType.String)]
+    [InlineData("mileage", DbType.Int64)]
+    [InlineData("price", DbType.Decimal)]
+    [InlineData("is_public", DbType.Boolean)]
+    [InlineData("due_on", DbType.Date)]
+    [InlineData("created_at", DbType.DateTimeOffset)]
+    public async Task Every_column_binds_with_the_db_type_efs_own_mapping_chose(string field, DbType expected)
+    {
+        var factory = await FactoryAsync();
+        using var context = factory.Create();
+
+        new PredicateParameterBinder(context)
+            .Bind(Column(context, field), PolicyParameterPrefix.Filter + "0", SampleFor(field))
+            .DbType.ShouldBe(expected);
+    }
+
+    /// <summary>
+    /// The shape C1 was: a <c>uuid</c> column compared against a value that arrived as a
+    /// <see cref="string"/> — a caller filter's JSON value, say. Binding it by the <em>value's</em> type
+    /// picks the <c>string</c> mapping and the comparison silently matches nothing; binding it by the
+    /// <em>column's</em> type is the guarantee this class claims to make.
     /// </summary>
     [Fact]
-    public async Task Every_awkward_clr_type_binds_with_a_real_db_type()
+    public async Task A_uuid_column_matches_a_string_typed_value_bound_through_the_column()
+    {
+        var ownerId = Guid.NewGuid();
+        var factory = await SeededFactoryAsync(ownerId);
+
+        using var context = factory.Create();
+        var bound = new PredicateParameterBinder(context)
+            .Bind(Column(context, "owner_id"), PolicyParameterPrefix.Using + "0", ownerId.ToString("D", CultureInfo.InvariantCulture));
+
+        (await CountAsync(context, CountByOwner, bound)).ShouldBe(1);
+    }
+
+    /// <summary>
+    /// The second shape, and the one no layer above coerces: <c>CelTypeChecker</c> collapses
+    /// <c>FieldType.Date</c> and <c>FieldType.DateTime</c> into one <c>Timestamp</c>, while
+    /// <c>FieldClrTypeMap</c> keeps them as <see cref="DateOnly"/> and <see cref="DateTimeOffset"/>. A
+    /// timestamp-typed value against a <c>date</c> column must still find the row.
+    /// </summary>
+    [Fact]
+    public async Task A_date_column_matches_a_timestamp_typed_value_bound_through_the_column()
+    {
+        var dueOn = new DateOnly(2026, 7, 26);
+        var factory = await FactoryAsync();
+        await AlvoDataSeed.SeedAsync(factory, Seed(Guid.NewGuid(), dueOn), TestContext.Current.CancellationToken);
+
+        using var context = factory.Create();
+        var bound = new PredicateParameterBinder(context).Bind(
+            Column(context, "due_on"),
+            PolicyParameterPrefix.Using + "0",
+            new DateTimeOffset(dueOn.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero));
+
+        var matched = await CountAsync(
+            context, "SELECT COUNT(*) FROM \"vehicle\" WHERE \"due_on\" = @alvo_u0", bound);
+
+        matched.ShouldBe(1);
+    }
+
+    /// <summary>
+    /// A value the column's type cannot accept is refused loudly rather than coerced to something
+    /// arbitrary or bound with the wrong mapping — a silent mismatch is what C1 was.
+    /// </summary>
+    [Fact]
+    public async Task A_value_the_column_cannot_hold_is_refused_loudly()
     {
         var factory = await FactoryAsync();
         using var context = factory.Create();
         var binder = new PredicateParameterBinder(context);
 
-        object?[] values = [Guid.NewGuid(), "text", 42L, 12.34m, true, DateTimeOffset.UnixEpoch, new DateOnly(2026, 7, 26)];
+        Should.Throw<InvalidOperationException>(
+            () => binder.Bind(Column(context, "owner_id"), PolicyParameterPrefix.Filter + "0", "not-a-uuid"));
+    }
 
-        foreach (var value in values)
-        {
-            binder.Bind(PolicyParameterPrefix.Filter + "0", value).Value.ShouldNotBeNull();
-        }
+    [Fact]
+    public async Task A_null_binds_against_a_column_as_the_ado_net_null_sentinel()
+    {
+        var factory = await FactoryAsync();
+        using var context = factory.Create();
 
-        binder.Bind(PolicyParameterPrefix.Filter + "0", null).Value.ShouldBe(DBNull.Value);
+        new PredicateParameterBinder(context)
+            .Bind(Column(context, "owner_id"), PolicyParameterPrefix.Filter + "0", null)
+            .Value.ShouldBe(DBNull.Value);
+    }
+
+    [Fact]
+    public async Task A_value_typed_bind_still_carries_the_null_sentinel()
+    {
+        var factory = await FactoryAsync();
+        using var context = factory.Create();
+
+        new PredicateParameterBinder(context)
+            .Bind(PolicyParameterPrefix.Filter + "0", null)
+            .Value.ShouldBe(DBNull.Value);
     }
 
     [Fact]
@@ -100,6 +185,24 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
     }
 
     /// <summary>
+    /// The last place a forgotten explicit parameter prefix can be caught. A <c>PolicyDecision</c> carries
+    /// three predicates, each numbering its parameters from zero; if two of them render with one prefix,
+    /// both bags carry <c>alvo_p0</c> and the engine binds whichever it sees last — no exception, and one
+    /// predicate's value substituted into another's comparison.
+    /// </summary>
+    [Fact]
+    public async Task Two_bags_claiming_one_name_are_refused_rather_than_bound_twice()
+    {
+        var factory = await FactoryAsync();
+        using var context = factory.Create();
+        var binder = new PredicateParameterBinder(context);
+
+        Should.Throw<InvalidOperationException>(() => binder.Bind(
+            new Dictionary<string, object?>(StringComparer.Ordinal) { ["alvo_p0"] = Guid.NewGuid() },
+            new Dictionary<string, object?>(StringComparer.Ordinal) { ["alvo_p0"] = Guid.NewGuid() }));
+    }
+
+    /// <summary>
     /// A value the provider has no mapping for is refused rather than handed to ADO.NET with an inferred
     /// type — an inferred type is exactly the silent misrepresentation this binder exists to prevent.
     /// </summary>
@@ -128,7 +231,21 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
         return factory;
     }
 
-    private static Dictionary<string, IReadOnlyList<Data.AlvoRecord>> Seed(Guid ownerId) =>
+    private static IProperty Column(DbContext context, string field) =>
+        context.Model.FindEntityType("vehicle")!.FindProperty(field)!;
+
+    private static object SampleFor(string field) => field switch
+    {
+        "owner_id" => Guid.NewGuid(),
+        "plate" => "ACME-001",
+        "mileage" => 42L,
+        "price" => 12.34m,
+        "is_public" => true,
+        "due_on" => new DateOnly(2026, 7, 26),
+        _ => DateTimeOffset.UnixEpoch,
+    };
+
+    private static Dictionary<string, IReadOnlyList<Data.AlvoRecord>> Seed(Guid ownerId, DateOnly? dueOn = null) =>
         new(StringComparer.Ordinal)
         {
             ["vehicle"] =
@@ -139,6 +256,7 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
                     ["tenant_id"] = Guid.NewGuid(),
                     ["owner_id"] = ownerId,
                     ["plate"] = "ACME-001",
+                    ["due_on"] = dueOn,
                 }),
             ],
         };

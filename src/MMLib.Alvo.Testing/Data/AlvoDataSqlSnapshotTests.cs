@@ -94,6 +94,7 @@ public abstract class AlvoDataSqlSnapshotTests
             new FieldSchema { Name = "mileage", Type = FieldType.Integer, Nullable = true },
             new FieldSchema { Name = "price", Type = FieldType.Decimal, Nullable = true, Precision = 18, Scale = 2 },
             new FieldSchema { Name = "is_public", Type = FieldType.Boolean, Nullable = true },
+            new FieldSchema { Name = "due_on", Type = FieldType.Date, Nullable = true },
             new FieldSchema { Name = "created_at", Type = FieldType.DateTime, Nullable = true },
         ],
     };
