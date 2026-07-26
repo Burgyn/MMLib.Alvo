@@ -7,6 +7,9 @@
     <Project Path="src/MMLib.Alvo.Testing/MMLib.Alvo.Testing.csproj" />
     <Project Path="src/MMLib.Alvo/MMLib.Alvo.csproj" />
   </Folder>
+  <Folder Name="/spike/">
+    <Project Path="spike/MMLib.Alvo.Data.Spike/MMLib.Alvo.Data.Spike.csproj" />
+  </Folder>
   <Folder Name="/test/">
     <Project Path="test/MMLib.Alvo.Abstractions.Tests/MMLib.Alvo.Abstractions.Tests.csproj" />
     <Project Path="test/MMLib.Alvo.Conventions.Tests/MMLib.Alvo.Conventions.Tests.csproj" />

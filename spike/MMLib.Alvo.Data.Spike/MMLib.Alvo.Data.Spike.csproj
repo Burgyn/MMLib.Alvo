@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- THROWAWAY SPIKE — see docs/superpowers/specs/2026-07-26-f3-pr2-spike-verdict.md.
+       This project exists only to answer the eight pass/fail questions that open F3 PR2
+       (can IAlvoData be implemented on EF Core property-bag entity types?). It is not
+       shipped, not packable, and is deleted once PR2's implementation lands. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>MMLib.Alvo.Data.Spike</RootNamespace>
+    <!-- Spike code: warnings are noise here, not a gate. -->
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <NoWarn>$(NoWarn);EF1001;EF1002;CA1303;CA1305;CA1848;CA2007;CA1861;CA1852;CS8600;CS8602;CS8604;IDE0058</NoWarn>
+    <AnalysisLevel>none</AnalysisLevel>
+    <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/MMLib.Alvo/MMLib.Alvo.csproj" />
+    <ProjectReference Include="../../src/MMLib.Alvo.Data.Sqlite/MMLib.Alvo.Data.Sqlite.csproj" />
+    <ProjectReference Include="../../src/MMLib.Alvo.Data.PostgreSql/MMLib.Alvo.Data.PostgreSql.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Testcontainers.PostgreSql" />
+  </ItemGroup>
+
+</Project>
