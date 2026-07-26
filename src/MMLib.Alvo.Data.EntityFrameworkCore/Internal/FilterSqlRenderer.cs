@@ -115,7 +115,7 @@ internal static class FilterSqlRenderer
             AlvoFilterOperator.Like => $"{field} LIKE {bag.Add(fields, comparison.Value)}",
             AlvoFilterOperator.ILike => fields.RenderCaseInsensitiveLike(field, bag.Add(fields, comparison.Value)),
             AlvoFilterOperator.In => Membership(field, comparison.Value, type, fields, bag),
-            AlvoFilterOperator.Is => Identity(field, comparison.Value),
+            AlvoFilterOperator.Is => Identity(field, comparison.Value, fields),
             _ => throw new AlvoAuthorizationException(UnsupportedFilterMessage),
         };
     }
@@ -161,15 +161,23 @@ internal static class FilterSqlRenderer
             : throw new AlvoAuthorizationException(UnsupportedFilterMessage);
 
     /// <summary>
-    /// The one operator that is definitely true or false over a <see langword="null"/> field, so it takes
-    /// no parameter and needs no collapse. Only the three values SQL's own <c>IS</c> accepts are
-    /// permitted; anything else is refused rather than coerced.
+    /// The one operator that is definitely true or false over a <see langword="null"/> field. Only the three
+    /// values SQL's own <c>IS</c> accepts are permitted; anything else is refused rather than coerced, and
+    /// none of them binds a parameter.
     /// </summary>
-    private static string Identity(string field, object? value) => value switch
+    /// <remarks>
+    /// <c>IS NULL</c> is universal SQL and is spelled here. <c>IS TRUE</c>/<c>IS FALSE</c> are <b>not</b>:
+    /// T-SQL — which §0 principle 3 names, through Azure SQL — has no boolean type and cannot parse either.
+    /// So they are composed from the dialect's own boolean literal and its two-valued fold, which is exactly
+    /// what that seam exists for, and the semantics are identical by construction:
+    /// <c>COALESCE(x = TRUE, FALSE)</c> is true precisely when <c>x IS TRUE</c> is, a <c>NULL</c> <c>x</c>
+    /// included. That keeps <c>is</c> definite on every dialect without inventing a port member for it.
+    /// </remarks>
+    private static string Identity(string field, object? value, IFieldSqlRenderer fields) => value switch
     {
         null => $"{field} IS NULL",
-        true => $"{field} IS TRUE",
-        false => $"{field} IS FALSE",
+        true => fields.RenderTwoValued($"{field} = {fields.TrueLiteral}"),
+        false => fields.RenderTwoValued($"{field} = {fields.FalseLiteral}"),
         _ => throw new AlvoAuthorizationException(UnsupportedFilterMessage),
     };
 

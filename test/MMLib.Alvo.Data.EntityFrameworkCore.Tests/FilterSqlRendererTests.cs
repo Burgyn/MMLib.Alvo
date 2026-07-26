@@ -53,14 +53,41 @@ public class FilterSqlRendererTests
         => Should.Throw<AlvoAuthorizationException>(
             () => Render(new AlvoComparison("mileage", AlvoFilterOperator.In, 10L)));
 
+    /// <summary>
+    /// <c>IS NULL</c> is universal SQL and is rendered literally. <c>IS TRUE</c>/<c>IS FALSE</c> are
+    /// <b>not</b> — T-SQL has no boolean type and cannot parse them — so they go through the dialect's
+    /// two-valued seam instead, over a comparison against its own boolean literal. The semantics are
+    /// identical: <c>COALESCE(x = TRUE, FALSE)</c> is true exactly when <c>x IS TRUE</c> is, including for a
+    /// <c>NULL</c> <c>x</c>, which is what makes <c>is</c> the one definite, two-valued operator.
+    /// </summary>
     [Fact]
     public void An_identity_test_renders_a_definite_two_valued_predicate_with_no_parameter()
     {
         Render(new AlvoComparison("status", AlvoFilterOperator.Is, null)).Sql.ShouldBe("\"status\" IS NULL");
-        Render(new AlvoComparison("is_public", AlvoFilterOperator.Is, true)).Sql.ShouldBe("\"is_public\" IS TRUE");
-        Render(new AlvoComparison("is_public", AlvoFilterOperator.Is, false)).Sql.ShouldBe("\"is_public\" IS FALSE");
+        Render(new AlvoComparison("is_public", AlvoFilterOperator.Is, true)).Sql
+            .ShouldBe("COALESCE(\"is_public\" = TRUE, FALSE)");
+        Render(new AlvoComparison("is_public", AlvoFilterOperator.Is, false)).Sql
+            .ShouldBe("COALESCE(\"is_public\" = FALSE, FALSE)");
         Render(new AlvoComparison("status", AlvoFilterOperator.Is, null)).Parameters.ShouldBeEmpty();
     }
+
+    /// <summary>
+    /// The seam is sufficient for a dialect neither in-repo driver speaks: on T-SQL, where a <c>bit</c> is a
+    /// value and never a predicate, the same filter renders parseable SQL with no change to this renderer —
+    /// which is the whole reason the identity operator is not spelled <c>IS TRUE</c> here.
+    /// </summary>
+    [Theory]
+    [InlineData(true, "(CASE WHEN [is_public] = 1 THEN 1 ELSE 0 END = 1)")]
+    [InlineData(false, "(CASE WHEN [is_public] = 0 THEN 1 ELSE 0 END = 1)")]
+    public void An_identity_test_renders_through_a_dialect_with_no_boolean_type(bool value, string expected)
+        => Render(new AlvoComparison("is_public", AlvoFilterOperator.Is, value), new TSqlFieldSqlRenderer()).Sql
+            .ShouldBe(expected);
+
+    /// <summary>An identity test against <see langword="null"/> needs no seam — every engine spells it the same.</summary>
+    [Fact]
+    public void An_identity_test_against_null_is_the_same_on_every_dialect()
+        => Render(new AlvoComparison("status", AlvoFilterOperator.Is, null), new TSqlFieldSqlRenderer()).Sql
+            .ShouldBe("[status] IS NULL");
 
     [Fact]
     public void An_identity_test_against_anything_else_is_refused()

@@ -31,6 +31,18 @@ namespace MMLib.Alvo.Testing
     {
         public static string Find() { }
     }
+    public sealed class TSqlFieldSqlRenderer : MMLib.Alvo.Expressions.IFieldSqlRenderer
+    {
+        public TSqlFieldSqlRenderer() { }
+        public string FalseLiteral { get; }
+        public string TrueLiteral { get; }
+        public string RenderBooleanFieldAsPredicate(string booleanValue) { }
+        public string RenderBooleanPredicate(bool value) { }
+        public string RenderCaseInsensitiveLike(string left, string right) { }
+        public string RenderField(MMLib.Alvo.Schema.EntitySchema entity, string fieldName) { }
+        public string RenderParameter(string parameterName) { }
+        public string RenderTwoValued(string predicate) { }
+    }
     public sealed class TestFieldSqlRenderer : MMLib.Alvo.Expressions.IFieldSqlRenderer
     {
         public TestFieldSqlRenderer() { }
