@@ -44,6 +44,57 @@ internal static class SnapshotFixture
             },
         };
 
+    /// <summary>
+    /// The <c>update</c> decision for the fixture caller over a descriptor that marks
+    /// <paramref name="readOnlyField"/> read-only and <paramref name="hiddenField"/> hidden — a real resolved
+    /// decision, so the read-only and mask sets under test are the ones the policy layer produces rather than
+    /// sets a test asserted into existence.
+    /// </summary>
+    /// <param name="readOnlyField">The field to mark <c>readOnly</c>, or <see langword="null"/> for none.</param>
+    /// <param name="hiddenField">The field to mark <c>hidden</c>, or <see langword="null"/> for none.</param>
+    internal static PolicyDecision UpdateDecision(string? readOnlyField, string? hiddenField = null)
+    {
+        using var services = new ServiceCollection().AddAlvo().Services.BuildServiceProvider();
+
+        return Decision(services, VehicleUpdatableWith(readOnlyField, hiddenField), DataOperation.Update);
+    }
+
+    private static AlvoDescriptor VehicleUpdatableWith(string? readOnlyField, string? hiddenField) => new()
+    {
+        ApiVersion = "alvo.dev/v1",
+        Name = "write-payload-fixture",
+        Entities = new Dictionary<string, EntityDescriptor>(StringComparer.Ordinal)
+        {
+            [AlvoDataFixtures.Vehicle.Name] = new EntityDescriptor
+            {
+                Fields = WriteFieldDescriptors(readOnlyField, hiddenField),
+                Rules = new AccessRules { Update = "owner_id == @user.id" },
+            },
+        },
+    };
+
+    private static Dictionary<string, FieldDescriptor> WriteFieldDescriptors(string? readOnlyField, string? hiddenField)
+    {
+        var fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal);
+        if (readOnlyField is not null)
+        {
+            fields[readOnlyField] = ReadOnly(readOnlyField);
+        }
+
+        if (hiddenField is not null)
+        {
+            fields[hiddenField] = Hidden(hiddenField);
+        }
+
+        return fields;
+    }
+
+    private static FieldDescriptor ReadOnly(string field) =>
+        new() { Type = DescriptorTypeOf(field), ReadOnly = BoolOrCel.FromBoolean(true) };
+
+    private static FieldDescriptor Hidden(string field) =>
+        new() { Type = DescriptorTypeOf(field), Hidden = BoolOrCel.FromBoolean(true) };
+
     /// <summary>Resolves the decision <paramref name="operation"/> gets for the fixture caller.</summary>
     internal static PolicyDecision Decision(
         IServiceProvider services, AlvoDescriptor descriptor, DataOperation operation)

@@ -98,9 +98,74 @@ internal sealed class EfAlvoData : IAlvoData
     }
 
     /// <inheritdoc/>
-    public Task<AlvoRecord> CreateAsync(
+    public async Task<AlvoRecord> CreateAsync(
         string entity, IReadOnlyDictionary<string, object?> values, AlvoContext context,
-        CancellationToken cancellationToken = default) => throw new NotSupportedException(WritePathPending);
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(entity);
+        ArgumentNullException.ThrowIfNull(values);
+        ArgumentNullException.ThrowIfNull(context);
+
+        var decision = Resolve(entity, DataOperation.Create, context);
+
+        using var db = _contexts.Create();
+        var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
+        WritePayloadGuard.EnsureWritable(values, schema, decision, isUpdate: false);
+
+        var candidate = Candidate(values);
+        EnsureWriteAllowed(decision, RecordMaterializer.ToRecord(candidate, _noMask), previous: null, context);
+
+        db.Rows(entity).Add(candidate);
+        await db.SaveChangesAsync(cancellationToken);
+
+        return RecordMaterializer.ToRecord(candidate, decision.HiddenFields);
+    }
+
+    /// <summary>
+    /// The candidate row: the payload plus the id this provider assigns, with every explicit
+    /// <see langword="null"/> dropped.
+    /// </summary>
+    /// <remarks>
+    /// A property bag cannot hold a <see langword="null"/> (its value type is <see cref="object"/>), so an
+    /// explicit <see langword="null"/> means "leave the column at its database default", which for a nullable
+    /// column is <c>NULL</c>. On a create that is indistinguishable from an omitted key and correct for both;
+    /// on an update it would not be, which is why <see cref="UpdateAsync"/> uses <c>ExecuteUpdate</c> setters,
+    /// where a <see langword="null"/> setter value is a real <c>SET col = NULL</c>.
+    /// </remarks>
+    private static Dictionary<string, object> Candidate(IReadOnlyDictionary<string, object?> values)
+    {
+        var candidate = new Dictionary<string, object>(StringComparer.Ordinal)
+        {
+            [AlvoDataContext.IdColumn] = Guid.NewGuid(),
+        };
+        foreach (var (field, value) in values.Where(pair => pair.Value is not null))
+        {
+            candidate[field] = value!;
+        }
+
+        return candidate;
+    }
+
+    /// <summary>
+    /// Evaluates <c>WITH CHECK</c> and the synthesized tenant scope over the <b>complete post-image</b>,
+    /// never over the payload alone — a field the caller did not mention has to read as its stored value,
+    /// or an update touching one unrelated field would be denied by its own ownership rule. Evaluating the
+    /// tenant scope here, and not only on the read side, is what stops a caller placing or moving a row
+    /// into another tenant.
+    /// </summary>
+    private void EnsureWriteAllowed(
+        PolicyDecision decision, AlvoRecord postImage, AlvoRecord? previous, AlvoContext context)
+    {
+        var passesCheck = decision.WithCheck is null
+            || _evaluator.Evaluate(decision.WithCheck, postImage, previous, context);
+        var passesTenantScope = decision.TenantScope is null
+            || _evaluator.Evaluate(decision.TenantScope, postImage, previous, context);
+
+        if (!passesCheck || !passesTenantScope)
+        {
+            throw new AlvoAuthorizationException("The write was rejected by policy.");
+        }
+    }
 
     /// <inheritdoc/>
     public Task<AlvoRecord> UpdateAsync(
@@ -222,6 +287,13 @@ internal sealed class EfAlvoData : IAlvoData
     private static IQueryable<Dictionary<string, object>> Materialize(
         AlvoDataContext db, EntitySchema entity, ReadStatement statement) => db.Rows(entity.Name)
         .FromSqlRaw(statement.Sql, new PredicateParameterBinder(db).Bind(statement.Parameters));
+
+    /// <summary>
+    /// The empty mask: a row a policy decision is <em>reached over</em> is never masked, only a row this data
+    /// path <em>returns</em> is. A masked field read as <see langword="null"/> would silently change what a
+    /// rule referencing it decides.
+    /// </summary>
+    private static readonly IReadOnlySet<string> _noMask = new HashSet<string>(StringComparer.Ordinal);
 
     /// <inheritdoc cref="AlvoDataContext.UnmappedEntityMessage"/>
     private const string UnknownEntityMessage = AlvoDataContext.UnmappedEntityMessage;
