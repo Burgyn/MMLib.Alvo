@@ -128,6 +128,65 @@ namespace MMLib.Alvo.Auth
 }
 namespace MMLib.Alvo.Data
 {
+    public sealed class AlvoAnd : MMLib.Alvo.Data.AlvoFilter, System.IEquatable<MMLib.Alvo.Data.AlvoAnd>
+    {
+        public AlvoAnd(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoFilter> Filters) { }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoFilter> Filters { get; init; }
+    }
+    public sealed class AlvoAuthorizationException : System.Exception
+    {
+        public AlvoAuthorizationException() { }
+        public AlvoAuthorizationException(string message) { }
+        public AlvoAuthorizationException(string message, System.Exception innerException) { }
+    }
+    public sealed class AlvoComparison : MMLib.Alvo.Data.AlvoFilter, System.IEquatable<MMLib.Alvo.Data.AlvoComparison>
+    {
+        public AlvoComparison(string Field, MMLib.Alvo.Data.AlvoFilterOperator Operator, object? Value) { }
+        public string Field { get; init; }
+        public MMLib.Alvo.Data.AlvoFilterOperator Operator { get; init; }
+        public object? Value { get; init; }
+    }
+    public abstract class AlvoFilter : System.IEquatable<MMLib.Alvo.Data.AlvoFilter>
+    {
+        protected AlvoFilter() { }
+    }
+    public enum AlvoFilterOperator
+    {
+        Eq = 0,
+        Neq = 1,
+        Gt = 2,
+        Gte = 3,
+        Lt = 4,
+        Lte = 5,
+        Like = 6,
+        ILike = 7,
+        In = 8,
+        Is = 9,
+    }
+    public sealed class AlvoNot : MMLib.Alvo.Data.AlvoFilter, System.IEquatable<MMLib.Alvo.Data.AlvoNot>
+    {
+        public AlvoNot(MMLib.Alvo.Data.AlvoFilter Filter) { }
+        public MMLib.Alvo.Data.AlvoFilter Filter { get; init; }
+    }
+    public enum AlvoNullPlacement
+    {
+        Last = 0,
+        First = 1,
+    }
+    public sealed class AlvoOr : MMLib.Alvo.Data.AlvoFilter, System.IEquatable<MMLib.Alvo.Data.AlvoOr>
+    {
+        public AlvoOr(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoFilter> Filters) { }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoFilter> Filters { get; init; }
+    }
+    public sealed class AlvoQuery : System.IEquatable<MMLib.Alvo.Data.AlvoQuery>
+    {
+        public AlvoQuery() { }
+        public string? After { get; init; }
+        public required string Entity { get; init; }
+        public MMLib.Alvo.Data.AlvoFilter? Filter { get; init; }
+        public int? Limit { get; init; }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoSort> Sort { get; init; }
+    }
     public sealed class AlvoRecord : System.IEquatable<MMLib.Alvo.Data.AlvoRecord>
     {
         public AlvoRecord(System.Collections.Generic.IReadOnlyDictionary<string, object?> values) { }
@@ -138,6 +197,27 @@ namespace MMLib.Alvo.Data
         public override int GetHashCode() { }
         public bool TryGetValue(string field, out object? value) { }
         public MMLib.Alvo.Data.AlvoRecord With(string field, object? value) { }
+    }
+    public sealed class AlvoRecordNotFoundException : System.Exception
+    {
+        public AlvoRecordNotFoundException() { }
+        public AlvoRecordNotFoundException(string message) { }
+        public AlvoRecordNotFoundException(string message, System.Exception innerException) { }
+    }
+    public sealed class AlvoSort : System.IEquatable<MMLib.Alvo.Data.AlvoSort>
+    {
+        public AlvoSort(string Field, bool Descending = false, MMLib.Alvo.Data.AlvoNullPlacement Nulls = 0) { }
+        public bool Descending { get; init; }
+        public string Field { get; init; }
+        public MMLib.Alvo.Data.AlvoNullPlacement Nulls { get; init; }
+    }
+    public interface IAlvoData
+    {
+        System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord> CreateAsync(string entity, System.Collections.Generic.IReadOnlyDictionary<string, object?> values, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task DeleteAsync(string entity, System.Guid id, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord?> GetAsync(string entity, System.Guid id, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRecord>> QueryAsync(MMLib.Alvo.Data.AlvoQuery query, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord> UpdateAsync(string entity, System.Guid id, System.Collections.Generic.IReadOnlyDictionary<string, object?> values, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default);
     }
 }
 namespace MMLib.Alvo.Descriptor

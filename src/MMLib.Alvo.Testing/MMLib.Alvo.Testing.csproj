@@ -22,6 +22,23 @@
     <ProjectReference Include="../MMLib.Alvo.Abstractions/MMLib.Alvo.Abstractions.csproj" />
   </ItemGroup>
 
+  <!--
+    InMemoryAlvoData (Task 12) is a reference IAlvoData: it enforces the resolved policy
+    predicate per row through the exact same CEL backend a real provider evaluates WITH CHECK
+    with — MMLib.Alvo's internal CelInterpreter — rather than re-implementing CEL evaluation a
+    second time in this project. A second interpreter would be exactly the kind of divergence
+    Task 10's differential suite exists to catch between backends; referencing the one real
+    implementation avoids introducing a second one to keep in sync. Granted via
+    MMLib.Alvo's own InternalsVisibleTo("MMLib.Alvo.Testing"), the same mechanism
+    MMLib.Alvo.Tests already uses to construct PolicyEngine/PolicyCatalogProvider directly.
+    This does not weaken the package boundary: neither shared-architecture test constrains this
+    project's own dependencies (only MMLib.Alvo's — Abstractions-only — and
+    MMLib.Alvo.Abstractions's — nothing), and MMLib.Alvo itself never references this project back.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="../MMLib.Alvo/MMLib.Alvo.csproj" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="xunit.v3.extensibility.core" />
     <PackageReference Include="Shouldly" />

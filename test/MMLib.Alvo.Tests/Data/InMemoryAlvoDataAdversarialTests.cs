@@ -1,0 +1,33 @@
+﻿using MMLib.Alvo.Data;
+using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Rules;
+using MMLib.Alvo.Rules.Internal;
+using MMLib.Alvo.Schema;
+using MMLib.Alvo.Testing.Data;
+
+namespace MMLib.Alvo.Tests.Data;
+
+/// <summary>
+/// The concrete run of <see cref="AlvoDataAdversarialTests"/> over <see cref="InMemoryAlvoData"/> —
+/// PR1's proof that the reference implementation satisfies the milestone's security suite before
+/// any real storage exists. PR2 adds the identical run over SQLite and PostgreSQL.
+/// </summary>
+public class InMemoryAlvoDataAdversarialTests : AlvoDataAdversarialTests
+{
+    protected override Task<IAlvoData> CreateAsync(
+        SchemaModel schema, AlvoDescriptor descriptor, IReadOnlyDictionary<string, IReadOnlyList<AlvoRecord>> seed)
+    {
+        var catalog = PolicyCatalog.Build(descriptor, schema, MMLib.Alvo.Tests.Expressions.CelFixtures.Compiler);
+        var provider = new PolicyCatalogProvider();
+        provider.SetCurrent(descriptor.Name, catalog);
+        var engine = new PolicyEngine(provider);
+
+        var data = new InMemoryAlvoData(engine, schema);
+        foreach (var (entity, rows) in seed)
+        {
+            data.Seed(entity, [.. rows]);
+        }
+
+        return Task.FromResult<IAlvoData>(data);
+    }
+}
