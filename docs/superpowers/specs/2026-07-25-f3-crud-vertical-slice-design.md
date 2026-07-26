@@ -72,8 +72,9 @@ was reopened while writing this design; nothing of it exists in `src/`.
 ## The 9 principles this touches
 
 1. **Interface-first** — every port lands in `Abstractions` with a contract suite
-   before an implementation exists; the adversarial suite is written red in PR1
-   and goes green in PR2.
+   before an implementation exists; the adversarial suite ships green in PR1 against
+   an in-memory reference implementation, and PR2's backends inherit it unchanged
+   (*Deviations*, 6).
 2. **Provider model everywhere** — `IAlvoData`, `IOutboxStore`, `IEventDispatcher`
    and `IEmailSender` are ports. Critically, **SQL rendering is a provider
    concern** (see *The core compiles, the provider renders*).
@@ -278,7 +279,7 @@ it is deferred and explicitly tied to #42.
 | Namespace | Port / type | Guarantee |
 |---|---|---|
 | `MMLib.Alvo` | `AlvoContext`, `UserId`, `TenantId`, `Role`, `RoleCatalog` | identity, roles, tenant |
-| `MMLib.Alvo.Expressions` | `ICelCompiler` → `CompiledExpression` (a validated, typed tree) + `IPredicateRenderer` | fail-fast at apply; input is never interpolated |
+| `MMLib.Alvo.Expressions` | `ICelCompiler` → `CompiledExpression` (a validated, typed tree) + `IPredicateRenderer` + `IPredicateEvaluator` | fail-fast at apply; input is never interpolated; the two Rule backends are symmetric ports — SQL for the stored row, rows for the candidate one |
 | `MMLib.Alvo.Rules` | `IPolicyEngine` | for (entity, operation, context) returns a compiled predicate or deny; field-level `hidden` / `readOnly` |
 | `MMLib.Alvo.Data` | `IAlvoData`, `AlvoQuery`, `AlvoRecord` | policy is applied **inside** the port |
 | `MMLib.Alvo.Events` | `IEventPublisher`, `IOutboxStore`, `IEventDispatcher` | the event and the change commit together |
@@ -667,7 +668,7 @@ Same test types as #18 — nothing new is invented.
 | Type | Covers |
 |---|---|
 | Contract tests per port + in-memory fakes | `IAlvoData`, `IPolicyEngine`, `IOutboxStore`, `IEntityHooks`; fakes ship in `MMLib.Alvo.Testing` beside `InMemorySchemaMigrator` |
-| **Adversarial suite** | two-user, two-tenant, default-deny — written **red in PR1**, green in PR2, on SQLite + PostgreSQL |
+| **Adversarial suite** | two-user, two-tenant, default-deny — **green in PR1** against an in-memory reference implementation, inherited unchanged by PR2's backends on SQLite + PostgreSQL (*Deviations*, 6) |
 | **Differential backend test** | the same rule over the same row yields the same verdict in SQL and in-memory (the null-semantics proof) |
 | Property tests (CsCheck) | the translation never interpolates input; the filter parser survives fuzzing |
 | Golden snapshots (Verify) | CEL → SQL per engine; the OpenAPI document |
@@ -703,7 +704,7 @@ this design was being written:
 
 | PR | Content | Closes |
 |---|---|---|
-| **1** | `AlvoContext` (+ `Role` / `RoleCatalog`) + dev auth with scopes + tenant resolution · CEL parser, AST and type-checker · the three profiles · **both Rule backends** · the `IFieldSqlRenderer` contract · null-semantics rendering rule · `IPolicyEngine` · the two `@user.roles` strings in `schema/project.schema.json` · adversarial suite written red | `[15a]` |
+| **1** | `AlvoContext` (+ `Role` / `RoleCatalog`) + dev auth with scopes + tenant resolution · CEL parser, AST and type-checker · the three profiles · **both Rule backends** · the `IFieldSqlRenderer` contract · null-semantics rendering rule · `IPolicyEngine` · the two `@user.roles` strings in `schema/project.schema.json` · adversarial suite, green against an in-memory reference implementation | `[15a]` |
 | **2** | **Spike first** (below) · `IAlvoData` + EF implementation · per-engine renderers · policy in the `WHERE` clause · adversarial + differential suites green on SQLite and PostgreSQL | #20 |
 | **3** | generated HTTP Data API · filter tree + PostgREST parsing · keyset/offset paging · schema-derived validation · RFC 7807 · `Idempotency-Key` · `ETag`/`If-Match` · OpenAPI 3.1 + document transformer | — |
 | **4** | `MMLib.Alvo.Host` + docker-compose + Scalar + TeaPie | #19, `[15b]` |
@@ -759,6 +760,40 @@ Recorded so a later reader can tell a decision from an oversight.
    scope is not inflated to cover them.
 5. **Ambient tenant context (§4) is provided, but is not the enforcement
    mechanism.** Rationale under *Explicit parameter and an ambient accessor*.
+6. **The adversarial suite ships green in PR1, not red.** This design had it written
+   red in PR1 and going green in PR2 (principle 1, the PR table, the acceptance table
+   and PR1's verification bullet all said so, and were corrected). PR1 ships the suite
+   as an inherited base class in `MMLib.Alvo.Testing` **plus** an in-memory reference
+   implementation of `IAlvoData` it runs green against. A suite that is red for a
+   whole PR proves only that nothing implements the port yet; running it against a
+   reference implementation proves the *facts themselves* discriminate, which is what
+   makes them worth inheriting. The obligation the red suite was meant to create is
+   kept by PR2's backends inheriting the same class, unchanged.
+7. **PR1 ships the `IAlvoData` port, `like`/`ilike` and cursor semantics that this
+   design assigns to PR3.** The port had to land in PR1 because the adversarial suite
+   is written against it and the reference implementation above needs something to
+   implement; once the port exists, the query shape it exposes — including
+   `IFieldSqlRenderer.RenderCaseInsensitiveLike` and the opaque `After` cursor — is
+   decided in PR1 rather than PR3. Cost, stated plainly: PR3's query-string layer
+   inherits decisions it did not make, and `RenderCaseInsensitiveLike` ships with no
+   consumer and an unresolved wildcard-escaping contract that every PR2 driver has to
+   implement. Filed as a follow-up rather than guessed at here.
+8. **No ASP.NET in PR1.** Dev auth "with scopes and tenant resolution" (the PR table's
+   row 1) lands as ports plus an `IAlvoContextResolver` implementation and a
+   `ScopeGate`; nothing is bound to an HTTP request, because PR1 adds no ASP.NET
+   dependency at all. `ScopeGate`, `IAlvoContextAccessor` and
+   `AlvoAuthOptions.HeaderName` therefore have no production consumer until PR3 wires
+   the pipeline — deliberate, and the reason PR1 cannot satisfy #74's "a request
+   carries an identity and a tenant" on its own.
+9. **The two-valued collapse is rendered once in the core, not per driver.** *The core
+   compiles, the provider renders* assigns every SQL fragment to the provider; the
+   `NULL`-to-`FALSE` fold is instead composed once in the core's `SqlPredicateRenderer`,
+   with only the *dialect's shape* of it delegated to `IFieldSqlRenderer` (three
+   default interface members carrying the PostgreSQL/SQLite form). Rationale: the fold
+   is the one rule both Rule backends must agree on, so a per-driver copy is how the
+   SQL and in-memory verdicts silently diverge — the exact failure the differential
+   test exists to catch. Cost: a dialect with different boolean handling (T-SQL) has to
+   override three members rather than write its own predicate renderer.
 
 ## Assumptions (veto candidates)
 
@@ -788,7 +823,8 @@ Recorded so a later reader can tell a decision from an oversight.
 
 ## Verification
 
-- **PR1:** the adversarial suite exists and is red for the right reason; the
+- **PR1:** the adversarial suite exists and is green against the in-memory reference
+  implementation, with every fact shown to discriminate (*Deviations*, 6); the
   property test passes against the compiler; unknown fields and out-of-profile
   nodes error at apply with a fix suggestion; the differential test harness runs
   both backends over the same rules.
