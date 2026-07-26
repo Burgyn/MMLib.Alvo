@@ -24,4 +24,22 @@ public class PostgreSqlSqlDialectTests
     [Fact]
     public void A_null_projection_refuses_a_missing_store_type_rather_than_casting_to_nothing()
         => Should.Throw<ArgumentException>(() => _dialect.RenderNullProjection("  "));
+
+    /// <summary>
+    /// <c>FOR NO KEY UPDATE</c>, not <c>FOR UPDATE</c>: the pre-image read never precedes a key change,
+    /// and the weaker mode does not block a concurrent inserter's foreign-key check against this row.
+    /// </summary>
+    [Fact]
+    public void The_row_lock_is_the_no_key_variant()
+        => _dialect.RowLockHint.ShouldBe("FOR NO KEY UPDATE");
+
+    /// <summary>
+    /// The hint carries no separator of its own — the composer inserts the space. A value that shipped its
+    /// own leading space would concatenate correctly at a composer written for the other convention and
+    /// produce <c>… WHERE &lt;predicate&gt;  FOR NO KEY UPDATE</c> or, the other way round,
+    /// <c>&lt;predicate&gt;FOR NO KEY UPDATE</c>.
+    /// </summary>
+    [Fact]
+    public void The_row_lock_hint_carries_no_separator_of_its_own()
+        => _dialect.RowLockHint.ShouldBe(_dialect.RowLockHint.Trim());
 }

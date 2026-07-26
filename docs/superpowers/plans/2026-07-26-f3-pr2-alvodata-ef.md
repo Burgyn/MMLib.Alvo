@@ -422,6 +422,19 @@ it judges quoting unnecessary, which PostgreSQL then case-folds.
 > signature**, and its caller must obtain the store type from the EF model rather than pass the
 > `FieldSchema` through.
 
+> **AMENDMENT (slice 1 review, finding I3 — binding on every later task).** `RowLockHint` returns the
+> clause **with no separator of its own**: `"FOR NO KEY UPDATE"` on PostgreSQL (not `" FOR UPDATE"`),
+> `string.Empty` on SQLite. Two changes, each with its reason.
+> - *No leading space.* A value that must carry its own separator is a trap a third-party driver author
+>   trips silently — return `"FOR UPDATE"` under the old convention and every pre-image read becomes
+>   `… WHERE <predicate>FOR UPDATE`. **The composer inserts the space**, and only when the hint is
+>   non-empty, so the call site at *Task 6* becomes a small helper rather than a bare `.Append(hint)`.
+> - *`FOR NO KEY UPDATE`, not `FOR UPDATE`.* PostgreSQL documents the "no key" mode for a locking read
+>   that precedes an update not touching the row's key (SELECT reference, "The Locking Clause"; Explicit
+>   Locking §13.3.2). Alvo's update path provably never changes a key — a caller-supplied `id` is rejected
+>   before the pre-image read — and the weaker lock does not block the `FOR KEY SHARE` a concurrent
+>   foreign-key check needs on this row, which matters because `Ref` fields carry real FKs.
+
 - [ ] **Step 1: Write the identifier-quoting test**
 
 Create `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/AlvoSqlIdentifierTests.cs`:
@@ -544,7 +557,7 @@ public interface IAlvoSqlDialect
     /// <summary>
     /// Gets the clause appended to a pre-image read whose result a <c>WITH CHECK</c> decision will be
     /// based on, so a concurrent writer cannot change the row between the check and the write —
-    /// <c>" FOR UPDATE"</c> on PostgreSQL, the empty string where the engine has no such clause and
+    /// <c>FOR NO KEY UPDATE</c> on PostgreSQL, the empty string where the engine has no such clause and
     /// serializes write transactions instead (SQLite).
     /// </summary>
     string RowLockHint { get; }
@@ -743,7 +756,7 @@ public sealed class SqliteSqlDialect : IAlvoSqlDialect
 `RenderCaseInsensitiveLike(left, right) => $"{left} ILIKE {right}"`.
 
 `src/MMLib.Alvo.Data.PostgreSql/PostgreSqlSqlDialect.cs` — identical shape, with
-`RowLockHint => " FOR NO KEY UPDATE"` (see the AMENDMENT at *Step 5* below) and the same
+`RowLockHint => "FOR NO KEY UPDATE"` (see the second AMENDMENT above) and the same
 `RenderNullProjection(string storeType) => $"CAST(NULL AS {storeType})"`.
 
 Neither dialect carries a `FieldType` → type table: per the AMENDMENT above, the store type is EF's to
@@ -2172,7 +2185,7 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore.Tests;
 
 internal sealed class TestSqlDialect : IAlvoSqlDialect
 {
-    public string RowLockHint => " FOR TEST";
+    public string RowLockHint => "FOR TEST";
 
     public string RenderTable(EntitySchema entity) => AlvoSqlIdentifier.Quote(entity.Name);
 
@@ -2554,11 +2567,16 @@ internal sealed class ReadStatementComposer
             .Append(_dialect.RenderTable(entity))
             .Append(" WHERE ")
             .Append(string.Join(" AND ", terms.Select(term => $"({term})")))
-            .Append(options.LockRows ? _dialect.RowLockHint : string.Empty)
+            .Append(LockClause(options))
             .ToString();
 
         return new ReadStatement(sql, parameters);
     }
+
+    // RowLockHint carries no separator of its own (see IAlvoSqlDialect.RowLockHint's remarks), so the
+    // separating space is inserted here and only when there is a clause to separate.
+    private string LockClause(ReadOptions options) =>
+        options.LockRows && _dialect.RowLockHint.Length > 0 ? " " + _dialect.RowLockHint : string.Empty;
 
     /// <summary>
     /// A <see langword="null"/> predicate contributes the dialect's constant-true predicate rather than

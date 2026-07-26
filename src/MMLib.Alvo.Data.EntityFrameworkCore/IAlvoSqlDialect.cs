@@ -83,10 +83,39 @@ public interface IAlvoSqlDialect
     string RenderNullProjection(string storeType);
 
     /// <summary>
-    /// Gets the clause appended to a pre-image read whose result a <c>WITH CHECK</c> decision will be
-    /// based on, so a concurrent writer cannot change the row between the check and the write —
-    /// <c>" FOR UPDATE"</c> on PostgreSQL, the empty string where the engine has no such clause and
+    /// Gets the row-locking clause appended to a pre-image read whose result a <c>WITH CHECK</c> decision
+    /// will be based on, so a concurrent writer cannot change the row between the check and the write —
+    /// <c>FOR NO KEY UPDATE</c> on PostgreSQL, the empty string where the engine has no such clause and
     /// serializes write transactions instead (SQLite).
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Return grammar.</b> The clause itself, carrying <b>no separator of its own</b> — no leading
+    /// space, no trailing space, no terminator. The composer inserts the separating space, and only when
+    /// the value is non-empty. A dialect that shipped its own leading space would double the separator
+    /// here and a dialect that omitted one under the opposite convention would produce
+    /// <c>… WHERE &lt;predicate&gt;FOR NO KEY UPDATE</c> — a syntax error in the one statement a
+    /// <c>WITH CHECK</c> verdict is based on. Return <see cref="string.Empty"/>, not <c>" "</c>, when the
+    /// engine has no such clause.
+    /// </para>
+    /// <para>
+    /// <b>Why the "no key" variant on PostgreSQL.</b> PostgreSQL documents <c>FOR NO KEY UPDATE</c> as the
+    /// mode for a locking read that precedes an <c>UPDATE</c> not touching the row's key: it takes a
+    /// weaker lock than <c>FOR UPDATE</c> and, unlike it, does not block a concurrent transaction that
+    /// needs to take a <c>FOR KEY SHARE</c> lock on this row — which is exactly what a foreign-key check
+    /// from another table does (see PostgreSQL's <i>SELECT</i> reference, "The Locking Clause", and
+    /// <i>Explicit Locking</i> §13.3.2). Alvo's update path provably never changes a key: the row id is
+    /// framework-owned and a caller-supplied <c>id</c> in an update payload is rejected before the
+    /// pre-image is read. Since the entity's <c>Ref</c> fields carry real foreign keys
+    /// (<c>DescriptorModelBuilder.ConfigureReferences</c>), taking the stronger lock would serialize
+    /// unrelated inserts against this row for no benefit.
+    /// </para>
+    /// <para>
+    /// Being a property, this cannot vary per operation, which forecloses <c>FOR SHARE</c>,
+    /// <c>SKIP LOCKED</c> and <c>NOWAIT</c>. That is accepted for PR2: the one caller is the
+    /// <c>WITH CHECK</c> pre-image read, and every mode above is a widening this member can grow into
+    /// (an operation argument, or a small option value) without changing what it means today.
+    /// </para>
+    /// </remarks>
     string RowLockHint { get; }
 }

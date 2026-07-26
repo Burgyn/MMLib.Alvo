@@ -6,12 +6,12 @@ namespace MMLib.Alvo.Data.PostgreSql;
 /// <summary>
 /// PostgreSQL's <see cref="IAlvoSqlDialect"/>: unqualified quoted tables (<c>AlvoOptions.SchemaPrefix</c>
 /// is a table-name prefix, not a database schema), a standard <c>CAST</c> around the store type EF
-/// resolved, and a real row lock.
+/// resolved, and a real row lock (<c>FOR NO KEY UPDATE</c> — see <see cref="IAlvoSqlDialect.RowLockHint"/>).
 /// </summary>
 public sealed class PostgreSqlSqlDialect : IAlvoSqlDialect
 {
     /// <inheritdoc/>
-    public string RowLockHint => " FOR UPDATE";
+    public string RowLockHint => "FOR NO KEY UPDATE";
 
     /// <inheritdoc/>
     public string RenderTable(EntitySchema entity)
