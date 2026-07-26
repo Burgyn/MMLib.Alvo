@@ -211,10 +211,50 @@ internal sealed class PredicateParameterBinder
             return AsInstant(value);
         }
 
-        return target == typeof(TimeOnly)
-            ? TimeOnly.Parse(AsText(value), CultureInfo.InvariantCulture)
-            : System.Convert.ChangeType(value, target, CultureInfo.InvariantCulture);
+        if (target == typeof(TimeOnly))
+        {
+            return TimeOnly.Parse(AsText(value), CultureInfo.InvariantCulture);
+        }
+
+        EnsureNoFractionLost(value, target);
+        return System.Convert.ChangeType(value, target, CultureInfo.InvariantCulture);
     }
+
+    /// <summary>
+    /// <see cref="System.Convert.ChangeType(object?, Type, IFormatProvider?)"/> <b>rounds</b> a fractional
+    /// value into an integral type (midpoint-to-even) rather than refusing it, which would make the enclosing
+    /// method's own contract false in the one case a caller filter reaches most easily.
+    /// </summary>
+    /// <remarks>
+    /// <c>mileage=gt.12.7</c> bound as <c>13</c> answers <c>mileage &gt; 13</c> and drops the row with
+    /// <c>mileage = 13</c>; <c>lte.12.7</c> admits one the caller excluded. Both are silent, and both are the
+    /// wrong-but-plausible representation this class exists to prevent. There <em>is</em> a correct answer for
+    /// a fractional bound against an integral column, but it is per-operator (floor for <c>gt</c>, ceiling for
+    /// <c>lt</c>, no match at all for <c>eq</c>) and it is request-validation work, not something a parameter
+    /// binder may decide — so the value is refused and the caller gets a structured error. Throwing
+    /// <see cref="InvalidCastException"/> hands the refusal to <see cref="Converted"/>, so it carries the
+    /// column's name like every other rejection here.
+    /// </remarks>
+    private static void EnsureNoFractionLost(object value, Type target)
+    {
+        if (IsIntegral(target) && HasFraction(value))
+        {
+            throw new InvalidCastException(
+                $"'{value}' has a fractional part and would be rounded to fit an integral column.");
+        }
+    }
+
+    private static bool IsIntegral(Type target) => Type.GetTypeCode(target) is
+        TypeCode.SByte or TypeCode.Byte or TypeCode.Int16 or TypeCode.UInt16
+        or TypeCode.Int32 or TypeCode.UInt32 or TypeCode.Int64 or TypeCode.UInt64;
+
+    private static bool HasFraction(object value) => value switch
+    {
+        decimal number => number != decimal.Truncate(number),
+        double number => number != Math.Truncate(number),
+        float number => number != MathF.Truncate(number),
+        _ => false,
+    };
 
     /// <summary>
     /// A <c>date</c> column takes the calendar date the caller wrote, read in the offset they wrote it

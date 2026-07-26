@@ -137,6 +137,54 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
             () => binder.Bind(Column(context, "owner_id"), PolicyParameterPrefix.Filter + "0", "not-a-uuid"));
     }
 
+    /// <summary>
+    /// A fractional value against an integral column is refused, not rounded. <c>Convert.ChangeType</c>
+    /// rounds (midpoint-to-even), so <c>mileage=gt.12.7</c> would have bound <c>13</c> and answered
+    /// <c>mileage &gt; 13</c> — excluding the row with <c>mileage = 13</c> from a request whose stated
+    /// predicate included it, silently. <c>lte.12.7</c> is the mirror, admitting a row the caller excluded.
+    /// The binder's own contract says a value the column cannot hold is refused rather than coerced; this is
+    /// that contract being true.
+    /// </summary>
+    [Theory]
+    [InlineData(12.7)]
+    [InlineData(12.5)]
+    [InlineData(-0.5)]
+    public async Task A_fractional_value_against_an_integral_column_is_refused_rather_than_rounded(double fraction)
+    {
+        var factory = await FactoryAsync();
+        using var context = factory.Create();
+        var binder = new PredicateParameterBinder(context);
+
+        Should.Throw<InvalidOperationException>(() => binder.Bind(
+            Column(context, "mileage"), PolicyParameterPrefix.Filter + "0", (decimal)fraction));
+    }
+
+    [Fact]
+    public async Task A_whole_number_of_another_numeric_type_still_binds_against_an_integral_column()
+    {
+        var factory = await FactoryAsync();
+        using var context = factory.Create();
+
+        new PredicateParameterBinder(context)
+            .Bind(Column(context, "mileage"), PolicyParameterPrefix.Filter + "0", 13m)
+            .Value.ShouldBe(13L);
+    }
+
+    /// <summary>
+    /// The refusal is about losing information, not about the type: a fractional value against a
+    /// <c>decimal</c> column is exactly what that column holds.
+    /// </summary>
+    [Fact]
+    public async Task A_fractional_value_against_a_decimal_column_is_untouched()
+    {
+        var factory = await FactoryAsync();
+        using var context = factory.Create();
+
+        new PredicateParameterBinder(context)
+            .Bind(Column(context, "price"), PolicyParameterPrefix.Filter + "0", 12.7)
+            .Value.ShouldBe(12.7m);
+    }
+
     [Fact]
     public async Task A_null_binds_against_a_column_as_the_ado_net_null_sentinel()
     {
