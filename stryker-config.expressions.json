@@ -1,0 +1,23 @@
+{
+  "stryker-config": {
+    "project": "MMLib.Alvo.csproj",
+    "test-projects": [
+      "test/MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj"
+    ],
+    "test-runner": "mtp",
+    "coverage-analysis": "off",
+    "mutate": [
+      "**/Expressions/**",
+      "!**/Expressions/Setup.cs"
+    ],
+    "thresholds": {
+      "high": 90,
+      "low": 85,
+      "break": 80
+    },
+    "reporters": [
+      "progress",
+      "cleartext"
+    ]
+  }
+}

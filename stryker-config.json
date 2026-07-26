@@ -16,7 +16,8 @@
       "!**/AlvoBuilderExtensions.cs",
       "!**/Expressions/Setup.cs",
       "!**/Rules/Setup.cs",
-      "!**/Auth/Setup.cs"
+      "!**/Auth/Setup.cs",
+      "!**/Expressions/**"
     ],
     "thresholds": {
       "high": 90,
