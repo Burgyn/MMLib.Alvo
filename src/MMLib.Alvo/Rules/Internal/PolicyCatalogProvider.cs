@@ -3,8 +3,11 @@
 /// <summary>
 /// The default <see cref="IPolicyCatalogProvider"/>: a single volatile reference, written once per
 /// successful apply and read once per <c>IPolicyEngine.Resolve</c> call, with no blocking wait on
-/// either side. The project-identity check in <see cref="SetCurrent"/> is guarded by a lock — it
-/// only ever runs at apply time, never on the <see cref="Current"/> read path a request takes.
+/// either side. The project-identity check <b>and</b> the publish in <see cref="SetCurrent"/> share
+/// one lock, so a catalog only ever becomes current as one atomic step with the guard that admitted
+/// it, and two concurrent applies publish in the order the guard admitted them rather than in an
+/// arbitrary one. Both only ever run at apply time; the <see cref="Current"/> read path a request
+/// takes never takes the lock.
 /// </summary>
 internal sealed class PolicyCatalogProvider : IPolicyCatalogProvider
 {
@@ -30,8 +33,8 @@ internal sealed class PolicyCatalogProvider : IPolicyCatalogProvider
                     $"This policy catalog provider was already primed for project '{_project}'; it cannot " +
                     $"also be primed for project '{project}'. F3 supports exactly one project per host.");
             }
-        }
 
-        Volatile.Write(ref _current, catalog);
+            Volatile.Write(ref _current, catalog);
+        }
     }
 }

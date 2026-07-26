@@ -6,6 +6,7 @@ using MMLib.Alvo.Rules;
 using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Testing.Migrations;
 using MMLib.Alvo.Tests.Expressions;
+using System.Collections.Concurrent;
 
 namespace MMLib.Alvo.Tests.Rules;
 
@@ -17,6 +18,9 @@ namespace MMLib.Alvo.Tests.Rules;
 /// </summary>
 public class PolicyCatalogPrimingTests
 {
+    private const int Contenders = 8;
+    private const int Reads = 10_000;
+
     [Fact]
     public void An_unprimed_provider_denies_with_a_clear_reason()
     {
@@ -118,15 +122,68 @@ public class PolicyCatalogPrimingTests
     public void SetCurrent_for_a_different_project_throws()
     {
         var provider = new PolicyCatalogProvider();
-        var descriptor = AlvoDescriptor.Parse(Descriptor("""{"list": "true"}"""));
-        var schema = DescriptorToSchemaMapper.Map(descriptor);
-        var catalog = PolicyCatalog.Build(descriptor, schema, new CelCompiler());
+        var catalog = NewCatalog();
         provider.SetCurrent("alpha", catalog);
 
         var exception = Should.Throw<InvalidOperationException>(() => provider.SetCurrent("beta", catalog));
 
         exception.Message.ShouldContain("alpha");
         exception.Message.ShouldContain("beta");
+    }
+
+    /// <summary>
+    /// The project-identity guard and the publish are one atomic step under one lock. Eight threads
+    /// re-prime the admitted project while eight more try to prime a second one and a ninth spins on
+    /// <see cref="IPolicyCatalogProvider.Current"/>: every refusal must still name the admitted
+    /// project, and a reader must only ever observe a catalog that project published — never the
+    /// refused project's, and never an empty slot that would make <c>IPolicyEngine</c> deny mid-flight.
+    /// </summary>
+    [Fact]
+    public async Task Concurrent_primes_publish_only_the_admitted_projects_catalogs()
+    {
+        var provider = new PolicyCatalogProvider();
+        var admitted = Enumerable.Range(0, Contenders).Select(_ => NewCatalog()).ToHashSet();
+        var observed = new ConcurrentBag<PolicyCatalog?>();
+        var refusals = new ConcurrentBag<string>();
+        provider.SetCurrent("alpha", admitted.First());
+
+        using var start = new Barrier((Contenders * 2) + 1);
+        await Task.WhenAll([
+            .. admitted.Select(catalog => Primed(start, () => provider.SetCurrent("alpha", catalog))),
+            .. Enumerable.Range(0, Contenders).Select(_ => Primed(start, () => Refuse(provider, refusals))),
+            Reading(start, provider, observed)]);
+
+        refusals.Count.ShouldBe(Contenders);
+        refusals.ShouldAllBe(message => message.Contains("alpha", StringComparison.Ordinal));
+        observed.ShouldAllBe(catalog => catalog != null && admitted.Contains(catalog));
+        var current = provider.Current;
+        current.ShouldNotBeNull();
+        admitted.ShouldContain(current);
+    }
+
+    private static Task Primed(Barrier start, Action prime) => Task.Run(() =>
+    {
+        start.SignalAndWait();
+        prime();
+    });
+
+    private static void Refuse(PolicyCatalogProvider provider, ConcurrentBag<string> refusals) =>
+        refusals.Add(Should.Throw<InvalidOperationException>(() => provider.SetCurrent("beta", NewCatalog())).Message);
+
+    private static Task Reading(Barrier start, PolicyCatalogProvider provider, ConcurrentBag<PolicyCatalog?> observed) =>
+        Task.Run(() =>
+        {
+            start.SignalAndWait();
+            for (var read = 0; read < Reads; read++)
+            {
+                observed.Add(provider.Current);
+            }
+        });
+
+    private static PolicyCatalog NewCatalog()
+    {
+        var descriptor = AlvoDescriptor.Parse(Descriptor("""{"list": "true"}"""));
+        return PolicyCatalog.Build(descriptor, DescriptorToSchemaMapper.Map(descriptor), new CelCompiler());
     }
 
     private static (RuntimeSchemaService Service, PolicyCatalogProvider Provider, InMemoryDescriptorVersionStore Store) CreateService()
