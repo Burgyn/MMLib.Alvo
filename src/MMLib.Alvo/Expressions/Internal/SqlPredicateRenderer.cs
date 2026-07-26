@@ -213,9 +213,15 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
         return new PredicateFragment(fields.RenderTwoValued(sql), true);
     }
 
+    /// <summary>
+    /// Renders role membership. The right operand is never read — the caller's role set answers it — so
+    /// <see cref="RoleMembership"/> asserts that the operand really is <c>@user.roles</c> first.
+    /// </summary>
     private static PredicateFragment RenderIn(
         CelBinary binary, EntitySchema entity, AlvoContext context, IFieldSqlRenderer fields, ParameterBag bag)
     {
+        RoleMembership.RequireUserRolesOperand(binary.Right);
+
         if (binary.Left is CelLiteral { Type: CelValueType.String, Value: string text })
         {
             var isMember = context.Roles.Select(role => role.Name).Contains(text, StringComparer.Ordinal);

@@ -232,8 +232,16 @@ internal static class CelInterpreter
             : left || AsBoolean(Evaluate(binary.Right, state));
     }
 
+    /// <summary>
+    /// Evaluates role membership. The right operand's value is only ever the caller's role set, so
+    /// <see cref="RoleMembership"/> asserts that it really is <c>@user.roles</c> first; the resulting
+    /// <see cref="NotSupportedException"/> is caught by this class's entry points and collapses to a
+    /// denial (or, for a mask, to "masked") rather than escaping — fail-closed in both directions.
+    /// </summary>
     private static bool EvaluateIn(CelBinary binary, in EvalState state)
     {
+        RoleMembership.RequireUserRolesOperand(binary.Right);
+
         var left = Evaluate(binary.Left, state);
         var right = Evaluate(binary.Right, state);
         return left is string text && right is IEnumerable<string> values && values.Contains(text, StringComparer.Ordinal);
