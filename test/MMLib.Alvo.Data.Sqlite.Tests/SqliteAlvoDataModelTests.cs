@@ -32,6 +32,26 @@ public sealed class SqliteAlvoDataModelTests : IAsyncDisposable
     }
 
     /// <summary>
+    /// The other half of the model-cache contract, and the one an always-new token satisfies vacuously: the
+    /// token must <b>not</b> change while the applied schema has not. Model building is the most expensive
+    /// thing EF does at runtime, so a token minted per call would rebuild the whole model on every single
+    /// data operation — invisible to every other fact in this file, and fatal to the p95 criterion PR3
+    /// inherits.
+    /// </summary>
+    [Fact]
+    public async Task An_unchanged_schema_keeps_its_model_token_so_the_model_is_built_once()
+    {
+        var host = await _fixture.StartAsync(SchemaWith("plate"));
+        var factory = host.Services.GetRequiredService<AlvoDataContextFactory>();
+
+        using var first = factory.Create();
+        using var second = factory.Create();
+
+        second.ModelToken.ShouldBe(first.ModelToken);
+        second.Model.ShouldBeSameAs(first.Model);
+    }
+
+    /// <summary>
     /// Spike <c>Q4g</c>: an all-optional read model is the only shape in which a <c>hidden</c>
     /// <c>NOT NULL</c> column can be replaced by a projected typed SQL <c>NULL</c>. The schema-faithful
     /// model throws instead — and throws a <em>different</em> exception type on each engine, which

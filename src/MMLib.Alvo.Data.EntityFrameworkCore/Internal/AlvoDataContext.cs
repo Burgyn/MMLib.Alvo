@@ -1,5 +1,6 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using MMLib.Alvo.Schema;
 
@@ -71,8 +72,21 @@ internal sealed class AlvoDataContext : DbContext
         }
     }
 
-    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder) =>
-        optionsBuilder.ConfigureWarnings(warnings => warnings.Ignore(RelationalEventId.PendingModelChangesWarning));
+    /// <summary>
+    /// Both of these belong to the context rather than to whoever builds it. The model cache key in
+    /// particular: EF caches one model per <see cref="DbContext"/> CLR type, so an
+    /// <see cref="AlvoDataContext"/> constructed without <see cref="AlvoModelCacheKeyFactory"/> in place
+    /// silently serves the first schema the process ever built, whatever <see cref="ModelToken"/> says.
+    /// Setting it here means the type cannot be constructed wrongly — a caller that forgot would otherwise
+    /// get a stale model with no error at all.
+    /// </summary>
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        ArgumentNullException.ThrowIfNull(optionsBuilder);
+        optionsBuilder
+            .ReplaceService<IModelCacheKeyFactory, AlvoModelCacheKeyFactory>()
+            .ConfigureWarnings(warnings => warnings.Ignore(RelationalEventId.PendingModelChangesWarning));
+    }
 
     private static void ConfigureEntity(ModelBuilder modelBuilder, EntitySchema entity)
     {

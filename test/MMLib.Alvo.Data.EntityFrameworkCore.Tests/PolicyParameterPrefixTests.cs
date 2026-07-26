@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Data.EntityFrameworkCore.Tests;
+﻿using System.Reflection;
+
+namespace MMLib.Alvo.Data.EntityFrameworkCore.Tests;
 
 public class PolicyParameterPrefixTests
 {
@@ -31,20 +33,36 @@ public class PolicyParameterPrefixTests
             .Distinct(StringComparer.Ordinal).Count().ShouldBe(3);
 
     /// <summary>
-    /// Every declared name is in <see cref="PolicyParameterPrefix.All"/>. Without this the disjointness
-    /// invariants above would pass vacuously for a name someone forgot to list — which is exactly the
-    /// name that would then be free to collide.
+    /// Every literal this type declares is in <see cref="PolicyParameterPrefix.All"/>. Comparing
+    /// <c>All</c> against a hand-written list of the same constants would not close this: a seventh
+    /// constant added later and forgotten in <c>All</c> would be forgotten in the list too, and the new
+    /// name would escape every invariant above — the exact scenario those invariants exist for. Reflection
+    /// is what makes the set self-maintaining.
     /// </summary>
     [Fact]
-    public void Every_declared_name_is_covered_by_the_invariants()
-        => PolicyParameterPrefix.All.ShouldBe(
-            [
-                PolicyParameterPrefix.Using,
-                PolicyParameterPrefix.WithCheck,
-                PolicyParameterPrefix.TenantScope,
-                PolicyParameterPrefix.Filter,
-                PolicyParameterPrefix.Keyset,
-                PolicyParameterPrefix.RowId,
-            ],
-            ignoreOrder: true);
+    public void Every_declared_constant_is_covered_by_the_invariants()
+        => DeclaredConstants().ShouldBe(PolicyParameterPrefix.All, ignoreOrder: true);
+
+    /// <summary>
+    /// <c>alvo_p</c> is <c>IPredicateRenderer.Render</c>'s shipped default prefix — the name a forgotten
+    /// explicit prefix actually produces — so the reserved set has to stay disjoint from it as well as from
+    /// EF's own <c>pN</c> family. It is deliberately <em>not</em> one of Alvo's reserved names: a predicate
+    /// rendered with the default is a bug, and a name that cannot collide with a reserved one is what lets
+    /// the binder's duplicate check see it.
+    /// </summary>
+    [Fact]
+    public void No_reserved_name_collides_with_the_renderers_default_prefix()
+        => PolicyParameterPrefix.All.ShouldAllBe(name =>
+            !name.StartsWith(RendererDefaultPrefix, StringComparison.Ordinal)
+            && !RendererDefaultPrefix.StartsWith(name, StringComparison.Ordinal));
+
+    private const string RendererDefaultPrefix = "alvo_p";
+
+    private static IReadOnlyList<string> DeclaredConstants() =>
+    [
+        .. typeof(PolicyParameterPrefix)
+            .GetFields(BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Static)
+            .Where(field => field.IsLiteral && field.FieldType == typeof(string))
+            .Select(field => (string)field.GetRawConstantValue()!),
+    ];
 }

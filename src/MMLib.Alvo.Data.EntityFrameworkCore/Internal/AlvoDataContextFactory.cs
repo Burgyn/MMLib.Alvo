@@ -1,5 +1,4 @@
 ﻿using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Infrastructure;
 using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore;
@@ -33,7 +32,6 @@ internal sealed class AlvoDataContextFactory
         var token = TokenFor(schema);
         var options = new DbContextOptionsBuilder();
         _configureProvider(options);
-        options.ReplaceService<IModelCacheKeyFactory, AlvoModelCacheKeyFactory>();
 
         return new AlvoDataContext(options.Options, schema, token);
     }

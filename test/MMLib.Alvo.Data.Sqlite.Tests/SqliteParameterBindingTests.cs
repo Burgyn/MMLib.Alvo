@@ -31,12 +31,16 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
     }
 
     /// <summary>
-    /// The spike's own first false negative, kept as a regression: EF's SQLite <c>Guid</c> mapping stores
-    /// an upper-case <c>TEXT</c>, so the same value hand-formatted lower-case matches nothing — and
-    /// matches nothing <em>silently</em>, which under a negated predicate would fail open.
+    /// Pins the <em>engine</em> behaviour the binder exists to avoid, not the binder itself: EF's SQLite
+    /// <c>Guid</c> mapping stores an upper-case <c>TEXT</c>, so the same value hand-formatted lower-case
+    /// matches nothing — and matches nothing <em>silently</em>, which under a negated predicate fails open.
+    /// It constructs its own parameter deliberately; what pins the binder's own mechanism is
+    /// <see cref="Every_column_binds_with_the_db_type_efs_own_mapping_chose"/>, because
+    /// <c>Microsoft.Data.Sqlite</c> re-serialises a <see cref="Guid"/> to the same text with or without a
+    /// mapping, so no round-trip alone could tell the two apart.
     /// </summary>
     [Fact]
-    public async Task The_same_guid_hand_formatted_as_lower_case_text_matches_nothing()
+    public async Task A_guid_hand_formatted_as_lower_case_text_matches_nothing_on_this_engine()
     {
         var ownerId = Guid.NewGuid();
         var factory = await SeededFactoryAsync(ownerId);
