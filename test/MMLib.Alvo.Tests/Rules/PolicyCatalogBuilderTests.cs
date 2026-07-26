@@ -248,6 +248,113 @@ public class PolicyCatalogBuilderTests
         errors.ShouldContain(e => e.Path == "/entities/orders/fields/owner_id/hidden");
     }
 
+    /// <summary>
+    /// The framework owns the row key, and the read path replaces a masked field with a projected typed SQL
+    /// <c>NULL</c> — which the key can never be, because EF re-marks a key property required whatever the
+    /// model asked for. A <c>hidden</c> flag on <c>id</c> would therefore fail when the row was
+    /// materialised, with a different exception type per engine. Alvo's rule is that a bad descriptor fails
+    /// at save, so it is refused here.
+    /// </summary>
+    [Theory]
+    [InlineData("hidden")]
+    [InlineData("readOnly")]
+    public void A_field_flag_on_the_framework_owned_key_is_refused_at_save(string flag)
+    {
+        var descriptor = Descriptor("orders", Entity(fields: Flagged("id", flag)));
+
+        PolicyCatalog.TryBuild(descriptor, Schema(), CelFixtures.Compiler, out var catalog, out var errors).ShouldBeFalse();
+
+        catalog.ShouldBeNull();
+        var error = errors.ShouldHaveSingleItem();
+        error.Path.ShouldBe($"/entities/orders/fields/id/{flag}");
+        error.FixSuggestion.ShouldNotBeNull();
+    }
+
+    /// <summary>
+    /// The sibling half of DoD criterion 3 — "a rule naming a nonexistent column fails at save, not at
+    /// request time". A flag naming a field the schema does not contain was silently accepted and then
+    /// masked nothing, so a typo in a <c>hidden</c> flag quietly exposed the field it meant to hide.
+    /// </summary>
+    [Theory]
+    [InlineData("hidden")]
+    [InlineData("readOnly")]
+    public void A_field_flag_on_a_field_the_schema_does_not_have_is_refused_at_save(string flag)
+    {
+        var descriptor = Descriptor("orders", Entity(fields: Flagged("secret_note", flag)));
+
+        PolicyCatalog.TryBuild(descriptor, Schema(), CelFixtures.Compiler, out var catalog, out var errors).ShouldBeFalse();
+
+        catalog.ShouldBeNull();
+        errors.ShouldHaveSingleItem().Path.ShouldBe($"/entities/orders/fields/secret_note/{flag}");
+    }
+
+    /// <summary>A typo is the likeliest cause, so the fix names the nearest declared field.</summary>
+    [Fact]
+    public void An_unknown_flagged_field_suggests_the_nearest_declared_one()
+    {
+        var descriptor = Descriptor("orders", Entity(fields: Flagged("ownerid", "hidden")));
+
+        PolicyCatalog.TryBuild(descriptor, Schema(), CelFixtures.Compiler, out _, out var errors).ShouldBeFalse();
+
+        errors.ShouldHaveSingleItem().FixSuggestion.ShouldNotBeNull().ShouldContain("owner_id");
+    }
+
+    /// <summary>
+    /// A flag that is present but <see langword="false"/> masks nothing, so it must still be validated —
+    /// otherwise the refusal above could be bypassed by writing the mistake as <c>false</c> today and
+    /// flipping it to <c>true</c> later, when nothing re-validates.
+    /// </summary>
+    [Fact]
+    public void A_false_flag_on_an_unknown_field_is_refused_too()
+    {
+        var fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
+        {
+            ["secret_note"] = new()
+            {
+                Type = MMLib.Alvo.Descriptor.FieldType.String,
+                Hidden = BoolOrCel.FromBoolean(false),
+            },
+        };
+
+        PolicyCatalog.TryBuild(
+            Descriptor("orders", Entity(fields: fields)), Schema(), CelFixtures.Compiler, out _, out var errors)
+            .ShouldBeFalse();
+
+        errors.ShouldHaveSingleItem().Path.ShouldBe("/entities/orders/fields/secret_note/hidden");
+    }
+
+    /// <summary>
+    /// A field descriptor carrying no flag at all is the ordinary case — every entity declares its fields —
+    /// and must not be validated as if it did, or every descriptor would have to flag every field.
+    /// </summary>
+    [Fact]
+    public void A_field_descriptor_with_no_flag_is_not_refused()
+    {
+        var fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
+        {
+            ["id"] = new() { Type = MMLib.Alvo.Descriptor.FieldType.Uuid },
+            ["owner_id"] = new() { Type = MMLib.Alvo.Descriptor.FieldType.Uuid },
+        };
+
+        PolicyCatalog.TryBuild(
+            Descriptor("orders", Entity(fields: fields)), Schema(), CelFixtures.Compiler, out var catalog, out var errors)
+            .ShouldBeTrue();
+
+        catalog.ShouldNotBeNull();
+        errors.ShouldBeEmpty();
+    }
+
+    private static Dictionary<string, FieldDescriptor> Flagged(string field, string flag) =>
+        new(StringComparer.Ordinal)
+        {
+            [field] = new()
+            {
+                Type = MMLib.Alvo.Descriptor.FieldType.Uuid,
+                Hidden = flag == "hidden" ? BoolOrCel.FromBoolean(true) : null,
+                ReadOnly = flag == "readOnly" ? BoolOrCel.FromBoolean(true) : null,
+            },
+        };
+
     private static SchemaModel Schema() => new([CelFixtures.Orders]);
 
     private static EntityDescriptor Entity(AccessRules? rules = null, IReadOnlyDictionary<string, FieldDescriptor>? fields = null) =>
