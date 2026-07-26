@@ -4,10 +4,10 @@ using MMLib.Alvo.Schema;
 namespace MMLib.Alvo.Data.EntityFrameworkCore.Tests;
 
 /// <summary>
-/// <c>TestFieldSqlRenderer</c> with one difference: its value repair is visible. Every operand a renderer
-/// routes through <see cref="IFieldSqlRenderer.RenderComparableOperand"/> comes back marked with the type it
-/// was compared at, which is the only way to assert that a comparison repairs <em>both</em> sides — the
-/// shipped renderers' repair is a no-op for every type but <c>decimal</c>, and SQLite's is invisible here.
+/// <c>TestFieldSqlRenderer</c> with one difference: its value repair is visible. Every operand pair a renderer
+/// routes through <see cref="IFieldSqlRenderer.RenderComparableOperands"/> comes back marked with the type it
+/// was compared at, which is how a test asserts <em>which</em> comparisons are repaired at all — the shipped
+/// renderers' repair is a no-op for every type but <c>decimal</c>, and SQLite's is invisible here.
 /// </summary>
 internal sealed class TypeMarkingFieldSqlRenderer : IFieldSqlRenderer
 {
@@ -23,5 +23,6 @@ internal sealed class TypeMarkingFieldSqlRenderer : IFieldSqlRenderer
 
     public string RenderCaseInsensitiveLike(string left, string right) => _inner.RenderCaseInsensitiveLike(left, right);
 
-    public string RenderComparableOperand(string sql, CelValueType type) => $"CMP<{type}>({sql})";
+    public (string Left, string Right) RenderComparableOperands(string left, string right, CelValueType type) =>
+        ($"CMP<{type}>({left})", $"CMP<{type}>({right})");
 }

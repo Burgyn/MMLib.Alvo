@@ -207,9 +207,10 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
             return new PredicateFragment(fields.RenderBooleanPredicate(false), true);
         }
 
-        var comparable = PromotedType(binary.Left, binary.Right);
-        var left = fields.RenderComparableOperand(RenderOperand(binary.Left, entity, context, fields, bag), comparable);
-        var right = fields.RenderComparableOperand(RenderOperand(binary.Right, entity, context, fields, bag), comparable);
+        var (left, right) = fields.RenderComparableOperands(
+            RenderOperand(binary.Left, entity, context, fields, bag),
+            RenderOperand(binary.Right, entity, context, fields, bag),
+            PromotedType(binary.Left, binary.Right));
         var sql = $"{left} {ComparisonOperatorText(binary.Operator)} {right}";
         return new PredicateFragment(fields.RenderTwoValued(sql), true);
     }
@@ -218,10 +219,11 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
     /// The type a comparison over these two operands is evaluated at, after CEL's numeric promotion —
     /// <see cref="CelValueType.Decimal"/> wins over <see cref="CelValueType.Int"/>, since the type checker
     /// admits a mixed numeric comparison. It is handed to
-    /// <see cref="IFieldSqlRenderer.RenderComparableOperand"/> so a dialect whose storage for that type
+    /// <see cref="IFieldSqlRenderer.RenderComparableOperands"/> so a dialect whose storage for that type
     /// does not order the way the type does repairs <b>both</b> sides identically: on SQLite a decimal
     /// lives in a <c>TEXT</c> column, and casting only the column would leave the parameter's own storage
-    /// class deciding the comparison.
+    /// class deciding the comparison — which the member's pair-shaped signature now prevents by
+    /// construction.
     /// </summary>
     private static CelValueType PromotedType(CelNode left, CelNode right)
     {
@@ -418,9 +420,10 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
 
     private static string RenderScalarComparison(CelBinary binary, EntitySchema entity, IFieldSqlRenderer fields, ParameterBag bag)
     {
-        var comparable = PromotedType(binary.Left, binary.Right);
-        var left = fields.RenderComparableOperand(RenderScalarOperand(binary.Left, entity, fields, bag), comparable);
-        var right = fields.RenderComparableOperand(RenderScalarOperand(binary.Right, entity, fields, bag), comparable);
+        var (left, right) = fields.RenderComparableOperands(
+            RenderScalarOperand(binary.Left, entity, fields, bag),
+            RenderScalarOperand(binary.Right, entity, fields, bag),
+            PromotedType(binary.Left, binary.Right));
         return $"{left} {ComparisonOperatorText(binary.Operator)} {right}";
     }
 

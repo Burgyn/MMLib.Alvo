@@ -36,7 +36,7 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// <c>SqlPredicate</c>'s parameter bag records names and values only — it carries no field, so there is no
 /// column to consult. That is sound for the predicates PR2 renders: the type checker forces both operands
 /// of a non-numeric comparison to one CEL type, and the one reachable numeric mismatch is a
-/// <c>Decimal</c> comparison, whose operands <c>IFieldSqlRenderer.RenderComparableOperand</c> normalises
+/// <c>Decimal</c> comparison, whose operands <c>IFieldSqlRenderer.RenderComparableOperands</c> normalises
 /// on both sides. It is <em>not</em> sound for a caller-supplied value, which is why the filter, keyset
 /// and row-id call sites bind through the column.
 /// </para>

@@ -23,8 +23,8 @@ internal sealed record KeysetAnchor(IReadOnlyList<AlvoSort> Sort, IReadOnlyList<
 /// two pages of the same query disagree about where the boundary is.
 /// </para>
 /// <para>
-/// Both operands of every comparison here go through
-/// <see cref="IFieldSqlRenderer.RenderComparableOperand"/> at the key column's own type, exactly as the
+/// Every comparison here renders both operands through
+/// <see cref="IFieldSqlRenderer.RenderComparableOperands"/> at the key column's own type, exactly as the
 /// caller filter and the CEL predicate renderer do. A cursor is <em>only</em> comparisons, so a dialect whose
 /// storage does not order the way the type does (a <c>decimal</c> in a SQLite <c>TEXT</c> column) would not
 /// merely mis-order a page — it would skip or repeat rows across page boundaries.
@@ -79,10 +79,10 @@ internal static class KeysetSqlRenderer
 
         var key = anchor.Sort[index];
         var declared = QueryFieldGuard.DeclaredField(entity, key.Field);
-        var type = FieldCelType.Of(declared);
-        var column = fields.RenderComparableOperand(fields.RenderField(entity, declared.Name), type);
-        var parameter = fields.RenderComparableOperand(
-            Bind(anchor.Values[index], fields, prefix, parameters), type);
+        var (column, parameter) = fields.RenderComparableOperands(
+            fields.RenderField(entity, declared.Name),
+            Bind(anchor.Values[index], fields, prefix, parameters),
+            FieldCelType.Of(declared));
         var strict = key.Descending ? "<" : ">";
         var tail = Level(index + 1, anchor, entity, fields, prefix, parameters);
 
@@ -94,9 +94,10 @@ internal static class KeysetSqlRenderer
         string prefix, Dictionary<string, object?> parameters)
     {
         var declared = QueryFieldGuard.DeclaredField(entity, AlvoDataContext.IdColumn);
-        var type = FieldCelType.Of(declared);
-        var column = fields.RenderComparableOperand(fields.RenderField(entity, declared.Name), type);
-        var parameter = fields.RenderComparableOperand(Bind(anchor.RowId, fields, prefix, parameters), type);
+        var (column, parameter) = fields.RenderComparableOperands(
+            fields.RenderField(entity, declared.Name),
+            Bind(anchor.RowId, fields, prefix, parameters),
+            FieldCelType.Of(declared));
 
         return $"{column} > {parameter}";
     }

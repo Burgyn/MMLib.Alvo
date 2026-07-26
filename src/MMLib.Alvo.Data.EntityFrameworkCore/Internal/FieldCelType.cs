@@ -5,7 +5,7 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 
 /// <summary>
 /// The <see cref="CelValueType"/> a comparison over a declared field is evaluated at — the type a caller
-/// filter and a keyset cursor hand to <see cref="IFieldSqlRenderer.RenderComparableOperand"/> so a dialect
+/// filter and a keyset cursor hand to <see cref="IFieldSqlRenderer.RenderComparableOperands"/> so a dialect
 /// whose storage does not order the way the type does can repair the comparison.
 /// </summary>
 /// <remarks>

@@ -30,8 +30,8 @@ internal sealed record RenderedSql(string Sql, IReadOnlyDictionary<string, objec
 /// is not an injection surface: the pattern is always a bind parameter, never text in the statement.
 /// </para>
 /// <para>
-/// Every ordering and equality comparison routes <b>both</b> operands through
-/// <see cref="IFieldSqlRenderer.RenderComparableOperand"/> at the column's own
+/// Every ordering and equality comparison renders <b>both</b> operands through
+/// <see cref="IFieldSqlRenderer.RenderComparableOperands"/> at the column's own
 /// <see cref="CelValueType"/>, exactly as the core's CEL predicate renderer does. Without it a filter over a
 /// <c>decimal</c> is lexicographic on SQLite — <c>price=gt.100</c> matches a row priced 12.34 — which is the
 /// same fail-open a rule had, in a second channel. Pattern operators are deliberately not routed: a
@@ -129,18 +129,25 @@ internal static class FilterSqlRenderer
     private static string Ordered(
         string field, string op, object? value, CelValueType type, IFieldSqlRenderer fields, ParameterBag bag)
     {
-        var parameter = bag.Add(fields, value);
-        return $"{fields.RenderComparableOperand(field, type)} {op} {fields.RenderComparableOperand(parameter, type)}";
+        var (left, right) = fields.RenderComparableOperands(field, bag.Add(fields, value), type);
+        return $"{left} {op} {right}";
     }
 
+    /// <summary>
+    /// Membership is a set of equality comparisons sharing one left operand, so each candidate is paired with
+    /// the column through the dialect's value repair — the repaired column comes back identically from every
+    /// pairing, which is what lets one <c>IN</c> list stand for all of them.
+    /// </summary>
     private static string Membership(
         string field, object? value, CelValueType type, IFieldSqlRenderer fields, ParameterBag bag)
     {
-        var names = Candidates(value).Select(candidate => fields.RenderComparableOperand(bag.Add(fields, candidate), type)).ToList();
+        var pairs = Candidates(value)
+            .Select(candidate => fields.RenderComparableOperands(field, bag.Add(fields, candidate), type))
+            .ToList();
 
-        return names.Count == 0
+        return pairs.Count == 0
             ? fields.RenderBooleanPredicate(false)
-            : $"{fields.RenderComparableOperand(field, type)} IN ({string.Join(", ", names)})";
+            : $"{pairs[0].Left} IN ({string.Join(", ", pairs.Select(pair => pair.Right))})";
     }
 
     /// <summary>

@@ -70,7 +70,8 @@ public class PostgreSqlFieldSqlRendererTests
     [InlineData(CelValueType.Timestamp)]
     [InlineData(CelValueType.Uuid)]
     public void Every_operand_is_already_comparable_and_is_left_alone(CelValueType type)
-        => ((IFieldSqlRenderer)_fields).RenderComparableOperand("\"price\"", type).ShouldBe("\"price\"");
+        => ((IFieldSqlRenderer)_fields).RenderComparableOperands("\"price\"", "@alvo_f0", type)
+            .ShouldBe(("\"price\"", "@alvo_f0"));
 
     private static EntitySchema Entity() => new()
     {

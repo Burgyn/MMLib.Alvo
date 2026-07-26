@@ -62,12 +62,15 @@ public class SqliteFieldSqlRendererTests
     }
 
     /// <summary>
-    /// SQLite stores a decimal in a <c>TEXT</c> column, so a decimal comparison must be cast on both sides
-    /// or it is a string comparison — <c>price &gt; 100</c> would match a price of <c>12.34</c>.
+    /// SQLite stores a decimal in a <c>TEXT</c> column, so a decimal comparison must be cast on <b>both</b>
+    /// sides or it is a string comparison — <c>price &gt; 100</c> would match a price of <c>12.34</c>, and
+    /// casting one side only is worse still, because SQLite orders every <c>TEXT</c> value above every
+    /// <c>REAL</c> one. The member takes and returns the pair for exactly that reason.
     /// </summary>
     [Fact]
-    public void A_decimal_operand_is_cast_so_the_comparison_is_numeric()
-        => _fields.RenderComparableOperand("\"price\"", CelValueType.Decimal).ShouldBe("CAST(\"price\" AS REAL)");
+    public void A_decimal_comparisons_operands_are_both_cast_so_the_comparison_is_numeric()
+        => _fields.RenderComparableOperands("\"price\"", "@alvo_f0", CelValueType.Decimal)
+            .ShouldBe(("CAST(\"price\" AS REAL)", "CAST(@alvo_f0 AS REAL)"));
 
     /// <summary>
     /// Every other type already has a storage class SQLite orders correctly — <c>INTEGER</c> for an int,
@@ -83,7 +86,7 @@ public class SqliteFieldSqlRendererTests
     [InlineData(CelValueType.Json)]
     [InlineData(CelValueType.Null)]
     public void Every_other_type_is_already_comparable_and_is_left_alone(CelValueType type)
-        => _fields.RenderComparableOperand("\"mileage\"", type).ShouldBe("\"mileage\"");
+        => _fields.RenderComparableOperands("\"mileage\"", "@alvo_f0", type).ShouldBe(("\"mileage\"", "@alvo_f0"));
 
     private static EntitySchema Entity() => new()
     {

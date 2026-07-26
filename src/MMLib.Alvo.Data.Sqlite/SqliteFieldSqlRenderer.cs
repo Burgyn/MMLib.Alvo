@@ -47,6 +47,8 @@ public sealed class SqliteFieldSqlRenderer : IFieldSqlRenderer
     /// decision this port cannot make.
     /// </para>
     /// </remarks>
-    public string RenderComparableOperand(string sql, CelValueType type) =>
-        type == CelValueType.Decimal ? $"CAST({sql} AS REAL)" : sql;
+    public (string Left, string Right) RenderComparableOperands(string left, string right, CelValueType type) =>
+        type == CelValueType.Decimal ? (AsReal(left), AsReal(right)) : (left, right);
+
+    private static string AsReal(string sql) => $"CAST({sql} AS REAL)";
 }
