@@ -1,0 +1,25 @@
+{
+  "stryker-config": {
+    "project": "MMLib.Alvo.Data.PostgreSql.csproj",
+    "test-projects": [
+      "test/MMLib.Alvo.Data.PostgreSql.Tests/MMLib.Alvo.Data.PostgreSql.Tests.csproj"
+    ],
+    "test-runner": "mtp",
+    "coverage-analysis": "off",
+    "mutate": [
+      "**/*.cs",
+      "!**/AssemblyInfo.cs",
+      "!AlvoPostgreSqlBuilderExtensions.cs",
+      "!PostgreSqlProviderOptions.cs"
+    ],
+    "thresholds": {
+      "high": 90,
+      "low": 85,
+      "break": 80
+    },
+    "reporters": [
+      "progress",
+      "cleartext"
+    ]
+  }
+}

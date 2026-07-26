@@ -1,15 +1,33 @@
 name: Mutation
 
 # Mutation testing of the security-relevant logic. Path-filtered so it runs only
-# when a mutated project changes. Two targets run in parallel via a matrix:
+# when a mutated project changes. Four targets run in parallel via a matrix:
 #   - "security core"  → src/MMLib.Alvo            (stryker-config.json)
 #   - "data-ef"        → the EF provider's PURE-LOGIC only: DestructiveScan,
-#                        RenamePrePass, RenameGuessSplitter, DescriptorModelBuilder
+#                        RenamePrePass, RenameGuessSplitter, DescriptorModelBuilder,
+#                        AlvoSqlIdentifier, and the data path's Internal/* composers
 #                        (stryker-config.data-ef.json). The EF project's
 #                        transaction/DB-round-trip code is deliberately excluded —
 #                        its defects only manifest against a real database, so
 #                        mutation there is noise; it's covered by the SQLite +
 #                        PostgreSQL integration tests instead.
+#   - "data-sqlite"    → src/MMLib.Alvo.Data.Sqlite     (stryker-config.data-sqlite.json)
+#   - "data-postgresql"→ src/MMLib.Alvo.Data.PostgreSql (stryker-config.data-postgresql.json)
+#
+# The two driver targets exist because F3 PR2 moved security-relevant RENDERING into
+# them: the boolean literal that lands inside a policy WHERE clause (TrueLiteral /
+# FalseLiteral), whether an identifier is quoted at all (RenderField / RenderColumn /
+# RenderTable), the case-insensitive LIKE shape, and the row-lock clause the WITH CHECK
+# pre-image read depends on. Before that they held only registration and plumbing, so
+# neither had a config. Mutating `TrueLiteral => "1"` to `"0"` inverts a security
+# predicate, and the only other thing pinning those values is an accepted Verify
+# baseline — the one artefact that can be made green with no product-code change.
+# Each driver's registration surface (the UseXxx builder extensions and its Options
+# POCO) is excluded for the same reason AlvoEfCoreProvider.cs is: it is DI wiring,
+# proven by the AddAlvo integration tests, and mutating it only produces survivors.
+# Both run against the driver's FAST unit test project — MMLib.Alvo.Data.PostgreSql.Tests,
+# not the Testcontainers-backed .Tests.Integration project, which self-skips off Linux
+# and would make the run depend on Docker.
 #
 # Each config pins `test-runner: mtp` + `coverage-analysis: off` because Stryker
 # 4.16's default VSTest runner cannot discover tests in xUnit v3 / Microsoft.Testing.Platform
@@ -42,13 +60,19 @@ on:
     paths:
       - 'src/MMLib.Alvo/**'
       - 'src/MMLib.Alvo.Data.EntityFrameworkCore/**'
+      - 'src/MMLib.Alvo.Data.Sqlite/**'
+      - 'src/MMLib.Alvo.Data.PostgreSql/**'
       - 'stryker-config.json'
       - 'stryker-config.data-ef.json'
+      - 'stryker-config.data-sqlite.json'
+      - 'stryker-config.data-postgresql.json'
       # The test projects belong in the filter too: mutation judges the test
       # suite, so deleting or loosening an adversarial test drops the score
       # without touching src/. Post-merge is now the only run that can catch it.
       - 'test/MMLib.Alvo.Tests/**'
       - 'test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/**'
+      - 'test/MMLib.Alvo.Data.Sqlite.Tests/**'
+      - 'test/MMLib.Alvo.Data.PostgreSql.Tests/**'
   workflow_dispatch:
 
 permissions:
@@ -79,6 +103,12 @@ jobs:
           - name: data-ef
             config: stryker-config.data-ef.json
             project: src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj
+          - name: data-sqlite
+            config: stryker-config.data-sqlite.json
+            project: src/MMLib.Alvo.Data.Sqlite/MMLib.Alvo.Data.Sqlite.csproj
+          - name: data-postgresql
+            config: stryker-config.data-postgresql.json
+            project: src/MMLib.Alvo.Data.PostgreSql/MMLib.Alvo.Data.PostgreSql.csproj
     steps:
       - name: Checkout
         uses: actions/checkout@v7
