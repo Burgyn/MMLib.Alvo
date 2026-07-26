@@ -2153,6 +2153,35 @@ engine's own unknown-column error, which happens too late and echoes schema inte
     `internal sealed record ReadStatementOptions { AlvoFilter? Filter; Guid? RowId; KeysetAnchor? Anchor;
     IReadOnlyList<AlvoSort> Sort; PreImageMutation? LockFor; }`.
 
+> **AMENDMENT (slice 3 — Tasks 5 and 6 as they landed).** Four differences from the block above and from the
+> code blocks in these two tasks. Later tasks must be written against these.
+>
+> 1. **Both `Compose` methods take the read model's `IEntityType` as a last argument.** The one authority for
+>    a masked column's store type is EF (`IProperty.GetColumnType()`, slice 1's I1/I2) and the one authority
+>    for which column is the row key is EF's own primary key:
+>    `ReadProjection.Compose(EntitySchema entity, IReadOnlySet<string> hiddenFields, IAlvoSqlDialect dialect,
+>    IEntityType rows)` and `ReadStatementComposer.Compose(EntitySchema entity, PolicyDecision decision,
+>    AlvoContext context, ReadStatementOptions options, IEntityType rows)`. **Tasks 7 and 9 pass
+>    `db.Rows(entity.Name).EntityType`** — every call site already has the `AlvoDataContext` in scope, and the
+>    call sites below are amended accordingly.
+> 2. **`ReadStatementOptions` carries no `Sort` member.** Nothing reads one: the sort chain is composed in
+>    LINQ (`SortComposer`, Task 7, *Deviations* 4), so the record is `{ AlvoFilter? Filter; Guid? RowId;
+>    KeysetAnchor? Anchor; PreImageMutation? LockFor; }`. Task 9 still adds `Unmasked` exactly as its own step
+>    describes.
+> 3. **`QueryFieldGuard` gained two members.** `EnsureMaskable(IReadOnlySet<string> hiddenFields,
+>    IEntityType rows)` is the read path's fail-closed belt: it refuses a mask that hides a key property, and a
+>    model with no key at all, so a `SchemaModel` from a source that never ran the apply-time check cannot
+>    reach the shaper. `ReadProjection.Compose` calls it, and also refuses a masked field the read model does
+>    not map, since such a field has no store type to cast to. `DeclaredField(EntitySchema entity, string
+>    field)` is the one implementation of "resolve a caller-supplied name to the schema's own `FieldSchema`",
+>    shared by `FilterSqlRenderer` and `KeysetSqlRenderer`.
+> 4. **Task 6's comparisons route *both* operands through `IFieldSqlRenderer.RenderComparableOperand`**
+>    (slice 2's C2 fix — a decimal in a SQLite `TEXT` column compares lexicographically otherwise), at the type
+>    a new `internal static class FieldCelType` reports for the *column*, pinned against the real
+>    `ICelCompiler`'s own resolution by `FieldCelTypeTests`. Ordering, equality and membership are routed;
+>    `Like`/`ILike` deliberately are not (a pattern match is a string operation), and `Is` binds nothing to
+>    route.
+
 - [ ] **Step 1: Write the failing projection test**
 
 Create `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/ReadProjectionTests.cs`:
@@ -3846,11 +3875,12 @@ internal sealed class EfAlvoData : IAlvoData
             throw new AlvoAuthorizationException(UnknownEntityMessage);
         }
 
-        var statement = _statements.Compose(entity, decision, context, new ReadStatementComposer.ReadStatementOptions
-        {
-            RowId = id,
-            LockFor = lockFor,
-        });
+        var statement = _statements.Compose(
+            entity,
+            decision,
+            context,
+            new ReadStatementComposer.ReadStatementOptions { RowId = id, LockFor = lockFor },
+            db.Rows(entity.Name).EntityType);
 
         var rows = await Materialize(db, entity, statement).SingleOrDefaultAsync(cancellationToken);
         return rows;
@@ -3895,11 +3925,12 @@ composes the statement with the filter and the anchor, applies `SortComposer.App
             throw new AlvoAuthorizationException(UnknownEntityMessage);
         }
 
-        var statement = _statements.Compose(entity, decision, context, new ReadStatementComposer.ReadStatementOptions
-        {
-            Filter = query.Filter,
-            Anchor = anchor,
-        });
+        var statement = _statements.Compose(
+            entity,
+            decision,
+            context,
+            new ReadStatementComposer.ReadStatementOptions { Filter = query.Filter, Anchor = anchor },
+            db.Rows(entity.Name).EntityType);
 
         var rows = SortComposer.Apply(Materialize(db, entity, statement), entity, query.Sort);
         return await (query.Limit is int limit ? rows.Take(limit) : rows).ToListAsync(cancellationToken);
@@ -4555,7 +4586,8 @@ driver's row lock on the pre-image read where it exists:
         AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context)
     {
         var statement = _statements.Compose(
-            schema, decision, context, new ReadStatementComposer.ReadStatementOptions());
+            schema, decision, context, new ReadStatementComposer.ReadStatementOptions(),
+            db.Rows(schema.Name).EntityType);
         return Materialize(db, schema, statement);
     }
 
@@ -5555,9 +5587,10 @@ T1; `FieldClrTypeMap.Exact`/`.Optional` — T3; `AlvoDataContext` (`IdColumn`, `
 `ModelToken`, `AppliedSchema`, `Rows`) — T3/T7; `AlvoModelCacheKeyFactory`, `AlvoDataContextFactory.Create`
 — T3; `PolicyParameterPrefix` (`Using`, `WithCheck`, `TenantScope`, `Filter`, `Keyset`, `RowId`, `All`) —
 T4; `PredicateParameterBinder.Bind` — T4; `AlvoDataSeed.SeedAsync` — T4; `ReadProjection.Compose`,
-`QueryFieldGuard.EnsureAvailable`/`.EnsureDeclared`, `ReadStatement`, `ReadStatementComposer` +
-`ReadStatementOptions` (`Filter`, `RowId`, `Anchor`, `Sort`, `LockFor`, `Unmasked`) — T5/T9;
-`RenderedSql`, `FilterSqlRenderer.Render`, `KeysetAnchor`, `KeysetSqlRenderer.Render` — T6;
+`QueryFieldGuard.EnsureAvailable`/`.EnsureDeclared`/`.EnsureMaskable`/`.DeclaredField`, `ReadStatement`,
+`ReadStatementComposer` + `ReadStatementOptions` (`Filter`, `RowId`, `Anchor`, `LockFor`, `Unmasked` — **no
+`Sort`**, see the slice-3 AMENDMENT at Task 5) — T5/T9;
+`RenderedSql`, `FilterSqlRenderer.Render`, `FieldCelType.Of`, `KeysetAnchor`, `KeysetSqlRenderer.Render` — T6;
 `RecordMaterializer.ToRecord`, `SortComposer.Apply`, `KeysetCursor.Encode`/`.TryDecode`, `EfAlvoData` —
 T7; `WritePayloadGuard.EnsureWritable` — T8; `UpdateSetterFactory.For` — T9; `AlvoDataSqlSnapshotTests`
 (`EngineName`, `Compiler`, `Renderer`, `Fields`, `SnapshotEntity`, `SnapshotCaller`) — T1;
