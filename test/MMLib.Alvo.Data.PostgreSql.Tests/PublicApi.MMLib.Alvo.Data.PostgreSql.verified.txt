@@ -21,7 +21,7 @@ namespace MMLib.Alvo.Data.PostgreSql
         public PostgreSqlSqlDialect() { }
         public string RowLockHint { get; }
         public string RenderColumn(string columnName) { }
-        public string RenderNullProjection(MMLib.Alvo.Schema.FieldSchema field) { }
+        public string RenderNullProjection(string storeType) { }
         public string RenderTable(MMLib.Alvo.Schema.EntitySchema entity) { }
     }
 }

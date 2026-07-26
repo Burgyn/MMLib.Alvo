@@ -3,7 +3,10 @@ using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Data.Sqlite;
 
-/// <summary>SQLite's <see cref="IAlvoSqlDialect"/>: unqualified quoted tables, SQLite storage classes, no row lock.</summary>
+/// <summary>
+/// SQLite's <see cref="IAlvoSqlDialect"/>: unqualified quoted tables, a standard <c>CAST</c> around the
+/// store type EF resolved, and no row lock — SQLite serializes write transactions instead.
+/// </summary>
 public sealed class SqliteSqlDialect : IAlvoSqlDialect
 {
     /// <inheritdoc/>
@@ -20,18 +23,9 @@ public sealed class SqliteSqlDialect : IAlvoSqlDialect
     public string RenderColumn(string columnName) => AlvoSqlIdentifier.Quote(columnName);
 
     /// <inheritdoc/>
-    public string RenderNullProjection(FieldSchema field)
+    public string RenderNullProjection(string storeType)
     {
-        ArgumentNullException.ThrowIfNull(field);
-        return $"CAST(NULL AS {StorageClass(field.Type)})";
+        ArgumentException.ThrowIfNullOrWhiteSpace(storeType);
+        return $"CAST(NULL AS {storeType})";
     }
-
-    private static string StorageClass(FieldType type) => type switch
-    {
-        FieldType.Integer => "INTEGER",
-        FieldType.Boolean => "INTEGER",
-        FieldType.Uuid or FieldType.Ref or FieldType.String or FieldType.Text or FieldType.Json
-            or FieldType.Enum or FieldType.Decimal or FieldType.Date or FieldType.DateTime => "TEXT",
-        _ => throw new NotSupportedException($"Unsupported field type '{type}'."),
-    };
 }

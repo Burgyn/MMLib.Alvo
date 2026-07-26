@@ -47,11 +47,40 @@ public interface IAlvoSqlDialect
     /// <summary>
     /// Renders a typed SQL <c>NULL</c> standing in for a masked field's value — the mechanism that keeps
     /// a <c>hidden</c> field's data inside the table. An untyped bare <c>NULL</c> is not enough: the
-    /// result set has to satisfy the mapped property's store type, so the cast names this dialect's own
-    /// type for <paramref name="field"/>.
+    /// result set has to satisfy the mapped property's store type, so the cast names
+    /// <paramref name="storeType"/>.
     /// </summary>
-    /// <param name="field">The masked field.</param>
-    string RenderNullProjection(FieldSchema field);
+    /// <remarks>
+    /// <para>
+    /// A dialect decides only the <em>cast syntax</em>; it must not decide the type. The one authority for
+    /// "what store type does this column have" is EF's own <c>IRelationalTypeMappingSource</c>, reached
+    /// through the mapped property (<c>IProperty.GetColumnType()</c>) — the very thing that produced the
+    /// table's DDL, so it honours the <c>HasMaxLength</c>/<c>HasPrecision</c> calls
+    /// <c>DescriptorModelBuilder.ConfigureField</c> makes, and it is per provider by construction. A
+    /// dialect deriving a type name from a <see cref="FieldSchema"/> instead would be a second,
+    /// unreconciled authority, and this port's first revision proved that drifts immediately: it answered
+    /// <c>numeric(18,2)</c> for every <c>decimal</c> regardless of its declared precision, <c>jsonb</c>
+    /// for a <c>json</c> field whose column the migrator creates as <c>text</c>, and <c>text</c> for a
+    /// length-bounded string whose column is <c>character varying(N)</c>.
+    /// </para>
+    /// <para>
+    /// <b>Return grammar.</b> The result is a bare SQL <em>expression</em>, interpolated verbatim into a
+    /// <c>SELECT</c> list. It must not carry an <c>AS &lt;column&gt;</c> alias — the composer appends the
+    /// masked field's alias itself, through <see cref="RenderColumn"/> — and it must not carry a
+    /// separating comma.
+    /// </para>
+    /// <para>
+    /// <paramref name="storeType"/> reaches the SQL text unparameterized, because a type name has no
+    /// bind-parameter form. That is safe only because it comes from EF's type mapping; a dialect must never
+    /// be handed one assembled from caller input.
+    /// </para>
+    /// </remarks>
+    /// <param name="storeType">
+    /// The masked column's EF-resolved store type, exactly as this provider spells it (e.g.
+    /// <c>character varying(32)</c>, <c>numeric(10,4)</c>, <c>TEXT</c>).
+    /// </param>
+    /// <exception cref="ArgumentException"><paramref name="storeType"/> is null, empty or whitespace.</exception>
+    string RenderNullProjection(string storeType);
 
     /// <summary>
     /// Gets the clause appended to a pre-image read whose result a <c>WITH CHECK</c> decision will be

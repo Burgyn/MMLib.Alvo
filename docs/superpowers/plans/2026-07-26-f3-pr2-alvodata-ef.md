@@ -394,7 +394,7 @@ it judges quoting unnecessary, which PostgreSQL then case-folds.
   - `public interface MMLib.Alvo.Data.EntityFrameworkCore.IAlvoSqlDialect`
     - `string RenderTable(EntitySchema entity)`
     - `string RenderColumn(string columnName)`
-    - `string RenderNullProjection(FieldSchema field)`
+    - `string RenderNullProjection(string storeType)`
     - `string RowLockHint { get; }`
   - `public static class MMLib.Alvo.Data.EntityFrameworkCore.AlvoSqlIdentifier` with
     `public static string Quote(string identifier)`.
@@ -408,6 +408,19 @@ it judges quoting unnecessary, which PostgreSQL then case-folds.
     `protected abstract string EngineName { get; }`, `protected abstract ICelCompiler Compiler { get; }`,
     `protected abstract IPredicateRenderer Renderer { get; }`,
     `protected abstract IFieldSqlRenderer Fields { get; }`.
+
+> **AMENDMENT (slice 1 review, findings I1 + I2 — binding on every later task).**
+> `RenderNullProjection` takes the **EF-resolved store type**, not a `FieldSchema`:
+> `string RenderNullProjection(string storeType)`. The per-dialect `FieldType` → type tables below are
+> **deleted**; a dialect decides only the cast syntax (`CAST(NULL AS {storeType})` on both in-repo
+> drivers). Reason: the hand-written tables were a second authority for a column's store type and already
+> disagreed with the DDL the migrator actually emits in three places on PostgreSQL — `Json` → `jsonb`
+> where the column is `text`, a `MaxLength` string → `text` where the column is `character varying(N)`,
+> and `Decimal` → a fixed `numeric(18,2)` regardless of declared precision. The single authority is EF's
+> own `IRelationalTypeMappingSource`, reached through the mapped property's `GetColumnType()`. **Any code
+> block further down this plan that still reads `RenderNullProjection(FieldSchema)` means the new
+> signature**, and its caller must obtain the store type from the EF model rather than pass the
+> `FieldSchema` through.
 
 - [ ] **Step 1: Write the identifier-quoting test**
 
@@ -521,11 +534,12 @@ public interface IAlvoSqlDialect
     /// <summary>
     /// Renders a typed SQL <c>NULL</c> standing in for a masked field's value — the mechanism that keeps
     /// a <c>hidden</c> field's data inside the table. An untyped bare <c>NULL</c> is not enough: the
-    /// result set has to satisfy the mapped property's store type, so the cast names this dialect's own
-    /// type for <paramref name="field"/>.
+    /// result set has to satisfy the mapped property's store type, so the cast names
+    /// <paramref name="storeType"/>. A dialect decides only the cast syntax; the type is EF's to resolve
+    /// (see the AMENDMENT above). The result is a bare expression — no `AS <column>` alias, no comma.
     /// </summary>
-    /// <param name="field">The masked field.</param>
-    string RenderNullProjection(FieldSchema field);
+    /// <param name="storeType">The masked column's EF-resolved store type.</param>
+    string RenderNullProjection(string storeType);
 
     /// <summary>
     /// Gets the clause appended to a pre-image read whose result a <c>WITH CHECK</c> decision will be
@@ -716,20 +730,11 @@ public sealed class SqliteSqlDialect : IAlvoSqlDialect
     public string RenderColumn(string columnName) => AlvoSqlIdentifier.Quote(columnName);
 
     /// <inheritdoc/>
-    public string RenderNullProjection(FieldSchema field)
+    public string RenderNullProjection(string storeType)
     {
-        ArgumentNullException.ThrowIfNull(field);
-        return $"CAST(NULL AS {StorageClass(field.Type)})";
+        ArgumentException.ThrowIfNullOrWhiteSpace(storeType);
+        return $"CAST(NULL AS {storeType})";
     }
-
-    private static string StorageClass(FieldType type) => type switch
-    {
-        FieldType.Integer => "INTEGER",
-        FieldType.Boolean => "INTEGER",
-        FieldType.Uuid or FieldType.Ref or FieldType.String or FieldType.Text or FieldType.Json
-            or FieldType.Enum or FieldType.Decimal or FieldType.Date or FieldType.DateTime => "TEXT",
-        _ => throw new NotSupportedException($"Unsupported field type '{type}'."),
-    };
 }
 ```
 
@@ -738,24 +743,13 @@ public sealed class SqliteSqlDialect : IAlvoSqlDialect
 `RenderCaseInsensitiveLike(left, right) => $"{left} ILIKE {right}"`.
 
 `src/MMLib.Alvo.Data.PostgreSql/PostgreSqlSqlDialect.cs` — identical shape, with
-`RowLockHint => " FOR UPDATE"` and:
+`RowLockHint => " FOR NO KEY UPDATE"` (see the AMENDMENT at *Step 5* below) and the same
+`RenderNullProjection(string storeType) => $"CAST(NULL AS {storeType})"`.
 
-```csharp
-    private static string ColumnType(FieldType type) => type switch
-    {
-        FieldType.Uuid or FieldType.Ref => "uuid",
-        FieldType.String or FieldType.Text or FieldType.Enum => "text",
-        FieldType.Json => "jsonb",
-        FieldType.Integer => "bigint",
-        FieldType.Decimal => "numeric(18,2)",
-        FieldType.Boolean => "boolean",
-        FieldType.Date => "date",
-        FieldType.DateTime => "timestamptz",
-        _ => throw new NotSupportedException($"Unsupported field type '{type}'."),
-    };
-```
-
-Both type tables are the spike's own `SpikeEngine.ColumnType` switches, verbatim.
+Neither dialect carries a `FieldType` → type table: per the AMENDMENT above, the store type is EF's to
+resolve and the spike's `SpikeEngine.ColumnType` switches are **not** carried over — in the spike the same
+switch also created the tables, so it could not diverge from the DDL by construction, and in PR2 the DDL
+comes from `DescriptorModelBuilder` + EF's type mapping instead.
 
 - [ ] **Step 5: Add the two members to the registration and pass them from both drivers**
 
@@ -2157,6 +2151,15 @@ public class ReadProjectionTests
     private static IReadOnlySet<string> Hidden(params string[] fields) => fields.ToHashSet(StringComparer.Ordinal);
 }
 ```
+
+> **AMENDMENT (slice 1, I1/I2).** `RenderNullProjection` now takes `string storeType`, so
+> `TestSqlDialect` becomes `RenderNullProjection(string storeType) => $"CAST(NULL AS {storeType})"` and
+> `ReadProjection.Compose` must be handed the masked column's EF-resolved store type
+> (`IProperty.GetColumnType()` off the read model's entity type) instead of passing the `FieldSchema`
+> through. How that is threaded — an extra `Func<string, string>` argument, an `IEntityType` parameter, or
+> resolving inside the composer — is this task's call; the constraint is only that the type comes from EF,
+> never from a `FieldType` switch. Adjust the expected strings in the tests above to whatever store types
+> the test dialect is handed.
 
 Add a shared `TestSqlDialect` to the same test project
 (`test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/TestSqlDialect.cs`) so the composer's tests do not need
@@ -5259,9 +5262,10 @@ if one of them actually fires, the design was not implemented, so fix the implem
 - A masked `NOT NULL` column throwing `InvalidCastException` ⇒ the read model is not all-optional.
 - `42883: operator does not exist: uuid = text` ⇒ a value reached the statement without going through
   `PredicateParameterBinder`, or a prefix collided with EF's own.
-- `numeric` precision differences on `total` ⇒ the model's `HasPrecision` is not being applied; the
-  differential entity declares `Precision = 18, Scale = 2` and the dialect's `RenderNullProjection` uses
-  `numeric(18,2)` to match.
+- `numeric` precision differences on `total` ⇒ the model's `HasPrecision` is not being applied. Since
+  slice 1's I1/I2 fix, the masked-column cast takes the store type EF resolved
+  (`IProperty.GetColumnType()`), so a mismatch here means the read model dropped `HasPrecision`, not that
+  a dialect hardcoded the wrong `numeric(p,s)` — that hardcoded table no longer exists.
 
 - [ ] **Step 6: Run ring2, accept baselines, commit**
 

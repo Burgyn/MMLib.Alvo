@@ -24,7 +24,7 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore
     {
         string RowLockHint { get; }
         string RenderColumn(string columnName);
-        string RenderNullProjection(MMLib.Alvo.Schema.FieldSchema field);
+        string RenderNullProjection(string storeType);
         string RenderTable(MMLib.Alvo.Schema.EntitySchema entity);
     }
     public sealed class RelationalProviderRegistration

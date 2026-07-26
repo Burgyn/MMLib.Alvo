@@ -5,7 +5,8 @@ namespace MMLib.Alvo.Data.PostgreSql;
 
 /// <summary>
 /// PostgreSQL's <see cref="IAlvoSqlDialect"/>: unqualified quoted tables (<c>AlvoOptions.SchemaPrefix</c>
-/// is a table-name prefix, not a database schema), PostgreSQL column types, and a real row lock.
+/// is a table-name prefix, not a database schema), a standard <c>CAST</c> around the store type EF
+/// resolved, and a real row lock.
 /// </summary>
 public sealed class PostgreSqlSqlDialect : IAlvoSqlDialect
 {
@@ -23,22 +24,9 @@ public sealed class PostgreSqlSqlDialect : IAlvoSqlDialect
     public string RenderColumn(string columnName) => AlvoSqlIdentifier.Quote(columnName);
 
     /// <inheritdoc/>
-    public string RenderNullProjection(FieldSchema field)
+    public string RenderNullProjection(string storeType)
     {
-        ArgumentNullException.ThrowIfNull(field);
-        return $"CAST(NULL AS {ColumnType(field.Type)})";
+        ArgumentException.ThrowIfNullOrWhiteSpace(storeType);
+        return $"CAST(NULL AS {storeType})";
     }
-
-    private static string ColumnType(FieldType type) => type switch
-    {
-        FieldType.Uuid or FieldType.Ref => "uuid",
-        FieldType.String or FieldType.Text or FieldType.Enum => "text",
-        FieldType.Json => "jsonb",
-        FieldType.Integer => "bigint",
-        FieldType.Decimal => "numeric(18,2)",
-        FieldType.Boolean => "boolean",
-        FieldType.Date => "date",
-        FieldType.DateTime => "timestamptz",
-        _ => throw new NotSupportedException($"Unsupported field type '{type}'."),
-    };
 }
