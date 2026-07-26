@@ -2175,12 +2175,25 @@ engine's own unknown-column error, which happens too late and echoes schema inte
 >    not map, since such a field has no store type to cast to. `DeclaredField(EntitySchema entity, string
 >    field)` is the one implementation of "resolve a caller-supplied name to the schema's own `FieldSchema`",
 >    shared by `FilterSqlRenderer` and `KeysetSqlRenderer`.
-> 4. **Task 6's comparisons route *both* operands through `IFieldSqlRenderer.RenderComparableOperand`**
->    (slice 2's C2 fix — a decimal in a SQLite `TEXT` column compares lexicographically otherwise), at the type
->    a new `internal static class FieldCelType` reports for the *column*, pinned against the real
->    `ICelCompiler`'s own resolution by `FieldCelTypeTests`. Ordering, equality and membership are routed;
+> 4. **Task 6's comparisons render *both* operands through
+>    `IFieldSqlRenderer.RenderComparableOperands(left, right, CelValueType)`** — the pair-returning shape the
+>    slice-2 re-review's FI3 ruling replaced the per-operand member with, so one-sided repair (which *inverts*
+>    a comparison on SQLite rather than approximating it) is unrepresentable. The type comes from
+>    `MMLib.Alvo.Expressions.CelFieldType.Of(FieldSchema)` in **`Abstractions`** — one shipped mapping the CEL
+>    type checker and the storage drivers share (ruling B2; a second copy silently changes *which* comparisons
+>    get the repair, which is a fail-open reintroduced by drift). Ordering, equality and membership are routed;
 >    `Like`/`ILike` deliberately are not (a pattern match is a string operation), and `Is` binds nothing to
 >    route.
+> 5. **The caller filter's `Is` operator renders through the two-valued seam**, not as literal `IS TRUE` /
+>    `IS FALSE`: `RenderTwoValued($"{field} = {TrueLiteral}")`, because T-SQL (§0 principle 3, via Azure SQL)
+>    has no boolean type and cannot parse either. `IS NULL` stays literal — it is universal SQL. No new port
+>    member; proved through `MMLib.Alvo.Testing.TSqlFieldSqlRenderer`, now shipped there rather than declared
+>    in `test/MMLib.Alvo.Tests`.
+> 6. **The decimal differential proof is `MMLib.Alvo.Testing.Data.AlvoDataComparisonTests`**, a shipped
+>    abstract base with one seam (`protected abstract Task<int> MatchesAsync(string rule, decimal? price,
+>    long? mileage)`), inherited by `SqliteAlvoDataComparisonTests` today. **Task 11 adds the PostgreSQL
+>    subclass** — until it does, `price > 100` is frozen on one engine only, and the `cel-to-sql-postgresql`
+>    baseline does not exist at all.
 
 - [ ] **Step 1: Write the failing projection test**
 
