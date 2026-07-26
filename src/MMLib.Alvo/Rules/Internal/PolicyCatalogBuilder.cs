@@ -48,7 +48,7 @@ internal static class PolicyCatalogBuilder
             return false;
         }
 
-        catalog = new PolicyCatalog(entities, roles);
+        catalog = new PolicyCatalog(entities, roles, schema);
         errors = [];
         return true;
     }
