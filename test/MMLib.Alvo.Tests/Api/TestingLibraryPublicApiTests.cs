@@ -39,15 +39,19 @@ public class TestingLibraryPublicApiTests
 
     /// <summary>
     /// This assembly references <c>Verify.XunitV3</c> directly (for <c>SchemaSqlSnapshotTests</c>),
-    /// which injects <c>[assembly: AssemblyMetadata("Verify.ProjectDirectory", ...)]</c> /
-    /// <c>("Verify.SolutionDirectory", ...)</c> carrying the absolute checkout path —
-    /// non-reproducible across machines/CI, unlike everything else <c>PublicApiGenerator</c> emits
-    /// here. Strips just those two entries; every other <c>AssemblyMetadata</c> entry (e.g.
-    /// <c>RepositoryUrl</c>) is stable and stays.
+    /// which injects an <c>[assembly: AssemblyMetadata("Verify.&lt;name&gt;Directory", ...)]</c> entry per
+    /// build-time directory it wants to recover at runtime — each carrying an absolute checkout path,
+    /// so each is non-reproducible across machines/CI, unlike everything else
+    /// <c>PublicApiGenerator</c> emits here. The match is deliberately over the whole
+    /// <c>*Directory</c> family rather than the individual keys: Verify 31.27.0 added a third
+    /// (<c>Verify.IntermediateDirectory</c>) to the two that existed when this filter was written,
+    /// and a patch bump must not be able to break an API baseline. Every other
+    /// <c>AssemblyMetadata</c> entry (<c>RepositoryUrl</c>, <c>Verify.ProjectName</c>,
+    /// <c>Verify.SolutionName</c>, <c>Verify.TargetFrameworks</c>) is stable and stays.
     /// </summary>
     private static string RemoveVerifyDirectoryMetadata(string publicApi) => Regex.Replace(
         publicApi,
-        "\\[assembly: System\\.Reflection\\.AssemblyMetadata\\(\"Verify\\.(?:Project|Solution)Directory\", .*?\\)\\]\r?\n",
+        "\\[assembly: System\\.Reflection\\.AssemblyMetadata\\(\"Verify\\.\\w*Directory\", .*?\\)\\]\r?\n",
         string.Empty,
         RegexOptions.Singleline);
 }
