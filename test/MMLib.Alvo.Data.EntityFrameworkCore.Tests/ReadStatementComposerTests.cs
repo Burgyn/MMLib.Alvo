@@ -157,6 +157,97 @@ public class ReadStatementComposerTests
         statement.Parameters.Keys.ShouldContain(PolicyParameterPrefix.RowId);
     }
 
+    /// <summary>
+    /// The <c>ORDER BY</c> lives in this statement rather than in a LINQ chain composed over it, and that is
+    /// the whole point: it is rendered through the same <see cref="IFieldSqlRenderer"/> the keyset boundary
+    /// is, so the page's order and the page's boundary cannot describe different sequences. Composed in LINQ
+    /// they could — EF's own SQLite <c>ORDER BY</c> over a decimal collates exactly, while the boundary
+    /// compares the repaired value.
+    /// </summary>
+    [Fact]
+    public void A_sorted_read_carries_its_order_by_inside_the_one_statement()
+    {
+        var statement = Compose(new ReadStatementComposer.ReadStatementOptions
+        {
+            Sort = [new AlvoSort("plate", Descending: true)],
+        });
+
+        statement.Sql.ShouldContain(
+            " ORDER BY CASE WHEN \"plate\" IS NULL THEN 1 ELSE 0 END, \"plate\" DESC, \"id\"");
+    }
+
+    /// <summary>
+    /// A <c>LIMIT</c> composed in LINQ would sit <em>outside</em> the derived table EF wraps a
+    /// <c>FromSql</c> root in, whose row order is not guaranteed to survive — so the limit would truncate an
+    /// unordered set. Inside the one statement it truncates the ordered, policy-filtered one.
+    /// </summary>
+    [Fact]
+    public void A_limited_read_orders_before_it_truncates_and_binds_the_limit()
+    {
+        var statement = Compose(new ReadStatementComposer.ReadStatementOptions { Limit = 5 });
+
+        statement.Sql.ShouldEndWith(" ORDER BY \"id\" LIMIT @alvo_limit");
+        statement.Parameters[PolicyParameterPrefix.RowLimit].ShouldBe(5);
+    }
+
+    [Fact]
+    public void An_unsorted_unlimited_first_page_needs_no_ordering_at_all()
+    {
+        var statement = Compose(new ReadStatementComposer.ReadStatementOptions());
+
+        statement.Sql.ShouldNotContain("ORDER BY");
+        statement.Sql.ShouldNotContain("LIMIT");
+    }
+
+    /// <summary>
+    /// A cursor's boundary is only meaningful against a total order, so a cursored page is ordered even when
+    /// the caller named no sort key at all — otherwise the engine's own row order decides which rows the
+    /// boundary excludes, and two pages of one query can skip or repeat a row.
+    /// </summary>
+    [Fact]
+    public void A_cursored_page_is_ordered_even_with_no_caller_sort_key()
+        => Compose(new ReadStatementComposer.ReadStatementOptions
+        {
+            Anchor = new KeysetAnchor([], [], Guid.NewGuid()),
+        }).Sql.ShouldContain(" ORDER BY \"id\"");
+
+    /// <summary>
+    /// A <c>WITH CHECK</c> verdict is reached over the complete stored row, so the pre-image read asks for
+    /// the masked field's real value: reading it as a projected <c>NULL</c> would silently change what a rule
+    /// referencing it decides. Masking is applied to what is <em>returned</em>, not to what is judged.
+    /// </summary>
+    [Fact]
+    public void An_unmasked_read_projects_a_hidden_fields_real_column()
+    {
+        var descriptor = SnapshotFixture.VehicleWith(list: "owner_id == @user.id", hiddenFields: "secret_note");
+        var statement = Compose(
+            new ReadStatementComposer.ReadStatementOptions { Unmasked = true }, descriptor);
+
+        statement.Sql.ShouldContain("\"secret_note\"");
+        statement.Sql.ShouldNotContain("CAST(NULL AS");
+    }
+
+    [Fact]
+    public void A_masked_read_is_still_the_default()
+        => Compose(
+                new ReadStatementComposer.ReadStatementOptions(),
+                SnapshotFixture.VehicleWith(list: "owner_id == @user.id", hiddenFields: "secret_note"))
+            .Sql.ShouldContain("CAST(NULL AS TEXT) AS \"secret_note\"");
+
+    /// <summary>
+    /// Both engines put the locking clause after <c>ORDER BY</c>/<c>LIMIT</c>, so the composer appends it
+    /// last however many clauses precede it — a lock spelled before <c>ORDER BY</c> is a syntax error in the
+    /// one statement a <c>WITH CHECK</c> verdict is based on.
+    /// </summary>
+    [Fact]
+    public void The_row_lock_is_the_last_clause_however_many_others_precede_it()
+        => Compose(new ReadStatementComposer.ReadStatementOptions
+        {
+            Sort = [new AlvoSort("plate")],
+            Limit = 1,
+            LockFor = PreImageMutation.Update,
+        }).Sql.ShouldEndWith(" ORDER BY CASE WHEN \"plate\" IS NULL THEN 1 ELSE 0 END, \"plate\", \"id\" LIMIT @alvo_limit FOR TEST");
+
     [Fact]
     public void A_filter_naming_an_undeclared_field_is_refused_before_any_statement_exists()
         => Should.Throw<AlvoAuthorizationException>(() => Compose(new ReadStatementComposer.ReadStatementOptions

@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
+using MMLib.Alvo.Data.EntityFrameworkCore;
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Migrations;
@@ -18,6 +19,7 @@ public sealed class SqliteAlvoDataFixture : IAsyncDisposable
 {
     private readonly List<string> _files = [];
     private readonly List<ServiceProvider> _providers = [];
+    private readonly List<SqlCapture> _captures = [];
 
     /// <summary>Creates a database, migrates <paramref name="schema"/> into it and primes the policy catalog.</summary>
     /// <param name="schema">The schema to migrate and compile the rules against.</param>
@@ -26,10 +28,12 @@ public sealed class SqliteAlvoDataFixture : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(schema);
 
-        var services = BuildProvider(NewDatabaseFile());
+        var path = NewDatabaseFile();
+        var services = BuildProvider(path);
         await MigrateAsync(services, schema);
 
-        var host = new AlvoDataHost(services, descriptor ?? MinimalDescriptor(schema));
+        var capture = NewCapture(path);
+        var host = new AlvoDataHost(services, descriptor ?? MinimalDescriptor(schema), capture);
         host.RePrime(schema);
         return host;
     }
@@ -39,6 +43,13 @@ public sealed class SqliteAlvoDataFixture : IAsyncDisposable
         var path = Path.Combine(Path.GetTempPath(), $"alvo-data-{Guid.NewGuid():N}.db");
         _files.Add(path);
         return path;
+    }
+
+    private SqlCapture NewCapture(string path)
+    {
+        var capture = new SqlCapture(path);
+        _captures.Add(capture);
+        return capture;
     }
 
     private ServiceProvider BuildProvider(string path)
@@ -82,6 +93,11 @@ public sealed class SqliteAlvoDataFixture : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        foreach (var capture in _captures)
+        {
+            capture.Dispose();
+        }
+
         foreach (var provider in _providers)
         {
             await provider.DisposeAsync();
@@ -111,17 +127,55 @@ public sealed class SqliteAlvoDataFixture : IAsyncDisposable
 }
 
 /// <summary>One started database plus the descriptor whose policy is primed against it.</summary>
-public sealed class AlvoDataHost(ServiceProvider services, AlvoDescriptor descriptor)
+public sealed class AlvoDataHost
 {
+    private readonly ServiceProvider _services;
+    private readonly AlvoDescriptor _descriptor;
+    private readonly SqlCapture _capture;
+
+    internal AlvoDataHost(ServiceProvider services, AlvoDescriptor descriptor, SqlCapture capture)
+    {
+        _services = services;
+        _descriptor = descriptor;
+        _capture = capture;
+        Data = BuildData(services);
+    }
+
     /// <summary>Gets the host container the data path resolves out of.</summary>
-    public ServiceProvider Services => services;
+    public ServiceProvider Services => _services;
+
+    /// <summary>Gets the data port under test, over this database.</summary>
+    internal IAlvoData Data { get; }
+
+    /// <summary>Gets every statement EF has executed against this database since the last <see cref="ClearStatements"/>.</summary>
+    internal IReadOnlyList<string> Statements => _capture.Statements;
+
+    /// <summary>Gets the most recent statement executed against this database.</summary>
+    internal string LastStatement => _capture.LastStatement;
+
+    /// <summary>Forgets every recorded statement, so a test asserts on the ones its own act produced.</summary>
+    internal void ClearStatements() => _capture.Clear();
 
     /// <summary>Re-primes the policy catalog (and therefore the applied schema) from <paramref name="schema"/>.</summary>
     /// <remarks>Synchronous, because compiling and publishing a catalog is: nothing here awaits.</remarks>
     /// <param name="schema">The schema the rules are re-compiled against and that the read model is rebuilt from.</param>
     public void RePrime(SchemaModel schema)
     {
-        var catalog = PolicyCatalog.Build(descriptor, schema, services.GetRequiredService<ICelCompiler>());
-        services.GetRequiredService<IPolicyCatalogProvider>().SetCurrent(descriptor.Name, catalog);
+        var catalog = PolicyCatalog.Build(_descriptor, schema, _services.GetRequiredService<ICelCompiler>());
+        _services.GetRequiredService<IPolicyCatalogProvider>().SetCurrent(_descriptor.Name, catalog);
     }
+
+    /// <summary>
+    /// Builds the data port over the container's own <c>AlvoDataContextFactory</c>. The two renderers are
+    /// constructed here rather than resolved, because the SQLite registration does not publish them to the
+    /// host container until <c>IAlvoData</c> itself is registered — at which point this becomes one
+    /// <c>GetRequiredService&lt;IAlvoData&gt;()</c>.
+    /// </summary>
+    private static EfAlvoData BuildData(IServiceProvider services) => new EfAlvoData(
+        services.GetRequiredService<IPolicyEngine>(),
+        services.GetRequiredService<IPredicateEvaluator>(),
+        services.GetRequiredService<IPredicateRenderer>(),
+        new SqliteFieldSqlRenderer(),
+        new SqliteSqlDialect(),
+        services.GetRequiredService<AlvoDataContextFactory>());
 }

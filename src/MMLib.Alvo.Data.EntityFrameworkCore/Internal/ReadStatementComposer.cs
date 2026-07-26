@@ -59,6 +59,21 @@ internal sealed class ReadStatementComposer
         /// <summary>The keyset cursor anchor, for a page after the first.</summary>
         internal KeysetAnchor? Anchor { get; init; }
 
+        /// <summary>The caller's sort keys, outermost first; empty for none.</summary>
+        internal IReadOnlyList<AlvoSort> Sort { get; init; } = [];
+
+        /// <summary>The page's maximum row count, or <see langword="null"/> for no explicit limit.</summary>
+        internal int? Limit { get; init; }
+
+        /// <summary>
+        /// Whether the projection ignores the decision's field mask. <see langword="true"/> only for the
+        /// pre-image a <c>WITH CHECK</c> verdict is reached over: that check evaluates the complete stored
+        /// row, and a masked field read as a projected <c>NULL</c> would silently change what a rule
+        /// referencing it decides. Masking still applies to everything this data path <em>returns</em> — a
+        /// record is masked when it is assembled, so an unmasked read is not an unmasked response.
+        /// </summary>
+        internal bool Unmasked { get; init; }
+
         /// <summary>
         /// The mutation this read's row is a pre-image for, or <see langword="null"/> for a read that takes
         /// no lock. It selects the lock <em>mode</em>, not merely whether to lock — an update's pre-image
@@ -104,15 +119,52 @@ internal sealed class ReadStatementComposer
         AddAnchor(terms, parameters, entity, options.Anchor);
 
         var sql = new StringBuilder("SELECT ")
-            .Append(ReadProjection.Compose(entity, decision.HiddenFields, _dialect, rows))
+            .Append(ReadProjection.Compose(entity, Mask(decision, options), _dialect, rows))
             .Append(" FROM ")
             .Append(_dialect.RenderTable(entity))
             .Append(" WHERE ")
             .Append(string.Join(" AND ", terms.Select(term => $"({term})")))
+            .Append(OrderByClause(entity, options))
+            .Append(LimitClause(parameters, options))
             .Append(LockClause(options))
             .ToString();
 
         return new ReadStatement(sql, parameters);
+    }
+
+    /// <inheritdoc cref="ReadStatementOptions.Unmasked"/>
+    private static IReadOnlySet<string> Mask(PolicyDecision decision, ReadStatementOptions options) =>
+        options.Unmasked ? _noMask : decision.HiddenFields;
+
+    private static readonly IReadOnlySet<string> _noMask = new HashSet<string>(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The ordering, when this read is one whose row order is observable — a caller sort, a limit that
+    /// truncates, or a cursor whose boundary is only meaningful against a total order. A first page with
+    /// none of those returns the whole visible set, where <see cref="AlvoQuery.Sort"/> documents the order as
+    /// implementation-defined, so nothing is spent making it total.
+    /// </summary>
+    private string OrderByClause(EntitySchema entity, ReadStatementOptions options) =>
+        RequiresTotalOrder(options)
+            ? " ORDER BY " + SortSqlRenderer.Render(options.Sort, entity, _fields)
+            : string.Empty;
+
+    private static bool RequiresTotalOrder(ReadStatementOptions options) =>
+        options.Sort.Count > 0 || options.Limit is not null || options.Anchor is not null;
+
+    /// <summary>
+    /// <c>RowLimitClause</c> carries no separator of its own, like <c>RowLockClause</c>, so the separating
+    /// space is inserted here. The row count is bound, never formatted: it is caller-supplied.
+    /// </summary>
+    private string LimitClause(Dictionary<string, object?> parameters, ReadStatementOptions options)
+    {
+        if (options.Limit is not { } limit)
+        {
+            return string.Empty;
+        }
+
+        parameters[PolicyParameterPrefix.RowLimit] = limit;
+        return " " + _dialect.RowLimitClause(_fields.RenderParameter(PolicyParameterPrefix.RowLimit));
     }
 
     /// <summary>

@@ -144,4 +144,36 @@ public interface IAlvoSqlDialect
     /// </remarks>
     /// <param name="mutation">The mutation the locked pre-image read precedes.</param>
     string RowLockClause(PreImageMutation mutation);
+
+    /// <summary>
+    /// Renders the clause that truncates an ordered page to at most the bound number of rows —
+    /// <c>LIMIT &lt;marker&gt;</c> on both engines Alvo ships, <c>FETCH FIRST &lt;marker&gt; ROWS ONLY</c> in
+    /// standard SQL, an <c>OFFSET … FETCH</c> pair on T-SQL.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A <b>default interface member</b>, exactly like
+    /// <see cref="MMLib.Alvo.Expressions.IFieldSqlRenderer"/>'s three two-valued members and for the same
+    /// reason: the default is right for every engine that spells this the PostgreSQL/SQLite way, so only a
+    /// dialect that genuinely differs implements it and adding it breaks no existing implementation.
+    /// </para>
+    /// <para>
+    /// <b>Why the limit is inside this statement rather than a LINQ <c>Take</c>.</b> EF pushes a
+    /// <c>FromSql</c> body into a derived table as soon as anything is composed over it, and a derived
+    /// table's row order is not guaranteed to survive into the outer query — so a limit applied outside
+    /// truncates a set whose order is undefined, which is a page that can skip or repeat a row. Ordering and
+    /// truncation live in one statement so they cannot come apart.
+    /// </para>
+    /// <para>
+    /// <b>Return grammar.</b> The clause itself, carrying <b>no separator of its own</b> — no leading space,
+    /// no terminator. The composer inserts the separating space and places the result after the
+    /// <c>ORDER BY</c> and before <see cref="RowLockClause"/>, which is where both engines' grammar puts it.
+    /// </para>
+    /// </remarks>
+    /// <param name="rowCountParameterMarker">
+    /// The already-rendered bind-parameter reference holding the row count (e.g. <c>@alvo_limit</c>). A
+    /// marker rather than a number, because a limit is caller-supplied and this data path formats no
+    /// caller-supplied value into SQL text.
+    /// </param>
+    string RowLimitClause(string rowCountParameterMarker) => $"LIMIT {rowCountParameterMarker}";
 }

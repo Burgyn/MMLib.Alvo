@@ -37,6 +37,17 @@ internal static class PolicyParameterPrefix
     /// <summary>The single name a row id binds to.</summary>
     internal const string RowId = "alvo_id";
 
-    /// <summary>Every reserved name, for the disjointness invariant.</summary>
-    internal static IReadOnlyList<string> All { get; } = [Using, WithCheck, TenantScope, Filter, Keyset, RowId];
+    /// <summary>
+    /// The single name a page's row limit binds to. Bound rather than formatted into the text, like every
+    /// other value this data path puts in a statement.
+    /// </summary>
+    internal const string RowLimit = "alvo_limit";
+
+    /// <summary>
+    /// Every reserved name, for the disjointness invariant. Every <see langword="const"/> <see cref="string"/>
+    /// this type declares is a reserved name and belongs here — the invariant test reflects over all of them,
+    /// so a message or format constant added to this type would fail it rather than escape it.
+    /// </summary>
+    internal static IReadOnlyList<string> All { get; } =
+        [Using, WithCheck, TenantScope, Filter, Keyset, RowId, RowLimit];
 }

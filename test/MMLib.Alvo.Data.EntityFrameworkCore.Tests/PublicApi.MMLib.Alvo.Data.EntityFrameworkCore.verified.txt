@@ -27,6 +27,7 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore
         string RenderColumn(string columnName);
         string RenderNullProjection(string storeType);
         string RenderTable(MMLib.Alvo.Schema.EntitySchema entity);
+        string RowLimitClause(string rowCountParameterMarker);
         string RowLockClause(MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation mutation);
     }
     public enum PreImageMutation

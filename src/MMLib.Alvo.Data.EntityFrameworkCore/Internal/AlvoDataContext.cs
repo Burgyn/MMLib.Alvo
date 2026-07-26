@@ -63,6 +63,12 @@ internal sealed class AlvoDataContext : DbContext
     internal Guid ModelToken { get; }
 
     /// <summary>
+    /// The applied schema this context's model was built from — the one an entity name and a field name are
+    /// resolved against, so the read path and the read model can never be talking about different shapes.
+    /// </summary>
+    internal SchemaModel AppliedSchema => _schema;
+
+    /// <summary>
     /// The property-bag set for <paramref name="entity"/>, refusing anything this model does not map with
     /// the same message an unknown entity gets.
     /// </summary>
@@ -88,7 +94,12 @@ internal sealed class AlvoDataContext : DbContext
     /// Deliberately the same text an unauthorized operation gets: whether an entity is undeclared, dynamic
     /// or merely invisible to this caller must not be distinguishable from the outside.
     /// </summary>
-    private const string UnmappedEntityMessage = "The operation was not authorized.";
+    /// <remarks>
+    /// <see langword="internal"/> so <see cref="EfAlvoData"/>'s own unknown-entity refusal reads this one
+    /// constant instead of declaring a matching literal. Two copies of an indistinguishability string are two
+    /// authorities for one security guarantee, and the copy that drifts is the one that becomes an oracle.
+    /// </remarks>
+    internal const string UnmappedEntityMessage = "The operation was not authorized.";
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
