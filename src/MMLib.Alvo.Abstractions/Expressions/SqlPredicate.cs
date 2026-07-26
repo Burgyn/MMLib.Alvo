@@ -7,6 +7,16 @@
 /// there is no <c>with</c>-mutation path that could re-inject text into <see cref="Sql"/> or swap
 /// <see cref="Parameters"/> after the renderer produced them.
 /// </summary>
+/// <remarks>
+/// <b>Parameter names are unique within one <see cref="SqlPredicate"/> and nowhere else.</b> Each render
+/// numbers its parameters from zero, so a caller composing several predicates into one command —
+/// a <see cref="Rules.PolicyDecision"/> carries up to three (<c>Using</c>, <c>WithCheck</c>,
+/// <c>TenantScope</c>) — must render each with a different <c>parameterPrefix</c> (see
+/// <see cref="IPredicateRenderer.Render(CompiledExpression, AlvoContext, IFieldSqlRenderer, string)"/>).
+/// Merging two default-prefixed predicates binds two different values to one name, and whichever wins
+/// silently changes what the other predicate means — a security-relevant bug that produces no error, so
+/// this contract is stated here rather than left to each backend to rediscover.
+/// </remarks>
 public sealed record SqlPredicate
 {
     /// <summary>Initializes a new instance of the <see cref="SqlPredicate"/> class.</summary>

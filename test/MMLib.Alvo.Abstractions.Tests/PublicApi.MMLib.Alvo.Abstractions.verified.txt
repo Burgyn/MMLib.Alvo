@@ -814,7 +814,7 @@ namespace MMLib.Alvo.Expressions
     public interface IPredicateRenderer
     {
         MMLib.Alvo.Expressions.SqlExpression Render(MMLib.Alvo.Expressions.CompiledExpression expression, MMLib.Alvo.Expressions.IFieldSqlRenderer fields);
-        MMLib.Alvo.Expressions.SqlPredicate Render(MMLib.Alvo.Expressions.CompiledExpression expression, MMLib.Alvo.AlvoContext context, MMLib.Alvo.Expressions.IFieldSqlRenderer fields);
+        MMLib.Alvo.Expressions.SqlPredicate Render(MMLib.Alvo.Expressions.CompiledExpression expression, MMLib.Alvo.AlvoContext context, MMLib.Alvo.Expressions.IFieldSqlRenderer fields, string parameterPrefix = "p");
     }
     public sealed class SqlExpression : System.IEquatable<MMLib.Alvo.Expressions.SqlExpression>
     {

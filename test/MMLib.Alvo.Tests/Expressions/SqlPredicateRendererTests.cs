@@ -118,6 +118,51 @@ public class SqlPredicateRendererTests
         predicate.Parameters["p1"].ShouldBe(CelFixtures.Alice.User.Value);
     }
 
+    /// <summary>
+    /// A <c>PolicyDecision</c> carries up to three predicates a backend composes into one command, and
+    /// each render numbers its own parameters from zero — so without a per-render prefix the composed
+    /// command has two different values bound to one name, and whichever wins silently changes what the
+    /// predicate means. The prefix is the caller's way to keep them disjoint.
+    /// </summary>
+    [Fact]
+    public void Two_renders_with_different_prefixes_produce_disjoint_parameter_names()
+    {
+        var usingPredicate = _renderer.Render(
+            CelFixtures.CompileRule("owner_id == @user.id"), CelFixtures.Alice, _fields, "u");
+        var tenantScope = _renderer.Render(
+            CelFixtures.CompileRule("tenant_id == @tenant.id"), CelFixtures.Alice, _fields, "t");
+
+        usingPredicate.Parameters.Keys.ShouldBe(["u0"]);
+        tenantScope.Parameters.Keys.ShouldBe(["t0"]);
+        usingPredicate.Parameters.Keys.Intersect(tenantScope.Parameters.Keys, StringComparer.Ordinal).ShouldBeEmpty();
+        usingPredicate.Sql.ShouldContain("@u0");
+        tenantScope.Sql.ShouldContain("@t0");
+    }
+
+    [Fact]
+    public void The_default_parameter_prefix_keeps_the_established_names()
+    {
+        Render("owner_id == @user.id", CelFixtures.Alice).Parameters.Keys.ShouldBe(["p0"]);
+    }
+
+    /// <summary>
+    /// The prefix is composed into SQL text unparameterized (there is no bind parameter for a bind
+    /// parameter's own name), so it is validated as an identifier rather than trusted — a provider
+    /// deriving one from anything caller-influenced must not be able to smuggle SQL through it.
+    /// </summary>
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("p 0")]
+    [InlineData("p; DROP TABLE items --")]
+    [InlineData("1p")]
+    [InlineData("p-0")]
+    public void A_parameter_prefix_that_is_not_a_plain_identifier_is_rejected(string prefix)
+    {
+        Should.Throw<ArgumentException>(() => _renderer.Render(
+            CelFixtures.CompileRule("owner_id == @user.id"), CelFixtures.Alice, _fields, prefix));
+    }
+
     [Fact]
     public void An_int_literal_binds_as_a_clr_long()
     {

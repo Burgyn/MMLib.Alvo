@@ -25,7 +25,7 @@ namespace MMLib.Alvo.Expressions.Internal;
 /// renderer.
 /// </para>
 /// <para>
-/// <b>Root collapse is defense-in-depth, not the live mechanism.</b> <see cref="Render(CompiledExpression, AlvoContext, IFieldSqlRenderer)"/>
+/// <b>Root collapse is defense-in-depth, not the live mechanism.</b> <see cref="Render(CompiledExpression, AlvoContext, IFieldSqlRenderer, string)"/>
 /// collapses the whole rendered predicate once more only when the root fragment is not already marked
 /// two-valued. Every node kind the predicate path renders today already produces an
 /// already-two-valued fragment at its own level, so that branch is never taken — it exists so a future
@@ -59,14 +59,16 @@ namespace MMLib.Alvo.Expressions.Internal;
 internal sealed class SqlPredicateRenderer : IPredicateRenderer
 {
     /// <inheritdoc />
-    public SqlPredicate Render(CompiledExpression expression, AlvoContext context, IFieldSqlRenderer fields)
+    public SqlPredicate Render(
+        CompiledExpression expression, AlvoContext context, IFieldSqlRenderer fields, string parameterPrefix = "p")
     {
         ArgumentNullException.ThrowIfNull(expression);
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(fields);
         RequirePredicateProfile(expression);
+        RequireIdentifierPrefix(parameterPrefix);
 
-        var bag = new ParameterBag();
+        var bag = new ParameterBag(parameterPrefix);
         var rendered = RenderPredicate(expression.Root, expression.Entity, context, fields, bag);
         var sql = rendered.IsTwoValued ? rendered.Sql : fields.RenderTwoValued(rendered.Sql);
         return new SqlPredicate(sql, bag.Snapshot());
@@ -79,7 +81,7 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
         ArgumentNullException.ThrowIfNull(fields);
         RequireScalarProfile(expression);
 
-        var bag = new ParameterBag();
+        var bag = new ParameterBag(DefaultParameterPrefix);
         var sql = RenderScalar(expression.Root, expression.Entity, fields, bag);
         return new SqlExpression(sql, bag.Snapshot());
     }
@@ -104,18 +106,47 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
         }
     }
 
+    private const string DefaultParameterPrefix = "p";
+
+    /// <summary>
+    /// The parameter prefix reaches the SQL text unparameterized — a bind parameter's own name has no
+    /// bind-parameter form — so it is validated as a plain identifier rather than trusted, in case a
+    /// provider ever derives one from something caller-influenced.
+    /// </summary>
+    private static void RequireIdentifierPrefix(string parameterPrefix)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(parameterPrefix);
+
+        if (!IsPlainIdentifier(parameterPrefix))
+        {
+            throw new ArgumentException(
+                $"'{parameterPrefix}' is not a plain identifier; a parameter prefix must start with an ASCII "
+                + "letter or '_' and contain only letters, digits and '_'.",
+                nameof(parameterPrefix));
+        }
+    }
+
+    private static bool IsPlainIdentifier(string text) =>
+        (char.IsAsciiLetter(text[0]) || text[0] == '_')
+        && text.All(character => char.IsAsciiLetterOrDigit(character) || character == '_');
+
     private static NotSupportedException Unsupported(CelNode node) =>
         new($"'{node.GetType().Name}' cannot be rendered to SQL by this entry point.");
 
     private readonly record struct PredicateFragment(string Sql, bool IsTwoValued);
 
-    private sealed class ParameterBag
+    /// <summary>
+    /// Collects a single render's bound values, naming them <c>&lt;prefix&gt;0</c>, <c>&lt;prefix&gt;1</c>,
+    /// … The prefix is per render, never global, which is what lets a caller compose several predicates
+    /// into one command without two of them claiming the same name (see <see cref="SqlPredicate"/>).
+    /// </summary>
+    private sealed class ParameterBag(string prefix)
     {
         private readonly Dictionary<string, object?> _values = [];
 
         public string Add(object? value)
         {
-            var name = $"p{_values.Count}";
+            var name = $"{prefix}{_values.Count}";
             _values.Add(name, value);
             return name;
         }

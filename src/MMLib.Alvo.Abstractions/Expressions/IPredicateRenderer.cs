@@ -17,14 +17,23 @@ public interface IPredicateRenderer
     /// <param name="expression">A compiled Rule or Condition expression.</param>
     /// <param name="context">The caller/tenant context <c>@user</c>/<c>@tenant</c> resolve against.</param>
     /// <param name="fields">The storage driver's field/dialect renderer.</param>
+    /// <param name="parameterPrefix">
+    /// The prefix every generated parameter name in this render carries, so a caller composing several
+    /// predicates into one command can keep their names disjoint — see <see cref="SqlPredicate"/>, which
+    /// owns that contract. Must be a plain identifier (an ASCII letter or <c>_</c> followed by letters,
+    /// digits or <c>_</c>): it reaches the SQL text unparameterized, since a bind parameter's own name
+    /// has no bind-parameter form.
+    /// </param>
     /// <exception cref="InvalidOperationException"><paramref name="expression"/> was compiled for the Computed profile.</exception>
+    /// <exception cref="ArgumentException"><paramref name="parameterPrefix"/> is not a plain identifier.</exception>
     /// <exception cref="NotSupportedException">
     /// <paramref name="expression"/> is a Condition tree that references <c>old.</c>/<c>new.</c> or
     /// <c>changed(...)</c>. A hook condition is evaluated entirely in-process by
     /// <c>CelInterpreter</c> — it never runs as a SQL predicate — so this is by design, not a gap: a
     /// Condition tree is only renderable here when it happens not to use those constructs.
     /// </exception>
-    SqlPredicate Render(CompiledExpression expression, AlvoContext context, IFieldSqlRenderer fields);
+    SqlPredicate Render(
+        CompiledExpression expression, AlvoContext context, IFieldSqlRenderer fields, string parameterPrefix = "p");
 
     /// <summary>
     /// Renders a Computed expression's scalar value to SQL. The result is <b>not</b> wrapped in
