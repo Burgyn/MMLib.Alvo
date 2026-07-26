@@ -16,16 +16,25 @@ namespace MMLib.Alvo.Tests.Expressions;
 public class SqlTextConfinedToRendererArchitectureTests
 {
     /// <summary>
-    /// Fragments that only ever appear in composed SQL, chosen for precision as well as reach. The
-    /// boolean connective <c>AND</c> is matched bare and case-sensitively, so it catches both the
-    /// string-literal form the renderer uses and the interpolated form a copy-paste would take;
-    /// <c>OR</c> is matched with its spaces instead, because bare <c>OR</c> is a substring of ordinary
-    /// all-caps identifiers (<c>ERROR_CODE</c>) and would fail on innocent code.
+    /// Fragments that only ever appear in composed SQL. Each already carries punctuation or a space,
+    /// so a plain substring match is precise enough.
     /// </summary>
-    private static readonly string[] _sqlTokens =
+    private static readonly string[] _sqlFragments =
     [
-        "SELECT ", "WHERE ", "ILIKE", "COALESCE(", "IS NOT NULL", "CASE WHEN ", " IN (", "AND", " OR ",
+        "SELECT ", "WHERE ", "ILIKE", "COALESCE(", "IS NOT NULL", "CASE WHEN ", " IN (",
     ];
+
+    /// <summary>
+    /// The three boolean connectives the renderer composes with. These have to be matched bare to
+    /// catch every form the renderer itself uses — the string literals <c>"AND"</c>/<c>"OR"</c> it
+    /// picks between, and the interpolated <c>$"(NOT {operand})"</c> — but a bare substring match
+    /// would fire on ordinary all-caps identifiers that merely contain one (<c>ERROR_CODE</c>,
+    /// <c>OPERAND</c>, <c>COMMAND</c>). They are therefore matched as whole uppercase words: a hit
+    /// counts only when neither neighbouring character could be part of the same identifier. That
+    /// keeps the token at full strength rather than diluting it with surrounding spaces, which is
+    /// what let a copy-paste of the renderer's own <c>NOT</c> and bare <c>"OR"</c> idioms through.
+    /// </summary>
+    private static readonly string[] _sqlConnectives = ["AND", "OR", "NOT"];
 
     /// <summary>
     /// The only two files allowed to spell SQL, and why the second is not a hole in the invariant.
@@ -57,26 +66,48 @@ public class SqlTextConfinedToRendererArchitectureTests
         var offenders = _scannedDirectories
             .Select(segments => Path.Combine([root, .. segments]))
             .SelectMany(directory => Directory.EnumerateFiles(directory, "*.cs", SearchOption.AllDirectories))
-            .Where(ContainsSqlTextOutsideDocComments)
+            .Where(ContainsSqlTextOutsideComments)
             .Where(path => !_allowedFileNames.Contains(Path.GetFileName(path), StringComparer.Ordinal))
             .Select(path => Path.GetRelativePath(root, path))
             .ToList();
 
         offenders.ShouldBeEmpty(
             $"Only {string.Join(" and ", _allowedFileNames)} may contain SQL text "
-            + $"({string.Join(", ", _sqlTokens)}); also found in: {string.Join(", ", offenders)}.");
+            + $"({string.Join(", ", [.. _sqlFragments, .. _sqlConnectives])}); "
+            + $"also found in: {string.Join(", ", offenders)}.");
     }
 
     /// <summary>
-    /// Joins every line that is not an XML doc-comment (<c>///</c>), so a doc comment explaining SQL
-    /// semantics in prose (which necessarily names SQL keywords) does not itself trip this check —
-    /// only actual SQL-composing code does.
+    /// Joins every line that is not a comment, so prose explaining SQL semantics (which necessarily
+    /// names SQL keywords) does not itself trip this check — only actual SQL-composing code does.
+    /// Both <c>///</c> and plain <c>//</c> are stripped: an ordinary comment mentioning a connective
+    /// is a false positive, and one surprising a contributor is worse than the marginal reach of
+    /// scanning it.
     /// </summary>
-    private static bool ContainsSqlTextOutsideDocComments(string path)
+    private static bool ContainsSqlTextOutsideComments(string path)
     {
-        var code = string.Join(
-            '\n',
-            File.ReadAllLines(path).Where(line => !line.TrimStart().StartsWith("///", StringComparison.Ordinal)));
-        return _sqlTokens.Any(token => code.Contains(token, StringComparison.Ordinal));
+        var code = string.Join('\n', File.ReadAllLines(path).Where(IsNotAComment));
+        return _sqlFragments.Any(fragment => code.Contains(fragment, StringComparison.Ordinal))
+            || _sqlConnectives.Any(connective => ContainsAsWholeWord(code, connective));
     }
+
+    private static bool IsNotAComment(string line) => !line.TrimStart().StartsWith("//", StringComparison.Ordinal);
+
+    private static bool ContainsAsWholeWord(string code, string word)
+    {
+        for (var found = code.IndexOf(word, StringComparison.Ordinal);
+             found >= 0;
+             found = code.IndexOf(word, found + 1, StringComparison.Ordinal))
+        {
+            if (!IsIdentifierCharAt(code, found - 1) && !IsIdentifierCharAt(code, found + word.Length))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsIdentifierCharAt(string code, int index) =>
+        index >= 0 && index < code.Length && (char.IsLetterOrDigit(code[index]) || code[index] == '_');
 }

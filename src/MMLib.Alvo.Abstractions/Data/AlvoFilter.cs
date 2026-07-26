@@ -49,7 +49,10 @@ public abstract record AlvoFilter
     /// measurement is iterative so the check itself cannot overflow on the tree it is about to reject.
     /// </summary>
     /// <param name="filter">The tree to check, or <see langword="null"/> for no filter.</param>
-    /// <exception cref="ArgumentException"><paramref name="filter"/> nests deeper than <see cref="MaxDepth"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="filter"/> nests deeper than <see cref="MaxDepth"/>, or carries a
+    /// <see langword="null"/> where a child belongs.
+    /// </exception>
     public static void EnsureWithinDepthLimit(AlvoFilter? filter)
     {
         var depth = MeasureDepth(filter);
@@ -73,6 +76,7 @@ public abstract record AlvoFilter
     /// rejected for being too deep.
     /// </summary>
     /// <param name="filter">The tree to walk, or <see langword="null"/> for no filter.</param>
+    /// <exception cref="ArgumentException"><paramref name="filter"/> carries a <see langword="null"/> where a child belongs.</exception>
     public static IEnumerable<string> ReferencedFields(AlvoFilter? filter)
     {
         if (filter is null)
@@ -133,12 +137,52 @@ public abstract record AlvoFilter
     private static IReadOnlyList<AlvoFilter> Children(AlvoFilter node) => node switch
     {
         AlvoComparison => [],
-        AlvoAnd and => and.Filters,
-        AlvoOr or => or.Filters,
-        AlvoNot not => [not.Filter],
+        AlvoAnd and => WellFormed(and.Filters),
+        AlvoOr or => WellFormed(or.Filters),
+        AlvoNot not => [WellFormed(not.Filter)],
         _ => throw new InvalidOperationException(
             $"'{node.GetType().Name}' is not a known {nameof(AlvoFilter)} case; its subtree cannot be walked."),
     };
+
+    /// <summary>
+    /// Rejects a <see langword="null"/> child before either walk dereferences it. The four cases are
+    /// positional records with no null guard of their own, so an <see cref="AlvoAnd"/> built with a
+    /// <see langword="null"/> list — or a list with a <see langword="null"/> in it — would otherwise
+    /// leave a <see cref="NullReferenceException"/> escaping the one check every backend must run
+    /// before touching a row, which is a far worse signal than a rejection.
+    /// </summary>
+    private static IReadOnlyList<AlvoFilter> WellFormed(IReadOnlyList<AlvoFilter> children)
+    {
+        EnsureNotNull(children);
+        foreach (var child in children)
+        {
+            EnsureNotNull(child);
+        }
+
+        return children;
+    }
+
+    private static AlvoFilter WellFormed(AlvoFilter child)
+    {
+        EnsureNotNull(child);
+        return child;
+    }
+
+    /// <summary>
+    /// Named <c>filter</c> to match the parameter of the two public entry points, so the rejection a
+    /// caller sees names the argument they actually passed rather than an internal child.
+    /// </summary>
+    /// <param name="filter">The nested filter to check.</param>
+    private static void EnsureNotNull(object? filter)
+    {
+        if (filter is null)
+        {
+            throw new ArgumentException(MalformedFilterMessage, nameof(filter));
+        }
+    }
+
+    private const string MalformedFilterMessage =
+        "The filter is malformed: a nested filter is null. Every and/or/not must carry real children.";
 }
 
 /// <summary>A single field comparison, e.g. <c>owner_id.eq.&lt;value&gt;</c>.</summary>

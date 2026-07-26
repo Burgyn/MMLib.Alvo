@@ -66,6 +66,32 @@ public class AlvoFilterTests
         AlvoFilter.ReferencedFields(null).ShouldBeEmpty();
     }
 
+    /// <summary>
+    /// A malformed tree must come back as the same fail-closed rejection an over-deep one does, not as
+    /// a <see cref="NullReferenceException"/>. These are the two walks every backend is required to
+    /// call before touching a row, so an NRE out of one is a far worse signal than a rejection — and
+    /// <see cref="AlvoAnd"/>/<see cref="AlvoOr"/>/<see cref="AlvoNot"/> are positional records with no
+    /// null guard of their own, so nothing else catches it.
+    /// </summary>
+    /// <param name="malformed">A tree carrying a <see langword="null"/> where a child belongs.</param>
+    [Theory]
+    [MemberData(nameof(MalformedTrees))]
+    public void A_null_child_is_rejected_rather_than_dereferenced(AlvoFilter malformed)
+    {
+        Should.Throw<ArgumentException>(() => AlvoFilter.EnsureWithinDepthLimit(malformed));
+        Should.Throw<ArgumentException>(() => AlvoFilter.ReferencedFields(malformed).ToList());
+    }
+
+    public static TheoryData<AlvoFilter> MalformedTrees() =>
+    [
+        new AlvoNot(null!),
+        new AlvoAnd(null!),
+        new AlvoOr(null!),
+        new AlvoAnd([Comparison("a"), null!]),
+        new AlvoOr([null!]),
+        new AlvoNot(new AlvoAnd([Comparison("a"), new AlvoNot(null!)])),
+    ];
+
     private static AlvoComparison Comparison(string field) => new(field, AlvoFilterOperator.Eq, "x");
 
     private static AlvoFilter Nest(int depth)

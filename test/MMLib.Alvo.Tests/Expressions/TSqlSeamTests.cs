@@ -73,11 +73,13 @@ public class TSqlSeamTests
 
     /// <summary>
     /// The structural claim behind the individual shapes: across the renderer's whole rule matrix,
-    /// nothing reaches the root as a bare <c>COALESCE(...)</c> value — the exact fragment T-SQL cannot
-    /// evaluate where a predicate is expected.
+    /// <b>every</b> <c>COALESCE(...)</c> the dialect emits is folded back into a comparison — the
+    /// exact fragment T-SQL cannot evaluate where a predicate is expected, wherever it sits.
+    /// Checking only the root would pass a hard-coded <c>COALESCE(...)</c> nested inside
+    /// <c>(NOT …)</c> or <c>(… AND …)</c>, which is precisely where T-SQL breaks.
     /// </summary>
     [Fact]
-    public void No_rendered_predicate_leaves_a_bare_coalesce_value_in_boolean_position()
+    public void Every_rendered_coalesce_is_folded_back_into_a_comparison()
     {
         string[] rules =
         [
@@ -91,15 +93,57 @@ public class TSqlSeamTests
             "!is_public",
             "is_public && owner_id == @user.id",
             "owner_id == @user.id || status == 'approved'",
+            "is_public && !is_public",
+            "!(is_public || owner_id == @user.id)",
             "true",
             "status in @user.roles",
         ];
 
         foreach (var rule in rules)
         {
-            var sql = Render(rule, CelFixtures.Editor).Sql;
-
-            sql.ShouldNotStartWith("COALESCE(", Case.Sensitive, $"'{rule}' rendered '{sql}', a value where T-SQL needs a predicate.");
+            ShouldFoldEveryCoalesce(Render(rule, CelFixtures.Editor).Sql, rule);
         }
+    }
+
+    private const string CoalesceCall = "COALESCE(";
+
+    private const string BooleanFold = " = 1";
+
+    private static void ShouldFoldEveryCoalesce(string sql, string rule)
+    {
+        foreach (var start in IndexesOf(sql, CoalesceCall))
+        {
+            var openParen = start + CoalesceCall.Length - 1;
+            sql[EndOfBalancedCall(sql, openParen, rule)..].ShouldStartWith(
+                BooleanFold,
+                Case.Sensitive,
+                $"'{rule}' rendered '{sql}', leaving a COALESCE value where T-SQL needs a predicate.");
+        }
+    }
+
+    private static IEnumerable<int> IndexesOf(string text, string token)
+    {
+        for (var found = text.IndexOf(token, StringComparison.Ordinal);
+             found >= 0;
+             found = text.IndexOf(token, found + 1, StringComparison.Ordinal))
+        {
+            yield return found;
+        }
+    }
+
+    /// <summary>The index just past the parenthesis matching the one at <paramref name="openParen"/>.</summary>
+    private static int EndOfBalancedCall(string sql, int openParen, string rule)
+    {
+        var depth = 0;
+        for (var index = openParen; index < sql.Length; index++)
+        {
+            depth += sql[index] switch { '(' => 1, ')' => -1, _ => 0 };
+            if (depth == 0)
+            {
+                return index + 1;
+            }
+        }
+
+        throw new InvalidOperationException($"'{rule}' rendered '{sql}', whose parentheses do not balance.");
     }
 }
