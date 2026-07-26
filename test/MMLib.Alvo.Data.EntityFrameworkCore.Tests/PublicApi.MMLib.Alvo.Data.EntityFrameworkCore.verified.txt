@@ -22,10 +22,10 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore
     }
     public interface IAlvoSqlDialect
     {
-        string RowLockHint { get; }
         string RenderColumn(string columnName);
         string RenderNullProjection(string storeType);
         string RenderTable(MMLib.Alvo.Schema.EntitySchema entity);
+        string RowLockClause(MMLib.Alvo.Rules.DataOperation operation);
     }
     public sealed class RelationalProviderRegistration
     {

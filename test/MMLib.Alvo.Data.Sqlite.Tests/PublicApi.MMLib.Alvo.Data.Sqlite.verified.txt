@@ -19,10 +19,10 @@ namespace MMLib.Alvo.Data.Sqlite
     public sealed class SqliteSqlDialect : MMLib.Alvo.Data.EntityFrameworkCore.IAlvoSqlDialect
     {
         public SqliteSqlDialect() { }
-        public string RowLockHint { get; }
         public string RenderColumn(string columnName) { }
         public string RenderNullProjection(string storeType) { }
         public string RenderTable(MMLib.Alvo.Schema.EntitySchema entity) { }
+        public string RowLockClause(MMLib.Alvo.Rules.DataOperation operation) { }
     }
 }
 namespace Microsoft.Extensions.DependencyInjection

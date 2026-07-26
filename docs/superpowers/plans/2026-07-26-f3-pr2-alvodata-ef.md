@@ -395,7 +395,7 @@ it judges quoting unnecessary, which PostgreSQL then case-folds.
     - `string RenderTable(EntitySchema entity)`
     - `string RenderColumn(string columnName)`
     - `string RenderNullProjection(string storeType)`
-    - `string RowLockHint { get; }`
+    - `string RowLockClause(DataOperation operation)`
   - `public static class MMLib.Alvo.Data.EntityFrameworkCore.AlvoSqlIdentifier` with
     `public static string Quote(string identifier)`.
   - `public sealed class MMLib.Alvo.Data.Sqlite.SqliteFieldSqlRenderer : IFieldSqlRenderer`
@@ -422,7 +422,8 @@ it judges quoting unnecessary, which PostgreSQL then case-folds.
 > signature**, and its caller must obtain the store type from the EF model rather than pass the
 > `FieldSchema` through.
 
-> **AMENDMENT (slice 1 review, finding I3 — binding on every later task).** `RowLockHint` returns the
+> **AMENDMENT (slice 1 review, finding I3 — binding on every later task; the member was renamed by the
+> next amendment).** `RowLockHint` returns the
 > clause **with no separator of its own**: `"FOR NO KEY UPDATE"` on PostgreSQL (not `" FOR UPDATE"`),
 > `string.Empty` on SQLite. Two changes, each with its reason.
 > - *No leading space.* A value that must carry its own separator is a trap a third-party driver author
@@ -434,6 +435,36 @@ it judges quoting unnecessary, which PostgreSQL then case-folds.
 >   Locking §13.3.2). Alvo's update path provably never changes a key — a caller-supplied `id` is rejected
 >   before the pre-image read — and the weaker lock does not block the `FOR KEY SHARE` a concurrent
 >   foreign-key check needs on this row, which matters because `Ref` fields carry real FKs.
+
+> **AMENDMENT (slice 2, item 0 — binding on every later task).** The row lock is a **method taking the
+> operation**, not a property:
+>
+> ```csharp
+> string RowLockClause(DataOperation operation);
+> ```
+>
+> `MMLib.Alvo.Rules.DataOperation`; PostgreSQL returns `FOR NO KEY UPDATE` for `Update` and
+> `FOR UPDATE` for `Delete`, SQLite `string.Empty` for both, and **both drivers throw
+> `ArgumentOutOfRangeException` for `List`/`Get`/`Create`** — those have no pre-image to lock, and on an
+> engine whose real answer is the empty string a silent `""` would make a composer bug read as a
+> legitimate answer. The separator-free convention from the AMENDMENT above is unchanged.
+>
+> *`Delete` has no caller in PR2*, because `DeleteAsync` carries no `WITH CHECK` and therefore reads no
+> pre-image (Task 9); the arm exists so that PR5's before-delete hooks — the first code that will read a
+> row it is about to remove — inherit the right lock instead of the update's.
+>
+> *Reason (correctness, not style).* `FOR NO KEY UPDATE` is right before an **update** — PostgreSQL
+> documents it as the weaker mode for an update that does not change the key, and a caller-supplied `id`
+> is rejected before the pre-image read, so that read provably never precedes a key change. It is wrong
+> before a **delete**: a delete removes the key, so it needs `FOR UPDATE`, which is precisely the lock
+> `FOR NO KEY UPDATE` declines to take (it does not block `FOR KEY SHARE`). One property cannot express
+> both. Done inside PR2 because it is a breaking change to a driver-facing seam afterwards.
+>
+> **Consequence for Task 5/6/7.** `ReadStatementOptions.LockRows` (a `bool`) becomes
+> `ReadStatementOptions.LockFor` (a `DataOperation?`): `null` for a read that takes no lock, the mutation
+> the pre-image precedes otherwise. `LockClause` becomes
+> `options.LockFor is { } operation && _dialect.RowLockClause(operation) is { Length: > 0 } clause ? " " + clause : string.Empty`,
+> and `EfAlvoData.SingleAsync`'s `bool lockRow` parameter becomes `DataOperation? lockFor`.
 
 - [ ] **Step 1: Write the identifier-quoting test**
 
@@ -555,12 +586,14 @@ public interface IAlvoSqlDialect
     string RenderNullProjection(string storeType);
 
     /// <summary>
-    /// Gets the clause appended to a pre-image read whose result a <c>WITH CHECK</c> decision will be
-    /// based on, so a concurrent writer cannot change the row between the check and the write —
-    /// <c>FOR NO KEY UPDATE</c> on PostgreSQL, the empty string where the engine has no such clause and
-    /// serializes write transactions instead (SQLite).
+    /// Renders the clause appended to the pre-image read that precedes <paramref name="operation"/>, so a
+    /// concurrent writer cannot change the row between the decision and the write —
+    /// <c>FOR NO KEY UPDATE</c> before an update and <c>FOR UPDATE</c> before a delete on PostgreSQL, the
+    /// empty string where the engine has no such clause and serializes write transactions instead
+    /// (SQLite). Only <c>Update</c> and <c>Delete</c> have a pre-image; every other operation is refused
+    /// (see the third AMENDMENT above).
     /// </summary>
-    string RowLockHint { get; }
+    string RowLockClause(DataOperation operation);
 }
 ```
 
@@ -730,7 +763,12 @@ namespace MMLib.Alvo.Data.Sqlite;
 public sealed class SqliteSqlDialect : IAlvoSqlDialect
 {
     /// <inheritdoc/>
-    public string RowLockHint => string.Empty;
+    public string RowLockClause(DataOperation operation) => operation switch
+    {
+        DataOperation.Update or DataOperation.Delete => string.Empty,
+        _ => throw new ArgumentOutOfRangeException(
+            nameof(operation), operation, "Only an update or a delete reads a pre-image that can be locked."),
+    };
 
     /// <inheritdoc/>
     public string RenderTable(EntitySchema entity)
@@ -756,7 +794,8 @@ public sealed class SqliteSqlDialect : IAlvoSqlDialect
 `RenderCaseInsensitiveLike(left, right) => $"{left} ILIKE {right}"`.
 
 `src/MMLib.Alvo.Data.PostgreSql/PostgreSqlSqlDialect.cs` — identical shape, with
-`RowLockHint => "FOR NO KEY UPDATE"` (see the second AMENDMENT above) and the same
+`RowLockClause` answering `FOR NO KEY UPDATE` for `Update` and `FOR UPDATE` for `Delete` (see the second
+and third AMENDMENTs above) and the same
 `RenderNullProjection(string storeType) => $"CAST(NULL AS {storeType})"`.
 
 Neither dialect carries a `FieldType` → type table: per the AMENDMENT above, the store type is EF's to
@@ -2114,7 +2153,7 @@ engine's own unknown-column error, which happens too late and echoes schema inte
     `internal ReadStatement Compose(EntitySchema entity, PolicyDecision decision, AlvoContext context,
     ReadStatementOptions options)`; and
     `internal sealed record ReadStatementOptions { AlvoFilter? Filter; Guid? RowId; KeysetAnchor? Anchor;
-    IReadOnlyList<AlvoSort> Sort; bool LockRows; }`.
+    IReadOnlyList<AlvoSort> Sort; DataOperation? LockFor; }`.
 
 - [ ] **Step 1: Write the failing projection test**
 
@@ -2185,7 +2224,12 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore.Tests;
 
 internal sealed class TestSqlDialect : IAlvoSqlDialect
 {
-    public string RowLockHint => "FOR TEST";
+    public string RowLockClause(DataOperation operation) => operation switch
+    {
+        DataOperation.Update => "FOR TEST",
+        DataOperation.Delete => "FOR TEST DELETE",
+        _ => throw new ArgumentOutOfRangeException(nameof(operation), operation, "No pre-image to lock."),
+    };
 
     public string RenderTable(EntitySchema entity) => AlvoSqlIdentifier.Quote(entity.Name);
 
@@ -2426,7 +2470,7 @@ public class ReadStatementComposerTests
         var statement = Compose(ListDecision(), new ReadStatementComposer.ReadStatementOptions
         {
             RowId = id,
-            LockRows = true,
+            LockFor = DataOperation.Update,
         });
 
         statement.Sql.ShouldContain("\"id\" = @alvo_id");
@@ -2540,8 +2584,12 @@ internal sealed class ReadStatementComposer
         /// <summary>The keyset cursor anchor, for a page after the first.</summary>
         internal KeysetAnchor? Anchor { get; init; }
 
-        /// <summary>Whether to append the dialect's row-lock hint (a pre-image read a check will be based on).</summary>
-        internal bool LockRows { get; init; }
+        /// <summary>
+        /// The mutation this read's row is a pre-image for, or <see langword="null"/> for a read that takes
+        /// no lock. It selects the lock <em>mode</em>, not merely whether to lock — an update's pre-image
+        /// takes the weaker no-key lock and a delete's takes the full one.
+        /// </summary>
+        internal DataOperation? LockFor { get; init; }
     }
 
     internal ReadStatement Compose(
@@ -2573,10 +2621,12 @@ internal sealed class ReadStatementComposer
         return new ReadStatement(sql, parameters);
     }
 
-    // RowLockHint carries no separator of its own (see IAlvoSqlDialect.RowLockHint's remarks), so the
+    // RowLockClause carries no separator of its own (see IAlvoSqlDialect.RowLockClause's remarks), so the
     // separating space is inserted here and only when there is a clause to separate.
-    private string LockClause(ReadOptions options) =>
-        options.LockRows && _dialect.RowLockHint.Length > 0 ? " " + _dialect.RowLockHint : string.Empty;
+    private string LockClause(ReadStatementOptions options) =>
+        options.LockFor is { } operation && _dialect.RowLockClause(operation) is { Length: > 0 } clause
+            ? " " + clause
+            : string.Empty;
 
     /// <summary>
     /// A <see langword="null"/> predicate contributes the dialect's constant-true predicate rather than
@@ -3767,7 +3817,7 @@ internal sealed class EfAlvoData : IAlvoData
         var decision = Resolve(entity, DataOperation.Get, context);
 
         using var db = _contexts.Create();
-        var row = await SingleAsync(db, Entity(db, entity), decision, context, id, lockRow: false, cancellationToken);
+        var row = await SingleAsync(db, Entity(db, entity), decision, context, id, lockFor: null, cancellationToken);
         return row is null ? null : RecordMaterializer.ToRecord(row, decision.HiddenFields);
     }
 
@@ -3795,7 +3845,7 @@ internal sealed class EfAlvoData : IAlvoData
 
     private async Task<Dictionary<string, object>?> SingleAsync(
         AlvoDataContext db, EntitySchema? entity, PolicyDecision decision, AlvoContext context,
-        Guid id, bool lockRow, CancellationToken cancellationToken)
+        Guid id, DataOperation? lockFor, CancellationToken cancellationToken)
     {
         if (entity is null)
         {
@@ -3805,7 +3855,7 @@ internal sealed class EfAlvoData : IAlvoData
         var statement = _statements.Compose(entity, decision, context, new ReadStatementComposer.ReadStatementOptions
         {
             RowId = id,
-            LockRows = lockRow,
+            LockFor = lockFor,
         });
 
         var rows = await Materialize(db, entity, statement).SingleOrDefaultAsync(cancellationToken);
@@ -3836,7 +3886,7 @@ composes the statement with the filter and the anchor, applies `SortComposer.App
             return null;
         }
 
-        var row = await SingleAsync(db, entity, decision, context, anchorId, lockRow: false, cancellationToken);
+        var row = await SingleAsync(db, entity, decision, context, anchorId, lockFor: null, cancellationToken);
         return row is null
             ? null
             : new KeysetAnchor(query.Sort, [.. query.Sort.Select(key => row.GetValueOrDefault(key.Field))], anchorId);
@@ -4230,7 +4280,7 @@ requires, from a row that never existed (`Q5c`).
 - Consumes: `Microsoft.EntityFrameworkCore.Query.UpdateSettersBuilder<Dictionary<string, object>>`;
   `RelationalQueryableExtensions.ExecuteUpdateAsync` /
   `ExecuteDeleteAsync`; `db.Database.BeginTransactionAsync`; `FieldClrTypeMap.Optional` (Task 3);
-  `WritePayloadGuard` (Task 8); `ReadStatementComposer.ReadStatementOptions.LockRows` (Task 5).
+  `WritePayloadGuard` (Task 8); `ReadStatementComposer.ReadStatementOptions.LockFor` (Task 5).
 - Produces:
   - `internal static class UpdateSetterFactory` — `internal static
     Action<UpdateSettersBuilder<Dictionary<string, object>>> For(EntitySchema entity,
@@ -4448,7 +4498,7 @@ driver's row lock on the pre-image read where it exists:
         WritePayloadGuard.EnsureWritable(values, schema, decision, isUpdate: true);
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var stored = await SingleAsync(db, schema, decision, context, id, lockRow: true, cancellationToken)
+        var stored = await SingleAsync(db, schema, decision, context, id, lockFor: DataOperation.Update, cancellationToken)
             ?? throw new AlvoRecordNotFoundException();
 
         var preImage = RecordMaterializer.ToRecord(stored, NoMask);
@@ -4459,7 +4509,7 @@ driver's row lock on the pre-image read where it exists:
             throw new AlvoRecordNotFoundException();
         }
 
-        var postImage = await SingleAsync(db, schema, decision, context, id, lockRow: false, cancellationToken)
+        var postImage = await SingleAsync(db, schema, decision, context, id, lockFor: null, cancellationToken)
             ?? throw new AlvoRecordNotFoundException();
         await transaction.CommitAsync(cancellationToken);
 
@@ -4537,7 +4587,8 @@ driver's row lock on the pre-image read where it exists:
 **`NoMask` is load-bearing and easy to get wrong.** `SingleAsync` composes its projection from
 `decision.HiddenFields`, so a masked field arrives as a projected `NULL` even on the pre-image read.
 Fix it by giving `ReadStatementOptions` a `bool Unmasked { get; init; }` and having `Compose` pass
-`Unmasked ? EmptySet : decision.HiddenFields` to `ReadProjection` — then `SingleAsync(lockRow: true)`
+`Unmasked ? EmptySet : decision.HiddenFields` to `ReadProjection` — then
+`SingleAsync(lockFor: DataOperation.Update)`
 for the pre-image asks for `Unmasked = true`, and `GetAsync` does not. Add that flag and a test:
 *"the pre-image a check is evaluated over carries a hidden field's real value"* — build it with a rule
 `secret == 'shh'` over a `hidden` field and assert the update succeeds.
@@ -5504,13 +5555,13 @@ option named. Outbox, hooks, the `GetDbTransaction()` seam → **PR5** (#22). `c
 in `data-path.md`.
 
 **Type consistency.** The names used across tasks, declared exactly once: `IAlvoSqlDialect`
-(`RenderTable`, `RenderColumn`, `RenderNullProjection`, `RowLockHint`) — T1; `AlvoSqlIdentifier.Quote` —
+(`RenderTable`, `RenderColumn`, `RenderNullProjection`, `RowLockClause`) — T1; `AlvoSqlIdentifier.Quote` —
 T1; `FieldClrTypeMap.Exact`/`.Optional` — T3; `AlvoDataContext` (`IdColumn`, `TenantIdColumn`,
 `ModelToken`, `AppliedSchema`, `Rows`) — T3/T7; `AlvoModelCacheKeyFactory`, `AlvoDataContextFactory.Create`
 — T3; `PolicyParameterPrefix` (`Using`, `WithCheck`, `TenantScope`, `Filter`, `Keyset`, `RowId`, `All`) —
 T4; `PredicateParameterBinder.Bind` — T4; `AlvoDataSeed.SeedAsync` — T4; `ReadProjection.Compose`,
 `QueryFieldGuard.EnsureAvailable`/`.EnsureDeclared`, `ReadStatement`, `ReadStatementComposer` +
-`ReadStatementOptions` (`Filter`, `RowId`, `Anchor`, `Sort`, `LockRows`, `Unmasked`) — T5/T9;
+`ReadStatementOptions` (`Filter`, `RowId`, `Anchor`, `Sort`, `LockFor`, `Unmasked`) — T5/T9;
 `RenderedSql`, `FilterSqlRenderer.Render`, `KeysetAnchor`, `KeysetSqlRenderer.Render` — T6;
 `RecordMaterializer.ToRecord`, `SortComposer.Apply`, `KeysetCursor.Encode`/`.TryDecode`, `EfAlvoData` —
 T7; `WritePayloadGuard.EnsureWritable` — T8; `UpdateSetterFactory.For` — T9; `AlvoDataSqlSnapshotTests`

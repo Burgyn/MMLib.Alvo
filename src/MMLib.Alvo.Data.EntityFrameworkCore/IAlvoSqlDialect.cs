@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Schema;
+﻿using MMLib.Alvo.Rules;
+using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore;
 
@@ -100,10 +101,11 @@ public interface IAlvoSqlDialect
     string RenderNullProjection(string storeType);
 
     /// <summary>
-    /// Gets the row-locking clause appended to a pre-image read whose result a <c>WITH CHECK</c> decision
-    /// will be based on, so a concurrent writer cannot change the row between the check and the write —
-    /// <c>FOR NO KEY UPDATE</c> on PostgreSQL, the empty string where the engine has no such clause and
-    /// serializes write transactions instead (SQLite).
+    /// Renders the row-locking clause appended to the pre-image read that precedes
+    /// <paramref name="operation"/>, so a concurrent writer cannot change the row between the decision and
+    /// the write — <c>FOR NO KEY UPDATE</c> before an update and <c>FOR UPDATE</c> before a delete on
+    /// PostgreSQL, the empty string where the engine has no such clause and serializes write transactions
+    /// instead (SQLite).
     /// </summary>
     /// <remarks>
     /// <para>
@@ -116,23 +118,33 @@ public interface IAlvoSqlDialect
     /// engine has no such clause.
     /// </para>
     /// <para>
-    /// <b>Why the "no key" variant on PostgreSQL.</b> PostgreSQL documents <c>FOR NO KEY UPDATE</c> as the
-    /// mode for a locking read that precedes an <c>UPDATE</c> not touching the row's key: it takes a
-    /// weaker lock than <c>FOR UPDATE</c> and, unlike it, does not block a concurrent transaction that
-    /// needs to take a <c>FOR KEY SHARE</c> lock on this row — which is exactly what a foreign-key check
-    /// from another table does (see PostgreSQL's <i>SELECT</i> reference, "The Locking Clause", and
-    /// <i>Explicit Locking</i> §13.3.2). Alvo's update path provably never changes a key: the row id is
+    /// <b>Why the lock mode depends on the operation, and is therefore an argument rather than a fixed
+    /// value.</b> PostgreSQL documents <c>FOR NO KEY UPDATE</c> as the mode for a locking read that
+    /// precedes an <c>UPDATE</c> not touching the row's key: it takes a weaker lock than
+    /// <c>FOR UPDATE</c> and, unlike it, does not block a concurrent transaction that needs a
+    /// <c>FOR KEY SHARE</c> lock on this row — which is exactly what a foreign-key check from another
+    /// table takes (PostgreSQL, <i>SELECT</i> reference, "The Locking Clause"; <i>Explicit Locking</i>
+    /// §13.3.2, which describes <c>FOR NO KEY UPDATE</c> as the mode that does not block
+    /// <c>FOR KEY SHARE</c>). Alvo's update path provably never changes a key: the row id is
     /// framework-owned and a caller-supplied <c>id</c> in an update payload is rejected before the
-    /// pre-image is read. Since the entity's <c>Ref</c> fields carry real foreign keys
-    /// (<c>DescriptorModelBuilder.ConfigureReferences</c>), taking the stronger lock would serialize
-    /// unrelated inserts against this row for no benefit.
+    /// pre-image is read, and since a <c>Ref</c> field carries a real foreign key
+    /// (<c>DescriptorModelBuilder.ConfigureReferences</c>), taking the stronger lock there would
+    /// serialize unrelated inserts against the row for no benefit. A <b>delete</b> is the opposite case:
+    /// it removes the key, so the very <c>FOR KEY SHARE</c> lock <c>FOR NO KEY UPDATE</c> declines to
+    /// block is the one that must be blocked, and the pre-image read takes the full <c>FOR UPDATE</c>.
     /// </para>
     /// <para>
-    /// Being a property, this cannot vary per operation, which forecloses <c>FOR SHARE</c>,
-    /// <c>SKIP LOCKED</c> and <c>NOWAIT</c>. That is accepted for PR2: the one caller is the
-    /// <c>WITH CHECK</c> pre-image read, and every mode above is a widening this member can grow into
-    /// (an operation argument, or a small option value) without changing what it means today.
+    /// Only <see cref="DataOperation.Update"/> and <see cref="DataOperation.Delete"/> have a pre-image to
+    /// lock. A dialect must refuse every other operation rather than answer it with
+    /// <see cref="string.Empty"/>: on an engine that has no locking clause the empty string already means
+    /// "nothing to append", so returning it for a list, a get or a create would make a caller's bug
+    /// indistinguishable from a legitimate answer.
     /// </para>
     /// </remarks>
-    string RowLockHint { get; }
+    /// <param name="operation">The mutation the locked pre-image read precedes.</param>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="operation"/> is not <see cref="DataOperation.Update"/> or
+    /// <see cref="DataOperation.Delete"/>, and therefore has no pre-image to lock.
+    /// </exception>
+    string RowLockClause(DataOperation operation);
 }

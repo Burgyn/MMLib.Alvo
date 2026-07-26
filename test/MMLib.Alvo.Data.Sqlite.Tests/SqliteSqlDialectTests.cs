@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Schema;
+﻿using MMLib.Alvo.Rules;
+using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Data.Sqlite.Tests;
 
@@ -74,15 +75,32 @@ public class SqliteSqlDialectTests
         => Should.Throw<ArgumentException>(() => _dialect.RenderNullProjection("  "));
 
     /// <summary>
-    /// SQLite has no row-locking clause at all, and the empty string is how a dialect says so. It must be
-    /// genuinely empty rather than whitespace: a composer that only checks for <c>""</c> would otherwise
-    /// emit a stray separator, and one that checks <c>IsNullOrWhiteSpace</c> would mask the difference.
+    /// SQLite has no row-locking clause at all — for either mutation — and the empty string is how a
+    /// dialect says so. It must be genuinely empty rather than whitespace: a composer that only checks
+    /// for <c>""</c> would otherwise emit a stray separator, and one that checks
+    /// <c>IsNullOrWhiteSpace</c> would mask the difference.
     /// </summary>
-    [Fact]
-    public void There_is_no_row_lock_clause()
-        => _dialect.RowLockHint.ShouldBe(string.Empty);
+    [Theory]
+    [InlineData(DataOperation.Update)]
+    [InlineData(DataOperation.Delete)]
+    public void There_is_no_row_lock_clause_for_either_mutation(DataOperation operation)
+        => _dialect.RowLockClause(operation).ShouldBe(string.Empty);
 
-    [Fact]
-    public void The_row_lock_hint_carries_no_separator_of_its_own()
-        => _dialect.RowLockHint.ShouldBe(_dialect.RowLockHint.Trim());
+    [Theory]
+    [InlineData(DataOperation.Update)]
+    [InlineData(DataOperation.Delete)]
+    public void The_row_lock_clause_carries_no_separator_of_its_own(DataOperation operation)
+        => _dialect.RowLockClause(operation).ShouldBe(_dialect.RowLockClause(operation).Trim());
+
+    /// <summary>
+    /// An operation with no pre-image to lock is refused rather than answered with an empty clause. On
+    /// this dialect the empty string already means "this engine locks nothing", so answering a list, a
+    /// get or a create with it would make a composer bug indistinguishable from SQLite's real answer.
+    /// </summary>
+    [Theory]
+    [InlineData(DataOperation.List)]
+    [InlineData(DataOperation.Get)]
+    [InlineData(DataOperation.Create)]
+    public void An_operation_with_no_pre_image_has_no_row_lock_clause_to_render(DataOperation operation)
+        => Should.Throw<ArgumentOutOfRangeException>(() => _dialect.RowLockClause(operation));
 }

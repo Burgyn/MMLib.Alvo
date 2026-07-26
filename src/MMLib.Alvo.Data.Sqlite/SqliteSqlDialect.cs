@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Data.EntityFrameworkCore;
+using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Data.Sqlite;
@@ -10,7 +11,18 @@ namespace MMLib.Alvo.Data.Sqlite;
 public sealed class SqliteSqlDialect : IAlvoSqlDialect
 {
     /// <inheritdoc/>
-    public string RowLockHint => string.Empty;
+    /// <remarks>
+    /// SQLite has no locking clause in either mode: a write transaction takes a database-wide lock, so a
+    /// pre-image read and the write that follows it are already serialized against another writer. The
+    /// answer is therefore the same for both mutations, and it is <see cref="string.Empty"/> rather than a
+    /// clause the engine would reject.
+    /// </remarks>
+    public string RowLockClause(DataOperation operation) => operation switch
+    {
+        DataOperation.Update or DataOperation.Delete => string.Empty,
+        _ => throw new ArgumentOutOfRangeException(
+            nameof(operation), operation, "Only an update or a delete reads a pre-image that can be locked."),
+    };
 
     /// <inheritdoc/>
     public string RenderTable(EntitySchema entity)
