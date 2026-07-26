@@ -43,7 +43,14 @@ internal sealed class DescriptorValidator : IDescriptorValidator
 {
     private readonly ICelCompiler _compiler;
 
-    /// <summary>Initializes a new instance of the <see cref="DescriptorValidator"/> class with the default CEL compiler.</summary>
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DescriptorValidator"/> class with the default CEL
+    /// compiler — for a caller that has no container to resolve one from (a test, a CLI validate
+    /// command). A host that replaced <see cref="ICelCompiler"/> must not use this overload: it would
+    /// validate rules against a different compiler from the one the apply path then compiles them
+    /// with, so the pass that reports findings and the pass that builds the real catalog could
+    /// disagree. The DI registration always uses the other constructor.
+    /// </summary>
     public DescriptorValidator()
         : this(new CelCompiler())
     {

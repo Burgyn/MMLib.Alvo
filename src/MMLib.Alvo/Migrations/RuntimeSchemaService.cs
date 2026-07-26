@@ -78,11 +78,30 @@ public sealed class RuntimeSchemaService
     /// <param name="expectedRevision">The revision the caller expects to currently be latest (0 for a fresh project).</param>
     /// <param name="options">Migration options; <see cref="MigrationOptions.Author"/>/<see cref="MigrationOptions.Reason"/> are carried into the appended version.</param>
     /// <param name="ct">Cancellation token.</param>
-    /// <returns>The appended <see cref="DescriptorVersion"/>.</returns>
-    /// <exception cref="DescriptorValidationException"><paramref name="descriptorJson"/> is invalid.</exception>
+    /// <returns>
+    /// The appended <see cref="DescriptorVersion"/> — or the unchanged current one when
+    /// <paramref name="descriptorJson"/> is, in canonical form, byte-identical to what is already
+    /// stored. A rules-only change (same fields, different CEL) plans empty exactly like such a
+    /// resubmission does, so the plan cannot tell the two apart and the descriptors' own content is
+    /// what does: a rules-only change <b>does</b> append a version, an identical resubmission does
+    /// not. Both (re)prime the policy catalog.
+    /// </returns>
+    /// <exception cref="DescriptorValidationException"><paramref name="descriptorJson"/> is invalid, or one of its rules no longer compiles.</exception>
     /// <exception cref="DestructiveChangeNotAllowedException">The plan is destructive and <see cref="MigrationOptions.AllowDestructive"/> is <see langword="false"/>.</exception>
-    /// <exception cref="DescriptorConcurrencyException"><paramref name="expectedRevision"/> lost the optimistic-lock race.</exception>
-    /// <exception cref="NotSupportedException"><see cref="MigrationOptions.DryRun"/> is <see langword="true"/>; the runtime path has no dry-run.</exception>
+    /// <exception cref="DescriptorConcurrencyException">
+    /// <paramref name="expectedRevision"/> is not the latest revision. Checked <em>before</em>
+    /// planning, deliberately: planning against a base the caller never saw can misclassify the diff
+    /// as destructive (two unrelated field additions read as a drop plus an add), surfacing the wrong
+    /// exception — or, with <see cref="MigrationOptions.AllowDestructive"/> set, silently applying a
+    /// diff nobody asked for. The writer's own optimistic-lock check still guards the narrower race
+    /// between this check and the atomic append.
+    /// </exception>
+    /// <exception cref="NotSupportedException">
+    /// <see cref="MigrationOptions.DryRun"/> is <see langword="true"/>. The runtime path has no
+    /// dry-run: <see cref="IRuntimeSchemaWriter"/> applies and appends in one atomic step, so there is
+    /// no seam to preview from without mutating. It is refused rather than ignored, so a caller
+    /// expecting a no-op preview does not get a real apply.
+    /// </exception>
     public async Task<DescriptorVersion> ApplyAsync(string project, string descriptorJson, int expectedRevision, MigrationOptions options, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(project);
@@ -97,14 +116,6 @@ public sealed class RuntimeSchemaService
         var currentRevision = current?.Revision ?? 0;
         if (currentRevision != expectedRevision)
         {
-            // Fail fast on staleness BEFORE planning: planning against the store's actual current
-            // (which the caller's expectedRevision no longer matches — either a plain stale caller,
-            // or the other side of a genuine race that already committed) would diff the desired
-            // schema against a base the caller never saw. That diff can misclassify as destructive
-            // (e.g. two unrelated single-field additions look like a drop+add) and surface the wrong
-            // exception type, or — worse — silently apply an unintended diff when AllowDestructive is
-            // set. The writer's own optimistic-lock check still guards the true, narrower race between
-            // this read and the atomic append below.
             throw new DescriptorConcurrencyException(project, expectedRevision, currentRevision);
         }
 
@@ -124,10 +135,6 @@ public sealed class RuntimeSchemaService
         return applied;
     }
 
-    // SchemaModel/FieldSchema carry no rule content, so a rules-only change (tighten or loosen a CEL
-    // string, same fields) plans empty exactly like a true no-op resubmission of the same descriptor
-    // does. Only the latter must skip the writer; the descriptors' own canonical content — not the
-    // plan — is what tells the two apart.
     private static bool IsUnchangedReapply(MigrationPlan plan, DescriptorVersion? current, AlvoDescriptor descriptor) =>
         plan.IsEmpty && current is not null && IsSameDescriptorContent(descriptor, current.DescriptorJson);
 
@@ -187,9 +194,6 @@ public sealed class RuntimeSchemaService
         }
     }
 
-    // The runtime path has no dry-run: the atomic IRuntimeSchemaWriter applies and appends in one
-    // step, so there is no seam to preview from without actually mutating. Reject up front rather
-    // than silently ignoring the flag (which would surprise a caller expecting a no-op preview).
     private static void RejectDryRun(MigrationOptions options)
     {
         if (options.DryRun)

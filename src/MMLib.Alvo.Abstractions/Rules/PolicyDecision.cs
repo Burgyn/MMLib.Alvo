@@ -74,10 +74,18 @@ public sealed record PolicyDecision
     /// </summary>
     public CompiledExpression? TenantScope { get; }
 
-    /// <summary>Gets the field names to omit from the response entirely; empty for any denied decision.</summary>
+    /// <summary>
+    /// Gets the field names to omit from the response entirely; empty for any denied decision.
+    /// Compares with <see cref="StringComparer.Ordinal"/> — a port must look a field up by its exact
+    /// declared name, since that is the name the schema, the CEL type checker and the rendered SQL all
+    /// use; an <c>OrdinalIgnoreCase</c> lookup of its own would report a hidden field as visible.
+    /// </summary>
     public IReadOnlySet<string> HiddenFields { get; }
 
-    /// <summary>Gets the field names the caller may read but never write; empty for any denied decision.</summary>
+    /// <summary>
+    /// Gets the field names the caller may read but never write; empty for any denied decision.
+    /// Ordinal, for the same reason as <see cref="HiddenFields"/>.
+    /// </summary>
     public IReadOnlySet<string> ReadOnlyFields { get; }
 
     /// <summary>Gets why the operation was denied; <see langword="null"/> when <see cref="IsDenied"/> is <see langword="false"/>.</summary>

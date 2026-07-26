@@ -7,6 +7,13 @@ namespace MMLib.Alvo;
 /// descriptor's <c>auth.roles</c>. The only place an application <see cref="Role"/> can be
 /// minted, so an undeclared name is rejected at the boundary where it arrives.
 /// </summary>
+/// <remarks>
+/// Names are looked up with <see cref="StringComparer.Ordinal"/> — byte-for-byte, case-sensitive,
+/// culture-invariant, the same rule <c>'editor' in @user.roles</c> is evaluated under in both Rule
+/// backends. <c>Editor</c> is therefore not <c>editor</c>: it is a different name, and an undeclared
+/// one. A case-insensitive catalog would make a role literal in a rule and the role on a credential
+/// match under one comparer and not the other, which is how a caller silently gains or loses access.
+/// </remarks>
 public sealed class RoleCatalog
 {
     private readonly Dictionary<string, Role> _byName;

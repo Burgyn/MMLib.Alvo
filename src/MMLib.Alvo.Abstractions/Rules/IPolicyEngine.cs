@@ -16,7 +16,12 @@
 public interface IPolicyEngine
 {
     /// <summary>Resolves the enforceable policy for one entity/operation/caller triple.</summary>
-    /// <param name="entity">The entity name.</param>
+    /// <param name="entity">
+    /// The entity name, matched ordinally against the descriptor's own declared name — case-sensitive
+    /// and culture-invariant, like every other name in the framework. A caller that normalizes the
+    /// name (lower-casing a route segment, say) before reaching here gets a denial for an unknown
+    /// entity, not a match.
+    /// </param>
     /// <param name="operation">The data operation being attempted.</param>
     /// <param name="context">The caller/tenant identity performing the operation.</param>
     /// <returns>A denial, or a decision carrying every predicate and field mask a data port must apply.</returns>

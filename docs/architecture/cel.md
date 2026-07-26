@@ -133,12 +133,13 @@ predicate, which makes the collapse **unreachable defence-in-depth** for anythin
 provider may drive directly, where rendering `FALSE` is still the right answer. Never read
 "it renders `FALSE`" as the tenant- or owner-isolation guarantee itself.
 
-`SqlPredicateRenderer` reproduces this by wrapping every place `UNKNOWN` could otherwise leak into
-Postgres's own three-valued semantics in `COALESCE(<value>, FALSE)`: a raw comparison, a nullable
-boolean field read as a predicate, and (defensively, for a future node kind that forgets to
-self-collapse) the whole rendered predicate at its root. `AND`/`OR`/`NOT` over already-two-valued
-operands need no extra wrap — `(a AND b)`/`(a OR b)`/`(NOT a)` over two `COALESCE`d operands is
-already two-valued by construction. This is why the renderer tracks, per rendered subtree, whether
+`SqlPredicateRenderer` reproduces this by folding every place `UNKNOWN` could otherwise leak into
+Postgres's own three-valued semantics — a raw comparison, a nullable boolean field read as a
+predicate, and (defensively, for a future node kind that forgets to self-collapse) the whole rendered
+predicate at its root — through the dialect's own fold (`COALESCE(<value>, FALSE)` on
+PostgreSQL/SQLite; see the `IFieldSqlRenderer` seam below). `AND`/`OR`/`NOT` over already-two-valued
+operands need no extra fold — `(a AND b)`/`(a OR b)`/`(NOT a)` over two folded operands is already
+two-valued by construction. This is why the renderer tracks, per rendered subtree, whether
 it is already two-valued rather than wrapping indiscriminately: over-wrapping would still be
 *correct* but would bury the actual predicate in redundant `COALESCE`s a query planner has to see
 through.
@@ -191,7 +192,8 @@ entity's field is a real column; a dynamic (metadata-driven, `evidencie`) entity
 path into one shared, partitioned store (`data->>'owner_id'`), not a column at all. Splitting field
 rendering out of the structural renderer is what lets F7 add a JSON-path-rendering
 `IFieldSqlRenderer` **without touching `SqlPredicateRenderer` itself** — the renderer that composes
-`COALESCE`/`AND`/`OR`/`NOT` never needs to know or care whether a field is a column or a JSON path.
+`AND`/`OR`/`NOT` and asks the dialect for the fold never needs to know or care whether a field is a
+column or a JSON path.
 The same split is what lets a second SQL dialect (SQLite today, PostgreSQL from PR2) share one
 structural renderer and differ only in their `IFieldSqlRenderer`.
 

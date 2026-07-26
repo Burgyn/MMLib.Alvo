@@ -20,6 +20,21 @@ public enum ScopeAccess
 /// A single grant on an API key: an entity name (or <c>*</c> for every entity) paired with
 /// read or write access. Parsed from the descriptor form <c>"&lt;entity|*&gt;:&lt;read|write&gt;"</c>.
 /// </summary>
+/// <remarks>
+/// <para>
+/// <b>Everything here compares ordinally</b> — byte-for-byte, case-sensitive, culture-invariant, the
+/// same rule <c>CelInterpreter</c> and the schema registry follow. So <c>orders:read</c> grants
+/// nothing on an entity named <c>Orders</c>, and <c>orders:READ</c> does not parse at all. That is
+/// deliberate: a scope is matched against a descriptor entity name, and a case-insensitive match
+/// would silently widen a grant on any engine whose identifiers are case-sensitive.
+/// </para>
+/// <para>
+/// A grant is <b>exact, never hierarchical</b>: <see cref="ScopeAccess.Write"/> does not imply
+/// <see cref="ScopeAccess.Read"/>, and an unrecognized <see cref="DataOperation"/> maps to no access
+/// level at all rather than to a guessed one, so it is refused. A caller needing both must be granted
+/// both.
+/// </para>
+/// </remarks>
 public readonly record struct ApiKeyScope
 {
     private const char Separator = ':';
