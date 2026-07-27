@@ -24,9 +24,12 @@ namespace MMLib.Alvo.Tests.Data;
 /// </para>
 /// <para>
 /// <c>DifferentialRuleCases</c> builds rows with <see cref="DateTime"/> values while a <c>datetime</c> field
-/// maps to <see cref="DateTimeOffset"/>, so timestamps are normalised here — in the probe, never in the shared
-/// matrix, which is PR1's and which both PRs replay unchanged. A <see cref="DateTimeKind.Unspecified"/> value
-/// is read as UTC, the convention <c>CelInterpreter</c> and <c>SqlVerdict</c> both document.
+/// maps to <see cref="DateTimeOffset"/>. The probe does <b>not</b> convert them itself: it seeds through
+/// <c>AlvoDataSeed</c>, whose property-bag preparation routes every value through the production
+/// <c>StoredInstant</c>. An earlier revision converted here and claimed in this remark to honour
+/// <see cref="DateTimeKind"/> while not actually inspecting it — harmless for the matrix as it stands, and
+/// exactly the kind of near-miss a differential test cannot see, because a wrong conversion here is applied to
+/// both sides at once.
 /// </para>
 /// </remarks>
 internal sealed class DifferentialProbe(
@@ -85,16 +88,15 @@ internal sealed class DifferentialProbe(
         return command;
     }
 
-    /// <summary>The row with an id and with every timestamp expressed the way the read model maps one.</summary>
+    /// <summary>
+    /// The row with the id its table requires. Nothing else is touched — value preparation belongs to the
+    /// seeding seam, which shares it with the production create path.
+    /// </summary>
     private static AlvoRecord Storable(AlvoRecord row)
     {
-        var values = row.Values.ToDictionary(pair => pair.Key, pair => AsStored(pair.Value), StringComparer.Ordinal);
+        var values = row.Values.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
         values["id"] = Guid.NewGuid();
 
         return new AlvoRecord(values);
     }
-
-    private static object? AsStored(object? value) => value is DateTime timestamp
-        ? new DateTimeOffset(DateTime.SpecifyKind(timestamp, DateTimeKind.Utc))
-        : value;
 }

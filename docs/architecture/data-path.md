@@ -467,6 +467,15 @@ pre-image.
 
 ## Mutation-testing notes
 
+**`MMLib.Alvo.Data.Sqlite.Tests` was added to `stryker-config.data-ef.json`'s `test-projects`, and that is a
+hypothesis, not a result.** The killing tests for `EfAlvoData`, `SortSqlRenderer`'s engine behaviour,
+`UpdateSetterFactory` and `WritePropertyBag` live there rather than in the EF package's own test project, so
+without it those files read as uncovered. Whether the mutants are actually killed is a post-merge measurement
+Task 12 owns — and this repository has already shipped a *vacuously green* mutation run once, so "added to
+`test-projects`" must not be read as "covered". `MMLib.Alvo.Data.PostgreSql.Tests.Integration` is deliberately
+**not** added: it is Docker-gated, so on a shard with no daemon every one of its kills would report as a
+survivor.
+
 `ReadStatementComposer.Collect` refuses a parameter name two fragments both claim. It is **unreachable
 today** — every fragment renders with a name from `PolicyParameterPrefix` and those are pairwise disjoint by
 test — and deliberately kept, because last-writer-wins on a real collision returns wrong rows with no error.
