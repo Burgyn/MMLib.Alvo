@@ -482,6 +482,46 @@ the driver's row lock, which is exactly where a version comparison belongs. Noth
 anticipation; PR3 widens the signature when it owns the precondition semantics (which header, which column,
 what a missing one means).
 
+### Row locking has two grammars, and T-SQL uses the one that is not a trailing clause
+
+`IAlvoSqlDialect.RowLockClause` was first contracted as a clause appended at the very end of the statement.
+That is PostgreSQL's grammar (`… ORDER BY … LIMIT … FOR NO KEY UPDATE`) and it is harmless on SQLite, which has
+no locking clause at all. It is **not expressible on T-SQL**: SQL Server / Azure SQL takes a row lock as a
+**table hint inside the `FROM`** — `FROM notes WITH (UPDLOCK, ROWLOCK)` — and has no trailing equivalent.
+
+The trap was not that T-SQL was unsupported; it was that the seam made the wrong answer look right. Because
+`string.Empty` is a *documented legitimate* answer (it is SQLite's), a T-SQL driver author following the
+contract had two options: return the hint from `RowLockClause`, and get a syntax error on every `update`; or
+return the empty string, and ship **silently unlocked `WITH CHECK` pre-images**. The second is a real
+time-of-check/time-of-use race — Azure SQL runs READ COMMITTED by default, so a concurrent writer can change
+the row between the verdict and the `ExecuteUpdate` — and it is indistinguishable from correct SQLite
+behaviour. §0 principle 3 names Azure SQL explicitly and Alvo ships no driver for it, so the seam's *shape* is
+the only thing protecting that author.
+
+So `RenderTable` is told whether the read is a locking pre-image, and for which mutation:
+`RenderTable(EntitySchema, PreImageMutation?)`. It is the member rendering at the position T-SQL's grammar
+requires, and the argument is the mutation rather than a flag because a delete's pre-image needs a stronger
+lock than an update's on either grammar. The rule the two members now share is that **exactly one position
+carries the lock**: a dialect answering a different table source for a locking pre-image must return
+`string.Empty` from `RowLockClause` for that same mutation. `AlvoSqlDialectContractTests` asserts the pairing,
+so a driver cannot satisfy half of it.
+
+`MMLib.Alvo.Testing.Data.TSqlSqlDialect` is the rehearsal that the seam is now sufficient — the statement-shape
+counterpart of `TSqlFieldSqlRenderer`, which had already done this for expression shape. It emits the hint from
+`RenderTable`, returns the empty string from `RowLockClause` honestly, and overrides `RowLimitClause` because
+T-SQL spells truncation `OFFSET 0 ROWS FETCH NEXT @n ROWS ONLY`. `TSqlDialectSeamTests` composes a real
+pre-image read through the production composer with nothing but the two T-SQL fakes registered, and neither
+shipped driver nor the composer needed a change to accommodate it. That the fake did not exist is why the gap
+survived to review: the one member T-SQL genuinely cannot express was the one nobody rehearsed.
+
+**Still open for a T-SQL driver, and recorded so it is not rediscovered:** `ExecuteUpdate` emits
+`UPDATE … SET … FROM (<policy root>) AS t WHERE t.id = n.id`, and `UPDATE … FROM` is **not universal SQL**. It
+is a PostgreSQL/SQLite/T-SQL extension rather than a standard construct, the three engines spell it
+differently, and T-SQL additionally names the *alias* as the update target rather than the table. EF's own
+`ExecuteUpdate` translator produces the right shape per provider, so this is a risk a provider translation bug
+would surface rather than one Alvo composes itself — but it is the second place a T-SQL driver will need its own
+answer, and unlike the lock it is not behind a seam Alvo owns.
+
 ## `softDelete` is refused, not silently ignored
 
 The frozen descriptor schema states the guarantee in full: *"Framework-managed soft delete: a managed
@@ -871,8 +911,10 @@ unverified on every host that skips the container, which is how a per-engine bas
 The `FOR NO KEY UPDATE` clause SQLite cannot test is covered behaviourally rather than by inspection: it is
 emitted at the very end of the pre-image `SELECT` (after `ORDER BY`/`LIMIT`, which is what PostgreSQL's grammar
 requires), so a misplaced clause is a syntax error and every PostgreSQL `update` fact in the adversarial suite
-fails. `PreImageMutation.Delete` still has no consumer — a delete carries no `WITH CHECK`, so it reads no
-pre-image.
+fails. `PreImageMutation.Delete` and its stronger `FOR UPDATE` are exercised the same way, now that a delete
+reads a locked pre-image for PR5's sake; `LockRecordingSqlDialect` additionally records *which* mutation the
+lock was requested for, which is the only way that request is observable on an engine whose answer is the empty
+string.
 
 ## Mutation-testing notes
 

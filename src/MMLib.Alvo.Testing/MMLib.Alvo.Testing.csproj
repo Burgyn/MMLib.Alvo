@@ -20,6 +20,24 @@
   -->
   <ItemGroup>
     <ProjectReference Include="../MMLib.Alvo.Abstractions/MMLib.Alvo.Abstractions.csproj" />
+    <!--
+      IAlvoSqlDialect and PreImageMutation live beside the EF data path rather than in
+      Abstractions, because statement shape is a relational concern Abstractions is required to stay
+      free of (see IAlvoSqlDialect's own remarks). Its contract suite (AlvoSqlDialectContractTests)
+      and its T-SQL fake (TSqlSqlDialect) therefore need that assembly, which is why this
+      test-support library reaches one package further than Abstractions — for exactly two types.
+
+      Accepted cost, recorded so it reads as a decision rather than a drift:
+      test/Directory.Build.props references this project from EVERY test project, so every one of
+      them now resolves Microsoft.EntityFrameworkCore.Relational transitively, including projects
+      that reference no EF of their own (Abstractions, Schema, the core). Nothing there may use it —
+      and the family-wide arch fact that forbids handing EF's context to a caller matches EF's types
+      by NAME rather than by typeof, so it does not depend on who can see them. The shape to take
+      instead, if MMLib.Alvo.Testing is ever packaged: split the relational half into its own
+      test-support project, so a non-relational driver author does not take an EF dependency to get
+      the contract suites.
+    -->
+    <ProjectReference Include="../MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj" />
   </ItemGroup>
 
   <!--

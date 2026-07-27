@@ -229,6 +229,58 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task The_policy_predicate_is_bound_inside_the_where_clause_of_one_statement() { }
         public System.Threading.Tasks.Task The_tenant_scope_is_bound_inside_the_same_where_clause() { }
     }
+    public abstract class AlvoSqlDialectContractTests
+    {
+        protected AlvoSqlDialectContractTests() { }
+        public void A_column_reference_is_bare() { }
+        [Xunit.InlineData(new object[] {
+                MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation.Delete})]
+        [Xunit.InlineData(new object[] {
+                MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation.Update})]
+        public void A_lock_is_expressed_in_the_table_source_or_in_the_trailing_clause_but_never_both(MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation mutation) { }
+        public void A_missing_entity_is_refused_rather_than_rendering_an_empty_table_source() { }
+        [Xunit.InlineData(new object[] {
+                "TEXT"})]
+        [Xunit.InlineData(new object[] {
+                "character varying(32)"})]
+        [Xunit.InlineData(new object[] {
+                "numeric(10,4)"})]
+        public void A_null_projection_is_a_bare_expression_naming_the_store_type_it_was_given(string storeType) { }
+        [Xunit.InlineData(new object?[]?[] {
+                "   "})]
+        [Xunit.InlineData(new object?[]?[] {
+                ""})]
+        [Xunit.InlineData(null)]
+        public void A_null_projection_refuses_a_missing_store_type(string? storeType) { }
+        [Xunit.MemberData("CelValueTypes", new object[0])]
+        public void A_repair_is_a_function_of_its_inputs_alone(MMLib.Alvo.Expressions.CelValueType type) { }
+        [Xunit.MemberData("CelValueTypes", new object[0])]
+        public void A_repair_wraps_its_operand_rather_than_replacing_it(MMLib.Alvo.Expressions.CelValueType type) { }
+        public void A_row_limit_clause_names_the_marker_and_carries_no_separator_of_its_own() { }
+        [Xunit.InlineData(new object[] {
+                MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation.Delete})]
+        [Xunit.InlineData(new object[] {
+                MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation.Update})]
+        public void A_row_lock_clause_carries_no_separator_of_its_own(MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation mutation) { }
+        [Xunit.InlineData(new object[] {
+                MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation.Delete})]
+        [Xunit.InlineData(new object[] {
+                MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation.Update})]
+        [Xunit.InlineData(null)]
+        public void A_table_source_is_a_from_clause_body_and_nothing_else(MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation? lockedPreImageFor) { }
+        public void A_table_source_is_a_function_of_its_inputs_alone() { }
+        public void An_identifier_that_would_not_strictly_need_delimiting_is_delimited_anyway() { }
+        [Xunit.MemberData("CelValueTypes", new object[0])]
+        public void An_ordering_key_is_the_repair_both_sides_of_the_boundary_see(MMLib.Alvo.Expressions.CelValueType type) { }
+        [Xunit.MemberData("CelValueTypes", new object[0])]
+        public void Both_operands_of_a_comparison_get_the_same_repair(MMLib.Alvo.Expressions.CelValueType type) { }
+        protected abstract MMLib.Alvo.Data.EntityFrameworkCore.IAlvoSqlDialect CreateDialect();
+        protected abstract MMLib.Alvo.Expressions.IFieldSqlRenderer CreateFieldRenderer();
+        [Xunit.MemberData("CelValueTypes", new object[0])]
+        public void Every_cel_value_type_is_answered_rather_than_refused(MMLib.Alvo.Expressions.CelValueType type) { }
+        public void Two_different_names_never_render_to_the_same_identifier() { }
+        public static Xunit.TheoryData<MMLib.Alvo.Expressions.CelValueType> CelValueTypes() { }
+    }
     public interface IDifferentialProbe : System.IAsyncDisposable
     {
         System.Threading.Tasks.Task<bool> MatchesAsync(MMLib.Alvo.Data.AlvoRecord row, MMLib.Alvo.Expressions.SqlPredicate predicate);
@@ -248,6 +300,15 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRecord>> QueryAsync(MMLib.Alvo.Data.AlvoQuery query, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default) { }
         public void Seed(string entity, params MMLib.Alvo.Data.AlvoRecord[] rows) { }
         public System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord> UpdateAsync(string entity, System.Guid id, System.Collections.Generic.IReadOnlyDictionary<string, object?> values, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default) { }
+    }
+    public sealed class TSqlSqlDialect : MMLib.Alvo.Data.EntityFrameworkCore.IAlvoSqlDialect
+    {
+        public TSqlSqlDialect() { }
+        public string RenderColumn(string columnName) { }
+        public string RenderNullProjection(string storeType) { }
+        public string RenderTable(MMLib.Alvo.Schema.EntitySchema entity, MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation? lockedPreImageFor) { }
+        public string RowLimitClause(string rowCountParameterMarker) { }
+        public string RowLockClause(MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation mutation) { }
     }
 }
 namespace MMLib.Alvo.Testing.Migrations

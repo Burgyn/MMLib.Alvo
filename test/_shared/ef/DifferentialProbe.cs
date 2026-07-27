@@ -53,7 +53,7 @@ internal sealed class DifferentialProbe(
     private async Task ClearAsync()
     {
         using var context = contexts.Create();
-        await using var command = await CommandAsync(context, $"DELETE FROM {dialect.RenderTable(entity)}");
+        await using var command = await CommandAsync(context, $"DELETE FROM {Table()}");
 
         await command.ExecuteNonQueryAsync(Token);
     }
@@ -67,12 +67,18 @@ internal sealed class DifferentialProbe(
     {
         using var context = contexts.Create();
         await using var command = await CommandAsync(
-            context, $"SELECT COUNT(*) FROM {dialect.RenderTable(entity)} WHERE {predicate.Sql}");
+            context, $"SELECT COUNT(*) FROM {Table()} WHERE {predicate.Sql}");
         command.Parameters.AddRange(
             PolicyPredicateParameters.Bind(context, context.Rows(entity.Name).EntityType, predicate.Parameters));
 
         return Convert.ToInt64(await command.ExecuteScalarAsync(Token), CultureInfo.InvariantCulture);
     }
+
+    /// <summary>
+    /// The table source, asking for no row lock: this probe counts rows, it never reads a pre-image it is
+    /// about to write over.
+    /// </summary>
+    private string Table() => dialect.RenderTable(entity, lockedPreImageFor: null);
 
     /// <summary>
     /// A command on the context's own connection. Raw ADO.NET rather than <c>ExecuteSqlRaw</c> because the

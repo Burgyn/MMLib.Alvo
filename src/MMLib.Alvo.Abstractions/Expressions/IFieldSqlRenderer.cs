@@ -160,6 +160,16 @@ public interface IFieldSqlRenderer
     /// three-valued fold every comparison goes through. A cast that costs an index scan is an accepted
     /// price for a correct answer; a dialect with a cheaper repair should prefer it.
     /// </para>
+    /// <para>
+    /// <b>A repair wraps its operand; it never substitutes one</b>, and it is a function of its inputs alone.
+    /// Both follow from what a caller does with the result — the <c>ORDER BY</c> and the keyset boundary are
+    /// two separate calls whose answers have to describe one total order — and both, together with the
+    /// symmetry above, are asserted generically by
+    /// <c>MMLib.Alvo.Testing.Data.AlvoSqlDialectContractTests</c>, which pairs a driver's renderer with its
+    /// dialect. The formal <c>a &lt; b ⇒ repair(a) &lt; repair(b)</c> obligation is a statement about an
+    /// engine's ordering, so that suite asserts only its structural half; the engine half is proved per
+    /// driver against a real engine.
+    /// </para>
     /// </remarks>
     /// <param name="left">The already-rendered left operand.</param>
     /// <param name="right">The already-rendered right operand.</param>

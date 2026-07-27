@@ -1,27 +1,36 @@
 ﻿using MMLib.Alvo.Data.EntityFrameworkCore;
+using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Schema;
+using MMLib.Alvo.Testing.Data;
 
 namespace MMLib.Alvo.Data.PostgreSql.Tests;
 
-public class PostgreSqlSqlDialectTests
+/// <summary>
+/// PostgreSQL's leg of the SQL-seam contract, plus the answers that are this engine's own — including the one
+/// place the two shipped drivers genuinely differ, the row-locking clause and its two modes.
+/// </summary>
+public class PostgreSqlSqlDialectTests : AlvoSqlDialectContractTests
 {
     private static readonly PostgreSqlSqlDialect _dialect = new();
 
+    protected override IAlvoSqlDialect CreateDialect() => _dialect;
+
+    protected override IFieldSqlRenderer CreateFieldRenderer() => new PostgreSqlFieldSqlRenderer();
+
     /// <summary>
-    /// The whole documented grammar in one assertion: a bare quoted table source, no surrounding
-    /// parentheses, no alias, no <c>FROM</c> keyword, no terminator, nothing to trim. In particular no
-    /// database schema qualifier — <c>AlvoOptions.SchemaPrefix</c> is a table-name prefix, not a schema.
+    /// In particular no database schema qualifier — <c>AlvoOptions.SchemaPrefix</c> is a table-name prefix, not
+    /// a schema.
     /// </summary>
     [Fact]
-    public void A_table_is_a_bare_quoted_name_with_no_alias_and_no_from_keyword()
-        => _dialect.RenderTable(Entity("vehicle")).ShouldBe("\"vehicle\"");
+    public void A_table_is_a_bare_quoted_name_with_no_schema_qualifier()
+        => _dialect.RenderTable(Entity("vehicle"), lockedPreImageFor: null).ShouldBe("\"vehicle\"");
 
     [Fact]
-    public void A_null_projection_is_a_bare_expression_with_no_column_alias()
+    public void A_null_projection_is_a_standard_cast()
         => _dialect.RenderNullProjection("text").ShouldBe("CAST(NULL AS text)");
 
     [Fact]
-    public void A_column_is_a_bare_quoted_reference_with_no_table_qualifier_and_no_alias()
+    public void A_column_is_a_bare_quoted_reference()
         => _dialect.RenderColumn("secret_note").ShouldBe("\"secret_note\"");
 
     /// <summary>
@@ -36,7 +45,7 @@ public class PostgreSqlSqlDialectTests
     public void A_name_that_would_not_strictly_need_quoting_is_quoted_anyway(string name)
     {
         _dialect.RenderColumn(name).ShouldBe($"\"{name}\"");
-        _dialect.RenderTable(Entity(name)).ShouldBe($"\"{name}\"");
+        _dialect.RenderTable(Entity(name), lockedPreImageFor: null).ShouldBe($"\"{name}\"");
     }
 
     /// <summary>
@@ -49,13 +58,9 @@ public class PostgreSqlSqlDialectTests
     {
         _dialect.RenderColumn("a\"; DROP TABLE vehicle; --")
             .ShouldBe("\"a\"\"; DROP TABLE vehicle; --\"");
-        _dialect.RenderTable(Entity("a\"; DROP TABLE vehicle; --"))
+        _dialect.RenderTable(Entity("a\"; DROP TABLE vehicle; --"), lockedPreImageFor: null)
             .ShouldBe("\"a\"\"; DROP TABLE vehicle; --\"");
     }
-
-    [Fact]
-    public void A_missing_entity_is_refused_rather_than_rendering_an_empty_table_source()
-        => Should.Throw<ArgumentNullException>(() => _dialect.RenderTable(null!));
 
     [Fact]
     public void A_missing_column_name_is_refused_rather_than_rendering_empty_quotes()
@@ -80,10 +85,6 @@ public class PostgreSqlSqlDialectTests
     public void A_parameterised_store_type_reaches_the_cast_unrewritten(string storeType)
         => _dialect.RenderNullProjection(storeType).ShouldBe($"CAST(NULL AS {storeType})");
 
-    [Fact]
-    public void A_null_projection_refuses_a_missing_store_type_rather_than_casting_to_nothing()
-        => Should.Throw<ArgumentException>(() => _dialect.RenderNullProjection("  "));
-
     /// <summary>
     /// <c>FOR NO KEY UPDATE</c>, not <c>FOR UPDATE</c>: an update's pre-image read never precedes a key
     /// change, and the weaker mode does not block a concurrent inserter's foreign-key check against this
@@ -102,21 +103,20 @@ public class PostgreSqlSqlDialectTests
     public void A_deletes_pre_image_takes_the_full_row_lock()
         => _dialect.RowLockClause(PreImageMutation.Delete).ShouldBe("FOR UPDATE");
 
-    /// <summary>
-    /// The clause carries no separator of its own — the composer inserts the space. A value that shipped
-    /// its own leading space would concatenate correctly at a composer written for the other convention
-    /// and produce <c>… WHERE &lt;predicate&gt;  FOR NO KEY UPDATE</c> or, the other way round,
-    /// <c>&lt;predicate&gt;FOR NO KEY UPDATE</c>.
-    /// </summary>
-    [Theory]
-    [InlineData(PreImageMutation.Update)]
-    [InlineData(PreImageMutation.Delete)]
-    public void The_row_lock_clause_carries_no_separator_of_its_own(PreImageMutation mutation)
-        => _dialect.RowLockClause(mutation).ShouldBe(_dialect.RowLockClause(mutation).Trim());
-
     /// <summary>The two mutations must not share a mode, or the distinction would be decorative.</summary>
     [Fact]
     public void The_two_mutations_take_different_modes()
         => _dialect.RowLockClause(PreImageMutation.Update)
             .ShouldNotBe(_dialect.RowLockClause(PreImageMutation.Delete));
+
+    /// <summary>
+    /// This engine's locking grammar is the trailing clause, so the table source must be untouched: hinting it
+    /// as well would be locking twice, which the port forbids and which PostgreSQL has no syntax for anyway.
+    /// </summary>
+    [Theory]
+    [InlineData(PreImageMutation.Update)]
+    [InlineData(PreImageMutation.Delete)]
+    public void A_pre_image_reads_the_same_table_source_as_an_ordinary_read(PreImageMutation mutation)
+        => _dialect.RenderTable(Entity("vehicle"), mutation)
+            .ShouldBe(_dialect.RenderTable(Entity("vehicle"), lockedPreImageFor: null));
 }

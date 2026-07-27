@@ -24,12 +24,21 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// what makes "the same adversarial suite passes over a physical and a virtual entity" a matter of
 /// registering another dialect instead of rewriting the data path.
 /// </para>
+/// <para>
+/// <b>Every obligation below is asserted generically</b> by
+/// <c>MMLib.Alvo.Testing.Data.AlvoSqlDialectContractTests</c>, which an implementation's own test class
+/// inherits — this repo's idiom for a port, and the reason the return grammars here are a contract rather
+/// than advice. An implementation is expected to pair its dialect with its
+/// <see cref="MMLib.Alvo.Expressions.IFieldSqlRenderer"/> there, because the two halves of one driver's SQL
+/// have to agree about where a row lock lives.
+/// </para>
 /// </remarks>
 public interface IAlvoSqlDialect
 {
     /// <summary>
     /// Renders the table source <paramref name="entity"/>'s rows are read from — a quoted table name on
-    /// a physical entity.
+    /// a physical entity — plus, where the engine's grammar puts it there, the row-locking hint a
+    /// pre-image read needs.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -47,16 +56,57 @@ public interface IAlvoSqlDialect
     /// parentheses of its own; EF then wraps the whole <c>FromSql</c> root in its own derived table and
     /// supplies the alias.
     /// </para>
+    /// <para>
+    /// <b>Why this member is told about the lock, when <see cref="RowLockClause"/> exists.</b> Row locking
+    /// has two grammars, and only one of them is a trailing clause. PostgreSQL appends
+    /// <c>FOR NO KEY UPDATE</c> at the end of the statement; T-SQL (SQL Server / Azure SQL) has no
+    /// trailing equivalent at all and expresses the same thing as a <b>table hint in the <c>FROM</c></b>
+    /// (<c>FROM notes WITH (UPDLOCK, ROWLOCK)</c>). A seam offering only the trailing position would leave
+    /// a T-SQL driver two choices, both wrong: answer a hint from <see cref="RowLockClause"/> and produce a
+    /// syntax error, or answer <see cref="string.Empty"/> — which is <em>legitimate</em> there (it is
+    /// SQLite's answer) and therefore silently ships unlocked <c>WITH CHECK</c> pre-images, a real
+    /// time-of-check/time-of-use race on an engine defaulting to READ COMMITTED, indistinguishable from
+    /// correct SQLite behaviour. §0 principle 3 names Azure SQL explicitly and no such driver exists yet, so
+    /// the seam's shape is the only thing protecting its author. <c>MMLib.Alvo.Testing.Data.TSqlSqlDialect</c>
+    /// is the rehearsal that it is sufficient.
+    /// </para>
+    /// <para>
+    /// <b>Exactly one position may carry the lock.</b> A dialect that answers a different table source for a
+    /// locking pre-image than for an ordinary read must return <see cref="string.Empty"/> from
+    /// <see cref="RowLockClause"/> for that same mutation: locking twice is not twice as safe, it is an
+    /// engine-dependent error. <c>MMLib.Alvo.Testing.Data.AlvoSqlDialectContractTests</c> asserts that pairing,
+    /// so a driver cannot satisfy half of it.
+    /// </para>
     /// </remarks>
     /// <param name="entity">The entity being read.</param>
-    string RenderTable(EntitySchema entity);
+    /// <param name="lockedPreImageFor">
+    /// The mutation this read's row is a locked pre-image for, or <see langword="null"/> when the read takes
+    /// no lock (a <c>list</c>, a <c>get</c>, a <c>create</c>'s re-read). A dialect whose locking grammar is
+    /// the trailing clause ignores it; the argument's presence is what lets one whose grammar is a table hint
+    /// answer at all. It is <see cref="PreImageMutation"/> rather than a bare flag for the reason
+    /// <see cref="RowLockClause"/> takes one: a delete's pre-image needs a stronger lock than an update's, on
+    /// either grammar.
+    /// </param>
+    /// <exception cref="ArgumentNullException"><paramref name="entity"/> is <see langword="null"/>.</exception>
+    string RenderTable(EntitySchema entity, PreImageMutation? lockedPreImageFor);
 
     /// <summary>Renders a column reference in a <c>SELECT</c> list or an <c>ORDER BY</c>.</summary>
     /// <remarks>
+    /// <para>
     /// <b>Return grammar.</b> A bare column reference: quoted per this dialect, with no table or alias
     /// qualifier, no <c>AS</c> alias of its own, and no separating comma — the composer joins the
     /// <c>SELECT</c> list and appends an alias where one is needed (see
     /// <see cref="RenderNullProjection"/>).
+    /// </para>
+    /// <para>
+    /// <b>Delimit unconditionally, and escape rather than concatenate.</b> A name is quoted even where the
+    /// engine would accept it bare: Npgsql's own <c>DelimitIdentifier</c> returns <c>plate</c> undelimited,
+    /// PostgreSQL then case-folds it, and the same field renders differently per driver — so a rule and a
+    /// caller filter over one column can disagree about which column that is (spike <c>Q8</c>). Escaping is
+    /// what makes the rendering injective: two different names must never produce one string, because a
+    /// rendering that collapses them is a rendering a name can escape through. Both are asserted generically
+    /// by <c>MMLib.Alvo.Testing.Data.AlvoSqlDialectContractTests</c>.
+    /// </para>
     /// </remarks>
     /// <param name="columnName">The column's name.</param>
     string RenderColumn(string columnName);
@@ -104,7 +154,8 @@ public interface IAlvoSqlDialect
     /// <paramref name="mutation"/>, so a concurrent writer cannot change the row between the decision and
     /// the write — <c>FOR NO KEY UPDATE</c> before an update and <c>FOR UPDATE</c> before a delete on
     /// PostgreSQL, the empty string where the engine has no such clause and serializes write transactions
-    /// instead (SQLite).
+    /// instead (SQLite), or where the dialect has already taken the lock as a table hint in the
+    /// <c>FROM</c> (T-SQL — see <see cref="RenderTable"/>).
     /// </summary>
     /// <remarks>
     /// <para>
@@ -115,6 +166,15 @@ public interface IAlvoSqlDialect
     /// <c>… WHERE &lt;predicate&gt;FOR NO KEY UPDATE</c> — a syntax error in the one statement a
     /// <c>WITH CHECK</c> verdict is based on. Return <see cref="string.Empty"/>, not <c>" "</c>, when the
     /// engine has no such clause.
+    /// </para>
+    /// <para>
+    /// <b>The empty string means two different things, and that is why <see cref="RenderTable"/> takes the
+    /// mutation.</b> It means "this engine needs no locking read" (SQLite, which serializes write
+    /// transactions database-wide) <em>and</em> "this dialect locks in the other position" (T-SQL). Both are
+    /// legitimate; what would not be legitimate is a third reading — "this engine locks with a trailing
+    /// clause and I forgot to emit one" — which is precisely what a seam with only this member left a T-SQL
+    /// driver author to produce. A dialect must not answer here <b>and</b> hint the table source for the same
+    /// mutation.
     /// </para>
     /// <para>
     /// <b>Why the lock mode depends on the operation, and is therefore an argument rather than a fixed

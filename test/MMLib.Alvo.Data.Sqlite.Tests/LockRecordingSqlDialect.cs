@@ -40,7 +40,8 @@ internal sealed class LockRecordingSqlDialect : IAlvoSqlDialect
         return _inner.RowLockClause(mutation);
     }
 
-    public string RenderTable(EntitySchema entity) => _inner.RenderTable(entity);
+    public string RenderTable(EntitySchema entity, PreImageMutation? lockedPreImageFor) =>
+        _inner.RenderTable(entity, lockedPreImageFor);
 
     public string RenderColumn(string columnName) => _inner.RenderColumn(columnName);
 

@@ -14,7 +14,7 @@ internal sealed class TestSqlDialect : IAlvoSqlDialect
     public string RowLockClause(PreImageMutation mutation) =>
         mutation == PreImageMutation.Delete ? "FOR TEST DELETE" : "FOR TEST";
 
-    public string RenderTable(EntitySchema entity)
+    public string RenderTable(EntitySchema entity, PreImageMutation? lockedPreImageFor)
     {
         ArgumentNullException.ThrowIfNull(entity);
         return AlvoSqlIdentifier.Quote(entity.Name);

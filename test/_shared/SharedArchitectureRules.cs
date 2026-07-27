@@ -10,10 +10,13 @@ namespace MMLib.Alvo.Tests.Architecture;
 /// <remarks>
 /// <para>
 /// Matched by full type <em>name</em> rather than by <c>typeof</c>, because this scan is linked into test
-/// projects that deliberately do not reference EF Core at all (Abstractions, Schema, the core). The cost of
-/// a name match is that an EF rename would make the rule silently vacuous, so
-/// <c>MMLib.Alvo.Data.EntityFrameworkCore.Tests</c> — which does reference EF — carries a fact that every
-/// name here still resolves to a real type.
+/// projects that have no EF Core reference of their own (Abstractions, Schema, the core) — and must keep
+/// working if that stops being true, which it since has: <c>MMLib.Alvo.Testing</c> reaches
+/// <c>MMLib.Alvo.Data.EntityFrameworkCore</c> for <c>IAlvoSqlDialect</c>, so every test project now resolves
+/// EF Core Relational transitively. Not typing the names is what makes this rule independent of who can see
+/// them. The cost of a name match is that an EF rename would make the rule silently vacuous, so
+/// <c>MMLib.Alvo.Data.EntityFrameworkCore.Tests</c> — which references EF directly — carries a fact that
+/// every name here still resolves to a real type.
 /// </para>
 /// <para>
 /// Inherited members are included on purpose: a public type <em>deriving</em> from <c>DbContext</c> exposes

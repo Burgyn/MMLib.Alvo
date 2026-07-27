@@ -26,7 +26,12 @@ public sealed class PostgreSqlSqlDialect : IAlvoSqlDialect
         mutation == PreImageMutation.Delete ? FullUpdate : NoKeyUpdate;
 
     /// <inheritdoc/>
-    public string RenderTable(EntitySchema entity)
+    /// <remarks>
+    /// <paramref name="lockedPreImageFor"/> is ignored because PostgreSQL's locking grammar is the trailing
+    /// clause this dialect already answers from <see cref="RowLockClause"/>. Hinting the table source as well
+    /// would be locking twice, which the port forbids.
+    /// </remarks>
+    public string RenderTable(EntitySchema entity, PreImageMutation? lockedPreImageFor)
     {
         ArgumentNullException.ThrowIfNull(entity);
         return AlvoSqlIdentifier.Quote(entity.Name);

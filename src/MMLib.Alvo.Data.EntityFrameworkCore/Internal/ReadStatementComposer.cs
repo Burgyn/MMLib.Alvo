@@ -121,7 +121,7 @@ internal sealed class ReadStatementComposer
         var sql = new StringBuilder("SELECT ")
             .Append(ReadProjection.Compose(entity, Mask(decision, options), _dialect, rows))
             .Append(" FROM ")
-            .Append(_dialect.RenderTable(entity))
+            .Append(_dialect.RenderTable(entity, options.LockFor))
             .Append(" WHERE ")
             .Append(string.Join(" AND ", terms.Select(term => $"({term})")))
             .Append(OrderByClause(entity, options))
@@ -169,7 +169,10 @@ internal sealed class ReadStatementComposer
 
     /// <summary>
     /// <c>RowLockClause</c> carries no separator of its own (see <see cref="IAlvoSqlDialect.RowLockClause"/>),
-    /// so the separating space is inserted here and only when there is a clause to separate.
+    /// so the separating space is inserted here and only when there is a clause to separate. An empty answer
+    /// is not "no lock was asked for": the same <see cref="ReadStatementOptions.LockFor"/> also reaches
+    /// <see cref="IAlvoSqlDialect.RenderTable"/>, which is where a dialect whose grammar is a table hint takes
+    /// the lock instead.
     /// </summary>
     private string LockClause(ReadStatementOptions options) =>
         options.LockFor is { } mutation && _dialect.RowLockClause(mutation) is { Length: > 0 } clause

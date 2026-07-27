@@ -25,7 +25,7 @@ namespace MMLib.Alvo.Data.Sqlite
         public SqliteSqlDialect() { }
         public string RenderColumn(string columnName) { }
         public string RenderNullProjection(string storeType) { }
-        public string RenderTable(MMLib.Alvo.Schema.EntitySchema entity) { }
+        public string RenderTable(MMLib.Alvo.Schema.EntitySchema entity, MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation? lockedPreImageFor) { }
         public string RowLockClause(MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation mutation) { }
     }
 }

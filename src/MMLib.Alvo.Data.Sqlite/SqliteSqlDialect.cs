@@ -19,7 +19,13 @@ public sealed class SqliteSqlDialect : IAlvoSqlDialect
     public string RowLockClause(PreImageMutation mutation) => string.Empty;
 
     /// <inheritdoc/>
-    public string RenderTable(EntitySchema entity)
+    /// <remarks>
+    /// <paramref name="lockedPreImageFor"/> is ignored, and that is the honest answer rather than a missing
+    /// one: SQLite expresses row locking in neither position — not as a trailing clause and not as a table
+    /// hint — because a write transaction already takes a database-wide lock. A pre-image read therefore
+    /// renders exactly the same table source as an ordinary one.
+    /// </remarks>
+    public string RenderTable(EntitySchema entity, PreImageMutation? lockedPreImageFor)
     {
         ArgumentNullException.ThrowIfNull(entity);
         return AlvoSqlIdentifier.Quote(entity.Name);
