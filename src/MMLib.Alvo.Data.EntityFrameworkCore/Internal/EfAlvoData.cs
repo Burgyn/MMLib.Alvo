@@ -390,8 +390,12 @@ internal sealed class EfAlvoData : IAlvoData
     /// guaranteed to survive.
     /// </summary>
     private static IQueryable<Dictionary<string, object>> Materialize(
-        AlvoDataContext db, EntitySchema entity, ReadStatement statement) => db.Rows(entity.Name)
-        .FromSqlRaw(statement.Sql, new PredicateParameterBinder(db).Bind(statement.Parameters));
+        AlvoDataContext db, EntitySchema entity, ReadStatement statement)
+    {
+        var rows = db.Rows(entity.Name);
+        return rows.FromSqlRaw(
+            statement.Sql, new PredicateParameterBinder(db).Bind(rows.EntityType, statement.Parameters));
+    }
 
     /// <summary>
     /// The empty mask: a row a policy decision is <em>reached over</em> is never masked, only a row this data

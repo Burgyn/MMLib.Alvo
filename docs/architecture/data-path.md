@@ -213,10 +213,37 @@ renders `(CASE WHEN [is_public] = 1 THEN 1 ELSE 0 END = 1)` with no change to th
 
 ## Values are bound through EF's own type mapping, never formatted
 
-`PredicateParameterBinder` binds every value through `IRelationalTypeMappingSource` — and, where the call
-site knows its column, through *that column's* mapping, after converting the value to the column's CLR type.
-Formatting a value into text is not a cosmetic shortcut: EF's SQLite `Guid` mapping writes upper-case `TEXT`,
-so a hand-formatted lower-case Guid matches no row and raises nothing.
+`PredicateParameterBinder` binds every value through `IRelationalTypeMappingSource`. Formatting a value into
+text is not a cosmetic shortcut: EF's SQLite `Guid` mapping writes upper-case `TEXT`, so a hand-formatted
+lower-case Guid matches no row and raises nothing.
+
+**A value compared against a column is bound through *that column's* mapping, and the shape of the data is
+what enforces it.** Each value a statement carries travels as a `BoundValue` tagged with one of three
+origins, and the binder switches on it exhaustively:
+
+| Origin | Produced by | Bound through |
+|---|---|---|
+| `ColumnComparison` | the caller filter, the keyset boundary, the row id | the named column's own mapping, after converting the value to the column's CLR type |
+| `PolicyPredicate` | `IPredicateRenderer.Render`'s bag | the value's own CLR type — see below |
+| `Framework` | the page's row limit | the value's own CLR type (an `int` this data path chose) |
+
+There is deliberately **no** way to bind a bare `name → value` bag on the statement path. The previous shape
+had one, every production call site used it, and the column-aware method — whose own documentation said it
+was mandatory — ended up with **zero callers** while its ~19 KB of tests kept passing. So the guarantee is now
+carried by `BoundValue`, which has no constructor taking a value alone: a fragment author has to name which
+of the three cases theirs is. Removing the column lookup fails four named facts in
+`SqliteAlvoDataFilterBindingTests`, all of which go through `IAlvoData.QueryAsync`.
+
+**Why the policy predicate is safe without a column.** A rendered `SqlPredicate` records names and values
+only, so there is no field to consult. Every value in it is a context value or a CEL literal, and the type
+checker has already forced both operands of the comparison to one type. The literal kinds the grammar admits
+are exactly `Int`, `Decimal`, `String`, `Bool` and `Null`; the context values are a `Guid` or the role set.
+**The language has no date or timestamp literal at all**, so the one mismatch the collapse of `date` and
+`timestamp` into a single CEL type could otherwise produce is unreachable — a rule comparing a `date` field
+against anything the grammar can express fails to compile. The only reachable numeric mismatch is an `Int`
+literal against a `Decimal` column, which promotes to a `Decimal` comparison and is repaired on both operands.
+`CelRuleBindingTests` pins all of that, so a grammar that grows a temporal literal fails a test rather than
+silently invalidating the argument.
 
 Two conversions are refused rather than performed, because both would be silent and wrong:
 

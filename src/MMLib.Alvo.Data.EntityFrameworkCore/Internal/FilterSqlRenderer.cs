@@ -8,7 +8,7 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// <summary>A rendered SQL fragment and the values its named parameters bind.</summary>
 /// <param name="Sql">The fragment text.</param>
 /// <param name="Parameters">The values <paramref name="Sql"/> references by name.</param>
-internal sealed record RenderedSql(string Sql, IReadOnlyDictionary<string, object?> Parameters);
+internal sealed record RenderedSql(string Sql, IReadOnlyDictionary<string, BoundValue> Parameters);
 
 /// <summary>
 /// Renders a caller's <see cref="AlvoFilter"/> tree to SQL: every field through the driver's
@@ -101,24 +101,32 @@ internal static class FilterSqlRenderer
         AlvoComparison comparison, EntitySchema entity, IFieldSqlRenderer fields, ParameterBag bag)
     {
         var declared = QueryFieldGuard.DeclaredField(entity, comparison.Field);
-        var type = CelFieldType.Of(declared);
-        var field = fields.RenderField(entity, declared.Name);
+        var target = new ComparisonTarget(
+            declared.Name, fields.RenderField(entity, declared.Name), CelFieldType.Of(declared));
 
         return comparison.Operator switch
         {
-            AlvoFilterOperator.Eq => Ordered(field, "=", comparison.Value, type, fields, bag),
-            AlvoFilterOperator.Neq => Ordered(field, "<>", comparison.Value, type, fields, bag),
-            AlvoFilterOperator.Gt => Ordered(field, ">", comparison.Value, type, fields, bag),
-            AlvoFilterOperator.Gte => Ordered(field, ">=", comparison.Value, type, fields, bag),
-            AlvoFilterOperator.Lt => Ordered(field, "<", comparison.Value, type, fields, bag),
-            AlvoFilterOperator.Lte => Ordered(field, "<=", comparison.Value, type, fields, bag),
-            AlvoFilterOperator.Like => $"{field} LIKE {bag.Add(fields, comparison.Value)}",
-            AlvoFilterOperator.ILike => fields.RenderCaseInsensitiveLike(field, bag.Add(fields, comparison.Value)),
-            AlvoFilterOperator.In => Membership(field, comparison.Value, type, fields, bag),
-            AlvoFilterOperator.Is => Identity(field, comparison.Value, fields),
+            AlvoFilterOperator.Eq => Ordered(target, "=", comparison.Value, fields, bag),
+            AlvoFilterOperator.Neq => Ordered(target, "<>", comparison.Value, fields, bag),
+            AlvoFilterOperator.Gt => Ordered(target, ">", comparison.Value, fields, bag),
+            AlvoFilterOperator.Gte => Ordered(target, ">=", comparison.Value, fields, bag),
+            AlvoFilterOperator.Lt => Ordered(target, "<", comparison.Value, fields, bag),
+            AlvoFilterOperator.Lte => Ordered(target, "<=", comparison.Value, fields, bag),
+            AlvoFilterOperator.Like => $"{target.Sql} LIKE {bag.Add(fields, target.Column, comparison.Value)}",
+            AlvoFilterOperator.ILike => fields.RenderCaseInsensitiveLike(
+                target.Sql, bag.Add(fields, target.Column, comparison.Value)),
+            AlvoFilterOperator.In => Membership(target, comparison.Value, fields, bag),
+            AlvoFilterOperator.Is => Identity(target.Sql, comparison.Value, fields),
             _ => throw new AlvoAuthorizationException(UnsupportedFilterMessage),
         };
     }
+
+    /// <summary>
+    /// One comparison's column, in the three forms every operator needs it: the declared field name the value
+    /// binds through, the rendered SQL operand, and the type the comparison is evaluated at. Carried together
+    /// so no operator can render the column while forgetting to bind through it.
+    /// </summary>
+    private sealed record ComparisonTarget(string Column, string Sql, CelValueType Type);
 
     /// <summary>
     /// One comparison whose answer depends on how the engine <em>orders</em> the operands, so both sides are
@@ -127,9 +135,10 @@ internal static class FilterSqlRenderer
     /// answers a different wrong question.
     /// </summary>
     private static string Ordered(
-        string field, string op, object? value, CelValueType type, IFieldSqlRenderer fields, ParameterBag bag)
+        ComparisonTarget target, string op, object? value, IFieldSqlRenderer fields, ParameterBag bag)
     {
-        var (left, right) = fields.RenderComparableOperands(field, bag.Add(fields, value), type);
+        var (left, right) = fields.RenderComparableOperands(
+            target.Sql, bag.Add(fields, target.Column, value), target.Type);
         return $"{left} {op} {right}";
     }
 
@@ -139,10 +148,11 @@ internal static class FilterSqlRenderer
     /// pairing, which is what lets one <c>IN</c> list stand for all of them.
     /// </summary>
     private static string Membership(
-        string field, object? value, CelValueType type, IFieldSqlRenderer fields, ParameterBag bag)
+        ComparisonTarget target, object? value, IFieldSqlRenderer fields, ParameterBag bag)
     {
         var pairs = Candidates(value)
-            .Select(candidate => fields.RenderComparableOperands(field, bag.Add(fields, candidate), type))
+            .Select(candidate => fields.RenderComparableOperands(
+                target.Sql, bag.Add(fields, target.Column, candidate), target.Type))
             .ToList();
 
         return pairs.Count == 0
@@ -183,14 +193,20 @@ internal static class FilterSqlRenderer
 
     private sealed class ParameterBag(string prefix)
     {
-        private readonly Dictionary<string, object?> _values = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, BoundValue> _values = new(StringComparer.Ordinal);
 
-        internal IReadOnlyDictionary<string, object?> Values => _values;
+        internal IReadOnlyDictionary<string, BoundValue> Values => _values;
 
-        internal string Add(IFieldSqlRenderer fields, object? value)
+        /// <summary>
+        /// Records one caller-supplied value against the column it is compared with, and returns the marker
+        /// that references it. The column is required rather than optional: a filter operand is the
+        /// caller-supplied value this data path binds most often, and binding it by its own CLR type is a
+        /// silent wrong answer.
+        /// </summary>
+        internal string Add(IFieldSqlRenderer fields, string column, object? value)
         {
             var name = prefix + _values.Count.ToString(CultureInfo.InvariantCulture);
-            _values[name] = value;
+            _values[name] = BoundValue.ForColumn(column, value);
             return fields.RenderParameter(name);
         }
     }

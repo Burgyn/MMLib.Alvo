@@ -103,7 +103,7 @@ public class FilterSqlRendererPropertyTests
 
         rendered.Sql.ShouldBe("\"status\" IN (@alvo_f0, @alvo_f1)");
         rendered.Sql.ShouldNotContain("DROP", Case.Insensitive);
-        rendered.Parameters.Values.ShouldContain(Payload);
+        rendered.Parameters.Values.Select(bound => bound.Value).ShouldContain(Payload);
     }
 
     [Fact]
@@ -188,7 +188,7 @@ public class FilterSqlRendererPropertyTests
         {
             var rendered = Render(filter);
             sql = rendered.Sql;
-            parameters = rendered.Parameters;
+            parameters = rendered.Parameters.ToDictionary(pair => pair.Key, pair => pair.Value.Value, StringComparer.Ordinal);
             return true;
         }
         catch (AlvoAuthorizationException)

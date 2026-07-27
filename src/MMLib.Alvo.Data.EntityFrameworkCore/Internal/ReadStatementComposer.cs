@@ -9,7 +9,7 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// <summary>One composed read statement and the values its named parameters bind.</summary>
 /// <param name="Sql">The statement text.</param>
 /// <param name="Parameters">The values <paramref name="Sql"/> references by name.</param>
-internal sealed record ReadStatement(string Sql, IReadOnlyDictionary<string, object?> Parameters);
+internal sealed record ReadStatement(string Sql, IReadOnlyDictionary<string, BoundValue> Parameters);
 
 /// <summary>
 /// Composes the one statement every Alvo read goes through: the resolved <c>USING</c> predicate and the
@@ -110,7 +110,7 @@ internal sealed class ReadStatementComposer
         ArgumentNullException.ThrowIfNull(rows);
 
         var terms = new List<string>();
-        var parameters = new Dictionary<string, object?>(StringComparer.Ordinal);
+        var parameters = new Dictionary<string, BoundValue>(StringComparer.Ordinal);
 
         AddPredicate(terms, parameters, decision.Using, context, PolicyParameterPrefix.Using);
         AddPredicate(terms, parameters, decision.TenantScope, context, PolicyParameterPrefix.TenantScope);
@@ -156,14 +156,14 @@ internal sealed class ReadStatementComposer
     /// <c>RowLimitClause</c> carries no separator of its own, like <c>RowLockClause</c>, so the separating
     /// space is inserted here. The row count is bound, never formatted: it is caller-supplied.
     /// </summary>
-    private string LimitClause(Dictionary<string, object?> parameters, ReadStatementOptions options)
+    private string LimitClause(Dictionary<string, BoundValue> parameters, ReadStatementOptions options)
     {
         if (options.Limit is not { } limit)
         {
             return string.Empty;
         }
 
-        parameters[PolicyParameterPrefix.RowLimit] = limit;
+        parameters[PolicyParameterPrefix.RowLimit] = BoundValue.FromFramework(limit);
         return " " + _dialect.RowLimitClause(_fields.RenderParameter(PolicyParameterPrefix.RowLimit));
     }
 
@@ -184,7 +184,7 @@ internal sealed class ReadStatementComposer
     /// reason.
     /// </summary>
     private void AddPredicate(
-        List<string> terms, Dictionary<string, object?> parameters,
+        List<string> terms, Dictionary<string, BoundValue> parameters,
         CompiledExpression? expression, AlvoContext context, string prefix)
     {
         if (expression is null)
@@ -195,10 +195,18 @@ internal sealed class ReadStatementComposer
 
         var predicate = _predicates.Render(expression, context, _fields, prefix);
         terms.Add(predicate.Sql);
-        Collect(parameters, predicate.Parameters);
+        Collect(parameters, PolicyValues(predicate.Parameters));
     }
 
-    private void AddRowId(List<string> terms, Dictionary<string, object?> parameters, EntitySchema entity, Guid? rowId)
+    /// <summary>
+    /// A rendered <c>SqlPredicate</c>'s bag records names and values only — it carries no field — so its values
+    /// are tagged as the policy predicate's rather than as any column's. See
+    /// <see cref="BoundValue.FromPolicyPredicate"/> for why the CEL type checker makes that sufficient.
+    /// </summary>
+    private static Dictionary<string, BoundValue> PolicyValues(IReadOnlyDictionary<string, object?> rendered) =>
+        rendered.ToDictionary(pair => pair.Key, pair => BoundValue.FromPolicyPredicate(pair.Value), StringComparer.Ordinal);
+
+    private void AddRowId(List<string> terms, Dictionary<string, BoundValue> parameters, EntitySchema entity, Guid? rowId)
     {
         if (rowId is not { } id)
         {
@@ -207,11 +215,11 @@ internal sealed class ReadStatementComposer
 
         terms.Add(
             $"{_fields.RenderField(entity, AlvoDataContext.IdColumn)} = {_fields.RenderParameter(PolicyParameterPrefix.RowId)}");
-        parameters[PolicyParameterPrefix.RowId] = id;
+        parameters[PolicyParameterPrefix.RowId] = BoundValue.ForColumn(AlvoDataContext.IdColumn, id);
     }
 
     private void AddFilter(
-        List<string> terms, Dictionary<string, object?> parameters, EntitySchema entity, AlvoFilter? filter)
+        List<string> terms, Dictionary<string, BoundValue> parameters, EntitySchema entity, AlvoFilter? filter)
     {
         if (filter is null)
         {
@@ -224,7 +232,7 @@ internal sealed class ReadStatementComposer
     }
 
     private void AddAnchor(
-        List<string> terms, Dictionary<string, object?> parameters, EntitySchema entity, KeysetAnchor? anchor)
+        List<string> terms, Dictionary<string, BoundValue> parameters, EntitySchema entity, KeysetAnchor? anchor)
     {
         if (anchor is null)
         {
@@ -248,7 +256,7 @@ internal sealed class ReadStatementComposer
     /// produce wrong rows rather than an error.
     /// </para>
     /// </summary>
-    private static void Collect(Dictionary<string, object?> parameters, IReadOnlyDictionary<string, object?> rendered)
+    private static void Collect(Dictionary<string, BoundValue> parameters, IReadOnlyDictionary<string, BoundValue> rendered)
     {
         foreach (var (name, value) in rendered)
         {

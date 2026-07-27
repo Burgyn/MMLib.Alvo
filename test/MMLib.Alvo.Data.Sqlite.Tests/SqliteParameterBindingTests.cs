@@ -25,7 +25,7 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
 
         using var context = factory.Create();
         var binder = new PredicateParameterBinder(context);
-        var matched = await CountAsync(context, CountByOwner, binder.Bind(PolicyParameterPrefix.Using + "0", ownerId));
+        var matched = await CountAsync(context, CountByOwner, binder.BindPolicyPredicate(Bag(PolicyParameterPrefix.Using + "0", ownerId)));
 
         matched.ShouldBe(1);
     }
@@ -74,16 +74,14 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
         using var context = factory.Create();
 
         new PredicateParameterBinder(context)
-            .Bind(Column(context, field), PolicyParameterPrefix.Filter + "0", SampleFor(field))
+            .BindColumnValue(Column(context, field), PolicyParameterPrefix.Filter + "0", SampleFor(field))
             .DbType.ShouldBe(expected);
     }
 
     /// <summary>
-    /// The same guarantee on the overload PR2's rule predicates actually take. A rendered
-    /// <c>SqlPredicate</c>'s bag carries names and values only, so this path binds by the <em>value's</em>
-    /// type — and it must still reach ADO.NET with EF's own <see cref="DbType"/> rather than the
-    /// <c>String</c> a provider infers for an unmapped value. Asserting that on the column overload alone
-    /// left the live path's premise unasserted.
+    /// The same guarantee on the one path that has no column: a rendered <c>SqlPredicate</c>'s bag carries
+    /// names and values only, so it binds by the <em>value's</em> type — and must still reach ADO.NET with
+    /// EF's own <see cref="DbType"/> rather than the <c>String</c> a provider infers for an unmapped value.
     /// </summary>
     [Theory]
     [InlineData("owner_id", DbType.Guid)]
@@ -93,19 +91,20 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
     [InlineData("is_public", DbType.Boolean)]
     [InlineData("due_on", DbType.Date)]
     [InlineData("created_at", DbType.DateTimeOffset)]
-    public async Task Every_value_typed_bind_carries_the_db_type_efs_own_mapping_chose(string field, DbType expected)
+    public async Task Every_policy_predicate_bind_carries_the_db_type_efs_own_mapping_chose(string field, DbType expected)
     {
         var factory = await FactoryAsync();
         using var context = factory.Create();
 
         new PredicateParameterBinder(context)
-            .Bind(PolicyParameterPrefix.Using + "0", SampleFor(field))
+            .BindPolicyPredicate(Bag(PolicyParameterPrefix.Using + "0", SampleFor(field)))
+            .Single()
             .DbType.ShouldBe(expected);
     }
 
     /// <summary>
-    /// The column overload's real advantage over the value-typed one: a <see langword="null"/> still gets the
-    /// <em>column's</em> <see cref="DbType"/>, where the value-typed path has no type to take it from. That is
+    /// The column path's real advantage: a <see langword="null"/> still gets the <em>column's</em>
+    /// <see cref="DbType"/>, where a path with no column has no type to take it from. That is
     /// what keeps a <c>NULL</c> comparison from reaching PostgreSQL as an untyped parameter
     /// (<c>42P08 could not determine data type of parameter</c>).
     /// </summary>
@@ -116,7 +115,7 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
         using var context = factory.Create();
 
         new PredicateParameterBinder(context)
-            .Bind(Column(context, "created_at"), PolicyParameterPrefix.Filter + "0", null)
+            .BindColumnValue(Column(context, "created_at"), PolicyParameterPrefix.Filter + "0", null)
             .DbType.ShouldBe(DbType.DateTimeOffset);
     }
 
@@ -134,7 +133,7 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
 
         using var context = factory.Create();
         var bound = new PredicateParameterBinder(context)
-            .Bind(Column(context, "owner_id"), PolicyParameterPrefix.Using + "0", ownerId.ToString("D", CultureInfo.InvariantCulture));
+            .BindColumnValue(Column(context, "owner_id"), PolicyParameterPrefix.Using + "0", ownerId.ToString("D", CultureInfo.InvariantCulture));
 
         (await CountAsync(context, CountByOwner, bound)).ShouldBe(1);
     }
@@ -153,7 +152,7 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
         await AlvoDataSeed.SeedAsync(factory, Seed(Guid.NewGuid(), dueOn), TestContext.Current.CancellationToken);
 
         using var context = factory.Create();
-        var bound = new PredicateParameterBinder(context).Bind(
+        var bound = new PredicateParameterBinder(context).BindColumnValue(
             Column(context, "due_on"),
             PolicyParameterPrefix.Using + "0",
             new DateTimeOffset(dueOn.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero));
@@ -176,7 +175,7 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
         var binder = new PredicateParameterBinder(context);
 
         Should.Throw<InvalidOperationException>(
-            () => binder.Bind(Column(context, "owner_id"), PolicyParameterPrefix.Filter + "0", "not-a-uuid"));
+            () => binder.BindColumnValue(Column(context, "owner_id"), PolicyParameterPrefix.Filter + "0", "not-a-uuid"));
     }
 
     /// <summary>
@@ -197,7 +196,7 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
         using var context = factory.Create();
         var binder = new PredicateParameterBinder(context);
 
-        Should.Throw<InvalidOperationException>(() => binder.Bind(
+        Should.Throw<InvalidOperationException>(() => binder.BindColumnValue(
             Column(context, "mileage"), PolicyParameterPrefix.Filter + "0", (decimal)fraction));
     }
 
@@ -208,7 +207,7 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
         using var context = factory.Create();
 
         new PredicateParameterBinder(context)
-            .Bind(Column(context, "mileage"), PolicyParameterPrefix.Filter + "0", 13m)
+            .BindColumnValue(Column(context, "mileage"), PolicyParameterPrefix.Filter + "0", 13m)
             .Value.ShouldBe(13L);
     }
 
@@ -223,7 +222,7 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
         using var context = factory.Create();
 
         new PredicateParameterBinder(context)
-            .Bind(Column(context, "price"), PolicyParameterPrefix.Filter + "0", 12.7)
+            .BindColumnValue(Column(context, "price"), PolicyParameterPrefix.Filter + "0", 12.7)
             .Value.ShouldBe(12.7m);
     }
 
@@ -244,7 +243,7 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
         using var zone = new LocalTimeZone(timeZone);
 
         new PredicateParameterBinder(context)
-            .Bind(Column(context, "created_at"), PolicyParameterPrefix.Filter + "0", "2026-07-26T10:00:00")
+            .BindColumnValue(Column(context, "created_at"), PolicyParameterPrefix.Filter + "0", "2026-07-26T10:00:00")
             .Value.ShouldBe(new DateTimeOffset(2026, 7, 26, 10, 0, 0, TimeSpan.Zero));
     }
 
@@ -260,7 +259,7 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
         using var zone = new LocalTimeZone("Pacific/Kiritimati");
 
         new PredicateParameterBinder(context)
-            .Bind(Column(context, "created_at"), PolicyParameterPrefix.Filter + "0", "2026-07-26T10:00:00+02:00")
+            .BindColumnValue(Column(context, "created_at"), PolicyParameterPrefix.Filter + "0", "2026-07-26T10:00:00+02:00")
             .Value.ShouldBe(new DateTimeOffset(2026, 7, 26, 8, 0, 0, TimeSpan.Zero));
     }
 
@@ -276,7 +275,7 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
         using var zone = new LocalTimeZone("Pacific/Kiritimati");
 
         new PredicateParameterBinder(context)
-            .Bind(
+            .BindColumnValue(
                 Column(context, "created_at"),
                 PolicyParameterPrefix.Filter + "0",
                 new DateTime(2026, 7, 26, 10, 0, 0, DateTimeKind.Unspecified))
@@ -290,18 +289,19 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
         using var context = factory.Create();
 
         new PredicateParameterBinder(context)
-            .Bind(Column(context, "owner_id"), PolicyParameterPrefix.Filter + "0", null)
+            .BindColumnValue(Column(context, "owner_id"), PolicyParameterPrefix.Filter + "0", null)
             .Value.ShouldBe(DBNull.Value);
     }
 
     [Fact]
-    public async Task A_value_typed_bind_still_carries_the_null_sentinel()
+    public async Task A_policy_predicate_bind_still_carries_the_null_sentinel()
     {
         var factory = await FactoryAsync();
         using var context = factory.Create();
 
         new PredicateParameterBinder(context)
-            .Bind(PolicyParameterPrefix.Filter + "0", null)
+            .BindPolicyPredicate(Bag(PolicyParameterPrefix.Filter + "0", null))
+            .Single()
             .Value.ShouldBe(DBNull.Value);
     }
 
@@ -311,45 +311,55 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
         var factory = await FactoryAsync();
         using var context = factory.Create();
 
-        new PredicateParameterBinder(context).Bind(PolicyParameterPrefix.RowId, Guid.NewGuid())
+        new PredicateParameterBinder(context)
+            .BindColumnValue(Column(context, "id"), PolicyParameterPrefix.RowId, Guid.NewGuid())
             .ParameterName.ShouldBe("@" + PolicyParameterPrefix.RowId);
     }
 
     /// <summary>
-    /// One call binds every predicate's bag at once, and the names survive unchanged — the whole point of
-    /// three disjoint prefixes is that two bags can be merged without one value overwriting another.
+    /// A statement's values are bound in one call, dispatched on where each came from, and the names survive
+    /// unchanged — the whole point of disjoint prefixes is that several fragments can be merged without one
+    /// value overwriting another. Two fragments claiming one name is refused where they are <em>merged</em>
+    /// (<c>ReadStatementComposer.Collect</c>), not here: a statement carries one dictionary, so by the time it
+    /// reaches this class a duplicate is already unrepresentable.
     /// </summary>
     [Fact]
-    public async Task Several_predicate_bags_bind_in_one_call_without_losing_a_name()
+    public async Task A_statements_values_bind_in_one_call_without_losing_a_name()
     {
         var factory = await FactoryAsync();
         using var context = factory.Create();
 
         var bound = new PredicateParameterBinder(context).Bind(
-            new Dictionary<string, object?>(StringComparer.Ordinal) { ["alvo_u0"] = Guid.NewGuid() },
-            new Dictionary<string, object?>(StringComparer.Ordinal) { ["alvo_t0"] = Guid.NewGuid() },
-            new Dictionary<string, object?>(StringComparer.Ordinal) { ["alvo_f0"] = "text" });
+            context.Model.FindEntityType("vehicle")!,
+            new Dictionary<string, BoundValue>(StringComparer.Ordinal)
+            {
+                ["alvo_u0"] = BoundValue.FromPolicyPredicate(Guid.NewGuid()),
+                ["alvo_f0"] = BoundValue.ForColumn("plate", "ACME-001"),
+                ["alvo_limit"] = BoundValue.FromFramework(5),
+            });
 
         bound.Select(parameter => parameter.ParameterName)
-            .ShouldBe(["@alvo_u0", "@alvo_t0", "@alvo_f0"], ignoreOrder: true);
+            .ShouldBe(["@alvo_u0", "@alvo_f0", "@alvo_limit"], ignoreOrder: true);
     }
 
     /// <summary>
-    /// The last place a forgotten explicit parameter prefix can be caught. A <c>PolicyDecision</c> carries
-    /// three predicates, each numbering its parameters from zero; if two of them render with one prefix,
-    /// both bags carry <c>alvo_p0</c> and the engine binds whichever it sees last — no exception, and one
-    /// predicate's value substituted into another's comparison.
+    /// A value naming a field this read model does not map has no column to bind through, so it is refused
+    /// rather than falling back to the value's own type — the fallback that would silently reintroduce the
+    /// defect the origin-tagged shape exists to prevent.
     /// </summary>
     [Fact]
-    public async Task Two_bags_claiming_one_name_are_refused_rather_than_bound_twice()
+    public async Task A_column_this_read_model_does_not_map_is_refused_rather_than_bound_by_value_type()
     {
         var factory = await FactoryAsync();
         using var context = factory.Create();
         var binder = new PredicateParameterBinder(context);
 
         Should.Throw<InvalidOperationException>(() => binder.Bind(
-            new Dictionary<string, object?>(StringComparer.Ordinal) { ["alvo_p0"] = Guid.NewGuid() },
-            new Dictionary<string, object?>(StringComparer.Ordinal) { ["alvo_p0"] = Guid.NewGuid() }));
+            context.Model.FindEntityType("vehicle")!,
+            new Dictionary<string, BoundValue>(StringComparer.Ordinal)
+            {
+                ["alvo_f0"] = BoundValue.ForColumn("no_such_field", "x"),
+            }));
     }
 
     /// <summary>
@@ -363,7 +373,8 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
         using var context = factory.Create();
         var binder = new PredicateParameterBinder(context);
 
-        Should.Throw<InvalidOperationException>(() => binder.Bind(PolicyParameterPrefix.Filter + "0", new object()));
+        Should.Throw<InvalidOperationException>(
+            () => binder.BindPolicyPredicate(Bag(PolicyParameterPrefix.Filter + "0", new object())));
     }
 
     private Task<AlvoDataContextFactory> FactoryAsync() => FactoryAsync(new SchemaModel([AlvoDataFixtures.Vehicle]));
@@ -380,6 +391,9 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
         await AlvoDataSeed.SeedAsync(factory, Seed(ownerId), TestContext.Current.CancellationToken);
         return factory;
     }
+
+    private static Dictionary<string, object?> Bag(string name, object? value) =>
+        new(StringComparer.Ordinal) { [name] = value };
 
     private static IProperty Column(DbContext context, string field) =>
         context.Model.FindEntityType("vehicle")!.FindProperty(field)!;

@@ -46,7 +46,7 @@ internal static class KeysetSqlRenderer
         ArgumentException.ThrowIfNullOrWhiteSpace(parameterPrefix);
         EnsureAligned(anchor);
 
-        var parameters = new Dictionary<string, object?>(StringComparer.Ordinal);
+        var parameters = new Dictionary<string, BoundValue>(StringComparer.Ordinal);
         var sql = Level(0, anchor, entity, fields, parameterPrefix, parameters);
         return new RenderedSql(sql, parameters);
     }
@@ -70,7 +70,7 @@ internal static class KeysetSqlRenderer
 
     private static string Level(
         int index, KeysetAnchor anchor, EntitySchema entity, IFieldSqlRenderer fields,
-        string prefix, Dictionary<string, object?> parameters)
+        string prefix, Dictionary<string, BoundValue> parameters)
     {
         if (index == anchor.Sort.Count)
         {
@@ -81,7 +81,7 @@ internal static class KeysetSqlRenderer
         var declared = QueryFieldGuard.DeclaredField(entity, key.Field);
         var (column, parameter) = fields.RenderComparableOperands(
             fields.RenderField(entity, declared.Name),
-            Bind(anchor.Values[index], fields, prefix, parameters),
+            Bind(anchor.Values[index], declared.Name, fields, prefix, parameters),
             CelFieldType.Of(declared));
         var strict = key.Descending ? "<" : ">";
         var tail = Level(index + 1, anchor, entity, fields, prefix, parameters);
@@ -91,21 +91,28 @@ internal static class KeysetSqlRenderer
 
     private static string TieBreaker(
         KeysetAnchor anchor, EntitySchema entity, IFieldSqlRenderer fields,
-        string prefix, Dictionary<string, object?> parameters)
+        string prefix, Dictionary<string, BoundValue> parameters)
     {
         var declared = QueryFieldGuard.DeclaredField(entity, AlvoDataContext.IdColumn);
         var (column, parameter) = fields.RenderComparableOperands(
             fields.RenderField(entity, declared.Name),
-            Bind(anchor.RowId, fields, prefix, parameters),
+            Bind(anchor.RowId, declared.Name, fields, prefix, parameters),
             CelFieldType.Of(declared));
 
         return $"{column} > {parameter}";
     }
 
-    private static string Bind(object? value, IFieldSqlRenderer fields, string prefix, Dictionary<string, object?> parameters)
+    /// <summary>
+    /// Records one anchor value against the column it is compared with. The anchor's values came back from a
+    /// previous read already shaped by EF's mapping, but the column is still required: a cursor is only
+    /// comparisons, and a boundary bound by the value's own CLR type would compare a repaired column against
+    /// an unrepaired parameter.
+    /// </summary>
+    private static string Bind(
+        object? value, string column, IFieldSqlRenderer fields, string prefix, Dictionary<string, BoundValue> parameters)
     {
         var name = prefix + parameters.Count.ToString(CultureInfo.InvariantCulture);
-        parameters[name] = value;
+        parameters[name] = BoundValue.ForColumn(column, value);
         return fields.RenderParameter(name);
     }
 }

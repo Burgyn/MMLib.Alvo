@@ -34,7 +34,8 @@ public class KeysetSqlRendererTests
 
     [Fact]
     public void Every_anchor_value_is_a_bound_parameter()
-        => Render([new AlvoSort("plate")], ["ACME-001"]).Parameters.Values.ShouldContain("ACME-001");
+        => Render([new AlvoSort("plate")], ["ACME-001"]).Parameters.Values
+            .Select(bound => bound.Value).ShouldContain("ACME-001");
 
     [Fact]
     public void An_anchor_value_is_bound_once_and_referenced_twice()
@@ -42,8 +43,8 @@ public class KeysetSqlRendererTests
         var rendered = Render([new AlvoSort("plate")], ["ACME-001"]);
 
         rendered.Parameters.Count.ShouldBe(2);
-        rendered.Parameters[PolicyParameterPrefix.Keyset + "0"].ShouldBe("ACME-001");
-        rendered.Parameters[PolicyParameterPrefix.Keyset + "1"].ShouldBe(_anchorId);
+        rendered.Parameters[PolicyParameterPrefix.Keyset + "0"].Value.ShouldBe("ACME-001");
+        rendered.Parameters[PolicyParameterPrefix.Keyset + "1"].Value.ShouldBe(_anchorId);
     }
 
     /// <summary>

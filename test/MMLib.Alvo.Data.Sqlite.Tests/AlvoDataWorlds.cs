@@ -104,8 +104,15 @@ internal static class AlvoDataWorlds
     /// The canonical <c>vehicle</c> entity with one fully populated row, so a read and a patch exercise
     /// every CLR type the port maps.
     /// </summary>
-    internal static async Task<DataWorld> VehicleAsync(SqliteAlvoDataFixture fixture)
+    /// <param name="fixture">The fixture standing the database up.</param>
+    /// <param name="extraRows">
+    /// Further rows carrying only a plate and a timestamp, for the facts that page over a
+    /// <c>created_at</c> key.
+    /// </param>
+    internal static async Task<DataWorld> VehicleAsync(
+        SqliteAlvoDataFixture fixture, params (string Plate, DateTimeOffset CreatedAt)[] extraRows)
     {
+        ArgumentNullException.ThrowIfNull(extraRows);
         var tenant = TenantId.New();
         var alice = Caller(tenant);
         var rowId = Guid.NewGuid();
@@ -122,7 +129,14 @@ internal static class AlvoDataWorlds
             ("due_on", new DateOnly(2026, 1, 2)),
             ("created_at", DateTimeOffset.UnixEpoch.AddDays(1)));
 
-        var host = await StartVehicleAsync(fixture, [row]);
+        var extras = extraRows.Select(extra => Row(
+            Guid.NewGuid(),
+            ("tenant_id", tenant.Value),
+            ("owner_id", alice.User.Value),
+            ("plate", extra.Plate),
+            ("created_at", extra.CreatedAt)));
+
+        var host = await StartVehicleAsync(fixture, [row, .. extras]);
         return new DataWorld(host) { Alice = alice, Tenant = tenant, RowId = rowId };
     }
 

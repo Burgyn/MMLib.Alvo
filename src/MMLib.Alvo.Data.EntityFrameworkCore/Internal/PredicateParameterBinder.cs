@@ -22,23 +22,24 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// the same argument applies to every type, not only to <see cref="Guid"/>.
 /// </para>
 /// <para>
-/// <b>The column is the authority, not the value.</b> The representation EF wrote is decided by the
-/// column's CLR type, so <see cref="Bind(IProperty, string, object?)"/> — the overload every call site
-/// that knows its column must use — takes the mapping from the property and converts the value to the
-/// property's type first. Choosing the mapping from the value's own type instead is the same class of
-/// silent miss: a <c>uuid</c> column compared against a value that arrived as a <see cref="string"/>, or
-/// a <c>date</c> column against a <see cref="DateTimeOffset"/> (which is what a <c>Timestamp</c>-typed
-/// CEL operand becomes, since the type checker collapses <c>date</c> and <c>timestamp</c> into one CEL
-/// type), matches nothing and raises nothing.
+/// <b>The column is the authority, not the value — and that is enforced by the argument types, not by a
+/// convention.</b> The representation EF wrote is decided by the column's CLR type, so a value compared
+/// against a column binds through <see cref="BindColumnValue"/>, which cannot be called without an
+/// <see cref="IProperty"/>. There is deliberately <b>no</b> overload that takes a bare
+/// <c>name → value</c> bag: an earlier shape of this class had one, every production call site used it,
+/// and the column-aware overload — the one whose own documentation said it was mandatory — ended up with
+/// zero callers while its tests kept passing. Choosing the mapping from the value's own type is the same
+/// class of silent miss as formatting it: a <c>uuid</c> column compared against a value that arrived as a
+/// <see cref="string"/>, or a <c>date</c> column against a <see cref="DateTimeOffset"/>, matches nothing
+/// and raises nothing.
 /// </para>
 /// <para>
-/// <see cref="Bind(IReadOnlyDictionary{string, object?}[])"/> stays value-typed because a rendered
-/// <c>SqlPredicate</c>'s parameter bag records names and values only — it carries no field, so there is no
-/// column to consult. That is sound for the predicates PR2 renders: the type checker forces both operands
-/// of a non-numeric comparison to one CEL type, and the one reachable numeric mismatch is a
-/// <c>Decimal</c> comparison, whose operands <c>IFieldSqlRenderer.RenderComparableOperands</c> normalises
-/// on both sides. It is <em>not</em> sound for a caller-supplied value, which is why the filter, keyset
-/// and row-id call sites bind through the column.
+/// The two values with no column behind them each have their own narrowly named path, so neither can be
+/// reached for by a caller who really is binding a caller value: <see cref="BindPolicyPredicate"/> for a
+/// rendered <c>SqlPredicate</c>'s bag (which records names and values only — see
+/// <see cref="BoundValue.FromPolicyPredicate"/> for why the CEL type checker makes that sufficient) and the
+/// framework arm of <see cref="Bind(IEntityType, IReadOnlyDictionary{string, BoundValue})"/> for the page's
+/// row limit.
 /// </para>
 /// </remarks>
 internal sealed class PredicateParameterBinder
@@ -67,30 +68,35 @@ internal sealed class PredicateParameterBinder
     private string Marker(string name) => _sql.GenerateParameterName(name);
 
     /// <summary>
-    /// Binds every value in <paramref name="bags"/>, refusing a name two bags both claim — the one place a
-    /// forgotten explicit parameter prefix would otherwise substitute one predicate's value into another's
-    /// comparison, silently and with no exception from the engine.
+    /// Binds every value one composed statement carries, dispatching on where each came from: a value
+    /// compared against a column goes through that column's mapping, and the two column-less origins go
+    /// through their own paths.
     /// </summary>
-    /// <exception cref="InvalidOperationException">Two bags bound the same parameter name.</exception>
-    internal DbParameter[] Bind(params IReadOnlyDictionary<string, object?>[] bags)
+    /// <param name="rows">The read model's entity type, the one authority for what column a field maps to.</param>
+    /// <param name="parameters">The statement's bound values, by parameter name.</param>
+    /// <exception cref="InvalidOperationException">
+    /// A value names a column this read model does not map, or a column cannot hold its value.
+    /// </exception>
+    internal DbParameter[] Bind(IEntityType rows, IReadOnlyDictionary<string, BoundValue> parameters)
     {
-        ArgumentNullException.ThrowIfNull(bags);
+        ArgumentNullException.ThrowIfNull(rows);
+        ArgumentNullException.ThrowIfNull(parameters);
         using var command = _connection.CreateCommand();
-        var bound = new Dictionary<string, DbParameter>(StringComparer.Ordinal);
 
-        foreach (var (name, value) in bags.SelectMany(Pairs))
-        {
-            RequireUnclaimed(bound, name);
-            bound[name] = Bind(command, name, value);
-        }
-
-        return [.. bound.Values];
+        return [.. parameters.Select(pair => Bind(command, rows, pair.Key, pair.Value))];
     }
 
-    internal DbParameter Bind(string name, object? value)
+    /// <summary>
+    /// Binds a rendered policy predicate's bag, whose values carry no column. Named for exactly that case so
+    /// it cannot stand in for <see cref="BindColumnValue"/>.
+    /// </summary>
+    /// <param name="parameters">The rendered predicate's values, by parameter name.</param>
+    internal DbParameter[] BindPolicyPredicate(IReadOnlyDictionary<string, object?> parameters)
     {
+        ArgumentNullException.ThrowIfNull(parameters);
         using var command = _connection.CreateCommand();
-        return Bind(command, name, value);
+
+        return [.. parameters.Select(pair => WithoutColumn(command, pair.Key, pair.Value))];
     }
 
     /// <summary>
@@ -98,33 +104,42 @@ internal sealed class PredicateParameterBinder
     /// column's own type mapping, and after converting the value to the column's CLR type.
     /// </summary>
     /// <exception cref="InvalidOperationException"><paramref name="column"/> cannot hold <paramref name="value"/>.</exception>
-    internal DbParameter Bind(IProperty column, string name, object? value)
+    internal DbParameter BindColumnValue(IProperty column, string name, object? value)
     {
         ArgumentNullException.ThrowIfNull(column);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         using var command = _connection.CreateCommand();
 
-        return column.GetRelationalTypeMapping()
+        return BindThroughColumn(command, column, name, value);
+    }
+
+    private DbParameter Bind(DbCommand command, IEntityType rows, string name, BoundValue bound) => bound.Origin switch
+    {
+        BoundValueOrigin.ColumnComparison => BindThroughColumn(command, Column(rows, bound.Column!), name, bound.Value),
+        BoundValueOrigin.PolicyPredicate or BoundValueOrigin.Framework => WithoutColumn(command, name, bound.Value),
+        _ => throw new InvalidOperationException(
+            $"'{bound.Origin}' is not a known bound-value origin, so parameter '{name}' cannot be bound safely."),
+    };
+
+    /// <summary>
+    /// The mapped property for a declared field name. A field this read model does not map has no
+    /// representation to bind through, so it is refused rather than bound by the value's own type — the
+    /// fallback that would silently reintroduce the defect this class's shape exists to prevent.
+    /// </summary>
+    private static IProperty Column(IEntityType rows, string field) => rows.FindProperty(field)
+        ?? throw new InvalidOperationException(
+            $"'{field}' is not mapped by this read model, so a value cannot be bound through its column.");
+
+    private DbParameter BindThroughColumn(DbCommand command, IProperty column, string name, object? value) =>
+        column.GetRelationalTypeMapping()
             .CreateParameter(command, Marker(name), AsColumnType(value, column), nullable: true);
-    }
 
-    private static IEnumerable<KeyValuePair<string, object?>> Pairs(IReadOnlyDictionary<string, object?> bag)
-    {
-        ArgumentNullException.ThrowIfNull(bag);
-        return bag;
-    }
-
-    private static void RequireUnclaimed(Dictionary<string, DbParameter> bound, string name)
-    {
-        if (bound.ContainsKey(name))
-        {
-            throw new InvalidOperationException(
-                $"Two predicates both bound the parameter name '{name}'. Each predicate must be rendered with its own " +
-                "parameter prefix, or one predicate's value is substituted into another's comparison.");
-        }
-    }
-
-    private DbParameter Bind(DbCommand command, string name, object? value)
+    /// <summary>
+    /// The one path for a value with no column behind it: the mapping comes from the value's own CLR type.
+    /// Reachable only for a rendered policy predicate's values and for the framework's own row limit — both
+    /// typed by something other than a caller.
+    /// </summary>
+    private DbParameter WithoutColumn(DbCommand command, string name, object? value)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         var mapping = value is null ? null : _mappings.FindMapping(value.GetType());

@@ -34,7 +34,7 @@ public class ReadStatementComposerTests
     {
         var statement = Compose(new ReadStatementComposer.ReadStatementOptions());
 
-        foreach (var value in statement.Parameters.Values.Where(value => value is not null))
+        foreach (var value in statement.Parameters.Values.Select(bound => bound.Value).Where(value => value is not null))
         {
             statement.Sql.ShouldNotContain(value!.ToString()!, Case.Insensitive);
         }
@@ -52,7 +52,7 @@ public class ReadStatementComposerTests
 
         statement.Sql.ShouldContain("\"id\" = @alvo_id");
         statement.Sql.ShouldEndWith(" FOR TEST");
-        statement.Parameters[PolicyParameterPrefix.RowId].ShouldBe(id);
+        statement.Parameters[PolicyParameterPrefix.RowId].Value.ShouldBe(id);
     }
 
     /// <summary>
@@ -122,7 +122,7 @@ public class ReadStatementComposerTests
 
         statement.Sql.ShouldContain("@alvo_u0");
         statement.Sql.ShouldContain("AND (\"status\" = @alvo_f0)");
-        statement.Parameters[PolicyParameterPrefix.Filter + "0"].ShouldBe("open");
+        statement.Parameters[PolicyParameterPrefix.Filter + "0"].Value.ShouldBe("open");
     }
 
     [Fact]
@@ -132,7 +132,7 @@ public class ReadStatementComposerTests
         var statement = Compose(new ReadStatementComposer.ReadStatementOptions { Anchor = anchor });
 
         statement.Sql.ShouldContain("AND ((\"plate\" > @alvo_k0 OR (\"plate\" = @alvo_k0 AND \"id\" > @alvo_k1)))");
-        statement.Parameters[PolicyParameterPrefix.Keyset + "0"].ShouldBe("ACME-001");
+        statement.Parameters[PolicyParameterPrefix.Keyset + "0"].Value.ShouldBe("ACME-001");
     }
 
     /// <summary>
@@ -187,7 +187,7 @@ public class ReadStatementComposerTests
         var statement = Compose(new ReadStatementComposer.ReadStatementOptions { Limit = 5 });
 
         statement.Sql.ShouldEndWith(" ORDER BY \"id\" LIMIT @alvo_limit");
-        statement.Parameters[PolicyParameterPrefix.RowLimit].ShouldBe(5);
+        statement.Parameters[PolicyParameterPrefix.RowLimit].Value.ShouldBe(5);
     }
 
     [Fact]
