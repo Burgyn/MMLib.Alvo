@@ -75,6 +75,30 @@ declined, and the reasons belong here so a later reader does not re-derive it as
    *is* the whole cost, which makes this a judgement call rather than a mistake — and one worth revisiting if
    EF ever documents the collation.
 
+### `ORDER BY` is engine-divergent for two types, and only one of them needs a repair
+
+Ordering and boundary agree *with each other* on each engine — that is the point above and it holds. Agreement
+*between* engines is a separate property, which §0's engine-agnostic rule wants and which rendering an
+`ORDER BY` newly makes observable. `RenderComparableOperands` repairs `Decimal` only, so:
+
+- **Timestamps and dates — a real divergence, and a repair is the answer.** On SQLite EF stores them as `TEXT`
+  carrying the caller's own offset, so ordering is lexical: two rows written at the same instant with different
+  offsets sort by their rendered text, while PostgreSQL's `timestamptz` sorts by instant. Same data, same
+  query, two page contents. It is narrower than it looks, because `PredicateParameterBinder` normalises every
+  bound timestamp to UTC — but a row's *stored* offset comes from the create path, which preserves what the
+  caller passed. **Verdict: this wants the same treatment as `Decimal`** (a SQLite override normalising the
+  operand), and it is Task 11's differential leg that should decide the exact form, since PostgreSQL is the
+  side that gives the right answer to compare against.
+- **Strings — divergent, and deliberately left alone.** SQLite compares `TEXT` with `BINARY` collation;
+  PostgreSQL uses the database collation, where `'a' < 'B'`. So one `AlvoSort("title")` yields a different first
+  page on the two engines. **Verdict: acceptable, not a defect to repair here.** Collation is a property of the
+  *database* a host configures, not of Alvo's rendering; forcing one (`COLLATE "C"`, `COLLATE BINARY`) would
+  override an operator's deliberate choice and make every string sort non-sargable on PostgreSQL. It is also
+  already the reason relational operators on a string are refused in the Rule profile
+  (`CelTypeChecker`: *"collation-dependent and are not available"*), so refusing to *order* by a string would
+  be inconsistent with allowing it to be sorted at all. What matters for correctness is that the boundary uses
+  the identical unrepaired operand, so a page is self-consistent on each engine — which it is.
+
 **Null placement** is the portable `CASE WHEN <key> IS NULL THEN 0/1 ELSE 1/0 END` emulation (spike `Q3c`),
 because SQLite and PostgreSQL disagree on where `NULL` sorts for a given direction. It is known to defeat an
 index on the sort key; that cost belongs with the latency criterion, which #19 owns. The `IS NULL` test reads

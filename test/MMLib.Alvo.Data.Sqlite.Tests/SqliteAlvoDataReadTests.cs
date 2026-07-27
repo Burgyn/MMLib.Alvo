@@ -150,6 +150,55 @@ public sealed class SqliteAlvoDataReadTests : IAsyncDisposable
         rows.ShouldBeEmpty();
     }
 
+    /// <summary>
+    /// Ordering by a field the caller may not read discloses that field's ordering across the whole page, with
+    /// no value ever appearing in the response — and with a limit and a cursor it is a binary search that
+    /// recovers the value itself. The sort arm is closed by <c>QueryFields</c> concatenating the sort keys onto
+    /// the filter's; the filter arm alone leaves the channel open, so it is asserted here, through the port.
+    /// </summary>
+    [Fact]
+    public async Task A_sort_naming_a_hidden_field_is_refused_rather_than_leaking_its_ordering()
+    {
+        var world = await AlvoDataWorlds.AccountsAsync(_fixture);
+
+        var refused = await Should.ThrowAsync<AlvoAuthorizationException>(() => world.QueryAsync(
+            new AlvoQuery { Entity = "accounts", Sort = [new AlvoSort("secret", Descending: true)] }, world.Member));
+
+        refused.Message.ShouldNotContain("secret");
+        world.Statements.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// The mask is per caller, so the same sort key must still work for the admin the field is visible to —
+    /// otherwise the refusal is a blanket rejection of a field name rather than real masking.
+    /// </summary>
+    [Fact]
+    public async Task A_sort_naming_a_field_hidden_only_from_this_caller_still_sorts_for_the_other()
+    {
+        var world = await AlvoDataWorlds.AccountsAsync(_fixture);
+        var byNote = new AlvoQuery { Entity = "accounts", Sort = [new AlvoSort("note")] };
+
+        await Should.ThrowAsync<AlvoAuthorizationException>(() => world.QueryAsync(byNote, world.Member));
+
+        var asAdmin = await world.QueryAsync(byNote, world.Admin);
+        asAdmin.Count.ShouldBe(2);
+    }
+
+    /// <summary>
+    /// The visible sibling still sorts, so the refusal is about the mask rather than about sorting at all.
+    /// </summary>
+    [Fact]
+    public async Task A_sort_naming_a_visible_field_is_answered()
+    {
+        var world = await AlvoDataWorlds.AccountsAsync(_fixture);
+
+        var sorted = await world.QueryAsync(
+            new AlvoQuery { Entity = "accounts", Sort = [new AlvoSort("title", Descending: true)] }, world.Member);
+
+        sorted.Count.ShouldBe(2);
+        sorted[0]["title"].ShouldBe("Acct-2");
+    }
+
     [Fact]
     public async Task A_get_of_another_callers_row_reads_as_absent()
     {
