@@ -3,10 +3,9 @@
 How an Alvo read or write becomes one SQL statement, and the decisions that shape it. Written during F3 PR2
 (#20).
 
-> **Status: partial.** This file is created early, by the slice that needed somewhere to record a port
-> decision. **PR2's Task 12 completes it** — the mechanism end to end, the three parameter prefixes, the
-> no-`SaveChanges` rule, the all-optional read model, and the F7 notes. What is below is only what is already
-> settled, so a later reader can tell a decision from an oversight.
+> **Status: partial.** **PR2's Task 12 completes it** — what is still missing is the parameter-prefix table,
+> the all-optional read model's own section, the DI wiring, and the F7 notes. What is below is settled, so a
+> later reader can tell a decision from an oversight.
 
 ## One statement, one `WHERE`
 
@@ -18,6 +17,136 @@ that the policy predicate is in the `WHERE` clause rather than applied afterward
 
 A `hidden` field is not omitted from the `SELECT` list — EF refuses a `FromSql` result set missing a mapped
 property — it is projected as a typed SQL `NULL` under its own alias, so the column is never read.
+
+**`ORDER BY` and `LIMIT` are in that same statement, and nothing is composed over the root in LINQ.** That is
+a deliberate reversal of the plan's own *Deviations* 4, which put the ordering in a LINQ chain because EF
+wraps a `FromSql` body in a derived table whose row order is not guaranteed to survive. The reversal is
+sound because the objection only bites when something *is* composed: with the whole statement in the raw
+text and a bare `ToListAsync()` over it, EF runs the text verbatim and there is no derived table. Measured,
+not assumed — see *A page's order and its boundary must be the same sequence* below.
+
+A read whose row order is not observable — no sort key, no limit, no cursor — gets no `ORDER BY` at all;
+`AlvoQuery.Sort` documents that order as implementation-defined. Every other read is ordered by the caller's
+keys and then, always ascending, by the row key, because the keyset boundary's own tie-breaker is exactly
+that comparison.
+
+## A page's order and its boundary must be the same sequence
+
+A keyset page is correct only while its `ORDER BY` and its cursor predicate describe the same total order.
+Both are therefore rendered from one seam — `IFieldSqlRenderer.RenderComparableOperands`, at the sort
+column's own `CelFieldType` — by `SortSqlRenderer` and `KeysetSqlRenderer` respectively. The ordering
+operand asks the pair-returning port with the same operand on both sides and takes either; the repair is
+symmetric by contract, so that is the same seam rather than a second reading of it.
+
+**What was measured, against a real SQLite database.** EF's LINQ `ORDER BY` over a `decimal` property does
+translate — the plan suspected a translation error and there is none — but it translates to
+`ORDER BY "price" COLLATE EF_DECIMAL`, EF's own collation, which orders **exactly**. The keyset boundary
+compares the driver's `CAST(… AS REAL)` repair, which orders **approximately**. Those are two different
+orders, and they disagree wherever a `decimal(18,2)` exceeds double's 53-bit mantissa: two values the
+collation separates, the repair ties. A page then does not merely mis-sort — the boundary excludes a row the
+order placed after the anchor, and the row is **skipped**. Reproduced as a failing test by rendering
+`COLLATE EF_DECIMAL` into the `ORDER BY` while leaving the boundary repaired
+(`SqliteAlvoDataDecimalPagingTests.Two_prices_that_collide_in_the_repaired_space_are_still_both_walked`).
+
+The suite walks every page one row at a time over prices `2, 9, 10, 100` — lexically `10, 100, 2, 9`, so a
+lost repair on *either* side is visible as a skipped row rather than as a mis-sort. Both directions are
+verified by mutation.
+
+**Null placement** is the portable `CASE WHEN <key> IS NULL THEN 0/1 ELSE 1/0 END` emulation (spike `Q3c`),
+because SQLite and PostgreSQL disagree on where `NULL` sorts for a given direction. It is known to defeat an
+index on the sort key; that cost belongs with the latency criterion, which #19 owns. The `IS NULL` test reads
+the raw column, not the repaired one — a cast `NULL` is still `NULL`.
+
+**Known gap, carried forward:** `KeysetSqlRenderer` models no null placement of its own, so a cursor whose
+anchor row has a `NULL` sort key compares against `NULL` and yields an empty page. Paging over a nullable
+sort key therefore stops at the first null-keyed row. `AlvoQuery.Sort`'s `Nulls` placement is honoured by the
+`ORDER BY` and not by the boundary; closing it needs an `IS NULL`-aware cursor predicate, which is a shape
+change to that renderer.
+
+## Writes never reach a change tracker
+
+`update` and `delete` are `ExecuteUpdateAsync`/`ExecuteDeleteAsync` composed over the **same `FromSql` root
+that carries `USING`**, so the predicate is a subquery inside the emitted statement and `rows affected == 0`
+is the `AlvoRecordNotFoundException` signal — indistinguishable, as `IAlvoData` requires, from a row that
+never existed. `SaveChangesAsync` is reached from exactly one production path, the insert, plus the test-only
+`AlvoDataSeed` seam. The alternative is not a style preference: a tracked `Attach` + set + `SaveChanges`
+emits `UPDATE … WHERE id = @p` with **no policy predicate at all** (spike `Q5d`), and it is the shortest,
+most idiomatic EF code available.
+
+The shapes SQLite actually emits:
+
+```sql
+-- update: the policy root is the inner derived table
+UPDATE "notes" AS "n0" SET "title" = @p2
+FROM (SELECT "n"."id" FROM (
+        SELECT "id", "owner_id", "title", "tenant_id" FROM "notes"
+        WHERE (COALESCE("owner_id" = @alvo_u0, 0)) AND (COALESCE("tenant_id" = @alvo_t0, 0))
+      ) AS "n" WHERE "n"."id" = @id) AS "n1"
+WHERE "n0"."id" = "n1"."id"
+
+-- delete: the same root, as an IN subquery
+DELETE FROM "notes" AS "n" WHERE "n"."id" IN (
+    SELECT "n0"."id" FROM (<the same policy-filtered SELECT>) AS "n0" WHERE "n0"."id" = @id)
+```
+
+**The row id is matched in LINQ, and EF names that parameter after the C# local** — `@id` here, which is
+spike `Q6`'s widened namespace in the flesh. Every name this data path generates begins with `alvo_`, so it
+cannot collide; a future reserved name that did not would be substituted silently.
+
+**`WITH CHECK` is merge-then-check, never write-then-rollback.** Inside one transaction: read the pre-image
+under `USING` with the driver's row lock in `PreImageMutation.Update` mode, merge the patch over it, evaluate
+`WithCheck` and the tenant scope through `IPredicateEvaluator`, then write — still constrained by `USING`.
+Spike `Q5e` proved write-then-read-then-rollback also works; it is rejected because it makes a rollback
+control flow and moves the verdict out of the engine-agnostic core.
+
+**The pre-image read is unmasked** (`ReadStatementOptions.Unmasked`). A verdict is reached over the complete
+stored row, so a rule referencing a `hidden` field must see its real value; read through the mask it would be
+the projected `NULL` and the rule would decide differently. Masking applies to what the port *returns*, which
+is a separate step (`RecordMaterializer`).
+
+**The pre-image read is a second gate in front of the write's own predicate**, and the two are not
+interchangeable: with the policy root swapped for the bare `DbSet`, every outcome-level fact still passes
+(the pre-image read has already refused the invisible row) and only the statement-level facts fail. Both
+kinds of test are therefore kept.
+
+**`PreImageMutation.Delete` has no consumer in PR2.** A delete carries no `WITH CHECK`, so it reads no
+pre-image at all and goes straight to `ExecuteDelete` over the policy root. The enum member is the dialect
+contract for a future path that does read one.
+
+## The failure contract, and where each refusal is decided
+
+| Situation | Outcome | Decided from |
+|---|---|---|
+| No policy for the operation | `AlvoAuthorizationException` | the decision alone |
+| Entity undeclared, or `EntityStorage.Dynamic` | `AlvoAuthorizationException`, one shared message | the applied schema |
+| Filter/sort names a hidden or undeclared field | `AlvoAuthorizationException`, one shared message | the decision + schema |
+| Filter deeper than `AlvoFilter.MaxDepth`, negative `Limit` | `ArgumentException` family | the query alone |
+| Payload names `id`, or `tenant_id` on update, or a read-only or undeclared field | `AlvoAuthorizationException` | the payload alone |
+| `get` of an invisible or absent row | `null` | the engine |
+| `update`/`delete` of an invisible or absent row | `AlvoRecordNotFoundException`, identical message | rows affected / pre-image |
+| Post-image fails `WITH CHECK` or the tenant scope | `AlvoAuthorizationException` | `IPredicateEvaluator` |
+
+Every payload refusal is decided **before any row is looked up**, so "was my write rejected" can never answer
+"does this row exist". The undeclared-entity message is `AlvoDataContext.UnmappedEntityMessage`, referenced
+rather than re-declared: two copies of an indistinguishability string are two authorities for one security
+guarantee.
+
+A missing **required** value is refused by the database's own `NOT NULL` and surfaces as EF's
+`DbUpdateException` — deliberately not one of `IAlvoData`'s declared exceptions, because schema-derived
+request validation belongs above this port. Pinned by
+`SqliteAlvoDataCreateTests.A_missing_required_value_is_refused_by_the_database_constraint` as the rough edge
+PR3's RFC 7807 layer closes.
+
+## The cursor carries no data
+
+`KeysetCursor` is base64url over the anchor row's primary key and nothing else. The anchor's sort-key values
+are re-read **under the same policy predicate as the page**, so a stale, forged or cross-tenant cursor finds
+no anchor and yields an empty page rather than an oracle. Cost: one extra round trip per page.
+
+`Base64Url.TryDecodeFromChars` **throws** `FormatException` on a non-alphabet character despite the `Try`
+name — it returns `false` only for a destination it cannot fill. A cursor is caller-supplied text, so the
+text is validated with `Base64Url.IsValid` first; without that, a garbage cursor is an unhandled exception
+out of `QueryAsync` rather than an empty page.
 
 ## Comparison operands are repaired in pairs, by the dialect
 
@@ -110,3 +239,7 @@ test — and deliberately kept, because last-writer-wins on a real collision ret
 Task 12 should record it as a known survivor (or exclude the arm) rather than let it read as a missing test.
 The same applies to `Internal/AlvoDataSeed.cs`, which is test-only seeding and is excluded from mutation by
 design.
+
+`ReadStatementComposer.RequiresTotalOrder` has three disjuncts and only two are independently observable on
+the read path today (`Sort` and `Limit`/`Anchor` reach it together from `QueryAsync` in some combinations);
+Task 12 should confirm each disjunct has a killing test rather than assume the composer tests cover all three.
