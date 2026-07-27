@@ -217,6 +217,27 @@ public abstract class AlvoDataAdversarialTests
         thirdResult.Count.ShouldBe(1);
     }
 
+    /// <summary>
+    /// Design <em>Verification</em> §4: a query issued with <see langword="null"/> for
+    /// <see cref="AlvoContext"/> throws, rather than defaulting to anonymous or to every tenant's rows
+    /// — a caller identity is required before any policy can even be resolved. Distinct from
+    /// <see cref="A_query_with_no_tenant_context_fails_rather_than_returning_every_tenants_rows"/>: that
+    /// fact is a caller who <b>has</b> an identity but no tenant, denied by the tenant guard; this one
+    /// has no <see cref="AlvoContext"/> at all, caught by <c>ArgumentNullException.ThrowIfNull(context)</c>
+    /// at the top of every <c>EfAlvoData</c> member — one piece of shared code both EF drivers call
+    /// through, so there is no engine-specific path that could diverge.
+    /// </summary>
+    [Fact]
+    public async Task A_query_with_no_context_at_all_throws_rather_than_defaulting_to_anyone()
+    {
+        var fixture = await NotesFixtureAsync();
+
+        await Should.ThrowAsync<ArgumentNullException>(
+            () => fixture.Data.QueryAsync(new AlvoQuery { Entity = "notes" }, null!));
+        await Should.ThrowAsync<ArgumentNullException>(
+            () => fixture.Data.GetAsync("notes", fixture.AliceRow1Id, null!));
+    }
+
     /// <summary>A tenantless context cannot create into a scoped entity, even with a permissive <c>"true"</c> rule.</summary>
     [Fact]
     public async Task A_tenantless_context_cannot_create_into_a_scoped_entity()

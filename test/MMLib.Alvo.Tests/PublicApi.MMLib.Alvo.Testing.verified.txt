@@ -73,6 +73,7 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task A_paged_read_sorted_by_a_nullable_field_is_refused_rather_than_dropping_rows() { }
         public System.Threading.Tasks.Task A_paged_read_sorted_by_a_required_field_still_answers() { }
         public System.Threading.Tasks.Task A_query_limit_is_applied_after_the_policy_predicate_not_before() { }
+        public System.Threading.Tasks.Task A_query_with_no_context_at_all_throws_rather_than_defaulting_to_anyone() { }
         public System.Threading.Tasks.Task A_query_with_no_tenant_context_fails_rather_than_returning_every_tenants_rows() { }
         public System.Threading.Tasks.Task A_sort_naming_a_hidden_field_is_rejected_rather_than_leaking_its_ordering() { }
         public System.Threading.Tasks.Task A_tenant_scoped_entity_never_returns_another_tenants_rows() { }

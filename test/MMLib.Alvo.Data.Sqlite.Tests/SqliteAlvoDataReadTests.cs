@@ -22,17 +22,6 @@ public sealed class SqliteAlvoDataReadTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task A_query_with_no_context_throws_rather_than_defaulting_to_anyone()
-    {
-        var world = await AlvoDataWorlds.NotesAsync(_fixture);
-
-        await Should.ThrowAsync<ArgumentNullException>(
-            () => world.Data.QueryAsync(new AlvoQuery { Entity = "notes" }, null!, TestContext.Current.CancellationToken));
-        await Should.ThrowAsync<ArgumentNullException>(
-            () => world.Data.GetAsync("notes", Guid.NewGuid(), null!, TestContext.Current.CancellationToken));
-    }
-
-    [Fact]
     public async Task A_hidden_field_is_absent_from_every_returned_row_and_its_value_never_leaves_the_table()
     {
         var world = await AlvoDataWorlds.AccountsAsync(_fixture);
