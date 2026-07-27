@@ -52,6 +52,29 @@ The suite walks every page one row at a time over prices `2, 9, 10, 100` — lex
 lost repair on *either* side is visible as a skipped row rather than as a mis-sort. Both directions are
 verified by mutation.
 
+**The obligation is stated on the port member itself**, not only here: `RenderComparableOperands`' remarks now
+name ordering as its second consumer and spell out that the repair has to be *order-preserving*, because a
+third-party driver reads that member and nothing else. `LOWER(x)` is the named trap — a sound comparison
+repair and a wrong ordering key.
+
+### Rejected alternative: EF's `EF_DECIMAL` collation on both sides
+
+`ORDER BY "price" COLLATE EF_DECIMAL` is what a LINQ `OrderBy` emits, and using it on *both* sides — the
+ordering and the boundary — would have been **strictly better on exactness**: the collation compares parsed
+decimal values, so it orders correctly at every magnitude and removes the documented 53-bit / ±90-trillion
+cliff, while leaving the operand `TEXT` and so no worse for indexability than the `CAST`. It was still
+declined, and the reasons belong here so a later reader does not re-derive it as an obvious improvement:
+
+1. **`EF_DECIMAL` is a collation EF registers on the connection** — not a SQLite feature and not part of EF's
+   public API. Writing it into Alvo's SQL text couples the driver to an undocumented EF internal whose rename
+   surfaces as `no such collation sequence` at query time, **on the security path**.
+2. **A collation only applies `TEXT`-vs-`TEXT`.** It repairs a comparison only if the parameter is bound as
+   EF's decimal `TEXT` representation too, which was not the case while values bound by their own CLR type —
+   so adopting it was not even available as a local change until the binding was fixed.
+3. It is SQLite-only and would live behind the same port member, so the port shape is unaffected. The coupling
+   *is* the whole cost, which makes this a judgement call rather than a mistake — and one worth revisiting if
+   EF ever documents the collation.
+
 **Null placement** is the portable `CASE WHEN <key> IS NULL THEN 0/1 ELSE 1/0 END` emulation (spike `Q3c`),
 because SQLite and PostgreSQL disagree on where `NULL` sorts for a given direction. It is known to defeat an
 index on the sort key; that cost belongs with the latency criterion, which #19 owns. The `IS NULL` test reads

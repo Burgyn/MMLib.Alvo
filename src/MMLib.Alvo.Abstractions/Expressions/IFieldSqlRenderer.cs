@@ -137,6 +137,24 @@ public interface IFieldSqlRenderer
     /// comparisons sharing one left operand.
     /// </para>
     /// <para>
+    /// <b>This member also renders <c>ORDER BY</c>, so the repair must be order-preserving and not merely
+    /// comparison-consistent.</b> A storage driver asks it with the <em>same</em> operand on both sides and
+    /// uses either result as an ordering key, so whatever it returns decides how rows sort as well as how they
+    /// compare. That is deliberate: a keyset page is correct only while its <c>ORDER BY</c> and its cursor
+    /// boundary describe the <em>same</em> total order, and rendering both from one member is what makes them
+    /// unable to drift. The consequence for an implementation is a real constraint — a repair that is a valid
+    /// equivalence but not a valid ordering breaks paging while looking perfectly reasonable in isolation.
+    /// <c>LOWER(x)</c> for a case-insensitive string comparison is the trap: it is a sound comparison repair
+    /// and a wrong ordering key, and a page built on it silently skips or repeats rows. A dialect needing that
+    /// kind of repair must express it in the <em>operator</em> instead (see
+    /// <see cref="RenderCaseInsensitiveLike"/>, which is why case-insensitive matching has a member of its
+    /// own), and return the operands unchanged here. Formally: for all <c>a</c>, <c>b</c> of
+    /// <paramref name="type"/>, <c>a &lt; b</c> must imply <c>repair(a) &lt; repair(b)</c>. A repair that
+    /// merges values the type distinguishes (SQLite's <c>REAL</c> cast beyond 53 bits of mantissa) is
+    /// acceptable, because both sides then agree the two are tied and the row key breaks the tie; a repair that
+    /// <em>reorders</em> them is not.
+    /// </para>
+    /// <para>
     /// An implementation must return expressions rather than predicates, and must preserve
     /// <see langword="null"/>: a wrapper that turned a <c>NULL</c> operand into a value would break the
     /// three-valued fold every comparison goes through. A cast that costs an index scan is an accepted
