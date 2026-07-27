@@ -110,6 +110,31 @@ The model also configures **no foreign keys and no navigations**. F2's `Descript
 physical relationships; here a `Ref` field is simply a `uuid` column, and relation embedding is not part of
 this query path.
 
+### `UseRelationalNulls()` is on, and PR5 is the first PR its cost binds
+
+Both drivers register their provider with `UseRelationalNulls()` — `AlvoSqliteBuilderExtensions` and
+`AlvoPostgreSqlBuilderExtensions`, one line each, now with a remark at the call site. What it does is switch
+EF from **C#'s** null semantics to **SQL's**: by default EF expands a comparison it translates so that
+`a == b` keeps C#'s meaning even when a side is `NULL` (`a = b OR (a IS NULL AND b IS NULL)`), and with the
+option on it emits the bare `a = b`, whose answer is `UNKNOWN`.
+
+It is on because this data path's authorization predicate is composed as **raw SQL** and the composed
+statement is the only place a verdict is reached. A rendered `USING` predicate already carries SQL's
+three-valued logic, folded to `FALSE` once in the core; if EF then expanded a *residual* LINQ comparison over
+the same root with C#'s semantics, one statement would contain two different null contracts, and the
+differential test that proves the SQL and in-memory verdicts agree would be proving it about only half the
+statement.
+
+**The cost, which is a constraint on future code rather than a behaviour today.** EF's own documentation says
+it plainly: with this option "your LINQ queries no longer have the same meaning as they do in C#". Today the
+data path composes almost no LINQ over the root — the row-id match on the write path is the exception, and
+`id` is non-nullable — so nothing in this package currently depends on the difference. **PR5 adds LINQ to this
+package** (the outbox claim and dispatch queries), and it is the first place the constraint bites: a
+predicate over a nullable column there has to be written the way SQL reads it, `x != null && x != y` rather
+than `x != y`. Turning the option off is not the escape hatch it looks like, because that would reintroduce
+the two-contracts problem above; the escape hatch is to write those queries against SQL semantics and say so
+where they are written.
+
 ## Identifiers are quoted by one helper, and there is no database schema
 
 `AlvoSqlIdentifier.Quote` is the single implementation of double-quote escaping, and every driver's
@@ -247,6 +272,22 @@ would learn the wrong one. Its sibling fact pins that an **unpaged** sorted read
 cannot be implemented as "reject a nullable sort key".
 
 ### Collation belongs to the host — two rulings that need the maintainer's sign-off
+
+> **⚠ SIGN-OFF REQUIRED — the two knowing exceptions to §0 principle 3 ("identical behaviour on
+> SQLite/PostgreSQL/Azure SQL"). Ratify or reject in one reading:**
+>
+> | | What differs | On which engines | Cost to remove it | Why it was accepted |
+> |---|---|---|---|---|
+> | **1** | `ORDER BY` over a **string**, so `AlvoSort("title")` yields a different first page | SQLite compares `TEXT` as `BINARY`; PostgreSQL uses the **database's** collation, where `'a' < 'B'`. Both self-consistent; the two disagree with each other | Force a collation in every string `ORDER BY` (`COLLATE "C"` / `COLLATE BINARY`). That **overrides a collation the operator chose** and makes every string sort non-sargable on PostgreSQL — it defeats the index #19's "p95 < 50 ms on an indexed column" needs | Collation is a property of the database a host configures, not of Alvo's rendering. It is also already why the Rule profile refuses relational operators on a string, so allowing a string to be *sorted* while refusing to *order* by it would be incoherent |
+> | **2** | `ilike`'s folding beyond ASCII, so `plate=ilike.čé%` may match on one engine and not the other | PostgreSQL's `ILIKE` folds by the database collation; SQLite's `UPPER` is ASCII-only (`upper('čé')` → `čé`) | A folding function per engine, or a normalised shadow column per foldable field — a schema change, and a per-engine native dependency. Filed as a follow-up rather than guessed at | The **ASCII** guarantee is now identical on both engines and asserted on the shipped suite; only the non-ASCII tail is host-owned, which is the same question as ruling 1 |
+>
+> **Blast radius, both:** which rows an already-authorized caller sees, or in what order. **No authorization
+> verdict changes** — the CEL rule grammar has no string-match operator, so no `USING`/`WITH CHECK` result
+> depends on either. **Not covered by this ask:** `like`'s case-sensitivity, which was a real defect and is
+> **fixed** (leg 2 below), and string *equality*, which is byte-exact on both engines.
+>
+> Rejecting either means filing the removal above as work, not reverting this PR: both rulings are the current
+> behaviour of the shipped drivers, and the tests that pin them are the reason the divergence is visible at all.
 
 Two places where a string's *collation* decides an answer, grouped because they are one question and because
 **neither is ratified by anyone but the implementing agent**. Both are read-visible: they change which rows a

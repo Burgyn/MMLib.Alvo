@@ -15,13 +15,24 @@ Throwaway spike project: `spike/MMLib.Alvo.Data.Spike` (console app, registered 
 `MMLib.Alvo.slnx`, `IsPackable=false`, deleted when PR2's implementation lands). Every
 statement below is a captured real `DbCommand` — command text plus the provider's own
 parameter collection, recorded by a `DbCommandInterceptor` — not a reasoned expectation.
+
+**The project is gone; the evidence is not.** This document is the cited authority for about
+fifteen decisions in PR2's code — `Q4g`, `Q5d`, `Q6`, `Q6d`, `Q8` and `X2` are referenced by
+name from XML doc comments and from `docs/architecture/data-path.md` — so the transcripts it
+points at are kept as documents rather than left dangling at a commit nobody will dig for.
 Full transcripts:
 
-- `spike/MMLib.Alvo.Data.Spike/evidence/sqlite.txt`
-- `spike/MMLib.Alvo.Data.Spike/evidence/postgresql.txt`
+- `docs/superpowers/specs/evidence/2026-07-26-f3-pr2-spike/sqlite.txt`
+- `docs/superpowers/specs/evidence/2026-07-26-f3-pr2-spike/postgresql.txt`
 
-Run it with `dotnet run --project spike/MMLib.Alvo.Data.Spike` (both engines; PostgreSQL
-via Testcontainers `postgres:16-alpine`) or `-- sqlite` for the no-Docker subset.
+The **runnable** project was added in `82c2b0d` and deleted in `b632152`, both inside PR2's
+own commit range, so it survives only in history:
+`git show 82c2b0d:spike/MMLib.Alvo.Data.Spike/Probes.cs` is where the probe that produced a
+given transcript line lives. It was run with `dotnet run --project spike/MMLib.Alvo.Data.Spike`
+(both engines; PostgreSQL via Testcontainers `postgres:16-alpine`) or `-- sqlite` for the
+no-Docker subset. Nothing re-runs it today, and nothing needs to: every answer that still
+constrains the code is pinned by a test in the shipped suites instead, which is what made
+deleting the project right and keeping the transcripts sufficient.
 
 Versions: EF Core 10.0.10, `Npgsql.EntityFrameworkCore.PostgreSQL` 10.0.3, net10.0.
 
