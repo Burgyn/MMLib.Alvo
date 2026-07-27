@@ -168,15 +168,120 @@ internal sealed class EfAlvoData : IAlvoData
     }
 
     /// <inheritdoc/>
-    public Task<AlvoRecord> UpdateAsync(
+    /// <remarks>
+    /// Merge-then-check inside one transaction, never write-then-rollback: the pre-image is read under
+    /// <c>USING</c> with the driver's row lock, the patch is merged over it, <c>WITH CHECK</c> and the tenant
+    /// scope are evaluated over that complete post-image, and only then does the <c>ExecuteUpdate</c> run —
+    /// still constrained by <c>USING</c>, so the row cannot have been taken away in between. A rollback is
+    /// not control flow here, and the verdict stays in the engine-agnostic core.
+    /// </remarks>
+    public async Task<AlvoRecord> UpdateAsync(
         string entity, Guid id, IReadOnlyDictionary<string, object?> values, AlvoContext context,
-        CancellationToken cancellationToken = default) => throw new NotSupportedException(WritePathPending);
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(entity);
+        ArgumentNullException.ThrowIfNull(values);
+        ArgumentNullException.ThrowIfNull(context);
+
+        var decision = Resolve(entity, DataOperation.Update, context);
+
+        using var db = _contexts.Create();
+        var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
+        WritePayloadGuard.EnsureWritable(values, schema, decision, isUpdate: true);
+
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var postImage = await WriteAsync(db, schema, decision, context, id, values, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        return RecordMaterializer.ToRecord(postImage, decision.HiddenFields);
+    }
 
     /// <inheritdoc/>
-    public Task DeleteAsync(string entity, Guid id, AlvoContext context, CancellationToken cancellationToken = default)
-        => throw new NotSupportedException(WritePathPending);
+    public async Task DeleteAsync(
+        string entity, Guid id, AlvoContext context, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(entity);
+        ArgumentNullException.ThrowIfNull(context);
 
-    private const string WritePathPending = "The write path is not implemented yet.";
+        var decision = Resolve(entity, DataOperation.Delete, context);
+
+        using var db = _contexts.Create();
+        var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
+
+        var affected = await RowOf(PolicyRoot(db, schema, decision, context), id)
+            .ExecuteDeleteAsync(cancellationToken);
+        if (affected == 0)
+        {
+            throw new AlvoRecordNotFoundException();
+        }
+    }
+
+    /// <summary>
+    /// The body of one update, inside the caller's transaction: the locked unmasked pre-image, the merged
+    /// post-image's verdict, the policy-carrying write, and the re-read that produces what is returned.
+    /// </summary>
+    private async Task<Dictionary<string, object>> WriteAsync(
+        AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context,
+        Guid id, IReadOnlyDictionary<string, object?> values, CancellationToken cancellationToken)
+    {
+        var stored = await SingleAsync(
+            db, schema, decision, context, id, PreImageMutation.Update, cancellationToken, unmasked: true)
+            ?? throw new AlvoRecordNotFoundException();
+
+        var preImage = RecordMaterializer.ToRecord(stored, _noMask);
+        EnsureWriteAllowed(decision, Merge(preImage, values), preImage, context);
+
+        if (await AffectedAsync(db, schema, decision, context, id, values, cancellationToken) == 0)
+        {
+            throw new AlvoRecordNotFoundException();
+        }
+
+        return await SingleAsync(db, schema, decision, context, id, lockFor: null, cancellationToken)
+            ?? throw new AlvoRecordNotFoundException();
+    }
+
+    private async Task<int> AffectedAsync(
+        AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context,
+        Guid id, IReadOnlyDictionary<string, object?> values, CancellationToken cancellationToken)
+        => await RowOf(PolicyRoot(db, schema, decision, context), id)
+            .ExecuteUpdateAsync(UpdateSetterFactory.For(schema, values), cancellationToken);
+
+    /// <summary>
+    /// The queryable a write is composed over: a <c>FromSql</c> root whose <c>WHERE</c> already carries the
+    /// <c>USING</c> predicate and the tenant scope, so the emitted <c>UPDATE</c>/<c>DELETE</c> constrains
+    /// the row through a subquery the caller cannot influence and <c>rows affected == 0</c> means "no such
+    /// visible row".
+    /// </summary>
+    private IQueryable<Dictionary<string, object>> PolicyRoot(
+        AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context)
+    {
+        var statement = _statements.Compose(
+            schema, decision, context, new ReadStatementComposer.ReadStatementOptions(),
+            db.Rows(schema.Name).EntityType);
+
+        return Materialize(db, schema, statement);
+    }
+
+    /// <summary>
+    /// Narrows the policy root to one row id. Composed in LINQ rather than into the raw text: that is the
+    /// exact shape proved to emit one statement on both engines
+    /// (<c>UPDATE … FROM (SELECT id FROM (&lt;root&gt;) WHERE id = @p) …</c>), and the comparison is written
+    /// against <see cref="Guid"/>? because every read-model property is nullable.
+    /// </summary>
+    private static IQueryable<Dictionary<string, object>> RowOf(
+        IQueryable<Dictionary<string, object>> root, Guid id) =>
+        root.Where(row => EF.Property<Guid?>(row, AlvoDataContext.IdColumn) == id);
+
+    private static AlvoRecord Merge(AlvoRecord stored, IReadOnlyDictionary<string, object?> values)
+    {
+        var merged = stored;
+        foreach (var (field, value) in values)
+        {
+            merged = merged.With(field, value);
+        }
+
+        return merged;
+    }
 
     private PolicyDecision Resolve(string entity, DataOperation operation, AlvoContext context)
     {

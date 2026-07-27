@@ -132,13 +132,14 @@ public sealed class AlvoDataHost
     private readonly ServiceProvider _services;
     private readonly AlvoDescriptor _descriptor;
     private readonly SqlCapture _capture;
+    private readonly LockRecordingSqlDialect _dialect = new();
 
     internal AlvoDataHost(ServiceProvider services, AlvoDescriptor descriptor, SqlCapture capture)
     {
         _services = services;
         _descriptor = descriptor;
         _capture = capture;
-        Data = BuildData(services);
+        Data = BuildData(services, _dialect);
     }
 
     /// <summary>Gets the host container the data path resolves out of.</summary>
@@ -156,6 +157,9 @@ public sealed class AlvoDataHost
     /// <summary>Forgets every recorded statement, so a test asserts on the ones its own act produced.</summary>
     internal void ClearStatements() => _capture.Clear();
 
+    /// <summary>Gets the row-lock modes the data path has asked this dialect for.</summary>
+    internal IReadOnlyList<PreImageMutation> RequestedLocks => _dialect.RequestedLocks;
+
     /// <summary>Re-primes the policy catalog (and therefore the applied schema) from <paramref name="schema"/>.</summary>
     /// <remarks>Synchronous, because compiling and publishing a catalog is: nothing here awaits.</remarks>
     /// <param name="schema">The schema the rules are re-compiled against and that the read model is rebuilt from.</param>
@@ -171,11 +175,11 @@ public sealed class AlvoDataHost
     /// host container until <c>IAlvoData</c> itself is registered — at which point this becomes one
     /// <c>GetRequiredService&lt;IAlvoData&gt;()</c>.
     /// </summary>
-    private static EfAlvoData BuildData(IServiceProvider services) => new EfAlvoData(
+    private static EfAlvoData BuildData(IServiceProvider services, IAlvoSqlDialect dialect) => new(
         services.GetRequiredService<IPolicyEngine>(),
         services.GetRequiredService<IPredicateEvaluator>(),
         services.GetRequiredService<IPredicateRenderer>(),
         new SqliteFieldSqlRenderer(),
-        new SqliteSqlDialect(),
+        dialect,
         services.GetRequiredService<AlvoDataContextFactory>());
 }

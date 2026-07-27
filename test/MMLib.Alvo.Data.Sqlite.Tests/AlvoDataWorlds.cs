@@ -156,6 +156,27 @@ internal static class AlvoDataWorlds
         return host;
     }
 
+    /// <summary>
+    /// An entity whose <c>update</c> rule references a <c>hidden</c> field, so the <c>WITH CHECK</c> verdict
+    /// can only be reached over an <b>unmasked</b> pre-image: read through the mask, <c>secret</c> arrives as
+    /// the projected <c>NULL</c> and the rule denies an update that policy allows.
+    /// </summary>
+    internal static async Task<DataWorld> GuardedSecretAsync(SqliteAlvoDataFixture fixture)
+    {
+        var fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
+        {
+            ["title"] = new() { Type = DescriptorFieldType.String },
+            ["secret"] = new() { Type = DescriptorFieldType.String, Hidden = BoolOrCel.FromBoolean(true) },
+        };
+        var rules = new AccessRules { List = "true", Get = "true", Update = "secret == 'shh'" };
+
+        var rowId = Guid.NewGuid();
+        var seed = Seed("vaults", [Row(rowId, ("title", "Vault"), ("secret", "shh"))]);
+
+        var host = await StartAsync(fixture, "vaults", fields, EntityTenancy.Global, rules, seed);
+        return new DataWorld(host) { Member = Caller(tenant: null), RowId = rowId };
+    }
+
     private const string OwnerRule = "owner_id == @user.id";
 
     private static AlvoDescriptor VehicleDescriptor() => new()
@@ -302,6 +323,8 @@ internal sealed class DataWorld(AlvoDataHost host)
     internal string LastStatement => host.LastStatement;
 
     internal void ClearStatements() => host.ClearStatements();
+
+    internal IReadOnlyList<PreImageMutation> RequestedLocks => host.RequestedLocks;
 
     internal AlvoContext Alice { get; init; } = AlvoContext.Anonymous;
 
