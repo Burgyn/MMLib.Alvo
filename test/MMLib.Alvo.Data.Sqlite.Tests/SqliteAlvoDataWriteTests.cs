@@ -263,9 +263,26 @@ public sealed class SqliteAlvoDataWriteTests : IAsyncDisposable
 
         await world.DeleteAsync("notes", world.AliceRowId, world.Alice);
 
-        world.Statements.Count.ShouldBe(1);
+        world.Statements.Count.ShouldBe(2);
         world.LastStatement.ShouldStartWith("DELETE FROM \"notes\"");
         world.LastStatement.ShouldContain("\"owner_id\" = @alvo_u0");
+    }
+
+    /// <summary>
+    /// The two statements a delete emits, in order: the locked pre-image PR5's event needs a row image from,
+    /// then the policy-carrying <c>DELETE</c>. Both carry the predicate, so neither is a path to a row the
+    /// caller cannot see.
+    /// </summary>
+    [Fact]
+    public async Task A_delete_reads_a_locked_pre_image_before_it_writes()
+    {
+        var world = await AlvoDataWorlds.NotesAsync(_fixture);
+
+        await world.DeleteAsync("notes", world.AliceRowId, world.Alice);
+
+        world.Statements[0].ShouldStartWith("SELECT");
+        world.Statements[0].ShouldContain("\"owner_id\" = @alvo_u0");
+        world.RequestedLocks.ShouldContain(PreImageMutation.Delete);
     }
 
     [Fact]

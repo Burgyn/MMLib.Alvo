@@ -121,10 +121,45 @@ internal sealed class EfAlvoData : IAlvoData
         var candidate = Candidate(db.Rows(entity).EntityType, Stamped(schema, values, context, isUpdate: false));
         EnsureWriteAllowed(decision, RecordMaterializer.ToRecord(candidate, _noMask), previous: null, context);
 
-        db.Rows(entity).Add(candidate);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var stored = await InsertAsync(db, schema, decision, context, candidate, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        return RecordMaterializer.ToRecord(stored, decision.HiddenFields);
+    }
+
+    /// <summary>
+    /// Inserts the candidate and <b>returns the row the database now holds</b>, re-read inside the same
+    /// transaction.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Returning the candidate bag instead — the caller's own payload plus the generated id — makes the create
+    /// response a different thing from the update response, which re-reads. Every database default is missing
+    /// from it, a 201 has no <c>ETag</c> source, PR6's <c>computed</c> column has no value at all until the row
+    /// exists, and the caller cannot see the audit values the framework just assigned. One re-read closes all
+    /// four, and the transaction is what makes it the row this insert wrote rather than whatever a concurrent
+    /// writer left behind.
+    /// </para>
+    /// <para>
+    /// The re-read goes through the policy root like every other read here. <c>create</c> carries no
+    /// <c>USING</c> predicate — there is no stored row to filter when the decision is made — so the root
+    /// narrows to this one id under the synthesized tenant scope, which the candidate's post-image has already
+    /// been checked against. It cannot come back empty for a row the caller was just allowed to write, so a
+    /// missing row is an invariant violation rather than a "not found".
+    /// </para>
+    /// </remarks>
+    private async Task<Dictionary<string, object>> InsertAsync(
+        AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context,
+        Dictionary<string, object> candidate, CancellationToken cancellationToken)
+    {
+        db.Rows(schema.Name).Add(candidate);
         await db.SaveChangesAsync(cancellationToken);
 
-        return RecordMaterializer.ToRecord(candidate, decision.HiddenFields);
+        var id = (Guid)candidate[AlvoDataContext.IdColumn];
+        return await SingleAsync(db, schema, decision, context, id, lockFor: null, cancellationToken)
+            ?? throw new InvalidOperationException(
+                "The row this create just inserted could not be read back inside its own transaction.");
     }
 
     /// <summary>
@@ -217,6 +252,44 @@ internal sealed class EfAlvoData : IAlvoData
         using var db = _contexts.Create();
         var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
         EnsureNotSoftDeleted(schema);
+
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await EraseAsync(db, schema, decision, context, id, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// The body of one delete, inside the caller's transaction: the locked pre-image, then the
+    /// policy-carrying <c>DELETE</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A delete has no <c>WITH CHECK</c> — there is no post-image to check — so it needs no verdict over the
+    /// pre-image, and this read exists for the <b>shape</b> rather than for a decision: PR5's outbox row and a
+    /// <c>record.deleted</c> event both need the row image, and an in-transaction before-hook needs something
+    /// to run over. Without the transaction, PR5's outbox row could not ride the same <c>DbTransaction</c> at
+    /// all — on SQLite a second connection writing while this one holds a write transaction on the same file
+    /// gets <c>SQLITE_BUSY</c>, so the happy path would deadlock rather than merely lose atomicity.
+    /// </para>
+    /// <para>
+    /// It also gives <see cref="PreImageMutation.Delete"/> — and therefore PostgreSQL's <c>FOR UPDATE</c> —
+    /// the consumer it lacked, so <see cref="IAlvoSqlDialect.RowLockClause"/>'s remarks describe a path that
+    /// exists.
+    /// </para>
+    /// <para>
+    /// Both refusals are <see cref="AlvoRecordNotFoundException"/> with no message, and they are
+    /// indistinguishable on purpose: a row the caller cannot see must read exactly like one that was never
+    /// there. The <c>DELETE</c> is still constrained by <c>USING</c>, so <c>rows affected == 0</c> after a
+    /// successful pre-image read means a concurrent writer got there first.
+    /// </para>
+    /// </remarks>
+    private async Task EraseAsync(
+        AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context,
+        Guid id, CancellationToken cancellationToken)
+    {
+        _ = await SingleAsync(
+            db, schema, decision, context, id, PreImageMutation.Delete, cancellationToken, unmasked: true)
+            ?? throw new AlvoRecordNotFoundException();
 
         var affected = await RowOf(PolicyRoot(db, schema, decision, context), id)
             .ExecuteDeleteAsync(cancellationToken);

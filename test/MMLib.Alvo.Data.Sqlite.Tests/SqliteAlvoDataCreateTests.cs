@@ -32,11 +32,19 @@ public sealed class SqliteAlvoDataCreateTests : IAsyncDisposable
     }
 
     /// <summary>
-    /// The change tracker is used here and nowhere else, so the insert has to be exactly one statement — a
-    /// second one would mean a row was read back through a path that is not the policy-filtered root.
+    /// A create emits exactly two statements: the <c>INSERT</c>, and the re-read that produces what the port
+    /// returns. The re-read goes through the same composed root every other read here does — a third statement,
+    /// or a read composed some other way, would mean a row reached a caller through a path this data path does
+    /// not control.
     /// </summary>
+    /// <remarks>
+    /// <c>create</c> carries no <c>USING</c> predicate — there is no stored row to filter when the decision is
+    /// made — so what the re-read is constrained by is the synthesized tenant scope and the row id, which is
+    /// what this asserts. Both are load-bearing: the id is the row this insert just wrote, and the tenant scope
+    /// is the same term the candidate's post-image was already checked against.
+    /// </remarks>
     [Fact]
-    public async Task An_allowed_create_is_one_insert_statement()
+    public async Task An_allowed_create_is_one_insert_and_one_re_read_through_the_composed_root()
     {
         var world = await AlvoDataWorlds.NotesAsync(_fixture);
 
@@ -51,8 +59,37 @@ public sealed class SqliteAlvoDataCreateTests : IAsyncDisposable
             },
             world.Alice);
 
-        world.Statements.Count.ShouldBe(1);
-        world.LastStatement.ShouldStartWith("INSERT INTO \"notes\"");
+        world.Statements.Count.ShouldBe(2);
+        world.Statements[0].ShouldStartWith("INSERT INTO \"notes\"");
+        world.LastStatement.ShouldStartWith("SELECT");
+        world.LastStatement.ShouldContain("\"tenant_id\" = @alvo_t0");
+        world.LastStatement.ShouldContain("\"id\" = @alvo_id");
+    }
+
+    /// <summary>
+    /// The record a create returns is the row the database holds, not the payload the caller sent — so a
+    /// column the caller never mentioned comes back with the value the store assigned it. Before this, a 201
+    /// had no <c>ETag</c> source, every database default was missing, and PR6's <c>computed</c> column would
+    /// have been absent from a create response entirely.
+    /// </summary>
+    [Fact]
+    public async Task A_created_record_carries_what_the_store_assigned_not_what_the_caller_sent()
+    {
+        var world = await AlvoDataWorlds.NotesAsync(_fixture);
+
+        var created = await world.CreateAsync(
+            "notes",
+            new Dictionary<string, object?>
+            {
+                ["owner_id"] = world.Alice.User.Value,
+                ["tenant_id"] = world.Tenant.Value,
+                ["label"] = "re-read",
+            },
+            world.Alice);
+
+        created.Values.Keys.ShouldContain("title");
+        created["title"].ShouldBeNull();
+        created["label"].ShouldBe("re-read");
     }
 
     [Fact]

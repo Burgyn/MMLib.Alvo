@@ -454,9 +454,33 @@ interchangeable: with the policy root swapped for the bare `DbSet`, every outcom
 (the pre-image read has already refused the invisible row) and only the statement-level facts fail. Both
 kinds of test are therefore kept.
 
-**`PreImageMutation.Delete` has no consumer in PR2.** A delete carries no `WITH CHECK`, so it reads no
-pre-image at all and goes straight to `ExecuteDelete` over the policy root. The enum member is the dialect
-contract for a future path that does read one.
+**Every write runs in a transaction, and a delete reads a pre-image it does not need for a verdict.** A
+delete carries no `WITH CHECK` — there is no post-image to check — so its pre-image read is there for the
+*shape*, not for a decision:
+
+- PR5's outbox row and a `record.deleted` event both need the row image, and an in-transaction before-hook
+  needs something to run over. Without the transaction, the outbox row could not ride the same `DbTransaction`
+  at all — and on SQLite a second connection writing while this one holds a write transaction on the same file
+  gets `SQLITE_BUSY`, so PR5's happy path would **deadlock** rather than merely lose atomicity.
+- It gives `PreImageMutation.Delete`, and therefore PostgreSQL's `FOR UPDATE`, the consumer it lacked — so
+  `IAlvoSqlDialect.RowLockClause`'s remarks now describe a path that exists.
+
+`create` opens one too, because it re-reads: **`CreateAsync` returns the row the database holds, not the
+payload the caller sent.** Returning the candidate bag made the create response a different thing from the
+update response, which already re-read — every database default missing, no `ETag` source for a 201, PR6's
+`computed` column absent by construction (a `GENERATED ALWAYS AS … STORED` column has no value until the row
+exists), and the caller unable to see the audit values the framework just assigned. One re-read inside the
+transaction closes all four. It goes through the same composed root; `create` has no `USING`, so what
+constrains it is the tenant scope the candidate was already checked against plus the row id just written, and
+a row that cannot be read back is an invariant violation rather than a "not found".
+
+**The `If-Match` precondition channel is PR3's, deliberately.** `UpdateAsync` has no argument that can carry a
+caller's expected version, and adding one is a change to a shipped public interface with two implementations
+and an inherited contract suite — so it is a decision, not a detail. The *mechanism* is already in the right
+place and this is the note that says so: the merge-then-check pre-image is read inside the transaction under
+the driver's row lock, which is exactly where a version comparison belongs. Nothing here should be reshaped in
+anticipation; PR3 widens the signature when it owns the precondition semantics (which header, which column,
+what a missing one means).
 
 ## `softDelete` is refused, not silently ignored
 
