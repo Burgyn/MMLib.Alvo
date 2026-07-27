@@ -216,12 +216,36 @@ internal sealed class EfAlvoData : IAlvoData
 
         using var db = _contexts.Create();
         var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
+        EnsureNotSoftDeleted(schema);
 
         var affected = await RowOf(PolicyRoot(db, schema, decision, context), id)
             .ExecuteDeleteAsync(cancellationToken);
         if (affected == 0)
         {
             throw new AlvoRecordNotFoundException();
+        }
+    }
+
+    /// <summary>
+    /// Refuses a delete on an entity whose schema declares <c>softDelete</c>, because this data path would
+    /// <b>hard-delete</b> the row while the descriptor contract promises a recoverable one — measured on real
+    /// PostgreSQL, where the row was simply gone.
+    /// </summary>
+    /// <remarks>
+    /// The descriptor mapper already refuses <c>softDelete</c> at apply time, so this is the request-time
+    /// belt for a <see cref="SchemaModel"/> that did not come through it — a host-assembled model, or F7's
+    /// dynamic registry. It is the same fail-closed shape as
+    /// <see cref="QueryFieldGuard.EnsureMaskable"/>, and it exists because the failure mode here is silent
+    /// data loss rather than a wrong answer.
+    /// </remarks>
+    private static void EnsureNotSoftDeleted(EntitySchema schema)
+    {
+        if (schema.SoftDelete)
+        {
+            throw new InvalidOperationException(
+                "Soft delete is not implemented, so this entity cannot be deleted: the row would be removed "
+                + "outright while its schema declares the delete recoverable. Remove 'softDelete' from the "
+                + "descriptor, or track the soft-delete implementation issue.");
         }
     }
 

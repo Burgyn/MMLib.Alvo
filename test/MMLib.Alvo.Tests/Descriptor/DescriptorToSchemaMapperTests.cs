@@ -30,9 +30,8 @@ public class DescriptorToSchemaMapperTests
     }
 
     [Fact]
-    public void Soft_delete_column_is_nullable_and_audit_timestamps_are_required()
+    public void Audit_timestamps_are_required_and_actors_are_nullable()
     {
-        // simple-tasks' "projects" entity declares both audit:true and softDelete:true.
         var m = Map("simple-tasks/tasks.alvo.json");
         var projects = m.Entities.Single(e => e.Name == "projects");
 
@@ -43,10 +42,45 @@ public class DescriptorToSchemaMapperTests
         var createdBy = projects.Fields.Single(f => f.Name == "created_by");
         createdBy.Required.ShouldBeFalse();
         createdBy.Nullable.ShouldBeTrue();
+    }
 
-        var deletedAt = projects.Fields.Single(f => f.Name == "deleted_at");
-        deletedAt.Required.ShouldBeFalse();
-        deletedAt.Nullable.ShouldBeTrue();
+    /// <summary>
+    /// <c>softDelete</c> is declared in the frozen descriptor schema and not implemented: the delete path
+    /// hard-deletes the row and reads do not exclude it, which is silent data loss where the schema promises
+    /// recoverability. Refused at apply time, exactly as <c>computed</c> is, rather than honoured half-way.
+    /// </summary>
+    [Fact]
+    public void Map_rejects_soft_delete_until_it_is_implemented()
+    {
+        var json = """
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "archives": { "softDelete": true, "fields": {
+            "title": { "type": "string" } } } } }
+        """;
+
+        var ex = Should.Throw<InvalidDataException>(() => MapInline(json));
+
+        ex.Message.ShouldContain("softDelete");
+        ex.Message.ShouldContain("archives");
+    }
+
+    /// <summary>
+    /// The negative leg: the flag written as <c>false</c> is not a declaration, so it must map normally —
+    /// otherwise the refusal would be "any entity mentioning softDelete".
+    /// </summary>
+    [Fact]
+    public void Soft_delete_written_as_false_maps_normally()
+    {
+        var json = """
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "archives": { "softDelete": false, "fields": {
+            "title": { "type": "string" } } } } }
+        """;
+
+        var archives = MapInline(json).Entities.Single(e => e.Name == "archives");
+
+        archives.SoftDelete.ShouldBeFalse();
+        archives.Fields.ShouldNotContain(field => field.Name == "deleted_at");
     }
 
     // complex-crm's gross_total/line_total legitimately use 'computed' (a gross total SHOULD be
@@ -146,13 +180,16 @@ public class DescriptorToSchemaMapperTests
     /// <param name="tenancy">The entity's declared tenancy.</param>
     /// <param name="audit">Whether the entity declares <c>audit</c>.</param>
     /// <param name="softDelete">Whether the entity declares <c>softDelete</c>.</param>
+    /// <remarks>
+    /// <c>softDelete</c> is absent from the matrix because the mapper refuses it outright until soft delete
+    /// is implemented; that the authority reports <c>deleted_at</c> for it is asserted on the authority
+    /// itself (<c>AlvoManagedColumnsTests</c>), so the two do not drift while the flag is unusable.
+    /// </remarks>
     [Theory]
     [InlineData("global", false, false)]
     [InlineData("scoped", false, false)]
     [InlineData("global", true, false)]
     [InlineData("scoped", true, false)]
-    [InlineData("global", false, true)]
-    [InlineData("scoped", true, true)]
     public void The_injected_columns_are_exactly_the_ones_AlvoManagedColumns_reports(
         string tenancy, bool audit, bool softDelete)
     {

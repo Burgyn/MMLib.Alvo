@@ -447,6 +447,40 @@ kinds of test are therefore kept.
 pre-image at all and goes straight to `ExecuteDelete` over the policy root. The enum member is the dialect
 contract for a future path that does read one.
 
+## `softDelete` is refused, not silently ignored
+
+The frozen descriptor schema states the guarantee in full: *"Framework-managed soft delete: a managed
+`deleted_at` column, DELETE becomes a soft delete, and reads/list/get/rollup auto-exclude soft-deleted rows.
+A restore operation is provided."* **None of it was implemented.** Measured on real PostgreSQL:
+`DeleteAsync` removed a row from a `softDelete: true` entity outright, and a row whose `deleted_at` was set
+was still listed. That is irrecoverable data loss where the contract promises recoverability — the worst
+failure mode in the diff, and the only one whose cost is not a wrong answer but a missing row.
+
+**Ruling: refuse it, loudly, and do not implement it here.** Soft delete changes what every *read* means,
+and that interacts with the policy predicate — the wrong thing to bolt on at the end of a PR. So:
+
+- **At apply time**, `DescriptorToSchemaMapper` throws and the descriptor validator reports a
+  `DescriptorValidationError` with a fix suggestion — exactly the shape `computed` already uses, and Alvo's
+  own rule that a bad descriptor fails at save rather than per request.
+- **At request time**, `DeleteAsync` refuses an entity whose `EntitySchema.SoftDelete` is set, in *both*
+  shipped implementations. That is the fail-closed belt for a `SchemaModel` that did not come through the
+  descriptor mapper — a host-assembled one, or F7's dynamic registry — and it is the same shape as
+  `QueryFieldGuard.EnsureMaskable`. `InvalidOperationException`, because it is neither a denial nor a
+  malformed query but a schema this port cannot serve.
+
+`EntitySchema.SoftDelete` and `AlvoManagedColumns.DeletedAt` deliberately **stay**: the migrator still
+creates the column for a hand-built schema, and the authority still reports it, so the implementation issue
+inherits a shape rather than having to re-invent one. `AlvoManagedColumnsTests` is where that answer stays
+pinned while the descriptor flag is unreachable.
+
+**Two examples declared it and were amended in the same commit** — `examples/simple-tasks/tasks.alvo.json`
+(`projects`) and `examples/complex-crm/crm.alvo.json` (`companies`, `deals`). `simple-tasks` is the "smallest
+real backend" example, so leaving it declaring a flag that now fails at apply would have shipped a broken
+starting point. This is a deliberate divergence from how `computed` is handled — that one stays in
+`complex-crm` and is stripped by the test that maps it — and the reason is that `computed`'s failure mode is
+a refused apply while `softDelete`'s was a deleted row. `examples/README.md` records the removal and says to
+restore it when soft delete lands.
+
 ## A filter's shape is capped in three dimensions, by one guard
 
 `AlvoFilter.EnsureWithinLimits` is the single entry point every implementation calls, and it caps depth,

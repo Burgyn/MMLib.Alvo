@@ -4,8 +4,8 @@ Reference descriptors validated against `schema/project.schema.json`
 (the type-2 "examples against the schema" corpus, F2 issue #17).
 
 - **`simple-tasks/`** — the smallest real backend: two owned entities
-  (`projects`, `tasks`), ownership rules, a `count` rollup, `audit` +
-  `softDelete`, a `beforeUpdate` mutate, one composite index.
+  (`projects`, `tasks`), ownership rules, a `count` rollup, `audit`,
+  a `beforeUpdate` mutate, one composite index.
 - **`complex-crm/`** — the analysis §16 CRM adapted to v1, exercising most of
   the surface: multi-tenancy (`tenancy.enabled` + a `global` číselník),
   dynamic-entities governance (`dynamicEntities.defaultRules` + quotas),
@@ -14,6 +14,10 @@ Reference descriptors validated against `schema/project.schema.json`
   field-level per-role masking (`hidden` as CEL), tagged `{"$cel": …}` values,
   `renamedFrom`, `templates`, outbound `webhooks`, a `batch`-delivery
   automation rule, a scheduled rule delegating to a `function`, and `x-` keys.
+  No example declares `softDelete`: the descriptor schema carries the keyword but
+  F3 does not implement it, and a descriptor declaring it is refused at apply time
+  rather than hard-deleting rows the contract promises are recoverable. Restore it
+  to the showcase once soft delete lands.
   It is a real **bundle** (D3): `crm.alvo.json` alongside
   `templates/invoice-issued.html` (referenced via `bodyFile`) and
   `functions/remind-stale-deals.csx` (referenced via `script`).

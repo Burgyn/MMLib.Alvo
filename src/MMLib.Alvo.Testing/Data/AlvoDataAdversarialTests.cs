@@ -708,6 +708,53 @@ public abstract class AlvoDataAdversarialTests
     }
 
     /// <summary>
+    /// <c>softDelete</c> is declared in the frozen descriptor schema — "DELETE becomes a soft delete, and
+    /// reads/list/get/rollup auto-exclude soft-deleted rows" — and is <b>not implemented</b>. Measured on real
+    /// PostgreSQL: <see cref="IAlvoData.DeleteAsync"/> removed the row outright, and a row whose
+    /// <c>deleted_at</c> was set was still listed. So a delete on such an entity is refused, loudly, rather
+    /// than silently destroying data the contract promises is recoverable.
+    /// </summary>
+    /// <remarks>
+    /// A rule of the port, so it is here: a reference implementation that quietly hard-deleted where a shipped
+    /// backend refuses would give the port two contracts. The refusal is
+    /// <see cref="InvalidOperationException"/> — not a denial and not a malformed query, but a schema this
+    /// port cannot serve. The counterweight is in the same act: an ordinary entity's delete still works, so
+    /// the refusal cannot be satisfied by refusing every delete.
+    /// </remarks>
+    [Fact]
+    public async Task A_delete_on_a_soft_delete_entity_is_refused_rather_than_hard_deleting()
+    {
+        var fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
+        {
+            ["title"] = new() { Type = DescField.String },
+        };
+        var rules = new AccessRules { List = "true", Get = "true", Delete = "true" };
+        var (descriptor, schema) = BuildFixture("archives", fields, EntityTenancy.Global, rules, softDelete: true);
+        var rowId = Guid.NewGuid();
+        var data = await CreateAsync(schema, descriptor, SeedOf("archives", Row(rowId, ("title", "Kept"))));
+        var caller = NewContext(tenant: null);
+
+        await Should.ThrowAsync<InvalidOperationException>(() => data.DeleteAsync("archives", rowId, caller));
+
+        var survived = await data.GetAsync("archives", rowId, caller);
+        survived.ShouldNotBeNull();
+    }
+
+    /// <summary>
+    /// The counterweight: an entity that does not declare <c>softDelete</c> still deletes, so the refusal
+    /// above cannot be implemented as "refuse every delete".
+    /// </summary>
+    [Fact]
+    public async Task A_delete_on_an_ordinary_entity_still_removes_the_row()
+    {
+        var fixture = await NotesFixtureAsync();
+
+        await fixture.Data.DeleteAsync("notes", fixture.AliceRow1Id, fixture.Alice);
+
+        (await fixture.Data.GetAsync("notes", fixture.AliceRow1Id, fixture.Alice)).ShouldBeNull();
+    }
+
+    /// <summary>
     /// The depth cap does not see <b>breadth</b>, and breadth is the same denial-of-service and the same
     /// engine divergence one level out: 900 <c>AND</c> terms answered on both engines and <b>1000 threw a
     /// raw <c>SqliteException</c></b> out of <see cref="IAlvoData.QueryAsync"/> while PostgreSQL answered,
@@ -1159,14 +1206,23 @@ public abstract class AlvoDataAdversarialTests
     /// <param name="tenancy">The entity's tenancy.</param>
     /// <param name="rules">The entity's access rules, or <see langword="null"/> for none.</param>
     /// <param name="audit">Whether the entity declares <c>audit</c>, and therefore carries the audit quartet.</param>
+    /// <param name="softDelete">Whether the entity declares <c>softDelete</c>, and therefore carries <c>deleted_at</c>.</param>
     private static (AlvoDescriptor Descriptor, SchemaModel Schema) BuildFixture(
         string entity,
         Dictionary<string, FieldDescriptor> fields,
         EntityTenancy tenancy,
         AccessRules? rules,
-        bool audit = false)
+        bool audit = false,
+        bool softDelete = false)
     {
-        var entityDescriptor = new EntityDescriptor { Fields = fields, Tenancy = tenancy, Rules = rules, Audit = audit };
+        var entityDescriptor = new EntityDescriptor
+        {
+            Fields = fields,
+            Tenancy = tenancy,
+            Rules = rules,
+            Audit = audit,
+            SoftDelete = softDelete,
+        };
         var descriptor = new AlvoDescriptor
         {
             ApiVersion = "alvo.dev/v1",
@@ -1181,14 +1237,22 @@ public abstract class AlvoDataAdversarialTests
             schemaFields.Add(ToFieldSchema(name, field));
         }
 
-        var managedColumns = AlvoManagedColumns.For(tenancyMode, audit, softDelete: false);
+        var managedColumns = AlvoManagedColumns.For(tenancyMode, audit, softDelete);
         foreach (var managed in managedColumns.Where(column => !fields.ContainsKey(column)))
         {
             schemaFields.Add(ManagedFieldSchema(managed));
         }
 
         var schema = new SchemaModel([
-            new EntitySchema { Name = entity, Tenancy = tenancyMode, Audit = audit, Fields = schemaFields }]);
+            new EntitySchema
+            {
+                Name = entity,
+                Tenancy = tenancyMode,
+                Audit = audit,
+                SoftDelete = softDelete,
+                Fields = schemaFields,
+            },
+        ]);
         return (descriptor, schema);
     }
 
@@ -1208,6 +1272,11 @@ public abstract class AlvoDataAdversarialTests
         if (column == AlvoManagedColumns.CreatedAt || column == AlvoManagedColumns.UpdatedAt)
         {
             return new() { Name = column, Type = SchemaField.DateTime, Required = true };
+        }
+
+        if (column == AlvoManagedColumns.DeletedAt)
+        {
+            return new() { Name = column, Type = SchemaField.DateTime, Nullable = true };
         }
 
         return column == AlvoManagedColumns.CreatedBy || column == AlvoManagedColumns.UpdatedBy

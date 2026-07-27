@@ -51,7 +51,7 @@ internal static class DescriptorToSchemaMapper
 
         var tenancy = ResolveTenancy(e.Tenancy, tenancyEnabled);
         bool audit = e.Audit == true;
-        bool softDelete = e.SoftDelete == true;
+        bool softDelete = EnsureSoftDeleteIsImplementable(name, e);
         AddManagedColumns(fields, e, tenancy, audit, softDelete);
 
         var indexes = (e.Indexes ?? [])
@@ -91,6 +91,32 @@ internal static class DescriptorToSchemaMapper
             AddManagedColumn(fields, e, AlvoManagedColumns.DeletedAt, OptionalInstantColumn);
         }
     }
+
+    /// <summary>
+    /// Refuses <c>softDelete</c>, which is <b>declared in the frozen descriptor schema and not implemented
+    /// in F3</b>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The schema promises "DELETE becomes a soft delete, and reads/list/get/rollup auto-exclude
+    /// soft-deleted rows. A restore operation is provided." None of that exists: the data path
+    /// hard-deletes the row and lists a row whose <c>deleted_at</c> is set. Measured on real PostgreSQL,
+    /// where <c>DeleteAsync</c> removed a row from a <c>softDelete: true</c> entity outright — irrecoverable
+    /// data loss where the contract promises recoverability.
+    /// </para>
+    /// <para>
+    /// So it is refused at <b>apply</b> time, loudly, exactly as <c>computed</c> is: failing closed on a
+    /// descriptor beats silently destroying rows, and Alvo's own rule is that a bad descriptor fails at save
+    /// rather than per request. Implementing it is deliberately <em>not</em> in scope here — soft delete
+    /// changes what every read means, and that interacts with the policy predicate.
+    /// </para>
+    /// </remarks>
+    private static bool EnsureSoftDeleteIsImplementable(string name, EntityDescriptor e) => e.SoftDelete == true
+        ? throw new InvalidDataException(
+            $"Entity '{name}' declares 'softDelete', which is not supported yet: the delete path would " +
+            "hard-delete the row and reads would not exclude it, losing data the descriptor promises is " +
+            "recoverable. Remove 'softDelete' or track the soft-delete implementation issue.")
+        : false;
 
     /// <summary>
     /// Appends one framework-managed column <b>unless the descriptor already declares that name</b>.

@@ -209,6 +209,8 @@ public sealed class InMemoryAlvoData : IAlvoData
             throw Denied(decision);
         }
 
+        EnsureNotSoftDeleted(entity);
+
         lock (_gate)
         {
             var list = RowsForLocked(entity);
@@ -273,6 +275,24 @@ public sealed class InMemoryAlvoData : IAlvoData
                 + "keyset cursor cannot express where its null values sort. Page by a required field, or read the "
                 + "whole set without a limit or a cursor.",
                 nameof(query));
+        }
+    }
+
+    /// <summary>
+    /// Refuses a delete on an entity whose schema declares <c>softDelete</c> — a rule of the port, not of one
+    /// backend: a shipped backend would remove the row outright while the descriptor contract promises the
+    /// delete is recoverable, and a reference implementation that quietly did the same would give the port two
+    /// contracts. Soft delete is refused at apply time as well; this is the request-time belt for a schema
+    /// that did not come through the descriptor mapper.
+    /// </summary>
+    private void EnsureNotSoftDeleted(string entity)
+    {
+        if (FindEntity(entity) is { SoftDelete: true })
+        {
+            throw new InvalidOperationException(
+                "Soft delete is not implemented, so this entity cannot be deleted: the row would be removed "
+                + "outright while its schema declares the delete recoverable. Remove 'softDelete' from the "
+                + "descriptor, or track the soft-delete implementation issue.");
         }
     }
 

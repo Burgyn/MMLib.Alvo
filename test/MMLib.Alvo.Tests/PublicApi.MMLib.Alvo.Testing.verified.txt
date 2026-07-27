@@ -62,6 +62,8 @@ namespace MMLib.Alvo.Testing.Data
     public abstract class AlvoDataAdversarialTests
     {
         protected AlvoDataAdversarialTests() { }
+        public System.Threading.Tasks.Task A_delete_on_a_soft_delete_entity_is_refused_rather_than_hard_deleting() { }
+        public System.Threading.Tasks.Task A_delete_on_an_ordinary_entity_still_removes_the_row() { }
         public System.Threading.Tasks.Task A_filter_naming_a_hidden_field_is_rejected_rather_than_answered() { }
         public System.Threading.Tasks.Task A_filter_or_sort_naming_a_field_the_schema_does_not_declare_is_rejected() { }
         public System.Threading.Tasks.Task A_filter_tree_deeper_than_the_cap_is_rejected_rather_than_walked() { }

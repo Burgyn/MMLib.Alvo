@@ -137,8 +137,7 @@
         "get": "'sales' in @user.roles || 'manager' in @user.roles",
         "list": "'sales' in @user.roles || 'manager' in @user.roles",
         "update": "'manager' in @user.roles || owner_id == @user.id"
-      },
-      "softDelete": true
+      }
     },
     "contacts": {
       "audit": true,
@@ -280,8 +279,7 @@
         "get": "'manager' in @user.roles || owner_id == @user.id",
         "list": "'manager' in @user.roles || owner_id == @user.id",
         "update": "'manager' in @user.roles || owner_id == @user.id"
-      },
-      "softDelete": true
+      }
     },
     "invoice_items": {
       "fields": {
