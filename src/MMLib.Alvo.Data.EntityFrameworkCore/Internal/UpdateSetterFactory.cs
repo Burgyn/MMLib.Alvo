@@ -65,15 +65,15 @@ internal static class UpdateSetterFactory
 
     /// <summary>
     /// One field's setter: the typed selector, the read model's type for the column, and the value <b>as that
-    /// column must hold it</b>. The last part is what routes a timestamp through
-    /// <see cref="StoredInstant"/> — an update is one of the three paths on which a caller's offset would
-    /// otherwise become part of the stored value.
+    /// column must hold it</b>. The last part goes through <see cref="ColumnValue"/>, the same funnel a filter
+    /// operand does — before that, this path's only type check was the reflection binder's, so an update
+    /// refused every value the read path converts.
     /// </summary>
     private static (LambdaExpression Selector, Type ClrType, object? Value) Setter(
         EntitySchema entity, string field, object? value)
     {
         var clrType = ClrTypeOf(entity, field);
-        return (Selector(clrType, field), clrType, StoredInstant.Stored(clrType, value));
+        return (Selector(clrType, field), clrType, ColumnValue.For(clrType, field, value));
     }
 
     private static LambdaExpression Selector(Type clrType, string field)

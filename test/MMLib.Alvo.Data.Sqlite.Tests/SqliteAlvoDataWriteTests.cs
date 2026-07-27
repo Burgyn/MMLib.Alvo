@@ -128,6 +128,36 @@ public sealed class SqliteAlvoDataWriteTests : IAsyncDisposable
     }
 
     /// <summary>
+    /// The write path now shares the read path's value funnel, so it inherits every refusal that funnel
+    /// makes rather than only its conversions. A fractional value into an integral column is the one a caller
+    /// reaches most easily: <c>Convert.ChangeType</c> would round it midpoint-to-even and store a number the
+    /// caller never wrote.
+    /// </summary>
+    [Fact]
+    public async Task A_fractional_value_for_an_integral_column_is_refused_on_the_write_path_too()
+    {
+        var world = await AlvoDataWorlds.VehicleAsync(_fixture);
+
+        var refused = await Should.ThrowAsync<InvalidOperationException>(() => world.UpdateAsync(
+            "vehicle", world.RowId, new Dictionary<string, object?> { ["mileage"] = 12.7m }, world.Alice));
+
+        refused.Message.ShouldContain("mileage");
+    }
+
+    /// <summary>
+    /// And the NUL refusal, which exists because PostgreSQL cannot represent one and SQLite quietly can — the
+    /// same §0 principle-3 reason on the write side as on the read side.
+    /// </summary>
+    [Fact]
+    public async Task A_nul_bearing_text_value_is_refused_on_the_write_path_too()
+    {
+        var world = await AlvoDataWorlds.VehicleAsync(_fixture);
+
+        await Should.ThrowAsync<InvalidOperationException>(() => world.UpdateAsync(
+            "vehicle", world.RowId, new Dictionary<string, object?> { ["status"] = "clo\0sed" }, world.Alice));
+    }
+
+    /// <summary>
     /// The policy predicate is inside the <c>UPDATE</c> itself, as a subquery over the same <c>FromSql</c>
     /// root the read path uses — not applied by a preceding <c>SELECT</c> whose verdict a concurrent writer
     /// could invalidate.

@@ -195,6 +195,7 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task A_timestamp_filter_over_utc_values_answers_by_instant() { }
         public System.Threading.Tasks.Task A_timestamp_sort_over_utc_values_orders_by_instant() { }
         public System.Threading.Tasks.Task A_timestamp_written_at_a_non_utc_offset_behaves_the_same_on_every_engine() { }
+        public System.Threading.Tasks.Task A_write_accepts_every_value_the_read_path_converts() { }
         public System.Threading.Tasks.Task An_ilike_filter_folds_ascii_case_on_every_engine() { }
         public System.Threading.Tasks.Task An_updated_row_stores_the_instant_however_the_caller_spelled_its_offset() { }
         protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Data.IAlvoData> CreateAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, System.Collections.Generic.IReadOnlyDictionary<string, System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRecord>> seed);

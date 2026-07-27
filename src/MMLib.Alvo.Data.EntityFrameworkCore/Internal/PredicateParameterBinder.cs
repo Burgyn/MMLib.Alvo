@@ -3,7 +3,6 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Storage;
 using System.Data.Common;
-using System.Globalization;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore;
 
@@ -130,9 +129,14 @@ internal sealed class PredicateParameterBinder
         ?? throw new InvalidOperationException(
             $"'{field}' is not mapped by this read model, so a value cannot be bound through its column.");
 
+    /// <summary>
+    /// Binds through the column's own mapping, after converting the value to what that column holds —
+    /// through <see cref="ColumnValue"/>, the same funnel the write paths use. The conversion used to live
+    /// here, which is how the write path came to have a different answer.
+    /// </summary>
     private DbParameter BindThroughColumn(DbCommand command, IProperty column, string name, object? value) =>
         column.GetRelationalTypeMapping()
-            .CreateParameter(command, Marker(name), AsColumnType(value, column), nullable: true);
+            .CreateParameter(command, Marker(name), ColumnValue.For(column.ClrType, column.Name, value), nullable: true);
 
     /// <summary>
     /// The one path for a value with no column behind it: the mapping comes from the value's own CLR type.
@@ -168,157 +172,4 @@ internal sealed class PredicateParameterBinder
         parameter.Value = DBNull.Value;
         return parameter;
     }
-
-    /// <summary>
-    /// Converts <paramref name="value"/> to <paramref name="column"/>'s CLR type, so the mapping binds the
-    /// representation the column holds. A value the column cannot hold is refused rather than coerced into
-    /// something arbitrary: a wrong-but-plausible value is exactly the silent miss this class prevents, and
-    /// the caller — a caller filter, a keyset cursor — has a structured error to report instead.
-    /// </summary>
-    private static object? AsColumnType(object? value, IProperty column)
-    {
-        if (value is null)
-        {
-            return null;
-        }
-
-        EnsureRepresentable(value, column);
-        var target = Nullable.GetUnderlyingType(column.ClrType) ?? column.ClrType;
-
-        return target.IsInstanceOfType(value) && !NeedsNormalising(target)
-            ? value
-            : Converted(value, target, column);
-    }
-
-    /// <summary>
-    /// Refuses a value no engine can carry, before it reaches one that would answer for the other.
-    /// </summary>
-    /// <remarks>
-    /// A <c>NUL</c> inside a text value is the case. PostgreSQL's <c>UTF8</c> encoding has no representation
-    /// for it and Npgsql surfaces <c>22021: invalid byte sequence for encoding "UTF8": 0x00</c> — a raw
-    /// provider exception out of <see cref="IAlvoData.QueryAsync"/>, off this port's failure contract
-    /// entirely — while SQLite accepts the parameter and quietly answers. One caller-supplied filter value,
-    /// an unhandled 500 on one engine and a silent answer on the other: §0 principle 3, on the channel a
-    /// caller controls per request. It is refused here so both engines refuse it identically, through the same
-    /// funnel that names the column for every other value a column cannot hold.
-    /// </remarks>
-    private static void EnsureRepresentable(object value, IProperty column)
-    {
-        if (value is string text && text.Contains('\0', StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException(
-                $"A text value containing a NUL character cannot be compared against column '{column.Name}': no "
-                + "engine Alvo supports can represent one. Remove the NUL before filtering on this field.");
-        }
-    }
-
-    /// <summary>
-    /// Whether a value the column's CLR type already accepts must still be converted.
-    /// </summary>
-    /// <remarks>
-    /// A timestamp is the one such type, and the short-circuit above is exactly how the normalisation went
-    /// missing: a <see cref="DateTimeOffset"/> <em>is</em> an instance of <see cref="DateTimeOffset"/>, so the
-    /// caller's own offset went straight to the provider — silently wrong rows on SQLite, and a raw Npgsql
-    /// refusal out of a read on PostgreSQL. Every other type here has one representation per value, so
-    /// "already the right type" really does mean "nothing to do".
-    /// </remarks>
-    private static bool NeedsNormalising(Type target) => StoredInstant.IsTimestamp(target);
-
-    private static object Converted(object value, Type target, IProperty column)
-    {
-        try
-        {
-            return Convert(value, target);
-        }
-        catch (Exception exception)
-            when (exception is FormatException or InvalidCastException or OverflowException or ArgumentException)
-        {
-            throw new InvalidOperationException(
-                $"A value of type '{value.GetType()}' cannot be compared against column '{column.Name}', which holds " +
-                $"'{target}'. Supply a value the column's type can hold.",
-                exception);
-        }
-    }
-
-    /// <summary>
-    /// The conversions <see cref="System.Convert.ChangeType(object?, Type, IFormatProvider?)"/> cannot
-    /// do — none of <see cref="Guid"/>, <see cref="DateOnly"/>, <see cref="DateTimeOffset"/> and
-    /// <see cref="TimeOnly"/> implements <see cref="IConvertible"/> — plus that method for the numeric,
-    /// string and boolean cases it does handle.
-    /// </summary>
-    private static object Convert(object value, Type target)
-    {
-        if (target == typeof(Guid))
-        {
-            return Guid.Parse(AsText(value), CultureInfo.InvariantCulture);
-        }
-
-        if (target == typeof(DateOnly))
-        {
-            return AsDate(value);
-        }
-
-        if (target == typeof(DateTimeOffset))
-        {
-            return StoredInstant.Of(value);
-        }
-
-        if (target == typeof(TimeOnly))
-        {
-            return TimeOnly.Parse(AsText(value), CultureInfo.InvariantCulture);
-        }
-
-        EnsureNoFractionLost(value, target);
-        return System.Convert.ChangeType(value, target, CultureInfo.InvariantCulture);
-    }
-
-    /// <summary>
-    /// <see cref="System.Convert.ChangeType(object?, Type, IFormatProvider?)"/> <b>rounds</b> a fractional
-    /// value into an integral type (midpoint-to-even) rather than refusing it, which would make the enclosing
-    /// method's own contract false in the one case a caller filter reaches most easily.
-    /// </summary>
-    /// <remarks>
-    /// <c>mileage=gt.12.7</c> bound as <c>13</c> answers <c>mileage &gt; 13</c> and drops the row with
-    /// <c>mileage = 13</c>; <c>lte.12.7</c> admits one the caller excluded. Both are silent, and both are the
-    /// wrong-but-plausible representation this class exists to prevent. There <em>is</em> a correct answer for
-    /// a fractional bound against an integral column, but it is per-operator (floor for <c>gt</c>, ceiling for
-    /// <c>lt</c>, no match at all for <c>eq</c>) and it is request-validation work, not something a parameter
-    /// binder may decide — so the value is refused and the caller gets a structured error. Throwing
-    /// <see cref="InvalidCastException"/> hands the refusal to <see cref="Converted"/>, so it carries the
-    /// column's name like every other rejection here.
-    /// </remarks>
-    private static void EnsureNoFractionLost(object value, Type target)
-    {
-        if (IsIntegral(target) && HasFraction(value))
-        {
-            throw new InvalidCastException(
-                $"'{value}' has a fractional part and would be rounded to fit an integral column.");
-        }
-    }
-
-    private static bool IsIntegral(Type target) => Type.GetTypeCode(target) is
-        TypeCode.SByte or TypeCode.Byte or TypeCode.Int16 or TypeCode.UInt16
-        or TypeCode.Int32 or TypeCode.UInt32 or TypeCode.Int64 or TypeCode.UInt64;
-
-    private static bool HasFraction(object value) => value switch
-    {
-        decimal number => number != decimal.Truncate(number),
-        double number => number != Math.Truncate(number),
-        float number => number != MathF.Truncate(number),
-        _ => false,
-    };
-
-    /// <summary>
-    /// A <c>date</c> column takes the calendar date the caller wrote, read in the offset they wrote it
-    /// with — not the UTC date, which would shift the day for any caller east or west of UTC.
-    /// </summary>
-    private static DateOnly AsDate(object value) => value switch
-    {
-        DateTimeOffset offset => DateOnly.FromDateTime(offset.DateTime),
-        DateTime instant => DateOnly.FromDateTime(instant),
-        _ => DateOnly.Parse(AsText(value), CultureInfo.InvariantCulture),
-    };
-
-    private static string AsText(object value) =>
-        value as string ?? throw new InvalidCastException($"'{value.GetType()}' cannot be read as text.");
 }

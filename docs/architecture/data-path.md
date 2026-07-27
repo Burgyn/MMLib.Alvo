@@ -668,6 +668,40 @@ no new port member was added — this is the seam PR1 already built for the two-
 way PR1 proved that seam: through `TSqlFieldSqlRenderer`, a fake dialect neither in-repo driver speaks, which
 renders `(CASE WHEN [is_public] = 1 THEN 1 ELSE 0 END = 1)` with no change to the filter renderer.
 
+## One value funnel, for reading and for writing
+
+`ColumnValue.For(clrType, column, value)` is the only answer to "what does this column hold, given this
+value". Three call sites go through it: the parameter binder (a filter operand, a cursor value, a policy
+predicate's column comparison), `WritePropertyBag` (an insert) and `UpdateSetterFactory` (an update).
+
+It is one type because it was two rules, and the copy nobody was looking at was the wrong one. The read path
+carried the whole funnel — the NUL refusal, the midpoint-rounding refusal, the UTC normalisation, the
+`Guid`/`DateOnly`/`DateTimeOffset`/`TimeOnly` conversions `Convert.ChangeType` cannot do. The write path's
+only type gate was the **reflection binder** driving EF's `SetProperty`, so:
+
+| payload | read path | write path (before) |
+|---|---|---|
+| `price = 5L` against a `decimal` column | converts | `ArgumentException: Object of type 'System.Int64' cannot be converted to…` |
+| `created_at = "2001-01-01T00:00:00Z"` | converts | the same reflection failure |
+| `mileage = "10"` | converts | the same reflection failure |
+
+Every value `System.Text.Json` produces for a JSON number or an RFC 3339 string, refused on the write path of
+a framework whose stated primary user is an agent emitting JSON. And `StoredInstant.Stored`'s own remark —
+*"a value that is not timestamp-shaped is passed through untouched … EF's own change tracker still rejects it,
+with its own message"* — was false: the message was a reflection `ArgumentException`, not EF's.
+
+The read path's funnel is the authority rather than the reverse because it is the tested one and its three
+refusals each exist for a measured reason. A write now inherits all of them, which is the point:
+`SqliteAlvoDataWriteTests` pins the fractional-into-integral and NUL refusals on the write side, and
+`AlvoDataOrderingTests.A_write_accepts_every_value_the_read_path_converts` pins the conversions on both real
+engines. `StoredInstant` lost its second entry point (`Stored`) in the same change — having two was precisely
+how the write path came to apply the timestamp normalisation and none of the funnel's other rules.
+
+**It converts; it does not validate.** An integer written to a `string` column becomes its invariant text,
+exactly as it already did when compared against one. Deciding that a JSON number is the wrong *shape* for a
+declared `string` field is schema-derived request validation, which belongs above this port — and a per-path
+guess about it is how the two paths came to disagree.
+
 ## Values are bound through EF's own type mapping, never formatted
 
 `PredicateParameterBinder` binds every value through `IRelationalTypeMappingSource`. Formatting a value into

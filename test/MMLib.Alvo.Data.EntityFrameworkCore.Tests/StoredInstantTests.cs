@@ -79,32 +79,37 @@ public class StoredInstantTests
         => Should.Throw<InvalidCastException>(() => StoredInstant.Of(42));
 
     /// <summary>
-    /// The write path's gate. A timestamp column normalises; every other column is left exactly as it was, so
-    /// a <c>date</c> keeps the calendar-date rule that is deliberately <em>not</em> this class's.
+    /// The column funnel every path now shares. A timestamp column normalises; every other column keeps its
+    /// own rule, so a <c>date</c> keeps the calendar-date rule that is deliberately <em>not</em> this class's.
     /// </summary>
+    /// <remarks>
+    /// Asserted through <c>ColumnValue</c> rather than through a write-path-only gate of its own, because
+    /// having two entry points is how the write path came to apply this normalisation and none of the funnel's
+    /// other rules.
+    /// </remarks>
     [Fact]
     public void Only_a_timestamp_column_normalises_its_value()
     {
         var spelled = _noon.ToOffset(TimeSpan.FromHours(-5));
 
-        StoredInstant.Stored(typeof(DateTimeOffset?), spelled).ShouldBe(_noon);
-        StoredInstant.Stored(typeof(DateTimeOffset), spelled).ShouldBe(_noon);
-        StoredInstant.Stored(typeof(DateOnly?), new DateOnly(2026, 7, 26)).ShouldBe(new DateOnly(2026, 7, 26));
-        StoredInstant.Stored(typeof(string), "2026-07-26T12:00:00").ShouldBe("2026-07-26T12:00:00");
+        ColumnValue.For(typeof(DateTimeOffset?), "occurred_at", spelled).ShouldBe(_noon);
+        ColumnValue.For(typeof(DateTimeOffset), "occurred_at", spelled).ShouldBe(_noon);
+        ColumnValue.For(typeof(DateOnly?), "due_on", new DateOnly(2026, 7, 26)).ShouldBe(new DateOnly(2026, 7, 26));
+        ColumnValue.For(typeof(string), "note", "2026-07-26T12:00:00").ShouldBe("2026-07-26T12:00:00");
     }
 
     /// <summary>
-    /// A value that is not timestamp-shaped passes through even for a timestamp column, so this gate invents no
-    /// conversion the write path did not previously perform — EF's own change tracker still rejects it, with
-    /// its own message.
+    /// Text a timestamp column can read is now <b>converted</b> rather than passed through for EF to reject:
+    /// the read path already accepted it, and two answers to one question is the defect
+    /// <c>ColumnValue</c> exists to remove.
     /// </summary>
     [Fact]
-    public void A_non_timestamp_value_for_a_timestamp_column_is_left_for_ef_to_reject()
-        => StoredInstant.Stored(typeof(DateTimeOffset?), "2026-07-26T12:00:00").ShouldBe("2026-07-26T12:00:00");
+    public void Timestamp_text_for_a_timestamp_column_is_converted_rather_than_left_to_ef()
+        => ColumnValue.For(typeof(DateTimeOffset?), "occurred_at", "2026-07-26T12:00:00Z").ShouldBe(_noon);
 
     [Fact]
     public void A_null_is_left_alone()
-        => StoredInstant.Stored(typeof(DateTimeOffset?), null).ShouldBeNull();
+        => ColumnValue.For(typeof(DateTimeOffset?), "occurred_at", null).ShouldBeNull();
 
     /// <summary>
     /// The gate's own predicate, over every column type this read model can produce — a <c>date</c> and a

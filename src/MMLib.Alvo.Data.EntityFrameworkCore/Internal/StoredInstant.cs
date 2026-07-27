@@ -28,10 +28,11 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// UTC would shift the day for any caller east or west of UTC.
 /// </para>
 /// <para>
-/// One helper, called from three places, rather than a rule each path applies for itself. The defect this
-/// shape prevents has already cost this package three review rounds in another form: a second copy of a
-/// conversion is how the two copies come to disagree, and a disagreement here is invisible until it costs a
-/// row.
+/// One helper, called from one place — <see cref="ColumnValue"/>, which is the single funnel every
+/// caller-supplied value meets a column through. It used to expose a second entry point (<c>Stored</c>) that
+/// the write paths called directly, which is precisely how the write path ended up applying the timestamp
+/// normalisation and none of the funnel's other rules. A second copy of a conversion is how the two copies
+/// come to disagree, and a disagreement here is invisible until it costs a row.
 /// </para>
 /// </remarks>
 internal static class StoredInstant
@@ -62,23 +63,6 @@ internal static class StoredInstant
             text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal),
         _ => throw new InvalidCastException($"'{value.GetType()}' cannot be read as a timestamp."),
     };
-
-    /// <summary>
-    /// <paramref name="value"/> as a column of <paramref name="clrType"/> must hold it — the write path's
-    /// gate over <see cref="Of"/>.
-    /// </summary>
-    /// <param name="clrType">The target column's CLR type, nullable or not.</param>
-    /// <param name="value">The value being written.</param>
-    /// <remarks>
-    /// A value that is not timestamp-shaped is passed through untouched even for a timestamp column, so this
-    /// changes no failure: EF's own change tracker still rejects it, with its own message. What this must not
-    /// do is invent a conversion the write path did not previously perform.
-    /// </remarks>
-    internal static object? Stored(Type clrType, object? value)
-    {
-        ArgumentNullException.ThrowIfNull(clrType);
-        return IsTimestamp(clrType) && value is DateTimeOffset or DateTime ? Of(value) : value;
-    }
 
     /// <summary>Whether a column of <paramref name="clrType"/> holds an instant.</summary>
     /// <param name="clrType">The column's CLR type, nullable or not.</param>

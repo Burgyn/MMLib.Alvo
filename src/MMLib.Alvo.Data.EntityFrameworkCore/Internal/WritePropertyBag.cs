@@ -44,9 +44,11 @@ internal static class WritePropertyBag
     }
 
     /// <summary>
-    /// A value as its own column holds it. A field this read model does not map is passed through untouched,
-    /// so EF raises its own error for it rather than this method inventing one.
+    /// A value as its own column holds it, through <see cref="ColumnValue"/> — the same funnel a filter
+    /// operand goes through, so an insert accepts exactly the values a comparison does. A field this read
+    /// model does not map is passed through untouched, so EF raises its own error for it rather than this
+    /// method inventing one.
     /// </summary>
     private static object Stored(IEntityType rows, string field, object value) =>
-        rows.FindProperty(field) is { } column ? StoredInstant.Stored(column.ClrType, value)! : value;
+        rows.FindProperty(field) is { } column ? ColumnValue.For(column.ClrType, column.Name, value)! : value;
 }

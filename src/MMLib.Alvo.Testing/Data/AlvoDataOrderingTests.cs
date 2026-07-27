@@ -315,6 +315,51 @@ public abstract class AlvoDataOrderingTests
         (await CodesAsync(data, Matching(AlvoFilterOperator.ILike, "ACME-0%"))).ShouldBe(["ACME-0"]);
     }
 
+    /// <summary>
+    /// A value the <b>read</b> path converts must be writable too. The write path's only type gate was the
+    /// reflection binder driving EF's <c>SetProperty</c>, so <c>amount = 100L</c> and
+    /// <c>occurred_at = "2026-01-01T00:00:00Z"</c> — every shape <c>System.Text.Json</c> produces for a JSON
+    /// number and an RFC 3339 string — failed with a raw <c>ArgumentException</c> while the identical values
+    /// filtered fine. For a framework whose stated primary user is an agent emitting JSON that was close to
+    /// total on the write path.
+    /// </summary>
+    /// <remarks>
+    /// It is one fact over both write members, because the defect was one conversion rule kept in two places:
+    /// the read path's funnel is now the only one, so a value either both paths accept or neither does.
+    /// </remarks>
+    [Fact]
+    public async Task A_write_accepts_every_value_the_read_path_converts()
+    {
+        var data = await EmptyLedgerAsync();
+        var created = await data.CreateAsync(
+            Entity,
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["code"] = Code(0),
+                ["amount"] = 100L,
+                ["occurred_at"] = "2026-01-01T00:00:00Z",
+            },
+            Caller,
+            TestContext.Current.CancellationToken);
+
+        Amount(created).ShouldBe(100m);
+        Occurred(created).ShouldBe(Midnight);
+
+        var updated = await data.UpdateAsync(
+            Entity,
+            (Guid)created["id"]!,
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["amount"] = 250L,
+                ["occurred_at"] = "2026-01-01T02:00:00Z",
+            },
+            Caller,
+            TestContext.Current.CancellationToken);
+
+        Amount(updated).ShouldBe(250m);
+        Occurred(updated).ShouldBe(Midnight.AddHours(2));
+    }
+
     private static AlvoComparison Matching(AlvoFilterOperator op, string pattern) =>
         new("code", op, pattern);
 
