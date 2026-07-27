@@ -588,9 +588,13 @@ paying for the run.
 |---|---|---|---|
 | `stryker-config.expressions.json` | `MMLib.Alvo` (`Expressions/**`) | 1267 | 834 |
 | `stryker-config.json` | `MMLib.Alvo` (the rest) | 1267 | 478 |
-| `stryker-config.data-ef.json` | `MMLib.Alvo.Data.EntityFrameworkCore` | 677 | 488 |
+| `stryker-config.data-ef.json` | `MMLib.Alvo.Data.EntityFrameworkCore` | 686 | 497 |
 | `stryker-config.data-sqlite.json` | `MMLib.Alvo.Data.Sqlite` | 268 | 13 |
 | `stryker-config.data-postgresql.json` | `MMLib.Alvo.Data.PostgreSql` | 132 | 11 |
+
+`data-ef`'s row is the second measurement, taken after `02f815d` fixed the negated-declaration-pattern blind
+spot below — the first probe (same commands, before that fix) found 677 tests and 488 mutants. The other
+four rows are unchanged since neither their mutated project nor their test projects were touched afterward.
 
 All five are non-vacuous. The two driver configs are small on purpose — each driver is two files of rendering
 — and small is the point: `TrueLiteral => "1"` mutated to `"0"` inverts a boolean inside a policy `WHERE`, and
@@ -600,7 +604,7 @@ can be made green with.
 **The `data-ef` `test-projects` list is now a result, not a hypothesis.** It names both
 `MMLib.Alvo.Data.EntityFrameworkCore.Tests` and `MMLib.Alvo.Data.Sqlite.Tests`, because the killing tests for
 `EfAlvoData`, `SortSqlRenderer`'s engine behaviour, `UpdateSetterFactory` and `WritePropertyBag` live in the
-latter; the probe confirms 677 tests reach the run, which is the two projects together rather than the EF
+latter; the probe confirms 686 tests reach the run, which is the two projects together rather than the EF
 project's own suite alone. `MMLib.Alvo.Data.PostgreSql.Tests.Integration` is deliberately **not** added: it is
 Docker-gated end to end, so on a CI shard with no daemon every one of its kills would report as a survivor and
 the score would read as a regression that is really an absent container. `MMLib.Alvo.Data.PostgreSql.Tests` is
@@ -640,20 +644,60 @@ Neither is suppressed with a Stryker directive: this package writes no inline co
 `// Stryker disable` line is a comment whose reason lives outside the code. Declaring them here keeps the
 reason where a reader of a red run will look for it.
 
-### Two Safe-Mode blind spots the probe surfaced
+### The negated-declaration-pattern trap, and the fix
 
-Worth naming because they are *invisible* in a score — Stryker reports them as `CompileError`, not as
-survivors, so the affected methods simply contribute nothing:
+Two methods on this data path — `ReadStatementComposer.AddRowId` and `AlvoModelCacheKeyFactory.Create` —
+used to be *entered* through a negated declaration pattern: a guard that binds a pattern variable only on
+the branch where the pattern **fails to match**, then uses that variable after the guard.
+`if (rowId is not { } id) { return; }` … `id` used below; `if (context is not AlvoDataContext alvo)
+{ throw …; }` … `alvo` used below. The shape is idiomatic and completely safe at run time — the compiler's
+definite-assignment analysis proves `id`/`alvo` is bound on every path that reaches the code after the
+guard, because the only way to get there is for the negated pattern to have failed to match.
 
-- `ReadStatementComposer.AddRowId` and `AlvoModelCacheKeyFactory.Create` are both entered through a negated
-  declaration pattern (`if (rowId is not { } id)`, `if (context is not AlvoDataContext alvo)`). Mutating the
-  pattern breaks definite assignment (`CS0165`), so Stryker's Safe Mode **removes every mutation in the whole
-  method**. `AddRowId` is on the security path — it is the `alvo_id` term of the `WHERE` — so read its
-  coverage from the behavioural suites (`ReadStatementComposerTests`, `SqliteAlvoDataReadTests`,
-  `AlvoDataStatementTests`) rather than from a mutation score that structurally cannot speak about it.
-- The `data-ef` shard reports 146 `CompileError` mutants against 488 tested, and each core shard reports 157.
-  That ratio is normal for pattern-matching-heavy C# and is not a coverage signal either way; it is recorded
-  so a later reader does not read a shrinking "tested" count as lost coverage.
+That same proof is exactly what a mutation tool's job destroys. Stryker mutates the guard's condition (a
+boundary, a negation, an equality) to see whether the test suite notices; the mutated condition no longer
+matches the shape the compiler proved definite assignment from, so the variable becomes "used but possibly
+unassigned" on the mutated path — `CS0165`, a compile error, not a behavioural difference.
+
+**A `CompileError` mutant is not a survivor, and the difference matters.** A survivor still lowers the
+mutation score and is visible in the report as one specific mutation someone can go read and decide whether
+to accept. A `CompileError` is invisible in a different way: Stryker's Safe Mode responds to *one* compile
+error inside a method by discarding **every** mutation of that whole method and marking them all
+`CompileError`, so the method's contribution to the score is not low, not flagged — it is simply **absent**.
+A green `data-ef` run then looks exactly like one where the method was fully exercised. `ReadStatementComposer.AddRowId`
+composes the `alvo_id` term that carries a row identity into a policy-filtered `WHERE` — the security path —
+so this was the worst place in the package for a mutation gate to be silently unable to speak at all.
+
+The fix (`02f815d`) is not suppressing the mutant — that is what `data-ef`'s two *declared* survivors above
+do, deliberately, because they stay reachable rather than uncompilable. It is rewriting each guard so no
+pattern variable's assignment depends on a branch the compiler can only prove from the *exact* syntactic
+form of the condition:
+
+- **`ReadStatementComposer.AddRowId`** dropped the pattern-variable capture entirely: `if (rowId is not { }
+  id) { return; }` became `if (rowId is null) { return; }`, with the body reading `rowId.Value` in place of
+  `id`. A nullable value type's `.Value` is legal to call regardless of the guard, so no mutation of
+  `is null` can make the method fail to compile — the worst a mutant can do is change which rows the
+  statement answers, which is exactly the kind of change a mutation score needs to be able to see.
+- **`AlvoModelCacheKeyFactory.Create`** flipped the pattern to its accepting form: `if (context is not
+  AlvoDataContext alvo) { throw …; }` became `if (context is AlvoDataContext alvo) { return (…,
+  alvo.ModelToken, …); } … throw …;`. `alvo` is now bound and read inside the same block the pattern matched
+  in, so the compiler needs no cross-branch reasoning to prove it assigned, and mutating the condition can at
+  worst make the method answer wrong rather than fail to build.
+
+Behaviour is unchanged in both; only the guard's shape is — and both methods' own remarks point back here.
+**The general rule this leaves for later code on this path:** a declaration pattern whose variable is used
+*after* the `if` rather than *inside* the branch that bound it is a mutation-coverage blind spot waiting to
+happen, not merely a style preference. Prefer the accepting-branch form, or a plain null/type test with no
+pattern variable at all, whenever the code after the guard would otherwise depend on the negative branch
+having been taken.
+
+**Measured, not assumed.** The same discovery-only probe from *How each config was verified* was re-run
+after the fix: `data-ef`'s tested-mutant count went from **488 to 497** (+9), and its `CompileError` count
+went from **146 to 134** (−12) — the two guards' mutants stopped disappearing, and most of the freed
+mutants landed in *tested* rather than in the (unrelated) already-covered/mutate-filter exclusions that
+account for the remaining three. Each core shard still reports about 157 `CompileError` mutants; that
+figure is unaffected by this fix (both rewritten methods live in `MMLib.Alvo.Data.EntityFrameworkCore`) and
+remains normal for pattern-matching-heavy C#, not a coverage signal on its own.
 
 `ReadStatementComposer.RequiresTotalOrder`'s three disjuncts each have an independent killing fact, plus the
 negative, so there is **no** survivor to chase there: `A_sorted_read_carries_its_order_by_inside_the_one_statement`
