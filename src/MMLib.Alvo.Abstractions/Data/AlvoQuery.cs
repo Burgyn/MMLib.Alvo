@@ -39,11 +39,20 @@ public sealed record AlvoQuery
     public AlvoFilter? Filter { get; init; }
 
     /// <summary>
-    /// Gets the sort order to apply, outermost first; empty means implementation-defined (but stable)
-    /// order. A sort key is subject to the same confidentiality rule as <see cref="Filter"/>: ordering
+    /// Gets the sort order to apply, outermost first; empty means <b>implementation-defined and unstable</b>
+    /// order — two identical calls may return the same rows in a different sequence, because neither engine
+    /// promises otherwise for a query with no <c>ORDER BY</c> (a PostgreSQL heap <c>UPDATE</c> relocates a row
+    /// and changes the sequence). A caller that cares about order, or that pages, must name a key.
+    /// A sort key is subject to the same confidentiality rule as <see cref="Filter"/>: ordering
     /// by a hidden field discloses that field's ordering across the whole page, so an implementation
     /// rejects it.
     /// </summary>
+    /// <remarks>
+    /// A key naming a <b>nullable</b> field is only usable on an <em>unpaged</em> read: a keyset cursor's
+    /// boundary is a chain of comparisons that cannot express where nulls sort, so an implementation refuses a
+    /// paged read (<see cref="Limit"/> or <see cref="After"/> set) sorted by one rather than silently losing
+    /// the null-keyed rows.
+    /// </remarks>
     public IReadOnlyList<AlvoSort> Sort { get; init; } = [];
 
     /// <summary>Gets the maximum number of rows to return, or <see langword="null"/> for no explicit limit.</summary>

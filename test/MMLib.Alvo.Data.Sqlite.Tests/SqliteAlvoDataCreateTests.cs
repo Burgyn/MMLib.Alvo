@@ -119,19 +119,18 @@ public sealed class SqliteAlvoDataCreateTests : IAsyncDisposable
 
     [Fact]
     public async Task A_caller_supplied_row_id_is_refused_rather_than_honoured()
-        => await Should.ThrowAsync<AlvoAuthorizationException>(async () =>
+    {
+        var world = await AlvoDataWorlds.NotesAsync(_fixture);
+        var payload = new Dictionary<string, object?>
         {
-            var world = await AlvoDataWorlds.NotesAsync(_fixture);
-            await world.CreateAsync(
-                "notes",
-                new Dictionary<string, object?>
-                {
-                    ["id"] = Guid.NewGuid(),
-                    ["owner_id"] = world.Alice.User.Value,
-                    ["tenant_id"] = world.Tenant.Value,
-                },
-                world.Alice);
-        });
+            ["id"] = Guid.NewGuid(),
+            ["owner_id"] = world.Alice.User.Value,
+            ["tenant_id"] = world.Tenant.Value,
+            ["label"] = "smuggled-id",
+        };
+
+        await Should.ThrowAsync<AlvoAuthorizationException>(() => world.CreateAsync("notes", payload, world.Alice));
+    }
 
     /// <summary>
     /// An explicit <see langword="null"/> in a create payload leaves the column at its database default,

@@ -184,11 +184,16 @@ contract for a future path that does read one.
 | No policy for the operation | `AlvoAuthorizationException` | the decision alone |
 | Entity undeclared, or `EntityStorage.Dynamic` | `AlvoAuthorizationException`, one shared message | the applied schema |
 | Filter/sort names a hidden or undeclared field | `AlvoAuthorizationException`, one shared message | the decision + schema |
-| Filter deeper than `AlvoFilter.MaxDepth`, negative `Limit` | `ArgumentException` family | the query alone |
+| Filter deeper than `AlvoFilter.MaxDepth`, negative `Limit`, a paged read sorted by a nullable field | `ArgumentException` family | the query alone |
 | Payload names `id`, or `tenant_id` on update, or a read-only or undeclared field | `AlvoAuthorizationException` | the payload alone |
 | `get` of an invisible or absent row | `null` | the engine |
 | `update`/`delete` of an invisible or absent row | `AlvoRecordNotFoundException`, identical message | rows affected / pre-image |
 | Post-image fails `WITH CHECK` or the tenant scope | `AlvoAuthorizationException` | `IPredicateEvaluator` |
+
+`Limit = 0` is *accepted* and renders `LIMIT 0`, which both engines answer with an empty page. That is
+deliberate rather than overlooked — unlike a negative limit the two engines agree on it, so it is not an
+engine-agnosticism defect — but this port does not define whether an empty page or a refusal is the right
+answer to "give me nothing", and the request-validation layer above it should.
 
 Every payload refusal is decided **before any row is looked up**, so "was my write rejected" can never answer
 "does this row exist". The undeclared-entity message is `AlvoDataContext.UnmappedEntityMessage`, referenced
@@ -331,6 +336,8 @@ Task 12 should record it as a known survivor (or exclude the arm) rather than le
 The same applies to `Internal/AlvoDataSeed.cs`, which is test-only seeding and is excluded from mutation by
 design.
 
-`ReadStatementComposer.RequiresTotalOrder` has three disjuncts and only two are independently observable on
-the read path today (`Sort` and `Limit`/`Anchor` reach it together from `QueryAsync` in some combinations);
-Task 12 should confirm each disjunct has a killing test rather than assume the composer tests cover all three.
+`ReadStatementComposer.RequiresTotalOrder`'s three disjuncts each have an independent killing fact, plus the
+negative, so there is no survivor for Task 12 to chase: `A_sorted_read_carries_its_order_by_inside_the_one_statement`
+(sort only), `A_limited_read_orders_before_it_truncates_and_binds_the_limit` (limit only),
+`A_cursored_page_is_ordered_even_with_no_caller_sort_key` (anchor only) and
+`An_unsorted_unlimited_first_page_needs_no_ordering_at_all`.
