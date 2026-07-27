@@ -38,8 +38,16 @@ public sealed class SqliteAlvoDataModelTests : IAsyncDisposable
     /// data operation — invisible to every other fact in this file, and fatal to the p95 criterion PR3
     /// inherits.
     /// </summary>
+    /// <remarks>
+    /// The token and the cache key are what Alvo owns, and they are what this asserts. It deliberately does
+    /// <b>not</b> assert that two contexts sharing a token get the same <c>IModel</c> instance: that is a
+    /// property of EFs own model cache — an <c>IMemoryCache</c> with a size limit — so a pass would be
+    /// evidence the cache retained the entry rather than evidence Alvo behaved, and a failure evidence of
+    /// eviction rather than of a defect. A suite that builds a fresh applied schema per database evicts often
+    /// enough to make that assertion intermittently red, which is worse than not making it.
+    /// </remarks>
     [Fact]
-    public async Task An_unchanged_schema_keeps_its_model_token_so_the_model_is_built_once()
+    public async Task An_unchanged_schema_keeps_its_model_cache_key()
     {
         var host = await _fixture.StartAsync(SchemaWith("plate"));
         var factory = host.Services.GetRequiredService<AlvoDataContextFactory>();
@@ -48,8 +56,30 @@ public sealed class SqliteAlvoDataModelTests : IAsyncDisposable
         using var second = factory.Create();
 
         second.ModelToken.ShouldBe(first.ModelToken);
-        second.Model.ShouldBeSameAs(first.Model);
+        CacheKey(second).ShouldBe(CacheKey(first));
     }
+
+    /// <summary>
+    /// The mechanism by which "built once per applied schema" actually happens, asserted on the pure function
+    /// that decides it rather than on whether EF happened to keep the entry: a re-prime mints a new token, so
+    /// the cache key differs and EF has to build again.
+    /// </summary>
+    [Fact]
+    public async Task A_re_primed_schema_gets_a_different_model_cache_key()
+    {
+        var host = await _fixture.StartAsync(SchemaWith("plate"));
+        var factory = host.Services.GetRequiredService<AlvoDataContextFactory>();
+        using var before = factory.Create();
+
+        host.RePrime(SchemaWith("plate", "colour"));
+        using var after = factory.Create();
+
+        after.ModelToken.ShouldNotBe(before.ModelToken);
+        CacheKey(after).ShouldNotBe(CacheKey(before));
+    }
+
+    private static object CacheKey(AlvoDataContext context) =>
+        new AlvoModelCacheKeyFactory().Create(context, designTime: false);
 
     /// <summary>
     /// Spike <c>Q4g</c>: an all-optional read model is the only shape in which a <c>hidden</c>
