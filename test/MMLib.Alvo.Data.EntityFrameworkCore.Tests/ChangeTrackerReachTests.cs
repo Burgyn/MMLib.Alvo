@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 namespace MMLib.Alvo.Data.EntityFrameworkCore.Tests;
 
 /// <summary>
-/// The change tracker is reachable from inside this package — <see cref="EfAlvoData"/> holds a live
+/// The change tracker is reachable from inside the data packages — <see cref="EfAlvoData"/> holds a live
 /// <c>AlvoDataContext</c> — and a tracked write bypasses policy completely: <c>Attach</c> + set +
 /// <c>SaveChanges</c> emits <c>UPDATE … WHERE id = @p</c> with no predicate at all (spike <c>Q5d</c>). These
 /// facts keep that unreachable by construction rather than by reviewer memory.
@@ -21,12 +21,17 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore.Tests;
 /// Comment lines are stripped before matching, so the many remarks that <em>discuss</em> the tracked shape (and
 /// exist precisely to warn about it) do not count as uses of it.
 /// </para>
+/// <para>
+/// <b>All three EF-referencing packages are scanned</b>, not only the shared one. A tracked write is just as
+/// complete a bypass in a driver package, and both drivers reference EF Core — a scan confined to
+/// <c>Data.EntityFrameworkCore</c> would have been silent about either of them.
+/// </para>
 /// </remarks>
 public class ChangeTrackerReachTests
 {
     /// <summary>
     /// The insert is the one operation that legitimately saves, and the seeding seam is test-only and
-    /// documented as bypassing policy. Nothing else in the package may.
+    /// documented as bypassing policy. Nothing else in any data package may.
     /// </summary>
     [Fact]
     public void Only_the_create_path_and_the_test_only_seed_reach_save_changes()
@@ -37,12 +42,16 @@ public class ChangeTrackerReachTests
     /// builds its own <c>WHERE</c> from the primary key, so the statement carries no policy predicate. An
     /// update or a delete goes through <c>ExecuteUpdate</c>/<c>ExecuteDelete</c> over the <c>FromSql</c> root.
     /// </summary>
+    /// <param name="call">The banned call, as a regular expression.</param>
     [Theory]
     [InlineData(@"\.Attach(Range)?\(")]
     [InlineData(@"\.Update(Range)?\(")]
     [InlineData(@"\.Remove(Range)?\(")]
     [InlineData(@"\.Entry\(")]
-    public void No_tracked_write_vocabulary_appears_in_this_package(string call)
+    [InlineData(@"\.AsTracking\(")]
+    [InlineData(@"\bEntityState\.")]
+    [InlineData(@"\.State\s*=[^=]")]
+    public void No_tracked_write_vocabulary_appears_in_any_data_package(string call)
         => FilesMatching(call).ShouldBeEmpty();
 
     /// <summary>
@@ -70,16 +79,54 @@ public class ChangeTrackerReachTests
         => FilesMatching(@"ChangeTracker\.").ShouldBe(["AlvoDataContext.cs"]);
 
     /// <summary>
-    /// The positive control: the scan really reads this package's sources, so an empty result above means "not
-    /// present" rather than "nothing was scanned".
+    /// The positive control: the scan really reads all three packages' sources, so an empty result above means
+    /// "not present" rather than "nothing was scanned". Each driver is named individually, because a wrong path
+    /// would silently drop one and leave the totals plausible.
     /// </summary>
     [Fact]
-    public void The_scan_reads_the_packages_own_sources()
+    public void The_scan_reads_every_data_packages_own_sources()
     {
-        SourceFiles().Count.ShouldBeGreaterThan(10);
+        var scanned = SourceFiles().Select(Path.GetFileName).ToList();
+
+        scanned.Count.ShouldBeGreaterThan(20);
+        scanned.ShouldContain("EfAlvoData.cs");
+        scanned.ShouldContain("SqliteSqlDialect.cs");
+        scanned.ShouldContain("PostgreSqlSqlDialect.cs");
         FilesMatching("ExecuteUpdateAsync").ShouldBe(["EfAlvoData.cs"]);
         FilesMatching("ExecuteDeleteAsync").ShouldBe(["EfAlvoData.cs"]);
     }
+
+    /// <summary>
+    /// The negative control for the vocabulary itself: every banned pattern must actually match the call it
+    /// names. A typo in one of them (a stray escape, a wrong word) would make that row silently unenforceable,
+    /// which is the failure mode a list of regular expressions has.
+    /// </summary>
+    /// <param name="call">The banned call, as a regular expression.</param>
+    /// <param name="sample">A line the pattern must match.</param>
+    [Theory]
+    [InlineData(@"\.Attach(Range)?\(", "db.Attach(row);")]
+    [InlineData(@"\.Attach(Range)?\(", "db.AttachRange(rows);")]
+    [InlineData(@"\.Update(Range)?\(", "db.Update(row);")]
+    [InlineData(@"\.Remove(Range)?\(", "db.Remove(row);")]
+    [InlineData(@"\.Entry\(", "db.Entry(row).State = EntityState.Modified;")]
+    [InlineData(@"\.AsTracking\(", "var row = db.Rows(entity).AsTracking().First();")]
+    [InlineData(@"\bEntityState\.", "entry.State = EntityState.Modified;")]
+    [InlineData(@"\.State\s*=[^=]", "entry.State = EntityState.Modified;")]
+    public void Every_banned_pattern_matches_the_call_it_names(string call, string sample)
+        => Regex.IsMatch(sample, call, RegexOptions.None, TimeSpan.FromSeconds(5)).ShouldBeTrue();
+
+    /// <summary>
+    /// And must not match the shapes this package legitimately uses, so a banned pattern cannot be satisfied by
+    /// being unfalsifiable.
+    /// </summary>
+    /// <param name="call">The banned call, as a regular expression.</param>
+    /// <param name="sample">A line the pattern must not match.</param>
+    [Theory]
+    [InlineData(@"\.State\s*=[^=]", "if (entry.State == EntityState.Added)")]
+    [InlineData(@"\.AsTracking\(", "var rows = db.Rows(entity).AsNoTracking();")]
+    [InlineData(@"\.Update(Range)?\(", "await root.ExecuteUpdateAsync(setters, cancellationToken);")]
+    public void No_banned_pattern_matches_a_shape_this_package_uses(string call, string sample)
+        => Regex.IsMatch(sample, call, RegexOptions.None, TimeSpan.FromSeconds(5)).ShouldBeFalse();
 
     private static IReadOnlyList<string> FilesMatching(string pattern) =>
         [.. SourceFiles()
@@ -96,13 +143,21 @@ public class ChangeTrackerReachTests
         File.ReadLines(file).Where(line => !line.TrimStart().StartsWith("//", StringComparison.Ordinal)));
 
     private static IReadOnlyList<string> SourceFiles() =>
-        [.. Directory.EnumerateFiles(PackageDirectory(), "*.cs", SearchOption.AllDirectories)
+        [.. PackageDirectories()
+            .SelectMany(directory => Directory.EnumerateFiles(directory, "*.cs", SearchOption.AllDirectories))
             .Where(file => !IsGenerated(file))];
 
     private static bool IsGenerated(string file) =>
         file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
         || file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal);
 
-    private static string PackageDirectory() =>
-        Path.Combine(RepositoryRoot.Find(), "src", "MMLib.Alvo.Data.EntityFrameworkCore");
+    /// <summary>
+    /// Every shipped package that references EF Core. The two drivers are here because a tracked write in one
+    /// of them bypasses policy exactly as completely as one in the shared package would.
+    /// </summary>
+    private static IEnumerable<string> PackageDirectories() =>
+        _efReferencingPackages.Select(package => Path.Combine(RepositoryRoot.Find(), "src", package));
+
+    private static readonly string[] _efReferencingPackages =
+        ["MMLib.Alvo.Data.EntityFrameworkCore", "MMLib.Alvo.Data.Sqlite", "MMLib.Alvo.Data.PostgreSql"];
 }

@@ -190,6 +190,22 @@ see the failure-contract note below, which PR3's request-validation layer closes
 
 ## Writes never reach a change tracker
 
+`ChangeTrackerReachTests` is what keeps that true, and it scans **all three EF-referencing packages** — the
+shared one and both drivers — because a tracked write in a driver bypasses policy exactly as completely. Its
+banned vocabulary includes `AsTracking(`, which is the whole point: `QueryTrackingBehavior.NoTracking` on the
+context is a *default*, and one `AsTracking()` call overrides it per query. Without that pattern, this —
+
+```csharp
+var row = await db.Rows(entity).AsTracking().FirstAsync(bag => (Guid)bag["id"]! == id);
+row["title"] = patch;
+await db.SaveChangesAsync();          // UPDATE … WHERE id = @p, no policy predicate
+```
+
+— passed every encapsulation fact in the repository, inside `EfAlvoData.cs`, the file already allow-listed for
+`SaveChanges`. It was landed, watched to fail the widened gate, and reverted. `EntityState.` and `.State =` are
+banned alongside it, and every pattern carries a positive and a negative sample so a typo cannot make a row
+silently unenforceable.
+
 `update` and `delete` are `ExecuteUpdateAsync`/`ExecuteDeleteAsync` composed over the **same `FromSql` root
 that carries `USING`**, so the predicate is a subquery inside the emitted statement and `rows affected == 0`
 is the `AlvoRecordNotFoundException` signal — indistinguishable, as `IAlvoData` requires, from a row that
