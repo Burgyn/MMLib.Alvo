@@ -13,6 +13,12 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/MMLib.Alvo.Data.PostgreSql/MMLib.Alvo.Data.PostgreSql.csproj" />
+    <!-- The core, for the real ICelCompiler/IPredicateRenderer the golden CEL→SQL snapshot resolves out of
+         AddAlvo(). That baseline lives here rather than in the Testcontainers project on purpose: rendering
+         needs no engine, and a Docker-gated snapshot goes unverified on every host that skips the container,
+         which is exactly how a per-engine baseline drifts unnoticed. Test-only — the provider package itself
+         still references Data.EntityFrameworkCore + Abstractions alone. -->
+    <ProjectReference Include="../../src/MMLib.Alvo/MMLib.Alvo.csproj" />
   </ItemGroup>
 
 </Project>

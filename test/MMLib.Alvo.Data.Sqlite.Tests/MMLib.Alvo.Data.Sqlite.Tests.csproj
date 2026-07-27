@@ -10,4 +10,12 @@
     <PackageReference Include="Microsoft.Extensions.Options" />
   </ItemGroup>
 
+  <!-- The one differential probe both engines answer through. Linked rather than copied: two per-engine
+       copies would be the very way a differential comparison stops comparing like with like. It lives in a
+       _shared subdirectory so the test/_shared/*.cs glob — which every test project compiles, including ones
+       with no EF reference at all — does not pick it up. -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/DifferentialProbe.cs" Link="_shared/DifferentialProbe.cs" />
+  </ItemGroup>
+
 </Project>

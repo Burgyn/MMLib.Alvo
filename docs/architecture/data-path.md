@@ -4,8 +4,8 @@ How an Alvo read or write becomes one SQL statement, and the decisions that shap
 (#20).
 
 > **Status: partial.** **PR2's Task 12 completes it** — what is still missing is the parameter-prefix table,
-> the all-optional read model's own section, the DI wiring, and the F7 notes. What is below is settled, so a
-> later reader can tell a decision from an oversight.
+> the all-optional read model's own section, and the F7 notes. What is below is settled, so a later reader can
+> tell a decision from an oversight.
 
 ## One statement, one `WHERE`
 
@@ -81,14 +81,34 @@ Ordering and boundary agree *with each other* on each engine — that is the poi
 *between* engines is a separate property, which §0's engine-agnostic rule wants and which rendering an
 `ORDER BY` newly makes observable. `RenderComparableOperands` repairs `Decimal` only, so:
 
-- **Timestamps and dates — a real divergence, and a repair is the answer.** On SQLite EF stores them as `TEXT`
-  carrying the caller's own offset, so ordering is lexical: two rows written at the same instant with different
-  offsets sort by their rendered text, while PostgreSQL's `timestamptz` sorts by instant. Same data, same
-  query, two page contents. It is narrower than it looks, because `PredicateParameterBinder` normalises every
-  bound timestamp to UTC — but a row's *stored* offset comes from the create path, which preserves what the
-  caller passed. **Verdict: this wants the same treatment as `Decimal`** (a SQLite override normalising the
-  operand), and it is Task 11's differential leg that should decide the exact form, since PostgreSQL is the
-  side that gives the right answer to compare against.
+- **Timestamps — measured on both engines, and a repair is *not* the answer.** Task 11 measured this rather
+  than reasoning about it, and the measurement changes the verdict.
+
+  For values stored **in UTC** there is no divergence at all, and this is now pinned end to end on both
+  engines (`AlvoDataOrderingTests`: a sort, a filter and a one-row-per-page keyset walk over `occurred_at`).
+  SQLite's `TEXT` form is zero-padded and carries one offset, so its lexical order *is* instant order, and the
+  ordering and the boundary compare the same unrepaired operand. Timestamps therefore need no value repair —
+  and the suite proves that positively: inverting `RenderComparableOperands` so it repairs everything *except*
+  `Decimal` fails six of its seven live facts, the timestamp ones included.
+
+  For a value written at a **non-UTC offset** the two engines do not merely order differently — they do not
+  agree on whether the write is legal. **PostgreSQL refuses it**: Npgsql throws *"Cannot write DateTimeOffset
+  with Offset=-02:00:00 to PostgreSQL type 'timestamp with time zone', only offset 0 (UTC) is supported"*,
+  surfacing as a `DbUpdateException`. **SQLite accepts it** and then answers by the stored text:
+  `2025-12-31 23:00:00-02:00` is the later instant but the lexically smaller string, so an ascending page walks
+  the rows in reverse-instant order and `occurred_at > 00:30Z` matches nothing at all.
+
+  So a dialect repair would be the wrong instrument — there is nothing to repair on the engine that refuses the
+  value, and the divergence is on the **write** path, not in the comparison. Two candidate rulings, neither
+  taken in PR2: normalise every timestamp to UTC on the way in (preserves the instant exactly and discards an
+  offset `timestamptz` was never going to keep), or refuse a non-UTC offset on both engines (fail-closed
+  parity, which is the contract Npgsql's own message states). `AlvoDataOrderingTests`
+  `A_timestamp_written_at_a_non_utc_offset_behaves_the_same_on_every_engine` carries the reproduction and is
+  skipped with that reason, so whichever ruling lands has one line to enable.
+
+  Note the scope: `PredicateParameterBinder` already normalises every *bound* timestamp to UTC (slice 2's
+  `FI2`), so the caller side of a comparison is never the problem. Only a row's *stored* offset is, and that
+  comes from the create/seed path.
 - **Strings — divergent, and deliberately left alone.** SQLite compares `TEXT` with `BINARY` collation;
   PostgreSQL uses the database collation, where `'a' < 'B'`. So one `AlvoSort("title")` yields a different first
   page on the two engines. **Verdict: acceptable, not a defect to repair here.** Collation is a property of the
@@ -326,6 +346,50 @@ Two conversions are refused rather than performed, because both would be silent 
   `Kind == Unspecified` likewise. Otherwise two replicas of one service in two regions bind two different
   instants for one request — and CI, which runs UTC, never sees it. A `date` column keeps its own documented
   rule: the calendar date the caller wrote, read at the offset they wrote it with.
+
+## How `IAlvoData` reaches a host, and why it is a singleton
+
+`AlvoEfCoreProvider.AddRelationalProvider` registers the driver's own `IFieldSqlRenderer` and `IAlvoSqlDialect`
+from `RelationalProviderRegistration`, then composes `IAlvoData` from them plus the engine-agnostic core's
+`IPolicyEngine`, `IPredicateEvaluator` and `IPredicateRenderer`. So `AddAlvo(alvo => alvo.UseSqlite(...))` alone
+yields a resolvable data port — the wiring, not just the type, is what a host gets.
+
+Every registration is `TryAdd`, which has a deliberate direction: a host that registers its own dialect
+*before* attaching the provider keeps it. That is the seam an out-of-repo engine (or a test wanting to observe
+a dialect decision) substitutes through, and it is how `SqliteAlvoDataFixture` keeps its lock-recording dialect
+in the graph while still resolving the production-composed port.
+
+**Singleton**, deliberately: the port holds no per-request state, it creates one `DbContext` per operation and
+disposes it, and every member takes the caller's `AlvoContext` as a parameter precisely so that no ambient
+scope decides who is asking. A scoped registration would imply the opposite and invite an accessor to be read
+instead of an argument to be passed.
+
+## What is proved on a real engine, and where
+
+The milestone's acceptance criteria are per-engine facts, so they are inherited suites in
+`MMLib.Alvo.Testing.Data` with one thin subclass per engine — never a per-engine copy, because a copied suite is
+how two engines come to test different things.
+
+| Suite | What it proves | SQLite | PostgreSQL |
+|---|---|---|---|
+| `AlvoDataAdversarialTests` | two-user / two-tenant / default-deny, masking, write scoping | real temp-file database | real container |
+| `AlvoDataDifferentialTests` | the rendered `USING` predicate and the in-memory evaluator agree on the shared matrix, judged by the engine's own `WHERE` | ✔ | ✔ |
+| `AlvoDataComparisonTests` | a **rule** compares a decimal by value | ✔ | ✔ |
+| `AlvoDataOrderingTests` | the **filter** and the **page** (order + keyset boundary) compare by value | ✔ | ✔ |
+| `AlvoDataSqlSnapshotTests` | golden CEL→SQL, per engine | `cel-to-sql-sqlite` | `cel-to-sql-postgresql` |
+
+Three of these are new in PR2's Task 11 and each closes a hole a single-engine suite left. The differential
+matrix runs as **one fact over one probe** rather than a theory row per case, so the loop can assert a
+non-vacuity counter afterwards — "the two backends never disagreed" is worthless if the probe answered `false`
+to everything. The golden PostgreSQL baseline deliberately lives in the *non-Docker* `MMLib.Alvo.Data.PostgreSql.Tests`
+project: rendering needs no engine, and a Docker-gated snapshot goes unverified on every host that skips the
+container, which is how a per-engine baseline drifts unnoticed.
+
+The `FOR NO KEY UPDATE` clause SQLite cannot test is covered behaviourally rather than by inspection: it is
+emitted at the very end of the pre-image `SELECT` (after `ORDER BY`/`LIMIT`, which is what PostgreSQL's grammar
+requires), so a misplaced clause is a syntax error and every PostgreSQL `update` fact in the adversarial suite
+fails. `PreImageMutation.Delete` still has no consumer — a delete carries no `WITH CHECK`, so it reads no
+pre-image.
 
 ## Mutation-testing notes
 

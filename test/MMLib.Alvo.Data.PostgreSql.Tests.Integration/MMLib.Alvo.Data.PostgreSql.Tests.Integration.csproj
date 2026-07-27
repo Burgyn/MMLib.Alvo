@@ -31,4 +31,11 @@
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/VerifyModuleInit.cs" Link="_shared/VerifyModuleInit.cs" />
   </ItemGroup>
 
+  <!-- The one differential probe both engines answer through — see the same link in
+       MMLib.Alvo.Data.Sqlite.Tests. A per-engine copy is how a differential comparison stops comparing like
+       with like. -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/DifferentialProbe.cs" Link="_shared/DifferentialProbe.cs" />
+  </ItemGroup>
+
 </Project>
