@@ -3,6 +3,11 @@
   <ItemGroup>
     <ProjectReference Include="../../src/MMLib.Alvo/MMLib.Alvo.csproj" />
     <ProjectReference Include="../../src/MMLib.Alvo.Data.Sqlite/MMLib.Alvo.Data.Sqlite.csproj" />
+    <!-- The relational half of the test-support library: AlvoSqlDialectContractTests (and, where a
+         test needs it, the T-SQL fake). Referenced per project rather than from
+         test/Directory.Build.props on purpose — only the projects with a dialect to hold to the
+         contract take an EF dependency for it. -->
+    <ProjectReference Include="../../src/MMLib.Alvo.Testing.EntityFrameworkCore/MMLib.Alvo.Testing.EntityFrameworkCore.csproj" />
   </ItemGroup>
 
   <ItemGroup>

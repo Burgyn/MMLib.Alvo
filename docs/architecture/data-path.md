@@ -917,6 +917,15 @@ The milestone's acceptance criteria are per-engine facts, so they are inherited 
 `MMLib.Alvo.Testing.Data` with one thin subclass per engine — never a per-engine copy, because a copied suite is
 how two engines come to test different things.
 
+One of them ships from a different **assembly** while keeping that namespace.
+`AlvoSqlDialectContractTests` needs `IAlvoSqlDialect`, which lives in the EF package rather than in
+`Abstractions`, so it lives in the companion project `MMLib.Alvo.Testing.EntityFrameworkCore` while
+`MMLib.Alvo.Testing` stays Abstractions-only. That is not tidiness: `MMLib.Alvo.Testing` is referenced by
+every test project and earns a package when *external provider authors* need these suites, so an EF dependency
+there would hand EF to an author whose store is not EF-backed — foreclosing the audience the package exists
+for. The namespace is shared so nothing a consumer already wrote moves, and `EfDependencyBoundaryTests`
+asserts the boundary, because the runtime arch fact matches EF's types by name and would never notice.
+
 | Suite | What it proves | SQLite | PostgreSQL |
 |---|---|---|---|
 | `AlvoDataAdversarialTests` | two-user / two-tenant / default-deny, masking, write scoping | real temp-file database | real container |

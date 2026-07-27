@@ -842,11 +842,9 @@ tell a decision from an oversight without reading that file.
    `IFieldSqlRenderer` with a table-rendering member — that port renders **expressions**, and
    every existing implementation (including the in-repo fakes) would have grown a member it has
    no table for. Cost, stated plainly: a driver author takes a dependency on the EF package to
-   implement it, which is what every relational driver already does; and
-   `MMLib.Alvo.Testing` now reaches that package too, for the contract suite and the T-SQL
-   fake, so every test project resolves EF Core Relational transitively. If
-   `MMLib.Alvo.Testing` is ever packaged, the relational half should split into its own
-   test-support project.
+   implement it, which is what every relational driver already does — and so does anyone who
+   wants its contract suite, which is why that suite and the T-SQL fake live in a **companion**
+   test-support project rather than in `MMLib.Alvo.Testing` (deviation 18).
 12. **`CelFieldType` is a new public type in `Abstractions`.** Two layers must map a declared
    `FieldType` to the `CelValueType` a comparison over it is evaluated at, and neither can see
    the other's copy: the CEL type checker resolves a field reference's type, and a storage
@@ -896,6 +894,28 @@ tell a decision from an oversight without reading that file.
 17. **`UseRelationalNulls(true)` is set by both drivers**, and its cost is a constraint on
    future code in these packages rather than a behaviour change today. See `data-path.md`; PR5,
    which adds LINQ here, is the first PR the constraint binds.
+18. **`MMLib.Alvo.Testing` is split, and `MMLib.Alvo.Testing.EntityFrameworkCore` is a new
+   project.** Deviation 11's port does not live in `Abstractions`, so its contract suite cannot
+   either. Putting `AlvoSqlDialectContractTests` in `MMLib.Alvo.Testing` put an EF dependency on
+   the *whole* test-support library, and that library's own remarks say it earns a package when
+   **external provider authors** need the contract suites — so shipping it that way would hand EF
+   to every consumer of the adversarial and differential suites, including an author whose store
+   is not EF-backed at all. That forecloses the one audience the package exists for, and §0's
+   provider model is precisely about not making a consumer adopt one infrastructure choice. It
+   also had a local cost: `test/Directory.Build.props` references `MMLib.Alvo.Testing` from
+   **every** test project, so all of them resolved `Microsoft.EntityFrameworkCore.Relational`
+   transitively, including `MMLib.Alvo.Abstractions.Tests` and `MMLib.Alvo.Schema.Tests`, which
+   deliberately have none.
+
+   So `MMLib.Alvo.Testing` is Abstractions-only again and the relational half is a companion
+   project. Per `docs/architecture/package-boundary.md` this one is **earned**: a real dependency
+   boundary appeared, which is the trigger that rule describes, not a speculative split. Its types
+   keep the `MMLib.Alvo.Testing.Data` **namespace**, so a consumer who adds the companion finds the
+   dialect suite beside the data suites and nothing they already wrote moves.
+   `EfDependencyBoundaryTests` (os A, reading the project files rather than loaded assemblies)
+   asserts the boundary, because the family-wide runtime arch fact matches EF's types by *name* —
+   deliberately, so it works in a project that cannot see EF — and therefore says nothing about
+   who *can*.
 
 ## Assumptions (veto candidates)
 

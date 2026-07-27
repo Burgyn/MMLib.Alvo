@@ -1,0 +1,62 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The RELATIONAL half of the test-support library: the contract suite for
+    IAlvoSqlDialect plus the T-SQL fake that proves that seam sufficient. It is a
+    separate project from MMLib.Alvo.Testing for one reason, and it is not tidiness.
+
+    IAlvoSqlDialect lives in MMLib.Alvo.Data.EntityFrameworkCore rather than in
+    Abstractions, because statement shape is a relational concern and Abstractions is
+    required to stay free of one. So a contract suite for it cannot avoid referencing
+    that package. Putting it in MMLib.Alvo.Testing put the EF dependency on the whole
+    test-support library — and MMLib.Alvo.Testing's own remarks say it earns a package
+    when EXTERNAL PROVIDER AUTHORS need the contract suite. Shipping it with an EF
+    dependency would hand EF to every consumer of the adversarial and differential
+    suites, including an author whose store is not EF-backed at all: that forecloses
+    the one audience the package exists for, and §0's provider model is precisely
+    about not making the core's consumers adopt one infrastructure choice.
+
+    It also had a measurable local cost: test/Directory.Build.props references
+    MMLib.Alvo.Testing from EVERY test project, so all of them resolved
+    Microsoft.EntityFrameworkCore.Relational transitively — including
+    MMLib.Alvo.Abstractions.Tests and MMLib.Alvo.Schema.Tests, which deliberately have
+    no EF. After this split they genuinely have none again — asserted by
+    EfDependencyBoundaryTests.The_shared_test_support_library_does_not_reach_ef_core rather
+    than assumed, because the family-wide arch fact matches EF's types by NAME and
+    would never have noticed.
+
+    Per docs/architecture/package-boundary.md this package is EARNED rather than
+    assumed: a real dependency boundary appeared, which is the trigger that rule
+    describes, not a speculative split.
+
+    NOT packable yet, for the same reason MMLib.Alvo.Testing is not: it ships when an
+    out-of-repo driver author needs it. When it does, it ships as a companion to
+    MMLib.Alvo.Testing, which is why its types stay in the MMLib.Alvo.Testing.Data
+    NAMESPACE — a consumer who adds this package finds the dialect suite beside the
+    data suites they already have, and nothing they already wrote moves.
+
+    TFM/Nullable/etc. are inherited from Directory.Build.props — do not re-declare here.
+  -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The base half, for the sibling contract suites its remarks cross-reference. -->
+    <ProjectReference Include="../MMLib.Alvo.Testing/MMLib.Alvo.Testing.csproj" />
+    <!-- Where IAlvoSqlDialect and PreImageMutation live. The whole reason this project exists. -->
+    <ProjectReference
+      Include="../MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj" />
+  </ItemGroup>
+
+  <!--
+    A public abstract xUnit test class inherited by every driver's own test project, so
+    this library needs the test framework and assertion library directly — it is not
+    covered by test/Directory.Build.props, which only applies to projects under test/.
+  -->
+  <ItemGroup>
+    <PackageReference Include="xunit.v3.extensibility.core" />
+    <PackageReference Include="Shouldly" />
+  </ItemGroup>
+
+</Project>
