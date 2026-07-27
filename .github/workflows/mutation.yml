@@ -14,7 +14,16 @@ name: Mutation
 #                        transaction/DB-round-trip code is deliberately excluded —
 #                        its defects only manifest against a real database, so
 #                        mutation there is noise; it's covered by the SQLite +
-#                        PostgreSQL integration tests instead.
+#                        PostgreSQL integration tests instead. Internal/AlvoDataSeed.cs
+#                        is excluded for a different reason: it is the test-only
+#                        seeding seam, so mutating it measures the harness, not the
+#                        product. This target's test-projects list BOTH the EF
+#                        package's own tests and MMLib.Alvo.Data.Sqlite.Tests, since
+#                        the killing tests for EfAlvoData, SortSqlRenderer,
+#                        UpdateSetterFactory and WritePropertyBag live in the latter.
+#                        Measured per-config mutant counts, the two Safe-Mode blind
+#                        spots and the known survivors are recorded in
+#                        docs/architecture/data-path.md ("Mutation-testing notes").
 #   - "data-sqlite"    → src/MMLib.Alvo.Data.Sqlite     (stryker-config.data-sqlite.json)
 #   - "data-postgresql"→ src/MMLib.Alvo.Data.PostgreSql (stryker-config.data-postgresql.json)
 #

@@ -157,6 +157,12 @@ coverage*.info
 *.coverage
 *.coveragexml
 
+# Stryker.NET — the mutation report directory and the build sandbox it copies the
+# solution into. Both are produced by any local `dotnet-stryker` invocation
+# (including a discovery-only probe of a config) and neither belongs in a commit.
+StrykerOutput/
+.stryker-tmp/
+
 # NCrunch
 _NCrunch_*
 .*crunch*.local.xml

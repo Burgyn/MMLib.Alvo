@@ -15,6 +15,7 @@
       "!Internal/RelationalSqlBatch.cs",
       "!Internal/SystemSchemaInitializer.cs",
       "!Internal/VersionRowWriter.cs",
+      "!Internal/AlvoDataSeed.cs",
       "!EfCoreDescriptorVersionStore.cs",
       "!EfCoreRuntimeSchemaWriter.cs",
       "!EfCoreSchemaIntrospector.cs",
