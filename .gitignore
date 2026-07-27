@@ -497,3 +497,8 @@ affected.proj
 
 # dotnet pack output (CI artifact; not committed)
 /artifacts/
+
+# Superpowers SDD scratch — per-plan ledgers, briefs, reports and review packages.
+# Recovery state for an in-flight plan, not a deliverable: the durable record is the
+# commit history plus the docs the plan tells you to write.
+.superpowers/
