@@ -106,15 +106,15 @@ public sealed class SqliteAlvoDataFilterBindingTests : IAsyncDisposable
     [Fact]
     public async Task A_cursor_over_a_timestamp_key_pages_rather_than_stopping()
     {
-        var world = await AlvoDataWorlds.VehicleAsync(_fixture, ("ACME-002", DateTimeOffset.UnixEpoch.AddDays(2)));
-        var sort = new[] { new AlvoSort("created_at") };
+        var world = await AlvoDataWorlds.LedgerAsync(_fixture, [1m, 2m]);
+        var sort = new[] { new AlvoSort("occurred_at") };
 
         var first = await world.QueryAsync(
-            new AlvoQuery { Entity = "vehicle", Sort = sort, Limit = 1 }, world.Alice);
+            new AlvoQuery { Entity = "ledger", Sort = sort, Limit = 1 }, world.Alice);
         var second = await world.QueryAsync(
             new AlvoQuery
             {
-                Entity = "vehicle",
+                Entity = "ledger",
                 Sort = sort,
                 Limit = 1,
                 After = DataWorld.CursorOf(first[^1]),

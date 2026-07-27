@@ -20,6 +20,7 @@ public sealed class SqliteAlvoDataCreateTests : IAsyncDisposable
             ["owner_id"] = world.Alice.User.Value,
             ["tenant_id"] = world.Tenant.Value,
             ["title"] = "brand new",
+            ["label"] = "new",
         };
 
         var created = await world.CreateAsync("notes", payload, world.Alice);
@@ -46,6 +47,7 @@ public sealed class SqliteAlvoDataCreateTests : IAsyncDisposable
                 ["owner_id"] = world.Alice.User.Value,
                 ["tenant_id"] = world.Tenant.Value,
                 ["title"] = "one statement",
+                ["label"] = "one",
             },
             world.Alice);
 
@@ -148,6 +150,7 @@ public sealed class SqliteAlvoDataCreateTests : IAsyncDisposable
                 ["owner_id"] = world.Alice.User.Value,
                 ["tenant_id"] = world.Tenant.Value,
                 ["title"] = null,
+                ["label"] = "nulled",
             },
             world.Alice);
 

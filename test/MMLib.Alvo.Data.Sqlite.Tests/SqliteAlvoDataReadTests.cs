@@ -59,7 +59,7 @@ public sealed class SqliteAlvoDataReadTests : IAsyncDisposable
             {
                 Entity = "notes",
                 Filter = new AlvoComparison("title", AlvoFilterOperator.Like, "Alice%"),
-                Sort = [new AlvoSort("title", Descending: true)],
+                Sort = [new AlvoSort("label", Descending: true)],
                 Limit = 1,
             },
             world.Alice);
@@ -67,7 +67,7 @@ public sealed class SqliteAlvoDataReadTests : IAsyncDisposable
         world.Statements.Count.ShouldBe(1);
         world.LastStatement.ShouldContain("\"owner_id\" = @alvo_u0");
         world.LastStatement.ShouldContain("\"title\" LIKE @alvo_f0");
-        world.LastStatement.ShouldContain("ORDER BY CASE WHEN \"title\" IS NULL THEN 1 ELSE 0 END, \"title\" DESC, \"id\"");
+        world.LastStatement.ShouldContain("ORDER BY CASE WHEN \"label\" IS NULL THEN 1 ELSE 0 END, \"label\" DESC, \"id\"");
         world.LastStatement.ShouldEndWith("LIMIT @alvo_limit");
         world.LastStatement.ShouldStartWith("SELECT \"id\"");
     }
@@ -94,7 +94,7 @@ public sealed class SqliteAlvoDataReadTests : IAsyncDisposable
     public async Task A_page_after_a_cursor_continues_where_the_previous_page_stopped()
     {
         var world = await AlvoDataWorlds.NotesAsync(_fixture);
-        var sort = new[] { new AlvoSort("title") };
+        var sort = new[] { new AlvoSort("label") };
 
         var first = await world.QueryAsync(new AlvoQuery { Entity = "notes", Sort = sort, Limit = 1 }, world.Alice);
         var cursor = DataWorld.CursorOf(first[^1]);
@@ -104,7 +104,7 @@ public sealed class SqliteAlvoDataReadTests : IAsyncDisposable
         first.Count.ShouldBe(1);
         second.Count.ShouldBe(1);
         second[0]["id"].ShouldNotBe(first[0]["id"]);
-        ((string)second[0]["title"]!).ShouldBeGreaterThan((string)first[0]["title"]!);
+        ((string)second[0]["label"]!).ShouldBeGreaterThan((string)first[0]["label"]!);
     }
 
     [Fact]

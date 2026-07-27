@@ -30,6 +30,7 @@ internal static class AlvoDataWorlds
         {
             ["owner_id"] = new() { Type = DescriptorFieldType.Uuid, Required = true },
             ["title"] = new() { Type = DescriptorFieldType.String },
+            ["label"] = new() { Type = DescriptorFieldType.String, Required = true },
         };
         var rules = new AccessRules
         {
@@ -45,13 +46,14 @@ internal static class AlvoDataWorlds
         var bobRow = Guid.NewGuid();
         var rows = new List<AlvoRecord>
         {
-            Row(aliceRow, ("owner_id", alice.User.Value), ("tenant_id", tenant.Value), ("title", "Alice-1")),
-            Row(aliceSecondRow, ("owner_id", alice.User.Value), ("tenant_id", tenant.Value), ("title", "Alice-2")),
-            Row(bobRow, ("owner_id", bob.User.Value), ("tenant_id", tenant.Value), ("title", "Bob-1")),
+            Row(aliceRow, ("owner_id", alice.User.Value), ("tenant_id", tenant.Value), ("title", "Alice-1"), ("label", "a1")),
+            Row(aliceSecondRow, ("owner_id", alice.User.Value), ("tenant_id", tenant.Value), ("title", "Alice-2"), ("label", "a2")),
+            Row(bobRow, ("owner_id", bob.User.Value), ("tenant_id", tenant.Value), ("title", "Bob-1"), ("label", "b1")),
         };
         if (includeNullTitleRow)
         {
-            rows.Add(Row(Guid.NewGuid(), ("owner_id", alice.User.Value), ("tenant_id", tenant.Value), ("title", null)));
+            rows.Add(Row(
+                Guid.NewGuid(), ("owner_id", alice.User.Value), ("tenant_id", tenant.Value), ("title", null), ("label", "a3")));
         }
 
         var host = await StartAsync(fixture, "notes", fields, EntityTenancy.Scoped, rules, Seed("notes", rows));
@@ -141,24 +143,32 @@ internal static class AlvoDataWorlds
     }
 
     /// <summary>
-    /// The same entity holding nothing but priced rows, for the decimal ordering and paging facts — a
-    /// <c>decimal</c> lives in a SQLite <c>TEXT</c> column, so its ordering is the one this data path has to
-    /// repair.
+    /// An entity whose sort keys are all <b>required</b>, for the facts that page: a keyset cursor cannot
+    /// express where a nullable key's nulls sort, so a paged read over one is refused. Its <c>amount</c> is a
+    /// <c>decimal</c> — the type whose SQLite storage is <c>TEXT</c>, and therefore the ordering this data path
+    /// has to repair — and its <c>occurred_at</c> is a timestamp, whose values must bind through the column.
     /// </summary>
-    internal static async Task<DataWorld> PricedVehicleAsync(
-        SqliteAlvoDataFixture fixture, IReadOnlyList<decimal> prices)
+    internal static async Task<DataWorld> LedgerAsync(
+        SqliteAlvoDataFixture fixture, IReadOnlyList<decimal> amounts)
     {
-        ArgumentNullException.ThrowIfNull(prices);
+        ArgumentNullException.ThrowIfNull(amounts);
+        var fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
+        {
+            ["owner_id"] = new() { Type = DescriptorFieldType.Uuid, Required = true },
+            ["amount"] = new() { Type = DescriptorFieldType.Decimal, Required = true },
+            ["occurred_at"] = new() { Type = DescriptorFieldType.DateTime, Required = true },
+        };
         var tenant = TenantId.New();
         var alice = Caller(tenant);
-        var rows = prices.Select((price, index) => Row(
+        var rows = amounts.Select((amount, index) => Row(
             Guid.NewGuid(),
             ("tenant_id", tenant.Value),
             ("owner_id", alice.User.Value),
-            ("plate", $"P-{index}"),
-            ("price", price)));
+            ("amount", amount),
+            ("occurred_at", DateTimeOffset.UnixEpoch.AddDays(index + 1))));
 
-        var host = await StartVehicleAsync(fixture, [.. rows]);
+        var host = await StartAsync(
+            fixture, "ledger", fields, EntityTenancy.Scoped, OwnerRules(), Seed("ledger", [.. rows]));
         return new DataWorld(host) { Alice = alice, Tenant = tenant };
     }
 
@@ -192,6 +202,15 @@ internal static class AlvoDataWorlds
     }
 
     private const string OwnerRule = "owner_id == @user.id";
+
+    private static AccessRules OwnerRules() => new()
+    {
+        List = OwnerRule,
+        Get = OwnerRule,
+        Create = OwnerRule,
+        Update = OwnerRule,
+        Delete = OwnerRule,
+    };
 
     private static AlvoDescriptor VehicleDescriptor() => new()
     {

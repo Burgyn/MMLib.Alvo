@@ -57,11 +57,28 @@ because SQLite and PostgreSQL disagree on where `NULL` sorts for a given directi
 index on the sort key; that cost belongs with the latency criterion, which #19 owns. The `IS NULL` test reads
 the raw column, not the repaired one — a cast `NULL` is still `NULL`.
 
-**Known gap, carried forward:** `KeysetSqlRenderer` models no null placement of its own, so a cursor whose
-anchor row has a `NULL` sort key compares against `NULL` and yields an empty page. Paging over a nullable
-sort key therefore stops at the first null-keyed row. `AlvoQuery.Sort`'s `Nulls` placement is honoured by the
-`ORDER BY` and not by the boundary; closing it needs an `IS NULL`-aware cursor predicate, which is a shape
-change to that renderer.
+**A paged read over a nullable sort key is refused, not answered.** `KeysetSqlRenderer` models no null
+placement of its own: its boundary is a chain of comparisons with no `IS NULL` arm, so a `NULL` on either side
+makes the term `NULL` and a `WHERE` treats that as false. Under `nullslast` the null-keyed tail became
+unreachable; under `nullsfirst` the first page's anchor had a null key and page two came back empty. Paging
+just stopped, silently.
+
+The design's ruling is that a nullable sort column must declare its null placement **or be rejected**, and
+`AlvoSort.Nulls` alone cannot deliver the first half while only the `ORDER BY` honours it — so
+`EfAlvoData.EnsureSortKeysCanBePaged` takes the second: a read with a `Limit` or an `After` whose sort key
+names a `Nullable` field is refused with an `ArgumentException`. That is the port's malformed-query channel,
+not an authorization refusal — the field is one the caller can read, nothing is hidden, and a request layer
+above this port turns it into a 422 with a fix suggestion.
+
+Scoped to a paged read deliberately: an **unpaged** sorted read has no boundary, so its ordering over nulls is
+already correct and stays legal. Making such a page work needs an `IS NULL`-aware boundary whose predicate
+form depends on the anchor's own null-ness (so `KeysetAnchor` has to carry it), which doubles that renderer's
+test matrix and must stay in lockstep with `SortSqlRenderer`'s rank expression or it reintroduces exactly the
+order/boundary divergence above. **PR3 owns that**, together with the paging surface and the cursor contract.
+
+The consequence for fixtures is real and worth knowing: a suite that pages has to sort by a **required**
+column, which is why `AlvoDataWorlds` grew a required `label` on `notes` and a purpose-built `ledger` entity
+whose `amount` and `occurred_at` are both required.
 
 ## Writes never reach a change tracker
 

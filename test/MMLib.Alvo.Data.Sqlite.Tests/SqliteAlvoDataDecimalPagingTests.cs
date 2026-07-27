@@ -26,17 +26,17 @@ public sealed class SqliteAlvoDataDecimalPagingTests : IAsyncDisposable
 {
     private readonly SqliteAlvoDataFixture _fixture = new();
 
-    private static readonly decimal[] _lexicallyMisleadingPrices = [2m, 9m, 10m, 100m];
+    private static readonly decimal[] _lexicallyMisleadingAmounts = [2m, 9m, 10m, 100m];
 
     [Fact]
     public async Task A_decimal_sort_orders_by_value_rather_than_by_its_text_representation()
     {
-        var world = await PricedWorldAsync(_lexicallyMisleadingPrices);
+        var world = await LedgerWorldAsync(_lexicallyMisleadingAmounts);
 
         var rows = await world.QueryAsync(
-            new AlvoQuery { Entity = "vehicle", Sort = [new AlvoSort("price")] }, world.Alice);
+            new AlvoQuery { Entity = "ledger", Sort = [new AlvoSort("amount")] }, world.Alice);
 
-        Prices(rows).ShouldBe(_lexicallyMisleadingPrices);
+        Amounts(rows).ShouldBe(_lexicallyMisleadingAmounts);
     }
 
     /// <summary>
@@ -47,21 +47,21 @@ public sealed class SqliteAlvoDataDecimalPagingTests : IAsyncDisposable
     [Fact]
     public async Task Paging_one_row_at_a_time_over_a_decimal_key_neither_skips_nor_repeats_a_row()
     {
-        var world = await PricedWorldAsync(_lexicallyMisleadingPrices);
+        var world = await LedgerWorldAsync(_lexicallyMisleadingAmounts);
 
-        var walked = await WalkAsync(world, new AlvoSort("price"));
+        var walked = await WalkAsync(world, new AlvoSort("amount"));
 
-        Prices(walked).ShouldBe(_lexicallyMisleadingPrices);
+        Amounts(walked).ShouldBe(_lexicallyMisleadingAmounts);
     }
 
     [Fact]
     public async Task Paging_descending_over_a_decimal_key_walks_the_same_rows_in_reverse()
     {
-        var world = await PricedWorldAsync(_lexicallyMisleadingPrices);
+        var world = await LedgerWorldAsync(_lexicallyMisleadingAmounts);
 
-        var walked = await WalkAsync(world, new AlvoSort("price", Descending: true));
+        var walked = await WalkAsync(world, new AlvoSort("amount", Descending: true));
 
-        Prices(walked).ShouldBe(_lexicallyMisleadingPrices.Reverse());
+        Amounts(walked).ShouldBe(_lexicallyMisleadingAmounts.Reverse());
     }
 
     /// <summary>
@@ -77,16 +77,16 @@ public sealed class SqliteAlvoDataDecimalPagingTests : IAsyncDisposable
         var higher = 999999999999999.55m;
         ((double)lower).ShouldBe((double)higher);
 
-        var world = await PricedWorldAsync([lower, higher]);
+        var world = await LedgerWorldAsync([lower, higher]);
 
-        var walked = await WalkAsync(world, new AlvoSort("price"));
+        var walked = await WalkAsync(world, new AlvoSort("amount"));
 
         walked.Count.ShouldBe(2);
         walked.Select(row => row["id"]).Distinct().Count().ShouldBe(2);
     }
 
-    private Task<DataWorld> PricedWorldAsync(IReadOnlyList<decimal> prices) =>
-        AlvoDataWorlds.PricedVehicleAsync(_fixture, prices);
+    private Task<DataWorld> LedgerWorldAsync(IReadOnlyList<decimal> amounts) =>
+        AlvoDataWorlds.LedgerAsync(_fixture, amounts);
 
     /// <summary>
     /// Pages one row at a time until the walk runs dry, refusing to loop forever if a boundary ever fails to
@@ -100,7 +100,7 @@ public sealed class SqliteAlvoDataDecimalPagingTests : IAsyncDisposable
         for (var page = 0; page <= MaxPages; page++)
         {
             var rows = await world.QueryAsync(
-                new AlvoQuery { Entity = "vehicle", Sort = [sort], Limit = 1, After = cursor }, world.Alice);
+                new AlvoQuery { Entity = "ledger", Sort = [sort], Limit = 1, After = cursor }, world.Alice);
             if (rows.Count == 0)
             {
                 return walked;
@@ -116,8 +116,8 @@ public sealed class SqliteAlvoDataDecimalPagingTests : IAsyncDisposable
 
     private const int MaxPages = 20;
 
-    private static IReadOnlyList<decimal> Prices(IEnumerable<AlvoRecord> rows) =>
-        [.. rows.Select(row => Convert.ToDecimal(row["price"], CultureInfo.InvariantCulture))];
+    private static IReadOnlyList<decimal> Amounts(IEnumerable<AlvoRecord> rows) =>
+        [.. rows.Select(row => Convert.ToDecimal(row["amount"], CultureInfo.InvariantCulture))];
 
     public ValueTask DisposeAsync() => _fixture.DisposeAsync();
 }
