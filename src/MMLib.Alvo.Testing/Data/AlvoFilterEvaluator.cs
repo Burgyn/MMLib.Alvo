@@ -144,6 +144,15 @@ internal static class AlvoFilterEvaluator
     /// PR3), so the translated regex runs under <see cref="RegexOptions.NonBacktracking"/> — no
     /// construct this translation ever emits needs backtracking, and this rules out a ReDoS from a
     /// pattern like a long run of <c>%</c> wildcards.
+    /// <para>
+    /// <c>like</c> is case-sensitive and <c>ilike</c> folds case, matching the port's own guarantee: standard
+    /// SQL's <c>LIKE</c> and PostgreSQL's are case-sensitive, and the SQLite driver sets
+    /// <c>PRAGMA case_sensitive_like = ON</c> to agree. <see cref="RegexOptions.CultureInvariant"/> is set so
+    /// this reference implementation's folding does not depend on the host's culture — the port guarantees
+    /// only <b>ASCII</b> folding for <c>ilike</c>, and this reference folding more (a real engine's does not,
+    /// SQLite's <c>UPPER</c> being ASCII-only) is inside that guarantee, while folding <em>differently per
+    /// host</em> would not be.
+    /// </para>
     /// </summary>
     private static bool? Like(object? fieldValue, object? pattern, bool ignoreCase)
     {
@@ -155,7 +164,8 @@ internal static class AlvoFilterEvaluator
         var regex = "^" + Regex.Escape(patternText)
             .Replace("%", ".*", StringComparison.Ordinal)
             .Replace("_", ".", StringComparison.Ordinal) + "$";
-        var options = RegexOptions.NonBacktracking | (ignoreCase ? RegexOptions.IgnoreCase : RegexOptions.None);
+        var options = RegexOptions.NonBacktracking | RegexOptions.CultureInvariant
+            | (ignoreCase ? RegexOptions.IgnoreCase : RegexOptions.None);
         return Regex.IsMatch(text, regex, options);
     }
 

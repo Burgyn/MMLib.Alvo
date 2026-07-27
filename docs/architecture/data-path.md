@@ -196,15 +196,8 @@ Ordering and boundary agree *with each other* on each engine — that is the poi
   That property is load-bearing and would break if the stored form ever gained a `Z` suffix (0x5A, above every
   digit), so `Paging_over_sub_second_timestamps_keeps_instant_order` asserts it instead of leaving it as an
   argument here.
-- **Strings — divergent, and deliberately left alone.** SQLite compares `TEXT` with `BINARY` collation;
-  PostgreSQL uses the database collation, where `'a' < 'B'`. So one `AlvoSort("title")` yields a different first
-  page on the two engines. **Verdict: acceptable, not a defect to repair here.** Collation is a property of the
-  *database* a host configures, not of Alvo's rendering; forcing one (`COLLATE "C"`, `COLLATE BINARY`) would
-  override an operator's deliberate choice and make every string sort non-sargable on PostgreSQL. It is also
-  already the reason relational operators on a string are refused in the Rule profile
-  (`CelTypeChecker`: *"collation-dependent and are not available"*), so refusing to *order* by a string would
-  be inconsistent with allowing it to be sorted at all. What matters for correctness is that the boundary uses
-  the identical unrepaired operand, so a page is self-consistent on each engine — which it is.
+- **Strings — divergent. See *Collation belongs to the host* below**, which is the one place both
+  string-collation decisions are ruled on together.
 
 **Null placement** is the portable `CASE WHEN <key> IS NULL THEN 0/1 ELSE 1/0 END` emulation (spike `Q3c`),
 because SQLite and PostgreSQL disagree on where `NULL` sorts for a given direction. It is known to defeat an
@@ -241,6 +234,62 @@ could page over a null key correctly. That is deliberate: a reference implementa
 shipped backends refuse would give the port two contracts, and a driver author reading the inherited suite
 would learn the wrong one. Its sibling fact pins that an **unpaged** sorted read still answers, so the refusal
 cannot be implemented as "reject a nullable sort key".
+
+### Collation belongs to the host — two rulings that need the maintainer's sign-off
+
+Two places where a string's *collation* decides an answer, grouped because they are one question and because
+**neither is ratified by anyone but the implementing agent**. Both are read-visible: they change which rows a
+caller sees or in what order, not whether they are authorized to see them.
+
+**1. `ORDER BY` over a string diverges between engines, and is deliberately left alone.** SQLite compares
+`TEXT` with `BINARY` collation; PostgreSQL uses the database collation, where `'a' < 'B'`. So one
+`AlvoSort("title")` yields a different first page on the two engines. *Verdict: acceptable, not a defect to
+repair here.* Collation is a property of the **database a host configures**, not of Alvo's rendering; forcing
+one (`COLLATE "C"`, `COLLATE BINARY`) would override an operator's deliberate choice and make every string
+sort non-sargable on PostgreSQL. It is also already the reason relational operators on a string are refused in
+the Rule profile (`CelTypeChecker`: *"collation-dependent and are not available"*), so refusing to *order* by
+a string would be inconsistent with allowing it to be sorted at all. What matters for correctness is that the
+boundary uses the identical unrepaired operand, so a page is self-consistent on each engine — which it is.
+This is the one place a read's **contents** differ per engine, so it is a knowing, narrow exception to §0
+principle 3 rather than an oversight.
+
+**2. `like` is case-sensitive on both engines; `ilike` guarantees ASCII folding and nothing more.** This one
+*was* a defect and is fixed. Measured on both real engines:
+
+| expression | SQLite | PostgreSQL 16 |
+|---|---|---|
+| `'ACME' LIKE 'acme'` | `1` — match | `f` — no match |
+| `upper('čé')` | `čé` (ASCII-only folding) | `ČÉ` |
+
+So `plate=like.acme%` returned rows on SQLite that the identical deployment on PostgreSQL did not — silently,
+per request, on a channel the caller controls, and a **superset** where a filter is used as a coarse
+allow-list above the port. Unlike ordering, this is not a collation an operator configured: it is SQLite's
+`LIKE` operator's own documented behaviour and cannot be configured away per query.
+
+*Ruling, in two parts:*
+
+- **`like` is case-sensitive on every engine.** That is standard SQL's meaning, it is what
+  `AlvoFilterOperator.Like` documents, and it is PostgreSQL's — so SQLite is the engine that moves.
+  `SqliteCaseSensitiveLike` runs `PRAGMA case_sensitive_like = ON` on every connection this driver opens.
+  Rejected alternative: render something case-sensitive instead. The only case-sensitive matching SQLite can
+  express in an operator is `GLOB`, whose wildcards are `*`/`?`/`[…]`, so adopting it means translating and
+  escaping a caller-supplied pattern into a second wildcard language — rewriting caller text, which this data
+  path refuses to do everywhere else. The pragma does not disturb the `ilike` emulation, which folds both
+  operands explicitly with `UPPER` before comparing.
+- **`ilike`'s guarantee is ASCII case-insensitivity, on every engine.** Non-ASCII folding is explicitly **not**
+  guaranteed: PostgreSQL's `ILIKE` folds by the database's collation while SQLite's `UPPER` is ASCII-only, and
+  that difference is the same host-owned collation question as ruling 1. A full Unicode-correct `ilike` — which
+  would need a folding function per engine, or a normalised shadow column — is filed as a follow-up rather than
+  guessed at here.
+
+Both legs are on the **shipped** suite (`AlvoDataOrderingTests.A_like_filter_is_case_sensitive_on_every_engine`,
+`An_ilike_filter_folds_ascii_case_on_every_engine`), which is where the hole was: that suite's stated job is
+"the same rows, the same query, the same expected answer on every engine" and it had legs for `decimal` and
+`datetime` and none for the two pattern operators, so every future driver inherited the divergence.
+
+Neither of these is an authorization question — the CEL rule grammar has no string-match operator, so no
+`USING`/`WITH CHECK` verdict changes; `RenderCaseInsensitiveLike`'s only production consumer is the caller
+filter. The blast radius is "which rows an already-authorized caller sees".
 
 ## Every timestamp is one instant
 

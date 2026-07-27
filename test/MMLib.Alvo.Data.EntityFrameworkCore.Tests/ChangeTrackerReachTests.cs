@@ -123,8 +123,10 @@ public class ChangeTrackerReachTests
     /// <c>EfCoreDescriptorVersionStore</c>, <c>EfCoreRuntimeSchemaWriter</c>, <c>SystemSchemaInitializer</c>,
     /// <c>RelationalSqlBatch</c> and <c>VersionRowWriter</c> never touch an entity table;
     /// <c>PredicateParameterBinder</c> creates a command only to reach the provider's parameter factory;
-    /// <c>EfCoreSchemaMigrator</c> executes the migrator's generated statements; <c>EfAlvoData</c> is the one
-    /// file that composes a row statement, and it is the file every other fact here pins.
+    /// <c>EfCoreSchemaMigrator</c> executes the migrator's generated statements;
+    /// <c>SqliteCaseSensitiveLike</c> runs one connection pragma and can carry no row predicate at all; and
+    /// <c>EfAlvoData</c> is the one file that composes a row statement, and it is the file every other fact
+    /// here pins.
     /// </para>
     /// </remarks>
     /// <param name="call">A raw-SQL or raw-command call, as a regular expression.</param>
@@ -177,6 +179,7 @@ public class ChangeTrackerReachTests
         "EfCoreSchemaMigrator.cs",
         "PredicateParameterBinder.cs",
         "RelationalSqlBatch.cs",
+        "SqliteCaseSensitiveLike.cs",
         "SystemSchemaInitializer.cs",
         "VersionRowWriter.cs",
     ];

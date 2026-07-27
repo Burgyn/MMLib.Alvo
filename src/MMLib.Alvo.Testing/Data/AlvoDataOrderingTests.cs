@@ -277,11 +277,61 @@ public abstract class AlvoDataOrderingTests
         (await InstantsAsync(data)).ShouldBe([Midnight.AddHours(2)]);
     }
 
+    /// <summary>
+    /// <c>like</c> is <b>case-sensitive on every engine</b>, which is standard SQL's meaning and
+    /// PostgreSQL's. SQLite's <c>LIKE</c> is ASCII-case-<em>in</em>sensitive by default, so the identical
+    /// deployment answered <c>plate=like.acme%</c> with rows on SQLite that PostgreSQL did not return —
+    /// silently, on a channel a caller controls per request, and a superset where a filter is used as a
+    /// coarse allow-list above the port.
+    /// </summary>
+    /// <remarks>
+    /// Measured before the fix: <c>'ACME' LIKE 'acme'</c> answered <c>1</c> on SQLite and <c>f</c> on
+    /// PostgreSQL 16. The driver now sets <c>PRAGMA case_sensitive_like = ON</c> per connection; this is the
+    /// fact that says so, and it is on the shipped suite so every future driver inherits it rather than
+    /// repeating the divergence. See <c>docs/architecture/data-path.md</c>, *Collation belongs to the host*.
+    /// </remarks>
+    [Fact]
+    public async Task A_like_filter_is_case_sensitive_on_every_engine()
+    {
+        var data = await LedgerAsync([1m, 2m]);
+
+        (await CodesAsync(data, Matching(AlvoFilterOperator.Like, "acme-%"))).ShouldBeEmpty();
+        (await CodesAsync(data, Matching(AlvoFilterOperator.Like, "ACME-%"))).ShouldBe(["ACME-0", "ACME-1"]);
+    }
+
+    /// <summary>
+    /// <c>ilike</c>'s guarantee is <b>ASCII</b> case-insensitivity on every engine — PostgreSQL renders
+    /// <c>ILIKE</c>, SQLite an <c>UPPER(a) LIKE UPPER(b)</c> emulation whose folding is ASCII-only. Non-ASCII
+    /// folding is deliberately <em>not</em> guaranteed and is not asserted here: it follows the host's own
+    /// collation (<c>upper('čé')</c> answers <c>čé</c> on SQLite and <c>ČÉ</c> on PostgreSQL). A full
+    /// Unicode-correct <c>ilike</c> is filed as a follow-up.
+    /// </summary>
+    [Fact]
+    public async Task An_ilike_filter_folds_ascii_case_on_every_engine()
+    {
+        var data = await LedgerAsync([1m, 2m]);
+
+        (await CodesAsync(data, Matching(AlvoFilterOperator.ILike, "acme-0%"))).ShouldBe(["ACME-0"]);
+        (await CodesAsync(data, Matching(AlvoFilterOperator.ILike, "ACME-0%"))).ShouldBe(["ACME-0"]);
+    }
+
+    private static AlvoComparison Matching(AlvoFilterOperator op, string pattern) =>
+        new("code", op, pattern);
+
+    private static async Task<IReadOnlyList<string>> CodesAsync(IAlvoData data, AlvoFilter filter) =>
+        [.. (await RowsAsync(data, filter, sort: null)).Select(row => (string)row["code"]!)];
+
     private Task<IAlvoData> EmptyLedgerAsync() =>
         LedgerAsync(Array.Empty<(decimal Amount, DateTimeOffset Occurred)>());
 
     private static Dictionary<string, object?> Payload(DateTimeOffset occurred) =>
-        new(StringComparer.Ordinal) { ["amount"] = 1m, ["occurred_at"] = occurred };
+        new(StringComparer.Ordinal) { ["code"] = Code(0), ["amount"] = 1m, ["occurred_at"] = occurred };
+
+    /// <summary>
+    /// One upper-case ASCII code per seeded row. Upper-case on purpose: a case-sensitive <c>like</c> for a
+    /// lower-case pattern must miss it, and an ASCII-folding <c>ilike</c> must match it.
+    /// </summary>
+    private static string Code(int index) => "ACME-" + index.ToString(CultureInfo.InvariantCulture);
 
     /// <summary>The instant every timestamp fact is expressed relative to.</summary>
     private static DateTimeOffset Midnight => new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
@@ -323,9 +373,10 @@ public abstract class AlvoDataOrderingTests
     private async Task<IAlvoData> LedgerAsync(IReadOnlyList<(decimal Amount, DateTimeOffset Occurred)> rows)
     {
         var (descriptor, schema) = Fixture();
-        var seed = rows.Select(row => new AlvoRecord(new Dictionary<string, object?>(StringComparer.Ordinal)
+        var seed = rows.Select((row, index) => new AlvoRecord(new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             ["id"] = Guid.NewGuid(),
+            ["code"] = Code(index),
             ["amount"] = row.Amount,
             ["occurred_at"] = row.Occurred,
         }));
@@ -353,6 +404,7 @@ public abstract class AlvoDataOrderingTests
                     Tenancy = EntityTenancy.Global,
                     Fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
                     {
+                        ["code"] = new() { Type = DescField.String, Required = true },
                         ["amount"] = new() { Type = DescField.Decimal, Required = true },
                         ["occurred_at"] = new() { Type = DescField.DateTime, Required = true },
                     },
@@ -369,6 +421,7 @@ public abstract class AlvoDataOrderingTests
                 Fields =
                 [
                     new FieldSchema { Name = "id", Type = SchemaField.Uuid, Required = true },
+                    new FieldSchema { Name = "code", Type = SchemaField.String, Required = true, MaxLength = 32 },
                     new FieldSchema { Name = "amount", Type = SchemaField.Decimal, Required = true, Precision = 18, Scale = 2 },
                     new FieldSchema { Name = "occurred_at", Type = SchemaField.DateTime, Required = true },
                 ],

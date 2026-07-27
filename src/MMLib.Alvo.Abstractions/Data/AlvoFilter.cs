@@ -251,9 +251,22 @@ public enum AlvoFilterOperator
     Lte,
 
     /// <summary>Case-sensitive pattern match, <c>%</c>/<c>_</c> wildcards (<c>like</c>).</summary>
+    /// <remarks>
+    /// <b>Case-sensitive on every engine</b>, which is standard SQL's meaning. That is a real obligation on an
+    /// implementation rather than a description of what engines happen to do: SQLite's <c>LIKE</c> is
+    /// ASCII-case-<em>in</em>sensitive by default, so its driver has to turn that off
+    /// (<c>PRAGMA case_sensitive_like = ON</c>) or the same filter answers differently there than on
+    /// PostgreSQL — silently, and with a superset of the rows.
+    /// </remarks>
     Like,
 
     /// <summary>Case-insensitive pattern match, <c>%</c>/<c>_</c> wildcards (<c>ilike</c>).</summary>
+    /// <remarks>
+    /// The guarantee is <b>ASCII</b> case-insensitivity on every engine. Folding beyond ASCII is deliberately
+    /// <em>not</em> guaranteed, because it follows the host database's own collation: PostgreSQL's <c>ILIKE</c>
+    /// folds <c>čé</c> and SQLite's <c>UPPER</c>-based emulation does not. A caller who needs
+    /// Unicode-correct matching must not rely on this operator for it.
+    /// </remarks>
     ILike,
 
     /// <summary>Membership in a supplied list of values (<c>in</c>).</summary>

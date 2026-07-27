@@ -135,8 +135,9 @@ public static class AlvoSqliteBuilderExtensions
         builder.AddRelationalProvider(new RelationalProviderRegistration
         {
             ConnectionString = ResolveConnectionString,
-            ConfigureProvider = static (options, connectionString) =>
-                options.UseSqlite(connectionString, static sqlite => sqlite.UseRelationalNulls()),
+            ConfigureProvider = static (options, connectionString) => options
+                .UseSqlite(connectionString, static sqlite => sqlite.UseRelationalNulls())
+                .AddInterceptors(new SqliteCaseSensitiveLike()),
             CreateModelBuilder = static () => new ModelBuilder(SqliteConventionSetBuilder.Build()),
             CreateDatabaseModelFactory = CreateDatabaseModelFactory,
             CreateConnection = static connectionString => new SqliteConnection(WithoutPooling(connectionString)),
