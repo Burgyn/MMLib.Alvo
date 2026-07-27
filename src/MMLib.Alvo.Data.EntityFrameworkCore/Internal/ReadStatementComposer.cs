@@ -206,16 +206,23 @@ internal sealed class ReadStatementComposer
     private static Dictionary<string, BoundValue> PolicyValues(IReadOnlyDictionary<string, object?> rendered) =>
         rendered.ToDictionary(pair => pair.Key, pair => BoundValue.FromPolicyPredicate(pair.Value), StringComparer.Ordinal);
 
+    /// <summary>
+    /// The row-id term, when the read names one. The guard is a plain <see langword="null"/> test rather
+    /// than the negated declaration pattern it used to be, because a pattern variable assigned only on the
+    /// guard's failing branch makes every mutation of this method a compile error — so Stryker's Safe Mode
+    /// removed all of them and the mutation gate reported nothing at all about the term that carries a row
+    /// identity into a policy-filtered statement. See <c>docs/architecture/data-path.md</c>.
+    /// </summary>
     private void AddRowId(List<string> terms, Dictionary<string, BoundValue> parameters, EntitySchema entity, Guid? rowId)
     {
-        if (rowId is not { } id)
+        if (rowId is null)
         {
             return;
         }
 
         terms.Add(
             $"{_fields.RenderField(entity, AlvoDataContext.IdColumn)} = {_fields.RenderParameter(PolicyParameterPrefix.RowId)}");
-        parameters[PolicyParameterPrefix.RowId] = BoundValue.ForColumn(AlvoDataContext.IdColumn, id);
+        parameters[PolicyParameterPrefix.RowId] = BoundValue.ForColumn(AlvoDataContext.IdColumn, rowId.Value);
     }
 
     private void AddFilter(

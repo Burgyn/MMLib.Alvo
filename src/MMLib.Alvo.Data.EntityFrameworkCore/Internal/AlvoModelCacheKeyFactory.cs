@@ -18,19 +18,25 @@ internal sealed class AlvoModelCacheKeyFactory : IModelCacheKeyFactory
     /// exists to prevent — and since <see cref="AlvoDataContext"/> installs the factory itself, no other
     /// type can arrive here without someone having wired it in deliberately.
     /// </remarks>
+    /// <remarks>
+    /// The accepting branch is the positive one so that the pattern variable is in scope only where it is
+    /// read. Written the other way round — <c>is not AlvoDataContext alvo</c> with the throw in the body —
+    /// every mutation of this method is a compile error, and Stryker's Safe Mode silently drops the lot. See
+    /// <c>docs/architecture/data-path.md</c>.
+    /// </remarks>
     /// <exception cref="ArgumentException"><paramref name="context"/> is not an <see cref="AlvoDataContext"/>.</exception>
     public object Create(DbContext context, bool designTime)
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        if (context is not AlvoDataContext alvo)
+        if (context is AlvoDataContext alvo)
         {
-            throw new ArgumentException(
-                $"'{context.GetType()}' is not an {nameof(AlvoDataContext)}, so it has no applied-schema token to key "
-                + "its model cache on.",
-                nameof(context));
+            return (context.GetType(), alvo.ModelToken, designTime);
         }
 
-        return (context.GetType(), alvo.ModelToken, designTime);
+        throw new ArgumentException(
+            $"'{context.GetType()}' is not an {nameof(AlvoDataContext)}, so it has no applied-schema token to key "
+            + "its model cache on.",
+            nameof(context));
     }
 }
