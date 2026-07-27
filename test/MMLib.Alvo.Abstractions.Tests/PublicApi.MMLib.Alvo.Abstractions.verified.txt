@@ -153,7 +153,9 @@ namespace MMLib.Alvo.Data
     public abstract class AlvoFilter : System.IEquatable<MMLib.Alvo.Data.AlvoFilter>
     {
         public static int MaxDepth { get; }
-        public static void EnsureWithinDepthLimit(MMLib.Alvo.Data.AlvoFilter? filter) { }
+        public static int MaxInCandidates { get; }
+        public static int MaxTerms { get; }
+        public static void EnsureWithinLimits(MMLib.Alvo.Data.AlvoFilter? filter) { }
         public static System.Collections.Generic.IEnumerable<string> ReferencedFields(MMLib.Alvo.Data.AlvoFilter? filter) { }
     }
     public enum AlvoFilterOperator

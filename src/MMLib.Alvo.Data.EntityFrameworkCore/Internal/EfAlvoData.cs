@@ -71,7 +71,7 @@ internal sealed class EfAlvoData : IAlvoData
         ArgumentNullException.ThrowIfNull(context);
 
         var decision = Resolve(query.Entity, DataOperation.List, context);
-        AlvoFilter.EnsureWithinDepthLimit(query.Filter);
+        AlvoFilter.EnsureWithinLimits(query.Filter);
         EnsureLimitIsSane(query.Limit);
 
         using var db = _contexts.Create();
@@ -303,7 +303,7 @@ internal sealed class EfAlvoData : IAlvoData
     /// <summary>
     /// A negative page size is a malformed query, not an authorization question: it discloses nothing, and a
     /// caller needs to know their query shape was refused rather than their permissions — the same reasoning
-    /// (and the same exception family) as <see cref="AlvoFilter.EnsureWithinDepthLimit"/>. It is refused here
+    /// (and the same exception family) as <see cref="AlvoFilter.EnsureWithinLimits"/>. It is refused here
     /// rather than passed on because the two engines disagree about it: PostgreSQL raises, SQLite reads
     /// <c>LIMIT -1</c> as "no limit at all" and silently returns the whole page.
     /// </summary>

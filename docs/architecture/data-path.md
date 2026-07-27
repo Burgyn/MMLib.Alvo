@@ -447,6 +447,40 @@ kinds of test are therefore kept.
 pre-image at all and goes straight to `ExecuteDelete` over the policy root. The enum member is the dialect
 contract for a future path that does read one.
 
+## A filter's shape is capped in three dimensions, by one guard
+
+`AlvoFilter.EnsureWithinLimits` is the single entry point every implementation calls, and it caps depth,
+**total term count** and **`in` candidate count** in one iterative walk. It replaced a depth-only
+`EnsureWithinDepthLimit` that every implementation called faithfully while nothing capped breadth at all —
+two guards would be two things to remember, and the one a driver author forgets is the one that was added
+last.
+
+Breadth was the third instance of a defect class this PR had already closed twice *per value* (the NUL
+refusal, the UTC normalisation), each time with the same reasoning: one caller-supplied filter, an unhandled
+provider exception on one engine and a silent answer on the other. Measured on both real engines:
+
+| caller filter | SQLite | PostgreSQL 16 |
+|---|---|---|
+| 900 `AND` terms | ok, 14 ms | ok |
+| **1000 `AND` terms** | `SqliteException` (expression tree too large, depth 1000) | **ok** |
+| 1000 `IN` candidates | ok, 14 ms | ok |
+| 32 000 `IN` candidates | ok, but **4.8 s** composing and parsing | ok |
+| **40 000 `IN` candidates** | `SqliteException: too many SQL variables` after 3.5 s | **ok, 0.27 s** |
+
+The caps, each justifiable in one sentence:
+
+- **`MaxTerms = 256`** — a rendered `AND`/`OR` chain nests SQLite's parser once per term, so its default
+  expression-tree ceiling of 1000 is the wall; 256 leaves room for the policy predicate's own terms in the
+  same statement and is far past any query string a human or agent writes on purpose (256 terms answered in
+  23 ms).
+- **`MaxInCandidates = 1000` per list** — every candidate is one bind parameter, so 1000 keeps a whole
+  statement inside SQLite's own 32 766-parameter ceiling even with several lists, and keeps the composition
+  cost (seconds, at 32 000) off the caller's control.
+
+An `in` list is counted with an **early exit**, because a candidate sequence is caller-supplied and may be
+lazily generated: counting it to the end would let a hostile one run forever inside the guard that exists to
+refuse it.
+
 ## The framework-managed columns have one authority, and the framework writes them
 
 `AlvoManagedColumns` (in `Abstractions`) is the only place that answers "which columns does the framework
@@ -504,7 +538,7 @@ validator owns. It is not implemented and is declared here rather than left look
 | No policy for the operation | `AlvoAuthorizationException` | the decision alone |
 | Entity undeclared, or `EntityStorage.Dynamic` | `AlvoAuthorizationException`, one shared message | the applied schema |
 | Filter/sort names a hidden or undeclared field | `AlvoAuthorizationException`, one shared message | the decision + schema |
-| Filter deeper than `AlvoFilter.MaxDepth`, negative `Limit`, a paged read sorted by a nullable field | `ArgumentException` family | the query alone |
+| Filter past `AlvoFilter.MaxDepth`/`MaxTerms`/`MaxInCandidates`, negative `Limit`, a paged read sorted by a nullable field | `ArgumentException` family | the query alone |
 | Payload names a framework-managed column a caller may not write (`AlvoManagedColumns`), or a read-only or undeclared field | `AlvoAuthorizationException` | the payload alone |
 | `get` of an invisible or absent row | `null` | the engine |
 | `update`/`delete` of an invisible or absent row | `AlvoRecordNotFoundException`, identical message | rows affected / pre-image |

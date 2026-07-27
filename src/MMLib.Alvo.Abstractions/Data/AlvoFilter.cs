@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Data;
+﻿using System.Collections;
+
+namespace MMLib.Alvo.Data;
 
 /// <summary>
 /// A caller-supplied query filter — the nested boolean tree PostgREST-style query strings
@@ -44,26 +46,83 @@ public abstract record AlvoFilter
     public static int MaxDepth { get; } = 32;
 
     /// <summary>
-    /// Throws when <paramref name="filter"/> nests deeper than <see cref="MaxDepth"/>. Every
-    /// <see cref="IAlvoData"/> implementation must call this before walking a caller's filter, and the
-    /// measurement is iterative so the check itself cannot overflow on the tree it is about to reject.
+    /// The most nodes an <see cref="AlvoFilter"/> tree may carry in total — every comparison plus every
+    /// connective, however they are nested. This is the <b>breadth</b> counterpart of
+    /// <see cref="MaxDepth"/>, which a wide-but-shallow tree escapes entirely.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Measured, not guessed. A rendered <c>AND</c>/<c>OR</c> chain nests SQLite's parser once per term, so
+    /// its default expression-tree ceiling of 1000 is the hard wall: 900 terms answered in 14 ms and
+    /// <b>1000 threw a raw <c>SqliteException</c></b> — while the identical filter answered on PostgreSQL,
+    /// which has no such ceiling. Same caller input, an unhandled provider exception on one engine and an
+    /// answer on the other: §0 principle 3, on the channel a caller controls per request, and the third
+    /// instance of the class the NUL refusal and the UTC normalisation each closed <em>per value</em>.
+    /// </para>
+    /// <para>
+    /// 256 sits far enough below 1000 to leave room for the policy predicate's own terms in the same
+    /// statement, and is far past any query string a human or agent writes on purpose; 256 terms answered in
+    /// 23 ms. It also caps the statement text a caller can make the server compose, which PostgreSQL
+    /// otherwise leaves entirely to them.
+    /// </para>
+    /// </remarks>
+    public static int MaxTerms { get; } = 256;
+
+    /// <summary>
+    /// The most candidates one <see cref="AlvoFilterOperator.In"/> comparison may list. Each candidate
+    /// becomes its own bind parameter, so this is a limit on the statement, not on the tree.
+    /// </summary>
+    /// <remarks>
+    /// Measured on SQLite: 1000 candidates answered in 14 ms, 20 000 took 2.0 s and 32 000 took 4.8 s
+    /// <em>composing and parsing</em> before answering, and 40 000 threw <c>too many SQL variables</c> after
+    /// 3.5 s — where PostgreSQL answered 40 000 in 0.27 s. 1000 per list keeps a whole statement's parameter
+    /// count inside SQLite's own 32 766 ceiling even with several lists, and keeps the composition cost off
+    /// the caller's control.
+    /// </remarks>
+    public static int MaxInCandidates { get; } = 1000;
+
+    /// <summary>
+    /// Throws when <paramref name="filter"/> exceeds any of this port's structural limits —
+    /// <see cref="MaxDepth"/>, <see cref="MaxTerms"/>, <see cref="MaxInCandidates"/> — or is malformed.
+    /// Every <see cref="IAlvoData"/> implementation must call this before walking a caller's filter.
+    /// </summary>
+    /// <remarks>
+    /// <b>One entry point on purpose.</b> This replaced a depth-only guard that every implementation called
+    /// faithfully while nothing capped breadth at all; two guards would be two things to remember, and the
+    /// one a driver author forgets is the one that was added last. The measurement is a single iterative
+    /// walk, so the check itself cannot overflow on the tree it is about to reject, and an
+    /// <see cref="AlvoFilterOperator.In"/> list is counted with an early exit so a lazily-generated
+    /// candidate sequence cannot be walked forever on the way to being refused.
+    /// </remarks>
     /// <param name="filter">The tree to check, or <see langword="null"/> for no filter.</param>
     /// <exception cref="ArgumentException">
-    /// <paramref name="filter"/> nests deeper than <see cref="MaxDepth"/>, or carries a
-    /// <see langword="null"/> where a child belongs.
+    /// <paramref name="filter"/> nests deeper than <see cref="MaxDepth"/>, carries more than
+    /// <see cref="MaxTerms"/> nodes, lists more than <see cref="MaxInCandidates"/> candidates in one
+    /// <c>in</c>, or carries a <see langword="null"/> where a child belongs.
     /// </exception>
-    public static void EnsureWithinDepthLimit(AlvoFilter? filter)
+    public static void EnsureWithinLimits(AlvoFilter? filter)
     {
-        var depth = MeasureDepth(filter);
-        if (depth > MaxDepth)
+        if (Exceeded(Measure(filter)) is { } message)
         {
-            throw new ArgumentException(
-                $"The filter nests {depth} levels deep, exceeding the maximum of {MaxDepth}. "
-                + "Flatten the nesting — an and/or over many terms is one level, not one level per term.",
-                nameof(filter));
+            throw new ArgumentException(message, nameof(filter));
         }
     }
+
+    /// <summary>
+    /// The first limit <paramref name="shape"/> exceeds, as the message a caller reads, or
+    /// <see langword="null"/> when it exceeds none. Composed rather than thrown so every refusal is raised at
+    /// one site, naming the argument the caller actually passed.
+    /// </summary>
+    private static string? Exceeded(FilterShape shape) =>
+        Over(shape.Depth, MaxDepth, $"nests {shape.Depth} levels deep",
+            "Flatten the nesting — an and/or over many terms is one level, not one level per term.")
+        ?? Over(shape.Terms, MaxTerms, $"carries {shape.Terms} terms",
+            "Narrow the query — a filter this wide is a statement the engine may refuse outright.")
+        ?? Over(shape.InCandidates, MaxInCandidates, $"lists {shape.InCandidates} 'in' candidates",
+            "Split the list across requests — every candidate becomes its own bind parameter.");
+
+    private static string? Over(int measured, int limit, string what, string fix) =>
+        measured > limit ? $"The filter {what}, exceeding the maximum of {limit}. {fix}" : null;
 
     /// <summary>
     /// Enumerates every field name any <see cref="AlvoComparison"/> in this tree compares, in no
@@ -102,21 +161,35 @@ public abstract record AlvoFilter
         }
     }
 
-    private static int MeasureDepth(AlvoFilter? filter)
+    /// <summary>Everything one iterative walk of the tree measures.</summary>
+    /// <param name="Depth">The number of nodes on the longest root-to-leaf path.</param>
+    /// <param name="Terms">The total number of nodes.</param>
+    /// <param name="InCandidates">The longest <c>in</c> candidate list any comparison carries.</param>
+    private sealed record FilterShape(int Depth, int Terms, int InCandidates);
+
+    /// <summary>
+    /// One walk for all three limits. Separate walks would each have to be bounded separately, and the
+    /// unbounded one is the one a hostile tree finds.
+    /// </summary>
+    private static FilterShape Measure(AlvoFilter? filter)
     {
         if (filter is null)
         {
-            return 0;
+            return new FilterShape(0, 0, 0);
         }
 
         var pending = new Stack<(AlvoFilter Node, int Depth)>();
         pending.Push((filter, 1));
         var deepest = 0;
+        var terms = 0;
+        var widestInList = 0;
 
         while (pending.Count > 0)
         {
             var (node, depth) = pending.Pop();
             deepest = Math.Max(deepest, depth);
+            terms++;
+            widestInList = Math.Max(widestInList, CandidateCount(node));
 
             foreach (var child in Children(node))
             {
@@ -124,7 +197,41 @@ public abstract record AlvoFilter
             }
         }
 
-        return deepest;
+        return new FilterShape(deepest, terms, widestInList);
+    }
+
+    /// <summary>
+    /// How many candidates an <c>in</c> comparison lists, counted no further than one past the cap.
+    /// </summary>
+    /// <remarks>
+    /// A candidate list is caller-supplied and may be a lazily-generated sequence, so counting it to the end
+    /// would let a hostile one run forever inside the guard that exists to reject it. A collection answers
+    /// from its own <c>Count</c>; anything else is enumerated only until the cap is provably exceeded.
+    /// </remarks>
+    private static int CandidateCount(AlvoFilter node)
+    {
+        if (node is not AlvoComparison { Operator: AlvoFilterOperator.In } comparison
+            || comparison.Value is not IEnumerable candidates
+            || comparison.Value is string)
+        {
+            return 0;
+        }
+
+        if (candidates is ICollection collection)
+        {
+            return collection.Count;
+        }
+
+        var counted = 0;
+        foreach (var _ in candidates)
+        {
+            if (++counted > MaxInCandidates)
+            {
+                break;
+            }
+        }
+
+        return counted;
     }
 
     /// <summary>

@@ -88,7 +88,7 @@ public sealed class InMemoryAlvoData : IAlvoData
             throw Denied(decision);
         }
 
-        AlvoFilter.EnsureWithinDepthLimit(query.Filter);
+        AlvoFilter.EnsureWithinLimits(query.Filter);
         EnsureQueryFieldsAvailable(query, decision);
         EnsureSortKeysCanBePaged(query);
 

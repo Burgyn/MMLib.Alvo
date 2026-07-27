@@ -59,7 +59,7 @@ internal static class FilterSqlRenderer
         ArgumentNullException.ThrowIfNull(entity);
         ArgumentNullException.ThrowIfNull(fields);
         ArgumentException.ThrowIfNullOrWhiteSpace(parameterPrefix);
-        AlvoFilter.EnsureWithinDepthLimit(filter);
+        AlvoFilter.EnsureWithinLimits(filter);
 
         var bag = new ParameterBag(parameterPrefix);
         var sql = Node(filter, entity, fields, bag);

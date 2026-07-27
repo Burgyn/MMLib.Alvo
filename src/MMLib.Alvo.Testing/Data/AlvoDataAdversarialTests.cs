@@ -708,6 +708,55 @@ public abstract class AlvoDataAdversarialTests
     }
 
     /// <summary>
+    /// The depth cap does not see <b>breadth</b>, and breadth is the same denial-of-service and the same
+    /// engine divergence one level out: 900 <c>AND</c> terms answered on both engines and <b>1000 threw a
+    /// raw <c>SqliteException</c></b> out of <see cref="IAlvoData.QueryAsync"/> while PostgreSQL answered,
+    /// and 40 000 <c>in</c> candidates threw <c>too many SQL variables</c> after 3.5 s on SQLite where
+    /// PostgreSQL answered in 0.27 s. Capped at the port so no backend can be the one that differs, on the
+    /// same malformed-query channel as the depth cap.
+    /// </summary>
+    [Fact]
+    public async Task A_filter_wider_than_the_term_cap_is_rejected_rather_than_composed()
+    {
+        var fixture = await AccountsFixtureAsync();
+        var member = NewContext(tenant: null);
+
+        var atCap = await fixture.Data.QueryAsync(QueryFilteredBy(WideFilter(AlvoFilter.MaxTerms)), member);
+        atCap.ShouldNotBeNull();
+
+        await Should.ThrowAsync<ArgumentException>(() => fixture.Data.QueryAsync(
+            QueryFilteredBy(WideFilter(AlvoFilter.MaxTerms + 1)), member));
+    }
+
+    /// <summary>
+    /// The <c>in</c> candidate cap, which is a limit on the <em>statement</em> rather than on the tree:
+    /// every candidate becomes its own bind parameter.
+    /// </summary>
+    [Fact]
+    public async Task An_in_list_longer_than_the_candidate_cap_is_rejected_rather_than_bound()
+    {
+        var fixture = await AccountsFixtureAsync();
+        var member = NewContext(tenant: null);
+
+        var atCap = await fixture.Data.QueryAsync(QueryFilteredBy(InFilter(AlvoFilter.MaxInCandidates)), member);
+        atCap.ShouldBeEmpty();
+
+        await Should.ThrowAsync<ArgumentException>(() => fixture.Data.QueryAsync(
+            QueryFilteredBy(InFilter(AlvoFilter.MaxInCandidates + 1)), member));
+    }
+
+    /// <summary>A conjunction of <paramref name="terms"/><c> - 1</c> comparisons, so the tree is exactly <paramref name="terms"/> nodes.</summary>
+    /// <param name="terms">The total node count the tree must have.</param>
+    private static AlvoAnd WideFilter(int terms) =>
+        new([.. Enumerable.Range(0, terms - 1).Select(index => new AlvoComparison(
+            "title", AlvoFilterOperator.Neq, $"absent-{index}"))]);
+
+    private static AlvoComparison InFilter(int candidates) => new(
+        "title",
+        AlvoFilterOperator.In,
+        Enumerable.Range(0, candidates).Select(index => $"absent-{index}").ToList());
+
+    /// <summary>
     /// A keyset cursor's boundary is a chain of comparisons with no <c>IS NULL</c> arm, so a <see langword="null"/>
     /// on either side makes the whole term <see langword="null"/> and a <c>WHERE</c> treats that as false —
     /// paging over a nullable sort key stops at the first null-keyed row and <b>silently drops the rest</b>.

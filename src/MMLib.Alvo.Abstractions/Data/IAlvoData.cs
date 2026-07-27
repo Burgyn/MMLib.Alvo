@@ -108,7 +108,7 @@ public interface IAlvoData
     /// <para>
     /// <b>A filter tree deeper than <see cref="AlvoFilter.MaxDepth"/> is refused, not walked.</b> Every
     /// backend walks a filter recursively, so an implementation must call
-    /// <see cref="AlvoFilter.EnsureWithinDepthLimit"/> before doing so — the one malformed-argument
+    /// <see cref="AlvoFilter.EnsureWithinLimits"/> before doing so — the one malformed-argument
     /// rejection on this port, deliberately an <see cref="ArgumentException"/> rather than an
     /// authorization failure, because it discloses nothing about the schema or the caller's access and a
     /// caller needs to know their query shape was refused rather than their permissions.
