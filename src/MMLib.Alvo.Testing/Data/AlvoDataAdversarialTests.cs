@@ -538,6 +538,38 @@ public abstract class AlvoDataAdversarialTests
     }
 
     /// <summary>
+    /// DoD #5's storage half: the CsCheck property suites (<c>NoInterpolationPropertyTests</c>,
+    /// <c>FilterSqlRendererPropertyTests</c>) prove unicode never breaks out of a bound parameter at
+    /// the <em>renderer</em> level, but that says nothing about whether the <em>value</em> survives a
+    /// real column's storage and retrieval. A code point outside the Basic Multilingual Plane (a
+    /// UTF-16 surrogate pair, a four-byte UTF-8 sequence) and a base letter followed by a combining
+    /// mark rather than its precomposed form are exactly where a naive <c>TEXT</c>/<c>varchar</c>
+    /// round trip silently truncates or normalizes — a column that only ever saw ASCII would still
+    /// look correct.
+    /// </summary>
+    /// <param name="value">The non-ASCII value written and expected to read back unchanged.</param>
+    [Theory]
+    [InlineData("\U0001F600 grinning face")] // outside the BMP: a UTF-16 surrogate pair, 4-byte UTF-8
+    [InlineData("café")] // 'e' + COMBINING ACUTE ACCENT (U+0301), not the precomposed 'é' (U+00E9)
+    public async Task A_non_ascii_value_survives_a_create_and_get_round_trip_unchanged(string value)
+    {
+        var fixture = await NotesFixtureAsync();
+        var payload = new Dictionary<string, object?>
+        {
+            ["owner_id"] = fixture.Alice.User.Value,
+            ["tenant_id"] = fixture.Tenant.Value,
+            ["title"] = value,
+        };
+
+        var created = await fixture.Data.CreateAsync("notes", payload, fixture.Alice);
+        created["title"].ShouldBe(value);
+
+        var reread = await fixture.Data.GetAsync("notes", (Guid)created["id"]!, fixture.Alice);
+        reread.ShouldNotBeNull();
+        reread!["title"].ShouldBe(value);
+    }
+
+    /// <summary>
     /// <c>Limit</c> must be applied after the policy predicate (and the tenant scope), never
     /// before — a <c>Limit</c> that truncated the pre-filter row set could return another tenant's
     /// row from the head of the table just because the caller's own row landed later, entirely

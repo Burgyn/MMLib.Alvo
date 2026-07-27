@@ -69,6 +69,11 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task A_global_entity_whose_rule_references_the_user_denies_the_anonymous_caller() { }
         public System.Threading.Tasks.Task A_hidden_expression_that_cannot_resolve_still_masks_the_field() { }
         public System.Threading.Tasks.Task A_hidden_field_never_appears_in_a_returned_record() { }
+        [Xunit.InlineData(new object[] {
+                "café"})]
+        [Xunit.InlineData(new object[] {
+                "😀 grinning face"})]
+        public System.Threading.Tasks.Task A_non_ascii_value_survives_a_create_and_get_round_trip_unchanged(string value) { }
         public System.Threading.Tasks.Task A_nullable_boolean_field_used_bare_in_a_rule_works_end_to_end() { }
         public System.Threading.Tasks.Task A_paged_read_sorted_by_a_nullable_field_is_refused_rather_than_dropping_rows() { }
         public System.Threading.Tasks.Task A_paged_read_sorted_by_a_required_field_still_answers() { }
