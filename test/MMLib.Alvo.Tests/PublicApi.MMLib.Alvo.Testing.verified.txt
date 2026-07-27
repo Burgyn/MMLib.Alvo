@@ -224,10 +224,13 @@ namespace MMLib.Alvo.Testing.Data
     {
         protected AlvoDataStatementTests() { }
         public System.Threading.Tasks.Task A_rule_with_no_operands_binds_no_policy_parameter() { }
+        public System.Threading.Tasks.Task A_rule_with_no_operands_binds_no_policy_parameter_on_the_write_path() { }
         public System.Threading.Tasks.Task A_single_row_read_carries_the_predicate_rather_than_checking_after_the_fetch() { }
         protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Testing.Data.IStatementProbe> CreateAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, System.Collections.Generic.IReadOnlyDictionary<string, System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRecord>> seed);
+        public System.Threading.Tasks.Task The_delete_statement_itself_carries_the_policy_predicate() { }
         public System.Threading.Tasks.Task The_policy_predicate_is_bound_inside_the_where_clause_of_one_statement() { }
         public System.Threading.Tasks.Task The_tenant_scope_is_bound_inside_the_same_where_clause() { }
+        public System.Threading.Tasks.Task The_update_statement_itself_carries_the_policy_predicate() { }
     }
     public abstract class AlvoSqlDialectContractTests
     {

@@ -162,8 +162,14 @@ public sealed class SqliteAlvoDataWriteTests : IAsyncDisposable
     /// root the read path uses — not applied by a preceding <c>SELECT</c> whose verdict a concurrent writer
     /// could invalidate.
     /// </summary>
+    /// <remarks>
+    /// The criterion itself is inherited from <c>AlvoDataStatementTests</c>, so both engines and every future
+    /// driver are held to it; what is left here is the part a cross-engine fact cannot assert — this engine's
+    /// exact rendered predicate text, which is how a driver that bound the parameter but rendered the wrong
+    /// column would be caught.
+    /// </remarks>
     [Fact]
-    public async Task The_update_statement_itself_carries_the_policy_predicate()
+    public async Task The_rendered_update_predicate_is_this_engines_own_text()
     {
         var world = await AlvoDataWorlds.NotesAsync(_fixture);
 
@@ -256,8 +262,13 @@ public sealed class SqliteAlvoDataWriteTests : IAsyncDisposable
         (await world.GetAsync("notes", world.BobRowId, world.Bob)).ShouldNotBeNull();
     }
 
+    /// <summary>
+    /// The delete's counterpart, and likewise narrowed to what only this engine can say: two statements in
+    /// total (the locked pre-image, then the write), the write over this engine's quoted table, and its exact
+    /// rendered predicate. The cross-engine criterion is inherited from <c>AlvoDataStatementTests</c>.
+    /// </summary>
     [Fact]
-    public async Task The_delete_statement_itself_carries_the_policy_predicate()
+    public async Task The_rendered_delete_predicate_is_this_engines_own_text()
     {
         var world = await AlvoDataWorlds.NotesAsync(_fixture);
 

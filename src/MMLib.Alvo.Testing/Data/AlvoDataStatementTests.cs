@@ -114,6 +114,77 @@ public abstract class AlvoDataStatementTests
         world.Probe.Statements.ShouldHaveSingleItem().ShouldNotContain(UsingPrefix);
     }
 
+    /// <summary>
+    /// The <c>UPDATE</c> the engine executes carries the predicate itself, so the pre-image read is not the only
+    /// gate: swap the policy root for the bare table and every outcome-level fact still passes, because the
+    /// pre-image has already refused the invisible row — while a concurrent writer that made the row visible
+    /// between the two would then be written by an unconstrained statement.
+    /// </summary>
+    /// <remarks>
+    /// Inherited rather than kept per engine, because <c>UPDATE … FROM (subquery)</c> is precisely the
+    /// engine-divergent shape the de-risking spike flagged: PostgreSQL and SQLite spell the policy root's
+    /// placement differently, and a driver that composed it over the bare table on one engine only would pass
+    /// the other engine's copy of this fact. Asserted on the reserved prefix rather than on predicate text,
+    /// which is engine-specific.
+    /// </remarks>
+    [Fact]
+    public async Task The_update_statement_itself_carries_the_policy_predicate()
+    {
+        var world = await OwnedNotesAsync();
+        world.Probe.ClearStatements();
+
+        await world.Probe.Data.UpdateAsync(Entity, world.AliceRowId, Patch, world.Alice, Token);
+
+        StatementStartingWith("UPDATE", world.Probe).ShouldContain(UsingPrefix);
+    }
+
+    /// <summary>
+    /// And the <c>DELETE</c> too, where the same shape appears as an <c>IN (subquery)</c>. A delete has no
+    /// <c>WITH CHECK</c>, so this statement's own predicate is the last gate there is.
+    /// </summary>
+    [Fact]
+    public async Task The_delete_statement_itself_carries_the_policy_predicate()
+    {
+        var world = await OwnedNotesAsync();
+        world.Probe.ClearStatements();
+
+        await world.Probe.Data.DeleteAsync(Entity, world.AliceRowId, world.Alice, Token);
+
+        StatementStartingWith("DELETE", world.Probe).ShouldContain(UsingPrefix);
+    }
+
+    /// <summary>
+    /// The non-vacuity control for both: with a bare <c>"true"</c> rule the write statements bind no policy
+    /// parameter at all, so the two facts above cannot be satisfied by an implementation that names
+    /// <c>alvo_u</c> in every statement it sends.
+    /// </summary>
+    [Fact]
+    public async Task A_rule_with_no_operands_binds_no_policy_parameter_on_the_write_path()
+    {
+        var world = await PublicNotesAsync();
+        world.Probe.ClearStatements();
+
+        await world.Probe.Data.UpdateAsync(Entity, world.AliceRowId, Patch, world.Alice, Token);
+
+        StatementStartingWith("UPDATE", world.Probe).ShouldNotContain(UsingPrefix);
+    }
+
+    /// <summary>The one statement of <paramref name="kind"/> this act emitted.</summary>
+    /// <remarks>
+    /// A write emits more than one statement — the locked pre-image, then the policy-carrying write — and both
+    /// carry the predicate, so a fact naming only "some statement" would be satisfied by the read alone. The
+    /// keyword picks the write out; <c>ShouldHaveSingleItem</c> makes a second one of the same kind a failure
+    /// rather than a silently ignored candidate.
+    /// </remarks>
+    private static string StatementStartingWith(string kind, IStatementProbe probe) =>
+        probe.Statements
+            .Where(statement => statement.StartsWith(kind, StringComparison.OrdinalIgnoreCase))
+            .ShouldHaveSingleItem();
+
+    /// <summary>The smallest legal patch over the fixture's one writable field.</summary>
+    private static IReadOnlyDictionary<string, object?> Patch =>
+        new Dictionary<string, object?>(StringComparer.Ordinal) { ["title"] = "renamed" };
+
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
     /// <summary>
@@ -140,6 +211,7 @@ public abstract class AlvoDataStatementTests
         var tenant = TenantId.New();
         var alice = Caller(tenant);
         var bob = Caller(tenant);
+        var aliceRow = Guid.NewGuid();
         var bobRow = Guid.NewGuid();
 
         var (descriptor, schema) = Fixture(rule);
@@ -147,12 +219,12 @@ public abstract class AlvoDataStatementTests
         {
             [Entity] =
             [
-                Row(Guid.NewGuid(), alice.User.Value, tenant.Value),
+                Row(aliceRow, alice.User.Value, tenant.Value),
                 Row(bobRow, bob.User.Value, tenant.Value),
             ],
         };
 
-        return new StatementWorld(await CreateAsync(schema, descriptor, seed), alice, bobRow);
+        return new StatementWorld(await CreateAsync(schema, descriptor, seed), alice, aliceRow, bobRow);
     }
 
     private static AlvoRecord Row(Guid id, Guid owner, Guid tenant) =>
@@ -161,6 +233,7 @@ public abstract class AlvoDataStatementTests
             ["id"] = id,
             ["owner_id"] = owner,
             ["tenant_id"] = tenant,
+            ["title"] = "seeded",
         });
 
     private static AlvoContext Caller(TenantId tenant) => new()
@@ -170,7 +243,11 @@ public abstract class AlvoDataStatementTests
         Tenant = tenant,
     };
 
-    /// <summary>A tenant-scoped entity, so both a <c>USING</c> predicate and a tenant scope are in play.</summary>
+    /// <summary>
+    /// A tenant-scoped entity, so both a <c>USING</c> predicate and a tenant scope are in play, carrying the
+    /// same rule on every operation — the write facts need <c>update</c> and <c>delete</c> to resolve to the
+    /// same predicate the read facts assert on, and <c>title</c> is the one field a patch may write.
+    /// </summary>
     private static (AlvoDescriptor Descriptor, SchemaModel Schema) Fixture(string rule)
     {
         var descriptor = new AlvoDescriptor
@@ -185,8 +262,9 @@ public abstract class AlvoDataStatementTests
                     Fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
                     {
                         ["owner_id"] = new() { Type = DescField.Uuid, Required = true },
+                        ["title"] = new() { Type = DescField.String },
                     },
-                    Rules = new AccessRules { List = rule, Get = rule },
+                    Rules = new AccessRules { List = rule, Get = rule, Update = rule, Delete = rule },
                 },
             },
         };
@@ -201,6 +279,7 @@ public abstract class AlvoDataStatementTests
                     new FieldSchema { Name = "id", Type = SchemaField.Uuid, Required = true },
                     new FieldSchema { Name = "owner_id", Type = SchemaField.Uuid, Required = true },
                     new FieldSchema { Name = "tenant_id", Type = SchemaField.Uuid, Required = true, Indexed = true },
+                    new FieldSchema { Name = "title", Type = SchemaField.String },
                 ],
             },
         ]);
@@ -208,5 +287,6 @@ public abstract class AlvoDataStatementTests
         return (descriptor, schema);
     }
 
-    private sealed record StatementWorld(IStatementProbe Probe, AlvoContext Alice, Guid BobRowId);
+    private sealed record StatementWorld(
+        IStatementProbe Probe, AlvoContext Alice, Guid AliceRowId, Guid BobRowId);
 }
