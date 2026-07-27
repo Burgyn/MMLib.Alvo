@@ -200,9 +200,17 @@ Ordering and boundary agree *with each other* on each engine — that is the poi
   string-collation decisions are ruled on together.
 
 **Null placement** is the portable `CASE WHEN <key> IS NULL THEN 0/1 ELSE 1/0 END` emulation (spike `Q3c`),
-because SQLite and PostgreSQL disagree on where `NULL` sorts for a given direction. It is known to defeat an
-index on the sort key; that cost belongs with the latency criterion, which #19 owns. The `IS NULL` test reads
+because SQLite and PostgreSQL disagree on where `NULL` sorts for a given direction. The `IS NULL` test reads
 the raw column, not the repaired one — a cast `NULL` is still `NULL`.
+
+**It is emitted only where the key is nullable**, which is the one index-defeating construct in this data path
+and it used to be on **every** read. On a paged read that was provably pointless:
+`EnsureSortKeysCanBePaged` refuses a nullable paged sort key three frames earlier, so the rank expression was
+a compile-time constant `0` that could not change a single row of the answer — while being the one thing
+standing between this port and §2.1's *p95 < 50 ms on an indexed column*. A PR3 author measuring that
+criterion would have started reworking where `ORDER BY` and paging live. Dropped where it cannot matter, kept
+where it is load-bearing (an unpaged sorted read over a nullable key, where `AlvoSort.Nulls` is a real
+promise); `SortSqlRendererTests.The_null_placement_rank_is_emitted_only_for_a_nullable_key` pins both arms.
 
 **A paged read over a nullable sort key is refused, not answered.** `KeysetSqlRenderer` models no null
 placement of its own: its boundary is a chain of comparisons with no `IS NULL` arm, so a `NULL` on either side

@@ -173,7 +173,7 @@ public class ReadStatementComposerTests
         });
 
         statement.Sql.ShouldContain(
-            " ORDER BY CASE WHEN \"plate\" IS NULL THEN 1 ELSE 0 END, \"plate\" DESC, \"id\"");
+            " ORDER BY \"plate\" DESC, \"id\"");
     }
 
     /// <summary>
@@ -246,7 +246,7 @@ public class ReadStatementComposerTests
             Sort = [new AlvoSort("plate")],
             Limit = 1,
             LockFor = PreImageMutation.Update,
-        }).Sql.ShouldEndWith(" ORDER BY CASE WHEN \"plate\" IS NULL THEN 1 ELSE 0 END, \"plate\", \"id\" LIMIT @alvo_limit FOR TEST");
+        }).Sql.ShouldEndWith(" ORDER BY \"plate\", \"id\" LIMIT @alvo_limit FOR TEST");
 
     [Fact]
     public void A_filter_naming_an_undeclared_field_is_refused_before_any_statement_exists()

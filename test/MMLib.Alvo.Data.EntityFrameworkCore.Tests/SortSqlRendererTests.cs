@@ -17,13 +17,27 @@ public class SortSqlRendererTests
 
     [Fact]
     public void A_sort_key_is_followed_by_the_row_key_tie_breaker()
-        => Render([new AlvoSort("plate")])
-            .ShouldBe("CASE WHEN \"plate\" IS NULL THEN 1 ELSE 0 END, \"plate\", \"id\"");
+        => Render([new AlvoSort("plate")]).ShouldBe("\"plate\", \"id\"");
+
+    /// <summary>
+    /// The null-placement rank is emitted <b>only</b> where the key is nullable. It defeats an index on the
+    /// sort key, and over a non-nullable key it is a compile-time constant <c>0</c> that cannot change a single
+    /// row — which is what it used to be on <em>every paged read</em>, because
+    /// <c>EnsureSortKeysCanBePaged</c> refuses a nullable paged key three frames earlier. So the one
+    /// index-defeating construct in this data path was unavoidable in exactly the case §2.1's latency criterion
+    /// is about.
+    /// </summary>
+    /// <param name="field">The key to sort by — <c>plate</c> is required, <c>status</c> nullable.</param>
+    /// <param name="expected">The rendered term list.</param>
+    [Theory]
+    [InlineData("plate", "\"plate\", \"id\"")]
+    [InlineData("status", "CASE WHEN \"status\" IS NULL THEN 1 ELSE 0 END, \"status\", \"id\"")]
+    public void The_null_placement_rank_is_emitted_only_for_a_nullable_key(string field, string expected)
+        => Render([new AlvoSort(field)]).ShouldBe(expected);
 
     [Fact]
     public void A_descending_key_carries_its_direction_while_the_tie_breaker_stays_ascending()
-        => Render([new AlvoSort("plate", Descending: true)])
-            .ShouldBe("CASE WHEN \"plate\" IS NULL THEN 1 ELSE 0 END, \"plate\" DESC, \"id\"");
+        => Render([new AlvoSort("plate", Descending: true)]).ShouldBe("\"plate\" DESC, \"id\"");
 
     /// <summary>
     /// SQLite and PostgreSQL disagree on where <c>NULL</c> sorts for a given direction, so the placement is
@@ -38,9 +52,7 @@ public class SortSqlRendererTests
     [Fact]
     public void Several_keys_are_ordered_outermost_first()
         => Render([new AlvoSort("status"), new AlvoSort("plate", Descending: true)])
-            .ShouldBe(
-                "CASE WHEN \"status\" IS NULL THEN 1 ELSE 0 END, \"status\", "
-                + "CASE WHEN \"plate\" IS NULL THEN 1 ELSE 0 END, \"plate\" DESC, \"id\"");
+            .ShouldBe("CASE WHEN \"status\" IS NULL THEN 1 ELSE 0 END, \"status\", \"plate\" DESC, \"id\"");
 
     /// <summary>
     /// The load-bearing fact of this renderer. A <c>decimal</c> lives in a SQLite <c>TEXT</c> column, so an

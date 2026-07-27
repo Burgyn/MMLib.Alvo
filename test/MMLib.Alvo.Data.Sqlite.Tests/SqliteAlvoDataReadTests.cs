@@ -56,7 +56,7 @@ public sealed class SqliteAlvoDataReadTests : IAsyncDisposable
         world.Statements.Count.ShouldBe(1);
         world.LastStatement.ShouldContain("\"owner_id\" = @alvo_u0");
         world.LastStatement.ShouldContain("\"title\" LIKE @alvo_f0");
-        world.LastStatement.ShouldContain("ORDER BY CASE WHEN \"label\" IS NULL THEN 1 ELSE 0 END, \"label\" DESC, \"id\"");
+        world.LastStatement.ShouldContain("ORDER BY \"label\" DESC, \"id\"");
         world.LastStatement.ShouldEndWith("LIMIT @alvo_limit");
         world.LastStatement.ShouldStartWith("SELECT \"id\"");
     }

@@ -24,8 +24,17 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// proved translates identically on both engines; native <c>NULLS FIRST</c>/<c>NULLS LAST</c> is not adopted
 /// (SQLite's support is recent and the emulation is one shape for both). The <c>IS NULL</c> test reads the
 /// raw column rather than the repaired one — a cast <c>NULL</c> is still <c>NULL</c>, and the raw column is
-/// the form an index can serve. The emulation is known to defeat an index on the sort key; that is the
-/// accepted cost recorded against the latency criterion, which #19 owns.
+/// the form an index can serve.
+/// </para>
+/// <para>
+/// <b>It is emitted only where the key is actually nullable.</b> The emulation is known to defeat an index on
+/// the sort key, and it used to be emitted on <em>every</em> key — including every <b>paged</b> read, where
+/// <c>EnsureSortKeysCanBePaged</c> has already refused a nullable key three frames earlier, so the rank
+/// expression was a compile-time constant <c>0</c> that could not change a single row of the answer. That made
+/// the one index-defeating construct in this data path unavoidable in exactly the case §2.1's
+/// <em>p95 &lt; 50 ms on an indexed column</em> criterion is about. Where the key really is nullable — an
+/// unpaged sorted read — it is load-bearing and stays: <see cref="AlvoSort.Nulls"/> is a promise about where
+/// nulls sort, and the two engines disagree on the default.
 /// </para>
 /// <para>
 /// The row-key tie-breaker is always ascending and always present: it exists to make the order total, not to
@@ -54,8 +63,9 @@ internal static class SortSqlRenderer
         var declared = QueryFieldGuard.DeclaredField(entity, key.Field);
         var column = fields.RenderField(entity, declared.Name);
         var direction = key.Descending ? " DESC" : string.Empty;
+        var ordering = $"{Comparable(column, declared, fields)}{direction}";
 
-        return $"{NullPlacement(column, key.Nulls)}, {Comparable(column, declared, fields)}{direction}";
+        return declared.Nullable ? $"{NullPlacement(column, key.Nulls)}, {ordering}" : ordering;
     }
 
     private static string TieBreaker(EntitySchema entity, IFieldSqlRenderer fields)
