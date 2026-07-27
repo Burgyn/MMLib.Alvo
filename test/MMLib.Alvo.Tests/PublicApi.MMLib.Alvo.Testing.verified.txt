@@ -78,6 +78,7 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task A_tenant_scoped_entity_never_returns_another_tenants_rows() { }
         public System.Threading.Tasks.Task A_tenantless_context_cannot_create_into_a_scoped_entity() { }
         public System.Threading.Tasks.Task A_user_filter_cannot_widen_the_policy_predicate() { }
+        public System.Threading.Tasks.Task A_uuid_rule_over_a_dynamic_entity_matches_rows_on_every_engine() { }
         public System.Threading.Tasks.Task A_write_to_a_read_only_field_is_rejected_rather_than_silently_dropped() { }
         public System.Threading.Tasks.Task An_admin_rule_over_the_role_set_matches_a_multi_role_caller() { }
         public System.Threading.Tasks.Task An_entity_with_no_rule_denies_every_operation() { }
@@ -90,6 +91,7 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task Delete_of_another_users_row_reports_not_found_and_does_not_delete() { }
         public System.Threading.Tasks.Task Get_of_another_users_row_is_indistinguishable_from_absent() { }
         public System.Threading.Tasks.Task List_returns_only_the_callers_own_rows() { }
+        public System.Threading.Tasks.Task Same_suite_passes_over_a_dynamic_entity() { }
         public System.Threading.Tasks.Task Update_cannot_move_a_row_into_another_tenant() { }
         public System.Threading.Tasks.Task Update_cannot_move_a_row_out_of_the_callers_scope() { }
         public System.Threading.Tasks.Task Update_cannot_rewrite_the_row_id() { }

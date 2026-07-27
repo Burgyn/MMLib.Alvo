@@ -778,6 +778,29 @@ public abstract class AlvoDataAdversarialTests
         await Should.ThrowAsync<AlvoAuthorizationException>(() => data.GetAsync("journals", rowId, AlvoContext.Anonymous));
     }
 
+    /// <summary>
+    /// Reserved parity leg: analysis §2.1 requires this whole suite to pass identically over a dynamic
+    /// (metadata-driven) entity, and PR2's obligation was only to leave the mechanism capable of it —
+    /// which it does by making the storage shape an <c>IAlvoSqlDialect</c> + <c>IFieldSqlRenderer</c>
+    /// pair rather than a branch in the data path. Enabling this member is F7's, and it is declared
+    /// here so the obligation is a named test rather than a paragraph in a design note.
+    /// </summary>
+    [Fact(Skip = "Dynamic driver lands in F7 — parity leg reserved (analysis §2.1).")]
+    public Task Same_suite_passes_over_a_dynamic_entity() => Task.CompletedTask;
+
+    /// <summary>
+    /// Reserved F7 leg for one trap the de-risking spike (probe <c>X2</c>) already walked into, so it is a
+    /// discovery already made rather than one waiting to happen. EF stores a <see cref="Guid"/> as
+    /// <b>upper-case</b> <c>TEXT</c> on SQLite, while <c>json_extract</c> returns whatever case the stored
+    /// payload holds — so a <c>uuid</c>-typed JSON path compares upper against lower and matches
+    /// <b>nothing</b>, with no error from either side. Every row-ownership rule Alvo writes is a
+    /// <c>uuid</c> comparison (<c>owner_id == @user.id</c>, <c>tenant_id == @tenant.id</c>), so on the
+    /// dynamic driver this reads as an over-strict policy rather than as a bug. The dynamic driver must
+    /// normalise the case of a <c>uuid</c>-typed JSON path per engine; this member is what says so.
+    /// </summary>
+    [Fact(Skip = "Dynamic driver lands in F7 — uuid JSON-path normalisation reserved (spike X2).")]
+    public Task A_uuid_rule_over_a_dynamic_entity_matches_rows_on_every_engine() => Task.CompletedTask;
+
     private sealed record NotesFixture(IAlvoData Data, AlvoContext Alice, AlvoContext Bob, TenantId Tenant, Guid AliceRow1Id, Guid AliceRow2Id, Guid BobRowId);
 
     private sealed record DocumentsFixture(
