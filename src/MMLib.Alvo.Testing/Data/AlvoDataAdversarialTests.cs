@@ -773,9 +773,14 @@ public abstract class AlvoDataAdversarialTests
         var globex = TenantId.New();
         var third = TenantId.New();
 
+        // title is required because A_query_limit_is_applied_after_the_policy_predicate_not_before pages by
+        // it, and a keyset cursor cannot express where a nullable key's nulls sort — an implementation is
+        // entitled to refuse a paged read over one rather than silently drop rows at the first null-keyed
+        // row. Required-ness is incidental to every fact this fixture serves (every seeded row carries a
+        // title, and every create supplies one), so declaring it costs the suite nothing.
         var fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
         {
-            ["title"] = new() { Type = DescField.String },
+            ["title"] = new() { Type = DescField.String, Required = true },
         };
         var rules = new AccessRules { List = "true", Get = "true", Create = "true" };
         var (descriptor, schema) = BuildFixture("documents", fields, EntityTenancy.Scoped, rules);

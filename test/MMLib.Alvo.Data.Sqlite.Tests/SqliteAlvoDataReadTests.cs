@@ -252,5 +252,24 @@ public sealed class SqliteAlvoDataReadTests : IAsyncDisposable
         refused.Message.ShouldNotContain("ghosts");
     }
 
+    /// <summary>
+    /// The encapsulation invariant observed rather than inspected: a row this port returned is a detached
+    /// <see cref="AlvoRecord"/>, so there is nothing for a later <c>SaveChanges</c> to write back around
+    /// policy. A second read through the port is what proves it — not the change tracker's own state, which a
+    /// caller cannot see anyway.
+    /// </summary>
+    [Fact]
+    public async Task A_returned_row_is_detached_so_mutating_it_changes_nothing()
+    {
+        var world = await AlvoDataWorlds.NotesAsync(_fixture);
+        var row = await world.GetAsync("notes", world.AliceRowId, world.Alice);
+
+        var mutated = row!.With("title", "mutated locally");
+
+        mutated["title"].ShouldBe("mutated locally");
+        var reread = await world.GetAsync("notes", world.AliceRowId, world.Alice);
+        reread!["title"].ShouldBe("Alice-1");
+    }
+
     public ValueTask DisposeAsync() => _fixture.DisposeAsync();
 }

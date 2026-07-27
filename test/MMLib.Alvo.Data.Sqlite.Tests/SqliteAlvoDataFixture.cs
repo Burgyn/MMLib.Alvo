@@ -29,11 +29,12 @@ public sealed class SqliteAlvoDataFixture : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(schema);
 
         var path = NewDatabaseFile();
-        var services = BuildProvider(path);
+        var dialect = new LockRecordingSqlDialect();
+        var services = BuildProvider(path, dialect);
         await MigrateAsync(services, schema);
 
         var capture = NewCapture(path);
-        var host = new AlvoDataHost(services, descriptor ?? MinimalDescriptor(schema), capture);
+        var host = new AlvoDataHost(services, descriptor ?? MinimalDescriptor(schema), capture, dialect);
         host.RePrime(schema);
         return host;
     }
@@ -52,9 +53,16 @@ public sealed class SqliteAlvoDataFixture : IAsyncDisposable
         return capture;
     }
 
-    private ServiceProvider BuildProvider(string path)
+    /// <summary>
+    /// Builds the host container through the public entry point, with one substitution: the lock-recording
+    /// dialect is registered <em>before</em> <c>UseSqlite</c>, so the driver's own <c>TryAdd</c> leaves it in
+    /// place. That is the same seam a host would use to swap a dialect — the data port is still the one the
+    /// container composed, not one a test built by hand.
+    /// </summary>
+    private ServiceProvider BuildProvider(string path, IAlvoSqlDialect dialect)
     {
         var builder = new FixtureAlvoBuilder(new ServiceCollection());
+        builder.Services.AddSingleton(dialect);
         builder.UseSqlite($"Data Source={path}");
         builder.Services.AddAlvo();
 
@@ -132,14 +140,16 @@ public sealed class AlvoDataHost
     private readonly ServiceProvider _services;
     private readonly AlvoDescriptor _descriptor;
     private readonly SqlCapture _capture;
-    private readonly LockRecordingSqlDialect _dialect = new();
+    private readonly LockRecordingSqlDialect _dialect;
 
-    internal AlvoDataHost(ServiceProvider services, AlvoDescriptor descriptor, SqlCapture capture)
+    internal AlvoDataHost(
+        ServiceProvider services, AlvoDescriptor descriptor, SqlCapture capture, LockRecordingSqlDialect dialect)
     {
         _services = services;
         _descriptor = descriptor;
         _capture = capture;
-        Data = BuildData(services, _dialect);
+        _dialect = dialect;
+        Data = services.GetRequiredService<IAlvoData>();
     }
 
     /// <summary>Gets the host container the data path resolves out of.</summary>
@@ -168,18 +178,4 @@ public sealed class AlvoDataHost
         var catalog = PolicyCatalog.Build(_descriptor, schema, _services.GetRequiredService<ICelCompiler>());
         _services.GetRequiredService<IPolicyCatalogProvider>().SetCurrent(_descriptor.Name, catalog);
     }
-
-    /// <summary>
-    /// Builds the data port over the container's own <c>AlvoDataContextFactory</c>. The two renderers are
-    /// constructed here rather than resolved, because the SQLite registration does not publish them to the
-    /// host container until <c>IAlvoData</c> itself is registered — at which point this becomes one
-    /// <c>GetRequiredService&lt;IAlvoData&gt;()</c>.
-    /// </summary>
-    private static EfAlvoData BuildData(IServiceProvider services, IAlvoSqlDialect dialect) => new(
-        services.GetRequiredService<IPolicyEngine>(),
-        services.GetRequiredService<IPredicateEvaluator>(),
-        services.GetRequiredService<IPredicateRenderer>(),
-        new SqliteFieldSqlRenderer(),
-        dialect,
-        services.GetRequiredService<AlvoDataContextFactory>());
 }
