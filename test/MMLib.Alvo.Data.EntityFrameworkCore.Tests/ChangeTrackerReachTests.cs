@@ -49,9 +49,16 @@ public class ChangeTrackerReachTests
     /// Adding a property bag to a set is the create path's own call, so it is allowed exactly where
     /// <c>SaveChanges</c> is — a third file reaching for it would be a second tracked write path.
     /// </summary>
+    /// <remarks>
+    /// The set is matched both inline (<c>Rows(...).Add(</c>) and through a local named <c>rows</c>, which is
+    /// how this package spells it when one set is used twice. A file reaching the set under some third name
+    /// would slip past this fact alone — but it would still have to call <c>SaveChanges</c> to persist
+    /// anything, and the fact above confines that by itself.
+    /// </remarks>
     [Fact]
     public void Only_the_create_path_and_the_test_only_seed_add_a_tracked_row()
-        => FilesMatching(@"Rows\([^)]*\)\.Add\(").ShouldBe(["AlvoDataSeed.cs", "EfAlvoData.cs"], ignoreOrder: true);
+        => FilesMatching(@"(?:Rows\([^)]*\)|\brows)\.Add\(")
+            .ShouldBe(["AlvoDataSeed.cs", "EfAlvoData.cs"], ignoreOrder: true);
 
     /// <summary>
     /// The one legitimate <c>ChangeTracker</c> touch is the context's own no-tracking setting, so pinning where

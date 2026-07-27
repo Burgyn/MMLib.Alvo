@@ -1,4 +1,5 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
@@ -113,7 +114,7 @@ internal sealed class EfAlvoData : IAlvoData
         var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
         WritePayloadGuard.EnsureWritable(values, schema, decision, isUpdate: false);
 
-        var candidate = Candidate(values);
+        var candidate = Candidate(db.Rows(entity).EntityType, values);
         EnsureWriteAllowed(decision, RecordMaterializer.ToRecord(candidate, _noMask), previous: null, context);
 
         db.Rows(entity).Add(candidate);
@@ -123,26 +124,14 @@ internal sealed class EfAlvoData : IAlvoData
     }
 
     /// <summary>
-    /// The candidate row: the payload plus the id this provider assigns, with every explicit
-    /// <see langword="null"/> dropped.
+    /// The candidate row: the payload as <see cref="WritePropertyBag"/> prepares it, plus the id this provider
+    /// assigns.
     /// </summary>
-    /// <remarks>
-    /// A property bag cannot hold a <see langword="null"/> (its value type is <see cref="object"/>), so an
-    /// explicit <see langword="null"/> means "leave the column at its database default", which for a nullable
-    /// column is <c>NULL</c>. On a create that is indistinguishable from an omitted key and correct for both;
-    /// on an update it would not be, which is why <see cref="UpdateAsync"/> uses <c>ExecuteUpdate</c> setters,
-    /// where a <see langword="null"/> setter value is a real <c>SET col = NULL</c>.
-    /// </remarks>
-    private static Dictionary<string, object> Candidate(IReadOnlyDictionary<string, object?> values)
+    private static Dictionary<string, object> Candidate(
+        IEntityType rows, IReadOnlyDictionary<string, object?> values)
     {
-        var candidate = new Dictionary<string, object>(StringComparer.Ordinal)
-        {
-            [AlvoDataContext.IdColumn] = Guid.NewGuid(),
-        };
-        foreach (var (field, value) in values.Where(pair => pair.Value is not null))
-        {
-            candidate[field] = value!;
-        }
+        var candidate = WritePropertyBag.For(rows, values);
+        candidate[AlvoDataContext.IdColumn] = Guid.NewGuid();
 
         return candidate;
     }

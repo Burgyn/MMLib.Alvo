@@ -99,6 +99,36 @@ public sealed class SqliteAlvoDataFilterBindingTests : IAsyncDisposable
     }
 
     /// <summary>
+    /// A <c>NUL</c> inside a filter value is refused rather than answered. SQLite binds it happily and returns
+    /// a row set; PostgreSQL cannot encode one at all and threw <c>22021: invalid byte sequence for encoding
+    /// "UTF8"</c> straight out of the port. One caller value, a silent answer on one engine and an unhandled
+    /// provider exception on the other — so it is refused on both, through the funnel that names the column.
+    /// </summary>
+    /// <param name="op">The operator the value is reached through — a bare comparison and a pattern match.</param>
+    [Theory]
+    [InlineData(AlvoFilterOperator.Eq)]
+    [InlineData(AlvoFilterOperator.Like)]
+    public async Task A_text_filter_value_containing_a_nul_is_refused_rather_than_answered(AlvoFilterOperator op)
+    {
+        var world = await AlvoDataWorlds.VehicleAsync(_fixture);
+
+        var refused = await Should.ThrowAsync<InvalidOperationException>(
+            () => Filtered(world, "plate", op, "ACME\0001"));
+
+        refused.Message.ShouldContain("NUL");
+    }
+
+    /// <summary>The same value reached through an <c>in</c> list, which binds each element separately.</summary>
+    [Fact]
+    public async Task A_nul_inside_an_in_list_is_refused_too()
+    {
+        var world = await AlvoDataWorlds.VehicleAsync(_fixture);
+
+        await Should.ThrowAsync<InvalidOperationException>(
+            () => Filtered(world, "plate", AlvoFilterOperator.In, new object?[] { "ACME-001", "ACME\0001" }));
+    }
+
+    /// <summary>
     /// The keyset cursor's boundary compares the anchor row's own values, which arrive from a previous read
     /// already shaped by EF's mapping — so the cursor path must bind through the column too, or a second page
     /// over a timestamp or uuid key would compare a repaired column against raw text.

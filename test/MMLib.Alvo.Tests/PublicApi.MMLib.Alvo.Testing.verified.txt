@@ -168,16 +168,21 @@ namespace MMLib.Alvo.Testing.Data
     public abstract class AlvoDataOrderingTests
     {
         protected AlvoDataOrderingTests() { }
+        public System.Threading.Tasks.Task A_created_row_stores_the_instant_however_the_caller_spelled_its_offset() { }
         public System.Threading.Tasks.Task A_decimal_filter_answers_numerically_not_lexicographically() { }
         public System.Threading.Tasks.Task A_decimal_filter_equality_answers_numerically() { }
         public System.Threading.Tasks.Task A_decimal_sort_orders_by_value_not_by_its_text_form() { }
+        public System.Threading.Tasks.Task A_timestamp_filter_and_a_stored_row_at_different_offsets_still_agree() { }
+        public System.Threading.Tasks.Task A_timestamp_filter_bound_at_a_non_utc_offset_answers_by_instant() { }
         public System.Threading.Tasks.Task A_timestamp_filter_over_utc_values_answers_by_instant() { }
         public System.Threading.Tasks.Task A_timestamp_sort_over_utc_values_orders_by_instant() { }
         public System.Threading.Tasks.Task A_timestamp_written_at_a_non_utc_offset_behaves_the_same_on_every_engine() { }
+        public System.Threading.Tasks.Task An_updated_row_stores_the_instant_however_the_caller_spelled_its_offset() { }
         protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Data.IAlvoData> CreateAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, System.Collections.Generic.IReadOnlyDictionary<string, System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRecord>> seed);
         protected abstract string CursorFor(MMLib.Alvo.Data.AlvoRecord row);
         public System.Threading.Tasks.Task Paging_over_a_decimal_key_neither_skips_nor_repeats_a_row() { }
         public System.Threading.Tasks.Task Paging_over_a_utc_timestamp_key_neither_skips_nor_repeats_a_row() { }
+        public System.Threading.Tasks.Task Paging_over_sub_second_timestamps_keeps_instant_order() { }
     }
     public abstract class AlvoDataSqlSnapshotTests
     {

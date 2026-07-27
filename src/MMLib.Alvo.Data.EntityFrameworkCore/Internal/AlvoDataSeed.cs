@@ -31,21 +31,17 @@ internal static class AlvoDataSeed
         await context.SaveChangesAsync(cancellationToken);
     }
 
+    /// <summary>
+    /// Rows go in through <see cref="WritePropertyBag"/>, exactly as the create path's do, so a seeded row and
+    /// a created one are stored identically. A seam that prepared its values its own way would let a fixture
+    /// reach a state production cannot — and, worse, miss one production can.
+    /// </summary>
     private static void Add(AlvoDataContext context, string entity, IReadOnlyList<AlvoRecord> records)
     {
+        var rows = context.Rows(entity);
         foreach (var record in records)
         {
-            context.Rows(entity).Add(SetValues(record));
+            rows.Add(WritePropertyBag.For(rows.EntityType, record.Values));
         }
     }
-
-    /// <summary>
-    /// A property bag carries only the fields it sets, and a <see langword="null"/> entry is dropped
-    /// rather than written: the bag's value type is non-nullable, and an absent key already means "leave
-    /// the column at its default", which for a nullable column is <c>NULL</c>.
-    /// </summary>
-    private static Dictionary<string, object> SetValues(AlvoRecord record) =>
-        new(
-            record.Values.Where(pair => pair.Value is not null).ToDictionary(pair => pair.Key, pair => pair.Value!),
-            StringComparer.Ordinal);
 }

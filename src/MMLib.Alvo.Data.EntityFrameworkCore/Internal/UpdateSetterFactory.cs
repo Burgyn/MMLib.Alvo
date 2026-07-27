@@ -51,7 +51,7 @@ internal static class UpdateSetterFactory
         ArgumentNullException.ThrowIfNull(values);
 
         var setters = values
-            .Select(pair => (Selector: Selector(ClrTypeOf(entity, pair.Key), pair.Key), ClrTypeOf(entity, pair.Key), pair.Value))
+            .Select(pair => Setter(entity, pair.Key, pair.Value))
             .ToList();
 
         return builder =>
@@ -61,6 +61,19 @@ internal static class UpdateSetterFactory
                 _setProperty.MakeGenericMethod(clrType).Invoke(builder, [selector, value]);
             }
         };
+    }
+
+    /// <summary>
+    /// One field's setter: the typed selector, the read model's type for the column, and the value <b>as that
+    /// column must hold it</b>. The last part is what routes a timestamp through
+    /// <see cref="StoredInstant"/> — an update is one of the three paths on which a caller's offset would
+    /// otherwise become part of the stored value.
+    /// </summary>
+    private static (LambdaExpression Selector, Type ClrType, object? Value) Setter(
+        EntitySchema entity, string field, object? value)
+    {
+        var clrType = ClrTypeOf(entity, field);
+        return (Selector(clrType, field), clrType, StoredInstant.Stored(clrType, value));
     }
 
     private static LambdaExpression Selector(Type clrType, string field)

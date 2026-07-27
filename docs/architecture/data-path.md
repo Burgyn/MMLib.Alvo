@@ -81,34 +81,21 @@ Ordering and boundary agree *with each other* on each engine — that is the poi
 *between* engines is a separate property, which §0's engine-agnostic rule wants and which rendering an
 `ORDER BY` newly makes observable. `RenderComparableOperands` repairs `Decimal` only, so:
 
-- **Timestamps — measured on both engines, and a repair is *not* the answer.** Task 11 measured this rather
-  than reasoning about it, and the measurement changes the verdict.
+- **Timestamps — no repair, because there is nothing left to repair.** Once every timestamp is normalised to
+  UTC (see *Every timestamp is one instant* below), SQLite's stored `TEXT` orders as an instant and the
+  ordering and the boundary compare the same unrepaired operand. The suite proves that positively rather than
+  by omission: inverting `RenderComparableOperands` so it repairs everything *except* `Decimal` fails six of
+  `AlvoDataOrderingTests`' facts, the timestamp ones included.
 
-  For values stored **in UTC** there is no divergence at all, and this is now pinned end to end on both
-  engines (`AlvoDataOrderingTests`: a sort, a filter and a one-row-per-page keyset walk over `occurred_at`).
-  SQLite's `TEXT` form is zero-padded and carries one offset, so its lexical order *is* instant order, and the
-  ordering and the boundary compare the same unrepaired operand. Timestamps therefore need no value repair —
-  and the suite proves that positively: inverting `RenderComparableOperands` so it repairs everything *except*
-  `Decimal` fails six of its seven live facts, the timestamp ones included.
-
-  For a value written at a **non-UTC offset** the two engines do not merely order differently — they do not
-  agree on whether the write is legal. **PostgreSQL refuses it**: Npgsql throws *"Cannot write DateTimeOffset
-  with Offset=-02:00:00 to PostgreSQL type 'timestamp with time zone', only offset 0 (UTC) is supported"*,
-  surfacing as a `DbUpdateException`. **SQLite accepts it** and then answers by the stored text:
-  `2025-12-31 23:00:00-02:00` is the later instant but the lexically smaller string, so an ascending page walks
-  the rows in reverse-instant order and `occurred_at > 00:30Z` matches nothing at all.
-
-  So a dialect repair would be the wrong instrument — there is nothing to repair on the engine that refuses the
-  value, and the divergence is on the **write** path, not in the comparison. Two candidate rulings, neither
-  taken in PR2: normalise every timestamp to UTC on the way in (preserves the instant exactly and discards an
-  offset `timestamptz` was never going to keep), or refuse a non-UTC offset on both engines (fail-closed
-  parity, which is the contract Npgsql's own message states). `AlvoDataOrderingTests`
-  `A_timestamp_written_at_a_non_utc_offset_behaves_the_same_on_every_engine` carries the reproduction and is
-  skipped with that reason, so whichever ruling lands has one line to enable.
-
-  Note the scope: `PredicateParameterBinder` already normalises every *bound* timestamp to UTC (slice 2's
-  `FI2`), so the caller side of a comparison is never the problem. Only a row's *stored* offset is, and that
-  comes from the create/seed path.
+  The reason lexical order equals instant order is **not** that the text is fixed-width, which is what an
+  earlier revision of this document claimed. The date and time components are zero-padded, but the fraction is
+  not: EF formats it with `.FFFFFFF`, which trims trailing zeros and drops the separator entirely at a whole
+  second, so one column really does hold `…00:00:00+00:00`, `…00:00:00.1+00:00` and `…00:00:00.12+00:00`. It
+  works because the offset terminator `+` (0x2B) sorts *below* every digit (0x30–0x39) under SQLite's `BINARY`
+  collation, which makes a shorter trimmed fraction correctly compare less than a longer one extending it.
+  That property is load-bearing and would break if the stored form ever gained a `Z` suffix (0x5A, above every
+  digit), so `Paging_over_sub_second_timestamps_keeps_instant_order` asserts it instead of leaving it as an
+  argument here.
 - **Strings — divergent, and deliberately left alone.** SQLite compares `TEXT` with `BINARY` collation;
   PostgreSQL uses the database collation, where `'a' < 'B'`. So one `AlvoSort("title")` yields a different first
   page on the two engines. **Verdict: acceptable, not a defect to repair here.** Collation is a property of the
@@ -146,6 +133,52 @@ order/boundary divergence above. **PR3 owns that**, together with the paging sur
 The consequence for fixtures is real and worth knowing: a suite that pages has to sort by a **required**
 column, which is why `AlvoDataWorlds` grew a required `label` on `notes` and a purpose-built `ledger` entity
 whose `amount` and `occurred_at` are both required.
+
+## Every timestamp is one instant
+
+**An offset is a spelling of a timestamp, never part of its value.** Every `datetime` value is normalised to
+UTC by `StoredInstant` before it is stored or bound — on the create path, on the update path, on the test-only
+seeding seam, and in `PredicateParameterBinder` for a caller's comparison operand. One helper, four call
+sites; a second copy of this rule is how the two copies come to disagree, and a disagreement here is invisible
+until it costs a row.
+
+**What it fixes.** Unnormalised, the two engines did not merely order these differently — they disagreed on
+whether the value was legal at all:
+
+| | PostgreSQL | SQLite |
+|---|---|---|
+| write a row at `-02:00` | refuses — Npgsql *"only offset 0 (UTC) is supported"*, as `DbUpdateException` | stores it, then orders by the text: an ascending page walks in reverse-instant order |
+| filter with a boundary at `-02:00` | throws a raw `Npgsql` `ArgumentException` **out of `QueryAsync`**, off this port's failure contract | compares `-02:00` text against stored `+00:00` text: `occurred_at > 01:30Z` returned all four rows |
+
+Two routes reached the second row of that table, and the second one is the reason this was found late.
+`PredicateParameterBinder.AsColumnType` short-circuited on `target.IsInstanceOfType(value)` — a
+`DateTimeOffset` *is* an instance of `DateTimeOffset`, so the conversion (and with it the normalisation the
+docs credited it with) was never called. It is now the one type for which "already the right type" does not
+mean "nothing to do".
+
+**Why normalise rather than refuse.** Refusal was the alternative and is rejected, for reasons in order of
+weight:
+
+1. There is no offset to preserve. `datetime` maps to `timestamptz`, which discards it by definition, so
+   refusing a value the reference storage type accepts makes Alvo stricter than the type it chose.
+2. It is a worse agent-facing contract. Alvo's stated primary user is an agent emitting JSON, `System.Text.Json`
+   serialises a `DateTimeOffset` at its own offset, and RFC 3339's numeric-offset form is the second most common
+   wire spelling after `Z`. Refusal means rejecting well-formed input on the most-used filter type.
+3. It buys no simplicity: refusing still needs one authority inspecting `Offset` on the same call sites.
+4. Normalisation makes SQLite's ordering correct **by construction**. Under refusal it would be correct only
+   because no non-UTC row exists — an invariant every future write path (PR5's outbox, F7's dynamic driver)
+   would have to remember.
+
+**Deliberately not covered: `date`.** `PredicateParameterBinder.AsDate` keeps its own rule — the calendar date
+the caller wrote, read at the offset they wrote it with. Normalising one to UTC would shift the day for any
+caller east or west of UTC, so `StoredInstant` tests the column's CLR type and leaves `DateOnly` alone.
+
+**Related: a value no engine can carry is refused before it reaches one.** A `NUL` inside a text filter value
+is the case found alongside this one: PostgreSQL cannot encode it (`22021: invalid byte sequence for encoding
+"UTF8": 0x00`, again a raw provider exception out of a read) while SQLite binds it and answers. It is refused
+in the binder, through the same funnel that names the column for every other value a column cannot hold. The
+write-side analogue still surfaces as EF's `DbUpdateException`, like every other storage-constraint violation —
+see the failure-contract note below, which PR3's request-validation layer closes.
 
 ## Writes never reach a change tracker
 

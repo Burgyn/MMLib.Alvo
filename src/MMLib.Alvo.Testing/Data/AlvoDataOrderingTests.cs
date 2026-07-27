@@ -163,32 +163,39 @@ public abstract class AlvoDataOrderingTests
     }
 
     /// <summary>
-    /// The same instants written at <em>different</em> offsets, which the two engines do not handle alike.
+    /// Sub-second values, where SQLite's stored text stops being fixed-width: EF formats the fraction with
+    /// <c>.FFFFFFF</c>, which trims trailing zeros and omits the separator entirely at a whole second.
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// <b>Skipped, and the skip is the finding.</b> Measured in PR2 slice 5 on both engines:
-    /// </para>
-    /// <para>
-    /// PostgreSQL <b>refuses the write</b> — Npgsql throws
-    /// <c>Cannot write DateTimeOffset with Offset=-02:00:00 to PostgreSQL type 'timestamp with time zone',
-    /// only offset 0 (UTC) is supported</c>, surfacing as a <c>DbUpdateException</c>. SQLite <b>accepts</b> it
-    /// and then answers by the stored <c>TEXT</c>: <c>2025-12-31 23:00:00-02:00</c> is the later instant but the
-    /// lexically smaller string, so an ascending page walks the rows in reverse-instant order and
-    /// <c>occurred_at &gt; 00:30Z</c> matches nothing at all.
-    /// </para>
-    /// <para>
-    /// So the same payload is rejected by one engine and silently mis-answered by the other — §0 principle 3,
-    /// and not something a per-engine expectation may paper over. Closing it is a decision, not a bug fix:
-    /// normalise every timestamp to UTC on the way in (preserves the instant, discards an offset
-    /// <c>timestamptz</c> was never going to keep), or refuse a non-UTC offset on <em>both</em> engines
-    /// (fail-closed parity, which is the contract Npgsql's message already states). PR2 does not pick; the fact
-    /// stays here so the ruling has one line to enable.
-    /// </para>
+    /// So the reason lexical order still equals instant order is <b>not</b> that the text is zero-padded — it
+    /// is that the offset terminator <c>+</c> (0x2B) sorts below every digit (0x30–0x39) under SQLite's
+    /// <c>BINARY</c> collation, which makes a shorter trimmed fraction correctly compare less than a longer one
+    /// extending it. That property is load-bearing and fragile in a specific way — it would break if the stored
+    /// form ever gained a <c>Z</c> suffix (0x5A, above every digit) — so it is asserted here rather than left
+    /// as an argument in a design document.
     /// </remarks>
-    [Fact(Skip = "Ruling required: PostgreSQL refuses a non-UTC DateTimeOffset outright, SQLite stores it and "
-        + "then orders and filters it by its text form (measured, PR2 slice 5 — see this fact's remarks and "
-        + "docs/architecture/data-path.md).")]
+    [Fact]
+    public async Task Paging_over_sub_second_timestamps_keeps_instant_order()
+    {
+        var data = await LedgerAsync(SubSecondRows());
+
+        var walked = await WalkAsync(data, new AlvoSort("occurred_at"), Occurred);
+
+        walked.ShouldBe([.. SubSecondRows().Select(row => row.Occurred)]);
+    }
+
+    /// <summary>
+    /// The same instants written at <em>different</em> offsets. Every timestamp is normalised to the instant it
+    /// denotes before it is stored, so an offset is a spelling of the value and never a property of it.
+    /// </summary>
+    /// <remarks>
+    /// Before that normalisation the two engines did not merely order these differently — they disagreed on
+    /// whether the write was legal at all. PostgreSQL refused it (Npgsql: <c>only offset 0 (UTC) is
+    /// supported</c>); SQLite stored it and then answered by the text, so an ascending page walked the rows in
+    /// reverse-instant order. See <c>docs/architecture/data-path.md</c> for the ruling and its two rejected
+    /// alternatives.
+    /// </remarks>
+    [Fact]
     public async Task A_timestamp_written_at_a_non_utc_offset_behaves_the_same_on_every_engine()
     {
         var data = await LedgerAsync(MixedOffsetRows());
@@ -197,6 +204,84 @@ public abstract class AlvoDataOrderingTests
 
         walked.ShouldBe([Midnight, Midnight.AddHours(1), Midnight.AddHours(2)]);
     }
+
+    /// <summary>
+    /// The <b>read</b> half of the same rule, and the one a caller reaches on every request: the boundary of a
+    /// filter is an instant however the caller spelled its offset.
+    /// </summary>
+    /// <remarks>
+    /// Unnormalised this was two different wrong answers on one payload — SQLite compared the caller's
+    /// <c>-02:00</c> text against stored <c>+00:00</c> text and returned <b>all four</b> rows, PostgreSQL threw
+    /// a raw <c>Npgsql</c> <see cref="ArgumentException"/> straight out of <see cref="IAlvoData.QueryAsync"/>,
+    /// off this port's failure contract entirely.
+    /// </remarks>
+    [Fact]
+    public async Task A_timestamp_filter_bound_at_a_non_utc_offset_answers_by_instant()
+    {
+        var data = await LedgerAsync(Instants(0, 1, 2, 3));
+        var boundary = Midnight.AddMinutes(90).ToOffset(TimeSpan.FromHours(-2));
+
+        var matched = await InstantsAsync(data, new AlvoComparison("occurred_at", AlvoFilterOperator.Gt, boundary));
+
+        matched.ShouldBe([Midnight.AddHours(2), Midnight.AddHours(3)]);
+    }
+
+    /// <summary>
+    /// A row written at one offset and a filter bound at another, together — the shape a real caller produces
+    /// when it round-trips a timestamp through JSON and back.
+    /// </summary>
+    [Fact]
+    public async Task A_timestamp_filter_and_a_stored_row_at_different_offsets_still_agree()
+    {
+        var data = await LedgerAsync(MixedOffsetRows());
+        var boundary = Midnight.AddMinutes(30).ToOffset(TimeSpan.FromHours(5));
+
+        var matched = await InstantsAsync(data, new AlvoComparison("occurred_at", AlvoFilterOperator.Gt, boundary));
+
+        matched.ShouldBe([Midnight.AddHours(1), Midnight.AddHours(2)]);
+    }
+
+    /// <summary>
+    /// The rule reaches the port's own write members, not only its seeding seam: a created row stores the
+    /// instant, whichever offset the caller spelled it at, and reads back as that instant.
+    /// </summary>
+    [Fact]
+    public async Task A_created_row_stores_the_instant_however_the_caller_spelled_its_offset()
+    {
+        var data = await EmptyLedgerAsync();
+        var written = Midnight.AddHours(1).ToOffset(TimeSpan.FromHours(-2));
+
+        var created = await data.CreateAsync(Entity, Payload(written), Caller, TestContext.Current.CancellationToken);
+
+        Occurred(created).ShouldBe(Midnight.AddHours(1));
+        (await InstantsAsync(data)).ShouldBe([Midnight.AddHours(1)]);
+    }
+
+    /// <summary>The update half of the same rule.</summary>
+    [Fact]
+    public async Task An_updated_row_stores_the_instant_however_the_caller_spelled_its_offset()
+    {
+        var data = await EmptyLedgerAsync();
+        var created = await data.CreateAsync(
+            Entity, Payload(Midnight), Caller, TestContext.Current.CancellationToken);
+        var moved = Midnight.AddHours(2).ToOffset(TimeSpan.FromHours(-5));
+
+        var updated = await data.UpdateAsync(
+            Entity,
+            (Guid)created["id"]!,
+            new Dictionary<string, object?>(StringComparer.Ordinal) { ["occurred_at"] = moved },
+            Caller,
+            TestContext.Current.CancellationToken);
+
+        Occurred(updated).ShouldBe(Midnight.AddHours(2));
+        (await InstantsAsync(data)).ShouldBe([Midnight.AddHours(2)]);
+    }
+
+    private Task<IAlvoData> EmptyLedgerAsync() =>
+        LedgerAsync(Array.Empty<(decimal Amount, DateTimeOffset Occurred)>());
+
+    private static Dictionary<string, object?> Payload(DateTimeOffset occurred) =>
+        new(StringComparer.Ordinal) { ["amount"] = 1m, ["occurred_at"] = occurred };
 
     /// <summary>The instant every timestamp fact is expressed relative to.</summary>
     private static DateTimeOffset Midnight => new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
@@ -216,6 +301,21 @@ public abstract class AlvoDataOrderingTests
     /// <summary>Rows at the given whole-hour UTC offsets from <see cref="Midnight"/>, each with a distinct amount.</summary>
     private static IReadOnlyList<(decimal Amount, DateTimeOffset Occurred)> Instants(params int[] hours) =>
         [.. hours.Select(hour => ((decimal)hour + 1m, Midnight.AddHours(hour)))];
+
+    /// <summary>
+    /// Instants in ascending order that straddle every shape SQLite's trimmed <c>.FFFFFFF</c> fraction can
+    /// take: no fraction at all, one digit, two, a longer one that extends a shorter, and the next whole
+    /// second.
+    /// </summary>
+    private static IReadOnlyList<(decimal Amount, DateTimeOffset Occurred)> SubSecondRows() =>
+    [
+        (1m, Midnight),
+        (2m, Midnight.AddTicks(1_000_000)),
+        (3m, Midnight.AddTicks(1_200_000)),
+        (4m, Midnight.AddTicks(2_500_000)),
+        (5m, Midnight.AddTicks(5_000_000)),
+        (6m, Midnight.AddSeconds(1)),
+    ];
 
     private Task<IAlvoData> LedgerAsync(IReadOnlyList<decimal> amounts) =>
         LedgerAsync([.. amounts.Select((amount, index) => (amount, Midnight.AddHours(index)))]);
@@ -256,7 +356,7 @@ public abstract class AlvoDataOrderingTests
                         ["amount"] = new() { Type = DescField.Decimal, Required = true },
                         ["occurred_at"] = new() { Type = DescField.DateTime, Required = true },
                     },
-                    Rules = new AccessRules { List = "true", Get = "true" },
+                    Rules = new AccessRules { List = "true", Get = "true", Create = "true", Update = "true" },
                 },
             },
         };

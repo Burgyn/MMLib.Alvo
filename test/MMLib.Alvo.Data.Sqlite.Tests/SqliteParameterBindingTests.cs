@@ -248,11 +248,11 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
     }
 
     /// <summary>
-    /// An input that <em>does</em> carry an offset keeps it — the caller said which instant they meant, and
-    /// only the offset-less case needed a default.
+    /// An input that <em>does</em> carry an offset is read at that offset and normalised to the instant it
+    /// denotes — the caller said which instant they meant, and the offset is a spelling of it, not part of it.
     /// </summary>
     [Fact]
-    public async Task A_timestamp_carrying_its_own_offset_is_read_at_that_offset()
+    public async Task A_timestamp_carrying_its_own_offset_binds_as_the_instant_it_denotes()
     {
         var factory = await FactoryAsync();
         using var context = factory.Create();
@@ -261,6 +261,61 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
         new PredicateParameterBinder(context)
             .BindColumnValue(Column(context, "created_at"), PolicyParameterPrefix.Filter + "0", "2026-07-26T10:00:00+02:00")
             .Value.ShouldBe(new DateTimeOffset(2026, 7, 26, 8, 0, 0, TimeSpan.Zero));
+    }
+
+    /// <summary>
+    /// The same rule for a value that arrives already typed as a <see cref="DateTimeOffset"/> — the route that
+    /// went unnormalised, because such a value <em>is</em> an instance of the column's own CLR type and so
+    /// short-circuited the conversion entirely.
+    /// </summary>
+    /// <remarks>
+    /// What that cost: on SQLite the caller's <c>+02:00</c> text was compared lexically against stored
+    /// <c>+00:00</c> text and matched rows the caller had excluded; on PostgreSQL Npgsql refused the parameter
+    /// outright, throwing out of a <em>read</em>. One payload, two wrong answers.
+    /// </remarks>
+    /// <remarks>
+    /// The <b>offset</b> is asserted alongside the instant, and that is not belt-and-braces:
+    /// <see cref="DateTimeOffset"/> equality compares instants, so <c>10:00+02:00</c> and <c>08:00Z</c> are
+    /// equal and an instant-only assertion would pass with no normalisation at all. What reaches SQLite is the
+    /// rendered <em>text</em>, so the offset is the whole point.
+    /// </remarks>
+    [Fact]
+    public async Task A_datetimeoffset_at_a_non_utc_offset_binds_as_the_instant_it_denotes()
+    {
+        var factory = await FactoryAsync();
+        using var context = factory.Create();
+
+        var bound = new PredicateParameterBinder(context).BindColumnValue(
+            Column(context, "created_at"),
+            PolicyParameterPrefix.Filter + "0",
+            new DateTimeOffset(2026, 7, 26, 10, 0, 0, TimeSpan.FromHours(2)));
+
+        bound.Value.ShouldBe(new DateTimeOffset(2026, 7, 26, 8, 0, 0, TimeSpan.Zero));
+        ((DateTimeOffset)bound.Value!).Offset.ShouldBe(TimeSpan.Zero);
+    }
+
+    /// <summary>
+    /// A <see cref="DateTime"/> the caller explicitly marked <see cref="DateTimeKind.Local"/> denotes the right
+    /// instant but carries the host's offset, so unnormalised the bound value differed per region. The zone is
+    /// forced rather than trusted, because CI runs UTC and would never show it.
+    /// </summary>
+    /// <param name="timeZone">The host zone to answer the binding in.</param>
+    [Theory]
+    [InlineData("UTC")]
+    [InlineData("Pacific/Kiritimati")]
+    [InlineData("Pacific/Niue")]
+    public async Task A_local_datetime_binds_as_the_same_utc_instant_in_every_host_time_zone(string timeZone)
+    {
+        var factory = await FactoryAsync();
+        using var context = factory.Create();
+        using var zone = new LocalTimeZone(timeZone);
+        var local = new DateTimeOffset(2026, 7, 26, 8, 0, 0, TimeSpan.Zero).ToLocalTime().LocalDateTime;
+
+        var bound = new PredicateParameterBinder(context)
+            .BindColumnValue(Column(context, "created_at"), PolicyParameterPrefix.Filter + "0", local);
+
+        bound.Value.ShouldBe(new DateTimeOffset(2026, 7, 26, 8, 0, 0, TimeSpan.Zero));
+        ((DateTimeOffset)bound.Value!).Offset.ShouldBe(TimeSpan.Zero);
     }
 
     /// <summary>
