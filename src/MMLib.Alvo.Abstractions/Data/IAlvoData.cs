@@ -35,6 +35,53 @@ namespace MMLib.Alvo.Data;
 /// all. Neither exception's message names the entity, the row id, or whether the row exists.
 /// </para>
 /// <para>
+/// <b>Three exception families, and the boundary between them is the contract — not a detail.</b> A layer
+/// above this port (PR3's RFC 7807 problem-details layer) has nothing but the exception type to map a status
+/// code from, so an implementation must place every refusal in exactly one of these:
+/// </para>
+/// <list type="table">
+///   <listheader>
+///     <term>Family</term>
+///     <description>Means, and what a request layer should render</description>
+///   </listheader>
+///   <item>
+///     <term><see cref="ArgumentException"/> (including its derived types)</term>
+///     <description>
+///     <b>The query or payload is malformed.</b> A filter past
+///     <see cref="AlvoFilter.MaxDepth"/>/<see cref="AlvoFilter.MaxTerms"/>/<see cref="AlvoFilter.MaxInCandidates"/>,
+///     a negative <see cref="AlvoQuery.Limit"/>, a paged read sorted by a nullable field, an <c>is</c> operand
+///     that is not <see langword="null"/>/<see langword="true"/>/<see langword="false"/>, an <c>in</c> operand
+///     that is not a list, a value the field's own type cannot hold, a fractional bound against an integral
+///     field, or a <see langword="null"/> where a nested filter belongs. Nothing about the caller's
+///     permissions is in question and nothing is being hidden: the shape is wrong. Render 422 with the
+///     message's fix suggestion.
+///     </description>
+///   </item>
+///   <item>
+///     <term><see cref="AlvoAuthorizationException"/></term>
+///     <description>
+///     <b>The operation is not permitted.</b> No policy allows it, a filter or sort names a field this caller
+///     may not read, a payload names a framework-managed or read-only field, or a candidate post-image fails
+///     <c>WITH CHECK</c> or the tenant scope. Render 403.
+///     </description>
+///   </item>
+///   <item>
+///     <term><see cref="InvalidOperationException"/></term>
+///     <description>
+///     <b>An invariant the implementation itself relies on is broken</b> — a schema this port cannot serve, a
+///     field the read model does not map, a bound value with no known origin. Never caused by a
+///     well-formed request from an authorized caller. Render 500.
+///     </description>
+///   </item>
+/// </list>
+/// <para>
+/// The two shipped implementations are held to this by
+/// <c>AlvoDataAdversarialTests.A_malformed_filter_is_refused_on_the_malformed_query_channel</c>, which exists
+/// because they once gave <em>four different answers</em> to four malformed inputs — including
+/// <see cref="AlvoAuthorizationException"/> for an ordinary typo like <c>status=is.hello</c>, i.e. a 403 with
+/// no fix suggestion, in a framework whose principle 4 is structured errors <em>with</em> fix suggestions.
+/// </para>
+/// <para>
 /// <see cref="AlvoAuthorizationException"/>'s and <see cref="AlvoRecordNotFoundException"/>'s
 /// message reaches the caller verbatim at this port boundary (an implementation is not required to
 /// further generalize <c>IPolicyEngine</c>'s own deny reason). That reason is already designed, at the

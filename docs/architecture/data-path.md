@@ -573,10 +573,39 @@ validator owns. It is not implemented and is declared here rather than left look
 | Entity undeclared, or `EntityStorage.Dynamic` | `AlvoAuthorizationException`, one shared message | the applied schema |
 | Filter/sort names a hidden or undeclared field | `AlvoAuthorizationException`, one shared message | the decision + schema |
 | Filter past `AlvoFilter.MaxDepth`/`MaxTerms`/`MaxInCandidates`, negative `Limit`, a paged read sorted by a nullable field | `ArgumentException` family | the query alone |
+| `is` with a non-bool, `in` with a non-list, a value the column cannot hold, a fractional bound against an integral column, a NUL in text | `ArgumentException` family | the query alone |
+| A schema this port cannot serve (`softDelete`), a field the read model does not map, an unknown bound-value origin | `InvalidOperationException` | the implementation's own invariant |
 | Payload names a framework-managed column a caller may not write (`AlvoManagedColumns`), or a read-only or undeclared field | `AlvoAuthorizationException` | the payload alone |
 | `get` of an invisible or absent row | `null` | the engine |
 | `update`/`delete` of an invisible or absent row | `AlvoRecordNotFoundException`, identical message | rows affected / pre-image |
 | Post-image fails `WITH CHECK` or the tenant scope | `AlvoAuthorizationException` | `IPredicateEvaluator` |
+
+**Three families, and the boundary between them is the contract.** A request layer above this port has
+nothing but the exception type to map a status code from, so it is stated on `IAlvoData`'s own remarks, where
+a PR3 author reads it: `ArgumentException` = malformed query (422), `AlvoAuthorizationException` = denial
+(403), `InvalidOperationException` = an invariant this implementation relies on (500).
+
+That needed settling because the two shipped implementations gave **four different answers** to four
+malformed inputs:
+
+| input | `InMemoryAlvoData` (before) | `EfAlvoData` (before) | both, now |
+|---|---|---|---|
+| `is` with a non-bool | `false`, row excluded | `AlvoAuthorizationException` | `ArgumentException` |
+| `in` with a scalar or a bare string | `UNKNOWN`, row excluded | `AlvoAuthorizationException` | `ArgumentException` |
+| `owner_id=eq."not-a-uuid"` | `UNKNOWN`, row excluded | `InvalidOperationException` | `ArgumentException` |
+| `mileage=gt.12.7` | normalised and **answered** | `InvalidOperationException` | `ArgumentException` |
+
+So `status=is.hello` — an ordinary agent typo — read as "not authorized": a 403 with no fix suggestion, in a
+framework whose principle 4 is structured errors *with* fix suggestions. And `InvalidOperationException` is
+the type the binder uses for genuine internal invariant violations, so a 422 and a 500 were
+indistinguishable.
+
+The reference implementation moved as much as the real one did, and that is deliberate: it could answer
+`mileage=gt.12.7` exactly, because it compares in memory with no column type in the way. It refuses anyway,
+for the reason `EnsureSortKeysCanBePaged` already gave — a reference implementation that answers where the
+shipped backends refuse gives the port two contracts, and a driver author reading the inherited suite learns
+the wrong one. `A_malformed_filter_is_refused_on_the_malformed_query_channel` is the shipped fact, with
+`A_well_formed_filter_over_the_same_fields_still_answers` as its counterweight.
 
 `Limit = 0` is *accepted* and renders `LIMIT 0`, which both engines answer with an empty page. That is
 deliberate rather than overlooked — unlike a negative limit the two engines agree on it, so it is not an

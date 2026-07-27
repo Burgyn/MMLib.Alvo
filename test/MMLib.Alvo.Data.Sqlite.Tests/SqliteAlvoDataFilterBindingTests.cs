@@ -71,7 +71,7 @@ public sealed class SqliteAlvoDataFilterBindingTests : IAsyncDisposable
     {
         var world = await AlvoDataWorlds.VehicleAsync(_fixture);
 
-        await Should.ThrowAsync<InvalidOperationException>(
+        await Should.ThrowAsync<ArgumentException>(
             () => Filtered(world, "mileage", AlvoFilterOperator.Gt, 12.7));
     }
 
@@ -94,7 +94,7 @@ public sealed class SqliteAlvoDataFilterBindingTests : IAsyncDisposable
     {
         var world = await AlvoDataWorlds.VehicleAsync(_fixture);
 
-        await Should.ThrowAsync<InvalidOperationException>(
+        await Should.ThrowAsync<ArgumentException>(
             () => Filtered(world, "owner_id", AlvoFilterOperator.Eq, "not-a-uuid"));
     }
 
@@ -112,7 +112,7 @@ public sealed class SqliteAlvoDataFilterBindingTests : IAsyncDisposable
     {
         var world = await AlvoDataWorlds.VehicleAsync(_fixture);
 
-        var refused = await Should.ThrowAsync<InvalidOperationException>(
+        var refused = await Should.ThrowAsync<ArgumentException>(
             () => Filtered(world, "plate", op, "ACME\0001"));
 
         refused.Message.ShouldContain("NUL");
@@ -124,7 +124,7 @@ public sealed class SqliteAlvoDataFilterBindingTests : IAsyncDisposable
     {
         var world = await AlvoDataWorlds.VehicleAsync(_fixture);
 
-        await Should.ThrowAsync<InvalidOperationException>(
+        await Should.ThrowAsync<ArgumentException>(
             () => Filtered(world, "plate", AlvoFilterOperator.In, new object?[] { "ACME-001", "ACME\0001" }));
     }
 

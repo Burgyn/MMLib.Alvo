@@ -18,6 +18,12 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// same shape as the framework-managed column list.
 /// </para>
 /// <para>
+/// <b>Every refusal here is an <see cref="ArgumentException"/></b>, because every one of them is about a
+/// value the caller supplied rather than about their permissions or about an invariant this code broke. That
+/// is the port's malformed-query channel — the same one the filter's depth and breadth caps use — and it is
+/// what lets a request layer above map it to a 422 with a fix suggestion instead of a 500.
+/// </para>
+/// <para>
 /// The read path's funnel is the authority rather than the other way round because it is the tested one, and
 /// because its three refusals are the ones that exist for a measured reason. A write inherits all of them,
 /// which is the point: a value no engine can carry must be refused identically wherever it arrives.
@@ -37,7 +43,7 @@ internal static class ColumnValue
     /// <param name="clrType">The column's CLR type, nullable or not.</param>
     /// <param name="column">The column's name, for the refusal message.</param>
     /// <param name="value">The caller-supplied value.</param>
-    /// <exception cref="InvalidOperationException">The column cannot hold <paramref name="value"/>.</exception>
+    /// <exception cref="ArgumentException">The column cannot hold <paramref name="value"/>.</exception>
     internal static object? For(Type clrType, string column, object? value)
     {
         ArgumentNullException.ThrowIfNull(clrType);
@@ -71,9 +77,10 @@ internal static class ColumnValue
     {
         if (value is string text && text.Contains('\0', StringComparison.Ordinal))
         {
-            throw new InvalidOperationException(
+            throw new ArgumentException(
                 "A text value containing a NUL character cannot be stored in or compared against column "
-                + $"'{column}': no engine Alvo supports can represent one. Remove the NUL.");
+                + $"'{column}': no engine Alvo supports can represent one. Remove the NUL.",
+                nameof(value));
         }
     }
 
@@ -89,6 +96,8 @@ internal static class ColumnValue
     /// </remarks>
     private static bool NeedsNormalising(Type target) => StoredInstant.IsTimestamp(target);
 
+    private const string ValueArgumentName = "value";
+
     private static object Converted(object value, Type target, string column)
     {
         try
@@ -98,9 +107,10 @@ internal static class ColumnValue
         catch (Exception exception)
             when (exception is FormatException or InvalidCastException or OverflowException or ArgumentException)
         {
-            throw new InvalidOperationException(
+            throw new ArgumentException(
                 $"A value of type '{value.GetType()}' cannot be used for column '{column}', which holds " +
                 $"'{target}'. Supply a value the column's type can hold.",
+                ValueArgumentName,
                 exception);
         }
     }

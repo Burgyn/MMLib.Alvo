@@ -19,6 +19,15 @@ namespace MMLib.Alvo.Testing.Data;
 /// keeps <c>neq</c> from matching a <see langword="null"/> field (SQL's <c>&lt;&gt;</c> yields
 /// <c>UNKNOWN</c> there, never a match) and keeps <c>not(eq(...))</c> over a <see langword="null"/>
 /// field from flipping into a match the way naive boolean negation would.
+/// <para>
+/// <b>A malformed comparison is refused, not treated as <c>UNKNOWN</c>.</b> <c>UNKNOWN</c> is SQL's answer
+/// for a comparison it <em>can</em> make against a missing value; it is not the answer for a query whose shape
+/// is wrong. This evaluator used to silently exclude the row for four such inputs — <c>is</c> with a non-bool,
+/// <c>in</c> with a scalar, a value the field's type cannot hold, and a fractional bound against an integral
+/// field — while the shipped backends refused all four. Two implementations of one port answering differently
+/// gives the port two contracts, and a driver author reading the inherited suite learns the wrong one. Each is
+/// now an <see cref="ArgumentException"/>, the port's malformed-query channel.
+/// </para>
 /// </remarks>
 internal static class AlvoFilterEvaluator
 {
@@ -101,8 +110,17 @@ internal static class AlvoFilterEvaluator
         AlvoFilterOperator.ILike => Like(fieldValue, operand, ignoreCase: true),
         AlvoFilterOperator.In => In(fieldValue, operand),
         AlvoFilterOperator.Is => Is(fieldValue, operand),
-        _ => null,
+        _ => throw Malformed(
+            $"uses operator '{op}', which is not one this port declares",
+            $"Use one of {nameof(AlvoFilterOperator)}'s declared members."),
     };
+
+    /// <summary>
+    /// A malformed filter, worded as the shipped backends word it: the query's shape is wrong, so it is the
+    /// port's <see cref="ArgumentException"/> channel rather than an authorization refusal or a silent
+    /// <c>UNKNOWN</c>.
+    /// </summary>
+    private static ArgumentException Malformed(string what, string fix) => new($"The filter {what}. {fix}");
 
     /// <summary>
     /// <c>eq</c>/<c>neq</c>: <see langword="null"/> on either side, or a pairing that cannot be
@@ -110,25 +128,43 @@ internal static class AlvoFilterEvaluator
     /// </summary>
     private static bool? NullSafeEquality(object? left, object? right, bool negate)
     {
-        if (left is null || right is null || !TryNormalize(left, right, out var normalizedLeft, out var normalizedRight))
+        if (left is null || right is null)
         {
             return null;
         }
 
+        var (normalizedLeft, normalizedRight) = Comparable(left, right);
         var equal = normalizedLeft.Equals(normalizedRight);
         return negate ? !equal : equal;
     }
 
     private static bool? NullSafeOrder(object? left, object? right, Func<int, bool> predicate)
     {
-        if (left is null || right is null || !TryNormalize(left, right, out var normalizedLeft, out var normalizedRight))
+        if (left is null || right is null)
         {
             return null;
         }
 
+        var (normalizedLeft, normalizedRight) = Comparable(left, right);
         var comparison = Order(normalizedLeft, normalizedRight);
         return comparison is int value ? predicate(value) : null;
     }
+
+    /// <summary>
+    /// Two non-null operands as one comparable pair, refusing a pairing this port cannot compare.
+    /// </summary>
+    /// <remarks>
+    /// A shipped backend binds the caller's value through the <em>column's</em> own type and refuses a value
+    /// the column cannot hold — <c>owner_id=eq."not-a-uuid"</c> is the case. Returning <c>UNKNOWN</c> here
+    /// instead answered the query with the row quietly excluded, so the same request was a 422 on a real engine
+    /// and an empty page on the reference.
+    /// </remarks>
+    private static (object Left, object Right) Comparable(object left, object right) =>
+        TryNormalize(left, right, out var normalizedLeft, out var normalizedRight)
+            ? (normalizedLeft, normalizedRight)
+            : throw Malformed(
+                $"compares a '{left.GetType().Name}' field against a '{right.GetType().Name}' value",
+                "Supply a value the field's own type can hold.");
 
     private static int? Order(object left, object right) => (left, right) switch
     {
@@ -177,12 +213,14 @@ internal static class AlvoFilterEvaluator
     /// </summary>
     private static bool? In(object? fieldValue, object? operand)
     {
-        if (fieldValue is null)
+        if (operand is string || operand is not System.Collections.IEnumerable values)
         {
-            return null;
+            throw Malformed(
+                "uses 'in' with a value that is not a list",
+                "Pass a collection of candidates; a bare string or a scalar is not one.");
         }
 
-        if (operand is string || operand is not System.Collections.IEnumerable values)
+        if (fieldValue is null)
         {
             return null;
         }
@@ -212,7 +250,9 @@ internal static class AlvoFilterEvaluator
     {
         null => fieldValue is null,
         bool expected => fieldValue is bool actual && actual == expected,
-        _ => false,
+        _ => throw Malformed(
+            "uses 'is' with a value other than null, true or false",
+            "SQL's own IS accepts only those three; compare with 'eq' instead."),
     };
 
     private static bool TryNormalize(object left, object right, out object normalizedLeft, out object normalizedRight)
@@ -257,6 +297,7 @@ internal static class AlvoFilterEvaluator
 
     private static bool TryNormalizeNumeric(object left, object right, out object normalizedLeft, out object normalizedRight)
     {
+        EnsureNoFractionLost(left, right);
         if (TryToDecimal(left, out var leftDecimal) && TryToDecimal(right, out var rightDecimal))
         {
             normalizedLeft = leftDecimal;
@@ -268,6 +309,37 @@ internal static class AlvoFilterEvaluator
         normalizedRight = right;
         return false;
     }
+
+    /// <summary>
+    /// Refuses a fractional value compared against an integral field, because a shipped backend does.
+    /// </summary>
+    /// <remarks>
+    /// This evaluator could answer it exactly — it compares in memory, with no column type in the way — and
+    /// that is precisely the problem: <c>mileage=gt.12.7</c> answered correctly here and was refused on both
+    /// real engines, because binding it through an integral column would round it midpoint-to-even and answer a
+    /// different question. A reference implementation that answers where the shipped backends refuse teaches a
+    /// driver author the wrong contract.
+    /// </remarks>
+    private static void EnsureNoFractionLost(object fieldValue, object operand)
+    {
+        if (IsIntegral(fieldValue) && HasFraction(operand))
+        {
+            throw Malformed(
+                $"compares an integral field against the fractional value '{operand}'",
+                "A fractional bound against an integral field has no exact answer; round it yourself.");
+        }
+    }
+
+    private static bool IsIntegral(object value) => value is
+        int or long or short or byte or sbyte or ushort or uint or ulong;
+
+    private static bool HasFraction(object value) => value switch
+    {
+        decimal number => number != decimal.Truncate(number),
+        double number => number != Math.Truncate(number),
+        float number => number != MathF.Truncate(number),
+        _ => false,
+    };
 
     private static bool IsNumeric(object value) => value is
         int or long or short or byte or sbyte or ushort or uint or ulong or float or double or decimal;

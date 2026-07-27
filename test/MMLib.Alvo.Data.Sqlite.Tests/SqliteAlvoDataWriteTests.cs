@@ -138,7 +138,7 @@ public sealed class SqliteAlvoDataWriteTests : IAsyncDisposable
     {
         var world = await AlvoDataWorlds.VehicleAsync(_fixture);
 
-        var refused = await Should.ThrowAsync<InvalidOperationException>(() => world.UpdateAsync(
+        var refused = await Should.ThrowAsync<ArgumentException>(() => world.UpdateAsync(
             "vehicle", world.RowId, new Dictionary<string, object?> { ["mileage"] = 12.7m }, world.Alice));
 
         refused.Message.ShouldContain("mileage");
@@ -153,7 +153,7 @@ public sealed class SqliteAlvoDataWriteTests : IAsyncDisposable
     {
         var world = await AlvoDataWorlds.VehicleAsync(_fixture);
 
-        await Should.ThrowAsync<InvalidOperationException>(() => world.UpdateAsync(
+        await Should.ThrowAsync<ArgumentException>(() => world.UpdateAsync(
             "vehicle", world.RowId, new Dictionary<string, object?> { ["status"] = "clo\0sed" }, world.Alice));
     }
 

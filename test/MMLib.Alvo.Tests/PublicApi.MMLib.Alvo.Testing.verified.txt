@@ -72,6 +72,8 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task A_global_entity_whose_rule_references_the_user_denies_the_anonymous_caller() { }
         public System.Threading.Tasks.Task A_hidden_expression_that_cannot_resolve_still_masks_the_field() { }
         public System.Threading.Tasks.Task A_hidden_field_never_appears_in_a_returned_record() { }
+        [Xunit.MemberData("MalformedFilters", new object[0])]
+        public System.Threading.Tasks.Task A_malformed_filter_is_refused_on_the_malformed_query_channel(MMLib.Alvo.Data.AlvoFilter malformed) { }
         [Xunit.InlineData(new object[] {
                 "café"})]
         [Xunit.InlineData(new object[] {
@@ -89,6 +91,7 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task A_tenantless_context_cannot_create_into_a_scoped_entity() { }
         public System.Threading.Tasks.Task A_user_filter_cannot_widen_the_policy_predicate() { }
         public System.Threading.Tasks.Task A_uuid_rule_over_a_dynamic_entity_matches_rows_on_every_engine() { }
+        public System.Threading.Tasks.Task A_well_formed_filter_over_the_same_fields_still_answers() { }
         public System.Threading.Tasks.Task A_write_to_a_read_only_field_is_rejected_rather_than_silently_dropped() { }
         public System.Threading.Tasks.Task An_admin_rule_over_the_role_set_matches_a_multi_role_caller() { }
         public System.Threading.Tasks.Task An_audited_create_stamps_the_caller_and_the_implementations_clock() { }
@@ -110,6 +113,7 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task Update_cannot_rewrite_the_row_id() { }
         public System.Threading.Tasks.Task Update_of_an_unrelated_field_succeeds_when_the_post_image_still_satisfies_the_rule() { }
         public System.Threading.Tasks.Task Update_of_another_users_row_reports_not_found() { }
+        public static Xunit.TheoryData<MMLib.Alvo.Data.AlvoFilter> MalformedFilters() { }
     }
     public abstract class AlvoDataComparisonTests
     {

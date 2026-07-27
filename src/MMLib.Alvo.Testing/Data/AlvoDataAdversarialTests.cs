@@ -755,6 +755,80 @@ public abstract class AlvoDataAdversarialTests
     }
 
     /// <summary>
+    /// The four malformed-filter inputs on which the two shipped implementations of this port used to give
+    /// <b>four different answers</b>, so PR3 could not map 422 from 403 from 500 by exception type. Settled:
+    /// a malformed query is the <see cref="ArgumentException"/> family, a denial is
+    /// <see cref="AlvoAuthorizationException"/>, and an internal invariant violation stays
+    /// <see cref="InvalidOperationException"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Before this, <c>is</c> with a non-bool and <c>in</c> with a scalar were <c>AlvoAuthorizationException</c>
+    /// on a real engine — so <c>status=is.hello</c>, an ordinary agent typo, read as "not authorized" — and
+    /// excluded-but-answered in the reference; an unconvertible value and a fractional bound against an
+    /// integral field were <c>InvalidOperationException</c>, the same type the binder uses for genuine internal
+    /// invariant violations, and answered in the reference.
+    /// </para>
+    /// <para>
+    /// It is one fact over all four because the point is that they share a channel. The counterweight is the
+    /// following fact: a well-formed filter over the same fields still answers, so this cannot be satisfied by
+    /// refusing every filter.
+    /// </para>
+    /// </remarks>
+    /// <param name="malformed">A filter whose shape or value this port cannot serve.</param>
+    [Theory]
+    [MemberData(nameof(MalformedFilters))]
+    public async Task A_malformed_filter_is_refused_on_the_malformed_query_channel(AlvoFilter malformed)
+    {
+        var fixture = await NotesFixtureAsync();
+
+        await Should.ThrowAsync<ArgumentException>(() => fixture.Data.QueryAsync(
+            new AlvoQuery { Entity = "notes", Filter = malformed }, fixture.Alice));
+    }
+
+    /// <summary>
+    /// The four inputs, each named for the shape it is: an <c>is</c> operand SQL's own <c>IS</c> does not
+    /// accept, an <c>in</c> operand that is not a list, a value the field's type cannot hold, and a fractional
+    /// bound against a field whose type has no fraction.
+    /// </summary>
+    public static TheoryData<AlvoFilter> MalformedFilters() =>
+    [
+        new AlvoComparison("title", AlvoFilterOperator.Is, "maybe"),
+        new AlvoComparison("title", AlvoFilterOperator.In, "not-a-list"),
+        new AlvoComparison("owner_id", AlvoFilterOperator.Eq, "not-a-uuid"),
+        new AlvoComparison("owner_id", AlvoFilterOperator.In, Guid.NewGuid()),
+    ];
+
+    /// <summary>
+    /// The counterweight to the refusals above: the same fields, well-formed, still answer — so the contract
+    /// cannot be met by refusing everything.
+    /// </summary>
+    [Fact]
+    public async Task A_well_formed_filter_over_the_same_fields_still_answers()
+    {
+        var fixture = await NotesFixtureAsync();
+
+        var byTitle = await fixture.Data.QueryAsync(
+            new AlvoQuery
+            {
+                Entity = "notes",
+                Filter = new AlvoComparison("title", AlvoFilterOperator.Is, null),
+            },
+            fixture.Alice);
+        byTitle.ShouldBeEmpty();
+
+        var byOwner = await fixture.Data.QueryAsync(
+            new AlvoQuery
+            {
+                Entity = "notes",
+                Filter = new AlvoComparison(
+                    "owner_id", AlvoFilterOperator.In, new object?[] { fixture.Alice.User.Value }),
+            },
+            fixture.Alice);
+        byOwner.Count.ShouldBe(2);
+    }
+
+    /// <summary>
     /// The depth cap does not see <b>breadth</b>, and breadth is the same denial-of-service and the same
     /// engine divergence one level out: 900 <c>AND</c> terms answered on both engines and <b>1000 threw a
     /// raw <c>SqliteException</c></b> out of <see cref="IAlvoData.QueryAsync"/> while PostgreSQL answered,

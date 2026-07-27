@@ -167,7 +167,7 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
         using var context = factory.Create();
         var binder = new PredicateParameterBinder(context);
 
-        Should.Throw<InvalidOperationException>(
+        Should.Throw<ArgumentException>(
             () => BindThroughColumn(context, "owner_id", PolicyParameterPrefix.Filter + "0", "not-a-uuid"));
     }
 
@@ -189,7 +189,7 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
         using var context = factory.Create();
         var binder = new PredicateParameterBinder(context);
 
-        Should.Throw<InvalidOperationException>(() => BindThroughColumn(context, "mileage", PolicyParameterPrefix.Filter + "0", (decimal)fraction));
+        Should.Throw<ArgumentException>(() => BindThroughColumn(context, "mileage", PolicyParameterPrefix.Filter + "0", (decimal)fraction));
     }
 
     [Fact]

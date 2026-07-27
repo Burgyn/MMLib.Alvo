@@ -36,7 +36,7 @@ public sealed class PostgreSqlAlvoDataFilterBindingTests : IAsyncLifetime
     {
         var data = await DataAsync();
 
-        var refused = await Should.ThrowAsync<InvalidOperationException>(
+        var refused = await Should.ThrowAsync<ArgumentException>(
             () => Query(data, new AlvoComparison("plate", op, "ACME\0001")));
 
         refused.ShouldNotBeOfType<PostgresException>();
@@ -49,7 +49,7 @@ public sealed class PostgreSqlAlvoDataFilterBindingTests : IAsyncLifetime
     {
         var data = await DataAsync();
 
-        await Should.ThrowAsync<InvalidOperationException>(
+        await Should.ThrowAsync<ArgumentException>(
             () => Query(data, new AlvoComparison("plate", AlvoFilterOperator.In, new object?[] { "A", "B\0C" })));
     }
 

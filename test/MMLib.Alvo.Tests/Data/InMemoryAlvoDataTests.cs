@@ -106,14 +106,18 @@ public class InMemoryAlvoDataTests
     }
 
     /// <summary>
-    /// A <see langword="string"/> operand to <c>in</c> is excluded outright (never matched) rather
-    /// than iterated as a sequence of characters — <see langword="string"/> itself satisfies
-    /// <see cref="System.Collections.IEnumerable"/>, which would otherwise let a caller who forgot
-    /// to wrap a single value in a list silently get per-character membership testing instead of a
-    /// clear "doesn't match".
+    /// A <see langword="string"/> operand to <c>in</c> is <b>refused</b>, never iterated as a sequence of
+    /// characters — <see langword="string"/> itself satisfies <see cref="System.Collections.IEnumerable"/>,
+    /// which would otherwise give a caller who forgot to wrap a single value in a list silent per-character
+    /// membership testing.
     /// </summary>
+    /// <remarks>
+    /// It used to be excluded rather than refused, which is <em>almost</em> as bad: the shipped backends refuse
+    /// it, so one request was an empty page here and a refusal there. A malformed query is the port's
+    /// <see cref="ArgumentException"/> channel, and both implementations now word it identically.
+    /// </remarks>
     [Fact]
-    public async Task In_with_a_string_operand_is_excluded_rather_than_iterated_as_characters()
+    public async Task In_with_a_string_operand_is_refused_rather_than_iterated_as_characters()
     {
         var ct = TestContext.Current.CancellationToken;
         var data = CreateStore(
@@ -121,18 +125,18 @@ public class InMemoryAlvoDataTests
             Row(Guid.NewGuid(), ("title", "o")));
         var caller = Caller();
 
-        var result = await data.QueryAsync(Query("items", new AlvoComparison("title", AlvoFilterOperator.In, "ok")), caller, ct);
-
-        result.ShouldBeEmpty();
+        await Should.ThrowAsync<ArgumentException>(() => data.QueryAsync(
+            Query("items", new AlvoComparison("title", AlvoFilterOperator.In, "ok")), caller, ct));
     }
 
     /// <summary>
-    /// A numeric comparison against a value outside <see langword="decimal"/>'s range must not
-    /// throw <see cref="OverflowException"/> — it simply does not match, since a caller-supplied
-    /// filter value must never crash the query.
+    /// A numeric comparison against a value outside <see langword="decimal"/>'s range is refused on the
+    /// port's malformed-query channel, not with a raw <see cref="OverflowException"/> and not with a silent
+    /// empty page: a shipped backend cannot bind it through a <c>decimal</c> column either, and the two
+    /// implementations of this port must answer one way.
     /// </summary>
     [Fact]
-    public async Task A_numeric_comparison_outside_decimal_range_does_not_throw()
+    public async Task A_numeric_comparison_outside_decimal_range_is_refused_rather_than_overflowing()
     {
         var ct = TestContext.Current.CancellationToken;
         var data = CreateStore(
@@ -140,10 +144,8 @@ public class InMemoryAlvoDataTests
             Row(Guid.NewGuid(), ("amount", 5m)));
         var caller = Caller();
 
-        var result = await data.QueryAsync(
-            Query("items", new AlvoComparison("amount", AlvoFilterOperator.Eq, double.MaxValue)), caller, ct);
-
-        result.ShouldBeEmpty();
+        await Should.ThrowAsync<ArgumentException>(() => data.QueryAsync(
+            Query("items", new AlvoComparison("amount", AlvoFilterOperator.Eq, double.MaxValue)), caller, ct));
     }
 
     /// <summary>Explicit null placement is honored independently of sort direction, and descending order reverses the non-null values.</summary>
@@ -215,14 +217,13 @@ public class InMemoryAlvoDataTests
     }
 
     /// <summary>
-    /// An unrecognized comparison operator is <c>UNKNOWN</c>, not <see langword="false"/> — so
-    /// negating it through <see cref="AlvoNot"/> must stay <c>UNKNOWN</c> (matching nothing) rather
-    /// than flipping into a match, exactly like every other unresolved comparison
-    /// <see cref="AlvoFilterEvaluator"/> handles. A naive "unrecognized operator = false" default
-    /// would incorrectly match every row here once negated.
+    /// An operator no <see cref="AlvoFilterOperator"/> member names — reachable only by casting an
+    /// integer — is a malformed query, so it is <b>refused</b> rather than folded into <c>UNKNOWN</c>. The
+    /// negation is what makes the distinction matter: a "unrecognized operator = false" default would match
+    /// every row once negated, and a refusal cannot be inverted at all.
     /// </summary>
     [Fact]
-    public async Task Not_of_an_unrecognized_operator_matches_nothing()
+    public async Task Not_of_an_unrecognized_operator_is_refused_rather_than_inverted()
     {
         var ct = TestContext.Current.CancellationToken;
         var data = CreateStore(
@@ -231,10 +232,8 @@ public class InMemoryAlvoDataTests
             Row(Guid.NewGuid(), ("title", "b")));
         var caller = Caller();
 
-        var result = await data.QueryAsync(
-            Query("items", new AlvoNot(new AlvoComparison("title", (AlvoFilterOperator)99, "a"))), caller, ct);
-
-        result.ShouldBeEmpty();
+        await Should.ThrowAsync<ArgumentException>(() => data.QueryAsync(
+            Query("items", new AlvoNot(new AlvoComparison("title", (AlvoFilterOperator)99, "a"))), caller, ct));
     }
 
     /// <summary>

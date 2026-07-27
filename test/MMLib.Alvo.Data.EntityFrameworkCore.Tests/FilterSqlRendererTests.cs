@@ -45,12 +45,12 @@ public class FilterSqlRendererTests
     /// </summary>
     [Fact]
     public void Membership_over_a_bare_string_is_refused_rather_than_expanded_per_character()
-        => Should.Throw<AlvoAuthorizationException>(
+        => Should.Throw<ArgumentException>(
             () => Render(new AlvoComparison("status", AlvoFilterOperator.In, "open")));
 
     [Fact]
     public void Membership_over_a_scalar_is_refused()
-        => Should.Throw<AlvoAuthorizationException>(
+        => Should.Throw<ArgumentException>(
             () => Render(new AlvoComparison("mileage", AlvoFilterOperator.In, 10L)));
 
     /// <summary>
@@ -91,7 +91,7 @@ public class FilterSqlRendererTests
 
     [Fact]
     public void An_identity_test_against_anything_else_is_refused()
-        => Should.Throw<AlvoAuthorizationException>(
+        => Should.Throw<ArgumentException>(
             () => Render(new AlvoComparison("status", AlvoFilterOperator.Is, "open")));
 
     [Fact]

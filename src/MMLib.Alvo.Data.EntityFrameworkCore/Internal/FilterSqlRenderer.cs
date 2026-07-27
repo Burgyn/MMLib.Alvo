@@ -40,7 +40,17 @@ internal sealed record RenderedSql(string Sql, IReadOnlyDictionary<string, Bound
 /// </remarks>
 internal static class FilterSqlRenderer
 {
-    private const string UnsupportedFilterMessage = "The query uses a filter this provider cannot render.";
+    /// <summary>
+    /// A malformed filter is refused as an <see cref="ArgumentException"/>, not as an authorization failure.
+    /// </summary>
+    /// <remarks>
+    /// It used to be <see cref="AlvoAuthorizationException"/>, which made <c>status=is.hello</c> — an ordinary
+    /// agent typo — read as "not authorized": a 403 with no fix suggestion, in a framework whose principle 4
+    /// is structured errors <em>with</em> fix suggestions. Nothing is being hidden and no permission is in
+    /// question; the query's shape is wrong, which is the same channel the depth and breadth caps already use.
+    /// </remarks>
+    private static ArgumentException Malformed(string what, string fix) =>
+        new($"The filter {what}. {fix}");
 
     /// <summary>Renders one caller filter into a SQL fragment and its bound values.</summary>
     /// <remarks>
@@ -72,7 +82,8 @@ internal static class FilterSqlRenderer
         AlvoAnd and => Connective(and.Filters, entity, fields, bag, "AND", fields.RenderBooleanPredicate(true)),
         AlvoOr or => Connective(or.Filters, entity, fields, bag, "OR", fields.RenderBooleanPredicate(false)),
         AlvoNot not => $"(NOT {Operand(not.Filter, entity, fields, bag)})",
-        _ => throw new AlvoAuthorizationException(UnsupportedFilterMessage),
+        _ => throw new InvalidOperationException(
+            $"'{node.GetType().Name}' is not a known {nameof(AlvoFilter)} case, so it cannot be rendered."),
     };
 
     /// <summary>
@@ -117,7 +128,9 @@ internal static class FilterSqlRenderer
                 target.Sql, bag.Add(fields, target.Column, comparison.Value)),
             AlvoFilterOperator.In => Membership(target, comparison.Value, fields, bag),
             AlvoFilterOperator.Is => Identity(target.Sql, comparison.Value, fields),
-            _ => throw new AlvoAuthorizationException(UnsupportedFilterMessage),
+            _ => throw Malformed(
+                $"uses operator '{comparison.Operator}', which is not one this provider renders",
+                $"Use one of {nameof(AlvoFilterOperator)}'s declared members."),
         };
     }
 
@@ -168,7 +181,9 @@ internal static class FilterSqlRenderer
     private static IEnumerable<object?> Candidates(object? value) =>
         value is IEnumerable candidates and not string
             ? candidates.Cast<object?>()
-            : throw new AlvoAuthorizationException(UnsupportedFilterMessage);
+            : throw Malformed(
+                "uses 'in' with a value that is not a list",
+                "Pass a collection of candidates; a bare string or a scalar is not one.");
 
     /// <summary>
     /// The one operator that is definitely true or false over a <see langword="null"/> field. Only the three
@@ -188,7 +203,9 @@ internal static class FilterSqlRenderer
         null => $"{field} IS NULL",
         true => fields.RenderTwoValued($"{field} = {fields.TrueLiteral}"),
         false => fields.RenderTwoValued($"{field} = {fields.FalseLiteral}"),
-        _ => throw new AlvoAuthorizationException(UnsupportedFilterMessage),
+        _ => throw Malformed(
+            "uses 'is' with a value other than null, true or false",
+            "SQL's own IS accepts only those three; compare with 'eq' instead."),
     };
 
     private sealed class ParameterBag(string prefix)
