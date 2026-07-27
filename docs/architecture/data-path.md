@@ -1,4 +1,4 @@
-# The data path
+﻿# The data path
 
 How an Alvo read or write becomes one SQL statement, and the decisions that shape it. Written during F3 PR2
 (#20).
@@ -133,6 +133,14 @@ order/boundary divergence above. **PR3 owns that**, together with the paging sur
 The consequence for fixtures is real and worth knowing: a suite that pages has to sort by a **required**
 column, which is why `AlvoDataWorlds` grew a required `label` on `notes` and a purpose-built `ledger` entity
 whose `amount` and `occurred_at` are both required.
+
+**It is a rule of the port, not of one backend.** `AlvoDataAdversarialTests`
+`A_paged_read_sorted_by_a_nullable_field_is_refused_rather_than_dropping_rows` is inherited, so every
+implementation is held to it — and `InMemoryAlvoData` refuses too, although it compares rows in memory and
+could page over a null key correctly. That is deliberate: a reference implementation answering where the
+shipped backends refuse would give the port two contracts, and a driver author reading the inherited suite
+would learn the wrong one. Its sibling fact pins that an **unpaged** sorted read still answers, so the refusal
+cannot be implemented as "reject a nullable sort key".
 
 ## Every timestamp is one instant
 

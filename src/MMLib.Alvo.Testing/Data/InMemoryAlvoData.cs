@@ -82,6 +82,7 @@ public sealed class InMemoryAlvoData : IAlvoData
 
         AlvoFilter.EnsureWithinDepthLimit(query.Filter);
         EnsureQueryFieldsAvailable(query, decision);
+        EnsureSortKeysCanBePaged(query);
 
         List<AlvoRecord> snapshot;
         lock (_gate)
@@ -237,6 +238,38 @@ public sealed class InMemoryAlvoData : IAlvoData
             }
         }
     }
+
+    /// <summary>
+    /// Refuses a <b>paged</b> read whose sort key is nullable — the port's rule, not one backend's.
+    /// </summary>
+    /// <remarks>
+    /// This reference could page over a nullable key correctly, because it compares rows in memory rather than
+    /// through a keyset boundary. It refuses anyway: a relational backend's boundary is a chain of comparisons
+    /// with no <c>IS NULL</c> arm, so a <see langword="null"/> makes the term <see langword="null"/> and the
+    /// page silently stops. If the reference implementation answered where the shipped backends refuse, this
+    /// port would have two contracts, and a driver author reading the inherited suite would learn the wrong one.
+    /// An <b>unpaged</b> sorted read has no boundary and stays legal.
+    /// </remarks>
+    private void EnsureSortKeysCanBePaged(AlvoQuery query)
+    {
+        if (query.Limit is null && query.After is null || FindEntity(query.Entity) is not { } entity)
+        {
+            return;
+        }
+
+        foreach (var key in query.Sort.Where(key => IsNullable(entity, key.Field)))
+        {
+            throw new ArgumentException(
+                $"Sorting a paged read by '{key.Field}' is not supported, because that field is nullable and a "
+                + "keyset cursor cannot express where its null values sort. Page by a required field, or read the "
+                + "whole set without a limit or a cursor.",
+                nameof(query));
+        }
+    }
+
+    private static bool IsNullable(EntitySchema entity, string field) =>
+        entity.Fields.FirstOrDefault(candidate => string.Equals(candidate.Name, field, StringComparison.Ordinal))
+            is { Nullable: true };
 
     /// <summary>
     /// The entity's declared field names. An entity this store's schema does not know yields an empty

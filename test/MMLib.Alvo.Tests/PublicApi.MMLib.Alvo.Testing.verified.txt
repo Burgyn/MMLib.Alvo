@@ -70,6 +70,8 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task A_hidden_expression_that_cannot_resolve_still_masks_the_field() { }
         public System.Threading.Tasks.Task A_hidden_field_never_appears_in_a_returned_record() { }
         public System.Threading.Tasks.Task A_nullable_boolean_field_used_bare_in_a_rule_works_end_to_end() { }
+        public System.Threading.Tasks.Task A_paged_read_sorted_by_a_nullable_field_is_refused_rather_than_dropping_rows() { }
+        public System.Threading.Tasks.Task A_paged_read_sorted_by_a_required_field_still_answers() { }
         public System.Threading.Tasks.Task A_query_limit_is_applied_after_the_policy_predicate_not_before() { }
         public System.Threading.Tasks.Task A_query_with_no_tenant_context_fails_rather_than_returning_every_tenants_rows() { }
         public System.Threading.Tasks.Task A_sort_naming_a_hidden_field_is_rejected_rather_than_leaking_its_ordering() { }

@@ -654,6 +654,58 @@ public abstract class AlvoDataAdversarialTests
             QueryFilteredBy(NestedFilter(50_000)), member));
     }
 
+    /// <summary>
+    /// A keyset cursor's boundary is a chain of comparisons with no <c>IS NULL</c> arm, so a <see langword="null"/>
+    /// on either side makes the whole term <see langword="null"/> and a <c>WHERE</c> treats that as false —
+    /// paging over a nullable sort key stops at the first null-keyed row and <b>silently drops the rest</b>.
+    /// Measured under <c>nullslast</c> three visible rows walked out as two; under <c>nullsfirst</c>, as one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The design's ruling is that a nullable sort column must declare its null placement <b>or be rejected</b>,
+    /// and <see cref="AlvoSort.Nulls"/> cannot deliver the first half while only the <c>ORDER BY</c> honours it.
+    /// So a <em>paged</em> read over one is refused. This is the port's malformed-query channel, not an
+    /// authorization refusal: the field is one the caller may read, nothing is hidden, and a request layer above
+    /// turns it into a 422 with a fix suggestion.
+    /// </para>
+    /// <para>
+    /// It is a fact here, on the inherited suite, because it is a property of the <em>port</em> — every
+    /// implementation pages, and one that answered instead of refusing would drop rows exactly as the first one
+    /// did. An <b>unpaged</b> sorted read has no boundary, so it stays legal, and this fact asserts that too:
+    /// without it the refusal could be implemented as "reject a nullable sort key", which would break sorting.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_paged_read_sorted_by_a_nullable_field_is_refused_rather_than_dropping_rows()
+    {
+        var fixture = await NotesFixtureAsync();
+        var sort = new[] { new AlvoSort("title") };
+
+        await Should.ThrowAsync<ArgumentException>(() => fixture.Data.QueryAsync(
+            new AlvoQuery { Entity = "notes", Sort = sort, Limit = 1 }, fixture.Alice));
+        await Should.ThrowAsync<ArgumentException>(() => fixture.Data.QueryAsync(
+            new AlvoQuery { Entity = "notes", Sort = sort, After = "any-cursor" }, fixture.Alice));
+
+        var unpaged = await fixture.Data.QueryAsync(
+            new AlvoQuery { Entity = "notes", Sort = sort }, fixture.Alice);
+        unpaged.Count.ShouldBe(2);
+    }
+
+    /// <summary>
+    /// The counterweight: paging by a <b>required</b> key is the supported shape and must keep working, so the
+    /// refusal above cannot be satisfied by refusing every paged sorted read.
+    /// </summary>
+    [Fact]
+    public async Task A_paged_read_sorted_by_a_required_field_still_answers()
+    {
+        var fixture = await NotesFixtureAsync();
+
+        var page = await fixture.Data.QueryAsync(
+            new AlvoQuery { Entity = "notes", Sort = [new AlvoSort("owner_id")], Limit = 1 }, fixture.Alice);
+
+        page.Count.ShouldBe(1);
+    }
+
     private static AlvoQuery QueryFilteredBy(AlvoFilter filter) => new() { Entity = "accounts", Filter = filter };
 
     /// <summary>Builds a filter nesting <paramref name="depth"/> levels of <see cref="AlvoNot"/> over one comparison.</summary>
