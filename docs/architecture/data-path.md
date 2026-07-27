@@ -220,8 +220,11 @@ just stopped, silently.
 
 The design's ruling is that a nullable sort column must declare its null placement **or be rejected**, and
 `AlvoSort.Nulls` alone cannot deliver the first half while only the `ORDER BY` honours it — so
-`EfAlvoData.EnsureSortKeysCanBePaged` takes the second: a read with a `Limit` or an `After` whose sort key
-names a `Nullable` field is refused with an `ArgumentException`. That is the port's malformed-query channel,
+`AlvoQuery.EnsureSortKeysCanBePaged` takes the second: a read with a `Limit` or an `After` whose sort key
+names a `Nullable` field is refused with an `ArgumentException`. **It lives in `Abstractions`, called by both
+implementations**, on this codebase's own `AlvoFilter.EnsureWithinLimits` precedent — it was written twice,
+verbatim including its three-line message, in two shipped assemblies, and F7's dynamic driver would have made
+a third copy. That is the port's malformed-query channel,
 not an authorization refusal — the field is one the caller can read, nothing is hidden, and a request layer
 above this port turns it into a 422 with a fix suggestion.
 

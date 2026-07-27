@@ -77,7 +77,7 @@ internal sealed class EfAlvoData : IAlvoData
         using var db = _contexts.Create();
         var entity = Entity(db, query.Entity);
         QueryFieldGuard.EnsureAvailable(QueryFields(query), entity, decision.HiddenFields);
-        EnsureSortKeysCanBePaged(query, entity);
+        AlvoQuery.EnsureSortKeysCanBePaged(query, entity);
 
         var anchor = await AnchorAsync(db, entity, decision, context, query, cancellationToken);
         if (query.After is not null && anchor is null)
@@ -333,45 +333,6 @@ internal sealed class EfAlvoData : IAlvoData
     /// </summary>
     private static void EnsureLimitIsSane(int? limit) =>
         ArgumentOutOfRangeException.ThrowIfNegative(limit ?? 0, nameof(AlvoQuery.Limit));
-
-    /// <summary>
-    /// Refuses a <b>paged</b> read whose sort key names a nullable field. The keyset boundary is a chain of
-    /// comparisons with no <c>IS NULL</c> arm, so a <c>NULL</c> on either side makes the term <c>NULL</c> and a
-    /// <c>WHERE</c> treats that as false: the page would stop early and silently, losing every null-keyed row
-    /// under <c>nullslast</c> and every row but the first under <c>nullsfirst</c>.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// The design's ruling is that a nullable sort column must declare its null placement <b>or be
-    /// rejected</b>; the third option — accept the query and lose rows — is what this refuses. It is the
-    /// port's malformed-query channel rather than an authorization refusal, because the field is one the
-    /// caller can read and nothing is being hidden; a structured error is also what a request layer above this
-    /// port can turn into a 422 with a fix suggestion.
-    /// </para>
-    /// <para>
-    /// Scoped to a paged read on purpose. An unpaged sorted read has no boundary, so its ordering over nulls is
-    /// already correct and refusing it would break whole-set reads for no gain. Making such a page work needs an
-    /// <c>IS NULL</c>-aware boundary whose predicate form depends on the anchor's own null-ness — a shape change
-    /// to <see cref="KeysetSqlRenderer"/> that must stay in lockstep with <see cref="SortSqlRenderer"/>'s rank
-    /// expression — and that belongs with the work that owns the paging surface.
-    /// </para>
-    /// </remarks>
-    private static void EnsureSortKeysCanBePaged(AlvoQuery query, EntitySchema? entity)
-    {
-        if (entity is null || (query.Limit is null && query.After is null))
-        {
-            return;
-        }
-
-        foreach (var key in query.Sort.Where(key => QueryFieldGuard.DeclaredField(entity, key.Field).Nullable))
-        {
-            throw new ArgumentException(
-                $"Sorting a paged read by '{key.Field}' is not supported, because that field is nullable and a "
-                + "keyset cursor cannot express where its null values sort. Page by a required field, or read the "
-                + "whole set without a limit or a cursor.",
-                nameof(query));
-        }
-    }
 
     /// <summary>
     /// Resolves the entity from the <b>applied schema this context's model was built from</b>. A dynamic
