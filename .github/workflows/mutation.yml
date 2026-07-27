@@ -87,6 +87,15 @@ on:
       - 'test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/**'
       - 'test/MMLib.Alvo.Data.Sqlite.Tests/**'
       - 'test/MMLib.Alvo.Data.PostgreSql.Tests/**'
+      # And so does the SHIPPED half of those suites, which lives under src/ and
+      # not test/: MMLib.Alvo.Testing carries AlvoDataAdversarialTests,
+      # AlvoDataStatementTests, AlvoDataDifferentialTests, AlvoDataComparisonTests,
+      # AlvoDataOrderingTests and AlvoSqlDialectContractTests — the inherited facts
+      # that kill mutants in data-ef and in both drivers. Loosening one of those
+      # drops the score of three configs, and without this entry it would do so
+      # with no workflow run at all: exactly the hole listing the test projects
+      # above exists to close.
+      - 'src/MMLib.Alvo.Testing/**'
   workflow_dispatch:
 
 permissions:
