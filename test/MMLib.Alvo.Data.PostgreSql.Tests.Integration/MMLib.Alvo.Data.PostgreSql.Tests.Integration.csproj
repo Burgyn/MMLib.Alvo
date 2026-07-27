@@ -37,6 +37,7 @@
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/DifferentialProbe.cs" Link="_shared/DifferentialProbe.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/SqlCapture.cs" Link="_shared/SqlCapture.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/PolicyPredicateParameters.cs" Link="_shared/PolicyPredicateParameters.cs" />
   </ItemGroup>
 
 </Project>

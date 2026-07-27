@@ -25,7 +25,7 @@ public sealed class SqliteAlvoDataComparisonTests : AlvoDataComparisonTests, IAs
         using var context = factory.Create();
         var predicate = Render(host, rule);
 
-        return (int)await CountAsync(context, predicate.Sql, new PredicateParameterBinder(context).BindPolicyPredicate(predicate.Parameters));
+        return (int)await CountAsync(context, predicate.Sql, MMLib.Alvo.Tests.Data.PolicyPredicateParameters.Bind(context, context.Rows("vehicle").EntityType, predicate.Parameters));
     }
 
     private static SqlPredicate Render(AlvoDataHost host, string rule)

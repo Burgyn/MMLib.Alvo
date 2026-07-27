@@ -21,24 +21,25 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// the same argument applies to every type, not only to <see cref="Guid"/>.
 /// </para>
 /// <para>
-/// <b>The column is the authority, not the value — and that is enforced by the argument types, not by a
-/// convention.</b> The representation EF wrote is decided by the column's CLR type, so a value compared
-/// against a column binds through <see cref="BindColumnValue"/>, which cannot be called without an
-/// <see cref="IProperty"/>. There is deliberately <b>no</b> overload that takes a bare
-/// <c>name → value</c> bag: an earlier shape of this class had one, every production call site used it,
-/// and the column-aware overload — the one whose own documentation said it was mandatory — ended up with
-/// zero callers while its tests kept passing. Choosing the mapping from the value's own type is the same
-/// class of silent miss as formatting it: a <c>uuid</c> column compared against a value that arrived as a
-/// <see cref="string"/>, or a <c>date</c> column against a <see cref="DateTimeOffset"/>, matches nothing
-/// and raises nothing.
+/// <b>The column is the authority, not the value — and that is enforced by the data, not by a
+/// convention.</b> The representation EF wrote is decided by the column's CLR type, so
+/// <see cref="Bind(IEntityType, IReadOnlyDictionary{string, BoundValue})"/> dispatches on each
+/// <see cref="BoundValue"/>'s declared <see cref="BoundValueOrigin"/> — and a <see cref="BoundValue"/>
+/// cannot be constructed without naming one. There is deliberately <b>no</b> member taking a bare
+/// <c>name → value</c> bag: an earlier shape of this class had one, every production call site used it, and
+/// the column-aware overload — the one whose own documentation said it was mandatory — ended up with zero
+/// callers while its tests kept passing. Choosing the mapping from the value's own type is the same class of
+/// silent miss as formatting it: a <c>uuid</c> column compared against a value that arrived as a
+/// <see cref="string"/>, or a <c>date</c> column against a <see cref="DateTimeOffset"/>, matches nothing and
+/// raises nothing.
 /// </para>
 /// <para>
-/// The two values with no column behind them each have their own narrowly named path, so neither can be
-/// reached for by a caller who really is binding a caller value: <see cref="BindPolicyPredicate"/> for a
-/// rendered <c>SqlPredicate</c>'s bag (which records names and values only — see
-/// <see cref="BoundValue.FromPolicyPredicate"/> for why the CEL type checker makes that sufficient) and the
-/// framework arm of <see cref="Bind(IEntityType, IReadOnlyDictionary{string, BoundValue})"/> for the page's
-/// row limit.
+/// <b>There is exactly one entry point, and that is the second half of the same lesson.</b> This class used
+/// to expose two more — <c>BindColumnValue</c> and <c>BindPolicyPredicate</c> — whose names read as the
+/// production seams while <em>neither had a production call site</em>, the fourth appearance in this codebase
+/// of the very defect the paragraph above records. They are gone. The origins they distinguished are
+/// distinguished by <see cref="BoundValueOrigin"/> instead, where the compiler enforces the distinction
+/// rather than a member name suggesting it.
 /// </para>
 /// </remarks>
 internal sealed class PredicateParameterBinder
@@ -83,33 +84,6 @@ internal sealed class PredicateParameterBinder
         using var command = _connection.CreateCommand();
 
         return [.. parameters.Select(pair => Bind(command, rows, pair.Key, pair.Value))];
-    }
-
-    /// <summary>
-    /// Binds a rendered policy predicate's bag, whose values carry no column. Named for exactly that case so
-    /// it cannot stand in for <see cref="BindColumnValue"/>.
-    /// </summary>
-    /// <param name="parameters">The rendered predicate's values, by parameter name.</param>
-    internal DbParameter[] BindPolicyPredicate(IReadOnlyDictionary<string, object?> parameters)
-    {
-        ArgumentNullException.ThrowIfNull(parameters);
-        using var command = _connection.CreateCommand();
-
-        return [.. parameters.Select(pair => WithoutColumn(command, pair.Key, pair.Value))];
-    }
-
-    /// <summary>
-    /// Binds <paramref name="value"/> for a comparison against <paramref name="column"/> — through that
-    /// column's own type mapping, and after converting the value to the column's CLR type.
-    /// </summary>
-    /// <exception cref="InvalidOperationException"><paramref name="column"/> cannot hold <paramref name="value"/>.</exception>
-    internal DbParameter BindColumnValue(IProperty column, string name, object? value)
-    {
-        ArgumentNullException.ThrowIfNull(column);
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        using var command = _connection.CreateCommand();
-
-        return BindThroughColumn(command, column, name, value);
     }
 
     private DbParameter Bind(DbCommand command, IEntityType rows, string name, BoundValue bound) => bound.Origin switch

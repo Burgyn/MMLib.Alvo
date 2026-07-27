@@ -25,7 +25,7 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
 
         using var context = factory.Create();
         var binder = new PredicateParameterBinder(context);
-        var matched = await CountAsync(context, CountByOwner, binder.BindPolicyPredicate(Bag(PolicyParameterPrefix.Using + "0", ownerId)));
+        var matched = await CountAsync(context, CountByOwner, BindWithoutColumn(context, PolicyParameterPrefix.Using + "0", ownerId));
 
         matched.ShouldBe(1);
     }
@@ -73,8 +73,7 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
         var factory = await FactoryAsync();
         using var context = factory.Create();
 
-        new PredicateParameterBinder(context)
-            .BindColumnValue(Column(context, field), PolicyParameterPrefix.Filter + "0", SampleFor(field))
+        BindThroughColumn(context, field, PolicyParameterPrefix.Filter + "0", SampleFor(field))
             .DbType.ShouldBe(expected);
     }
 
@@ -96,9 +95,7 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
         var factory = await FactoryAsync();
         using var context = factory.Create();
 
-        new PredicateParameterBinder(context)
-            .BindPolicyPredicate(Bag(PolicyParameterPrefix.Using + "0", SampleFor(field)))
-            .Single()
+        BindWithoutColumn(context, PolicyParameterPrefix.Using + "0", SampleFor(field))
             .DbType.ShouldBe(expected);
     }
 
@@ -114,8 +111,7 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
         var factory = await FactoryAsync();
         using var context = factory.Create();
 
-        new PredicateParameterBinder(context)
-            .BindColumnValue(Column(context, "created_at"), PolicyParameterPrefix.Filter + "0", null)
+        BindThroughColumn(context, "created_at", PolicyParameterPrefix.Filter + "0", null)
             .DbType.ShouldBe(DbType.DateTimeOffset);
     }
 
@@ -132,8 +128,7 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
         var factory = await SeededFactoryAsync(ownerId);
 
         using var context = factory.Create();
-        var bound = new PredicateParameterBinder(context)
-            .BindColumnValue(Column(context, "owner_id"), PolicyParameterPrefix.Using + "0", ownerId.ToString("D", CultureInfo.InvariantCulture));
+        var bound = BindThroughColumn(context, "owner_id", PolicyParameterPrefix.Using + "0", ownerId.ToString("D", CultureInfo.InvariantCulture));
 
         (await CountAsync(context, CountByOwner, bound)).ShouldBe(1);
     }
@@ -152,9 +147,7 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
         await AlvoDataSeed.SeedAsync(factory, Seed(Guid.NewGuid(), dueOn), TestContext.Current.CancellationToken);
 
         using var context = factory.Create();
-        var bound = new PredicateParameterBinder(context).BindColumnValue(
-            Column(context, "due_on"),
-            PolicyParameterPrefix.Using + "0",
+        var bound = BindThroughColumn(context, "due_on", PolicyParameterPrefix.Using + "0",
             new DateTimeOffset(dueOn.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero));
 
         var matched = await CountAsync(
@@ -175,7 +168,7 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
         var binder = new PredicateParameterBinder(context);
 
         Should.Throw<InvalidOperationException>(
-            () => binder.BindColumnValue(Column(context, "owner_id"), PolicyParameterPrefix.Filter + "0", "not-a-uuid"));
+            () => BindThroughColumn(context, "owner_id", PolicyParameterPrefix.Filter + "0", "not-a-uuid"));
     }
 
     /// <summary>
@@ -196,8 +189,7 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
         using var context = factory.Create();
         var binder = new PredicateParameterBinder(context);
 
-        Should.Throw<InvalidOperationException>(() => binder.BindColumnValue(
-            Column(context, "mileage"), PolicyParameterPrefix.Filter + "0", (decimal)fraction));
+        Should.Throw<InvalidOperationException>(() => BindThroughColumn(context, "mileage", PolicyParameterPrefix.Filter + "0", (decimal)fraction));
     }
 
     [Fact]
@@ -206,8 +198,7 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
         var factory = await FactoryAsync();
         using var context = factory.Create();
 
-        new PredicateParameterBinder(context)
-            .BindColumnValue(Column(context, "mileage"), PolicyParameterPrefix.Filter + "0", 13m)
+        BindThroughColumn(context, "mileage", PolicyParameterPrefix.Filter + "0", 13m)
             .Value.ShouldBe(13L);
     }
 
@@ -221,8 +212,7 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
         var factory = await FactoryAsync();
         using var context = factory.Create();
 
-        new PredicateParameterBinder(context)
-            .BindColumnValue(Column(context, "price"), PolicyParameterPrefix.Filter + "0", 12.7)
+        BindThroughColumn(context, "price", PolicyParameterPrefix.Filter + "0", 12.7)
             .Value.ShouldBe(12.7m);
     }
 
@@ -242,8 +232,7 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
         using var context = factory.Create();
         using var zone = new LocalTimeZone(timeZone);
 
-        new PredicateParameterBinder(context)
-            .BindColumnValue(Column(context, "created_at"), PolicyParameterPrefix.Filter + "0", "2026-07-26T10:00:00")
+        BindThroughColumn(context, "created_at", PolicyParameterPrefix.Filter + "0", "2026-07-26T10:00:00")
             .Value.ShouldBe(new DateTimeOffset(2026, 7, 26, 10, 0, 0, TimeSpan.Zero));
     }
 
@@ -258,8 +247,7 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
         using var context = factory.Create();
         using var zone = new LocalTimeZone("Pacific/Kiritimati");
 
-        new PredicateParameterBinder(context)
-            .BindColumnValue(Column(context, "created_at"), PolicyParameterPrefix.Filter + "0", "2026-07-26T10:00:00+02:00")
+        BindThroughColumn(context, "created_at", PolicyParameterPrefix.Filter + "0", "2026-07-26T10:00:00+02:00")
             .Value.ShouldBe(new DateTimeOffset(2026, 7, 26, 8, 0, 0, TimeSpan.Zero));
     }
 
@@ -285,9 +273,7 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
         var factory = await FactoryAsync();
         using var context = factory.Create();
 
-        var bound = new PredicateParameterBinder(context).BindColumnValue(
-            Column(context, "created_at"),
-            PolicyParameterPrefix.Filter + "0",
+        var bound = BindThroughColumn(context, "created_at", PolicyParameterPrefix.Filter + "0",
             new DateTimeOffset(2026, 7, 26, 10, 0, 0, TimeSpan.FromHours(2)));
 
         bound.Value.ShouldBe(new DateTimeOffset(2026, 7, 26, 8, 0, 0, TimeSpan.Zero));
@@ -311,8 +297,7 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
         using var zone = new LocalTimeZone(timeZone);
         var local = new DateTimeOffset(2026, 7, 26, 8, 0, 0, TimeSpan.Zero).ToLocalTime().LocalDateTime;
 
-        var bound = new PredicateParameterBinder(context)
-            .BindColumnValue(Column(context, "created_at"), PolicyParameterPrefix.Filter + "0", local);
+        var bound = BindThroughColumn(context, "created_at", PolicyParameterPrefix.Filter + "0", local);
 
         bound.Value.ShouldBe(new DateTimeOffset(2026, 7, 26, 8, 0, 0, TimeSpan.Zero));
         ((DateTimeOffset)bound.Value!).Offset.ShouldBe(TimeSpan.Zero);
@@ -329,10 +314,7 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
         using var context = factory.Create();
         using var zone = new LocalTimeZone("Pacific/Kiritimati");
 
-        new PredicateParameterBinder(context)
-            .BindColumnValue(
-                Column(context, "created_at"),
-                PolicyParameterPrefix.Filter + "0",
+        BindThroughColumn(context, "created_at", PolicyParameterPrefix.Filter + "0",
                 new DateTime(2026, 7, 26, 10, 0, 0, DateTimeKind.Unspecified))
             .Value.ShouldBe(new DateTimeOffset(2026, 7, 26, 10, 0, 0, TimeSpan.Zero));
     }
@@ -343,8 +325,7 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
         var factory = await FactoryAsync();
         using var context = factory.Create();
 
-        new PredicateParameterBinder(context)
-            .BindColumnValue(Column(context, "owner_id"), PolicyParameterPrefix.Filter + "0", null)
+        BindThroughColumn(context, "owner_id", PolicyParameterPrefix.Filter + "0", null)
             .Value.ShouldBe(DBNull.Value);
     }
 
@@ -354,9 +335,7 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
         var factory = await FactoryAsync();
         using var context = factory.Create();
 
-        new PredicateParameterBinder(context)
-            .BindPolicyPredicate(Bag(PolicyParameterPrefix.Filter + "0", null))
-            .Single()
+        BindWithoutColumn(context, PolicyParameterPrefix.Filter + "0", null)
             .Value.ShouldBe(DBNull.Value);
     }
 
@@ -366,8 +345,7 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
         var factory = await FactoryAsync();
         using var context = factory.Create();
 
-        new PredicateParameterBinder(context)
-            .BindColumnValue(Column(context, "id"), PolicyParameterPrefix.RowId, Guid.NewGuid())
+        BindThroughColumn(context, "id", PolicyParameterPrefix.RowId, Guid.NewGuid())
             .ParameterName.ShouldBe("@" + PolicyParameterPrefix.RowId);
     }
 
@@ -429,7 +407,7 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
         var binder = new PredicateParameterBinder(context);
 
         Should.Throw<InvalidOperationException>(
-            () => binder.BindPolicyPredicate(Bag(PolicyParameterPrefix.Filter + "0", new object())));
+            () => BindWithoutColumn(context, PolicyParameterPrefix.Filter + "0", new object()));
     }
 
     private Task<AlvoDataContextFactory> FactoryAsync() => FactoryAsync(new SchemaModel([AlvoDataFixtures.Vehicle]));
@@ -447,11 +425,30 @@ public sealed class SqliteParameterBindingTests : IAsyncDisposable
         return factory;
     }
 
-    private static Dictionary<string, object?> Bag(string name, object? value) =>
-        new(StringComparer.Ordinal) { [name] = value };
+    /// <summary>
+    /// Binds one value against a column through the <b>production</b> entry point.
+    /// </summary>
+    /// <remarks>
+    /// It goes through <c>Bind(IEntityType, …)</c> rather than a narrower member of its own, because a
+    /// narrower member is what this class used to drive: <c>BindColumnValue</c> and
+    /// <c>BindPolicyPredicate</c> had <b>zero</b> production call sites while 15 facts here exercised them —
+    /// the fourth appearance of the defect <c>PredicateParameterBinder</c>'s own remarks describe as having
+    /// already happened once. The members are gone; these two helpers say what origin the value has, which is
+    /// the only thing they ever varied.
+    /// </remarks>
+    private static DbParameter BindThroughColumn(
+        AlvoDataContext context, string field, string name, object? value) =>
+        Bound(context, name, BoundValue.ForColumn(field, value));
 
-    private static IProperty Column(DbContext context, string field) =>
-        context.Model.FindEntityType("vehicle")!.FindProperty(field)!;
+    /// <summary>Binds one value with no column behind it — a rendered policy predicate's bag.</summary>
+    private static DbParameter BindWithoutColumn(AlvoDataContext context, string name, object? value) =>
+        Bound(context, name, BoundValue.FromPolicyPredicate(value));
+
+    private static DbParameter Bound(AlvoDataContext context, string name, BoundValue bound) =>
+        new PredicateParameterBinder(context).Bind(
+            Rows(context), new Dictionary<string, BoundValue>(StringComparer.Ordinal) { [name] = bound })[0];
+
+    private static IEntityType Rows(AlvoDataContext context) => context.Model.FindEntityType("vehicle")!;
 
     private static object SampleFor(string field) => field switch
     {

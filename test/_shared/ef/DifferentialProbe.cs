@@ -68,7 +68,8 @@ internal sealed class DifferentialProbe(
         using var context = contexts.Create();
         await using var command = await CommandAsync(
             context, $"SELECT COUNT(*) FROM {dialect.RenderTable(entity)} WHERE {predicate.Sql}");
-        command.Parameters.AddRange(new PredicateParameterBinder(context).BindPolicyPredicate(predicate.Parameters));
+        command.Parameters.AddRange(
+            PolicyPredicateParameters.Bind(context, context.Rows(entity.Name).EntityType, predicate.Parameters));
 
         return Convert.ToInt64(await command.ExecuteScalarAsync(Token), CultureInfo.InvariantCulture);
     }
