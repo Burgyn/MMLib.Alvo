@@ -990,6 +990,25 @@ namespace MMLib.Alvo.Rules
 }
 namespace MMLib.Alvo.Schema
 {
+    public static class AlvoAuditStamp
+    {
+        public static System.Collections.Generic.IReadOnlyDictionary<string, object?> Applied(MMLib.Alvo.Schema.EntitySchema entity, System.Collections.Generic.IReadOnlyDictionary<string, object?> values, MMLib.Alvo.AlvoContext context, System.TimeProvider time, bool isUpdate) { }
+    }
+    public static class AlvoManagedColumns
+    {
+        public static System.Collections.Generic.IReadOnlyList<string> Audit { get; }
+        public static string CreatedAt { get; }
+        public static string CreatedBy { get; }
+        public static string DeletedAt { get; }
+        public static string Id { get; }
+        public static string TenantId { get; }
+        public static string UpdatedAt { get; }
+        public static string UpdatedBy { get; }
+        public static System.Collections.Generic.IReadOnlySet<string> For(MMLib.Alvo.Schema.EntitySchema entity) { }
+        public static System.Collections.Generic.IReadOnlySet<string> For(MMLib.Alvo.Schema.TenancyMode? tenancy, bool audit, bool softDelete) { }
+        public static bool IsCallerWritable(string column, bool isUpdate) { }
+        public static string RefusalReason(string column, bool isUpdate) { }
+    }
     public sealed class EntitySchema : System.IEquatable<MMLib.Alvo.Schema.EntitySchema>
     {
         public EntitySchema() { }

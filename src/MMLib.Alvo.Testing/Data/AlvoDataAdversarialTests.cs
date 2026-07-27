@@ -832,6 +832,96 @@ public abstract class AlvoDataAdversarialTests
     }
 
     /// <summary>
+    /// The audit trail is the framework's to write, on every managed column and on both write paths.
+    /// A caller that could supply <c>created_by</c> could create a row asserting a victim authored it —
+    /// and on <c>create</c> there is no <c>USING</c> predicate to contradict the claim, only
+    /// <c>WITH CHECK</c>, so a create rule that is anything other than a <c>created_by</c> comparison
+    /// admits it. A caller that could supply <c>created_at</c>/<c>updated_at</c> could back-date the
+    /// record. Both were live on both engines: the guard knew <c>id</c> and <c>tenant_id</c> while the
+    /// schema mapper injected six columns.
+    /// </summary>
+    /// <remarks>
+    /// The refusal is <see cref="AlvoAuthorizationException"/> like every other unwritable-field refusal,
+    /// and it is decided from the payload alone, before any row is looked up — so it can never answer
+    /// "does this row exist". The ordinary field is written in the same act, so the refusal cannot be
+    /// satisfied by refusing the whole payload.
+    /// </remarks>
+    [Fact]
+    public async Task A_payload_can_never_write_a_framework_managed_audit_column()
+    {
+        var fixture = await InvoicesFixtureAsync();
+        var caller = fixture.Caller;
+
+        foreach (var column in AlvoManagedColumns.Audit)
+        {
+            await Should.ThrowAsync<AlvoAuthorizationException>(() => fixture.Data.CreateAsync(
+                "invoices", Payload(("title", "forged"), (column, ForgedValue(column))), caller));
+            await Should.ThrowAsync<AlvoAuthorizationException>(() => fixture.Data.UpdateAsync(
+                "invoices", fixture.RowId, Payload((column, ForgedValue(column))), caller));
+        }
+
+        var updated = await fixture.Data.UpdateAsync("invoices", fixture.RowId, Payload(("title", "renamed")), caller);
+        updated["title"].ShouldBe("renamed");
+    }
+
+    /// <summary>
+    /// And the columns are actually populated, by the framework, from the caller's own identity and the
+    /// implementation's clock. This is the half that makes the refusal above usable rather than merely
+    /// safe: <c>created_at</c>/<c>updated_at</c> are <c>required</c>, so before this an audited create
+    /// <b>failed</b> unless the caller supplied the very columns they may not write.
+    /// </summary>
+    [Fact]
+    public async Task An_audited_create_stamps_the_caller_and_the_implementations_clock()
+    {
+        var fixture = await InvoicesFixtureAsync();
+        var before = DateTimeOffset.UtcNow.AddSeconds(-5);
+
+        var created = await fixture.Data.CreateAsync("invoices", Payload(("title", "new")), fixture.Caller);
+        var after = DateTimeOffset.UtcNow.AddSeconds(5);
+
+        created[AlvoManagedColumns.CreatedBy].ShouldBe(fixture.Caller.User.Value);
+        created[AlvoManagedColumns.UpdatedBy].ShouldBe(fixture.Caller.User.Value);
+        Stamp(created, AlvoManagedColumns.CreatedAt).ShouldBeInRange(before, after);
+        Stamp(created, AlvoManagedColumns.UpdatedAt).ShouldBe(Stamp(created, AlvoManagedColumns.CreatedAt));
+
+        var reread = await fixture.Data.GetAsync("invoices", (Guid)created["id"]!, fixture.Caller);
+        reread.ShouldNotBeNull();
+        reread![AlvoManagedColumns.CreatedBy].ShouldBe(fixture.Caller.User.Value);
+    }
+
+    /// <summary>
+    /// An update stamps who wrote it and when, and leaves the creation record alone — an implementation
+    /// that stamped all four on every write would erase the authorship the audit trail exists to record.
+    /// </summary>
+    [Fact]
+    public async Task An_audited_update_stamps_the_updater_and_never_rewrites_the_creator()
+    {
+        var fixture = await InvoicesFixtureAsync();
+        var created = await fixture.Data.CreateAsync("invoices", Payload(("title", "new")), fixture.Caller);
+        var second = NewContext(tenant: null);
+
+        var updated = await fixture.Data.UpdateAsync(
+            "invoices", (Guid)created["id"]!, Payload(("title", "renamed")), second);
+
+        updated[AlvoManagedColumns.UpdatedBy].ShouldBe(second.User.Value);
+        updated[AlvoManagedColumns.CreatedBy].ShouldBe(fixture.Caller.User.Value);
+        Stamp(updated, AlvoManagedColumns.CreatedAt).ShouldBe(Stamp(created, AlvoManagedColumns.CreatedAt));
+        Stamp(updated, AlvoManagedColumns.UpdatedAt).ShouldBeGreaterThanOrEqualTo(Stamp(created, AlvoManagedColumns.UpdatedAt));
+    }
+
+    private static DateTimeOffset Stamp(AlvoRecord row, string column) =>
+        ((DateTimeOffset)row[column]!).ToUniversalTime();
+
+    /// <summary>A value of the column's own type, so the refusal cannot be a type failure in disguise.</summary>
+    private static object ForgedValue(string column) => column == AlvoManagedColumns.CreatedBy
+        || column == AlvoManagedColumns.UpdatedBy
+            ? Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd")
+            : new DateTimeOffset(1989, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+    private static Dictionary<string, object?> Payload(params (string Field, object? Value)[] fields) =>
+        fields.ToDictionary(pair => pair.Field, pair => pair.Value, StringComparer.Ordinal);
+
+    /// <summary>
     /// Reserved parity leg: analysis §2.1 requires this whole suite to pass identically over a dynamic
     /// (metadata-driven) entity, and PR2's obligation was only to leave the mechanism capable of it —
     /// which it does by making the storage shape an <c>IAlvoSqlDialect</c> + <c>IFieldSqlRenderer</c>
@@ -860,6 +950,36 @@ public abstract class AlvoDataAdversarialTests
         IAlvoData Data, TenantId Acme, TenantId Globex, TenantId Third, Guid AcmeRowId, Guid GlobexRowId, Guid ThirdRowId);
 
     private sealed record AccountsFixture(IAlvoData Data, Guid RowId, Guid SecondRowId);
+
+    private sealed record InvoicesFixture(IAlvoData Data, AlvoContext Caller, Guid RowId);
+
+    /// <summary>
+    /// A global entity declaring <c>audit</c>, so the framework injects and owns the audit quartet. The
+    /// seeded row carries its own audit values, because seeding bypasses policy by design and the two
+    /// timestamp columns are <c>required</c>.
+    /// </summary>
+    private async Task<InvoicesFixture> InvoicesFixtureAsync()
+    {
+        var fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
+        {
+            ["title"] = new() { Type = DescField.String },
+        };
+        var rules = new AccessRules { List = "true", Get = "true", Create = "true", Update = "true", Delete = "true" };
+        var (descriptor, schema) = BuildFixture("invoices", fields, EntityTenancy.Global, rules, audit: true);
+
+        var seeded = new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var rowId = Guid.NewGuid();
+        var seed = SeedOf(
+            "invoices",
+            Row(
+                rowId,
+                ("title", "Seeded"),
+                (AlvoManagedColumns.CreatedAt, seeded),
+                (AlvoManagedColumns.UpdatedAt, seeded)));
+
+        var data = await CreateAsync(schema, descriptor, seed);
+        return new InvoicesFixture(data, NewContext(tenant: null), rowId);
+    }
 
     private async Task<NotesFixture> NotesFixtureAsync()
     {
@@ -978,15 +1098,26 @@ public abstract class AlvoDataAdversarialTests
     }
 
     /// <summary>
-    /// Builds a matching (descriptor, schema) pair for one entity, by hand mirroring the id/tenant_id
-    /// column injection <c>DescriptorToSchemaMapper</c> performs in the core — that mapper is
+    /// Builds a matching (descriptor, schema) pair for one entity, by hand mirroring the managed-column
+    /// injection <c>DescriptorToSchemaMapper</c> performs in the core — that mapper is
     /// <see langword="internal"/>, unreachable from this project, so this local mirror keeps the two
-    /// in sync manually. Limited to the F3 subset this suite needs (no audit/soft-delete columns).
+    /// in sync manually. <em>Which</em> columns are managed is not mirrored: that comes from
+    /// <see cref="AlvoManagedColumns"/>, the same authority the mapper and every driver's write guard read,
+    /// so only each column's shape is restated here.
     /// </summary>
+    /// <param name="entity">The entity name.</param>
+    /// <param name="fields">The entity's declared fields.</param>
+    /// <param name="tenancy">The entity's tenancy.</param>
+    /// <param name="rules">The entity's access rules, or <see langword="null"/> for none.</param>
+    /// <param name="audit">Whether the entity declares <c>audit</c>, and therefore carries the audit quartet.</param>
     private static (AlvoDescriptor Descriptor, SchemaModel Schema) BuildFixture(
-        string entity, Dictionary<string, FieldDescriptor> fields, EntityTenancy tenancy, AccessRules? rules)
+        string entity,
+        Dictionary<string, FieldDescriptor> fields,
+        EntityTenancy tenancy,
+        AccessRules? rules,
+        bool audit = false)
     {
-        var entityDescriptor = new EntityDescriptor { Fields = fields, Tenancy = tenancy, Rules = rules };
+        var entityDescriptor = new EntityDescriptor { Fields = fields, Tenancy = tenancy, Rules = rules, Audit = audit };
         var descriptor = new AlvoDescriptor
         {
             ApiVersion = "alvo.dev/v1",
@@ -994,25 +1125,45 @@ public abstract class AlvoDataAdversarialTests
             Entities = new Dictionary<string, EntityDescriptor>(StringComparer.Ordinal) { [entity] = entityDescriptor },
         };
 
+        var tenancyMode = tenancy == EntityTenancy.Scoped ? TenancyMode.Scoped : TenancyMode.Global;
         var schemaFields = new List<FieldSchema>();
-        if (!fields.ContainsKey("id"))
-        {
-            schemaFields.Add(new FieldSchema { Name = "id", Type = SchemaField.Uuid, Required = true });
-        }
-
         foreach (var (name, field) in fields)
         {
             schemaFields.Add(ToFieldSchema(name, field));
         }
 
-        var tenancyMode = tenancy == EntityTenancy.Scoped ? TenancyMode.Scoped : TenancyMode.Global;
-        if (tenancyMode == TenancyMode.Scoped)
+        var managedColumns = AlvoManagedColumns.For(tenancyMode, audit, softDelete: false);
+        foreach (var managed in managedColumns.Where(column => !fields.ContainsKey(column)))
         {
-            schemaFields.Add(new FieldSchema { Name = "tenant_id", Type = SchemaField.Uuid, Required = true, Indexed = true });
+            schemaFields.Add(ManagedFieldSchema(managed));
         }
 
-        var schema = new SchemaModel([new EntitySchema { Name = entity, Tenancy = tenancyMode, Fields = schemaFields }]);
+        var schema = new SchemaModel([
+            new EntitySchema { Name = entity, Tenancy = tenancyMode, Audit = audit, Fields = schemaFields }]);
         return (descriptor, schema);
+    }
+
+    /// <summary>One managed column's shape, as the core's own mapper declares it.</summary>
+    private static FieldSchema ManagedFieldSchema(string column)
+    {
+        if (column == AlvoManagedColumns.Id)
+        {
+            return new() { Name = column, Type = SchemaField.Uuid, Required = true };
+        }
+
+        if (column == AlvoManagedColumns.TenantId)
+        {
+            return new() { Name = column, Type = SchemaField.Uuid, Required = true, Indexed = true };
+        }
+
+        if (column == AlvoManagedColumns.CreatedAt || column == AlvoManagedColumns.UpdatedAt)
+        {
+            return new() { Name = column, Type = SchemaField.DateTime, Required = true };
+        }
+
+        return column == AlvoManagedColumns.CreatedBy || column == AlvoManagedColumns.UpdatedBy
+            ? new FieldSchema { Name = column, Type = SchemaField.Uuid, Nullable = true }
+            : throw new ArgumentOutOfRangeException(nameof(column), column, "Unmirrored managed column.");
     }
 
     private static FieldSchema ToFieldSchema(string name, FieldDescriptor field) => new()

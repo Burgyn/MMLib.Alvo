@@ -14,23 +14,31 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// the row was never consulted.
 /// </para>
 /// <para>
-/// The two framework columns are handled asymmetrically on purpose. <c>id</c> is assigned once, by this
-/// provider, and rewriting it would corrupt row identity — two rows sharing one id, and the row whose id
-/// was taken becoming unreachable. <c>tenant_id</c> is legitimately caller-supplied on a create, where
-/// the synthesized tenant scope over the candidate row decides whether that tenant is allowed; on an
-/// update it is refused outright, because a row can never move to another tenant once created. Neither
-/// column is ever a descriptor-declared field, so neither can appear in
-/// <see cref="PolicyDecision.ReadOnlyFields"/> — the read-only check alone would let both through.
+/// <b>Which columns are framework-managed is asked, not remembered.</b>
+/// <see cref="AlvoManagedColumns.For(EntitySchema)"/> answers it from the entity's own traits — the same
+/// question, of the same inputs, that the descriptor mapper injects those columns from. This method used
+/// to name two columns while the mapper injected six, and the four it did not know about were
+/// caller-writable: a create could assert a victim authored the row and an update could back-date it,
+/// with no rule violated on either engine. An enumeration in the guard is exactly what went stale, so
+/// there is none.
+/// </para>
+/// <para>
+/// The one asymmetry is <c>tenant_id</c> on a create, and it lives in
+/// <see cref="AlvoManagedColumns.IsCallerWritable"/> with its reason: a create legitimately places a row
+/// in a tenant, and the synthesized tenant scope over the candidate row decides whether that tenant is
+/// allowed. No managed column is ever a descriptor-declared field on an entity the framework manages it
+/// for, so none can appear in <see cref="PolicyDecision.ReadOnlyFields"/> — the read-only check alone
+/// would let every one of them through.
 /// </para>
 /// <para>
 /// A <c>hidden</c> field is deliberately still writable: <c>hidden</c> restricts reading, and refusing a
 /// write to one would tell the caller the field exists.
 /// </para>
 /// <para>
-/// The messages are word for word <c>InMemoryAlvoData</c>'s, so the reference implementation and this one
-/// answer the same refusal with the same text — the adversarial suite asserts on the read-only message
-/// naming its field, and a divergence there would be a real inconsistency between two implementations of
-/// one port.
+/// The messages are word for word <c>InMemoryAlvoData</c>'s, because both read them from
+/// <see cref="AlvoManagedColumns.RefusalReason"/> — the reference implementation and this one answer the
+/// same refusal with the same text, and the adversarial suite asserts on the read-only message naming its
+/// field.
 /// </para>
 /// </remarks>
 internal static class WritePayloadGuard
@@ -48,13 +56,32 @@ internal static class WritePayloadGuard
         ArgumentNullException.ThrowIfNull(decision);
 
         QueryFieldGuard.EnsureDeclared(values, entity);
-        Refuse(values, AlvoDataContext.IdColumn, IdReason(isUpdate));
-        if (isUpdate)
+        EnsureNoManagedColumnWrite(values, entity, isUpdate);
+        EnsureNoReadOnlyWrite(values, decision.ReadOnlyFields);
+    }
+
+    /// <summary>
+    /// Refuses every column the framework manages for this entity that a caller may not supply on this
+    /// path. An entity the applied schema does not declare has already been refused by
+    /// <see cref="QueryFieldGuard.EnsureDeclared"/>, so the row key is still covered.
+    /// </summary>
+    private static void EnsureNoManagedColumnWrite(
+        IReadOnlyDictionary<string, object?> values, EntitySchema? entity, bool isUpdate)
+    {
+        if (entity is null)
         {
-            Refuse(values, AlvoDataContext.TenantIdColumn, TenantReason);
+            return;
         }
 
-        EnsureNoReadOnlyWrite(values, decision.ReadOnlyFields);
+        var refused = AlvoManagedColumns.For(entity)
+            .Where(column => !AlvoManagedColumns.IsCallerWritable(column, isUpdate))
+            .Where(values.ContainsKey);
+
+        foreach (var column in refused)
+        {
+            throw new AlvoAuthorizationException(
+                $"Field '{column}' {AlvoManagedColumns.RefusalReason(column, isUpdate)}.");
+        }
     }
 
     private static void EnsureNoReadOnlyWrite(
@@ -65,18 +92,4 @@ internal static class WritePayloadGuard
             throw new AlvoAuthorizationException($"Field '{field}' is read-only and cannot be written.");
         }
     }
-
-    private static void Refuse(IReadOnlyDictionary<string, object?> values, string field, string reason)
-    {
-        if (values.ContainsKey(field))
-        {
-            throw new AlvoAuthorizationException($"Field '{field}' {reason}.");
-        }
-    }
-
-    private static string IdReason(bool isUpdate) => isUpdate
-        ? "is assigned once at creation and can never be rewritten"
-        : "is assigned by the store and cannot be supplied on create";
-
-    private const string TenantReason = "is fixed at creation and a row can never move to another tenant";
 }

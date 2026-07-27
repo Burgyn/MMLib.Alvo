@@ -77,6 +77,7 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task A_nullable_boolean_field_used_bare_in_a_rule_works_end_to_end() { }
         public System.Threading.Tasks.Task A_paged_read_sorted_by_a_nullable_field_is_refused_rather_than_dropping_rows() { }
         public System.Threading.Tasks.Task A_paged_read_sorted_by_a_required_field_still_answers() { }
+        public System.Threading.Tasks.Task A_payload_can_never_write_a_framework_managed_audit_column() { }
         public System.Threading.Tasks.Task A_query_limit_is_applied_after_the_policy_predicate_not_before() { }
         public System.Threading.Tasks.Task A_query_with_no_context_at_all_throws_rather_than_defaulting_to_anyone() { }
         public System.Threading.Tasks.Task A_query_with_no_tenant_context_fails_rather_than_returning_every_tenants_rows() { }
@@ -87,6 +88,8 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task A_uuid_rule_over_a_dynamic_entity_matches_rows_on_every_engine() { }
         public System.Threading.Tasks.Task A_write_to_a_read_only_field_is_rejected_rather_than_silently_dropped() { }
         public System.Threading.Tasks.Task An_admin_rule_over_the_role_set_matches_a_multi_role_caller() { }
+        public System.Threading.Tasks.Task An_audited_create_stamps_the_caller_and_the_implementations_clock() { }
+        public System.Threading.Tasks.Task An_audited_update_stamps_the_updater_and_never_rewrites_the_creator() { }
         public System.Threading.Tasks.Task An_entity_with_no_rule_denies_every_operation() { }
         public System.Threading.Tasks.Task An_operation_with_no_rule_denies_while_its_siblings_work() { }
         protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Data.IAlvoData> CreateAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, System.Collections.Generic.IReadOnlyDictionary<string, System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRecord>> seed);
@@ -227,7 +230,7 @@ namespace MMLib.Alvo.Testing.Data
     }
     public sealed class InMemoryAlvoData : MMLib.Alvo.Data.IAlvoData
     {
-        public InMemoryAlvoData(MMLib.Alvo.Rules.IPolicyEngine policy, MMLib.Alvo.Expressions.IPredicateEvaluator evaluator, MMLib.Alvo.Schema.SchemaModel schema) { }
+        public InMemoryAlvoData(MMLib.Alvo.Rules.IPolicyEngine policy, MMLib.Alvo.Expressions.IPredicateEvaluator evaluator, MMLib.Alvo.Schema.SchemaModel schema, System.TimeProvider? time = null) { }
         public System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord> CreateAsync(string entity, System.Collections.Generic.IReadOnlyDictionary<string, object?> values, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default) { }
         public System.Threading.Tasks.Task DeleteAsync(string entity, System.Guid id, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default) { }
         public System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord?> GetAsync(string entity, System.Guid id, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default) { }

@@ -26,12 +26,12 @@ namespace MMLib.Alvo.Testing.Data;
 /// </remarks>
 public sealed class InMemoryAlvoData : IAlvoData
 {
-    private const string IdField = "id";
-    private const string TenantIdField = "tenant_id";
+    private static string IdField => AlvoManagedColumns.Id;
 
     private readonly IPolicyEngine _policy;
     private readonly IPredicateEvaluator _evaluator;
     private readonly SchemaModel _schema;
+    private readonly TimeProvider _time;
     private readonly Dictionary<string, List<AlvoRecord>> _rows = new(StringComparer.Ordinal);
     private readonly Lock _gate = new();
 
@@ -43,7 +43,14 @@ public sealed class InMemoryAlvoData : IAlvoData
     /// field the entity does not declare, so this fake and a real provider (which would reject the
     /// same payload as an unknown-column SQL error) agree.
     /// </param>
-    public InMemoryAlvoData(IPolicyEngine policy, IPredicateEvaluator evaluator, SchemaModel schema)
+    /// <param name="time">
+    /// The clock an <c>audit</c> entity's timestamps are stamped from; <see cref="TimeProvider.System"/>
+    /// when omitted. Injected rather than read inline for the reason
+    /// <see cref="AlvoAuditStamp"/> gives — a stamped instant is exactly the kind of behaviour a test
+    /// has to be able to pin.
+    /// </param>
+    public InMemoryAlvoData(
+        IPolicyEngine policy, IPredicateEvaluator evaluator, SchemaModel schema, TimeProvider? time = null)
     {
         ArgumentNullException.ThrowIfNull(policy);
         ArgumentNullException.ThrowIfNull(evaluator);
@@ -51,6 +58,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         _policy = policy;
         _evaluator = evaluator;
         _schema = schema;
+        _time = time ?? TimeProvider.System;
     }
 
     /// <summary>Seeds an entity with initial rows, bypassing policy.</summary>
@@ -133,11 +141,12 @@ public sealed class InMemoryAlvoData : IAlvoData
             throw Denied(decision);
         }
 
-        EnsureFieldsDeclared(entity, values);
-        EnsureNotWriting(values, IdField, "is assigned by the store and cannot be supplied on create");
+        var schema = EnsureFieldsDeclared(entity, values);
+        EnsureNoManagedColumnWrite(values, schema, isUpdate: false);
         EnsureNoReadOnlyWrite(values, decision.ReadOnlyFields);
 
-        var candidate = new Dictionary<string, object?>(values, StringComparer.Ordinal) { [IdField] = Guid.NewGuid() };
+        var stamped = AlvoAuditStamp.Applied(schema, values, context, _time, isUpdate: false);
+        var candidate = new Dictionary<string, object?>(stamped, StringComparer.Ordinal) { [IdField] = Guid.NewGuid() };
         var postImage = new AlvoRecord(candidate);
         EnsureWriteAllowed(decision, postImage, previous: null, context);
 
@@ -164,10 +173,10 @@ public sealed class InMemoryAlvoData : IAlvoData
             throw Denied(decision);
         }
 
-        EnsureFieldsDeclared(entity, values);
-        EnsureNotWriting(values, IdField, "is assigned once at creation and can never be rewritten");
-        EnsureNotWriting(values, TenantIdField, "is fixed at creation and a row can never move to another tenant");
+        var schema = EnsureFieldsDeclared(entity, values);
+        EnsureNoManagedColumnWrite(values, schema, isUpdate: true);
         EnsureNoReadOnlyWrite(values, decision.ReadOnlyFields);
+        var stamped = AlvoAuditStamp.Applied(schema, values, context, _time, isUpdate: true);
 
         lock (_gate)
         {
@@ -179,7 +188,7 @@ public sealed class InMemoryAlvoData : IAlvoData
                 throw new AlvoRecordNotFoundException();
             }
 
-            var merged = Merge(stored, values);
+            var merged = Merge(stored, stamped);
             EnsureWriteAllowed(decision, merged, stored, context);
 
             list[index] = merged;
@@ -360,17 +369,30 @@ public sealed class InMemoryAlvoData : IAlvoData
     }
 
     /// <summary>
-    /// Rejects a payload that names a framework-managed column (<c>id</c>, <c>tenant_id</c>).
-    /// Neither is ever a descriptor-declared field, so neither can ever appear in
-    /// <see cref="PolicyDecision.ReadOnlyFields"/> — <see cref="EnsureNoReadOnlyWrite"/> alone would
-    /// silently let a payload rewrite either one, corrupting row identity (two rows sharing one
-    /// <c>id</c>) or moving a row to another tenant with no rule ever consulted.
+    /// Rejects a payload that names a column the framework manages for this entity and that a caller may
+    /// not supply on this path. None of them is ever a descriptor-declared field on an entity the
+    /// framework manages it for, so none can appear in <see cref="PolicyDecision.ReadOnlyFields"/> —
+    /// <see cref="EnsureNoReadOnlyWrite"/> alone would silently let a payload corrupt row identity (two
+    /// rows sharing one <c>id</c>), move a row to another tenant, or author its audit trail, with no rule
+    /// ever consulted.
     /// </summary>
-    private static void EnsureNotWriting(IReadOnlyDictionary<string, object?> values, string field, string reason)
+    /// <remarks>
+    /// Which columns those are, and how each refusal is worded, comes from
+    /// <see cref="AlvoManagedColumns"/> rather than from a list here — the same authority a real
+    /// provider's write guard reads, so the two implementations of this port cannot come to refuse
+    /// different sets or word one refusal two ways.
+    /// </remarks>
+    private static void EnsureNoManagedColumnWrite(
+        IReadOnlyDictionary<string, object?> values, EntitySchema entity, bool isUpdate)
     {
-        if (values.ContainsKey(field))
+        var refused = AlvoManagedColumns.For(entity)
+            .Where(column => !AlvoManagedColumns.IsCallerWritable(column, isUpdate))
+            .Where(values.ContainsKey);
+
+        foreach (var column in refused)
         {
-            throw new AlvoAuthorizationException($"Field '{field}' {reason}.");
+            throw new AlvoAuthorizationException(
+                $"Field '{column}' {AlvoManagedColumns.RefusalReason(column, isUpdate)}.");
         }
     }
 
@@ -390,7 +412,7 @@ public sealed class InMemoryAlvoData : IAlvoData
     /// check: an inconsistency between the catalog and this store's schema must not be the one path on
     /// which an unvalidated payload reaches the rows.
     /// </remarks>
-    private void EnsureFieldsDeclared(string entity, IReadOnlyDictionary<string, object?> values)
+    private EntitySchema EnsureFieldsDeclared(string entity, IReadOnlyDictionary<string, object?> values)
     {
         var entitySchema = FindEntity(entity)
             ?? throw new AlvoAuthorizationException(UndeclaredPayloadFieldMessage);
@@ -403,6 +425,8 @@ public sealed class InMemoryAlvoData : IAlvoData
                 throw new AlvoAuthorizationException(UndeclaredPayloadFieldMessage);
             }
         }
+
+        return entitySchema;
     }
 
     private const string UndeclaredPayloadFieldMessage = "The payload names a field that is not writable on this entity.";

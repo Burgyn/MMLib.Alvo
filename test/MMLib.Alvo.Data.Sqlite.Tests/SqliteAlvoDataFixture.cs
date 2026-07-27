@@ -25,13 +25,18 @@ public sealed class SqliteAlvoDataFixture : IAsyncDisposable
     /// <summary>Creates a database, migrates <paramref name="schema"/> into it and primes the policy catalog.</summary>
     /// <param name="schema">The schema to migrate and compile the rules against.</param>
     /// <param name="descriptor">The descriptor whose rules are compiled; a permissive minimal one by default.</param>
-    public async Task<AlvoDataHost> StartAsync(SchemaModel schema, AlvoDescriptor? descriptor = null)
+    /// <param name="time">
+    /// The clock the data path stamps an <c>audit</c> entity's timestamps from; the system clock by default.
+    /// Registered before the driver's own <c>TryAdd</c>, which is the same seam a host would use.
+    /// </param>
+    public async Task<AlvoDataHost> StartAsync(
+        SchemaModel schema, AlvoDescriptor? descriptor = null, TimeProvider? time = null)
     {
         ArgumentNullException.ThrowIfNull(schema);
 
         var path = NewDatabaseFile();
         var dialect = new LockRecordingSqlDialect();
-        var services = BuildProvider(path, dialect);
+        var services = BuildProvider(path, dialect, time);
         await MigrateAsync(services, schema);
 
         var capture = NewCapture(path);
@@ -60,10 +65,15 @@ public sealed class SqliteAlvoDataFixture : IAsyncDisposable
     /// place. That is the same seam a host would use to swap a dialect — the data port is still the one the
     /// container composed, not one a test built by hand.
     /// </summary>
-    private ServiceProvider BuildProvider(string path, IAlvoSqlDialect dialect)
+    private ServiceProvider BuildProvider(string path, IAlvoSqlDialect dialect, TimeProvider? time)
     {
         var builder = new FixtureAlvoBuilder(new ServiceCollection());
         builder.Services.AddSingleton(dialect);
+        if (time is not null)
+        {
+            builder.Services.AddSingleton(time);
+        }
+
         builder.UseSqlite($"Data Source={path}");
         builder.Services.AddAlvo();
 

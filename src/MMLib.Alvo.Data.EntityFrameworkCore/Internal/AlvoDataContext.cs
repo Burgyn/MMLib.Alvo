@@ -41,8 +41,11 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// </remarks>
 internal sealed class AlvoDataContext : DbContext
 {
-    internal const string IdColumn = "id";
-    internal const string TenantIdColumn = "tenant_id";
+    /// <inheritdoc cref="AlvoManagedColumns.Id"/>
+    internal static string IdColumn => AlvoManagedColumns.Id;
+
+    /// <inheritdoc cref="AlvoManagedColumns.TenantId"/>
+    internal static string TenantIdColumn => AlvoManagedColumns.TenantId;
 
     private readonly SchemaModel _schema;
 

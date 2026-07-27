@@ -75,6 +75,7 @@ public static class AlvoEfCoreProvider
         builder.Services.TryAddSingleton(services => new AlvoDataContextFactory(
             services.GetRequiredService<ISchemaRegistry>(),
             options => registration.ConfigureProvider(options, registration.ConnectionString(services))));
+        builder.Services.TryAddSingleton(TimeProvider.System);
         builder.Services.TryAddSingleton(registration.Fields);
         builder.Services.TryAddSingleton(registration.Dialect);
         builder.Services.TryAddSingleton<IAlvoData>(CreateData);
@@ -88,7 +89,8 @@ public static class AlvoEfCoreProvider
         services.GetRequiredService<IPredicateRenderer>(),
         services.GetRequiredService<IFieldSqlRenderer>(),
         services.GetRequiredService<IAlvoSqlDialect>(),
-        services.GetRequiredService<AlvoDataContextFactory>());
+        services.GetRequiredService<AlvoDataContextFactory>(),
+        services.GetRequiredService<TimeProvider>());
 
     private static RelationalConnectionFactory CreateConnectionFactory(IServiceProvider services, RelationalProviderRegistration registration)
     {

@@ -38,6 +38,7 @@ internal sealed class EfAlvoData : IAlvoData
     private readonly IPredicateEvaluator _evaluator;
     private readonly ReadStatementComposer _statements;
     private readonly AlvoDataContextFactory _contexts;
+    private readonly TimeProvider _time;
 
     internal EfAlvoData(
         IPolicyEngine policy,
@@ -45,7 +46,8 @@ internal sealed class EfAlvoData : IAlvoData
         IPredicateRenderer predicates,
         IFieldSqlRenderer fields,
         IAlvoSqlDialect dialect,
-        AlvoDataContextFactory contexts)
+        AlvoDataContextFactory contexts,
+        TimeProvider time)
     {
         ArgumentNullException.ThrowIfNull(policy);
         ArgumentNullException.ThrowIfNull(evaluator);
@@ -53,10 +55,12 @@ internal sealed class EfAlvoData : IAlvoData
         ArgumentNullException.ThrowIfNull(fields);
         ArgumentNullException.ThrowIfNull(dialect);
         ArgumentNullException.ThrowIfNull(contexts);
+        ArgumentNullException.ThrowIfNull(time);
         _policy = policy;
         _evaluator = evaluator;
         _statements = new ReadStatementComposer(predicates, fields, dialect);
         _contexts = contexts;
+        _time = time;
     }
 
     /// <inheritdoc/>
@@ -114,7 +118,7 @@ internal sealed class EfAlvoData : IAlvoData
         var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
         WritePayloadGuard.EnsureWritable(values, schema, decision, isUpdate: false);
 
-        var candidate = Candidate(db.Rows(entity).EntityType, values);
+        var candidate = Candidate(db.Rows(entity).EntityType, Stamped(schema, values, context, isUpdate: false));
         EnsureWriteAllowed(decision, RecordMaterializer.ToRecord(candidate, _noMask), previous: null, context);
 
         db.Rows(entity).Add(candidate);
@@ -180,11 +184,26 @@ internal sealed class EfAlvoData : IAlvoData
         WritePayloadGuard.EnsureWritable(values, schema, decision, isUpdate: true);
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var postImage = await WriteAsync(db, schema, decision, context, id, values, cancellationToken);
+        var postImage = await WriteAsync(
+            db, schema, decision, context, id, Stamped(schema, values, context, isUpdate: true), cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
         return RecordMaterializer.ToRecord(postImage, decision.HiddenFields);
     }
+
+    /// <summary>
+    /// The payload the write actually carries: the caller's, plus the audit columns this framework owns.
+    /// </summary>
+    /// <remarks>
+    /// Stamped <em>after</em> <see cref="WritePayloadGuard.EnsureWritable"/> and <em>before</em>
+    /// <see cref="EnsureWriteAllowed"/>, which is the only order that is both safe and useful: the guard
+    /// must judge the caller's own keys, and the check predicate must see the values that will be stored —
+    /// so a create rule reading <c>created_by == @user.id</c> is satisfied by the stamp rather than by
+    /// something the caller claimed.
+    /// </remarks>
+    private IReadOnlyDictionary<string, object?> Stamped(
+        EntitySchema schema, IReadOnlyDictionary<string, object?> values, AlvoContext context, bool isUpdate) =>
+        AlvoAuditStamp.Applied(schema, values, context, _time, isUpdate);
 
     /// <inheritdoc/>
     public async Task DeleteAsync(

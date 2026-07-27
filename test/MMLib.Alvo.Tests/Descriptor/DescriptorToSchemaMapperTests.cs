@@ -90,6 +90,87 @@ public class DescriptorToSchemaMapperTests
         await Verify(m);
     }
 
+    /// <summary>
+    /// A descriptor that declares a field the mapper also injects used to produce <b>two</b>
+    /// <see cref="FieldSchema"/> entries with one name, and every later operation on that entity died
+    /// with <c>ArgumentException: An item with the same key has already been added</c> out of the data
+    /// path — so declaring <c>readOnly</c> on a managed column, the documented way to protect one, broke
+    /// the entity instead. Only <c>id</c> had a de-duplication guard.
+    /// </summary>
+    [Theory]
+    [InlineData("created_by")]
+    [InlineData("created_at")]
+    [InlineData("updated_by")]
+    [InlineData("updated_at")]
+    public void A_declared_managed_column_is_not_injected_a_second_time(string column)
+    {
+        var json = $$"""
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "notes": { "audit": true, "fields": {
+            "title": { "type": "string" },
+            "{{column}}": { "type": "uuid", "readOnly": true } } } } }
+        """;
+
+        var notes = MapInline(json).Entities.Single(e => e.Name == "notes");
+
+        notes.Fields.Count(field => field.Name == column).ShouldBe(1);
+        notes.Fields.Select(field => field.Name).ShouldBeUnique();
+    }
+
+    /// <summary>
+    /// The tenant discriminator has the same shape, and a scoped entity is the ordinary case rather
+    /// than the audited one.
+    /// </summary>
+    [Fact]
+    public void A_declared_tenant_id_is_not_injected_a_second_time()
+    {
+        var json = """
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "notes": { "tenancy": "scoped", "fields": {
+            "tenant_id": { "type": "uuid", "required": true } } } } }
+        """;
+
+        var notes = MapInline(json).Entities.Single(e => e.Name == "notes");
+
+        notes.Fields.Select(field => field.Name).ShouldBeUnique();
+        notes.Fields.Count(field => field.Name == "tenant_id").ShouldBe(1);
+    }
+
+    /// <summary>
+    /// The agreement fact between the two sides of one decision: whatever this mapper injects beyond the
+    /// declared fields is exactly what <see cref="AlvoManagedColumns"/> reports for the mapped entity — the
+    /// set the write guard in each driver package refuses a caller from supplying. Deleting the authority's
+    /// answer, or growing the mapper past it, fails here by name rather than becoming a caller-writable
+    /// audit column nobody notices.
+    /// </summary>
+    /// <param name="tenancy">The entity's declared tenancy.</param>
+    /// <param name="audit">Whether the entity declares <c>audit</c>.</param>
+    /// <param name="softDelete">Whether the entity declares <c>softDelete</c>.</param>
+    [Theory]
+    [InlineData("global", false, false)]
+    [InlineData("scoped", false, false)]
+    [InlineData("global", true, false)]
+    [InlineData("scoped", true, false)]
+    [InlineData("global", false, true)]
+    [InlineData("scoped", true, true)]
+    public void The_injected_columns_are_exactly_the_ones_AlvoManagedColumns_reports(
+        string tenancy, bool audit, bool softDelete)
+    {
+        var json = $$"""
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "notes": {
+            "tenancy": "{{tenancy}}",
+            "audit": {{(audit ? "true" : "false")}},
+            "softDelete": {{(softDelete ? "true" : "false")}},
+            "fields": { "title": { "type": "string" } } } } }
+        """;
+
+        var notes = MapInline(json).Entities.Single(e => e.Name == "notes");
+
+        var injected = notes.Fields.Select(field => field.Name).Where(name => name != "title");
+        injected.ToHashSet(StringComparer.Ordinal).ShouldBe(AlvoManagedColumns.For(notes), ignoreOrder: true);
+    }
+
     private const string WithComputed = """
     {
       "apiVersion": "alvo.dev/v1",

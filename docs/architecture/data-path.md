@@ -354,6 +354,56 @@ kinds of test are therefore kept.
 pre-image at all and goes straight to `ExecuteDelete` over the policy root. The enum member is the dialect
 contract for a future path that does read one.
 
+## The framework-managed columns have one authority, and the framework writes them
+
+`AlvoManagedColumns` (in `Abstractions`) is the only place that answers "which columns does the framework
+own for this entity". `DescriptorToSchemaMapper` injects exactly what it reports, `WritePayloadGuard` and
+`InMemoryAlvoData` refuse exactly what it reports, and each refusal's wording comes from
+`AlvoManagedColumns.RefusalReason` so two implementations of one port cannot word one refusal two ways.
+
+It exists because the two sides had drifted, and the drift was exploitable on both engines: the mapper
+injected six columns (`tenant_id`, the audit quartet, `deleted_at`) and the guard named **two**. A caller
+could therefore create a row asserting a victim authored it — `created_by` is the only "who made this"
+column Alvo injects, and `create` has no `USING` predicate to contradict the claim, only `WITH CHECK` — and
+could then back-date `created_at` on update. Measured on SQLite and on real PostgreSQL: a row created with
+`created_by = dddddddd-…` at an invented instant, then rewritten to `Guid.Empty` and back-dated to 1989,
+with no rule violated. The lesson is not "add four names to the guard": an enumeration in the guard is what
+went stale, so there is none.
+
+Membership is answered from the entity's **traits** (tenancy, audit, soft delete) rather than from a flat
+name list, because a name alone is not enough — an entity that does not declare `audit` may legitimately
+declare an ordinary field called `created_at`, and `AlvoDataFixtures.Vehicle` does.
+
+**The framework populates them**, through `AlvoAuditStamp.Applied`, which is one function of its inputs in
+`Abstractions` for the same reason: there are two shipped implementations of `IAlvoData` and F7 adds a third.
+The ruling on which columns are written when:
+
+| Path | Stamped | Why |
+|---|---|---|
+| `create` | `created_at`, `created_by`, `updated_at`, `updated_by` | `updated_at` is `required`, so a row whose first write left it empty violates its own `NOT NULL`; and "last written" really is the creation instant for a row that has only been created |
+| `update` | `updated_at`, `updated_by` | rewriting the creation record on every write erases the authorship the audit trail exists to hold |
+| `delete` | nothing | soft delete is refused at apply time (see *`softDelete` is refused, not silently ignored*), so `deleted_at` has no writer |
+
+The instant comes from an injected `TimeProvider` (registered `TryAddSingleton(TimeProvider.System)`, so a
+host can substitute one), never `DateTimeOffset.UtcNow` inline — an inline clock cannot be asserted on, and
+`SqliteAlvoDataAuditTests` pins the exact stamped instants through a fixed one. The actor is `null` for a
+caller with no identity: the all-zero `UserId` is reserved to mean exactly that, so recording it would assert
+that the anonymous caller wrote the row.
+
+The stamp is applied **after** `WritePayloadGuard` and **before** `EnsureWriteAllowed`. That is the only
+order that is both safe and useful: the guard has to judge the caller's own keys, and `WITH CHECK` has to see
+the values that will be stored — so a create rule reading `created_by == @user.id` is satisfied by the stamp
+rather than by something the caller claimed.
+
+**A descriptor declaring a managed name no longer duplicates the field.** `AddManagedColumn` skips a name the
+descriptor already declares, which only `id` was guarded against before; the unguarded case produced two
+`FieldSchema` entries with one name and every later operation on that entity died with
+`ArgumentException: An item with the same key has already been added` out of the data path — so declaring
+`readOnly: created_by`, the documented way to protect a managed column, broke the entity instead of
+protecting it. De-duplication is **by name only**: a descriptor that declares a managed name with a
+*different type* still wins the mapping, and rejecting that is the reserved-name validation the descriptor
+validator owns. It is not implemented and is declared here rather than left looking handled.
+
 ## The failure contract, and where each refusal is decided
 
 | Situation | Outcome | Decided from |
@@ -362,7 +412,7 @@ contract for a future path that does read one.
 | Entity undeclared, or `EntityStorage.Dynamic` | `AlvoAuthorizationException`, one shared message | the applied schema |
 | Filter/sort names a hidden or undeclared field | `AlvoAuthorizationException`, one shared message | the decision + schema |
 | Filter deeper than `AlvoFilter.MaxDepth`, negative `Limit`, a paged read sorted by a nullable field | `ArgumentException` family | the query alone |
-| Payload names `id`, or `tenant_id` on update, or a read-only or undeclared field | `AlvoAuthorizationException` | the payload alone |
+| Payload names a framework-managed column a caller may not write (`AlvoManagedColumns`), or a read-only or undeclared field | `AlvoAuthorizationException` | the payload alone |
 | `get` of an invisible or absent row | `null` | the engine |
 | `update`/`delete` of an invisible or absent row | `AlvoRecordNotFoundException`, identical message | rows affected / pre-image |
 | Post-image fails `WITH CHECK` or the tenant scope | `AlvoAuthorizationException` | `IPredicateEvaluator` |
