@@ -3,9 +3,9 @@
 How an Alvo read or write becomes one SQL statement, and the decisions that shape it. Written during F3 PR2
 (#20).
 
-> **Status: partial.** **PR2's Task 12 completes it** — what is still missing is the parameter-prefix table,
-> the all-optional read model's own section, and the F7 notes. What is below is settled, so a later reader can
-> tell a decision from an oversight.
+> **Status: complete for PR2.** Everything below describes what the code does today, on the branch that
+> closes #20. Where a decision was deliberately deferred it says so and names the phase that owns it — see
+> *What later work inherits* at the end, which is the one place a PR3, PR5 or F7 author should start.
 
 ## One statement, one `WHERE`
 
@@ -29,6 +29,106 @@ A read whose row order is not observable — no sort key, no limit, no cursor �
 `AlvoQuery.Sort` documents that order as implementation-defined. Every other read is ordered by the caller's
 keys and then, always ascending, by the row key, because the keyset boundary's own tie-breaker is exactly
 that comparison.
+
+## Every bind-parameter name is reserved, and none of them starts with `p`
+
+One statement carries values contributed by several independent renderers that never see each other's
+output. Their names may not collide, and a collision here raises nothing. `PolicyParameterPrefix` is the
+single declaration of every name this data path can generate:
+
+| Name / prefix | Carries | Contributed by |
+|---|---|---|
+| `alvo_u` | the resolved `USING` predicate's values | `IPredicateRenderer.Render(decision.Using, …)` |
+| `alvo_c` | the `WITH CHECK` predicate's values — **reserved, never rendered in PR2** | nothing; see below |
+| `alvo_t` | the synthesized tenant scope's values | `IPredicateRenderer.Render(decision.TenantScope, …)` |
+| `alvo_f<n>` | the caller filter's bound values | `FilterSqlRenderer` |
+| `alvo_k<n>` | the keyset boundary's bound values | `KeysetSqlRenderer` |
+| `alvo_id` | the row id of a single-row read — a `get`, and an update's pre-image | `ReadStatementComposer.AddRowId` |
+| `alvo_limit` | a page's row limit — bound, never formatted into the text | `ReadStatementComposer` |
+
+A write's own row id is **not** in that table: `update` and `delete` match the row with a LINQ `Where` over
+the policy root, and EF names that parameter after the C# local (`@id`). It cannot collide because every name
+this data path generates begins with `alvo_` — see *Writes never reach a change tracker* for the emitted
+shapes.
+
+**Why not `p`.** Spike `Q6` bound a value under `@p0` and EF, which mints `p0`, `p1`, … for its own
+positional `FromSql` arguments and `ExecuteUpdate` setters, **renamed our parameter** while leaving the SQL
+text reading `@p0`. Nothing raised. On PostgreSQL that usually resurfaces later as a type error; on SQLite
+the security predicate simply compares against the caller's value and returns the wrong rows. PR1 acted on
+that finding by changing `IPredicateRenderer.Render`'s own default to `alvo_p` (commit `54d612c`), so the
+default is already safe; what this package must additionally do is **pass an explicit prefix at every call
+site**, because a `PolicyDecision` carries three predicates, each render numbers its parameters from zero,
+and one shared default would bind two different values to `alvo_p0`.
+
+The invariant is a test rather than a convention. `PolicyParameterPrefixTests` reflects over every `const
+string` the type declares and compares that to `All` — so a seventh name someone forgets to list fails
+instead of escaping every other check — then asserts that **no reserved name is a prefix of another** (not
+merely that they differ: `alvo_u` and `alvo_u2` would both mint `alvo_u0`), that none starts with `p`, and
+that `alvo_p` — the renderer's own shipped default, the name a forgotten explicit prefix actually produces —
+neither prefixes nor is prefixed by any of them. `ReadStatementComposer.Collect` is the belt: it refuses a name
+two fragments both claim rather than letting last-writer-wins return wrong rows quietly.
+
+`alvo_c` is declared and unused on purpose. `WITH CHECK` is evaluated in memory over the merged post-image
+(see *Writes never reach a change tracker*), so no SQL carries it today; reserving the name now means a
+future SQL-side check — a `RETURNING`-based write, say — inherits a name that already cannot collide with
+the other two.
+
+## The read model is all-optional, and that is what makes masking possible
+
+`AlvoDataContext`'s model is built at request time from the applied `SchemaModel` as
+`SharedTypeEntity<Dictionary<string, object>>` property bags — a record has no CLR type, so there is no
+entity class to map. **Every `IndexerProperty` is declared with the nullable CLR type and `IsRequired(false)`,
+whatever the column's own nullability says.**
+
+That is not laziness, it is the only shape that lets a `hidden` field be removed from a response. The mask
+works by projecting `CAST(NULL AS <store type>) AS <column>` in the `SELECT` list, so the column is never
+read; a *required* property would then make EF's shaper throw on that `NULL` — and spike `Q4f` measured it
+throwing **a different exception type on each engine** (`InvalidOperationException` on SQLite,
+`InvalidCastException` on PostgreSQL), which §0's engine-agnostic principle forbids outright. Omitting the
+column from the `SELECT` list instead is not available: EF refuses a `FromSql` result set that is missing a
+mapped property.
+
+Two things follow, and both are load-bearing:
+
+- **Required-ness is still enforced, just not here.** The physical `NOT NULL` the migrator created enforces
+  it on the write path (spike `Q4h`), and PR3's schema-derived request validation enforces it above this
+  port. What the all-optional model gives up is only the *shape* of the failure, which is why a missing
+  required value surfaces as `DbUpdateException` — recorded in the failure contract below as a named PR3
+  edge, not an accident.
+- **The row key is the one property that does not stay optional.** EF re-marks a key property required
+  however `IsRequired(false)` asked, so a projected `NULL` for `id` throws at materialization. `ReadProjection`
+  therefore refuses to mask the key and `QueryFieldGuard` refuses a hidden set containing it —
+  `A_mask_that_hides_the_row_key_is_refused`, `A_model_with_no_key_at_all_is_refused_rather_than_masked` and
+  `The_row_key_is_never_masked_however_the_mask_arrived` are the fail-closed belt, which matters because a
+  `SchemaModel` may one day arrive from somewhere other than the descriptor (F7's dynamic registry).
+
+The rejected alternative, from the spike: one entity type per *(entity, visible-field-set)* mapped to the
+same table. Legal, and schema-faithful — but the visible set is per-caller-role, so the EF model cache would
+multiply by the policy matrix.
+
+The model also configures **no foreign keys and no navigations**. F2's `DescriptorModelBuilder` owns the
+physical relationships; here a `Ref` field is simply a `uuid` column, and relation embedding is not part of
+this query path.
+
+## Identifiers are quoted by one helper, and there is no database schema
+
+`AlvoSqlIdentifier.Quote` is the single implementation of double-quote escaping, and every driver's
+`RenderField`, `RenderColumn` and `RenderTable` goes through it. **EF's `ISqlGenerationHelper.DelimitIdentifier`
+is banned** (spike `Q8`): `NpgsqlSqlGenerationHelper` returns an identifier *unquoted* whenever it judges
+quoting unnecessary — which PostgreSQL then case-folds, so one field renders differently per driver — and
+SQLite's helper *silently drops* the schema argument it is handed. A driver always quotes, unconditionally,
+because a field or entity name may have been assembled programmatically by a host and is therefore untrusted.
+
+**Only the `DelimitIdentifier` half is banned.** `PredicateParameterBinder` deliberately *does* read
+`ISqlGenerationHelper`'s parameter marker, so the name it creates and the name `IFieldSqlRenderer.RenderParameter`
+writes into the text cannot drift apart — hardcoding `@` would be a second authority for one decision, and a
+driver whose marker is `:` would emit a statement referencing a parameter that was never supplied. A sigil is
+dialect syntax; a quoting judgement is a correctness decision, and only the second one is unsafe to delegate.
+
+**PR2 introduces no database schema.** `AlvoOptions.SchemaPrefix` is a framework-*table* name prefix, not a
+`CREATE SCHEMA` name — SQLite has no schemas at all — and a qualified table name is produced by the driver's
+`RenderTable`, never assembled by shared code. That keeps the one construction spike `Q8` showed to be
+per-engine-divergent out of the shared layer entirely.
 
 ## A page's order and its boundary must be the same sequence
 
@@ -467,24 +567,172 @@ pre-image.
 
 ## Mutation-testing notes
 
-**`MMLib.Alvo.Data.Sqlite.Tests` was added to `stryker-config.data-ef.json`'s `test-projects`, and that is a
-hypothesis, not a result.** The killing tests for `EfAlvoData`, `SortSqlRenderer`'s engine behaviour,
-`UpdateSetterFactory` and `WritePropertyBag` live there rather than in the EF package's own test project, so
-without it those files read as uncovered. Whether the mutants are actually killed is a post-merge measurement
-Task 12 owns — and this repository has already shipped a *vacuously green* mutation run once, so "added to
-`test-projects`" must not be read as "covered". `MMLib.Alvo.Data.PostgreSql.Tests.Integration` is deliberately
-**not** added: it is Docker-gated, so on a shard with no daemon every one of its kills would report as a
-survivor.
+Mutation runs post-merge on `main` (`.github/workflows/mutation.yml`), across five parallel configs. Nothing
+blocks a merge on the score, so a red run is a notification someone has to act on — which makes it worth
+knowing, before the merge, that each config is configured to answer at all.
 
-`ReadStatementComposer.Collect` refuses a parameter name two fragments both claim. It is **unreachable
-today** — every fragment renders with a name from `PolicyParameterPrefix` and those are pairwise disjoint by
-test — and deliberately kept, because last-writer-wins on a real collision returns wrong rows with no error.
-Task 12 should record it as a known survivor (or exclude the arm) rather than let it read as a missing test.
-The same applies to `Internal/AlvoDataSeed.cs`, which is test-only seeding and is excluded from mutation by
-design.
+### Each config was verified non-vacuous, and here is how
+
+A config that discovers **zero** mutants, or whose test projects yield **zero** tests, reports a false green;
+this repository has shipped exactly that once already (`project_mutation_gate`), which is why the workflow's
+own step greps for `0 total mutants will be tested` and `Number of tests found: 0` and fails loudly. Config
+correctness therefore has to be measured, not asserted.
+
+It was measured with a **discovery-only probe** rather than a local mutation run (which `CLAUDE.md` forbids):
+each config was started with `dotnet-stryker -f <config> --concurrency 4`, watched until Stryker had printed
+the two numbers the workflow greps for, and then killed before the mutation loop began. That exercises the
+whole configuration — glob resolution, project resolution, the MTP runner, the initial test run — without
+paying for the run.
+
+| Config | Mutated project | Tests found | Mutants to be tested |
+|---|---|---|---|
+| `stryker-config.expressions.json` | `MMLib.Alvo` (`Expressions/**`) | 1267 | 834 |
+| `stryker-config.json` | `MMLib.Alvo` (the rest) | 1267 | 478 |
+| `stryker-config.data-ef.json` | `MMLib.Alvo.Data.EntityFrameworkCore` | 677 | 488 |
+| `stryker-config.data-sqlite.json` | `MMLib.Alvo.Data.Sqlite` | 268 | 13 |
+| `stryker-config.data-postgresql.json` | `MMLib.Alvo.Data.PostgreSql` | 132 | 11 |
+
+All five are non-vacuous. The two driver configs are small on purpose — each driver is two files of rendering
+— and small is the point: `TrueLiteral => "1"` mutated to `"0"` inverts a boolean inside a policy `WHERE`, and
+until PR2 the only other thing pinning those literals was an accepted Verify baseline, the one artefact a test
+can be made green with.
+
+**The `data-ef` `test-projects` list is now a result, not a hypothesis.** It names both
+`MMLib.Alvo.Data.EntityFrameworkCore.Tests` and `MMLib.Alvo.Data.Sqlite.Tests`, because the killing tests for
+`EfAlvoData`, `SortSqlRenderer`'s engine behaviour, `UpdateSetterFactory` and `WritePropertyBag` live in the
+latter; the probe confirms 677 tests reach the run, which is the two projects together rather than the EF
+project's own suite alone. `MMLib.Alvo.Data.PostgreSql.Tests.Integration` is deliberately **not** added: it is
+Docker-gated end to end, so on a CI shard with no daemon every one of its kills would report as a survivor and
+the score would read as a regression that is really an absent container. `MMLib.Alvo.Data.PostgreSql.Tests` is
+not added either, for a different reason — it holds the per-engine golden CEL→SQL snapshot, which renders
+through the *core*'s predicate renderer and never touches the EF package's composers, so it would add wall
+clock and no kills.
+
+### The exclusions, and the proof one of them bites
+
+`Internal/AlvoDataSeed.cs` is excluded. It is the test-only out-of-band seeding seam the adversarial suites
+use to place rows behind the port, so mutating it measures the harness rather than the product (plan
+*Deviations* 11). **Measured, so the exclusion cannot be a silently mis-matched glob:** the same discovery
+probe run with the exclusion removed reports **493** mutants against **488** with it — the five mutants in
+that file, and nothing else, are what the line removes.
+
+The rest of the exclusion list is unchanged from before PR2 and is all DB-round-trip or DI wiring
+(`RelationalConnectionFactory`, `RelationalSqlBatch`, `SystemSchemaInitializer`, `VersionRowWriter`, the four
+`EfCore*` services, `AlvoEfCoreProvider`, `RelationalProviderRegistration`): their defects only manifest
+against a real database, so mutating them produces noise the SQLite and PostgreSQL suites already answer.
+
+### Known survivors, declared rather than left looking like missing tests
+
+Two arms are deliberately unreachable and will survive. Both are kept, because both fail *silently* if the
+invariant that makes them unreachable ever stops holding — which is exactly when a throw earns its place.
+
+- **`ReadStatementComposer.Collect`'s duplicate-name throw.** Unreachable while every fragment renders with a
+  name from `PolicyParameterPrefix` and no reserved name prefixes another (asserted by
+  `PolicyParameterPrefixTests`). Kept because last-writer-wins on a real collision returns wrong rows with no
+  error at all.
+- **`SqlPredicateRenderer.ValueTypeOf`'s `CelUnary` / `CelBinary` / `CelConditional` arms and its `_` fallback**
+  (in the `expressions` shard, not `data-ef`). Both operand renderers accept only a literal, a field reference
+  and — on the predicate path — a context value, so `total + 1 > 100` throws `NotSupportedException` at
+  `RenderScalarOperand` and `(total > 0 ? total : 0) > 100` is refused a layer earlier by the type checker.
+  The unreachability itself is pinned by two named facts rather than by tests that cannot reach the code.
+
+Neither is suppressed with a Stryker directive: this package writes no inline comments, and a
+`// Stryker disable` line is a comment whose reason lives outside the code. Declaring them here keeps the
+reason where a reader of a red run will look for it.
+
+### Two Safe-Mode blind spots the probe surfaced
+
+Worth naming because they are *invisible* in a score — Stryker reports them as `CompileError`, not as
+survivors, so the affected methods simply contribute nothing:
+
+- `ReadStatementComposer.AddRowId` and `AlvoModelCacheKeyFactory.Create` are both entered through a negated
+  declaration pattern (`if (rowId is not { } id)`, `if (context is not AlvoDataContext alvo)`). Mutating the
+  pattern breaks definite assignment (`CS0165`), so Stryker's Safe Mode **removes every mutation in the whole
+  method**. `AddRowId` is on the security path — it is the `alvo_id` term of the `WHERE` — so read its
+  coverage from the behavioural suites (`ReadStatementComposerTests`, `SqliteAlvoDataReadTests`,
+  `AlvoDataStatementTests`) rather than from a mutation score that structurally cannot speak about it.
+- The `data-ef` shard reports 146 `CompileError` mutants against 488 tested, and each core shard reports 157.
+  That ratio is normal for pattern-matching-heavy C# and is not a coverage signal either way; it is recorded
+  so a later reader does not read a shrinking "tested" count as lost coverage.
 
 `ReadStatementComposer.RequiresTotalOrder`'s three disjuncts each have an independent killing fact, plus the
-negative, so there is no survivor for Task 12 to chase: `A_sorted_read_carries_its_order_by_inside_the_one_statement`
+negative, so there is **no** survivor to chase there: `A_sorted_read_carries_its_order_by_inside_the_one_statement`
 (sort only), `A_limited_read_orders_before_it_truncates_and_binds_the_limit` (limit only),
 `A_cursored_page_is_ordered_even_with_no_caller_sort_key` (anchor only) and
 `An_unsorted_unlimited_first_page_needs_no_ordering_at_all`.
+
+## Where the code lives, and one naming rule that looks like an oversight
+
+Every type this data path adds is `internal` and lives under `Internal/` in
+`src/MMLib.Alvo.Data.EntityFrameworkCore`. **The namespace of a file in that folder is the package root
+(`MMLib.Alvo.Data.EntityFrameworkCore`), not `….Internal`** — which is why the folder's `namespace`
+declarations are mixed, 27 at the root against 3 in `.Internal`.
+
+The reason is EF's own `EF1001` analyzer: it matches any namespace containing `EntityFrameworkCore` followed
+by `.Internal` and treats a cross-assembly reference to a type there as an error, which under
+`TreatWarningsAsErrors` fails the build. Four sibling projects already set `NoWarn EF1001` to live with that,
+so suppression was available and cheap; the root namespace was chosen anyway, because a suppression would also
+hide genuine EF internal-API misuse in a package whose whole job is to use EF correctly. Nothing is lost:
+`SharedArchitectureRules.Types_in_an_Internal_namespace_are_not_public` keys on the namespace and only forbids
+*public* types there, and every type here is `internal`. Moving the three stragglers to the root would end the
+confusion and is a tidy-up nobody has spent a PR on.
+
+## What later work inherits
+
+Everything PR2 deliberately did not answer, in one place, so the phase that owns it does not have to
+reconstruct the reasoning from a scattered set of remarks.
+
+### PR3 — the HTTP Data API and request validation (#19)
+
+| Item | Why it is not PR2's | Where the seam is |
+|---|---|---|
+| An **`IS NULL`-aware keyset boundary**, so a paged read can sort by a nullable column instead of being refused | The boundary's predicate form depends on the anchor's own null-ness, so `KeysetAnchor` has to carry it, and it must stay in lockstep with `SortSqlRenderer`'s rank expression or it reintroduces the order/boundary divergence that skips rows | `KeysetSqlRenderer` + `SortSqlRenderer`; the refusal it would replace is `EfAlvoData.EnsureSortKeysCanBePaged` |
+| The **coercion policy for a fractional bound against an integral column** — is `mileage=gt.12.7` a 422, or floored/ceiled per operator? | There *is* a correct answer but it is per-operator (floor for `gt`, ceiling for `lt`, no match for `eq`), which makes it request validation, not binding. `Convert.ChangeType` rounds midpoint-to-even, so binding `13` would drop the row with `mileage = 13` from a request whose stated predicate included it | `PredicateParameterBinder` refuses the conversion today rather than performing it |
+| ***"p95 latencia filtrovaného listu nad 100k riadkov (indexovaný stĺpec) < 50 ms lokálne"*** and *"keyset pagination stabilná nad 1M riadkov"* (§2.1) | An explicit non-goal of #20; and `AlvoSort.Nulls`' portable `CASE WHEN` emulation is known to defeat an index on the sort key, so the target cannot be met without revisiting it | The whole statement text is composed in **one** place (`ReadStatementComposer`), so moving `ORDER BY`/paging fully into the raw root — or adopting native `NULLS FIRST`/`NULLS LAST` per dialect — is a change to one file |
+| A **missing required value** surfaces as EF's `DbUpdateException`, not as RFC 7807 | Schema-derived request validation belongs above this port; the all-optional read model deliberately does not enforce required-ness | Pinned by `SqliteAlvoDataCreateTests.A_missing_required_value_is_refused_by_the_database_constraint` |
+| On a **create**, an explicit `null` is indistinguishable from an omitted key | `WritePropertyBag` drops nulls, and for an insert "absent" and "null" mean the same thing to the database. On an **update** they do not, and that path uses `ExecuteUpdate` setters where a `null` is a real `SET col = NULL` | `WritePropertyBag.For`; the asymmetry is stated in its own remarks |
+| `Limit = 0` is accepted and renders `LIMIT 0` | Both engines agree on it, so it is not an engine-agnosticism defect — but whether "give me nothing" is an empty page or a refusal is a request-layer decision | `ReadStatementComposer` |
+| A **`NUL` in a text value on the *write* path** still surfaces as `DbUpdateException` | The read path refuses it in the binder (PostgreSQL cannot encode it, SQLite can); the write analogue is one more storage-constraint violation, on the same boundary as the row above | `PredicateParameterBinder` holds the read-side guard |
+| The query-string surface, the offset mode, and a server-enforced maximum page size | `AlvoQuery.After` is opaque by contract and PR2 owns only its encoding | `KeysetCursor` |
+
+### PR5 — outbox, events and hooks (#22)
+
+- **The transaction is already the right seam.** `EfAlvoData`'s update path opens
+  `db.Database.BeginTransactionAsync()`; `transaction.GetDbTransaction()` yields the real provider
+  `DbTransaction`, so an outbox insert can ride the same transaction as the data change without a second
+  connection or a distributed transaction.
+- **`ExecuteUpdate`/`ExecuteDelete` do not go through the change tracker, so they fire no `SaveChanges`
+  interceptor.** This is the trap: the idiomatic EF place to hang an outbox is a `SaveChangesInterceptor`, and
+  on this data path it would silently never fire for an update or a delete — the two operations that most need
+  an event. PR5's hooks and outbox must be sequenced **explicitly on the transaction**, never hung off
+  `SaveChanges`.
+
+### F7 — dynamic (metadata-driven) entities
+
+- **The dynamic store is a different `IAlvoSqlDialect` + `IFieldSqlRenderer` pair, not a different data path.**
+  `EfAlvoData`, the composer, the guards, the binder and the masking all stay; what changes is how a table and
+  a column render (a JSON path into the shared partitioned `entity_records` store rather than a quoted column).
+  That is the seam §2.1's *"the same adversarial and policy suite passes identically over a physical and a
+  virtual entity"* criterion runs through, and it is why `IAlvoSqlDialect` was introduced as a port rather than
+  as a member on `IFieldSqlRenderer`. **`AlvoDataAdversarialTests.Same_suite_passes_over_a_dynamic_entity`** is
+  the reserved leg — skipped, with its reason — following the idiom
+  `SchemaMigratorContractTests` already set for F2's migrator contract, so the obligation shows up as a named
+  skip in every driver's own test run rather than as a paragraph nobody re-reads.
+- **A named F7 test, not a warning:
+  `AlvoDataAdversarialTests.A_uuid_rule_over_a_dynamic_entity_matches_rows_on_every_engine`.** Spike `X2`
+  rehearsed the dynamic driver and found one trap. EF's SQLite `Guid` mapping stores an **upper-case** `TEXT` value, while
+  `json_extract` returns whatever case the JSON payload happens to hold — so a `uuid`-typed JSON path compares
+  upper against lower and **silently returns zero rows**, with no error on either side. Every row-ownership
+  rule in Alvo is a `uuid` comparison (`owner_id == @user.id`, `tenant_id == @tenant.id`), so on the dynamic
+  driver that failure mode is fail-*closed* on a read and would look like an over-strict policy rather than a
+  bug. The dynamic driver must normalise the case of a `uuid`-typed JSON path per engine, and the reserved fact above is what
+  says so, so this is a discovery already made rather than one waiting to happen. It is the same class of
+  defect as spike `Q6d`, which is why *Values are bound through EF's own type mapping* exists.
+- **The migrator maps `Dynamic` entities; the read model does not.** `DescriptorModelBuilder.Build` maps every
+  entity, while `AlvoDataContext.OnModelCreating` filters to `EntityStorage.Physical`. So a descriptor
+  declaring a dynamic entity today gets a physical table created for it that the read path then refuses with
+  `AlvoAuthorizationException`. Harmless and fail-closed, but it is an asymmetry F7 should resolve
+  deliberately rather than rediscover.
+- **The fail-closed belt around the row key exists for F7's benefit.** `ReadProjection` and `QueryFieldGuard`
+  refuse a hidden set containing the key however that set arrived, precisely because a `SchemaModel` from a
+  dynamic registry has not been through the descriptor's validation.
