@@ -5,6 +5,7 @@ using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
+using MMLib.Alvo.Tests.Data;
 using Npgsql;
 using Testcontainers.PostgreSql;
 using Xunit;
@@ -25,6 +26,7 @@ public sealed class PostgreSqlAlvoDataFixture : IAsyncLifetime
     // reaches its own skip. PostgresFixture was fixed for exactly this; do not reintroduce it here.
     private PostgreSqlContainer? _container;
     private readonly List<ServiceProvider> _providers = [];
+    private readonly List<SqlCapture> _captures = [];
 
     /// <summary>Gets whether a real engine was started, so a caller can skip rather than fail.</summary>
     public bool Available => _container is not null;
@@ -53,12 +55,26 @@ public sealed class PostgreSqlAlvoDataFixture : IAsyncLifetime
         ArgumentNullException.ThrowIfNull(schema);
         Assert.SkipUnless(Available, "Docker is unavailable on this platform, so the PostgreSQL engine cannot be started.");
 
-        var services = BuildProvider(await CreateDatabaseAsync());
+        var (connectionString, database) = await CreateDatabaseAsync();
+        var services = BuildProvider(connectionString);
         await MigrateAsync(services, schema);
 
-        var host = new PostgreSqlAlvoDataHost(services, descriptor ?? MinimalDescriptor(schema));
+        var capture = NewCapture(database);
+        var host = new PostgreSqlAlvoDataHost(services, descriptor ?? MinimalDescriptor(schema), capture);
         host.RePrime(schema);
         return host;
+    }
+
+    /// <summary>
+    /// Starts recording after the migration, so a fact sees the statements its own act produced rather than the
+    /// DDL the fixture ran. The generated database name is the marker, exactly as the SQLite fixture's file
+    /// name is.
+    /// </summary>
+    private SqlCapture NewCapture(string database)
+    {
+        var capture = new SqlCapture(database);
+        _captures.Add(capture);
+        return capture;
     }
 
     private ServiceProvider BuildProvider(string connectionString)
@@ -87,7 +103,7 @@ public sealed class PostgreSqlAlvoDataFixture : IAsyncLifetime
     /// <see cref="Guid"/>, so it cannot collide, and it is also the marker that identifies this database's
     /// own statements in a shared connection string.
     /// </summary>
-    private async Task<string> CreateDatabaseAsync()
+    private async Task<(string ConnectionString, string Database)> CreateDatabaseAsync()
     {
         var adminConnectionString = _container!.GetConnectionString();
         var name = $"alvo_{Guid.NewGuid():N}";
@@ -97,7 +113,7 @@ public sealed class PostgreSqlAlvoDataFixture : IAsyncLifetime
         create.CommandText = $"CREATE DATABASE \"{name}\"";
         await create.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
 
-        return new NpgsqlConnectionStringBuilder(adminConnectionString) { Database = name }.ToString();
+        return (new NpgsqlConnectionStringBuilder(adminConnectionString) { Database = name }.ToString(), name);
     }
 
     /// <summary>
@@ -120,6 +136,11 @@ public sealed class PostgreSqlAlvoDataFixture : IAsyncLifetime
 
     public async ValueTask DisposeAsync()
     {
+        foreach (var capture in _captures)
+        {
+            capture.Dispose();
+        }
+
         foreach (var provider in _providers)
         {
             await provider.DisposeAsync();
@@ -151,11 +172,13 @@ public sealed class PostgreSqlAlvoDataHost
 {
     private readonly ServiceProvider _services;
     private readonly AlvoDescriptor _descriptor;
+    private readonly SqlCapture _capture;
 
-    internal PostgreSqlAlvoDataHost(ServiceProvider services, AlvoDescriptor descriptor)
+    internal PostgreSqlAlvoDataHost(ServiceProvider services, AlvoDescriptor descriptor, SqlCapture capture)
     {
         _services = services;
         _descriptor = descriptor;
+        _capture = capture;
         Data = services.GetRequiredService<IAlvoData>();
     }
 
@@ -164,6 +187,12 @@ public sealed class PostgreSqlAlvoDataHost
 
     /// <summary>Gets the data port under test, over this database.</summary>
     internal IAlvoData Data { get; }
+
+    /// <summary>Gets every statement EF has executed against this database since the last <see cref="ClearStatements"/>.</summary>
+    internal IReadOnlyList<string> Statements => _capture.Statements;
+
+    /// <summary>Forgets every recorded statement, so a fact asserts on the ones its own act produced.</summary>
+    internal void ClearStatements() => _capture.Clear();
 
     /// <summary>Re-primes the policy catalog (and therefore the applied schema) from <paramref name="schema"/>.</summary>
     /// <param name="schema">The schema the rules are re-compiled against and that the read model is rebuilt from.</param>

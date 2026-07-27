@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="../../src/MMLib.Alvo/MMLib.Alvo.csproj" />
@@ -16,6 +16,7 @@
        with no EF reference at all — does not pick it up. -->
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/DifferentialProbe.cs" Link="_shared/DifferentialProbe.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/SqlCapture.cs" Link="_shared/SqlCapture.cs" />
   </ItemGroup>
 
 </Project>

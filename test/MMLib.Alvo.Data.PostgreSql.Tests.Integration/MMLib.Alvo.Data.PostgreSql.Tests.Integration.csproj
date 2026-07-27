@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <!-- Testcontainers-backed integration project, not a 1:1 unit test project
        (hence the ".Tests.Integration" suffix instead of ".Tests"): opt out of
@@ -36,6 +36,7 @@
        with like. -->
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/DifferentialProbe.cs" Link="_shared/DifferentialProbe.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/SqlCapture.cs" Link="_shared/SqlCapture.cs" />
   </ItemGroup>
 
 </Project>

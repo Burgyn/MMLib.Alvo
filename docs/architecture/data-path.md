@@ -406,17 +406,34 @@ how two engines come to test different things.
 | Suite | What it proves | SQLite | PostgreSQL |
 |---|---|---|---|
 | `AlvoDataAdversarialTests` | two-user / two-tenant / default-deny, masking, write scoping | real temp-file database | real container |
+| `AlvoDataStatementTests` | the resolved predicate is bound **inside the `WHERE`** of one statement — never an in-memory post-filter | ✔ | ✔ |
 | `AlvoDataDifferentialTests` | the rendered `USING` predicate and the in-memory evaluator agree on the shared matrix, judged by the engine's own `WHERE` | ✔ | ✔ |
 | `AlvoDataComparisonTests` | a **rule** compares a decimal by value | ✔ | ✔ |
-| `AlvoDataOrderingTests` | the **filter** and the **page** (order + keyset boundary) compare by value | ✔ | ✔ |
+| `AlvoDataOrderingTests` | the **filter** and the **page** (order + keyset boundary) compare by value, and a timestamp is one instant | ✔ | ✔ |
 | `AlvoDataSqlSnapshotTests` | golden CEL→SQL, per engine | `cel-to-sql-sqlite` | `cel-to-sql-postgresql` |
 
-Three of these are new in PR2's Task 11 and each closes a hole a single-engine suite left. The differential
-matrix runs as **one fact over one probe** rather than a theory row per case, so the loop can assert a
-non-vacuity counter afterwards — "the two backends never disagreed" is worthless if the probe answered `false`
-to everything. The golden PostgreSQL baseline deliberately lives in the *non-Docker* `MMLib.Alvo.Data.PostgreSql.Tests`
-project: rendering needs no engine, and a Docker-gated snapshot goes unverified on every host that skips the
-container, which is how a per-engine baseline drifts unnoticed.
+Four of these are new in PR2 and each closes a hole a single-engine suite left.
+
+**`AlvoDataStatementTests` exists because no outcome can carry §2.4's "never a post-filter".** An
+implementation that fetched the candidate rows and filtered them with `IPredicateEvaluator` returns the same
+rows, throws the same exceptions and pages the same way — it passes the adversarial suite, the differential
+matrix and the ordering suite in full. The only observable difference is the SQL it sends, so the assertion is
+on the statement, and it has to run per engine: a criterion proved on one engine is a property of that engine's
+test project, not of the port. The predicate's *text* is engine-specific, so the facts assert on what is not —
+the reserved parameter prefixes (`alvo_u`, `alvo_t`) a resolved predicate binds its values under, and their
+position after the statement's first `WHERE`. A post-filtering implementation binds none of them, because it
+never renders the predicate. Dropping `decision.Using` from the composer fails two of the four facts; the
+fourth is the non-vacuity control, which asserts a bare `"true"` rule binds **no** policy parameter at all.
+
+`SqlCapture` was the enabler and is now linked into both engine projects from `test/_shared/ef/`: nothing in it
+is SQLite-specific — it observes EF's process-wide `DiagnosticListener` and filters by a marker in the
+connection string, which is the database file name on SQLite and the generated database name on PostgreSQL.
+
+The differential matrix runs as **one fact over one probe** rather than a theory row per case, so the loop can
+assert a non-vacuity counter afterwards — "the two backends never disagreed" is worthless if the probe answered
+`false` to everything. The golden PostgreSQL baseline deliberately lives in the *non-Docker*
+`MMLib.Alvo.Data.PostgreSql.Tests` project: rendering needs no engine, and a Docker-gated snapshot goes
+unverified on every host that skips the container, which is how a per-engine baseline drifts unnoticed.
 
 The `FOR NO KEY UPDATE` clause SQLite cannot test is covered behaviourally rather than by inspection: it is
 emitted at the very end of the pre-image `SELECT` (after `ORDER BY`/`LIMIT`, which is what PostgreSQL's grammar

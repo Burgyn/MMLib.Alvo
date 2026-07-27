@@ -1,10 +1,10 @@
 ﻿using Microsoft.EntityFrameworkCore.Diagnostics;
 using System.Diagnostics;
 
-namespace MMLib.Alvo.Data.Sqlite.Tests;
+namespace MMLib.Alvo.Tests.Data;
 
 /// <summary>
-/// Records every SQL statement EF executes against one database file, so a test can assert on the
+/// Records every SQL statement EF executes against one database, so a test can assert on the
 /// <em>statement</em> — that the policy predicate is in its <c>WHERE</c>, that a masked column is
 /// NULL-projected, that a patch is one <c>UPDATE</c> — rather than only on the rows that came back.
 /// </summary>
@@ -17,8 +17,14 @@ namespace MMLib.Alvo.Data.Sqlite.Tests;
 /// <b>production</b> configuration instead of a fixture-built copy of it.
 /// </para>
 /// <para>
-/// The listener is process-wide, so events are filtered to this fixture's own database file — every
+/// The listener is process-wide, so events are filtered to this fixture's own database — every
 /// <c>StartAsync</c> creates a uniquely named one — and test classes stay safe to run in parallel.
+/// </para>
+/// <para>
+/// Nothing here is SQLite-specific, which is why it is linked into both engine test projects rather than
+/// living in one: "the policy predicate is in the <c>WHERE</c>, never an in-memory post-filter" is a
+/// per-engine acceptance criterion, and a capture that only one engine owned left the other proving it by
+/// outcomes — which a materialise-then-filter implementation satisfies exactly.
 /// </para>
 /// </remarks>
 internal sealed class SqlCapture : IObserver<DiagnosticListener>, IDisposable
@@ -29,12 +35,18 @@ internal sealed class SqlCapture : IObserver<DiagnosticListener>, IDisposable
     private readonly List<string> _statements = [];
     private readonly List<IDisposable> _subscriptions = [];
     private readonly Lock _gate = new();
-    private readonly string _databaseFileName;
+    private readonly string _marker;
     private bool _disposed;
 
-    internal SqlCapture(string databaseFile)
+    /// <summary>Starts recording the statements of the one database <paramref name="marker"/> identifies.</summary>
+    /// <param name="marker">
+    /// A substring unique to that database's connection string — its file name on SQLite, its generated
+    /// database name on PostgreSQL. Both fixtures already mint a unique one per <c>StartAsync</c>.
+    /// </param>
+    internal SqlCapture(string marker)
     {
-        _databaseFileName = Path.GetFileName(databaseFile);
+        ArgumentException.ThrowIfNullOrWhiteSpace(marker);
+        _marker = marker;
         _subscriptions.Add(DiagnosticListener.AllListeners.Subscribe(this));
     }
 
@@ -124,7 +136,7 @@ internal sealed class SqlCapture : IObserver<DiagnosticListener>, IDisposable
     /// </summary>
     private void Record(CommandEventData command)
     {
-        if (command.Command.Connection?.ConnectionString.Contains(_databaseFileName, StringComparison.Ordinal) != true)
+        if (command.Command.Connection?.ConnectionString.Contains(_marker, StringComparison.Ordinal) != true)
         {
             return;
         }

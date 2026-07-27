@@ -196,9 +196,24 @@ namespace MMLib.Alvo.Testing.Data
         protected static MMLib.Alvo.Schema.EntitySchema SnapshotEntity { get; }
         public System.Threading.Tasks.Task Cel_renders_to_this_engines_sql() { }
     }
+    public abstract class AlvoDataStatementTests
+    {
+        protected AlvoDataStatementTests() { }
+        public System.Threading.Tasks.Task A_rule_with_no_operands_binds_no_policy_parameter() { }
+        public System.Threading.Tasks.Task A_single_row_read_carries_the_predicate_rather_than_checking_after_the_fetch() { }
+        protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Testing.Data.IStatementProbe> CreateAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, System.Collections.Generic.IReadOnlyDictionary<string, System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRecord>> seed);
+        public System.Threading.Tasks.Task The_policy_predicate_is_bound_inside_the_where_clause_of_one_statement() { }
+        public System.Threading.Tasks.Task The_tenant_scope_is_bound_inside_the_same_where_clause() { }
+    }
     public interface IDifferentialProbe : System.IAsyncDisposable
     {
         System.Threading.Tasks.Task<bool> MatchesAsync(MMLib.Alvo.Data.AlvoRecord row, MMLib.Alvo.Expressions.SqlPredicate predicate);
+    }
+    public interface IStatementProbe
+    {
+        MMLib.Alvo.Data.IAlvoData Data { get; }
+        System.Collections.Generic.IReadOnlyList<string> Statements { get; }
+        void ClearStatements();
     }
     public sealed class InMemoryAlvoData : MMLib.Alvo.Data.IAlvoData
     {

@@ -5,6 +5,7 @@ using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
+using MMLib.Alvo.Tests.Data;
 
 namespace MMLib.Alvo.Data.Sqlite.Tests;
 
@@ -48,7 +49,7 @@ public sealed class SqliteAlvoDataFixture : IAsyncDisposable
 
     private SqlCapture NewCapture(string path)
     {
-        var capture = new SqlCapture(path);
+        var capture = new SqlCapture(Path.GetFileName(path));
         _captures.Add(capture);
         return capture;
     }
