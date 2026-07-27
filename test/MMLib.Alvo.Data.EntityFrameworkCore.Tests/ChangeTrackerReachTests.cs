@@ -44,15 +44,39 @@ public class ChangeTrackerReachTests
     /// </summary>
     /// <param name="call">The banned call, as a regular expression.</param>
     [Theory]
-    [InlineData(@"\.Attach(Range)?\(")]
-    [InlineData(@"\.Update(Range)?\(")]
-    [InlineData(@"\.Remove(Range)?\(")]
-    [InlineData(@"\.Entry\(")]
-    [InlineData(@"\.AsTracking\(")]
-    [InlineData(@"\bEntityState\.")]
-    [InlineData(@"\.State\s*=[^=]")]
+    [MemberData(nameof(BannedCalls))]
     public void No_tracked_write_vocabulary_appears_in_any_data_package(string call)
         => FilesMatching(call).ShouldBeEmpty();
+
+    /// <summary>
+    /// The banned vocabulary, as regular expressions. Every call form tolerates an <b>explicit generic
+    /// argument list</b>, because that is one keystroke away from the non-generic spelling and was a live
+    /// bypass: <c>db.Rows(entity).AsTracking&lt;Dictionary&lt;string, object&gt;&gt;()</c> returns tracked rows,
+    /// <c>SaveChanges</c> is already allow-listed in the create path, and a production file carrying that one
+    /// line built with zero warnings and passed every fact in this class.
+    /// </summary>
+    /// <remarks>
+    /// <c>&lt;[^&gt;]*&gt;</c> would stop at the first <c>&gt;</c> of a nested generic argument, so the
+    /// argument list is matched as a run of characters that cannot contain a statement terminator — enough to
+    /// span <c>&lt;Dictionary&lt;string, object&gt;&gt;</c> without needing balanced-bracket matching, which a
+    /// regular expression cannot express anyway.
+    /// </remarks>
+    public static TheoryData<string> BannedCalls() => [.. _bannedCalls];
+
+    private static readonly string[] _bannedCalls =
+    [
+        Generic(@"\.Attach(Range)?"),
+        Generic(@"\.Update(Range)?"),
+        Generic(@"\.Remove(Range)?"),
+        Generic(@"\.Entry"),
+        Generic(@"\.AsTracking"),
+        @"\bEntityState\.",
+        @"\.State\s*=[^=]",
+    ];
+
+    private static string Generic(string call) => call + GenericArgumentList + @"\s*\(";
+
+    private const string GenericArgumentList = @"(\s*<[^;{}()]*>)?";
 
     /// <summary>
     /// Adding a property bag to a set is the create path's own call, so it is allowed exactly where
@@ -79,6 +103,85 @@ public class ChangeTrackerReachTests
         => FilesMatching(@"ChangeTracker\.").ShouldBe(["AlvoDataContext.cs"]);
 
     /// <summary>
+    /// A hand-built <c>DbCommand</c> is a complete policy bypass and a first-order injection surface, and it
+    /// is <b>the house style of four files in these very packages</b> — so the shape a contributor reaches for
+    /// by copying the file next door writes SQL with no predicate in it. This fact is an <b>allow-list</b>: the
+    /// files permitted to compose SQL or construct a command are named, and any other file in a data package
+    /// that does fails here.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// An allow-list rather than a ban-list, because a ban-list is a guess about what the next contributor
+    /// will type. The bypass this closes — <c>GetDbConnection().CreateCommand()</c> plus a concatenated
+    /// <c>UPDATE … WHERE id = '…'</c> in a new file — was in no banned vocabulary at all, built with zero
+    /// warnings under <c>TreatWarningsAsErrors</c>, and passed every other fact in this class.
+    /// </para>
+    /// <para>
+    /// Each allow-listed file earns its place by writing a <b>framework</b> table (the descriptor-version
+    /// history, the system schema), by running SQL EF's own generator produced, or by being the one seam that
+    /// binds parameters rather than composing a row statement:
+    /// <c>EfCoreDescriptorVersionStore</c>, <c>EfCoreRuntimeSchemaWriter</c>, <c>SystemSchemaInitializer</c>,
+    /// <c>RelationalSqlBatch</c> and <c>VersionRowWriter</c> never touch an entity table;
+    /// <c>PredicateParameterBinder</c> creates a command only to reach the provider's parameter factory;
+    /// <c>EfCoreSchemaMigrator</c> executes the migrator's generated statements; <c>EfAlvoData</c> is the one
+    /// file that composes a row statement, and it is the file every other fact here pins.
+    /// </para>
+    /// </remarks>
+    /// <param name="call">A raw-SQL or raw-command call, as a regular expression.</param>
+    [Theory]
+    [InlineData(@"\.CreateCommand\s*\(")]
+    [InlineData(@"\.CommandText\s*=[^=]")]
+    [InlineData(@"\.ExecuteNonQuery")]
+    [InlineData(@"\.ExecuteScalar")]
+    [InlineData(@"\.ExecuteReader")]
+    [InlineData(@"\.ExecuteSql(Raw|Interpolated)")]
+    [InlineData(@"\.FromSql(Raw|Interpolated)")]
+    [InlineData(@"\.GetDbConnection\s*\(")]
+    public void Only_allow_listed_files_compose_sql_or_build_a_command(string call)
+        => FilesMatching(call).ShouldBeSubsetOf(_sqlComposingFiles);
+
+    /// <summary>
+    /// The allow-list's own non-vacuity control: each pattern must really match the shape it names, so a file
+    /// that is not allow-listed would be reported. Asserted against a sample line rather than by landing such a
+    /// file, so the proof is permanent instead of reverted — and so no policy-free writer has to exist in a
+    /// shipped package to keep the gate honest.
+    /// </summary>
+    /// <param name="call">A raw-SQL or raw-command call, as a regular expression.</param>
+    /// <param name="sample">A line the pattern must match.</param>
+    [Theory]
+    [InlineData(@"\.CreateCommand\s*\(", "using var command = connection.CreateCommand();")]
+    [InlineData(@"\.CommandText\s*=[^=]", "command.CommandText = sql;")]
+    [InlineData(@"\.ExecuteNonQuery", "return await command.ExecuteNonQueryAsync();")]
+    [InlineData(@"\.ExecuteScalar", "var count = await command.ExecuteScalarAsync();")]
+    [InlineData(@"\.ExecuteReader", "await using var reader = await command.ExecuteReaderAsync();")]
+    [InlineData(@"\.GetDbConnection\s*\(", "var connection = db.Database.GetDbConnection();")]
+    [InlineData(@"\.ExecuteSql(Raw|Interpolated)", "await db.Database.ExecuteSqlRawAsync(sql);")]
+    [InlineData(@"\.FromSql(Raw|Interpolated)", "rows.FromSqlRaw(statement.Sql);")]
+    public void Every_sql_composing_pattern_matches_the_shape_it_names(string call, string sample)
+        => Matches(call, sample).ShouldBeTrue();
+
+    /// <summary>
+    /// Every allow-listed name must resolve to a file the scan actually reads, so a rename cannot leave a
+    /// permission behind that covers nothing while the file that inherited the behaviour goes unguarded.
+    /// </summary>
+    [Fact]
+    public void Every_allow_listed_file_still_exists()
+        => _sqlComposingFiles.ShouldBeSubsetOf(SourceFiles().Select(Path.GetFileName));
+
+    /// <summary>The files permitted to compose SQL text or construct a <c>DbCommand</c> inside a data package.</summary>
+    private static readonly string[] _sqlComposingFiles =
+    [
+        "EfAlvoData.cs",
+        "EfCoreDescriptorVersionStore.cs",
+        "EfCoreRuntimeSchemaWriter.cs",
+        "EfCoreSchemaMigrator.cs",
+        "PredicateParameterBinder.cs",
+        "RelationalSqlBatch.cs",
+        "SystemSchemaInitializer.cs",
+        "VersionRowWriter.cs",
+    ];
+
+    /// <summary>
     /// The positive control: the scan really reads all three packages' sources, so an empty result above means
     /// "not present" rather than "nothing was scanned". Each driver is named individually, because a wrong path
     /// would silently drop one and leave the totals plausible.
@@ -101,32 +204,44 @@ public class ChangeTrackerReachTests
     /// names. A typo in one of them (a stray escape, a wrong word) would make that row silently unenforceable,
     /// which is the failure mode a list of regular expressions has.
     /// </summary>
-    /// <param name="call">The banned call, as a regular expression.</param>
+    /// <param name="index">The index into <see cref="BannedCalls"/> of the pattern under test.</param>
     /// <param name="sample">A line the pattern must match.</param>
     [Theory]
-    [InlineData(@"\.Attach(Range)?\(", "db.Attach(row);")]
-    [InlineData(@"\.Attach(Range)?\(", "db.AttachRange(rows);")]
-    [InlineData(@"\.Update(Range)?\(", "db.Update(row);")]
-    [InlineData(@"\.Remove(Range)?\(", "db.Remove(row);")]
-    [InlineData(@"\.Entry\(", "db.Entry(row).State = EntityState.Modified;")]
-    [InlineData(@"\.AsTracking\(", "var row = db.Rows(entity).AsTracking().First();")]
-    [InlineData(@"\bEntityState\.", "entry.State = EntityState.Modified;")]
-    [InlineData(@"\.State\s*=[^=]", "entry.State = EntityState.Modified;")]
-    public void Every_banned_pattern_matches_the_call_it_names(string call, string sample)
-        => Regex.IsMatch(sample, call, RegexOptions.None, TimeSpan.FromSeconds(5)).ShouldBeTrue();
+    [InlineData(0, "db.Attach(row);")]
+    [InlineData(0, "db.AttachRange(rows);")]
+    [InlineData(0, "db.Attach<Dictionary<string, object>>(row);")]
+    [InlineData(1, "db.Update(row);")]
+    [InlineData(1, "db.Update<Dictionary<string, object>>(row);")]
+    [InlineData(2, "db.Remove(row);")]
+    [InlineData(2, "db.RemoveRange<Dictionary<string, object>>(rows);")]
+    [InlineData(3, "db.Entry(row).State = EntityState.Modified;")]
+    [InlineData(3, "db.Entry<Dictionary<string, object>>(row);")]
+    [InlineData(4, "var row = db.Rows(entity).AsTracking().First();")]
+    [InlineData(4, "db.Rows(entity).AsTracking<Dictionary<string, object>>();")]
+    [InlineData(4, "db.Rows(entity).AsTracking <Dictionary<string, object>> ();")]
+    [InlineData(5, "entry.State = EntityState.Modified;")]
+    [InlineData(6, "entry.State = EntityState.Modified;")]
+    public void Every_banned_pattern_matches_the_call_it_names(int index, string sample)
+        => Matches(Pattern(index), sample).ShouldBeTrue();
 
     /// <summary>
     /// And must not match the shapes this package legitimately uses, so a banned pattern cannot be satisfied by
     /// being unfalsifiable.
     /// </summary>
-    /// <param name="call">The banned call, as a regular expression.</param>
+    /// <param name="index">The index into <see cref="BannedCalls"/> of the pattern under test.</param>
     /// <param name="sample">A line the pattern must not match.</param>
     [Theory]
-    [InlineData(@"\.State\s*=[^=]", "if (entry.State == EntityState.Added)")]
-    [InlineData(@"\.AsTracking\(", "var rows = db.Rows(entity).AsNoTracking();")]
-    [InlineData(@"\.Update(Range)?\(", "await root.ExecuteUpdateAsync(setters, cancellationToken);")]
-    public void No_banned_pattern_matches_a_shape_this_package_uses(string call, string sample)
-        => Regex.IsMatch(sample, call, RegexOptions.None, TimeSpan.FromSeconds(5)).ShouldBeFalse();
+    [InlineData(6, "if (entry.State == EntityState.Added)")]
+    [InlineData(4, "var rows = db.Rows(entity).AsNoTracking();")]
+    [InlineData(1, "await root.ExecuteUpdateAsync(setters, cancellationToken);")]
+    [InlineData(1, "var updated = Updates(schema); Publish(updated);")]
+    public void No_banned_pattern_matches_a_shape_this_package_uses(int index, string sample)
+        => Matches(Pattern(index), sample).ShouldBeFalse();
+
+    private static string Pattern(int index) => _bannedCalls[index];
+
+    private static bool Matches(string pattern, string sample) =>
+        Regex.IsMatch(sample, pattern, RegexOptions.None, TimeSpan.FromSeconds(5));
 
     private static IReadOnlyList<string> FilesMatching(string pattern) =>
         [.. SourceFiles()

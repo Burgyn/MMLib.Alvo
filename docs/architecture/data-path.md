@@ -306,6 +306,50 @@ await db.SaveChangesAsync();          // UPDATE … WHERE id = @p, no policy pre
 banned alongside it, and every pattern carries a positive and a negative sample so a typo cannot make a row
 silently unenforceable.
 
+**Every banned call form tolerates an explicit generic argument list**, because the first version did not and
+that was a live bypass: `\.AsTracking\(` requires the *non-generic* spelling, and
+`db.Rows(entity).AsTracking<Dictionary<string, object>>()` is one keystroke away, returns tracked rows, and
+built with **zero warnings** under `TreatWarningsAsErrors` while all 284 facts passed. The same gap applied to
+`Attach`, `Update`, `Remove` and `Entry`. Measured, landed and reverted.
+
+### A hand-built command is forbidden by an allow-list, not by a ban-list
+
+The second bypass was not in the banned vocabulary at all:
+
+```csharp
+var connection = db.Database.GetDbConnection();
+using var command = connection.CreateCommand();
+command.CommandText = "UPDATE \"" + entity + "\" SET \"title\" = '" + title + "' WHERE \"id\" = '" + id + "'";
+await command.ExecuteNonQueryAsync();          // no predicate, and a first-order injection
+```
+
+It is not an exotic shape — it is **the house style of five sibling files in these very packages**
+(`VersionRowWriter`, `SystemSchemaInitializer`, `RelationalSqlBatch`, `EfCoreDescriptorVersionStore`,
+`EfCoreRuntimeSchemaWriter`), so a contributor writing it is copying the file next door.
+
+`Only_allow_listed_files_compose_sql_or_build_a_command` closes it as an **allow-list**: the files permitted
+to compose SQL text or construct a `DbCommand` are named, and any other file in a data package that reaches
+`CreateCommand`, `CommandText`, `ExecuteNonQuery`/`Scalar`/`Reader`, `ExecuteSqlRaw*`, `FromSql*` or
+`GetDbConnection` fails. A ban-list is a guess about what the next contributor will type; an allow-list is a
+decision. Each name earns its place by writing a *framework* table, by executing SQL EF's own generator
+produced, or by being the parameter-binding seam — and `Every_allow_listed_file_still_exists` makes a rename
+fail rather than leave a permission covering nothing.
+
+The allow-list's non-vacuity is asserted against sample lines rather than by landing a policy-free writer, so
+the proof is permanent instead of reverted and no such file has to exist in a shipped package.
+
+### EF's own `EF1002`/`EF1003` are a real control, and they were undocumented
+
+Credit where it is due: `db.Database.ExecuteSqlRawAsync($"…{title}…")` fails the build with **`EF1002`** and
+the concatenated form with **`EF1003`**, both as *errors* because of `TreatWarningsAsErrors`. That is a
+genuine control and it retroactively validates the choice of the root namespace over `NoWarn EF1001` (a
+suppression would also hide genuine EF internal-API misuse).
+
+But it is **EF's** control, not Alvo's. It was named nowhere as a security control, so nothing stopped a
+future `NoWarn EF1002` from switching it off silently, and it is blind to a hand-built `DbCommand` — which is
+why the allow-list above exists rather than relying on it. Recorded here because a control nobody knows about
+is one refactor away from being turned off.
+
 `update` and `delete` are `ExecuteUpdateAsync`/`ExecuteDeleteAsync` composed over the **same `FromSql` root
 that carries `USING`**, so the predicate is a subquery inside the emitted statement and `rows affected == 0`
 is the `AlvoRecordNotFoundException` signal — indistinguishable, as `IAlvoData` requires, from a row that
