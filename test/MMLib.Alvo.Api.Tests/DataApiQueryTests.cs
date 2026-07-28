@@ -1,5 +1,10 @@
-﻿using MMLib.Alvo.Data;
+﻿using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
+using MMLib.Alvo.Api.Internal;
+using MMLib.Alvo.Data;
 using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Schema;
 using System.Net;
 using System.Text.Json.Nodes;
 
@@ -288,6 +293,59 @@ public sealed class DataApiQueryTests
             () => AlvoApiWorld.FromDescriptorAsync("reserved-field.alvo.json"));
 
         refusal.Message.ShouldContain("limit");
+    }
+
+    /// <summary>
+    /// The mapping-time reserved-name belt, exercised on the <b>only</b> path it exists for: an applied schema that
+    /// reaches route generation without ever having passed descriptor validation.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A descriptor declaring such a field is refused at apply, so no descriptor-driven host can reach here — which
+    /// is exactly why this guard was pinned by nothing: deleting it left the whole suite green. It is kept for the
+    /// schemas that skip the validator, which are real and will grow: one applied by a build predating the
+    /// apply-time refusal, and F7's dynamic-entity registry, which never produces a descriptor at all.
+    /// </para>
+    /// <para>
+    /// The registry is substituted rather than the descriptor edited, because substituting it <em>is</em> the
+    /// bypass: <c>EntityRouteCatalog</c> reads the applied schema from <c>ISchemaRegistry</c>, so a registry
+    /// answering with a hostile schema is precisely the shape those two paths take.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void A_schema_reaching_mapping_without_validation_is_still_refused_for_a_reserved_field_name()
+    {
+        var builder = WebApplication.CreateSlimBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddAlvo(alvo => alvo
+            .UseSqlite($"Data Source=alvo-belt-{Guid.NewGuid():N};Mode=Memory;Cache=Shared")
+            .FromDescriptor(Path.Combine(RepositoryRoot.Find(), "examples", "vehicle-registry", "vehicles.alvo.json"))
+            .AddDataApi());
+        builder.Services.AddSingleton<ISchemaRegistry>(new FixedSchemaRegistry(new SchemaModel([
+            new EntitySchema
+            {
+                Name = "widgets",
+                Fields =
+                [
+                    new FieldSchema { Name = "id", Type = Schema.FieldType.Uuid },
+                    new FieldSchema { Name = ReservedQueryKeys.Limit, Type = Schema.FieldType.Integer },
+                ],
+            },
+        ])));
+
+        using var app = builder.Build();
+
+        var refusal = Should.Throw<InvalidOperationException>(() => app.MapAlvoDataApi());
+        refusal.Message.ShouldContain("widgets");
+        refusal.Message.ShouldContain(ReservedQueryKeys.Limit);
+        refusal.Message.ShouldContain("Rename the field");
+    }
+
+    /// <summary>An applied schema handed straight to route generation, with no descriptor behind it.</summary>
+    /// <param name="schema">The schema to answer with.</param>
+    private sealed class FixedSchemaRegistry(SchemaModel schema) : ISchemaRegistry
+    {
+        public SchemaModel GetSchema() => schema;
     }
 
     private static async Task<AlvoApiWorld> SeededAsync()

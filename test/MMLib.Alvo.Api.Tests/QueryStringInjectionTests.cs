@@ -80,8 +80,20 @@ public sealed class QueryStringInjectionTests
     private static readonly string[] _mustNotLeak =
     [
         "SELECT", "WHERE", "FROM", "sqlite", "SQLite", "no such column", "no such table",
-        "unrecognized token", "syntax error", "Exception",
+        "unrecognized token", "syntax error", "Exception", QuotedIdentifier,
     ];
+
+    /// <summary>
+    /// The table's name as a <b>quoted SQL identifier</b>, which is how a composed statement spells it.
+    /// </summary>
+    /// <remarks>
+    /// The one entry here that catches an identifier escaping into a response — the injection symptom most likely
+    /// to be silent, since a leaked identifier carries no SQL keyword and no engine error with it. It is separated
+    /// out because it was <em>lost once</em>: it read <c>vehicles"</c>, and re-seeding this suite onto a
+    /// tenant-scoped entity renamed the table without renaming the check, so it silently stopped matching anything.
+    /// Deriving it from <see cref="Table"/> makes that unrepresentable.
+    /// </remarks>
+    private const string QuotedIdentifier = Table + "\"";
 
     /// <summary>Every operator the port declares, by its wire spelling — the enum is the source, not a literal list.</summary>
     public static TheoryData<string> EveryOperator() => [.. FilterOperators.WireNames];
@@ -107,21 +119,32 @@ public sealed class QueryStringInjectionTests
     }
 
     /// <summary>
-    /// The same corpus through <c>order</c> and <c>select</c>, where a caller's text would reach SQL as an
-    /// <b>identifier</b> rather than as a bind parameter — the one position parameterisation cannot defend, and
-    /// therefore the one that must be refused outright.
+    /// The same corpus through every position a caller's text would reach SQL as an <b>identifier</b> rather than
+    /// as a bind parameter — the one position parameterisation cannot defend, and therefore the one that must be
+    /// refused outright.
     /// </summary>
+    /// <remarks>
+    /// <b>The filter's own key is such a position, and it is the one that was missing.</b> In PostgREST's grammar a
+    /// non-reserved parameter name <em>is</em> a field name, so <c>?&lt;payload&gt;=eq.1</c> puts the payload where
+    /// a column identifier goes — and it is the only one of these three that produces an <c>unavailable-field</c>
+    /// refusal, which is the refusal whose message could echo an identifier back. Without this row the
+    /// quoted-identifier entry in <see cref="_mustNotLeak"/> screened no body that could ever have carried one:
+    /// measured by planting the table name in that message and watching the whole suite stay green.
+    /// </remarks>
     [Theory]
     [InlineData("order")]
     [InlineData("select")]
+    [InlineData(FieldNamePosition)]
     public async Task Injection_through_an_identifier_position_is_refused_and_leaks_no_error(string parameter)
     {
         await using var world = await SeededAsync();
 
         foreach (var payload in _payloads)
         {
-            using var response = await world.SendAsync(
-                HttpMethod.Get, $"/api/{Table}?{parameter}={Uri.EscapeDataString(payload)}", _caller);
+            var query = parameter == FieldNamePosition
+                ? $"{Uri.EscapeDataString(payload)}=eq.1"
+                : $"{parameter}={Uri.EscapeDataString(payload)}";
+            using var response = await world.SendAsync(HttpMethod.Get, $"/api/{Table}?{query}", _caller);
 
             var body = await response.ReadTextAsync();
             response.StatusCode.ShouldBe(
@@ -131,6 +154,12 @@ public sealed class QueryStringInjectionTests
             (await world.CountRowsAsync(Table)).ShouldBe(SeededRows);
         }
     }
+
+    /// <summary>
+    /// The theory row that sends the payload as the parameter <em>name</em> — a field position, since every
+    /// non-reserved key in this grammar names a field.
+    /// </summary>
+    private const string FieldNamePosition = "<field>";
 
     /// <summary>
     /// The discriminating case, spelled out on its own: the payload that would drop the table is answered as an
@@ -250,11 +279,24 @@ public sealed class QueryStringInjectionTests
         }
     }
 
+    /// <summary>
+    /// Screens a response body for SQL, engine error vocabulary and the table's quoted identifier.
+    /// </summary>
+    /// <remarks>
+    /// <b>The body is JSON-unescaped first, and that is load-bearing rather than tidiness.</b> A quoted SQL
+    /// identifier is <c>"notes"</c>, and <c>System.Text.Json</c> writes an interior quote as <c>\"</c> — so
+    /// screening the raw body for <c>notes"</c> can <em>never</em> match. Measured: planting the quoted table name
+    /// in a refusal message left the whole suite green. The entry was reported as having been lost when this suite
+    /// re-seeded onto a tenant-scoped entity; it was worse than that — in its original <c>vehicles"</c> form it had
+    /// never been able to fire either. Unescaping is what turns the check from decoration into a check.
+    /// </remarks>
     private static void ShouldLeakNothing(string body, string parameter, string payload)
     {
+        var unescaped = body.Replace("\\\"", "\"", StringComparison.Ordinal);
+
         foreach (var leak in _mustNotLeak)
         {
-            body.ShouldNotContain(
+            unescaped.ShouldNotContain(
                 leak,
                 Case.Sensitive,
                 $"'{parameter}' with payload {Describe(payload)} leaked '{leak}' into the response");

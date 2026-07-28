@@ -269,9 +269,9 @@ public sealed class QueryStringParserPropertyTests
         return true;
     }
 
-    /// <summary>The distinct codes a refusal carried — a set, so a parser emitting every code fails.</summary>
+    /// <summary>Every code a refusal carried, in order and with repeats — so both a missing and a repeated one fail.</summary>
     private static IReadOnlyList<string> Codes(IReadOnlyList<AlvoViolation> violations) =>
-        [.. violations.Select(violation => violation.Code).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
+        [.. violations.Select(violation => violation.Code).Order(StringComparer.Ordinal)];
 
     private static bool TryParse(
         string queryString, out ParsedListQuery? parsed, out IReadOnlyList<AlvoViolation> violations) =>

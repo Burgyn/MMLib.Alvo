@@ -528,6 +528,37 @@ public sealed class QueryStringParserTests
     }
 
     /// <summary>
+    /// A request that is wrong in three different ways reports <b>all three</b>, and reports each of them once.
+    /// </summary>
+    /// <remarks>
+    /// The flooding case, which a global cap in arrival order silently loses: three hundred filter parameters
+    /// produced twenty identical <c>filter-too-wide</c> entries and the <c>limit</c> and <c>order</c> mistakes in
+    /// the same request were never reported at all. #19's definition of done and §2.1 both require every violation.
+    /// Asserted on the exact code sequence, so a repeat fails it as loudly as an omission.
+    /// </remarks>
+    [Fact]
+    public void A_request_wrong_in_three_ways_reports_all_three_refusals_once_each()
+    {
+        var flooded = string.Join("&", Enumerable.Repeat("year=gte.1", 300));
+
+        TryParse($"{flooded}&limit=0&order=color", out _, out var violations).ShouldBeFalse();
+
+        Codes(violations).ShouldBe(["filter-too-wide", "invalid-page-size", "unpageable-sort-key"]);
+    }
+
+    /// <summary>
+    /// Two parameters failing the same way are one problem, reported once — a caller learns nothing from the
+    /// second, and repeats are what crowded out the distinct refusals above.
+    /// </summary>
+    [Fact]
+    public void Two_parameters_failing_the_same_way_are_reported_once()
+    {
+        TryParse("nosuchfield=eq.1&alsomissing=eq.2", out _, out var violations).ShouldBeFalse();
+
+        Codes(violations).ShouldBe(["unavailable-field"]);
+    }
+
+    /// <summary>
     /// The <c>in</c>-candidate allowance is spent across the <b>whole query</b>, not per list — the bound the
     /// port cannot express, because it measures only the longest list.
     /// </summary>
@@ -686,12 +717,14 @@ public sealed class QueryStringParserTests
         (IReadOnlyList<object?>)((AlvoComparison)filter!).Value!;
 
     /// <summary>
-    /// The distinct codes a refusal carried. Asserted as a <b>set</b> rather than with
-    /// <c>ShouldContain</c>, which is satisfied by a parser that emits every code it knows — and which is how
-    /// a second, wrong violation rode along beside the right one unnoticed.
+    /// Every code a refusal carried, in order and <b>with repeats</b>. Asserted as the whole sequence rather
+    /// than with <c>ShouldContain</c>, which is satisfied by a parser that emits every code it knows — and which
+    /// is how a second, wrong violation rode along beside the right one unnoticed. It no longer de-duplicates
+    /// either: the parser is what must not repeat itself, and a helper that hid repeats hid exactly the flooding
+    /// that made distinct refusals vanish.
     /// </summary>
     private static IReadOnlyList<string> Codes(IReadOnlyList<AlvoViolation> violations) =>
-        [.. violations.Select(violation => violation.Code).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
+        [.. violations.Select(violation => violation.Code).Order(StringComparer.Ordinal)];
 
     private static AlvoViolation OnlyViolation(string queryString)
     {

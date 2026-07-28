@@ -49,13 +49,6 @@ internal sealed record ParsedListQuery(AlvoQuery Query, IReadOnlyList<string>? S
 internal static class QueryStringParser
 {
     /// <summary>
-    /// How many violations one refusal reports. The query string is caller-controlled and a hundred bad keys
-    /// would otherwise buy a hundred-fold response amplification; an agent needs the first handful, not all
-    /// of them.
-    /// </summary>
-    private const int MaxReportedViolations = 20;
-
-    /// <summary>
     /// The longest opaque cursor this API will pass through to a provider.
     /// </summary>
     /// <remarks>
@@ -102,6 +95,7 @@ internal static class QueryStringParser
         private readonly FilterParseScope _scope = new(new QueryFieldResolver(entity, hiddenFields));
         private readonly List<AlvoFilter> _terms = [];
         private readonly List<AlvoViolation> _violations = [];
+        private readonly HashSet<(string Code, string Pointer)> _reported = [];
         private IReadOnlyList<AlvoSort> _sort = [];
         private int? _limit;
         private int? _offset;
@@ -187,12 +181,12 @@ internal static class QueryStringParser
         /// certain to exist.
         /// </summary>
         /// <remarks>
-        /// Charged on arrival rather than at build time, because a budget spent after the tree is assembled does
-        /// not bound the tree. That was measured, not theorised: <c>?year=gte.1</c> repeated 256 times charged
-        /// 256 leaves, added the 257th node anyway, and left the port's own guard to answer — so a caller saw
+        /// <b>Charged on arrival rather than at build time, because a budget spent after the tree is assembled does
+        /// not bound the tree.</b> Measured, not theorised: <c>?year=gte.1</c> repeated 256 times charged 256
+        /// leaves, added the 257th node anyway, and left the port's own guard to answer — so a caller saw
         /// <c>filter-beyond-port-limits</c>, the code documented as unreachable, beside the
         /// <c>filter-too-wide</c> they actually needed. Charging here keeps the running total equal to the node
-        /// count of the tree that will be produced.
+        /// count of the tree that will be produced, which is the whole of why that code is now unreachable.
         /// </remarks>
         private void ChargeTheConjunction()
         {
@@ -237,6 +231,17 @@ internal static class QueryStringParser
             Add(QueryViolations.InvalidPageSize(options.MaxPageSize));
         }
 
+        /// <summary>
+        /// An offset must be a whole number of zero or more rows.
+        /// </summary>
+        /// <remarks>
+        /// <b>A deliberate restatement of the port's own bound, recorded as one</b> — the sibling of the
+        /// <see cref="ReadLimit"/> tightening. <see cref="AlvoQuery.EnsurePagingWindowIsSane"/> refuses a negative
+        /// offset too, and it still runs; this refuses the same thing earlier so a caller gets a structured
+        /// violation naming the parameter instead of the port's bare <c>ArgumentOutOfRangeException</c> text. Unlike
+        /// the <c>limit</c> case it adds no <em>new</em> bound: non-numeric text is the only condition here the
+        /// port cannot see, because by the time it looks the value is already an <see cref="int"/>.
+        /// </remarks>
         private void ReadOffset(string value)
         {
             if (TryReadWholeNumber(value, out var offset) && offset >= 0)
@@ -344,26 +349,24 @@ internal static class QueryStringParser
         };
 
         /// <summary>
-        /// Runs the port's own rules over what this parse produced.
+        /// Runs the port's own rules over what this parse produced — all three, unconditionally.
         /// </summary>
         /// <remarks>
-        /// <b>The filter's structural guard runs last, and only when nothing else was refused.</b> The paging
-        /// and sort rules are about the paging window rather than the filter, so they always run and can report
-        /// beside a filter violation. <see cref="AlvoFilter.EnsureWithinLimits"/> is the belt: it exists to catch
-        /// a divergence between this parser's accounting and the port's, so running it while the parser has
-        /// <em>already</em> refused would report the parser's own overflow twice — once with the code that names
-        /// the caller's fix, and once with the code that means "the API's accounting is broken". That is exactly
-        /// what shipped, and it is why <see cref="QueryViolations.FilterBeyondPortLimits"/> was reachable.
+        /// <b><see cref="AlvoFilter.EnsureWithinLimits"/> runs even when this parse has already refused, and that
+        /// is deliberate.</b> An earlier version skipped it in that case, reasoning that a parser which had already
+        /// found the overflow should not also report the belt's "the API's accounting is broken" code. It changes
+        /// no outcome — the request is refused either way — and its only real effect is to <em>suppress</em>
+        /// <see cref="QueryViolations.FilterBeyondPortLimits"/> whenever any other violation exists. That is
+        /// precisely the case in which the belt is carrying information: under the accounting defect it was written
+        /// alongside, the tree stayed unbounded and the guard hid the symptom. A defensive control that can only
+        /// ever conceal a real defect is worse than no control, and it blinds the suite-wide screen that now
+        /// asserts the belt code reaches no response body.
         /// </remarks>
         private void EnsureWithinPortRules(AlvoQuery query)
         {
             Record(() => AlvoQuery.EnsurePagingWindowIsSane(query), QueryViolations.ConflictingPagingWindow);
             Record(() => AlvoQuery.EnsureSortKeysCanBePaged(query, entity), QueryViolations.UnpageableSortKey);
-
-            if (_violations.Count == 0)
-            {
-                Record(() => AlvoFilter.EnsureWithinLimits(query.Filter), QueryViolations.FilterBeyondPortLimits);
-            }
+            Record(() => AlvoFilter.EnsureWithinLimits(query.Filter), QueryViolations.FilterBeyondPortLimits);
         }
 
         /// <summary>
@@ -405,9 +408,29 @@ internal static class QueryStringParser
         /// <summary>How <see cref="ArgumentException"/> introduces the argument name it appends to a message.</summary>
         private const string ArgumentNameSuffix = " (Parameter '";
 
+        /// <summary>
+        /// Records one refusal — <b>once per distinct <c>(code, pointer)</c></b>.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>De-duplicating is what bounds the response, and it replaces a global cap that flooding defeated.</b>
+        /// Three hundred bad parameters used to fill a twenty-entry allowance with one repeated
+        /// <c>filter-too-wide</c>, so a <c>limit</c> and an <c>order</c> mistake in the same request were never
+        /// reported at all — #19's definition of done and §2.1 both require <em>every</em> violation, and a
+        /// response that repeats one kind twenty times while silently dropping two others satisfies the letter and
+        /// defeats the purpose. One per kind needs no numeric cap: the code catalogue and the pointer set are both
+        /// small and fixed, so the list is bounded by construction and every distinct problem survives.
+        /// </para>
+        /// <para>
+        /// The message and fix suggestion are deliberately <em>not</em> part of the identity: both are derived from
+        /// the code plus server-owned values, so including them could only ever split one kind into several. And
+        /// nothing is lost by collapsing — a pointer here names a parameter's <em>role</em>, never a field, so two
+        /// bad filter values were already reported identically.
+        /// </para>
+        /// </remarks>
         private void Add(AlvoViolation violation)
         {
-            if (_violations.Count < MaxReportedViolations)
+            if (_reported.Add((violation.Code, violation.Pointer)))
             {
                 _violations.Add(violation);
             }

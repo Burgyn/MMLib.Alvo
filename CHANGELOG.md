@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (breaking)
+
+- **A descriptor may no longer name a field `order`, `limit`, `offset`, `after`, `select`,
+  `or`, `and` or `not`.** The generated Data API's query string reserves each of these
+  (`?limit=10`, `?or=(...)`, `?not.color=eq.red`), so a request could not tell a filter on
+  such a field from the parameter itself. The descriptor is now **rejected when it is
+  applied**, with an error naming the entity, the field, the full reserved list and
+  `Rename the field`; previously such a descriptor applied and then failed when routes were
+  mapped — or, for an embedded host that never maps the Data API, was never refused at all.
+  `order` in particular is a plausible business field name (an `orders` entity with an
+  `order` column is not exotic), so this will hit real descriptors. Rename the field; there
+  is no opt-out, because the ambiguity has no correct per-request resolution.
+  `schema/project.schema.json` documents the exclusion on the `fields` description — the
+  JSON Schema pattern cannot express it, so it is stated there rather than validated.
+
 ### Added
 
 - Repository and solution skeleton: `MMLib.Alvo.Abstractions` (the interface-first

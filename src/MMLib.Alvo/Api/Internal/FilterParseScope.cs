@@ -24,6 +24,7 @@ namespace MMLib.Alvo.Api.Internal;
 internal sealed class FilterParseScope(QueryFieldResolver fields)
 {
     private int _nodes;
+    private int _candidates;
 
     /// <summary>The caller's resolvable fields.</summary>
     internal QueryFieldResolver Fields => fields;
@@ -34,8 +35,6 @@ internal sealed class FilterParseScope(QueryFieldResolver fields)
     /// because every one of them is a node a backend then has to walk.
     /// </summary>
     internal bool TryChargeNode() => ++_nodes <= AlvoFilter.MaxTerms;
-
-    private int _candidates;
 
     /// <summary>
     /// Charges <paramref name="count"/> <c>in</c> candidates against this request's <b>total</b>, answering
