@@ -246,6 +246,17 @@ public sealed class AddAlvoIntegrationTests : IDisposable
     /// <c>SystemSchemaInitializer.FrameworkTableNames</c>: taking the name from the member under test is how a
     /// name dropped from that member stops being checked at all.
     /// </param>
+    /// <remarks>
+    /// <b>Measured, with a name deleted from that member:</b> the first thing that breaks is not a planned
+    /// <c>DROP</c> but a hard <c>InvalidOperationException</c> out of the model build — <em>"the property 'id'
+    /// cannot be added to the type 'alvo_idempotency'"</em> — because a bookkeeping table has no row key and the
+    /// property-bag model requires one. And it breaks on <b>every first run</b>, not only on a re-apply:
+    /// <c>SchemaMigrationRunner</c> reads the applied snapshot first, which is what creates these tables, and
+    /// then falls back to introspection because that read found no revision yet. So the plan assertion below is
+    /// the narrower of the two claims and the one worth stating; the throw is what a contributor would actually
+    /// see. Both facts fail for whichever name is missing, so the pair is a per-table statement rather than a
+    /// per-table discriminator.
+    /// </remarks>
     private async Task AFrameworkTableSurvivesIntrospectionAsync(string tableName)
     {
         var ct = TestContext.Current.CancellationToken;
