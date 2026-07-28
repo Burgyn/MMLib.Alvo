@@ -483,6 +483,121 @@ public class DescriptorValidatorTests
         Validate(DescriptorWithRule("list", "owner_id == @user.id")).IsValid.ShouldBeTrue();
     }
 
+    /// <summary>
+    /// Every framework-managed column the entity's traits carry is refused when declared, with the field's own
+    /// JSON path and a fix suggestion — the form a dashboard or a CLI <c>validate</c> can show.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The mapper throws for the same declaration, and that is a pair rather than a duplicate: this pass reports
+    /// every offending field at once with a path, and the throw is the fail-closed belt for an apply that
+    /// skipped the validator. Both read <c>ManagedColumnNames</c>, so a declaration cannot be explained one way
+    /// here and another by the apply that follows it.
+    /// </para>
+    /// <para>
+    /// <c>deleted_at</c> is driven with <c>softDelete</c>, which this build also refuses as unhonoured — so that
+    /// descriptor earns <em>two</em> errors and the assertion looks for its own rather than for the only one.
+    /// That is exactly why it is worth driving: <c>deleted_at</c>'s reason is unreachable through the mapper,
+    /// which refuses <c>softDelete</c> before injecting anything, and that is how the old catch-all came to tell
+    /// a softDelete-only entity its <c>deleted_at</c> was part of an audit trail.
+    /// </para>
+    /// </remarks>
+    /// <param name="traits">The entity traits that make the column managed.</param>
+    /// <param name="column">The managed column the entity declares.</param>
+    /// <param name="mentions">
+    /// A phrase this column's <em>message</em> must contain, so the per-name reason is really per name. The
+    /// replacement for the lost <c>readOnly</c>-on-<c>tenant_id</c> narrowing lives in the <em>fix</em> half
+    /// instead, and is asserted where it belongs by
+    /// <c>DescriptorToSchemaMapperTests.A_declared_tenant_id_is_refused_and_the_fix_names_a_create_rule</c>.
+    /// </param>
+    [Theory]
+    [InlineData(@"""audit"": true", "created_at", "every create")]
+    [InlineData(@"""audit"": true", "created_by", "audit trail")]
+    [InlineData(@"""audit"": true", "updated_at", "If-Match")]
+    [InlineData(@"""audit"": true", "updated_by", "audit trail")]
+    [InlineData(@"""tenancy"": ""scoped""", "tenant_id", "discriminator")]
+    [InlineData(@"""softDelete"": true", "deleted_at", "recoverable")]
+    [InlineData(@"""audit"": true", "id", "row key")]
+    public void A_declared_framework_managed_column_is_reported_with_its_path_and_its_own_reason(
+        string traits, string column, string mentions)
+    {
+        var json = $$"""
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "orders": { {{traits}}, "fields": {
+            "title": { "type": "string" },
+            "{{column}}": { "type": "datetime" } } } } }
+        """;
+
+        var error = Validate(json).Errors
+            .Where(candidate => candidate.Path == $"/entities/orders/fields/{column}")
+            .ShouldHaveSingleItem();
+
+        error.Message.ShouldContain($"'{column}' is a framework-managed column and cannot be declared");
+        error.Message.ShouldContain(mentions, Case.Sensitive, "the reason must be this column's, not a catch-all");
+        error.FixSuggestion.ShouldNotBeNull().ShouldContain("declare it under a different name", Case.Sensitive);
+    }
+
+    /// <summary>
+    /// An entity that says nothing about tenancy, in a project that turns tenancy <b>on</b>, still carries a
+    /// managed <c>tenant_id</c> — so declaring it is refused there too.
+    /// </summary>
+    /// <remarks>
+    /// The case this pass would otherwise have missed. <c>tenant_id</c>'s membership is a <em>project</em>-level
+    /// answer for an entity with no <c>tenancy</c> of its own, so reading only the entity would under-report
+    /// exactly the entities a multi-tenant project is built from — the mapper would still refuse them, but with
+    /// an exception instead of a path and a fix.
+    /// </remarks>
+    [Fact]
+    public void A_declared_tenant_id_is_refused_when_the_project_turns_tenancy_on()
+    {
+        var json = """
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "tenancy": { "enabled": true },
+          "entities": { "orders": { "fields": {
+            "tenant_id": { "type": "uuid" } } } } }
+        """;
+
+        Validate(json).Errors.ShouldContain(error => error.Path == "/entities/orders/fields/tenant_id");
+    }
+
+    /// <summary>
+    /// A field named like a managed column on an entity whose traits do <b>not</b> carry it validates —
+    /// trait-scoped, never a flat name list.
+    /// </summary>
+    [Fact]
+    public void A_managed_name_the_entity_does_not_manage_is_an_ordinary_field()
+    {
+        var json = """
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "orders": { "fields": {
+            "created_at": { "type": "datetime" },
+            "updated_at": { "type": "datetime" },
+            "deleted_at": { "type": "datetime" } } } } }
+        """;
+
+        Validate(json).IsValid.ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// Two declared managed columns produce <b>two</b> errors rather than the first — which is the whole reason
+    /// a semantic pass exists beside the mapper's throw.
+    /// </summary>
+    [Fact]
+    public void Every_declared_managed_column_is_reported_rather_than_the_first()
+    {
+        var json = """
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "orders": { "audit": true, "fields": {
+            "created_at": { "type": "datetime" },
+            "updated_at": { "type": "datetime" } } } } }
+        """;
+
+        Validate(json).Errors.Select(error => error.Path).ShouldBe(
+            ["/entities/orders/fields/created_at", "/entities/orders/fields/updated_at"],
+            ignoreOrder: true,
+            "an agent must see every fix it needs in one round trip");
+    }
+
     private static DescriptorValidationResult Validate(string json) => _validator.Validate(json);
 
     private static string DescriptorWithRule(string operation, string expression) => $$"""

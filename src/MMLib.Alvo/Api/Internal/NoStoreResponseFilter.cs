@@ -24,11 +24,6 @@ namespace MMLib.Alvo.Api.Internal;
 /// added later cannot be mapped without it.
 /// </para>
 /// <para>
-/// The header is written before the delegate runs rather than after: a response whose body has already
-/// started cannot take a new header, and an <see cref="IResult"/> deeper in the pipeline is free to begin
-/// writing whenever it likes.
-/// </para>
-/// <para>
 /// <b>In tension with the <c>304</c> path, and <c>no-store</c> is the one that wins.</b> RFC 9111 §5.2.2.5
 /// bars <em>every</em> cache from storing the response, private ones included — so a strictly conforming
 /// client keeps no stored representation to revalidate, and <c>DataApiEndpoints.Representation</c>'s

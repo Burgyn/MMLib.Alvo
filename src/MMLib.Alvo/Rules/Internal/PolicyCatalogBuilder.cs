@@ -249,23 +249,32 @@ internal static class PolicyCatalogBuilder
     private const string RowKeyField = "id";
 
     /// <summary>
-    /// The <c>hidden</c> flag name, needed by name because the framework-managed rule below applies to it
-    /// and not to <c>readOnly</c>.
-    /// </summary>
-    private const string HiddenFlag = "hidden";
-
-    /// <summary>
     /// Whether a field may carry a <c>hidden</c>/<c>readOnly</c> flag at all: it has to exist in the
-    /// entity's schema, must not be the framework-owned key, and — for <c>hidden</c> — must not be any
-    /// framework-managed column.
+    /// entity's schema and must not be the framework-owned key.
     /// </summary>
     /// <remarks>
-    /// Every check runs before the flag's own value is looked at, so a flag written as <c>false</c> is
+    /// <para>
+    /// Both checks run before the flag's own value is looked at, so a flag written as <c>false</c> is
     /// validated exactly like one written as <c>true</c>. Otherwise a mistake could be parked as
     /// <c>false</c> and become live later, when nothing re-validates it. Refusing here rather than in the
     /// data path is Alvo's stated rule — a bad descriptor fails at save, and DoD criterion 3 says it for
     /// the sibling case ("a rule naming a nonexistent column fails at save, not at request time") — and a
     /// read-time-only refusal would turn a one-off config error into a per-request failure.
+    /// </para>
+    /// <para>
+    /// <b>It does not check the other framework-managed columns, and no longer needs to.</b> A flag can only be
+    /// written on a field the descriptor <em>declares</em>, and declaring any managed column is now refused two
+    /// passes earlier — by <c>DescriptorValidator</c>'s semantic pass and by the mapper, both reading
+    /// <c>ManagedColumnNames</c>. A rule here as well would be a third copy of one decision, and it briefly was
+    /// exactly that: it covered <c>hidden</c> only, which left a wrong-typed declaration reachable and told a
+    /// <c>softDelete</c>-only entity its <c>deleted_at</c> was part of an audit trail it never asked for.
+    /// </para>
+    /// <para>
+    /// <see cref="RowKeyField"/> stays, because this method is reachable without either of those passes:
+    /// <see cref="PolicyCatalog.TryBuild"/> takes a <see cref="SchemaModel"/> a host may have assembled itself,
+    /// which is the same reason <c>EfAlvoData.EnsureNotSoftDeleted</c> exists. It keeps the one refusal whose
+    /// consequence is not a wrong column but a row that cannot materialise at all.
+    /// </para>
     /// </remarks>
     private static bool IsFlaggable(string fieldName, string flagName, EntityBuild build)
     {
@@ -274,13 +283,6 @@ internal static class PolicyCatalogBuilder
         if (string.Equals(fieldName, RowKeyField, StringComparison.Ordinal))
         {
             build.Errors.Add(RowKeyFlagError(path, flagName));
-            return false;
-        }
-
-        if (string.Equals(flagName, HiddenFlag, StringComparison.Ordinal)
-            && AlvoManagedColumns.For(build.Schema).Contains(fieldName))
-        {
-            build.Errors.Add(ManagedColumnHiddenError(path, fieldName));
             return false;
         }
 
@@ -300,65 +302,6 @@ internal static class PolicyCatalogBuilder
             $"Remove the {flagName} flag from '{RowKeyField}'. The key identifies the row in every response and "
             + "in every subsequent request, so it can be neither masked nor made read-only.",
             DescriptorValidationSeverity.Error);
-
-    /// <summary>
-    /// Refuses <c>hidden</c> on a framework-managed column, because masking one silently switches off
-    /// framework behaviour the descriptor never asked to lose.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// It is reachable — the mapper injects a managed column only when the entity does <em>not</em> declare a
-    /// field of that name (<c>DescriptorToSchemaMapper.AddManagedColumn</c>), so an author's own
-    /// <c>updated_at</c> wins and can carry any flag the schema allows. What it costs is invisible:
-    /// <c>updated_at</c> is the column <see cref="AlvoManagedColumns.VersionColumn"/> names, so masking it
-    /// means the API mints no <c>ETag</c> for the row and a caller therefore has nothing to send as
-    /// <c>If-Match</c> — <b>optimistic concurrency is switched off for that entity with no error anywhere</b>,
-    /// which is the lost update §2.1 of the analysis is about. Masking <c>created_by</c>/<c>updated_by</c>
-    /// hides the audit trail the entity opted into by declaring <c>audit</c>; masking <c>tenant_id</c> hides
-    /// which tenant a row belongs to from the only response that reports it.
-    /// </para>
-    /// <para>
-    /// Only <c>hidden</c>, not <c>readOnly</c>. <c>readOnly</c> on a managed column is at worst redundant —
-    /// <see cref="AlvoManagedColumns.IsCallerWritable"/> already refuses a caller's write to every one of
-    /// them — except on <c>tenant_id</c>, which <em>is</em> caller-writable on create, so marking it read-only
-    /// is a real and legitimate narrowing an author may want.
-    /// </para>
-    /// <para>
-    /// The refusal names the trait that produced the column rather than the column alone, because the fix is
-    /// usually to stop declaring the field: an author who wrote their own <c>updated_at</c> generally wanted a
-    /// different column, not a masked version of the framework's.
-    /// </para>
-    /// </remarks>
-    /// <param name="path">The JSON pointer of the flag.</param>
-    /// <param name="fieldName">The managed column the flag names.</param>
-    private static DescriptorValidationError ManagedColumnHiddenError(string path, string fieldName) =>
-        new(
-            path,
-            $"'{fieldName}' is a framework-managed column and cannot be marked hidden.",
-            $"Remove the hidden flag from '{fieldName}'. {ManagedColumnConsequence(fieldName)} If you meant a "
-            + $"column of your own, declare it under a different name — an entity that declares '{fieldName}' "
-            + "itself replaces the framework's, rather than adding to it.",
-            DescriptorValidationSeverity.Error);
-
-    /// <summary>What masking one particular managed column silently switches off.</summary>
-    /// <remarks>
-    /// Named per column rather than given one generic sentence, because the consequences are not
-    /// interchangeable and "the framework manages this" does not tell an author what they are about to lose.
-    /// </remarks>
-    /// <param name="fieldName">The managed column.</param>
-    private static string ManagedColumnConsequence(string fieldName) => fieldName switch
-    {
-        var name when name == AlvoManagedColumns.UpdatedAt =>
-            "It is the column that versions a row, so masking it leaves the API with no 'ETag' to hand out and "
-            + "the caller with no 'If-Match' to send: optimistic concurrency would be off for this entity, "
-            + "silently, and concurrent writers would overwrite each other. Drop 'audit' if you do not want the "
-            + "column at all.",
-        var name when name == AlvoManagedColumns.TenantId =>
-            "It is the tenant a row belongs to, and no other response reports it.",
-        _ =>
-            "It is part of the audit trail this entity asked for by declaring 'audit', and an audit trail the "
-            + "response omits is not one.",
-    };
 
     /// <summary>
     /// Builds the "flag on an undeclared field" rejection, reusing the same "did you mean" shape an unknown

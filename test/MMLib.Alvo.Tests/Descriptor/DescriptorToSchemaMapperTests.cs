@@ -331,49 +331,103 @@ public class DescriptorToSchemaMapperTests
     }
 
     /// <summary>
-    /// A descriptor that declares a field the mapper also injects used to produce <b>two</b>
-    /// <see cref="FieldSchema"/> entries with one name, and every later operation on that entity died
-    /// with <c>ArgumentException: An item with the same key has already been added</c> out of the data
-    /// path — so declaring <c>readOnly</c> on a managed column, the documented way to protect one, broke
-    /// the entity instead. Only <c>id</c> had a de-duplication guard.
+    /// Declaring a field the mapper also injects is <b>refused</b>, whatever attributes the declaration
+    /// carries — the framework owns those names on an entity whose traits carry them.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This branch has had three behaviours and it is worth keeping all three recorded, because the
+    /// middle one looked correct. Appending unconditionally produced <b>two</b> <see cref="FieldSchema"/>
+    /// entries with one name, and every later operation on the entity died with
+    /// <c>ArgumentException: An item with the same key has already been added</c>. Letting the declaration
+    /// win fixed that and opened two worse holes: an audited entity declaring <c>updated_at</c> as
+    /// <c>{"type":"string"}</c> applied cleanly and then <b>failed every create with an internal
+    /// <c>(Parameter 'value')</c> in the response body</b>, and one declaring it <c>hidden</c> applied
+    /// cleanly and switched optimistic concurrency off in silence. Refusing is the only answer that is
+    /// neither a duplicate nor a silent override.
+    /// </para>
+    /// <para>
+    /// Both attribute shapes are driven — the type the framework would have used, and a wrong one — because
+    /// "redundant" and "wrong" must not be told apart: a declaration that happens to match today would still
+    /// be a caller-authored column standing in for one the framework writes, and the type the framework uses
+    /// is not part of the descriptor's contract.
+    /// </para>
+    /// </remarks>
+    /// <param name="column">The managed column the entity declares.</param>
+    /// <param name="attributes">The declaration's attributes.</param>
     [Theory]
-    [InlineData("created_by")]
-    [InlineData("created_at")]
-    [InlineData("updated_by")]
-    [InlineData("updated_at")]
-    public void A_declared_managed_column_is_not_injected_a_second_time(string column)
+    [InlineData("created_by", @"""type"": ""uuid""")]
+    [InlineData("created_at", @"""type"": ""datetime""")]
+    [InlineData("updated_by", @"""type"": ""uuid"", ""readOnly"": true")]
+    [InlineData("updated_at", @"""type"": ""datetime""")]
+    [InlineData("updated_at", @"""type"": ""string""")]
+    [InlineData("updated_at", @"""type"": ""datetime"", ""hidden"": true")]
+    [InlineData("id", @"""type"": ""uuid""")]
+    public void A_declared_managed_column_is_refused(string column, string attributes)
     {
         var json = $$"""
         { "apiVersion": "alvo.dev/v1", "name": "demo",
           "entities": { "notes": { "audit": true, "fields": {
             "title": { "type": "string" },
-            "{{column}}": { "type": "uuid", "readOnly": true } } } } }
+            "{{column}}": { {{attributes}} } } } } }
         """;
 
-        var notes = MapInline(json).Entities.Single(e => e.Name == "notes");
+        var ex = Should.Throw<InvalidDataException>(() => MapInline(json));
 
-        notes.Fields.Count(field => field.Name == column).ShouldBe(1);
-        notes.Fields.Select(field => field.Name).ShouldBeUnique();
+        ex.Message.ShouldContain($"'{column}' is a framework-managed column and cannot be declared");
+        ex.Message.ShouldContain("declare it under a different name", Case.Sensitive);
     }
 
     /// <summary>
-    /// The tenant discriminator has the same shape, and a scoped entity is the ordinary case rather
+    /// The tenant discriminator is refused the same way, and a scoped entity is the ordinary case rather
     /// than the audited one.
     /// </summary>
+    /// <remarks>
+    /// It also carries the one capability the general rule removed: an earlier, narrower rule permitted
+    /// <c>readOnly</c> on <c>tenant_id</c>, since that is the single managed column a caller may write. The fix
+    /// suggestion has to name the replacement — a <c>create</c> rule, whose <c>WITH CHECK</c> already sees the
+    /// candidate row — or an author loses the capability with nowhere to go.
+    /// </remarks>
     [Fact]
-    public void A_declared_tenant_id_is_not_injected_a_second_time()
+    public void A_declared_tenant_id_is_refused_and_the_fix_names_a_create_rule()
     {
         var json = """
         { "apiVersion": "alvo.dev/v1", "name": "demo",
           "entities": { "notes": { "tenancy": "scoped", "fields": {
-            "tenant_id": { "type": "uuid", "required": true } } } } }
+            "tenant_id": { "type": "uuid", "required": true, "readOnly": true } } } } }
+        """;
+
+        var ex = Should.Throw<InvalidDataException>(() => MapInline(json));
+
+        ex.Message.ShouldContain("'tenant_id' is a framework-managed column and cannot be declared");
+        ex.Message.ShouldContain("'create' rule", Case.Sensitive);
+    }
+
+    /// <summary>
+    /// A field named like a managed column on an entity whose traits do <b>not</b> carry it is mapped
+    /// normally — the rule is trait-scoped, never a flat name list.
+    /// </summary>
+    /// <remarks>
+    /// An entity without <c>audit</c> may legitimately declare an ordinary <c>created_at</c>, and refusing that
+    /// would refuse a field the framework does not manage. It is the same reasoning
+    /// <see cref="AlvoManagedColumns"/>' own remarks give for answering membership from traits, and this is the
+    /// boundary a flat name list would quietly move.
+    /// </remarks>
+    [Fact]
+    public void A_managed_name_on_an_entity_whose_traits_do_not_carry_it_is_an_ordinary_field()
+    {
+        var json = """
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "notes": { "fields": {
+            "created_at": { "type": "datetime" },
+            "deleted_at": { "type": "datetime" } } } } }
         """;
 
         var notes = MapInline(json).Entities.Single(e => e.Name == "notes");
 
+        notes.Fields.Select(field => field.Name).ShouldContain("created_at");
+        notes.Fields.Select(field => field.Name).ShouldContain("deleted_at");
         notes.Fields.Select(field => field.Name).ShouldBeUnique();
-        notes.Fields.Count(field => field.Name == "tenant_id").ShouldBe(1);
     }
 
     /// <summary>

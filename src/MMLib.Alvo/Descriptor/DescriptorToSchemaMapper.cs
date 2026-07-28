@@ -148,28 +148,48 @@ internal static class DescriptorToSchemaMapper
     }
 
     /// <summary>
-    /// Appends one framework-managed column <b>unless the descriptor already declares that name</b>.
+    /// Appends one framework-managed column, <b>refusing the entity outright if it declares that name</b>.
     /// </summary>
     /// <remarks>
-    /// Appending unconditionally is what made a descriptor naming a managed column produce two
-    /// <see cref="FieldSchema"/> entries with one name, so every later operation on that entity died with
-    /// <c>An item with the same key has already been added</c> from the first code that keyed on the field
-    /// list — which made declaring <c>readOnly</c> on a managed column, the documented way to protect one,
-    /// break the entity instead of protecting it. <c>id</c> was the only column guarded this way; the guard
-    /// is now the shape every managed column goes through.
     /// <para>
-    /// This de-duplicates by name only. A descriptor that declares a managed name with a <em>different
-    /// type</em> still wins the mapping, which is a reserved-name question the descriptor validator owns
-    /// (see <c>docs/architecture/data-path.md</c>), not something a mapper may silently override.
+    /// This branch used to let the declaration win — inject only when the entity did not declare the name —
+    /// and both of the defects <see cref="ManagedColumnNames"/> records came out of it: an audited entity
+    /// declaring <c>updated_at</c> as <c>{"type":"string"}</c> applied cleanly and then failed every create
+    /// with an internal parameter name in the response body, and one declaring it <c>hidden</c> applied
+    /// cleanly and switched optimistic concurrency off in silence. Both are the same mistake — a
+    /// caller-authored column standing in for one the framework writes — so both are refused here, at the one
+    /// place the two paths meet.
+    /// </para>
+    /// <para>
+    /// Appending unconditionally was the version before that, and it is worth keeping the reason recorded
+    /// because refusing must not regress to it: two <see cref="FieldSchema"/> entries with one name made every
+    /// later operation on the entity die with <c>An item with the same key has already been added</c> from the
+    /// first code that keyed on the field list. Refusing produces neither a duplicate nor a silent override.
+    /// </para>
+    /// <para>
+    /// <b>The validator reports this too, and that is the pair rather than a duplicate.</b>
+    /// <c>DescriptorValidator</c>'s semantic pass names every offending field at once with a JSON path and a
+    /// fix suggestion, which is the only form a dashboard or a CLI <c>validate</c> can show; this throw is the
+    /// fail-closed belt for an apply that did not run the validator first, and it is why the two read one
+    /// table.
     /// </para>
     /// </remarks>
+    /// <param name="fields">The mapped field list being built.</param>
+    /// <param name="e">The entity descriptor, consulted for whether it declares <paramref name="name"/>.</param>
+    /// <param name="name">The managed column to inject.</param>
+    /// <param name="column">Builds the managed column's schema.</param>
+    /// <exception cref="InvalidDataException">The entity declares a field named <paramref name="name"/>.</exception>
     private static void AddManagedColumn(
         List<FieldSchema> fields, EntityDescriptor e, string name, Func<string, FieldSchema> column)
     {
-        if (!e.Fields.ContainsKey(name))
+        if (e.Fields.ContainsKey(name))
         {
-            fields.Add(column(name));
+            var (consequence, fix) = ManagedColumnNames.Refusing(name);
+            throw new InvalidDataException(
+                $"Field '{name}' is a framework-managed column and cannot be declared. {consequence} {fix}");
         }
+
+        fields.Add(column(name));
     }
 
     private static FieldSchema IdColumn(string name) =>

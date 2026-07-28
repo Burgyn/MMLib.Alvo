@@ -31,14 +31,15 @@ namespace MMLib.Alvo.Api.Internal;
 /// <see cref="AlvoContext"/> as a parameter on purpose.
 /// </para>
 /// <para>
-/// <b>All five delegates resolve the operation's decision before doing any work, and none of them is the
-/// authority for it.</b> The distinction is the whole of this layer's relationship with authorization, and
-/// it is worth stating precisely rather than as "this layer never re-checks a decision", which the code
-/// contradicts at five call sites. What each delegate does is refuse, up front, exactly what the port
-/// would refuse anyway — same engine, same catalog, same context — and then call the port, which resolves
-/// again and remains the authority. So nothing is admitted here that the port would refuse, and nothing is
-/// refused here that the port would admit. See <see cref="EnsureOperationIsAllowed"/> for why the refusal
-/// has to be up front on every verb and not only on the two that read a body.
+/// <b>Four of the five delegates resolve the operation's decision before doing any work, and none of them
+/// is the authority for it.</b> The distinction is the whole of this layer's relationship with
+/// authorization, and it is worth stating precisely rather than as "this layer never re-checks a decision",
+/// which the code contradicts at four call sites. What each delegate does is refuse, up front, exactly what
+/// the port would refuse anyway — same engine, same catalog, same context — and then call the port, which
+/// resolves again and remains the authority. So nothing is admitted here that the port would refuse, and
+/// nothing is refused here that the port would admit. The fifth, <c>GET {id}</c>, has no such call because
+/// there it would be observationally inert; <see cref="EnsureOperationIsAllowed"/> carries both the reason
+/// and the trigger for adding it.
 /// </para>
 /// </remarks>
 internal static class DataApiEndpoints
@@ -109,15 +110,25 @@ internal static class DataApiEndpoints
                     Guid id,
                     HttpContext http,
                     IAlvoData data,
-                    IPolicyEngine policies,
                     IAlvoContextAccessor caller,
                     CancellationToken ct) =>
                 ProblemResultFactory.GuardAsync(async () =>
                 {
-                    var context = Caller(caller);
-                    _ = EnsureOperationIsAllowed(policies, entity.Name, DataOperation.Get, context);
-
-                    var record = await data.GetAsync(entity.Name, id, context, ct).ConfigureAwait(false);
+                    // The one delegate with no EnsureOperationIsAllowed call, and it takes no IPolicyEngine at
+                    // all so the absence is visible in the signature. A guard here would be indistinguishable:
+                    // GetAsync resolves the same decision and raises the same exception, so a denied reader sees
+                    // the same 403 either way and no test can tell the two builds apart. A control nothing can
+                    // distinguish is worse than absent, because it reads as a security check.
+                    //
+                    // ADD THE GUARD (and the parameter back) the moment this delegate interprets caller input
+                    // before the port call. Two such changes are already sketched in this file, and each makes
+                    // the parse-before-decide oracle reachable here: a `select` projection would need
+                    // decision.HiddenFields and, unguarded, is MapList's oracle verbatim — see
+                    // EnsureOperationIsAllowed; and honouring If-Match on a read, which Representation puts at
+                    // about three lines, would answer 412 before 403, the defect
+                    // ConcurrencyTests.A_denied_caller_is_refused_before_their_precondition_header_is pins on
+                    // DELETE.
+                    var record = await data.GetAsync(entity.Name, id, Caller(caller), ct).ConfigureAwait(false);
 
                     // A row the caller's policy excludes reads exactly like one that was never there, so
                     // this 404 is the same 404 AlvoRecordNotFoundException produces.
@@ -276,11 +287,21 @@ internal static class DataApiEndpoints
     /// get to use.
     /// </para>
     /// <para>
-    /// <b>On <c>get</c> it changes nothing a caller can observe, and that is stated rather than dressed up.</b>
-    /// <c>GetAsync</c> resolves the same decision and raises the same exception, so a denied reader sees the
-    /// same 403 with or without this call, and no fact can tell the two builds apart. It is here for
-    /// uniformity — so "which verbs check up front" is not a question a reader has to answer by reading five
-    /// delegates — and it costs one resolve on a denied read that was going to be refused anyway.
+    /// <b>Called on four of the five, not all five — <c>MapGet</c> deliberately has no such call.</b> There it
+    /// would be indistinguishable: <c>GetAsync</c> resolves the same decision and raises the same exception, so
+    /// a denied reader sees the same 403 either way and deleting the call fails nothing. It was added for
+    /// uniformity and removed again for a better reason than symmetry — <b>a control no test can distinguish is
+    /// worse than an absent one, because it reads as a security check</b>, and the next reader budgets trust
+    /// against it.
+    /// </para>
+    /// <para>
+    /// <b>The trigger for putting it back</b>, since "get is exempt" is true only of today's delegate: add it
+    /// the moment <c>MapGet</c> interprets caller input before the port call. Two such changes are already
+    /// sketched in this file. A <c>select</c> projection on a single row would need
+    /// <see cref="PolicyDecision.HiddenFields"/> and, unguarded, would be the <c>list</c> oracle above verbatim.
+    /// Honouring <c>If-Match</c> on a read — which <see cref="Representation"/> puts at about three lines —
+    /// would answer 412 before 403, which is exactly the <c>delete</c> defect the paragraph above describes
+    /// fixing. Neither is hypothetical; both are written down as things a later task may want.
     /// </para>
     /// <para>
     /// <b>This does not become a second authorization authority.</b> It refuses only what the port would

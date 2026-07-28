@@ -170,17 +170,36 @@ internal sealed class DescriptorValidator : IDescriptorValidator
         }
 
         var entityNames = entities.EnumerateObject().Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
+        var tenancyEnabled = IsTenancyEnabled(root);
         var errors = new List<DescriptorValidationError>();
         foreach (var entity in entities.EnumerateObject())
         {
-            errors.AddRange(EntitySemanticErrors(entity, entityNames));
+            errors.AddRange(EntitySemanticErrors(entity, entityNames, tenancyEnabled));
         }
 
         return errors;
     }
 
+    /// <summary>
+    /// Whether the project turns tenancy on, which is what makes an entity that says nothing about tenancy
+    /// scoped — and therefore carry a framework-managed <c>tenant_id</c>.
+    /// </summary>
+    /// <remarks>
+    /// Read from the root here and threaded down, rather than left out, because <c>tenant_id</c>'s membership in
+    /// the managed set is a <em>project</em>-level answer for an entity that declares no <c>tenancy</c> of its
+    /// own (<c>DescriptorToSchemaMapper.ResolveTenancy</c>). Omitting it would make this pass under-report
+    /// exactly the entities a multi-tenant project is built from — the mapper would still refuse them, but with
+    /// an exception instead of a path and a fix, which is the shape a dashboard cannot show.
+    /// </remarks>
+    /// <param name="root">The descriptor's root object.</param>
+    private static bool IsTenancyEnabled(JsonElement root) =>
+        root.TryGetProperty("tenancy", out var tenancy)
+        && tenancy.ValueKind == JsonValueKind.Object
+        && tenancy.TryGetProperty("enabled", out var enabled)
+        && enabled.ValueKind == JsonValueKind.True;
+
     private static IEnumerable<DescriptorValidationError> EntitySemanticErrors(
-        JsonProperty entity, HashSet<string> entityNames)
+        JsonProperty entity, HashSet<string> entityNames, bool tenancyEnabled)
     {
         foreach (var error in Unhonoured($"/entities/{entity.Name}", entity.Value, UnhonouredFeatures.OnAnEntity))
         {
@@ -192,17 +211,50 @@ internal sealed class DescriptorValidator : IDescriptorValidator
             yield break;
         }
 
+        var managed = ManagedColumnsOf(entity.Value, tenancyEnabled);
         foreach (var field in fields.EnumerateObject())
         {
-            foreach (var error in FieldSemanticErrors($"/entities/{entity.Name}/fields/{field.Name}", field, entityNames))
+            foreach (var error in FieldSemanticErrors(
+                $"/entities/{entity.Name}/fields/{field.Name}", field, entityNames, managed))
             {
                 yield return error;
             }
         }
     }
 
+    /// <summary>
+    /// The framework-managed columns this entity carries, read from its traits in the raw JSON.
+    /// </summary>
+    /// <remarks>
+    /// The trait rule itself is <see cref="AlvoManagedColumns"/>', reached through
+    /// <see cref="ManagedColumnNames.InjectedFor"/> — this only maps the three JSON flags onto it. It has to be
+    /// answered from traits rather than from a flat name list because an entity without <c>audit</c> may
+    /// legitimately declare an ordinary field called <c>created_at</c>, and refusing that would refuse a field
+    /// the framework does not manage.
+    /// </remarks>
+    /// <param name="entity">The entity object.</param>
+    /// <param name="tenancyEnabled">Whether the project turns tenancy on.</param>
+    private static IReadOnlySet<string> ManagedColumnsOf(JsonElement entity, bool tenancyEnabled) =>
+        ManagedColumnNames.InjectedFor(
+            TenancyOf(entity, tenancyEnabled),
+            audit: IsTrue(entity, "audit"),
+            softDelete: IsTrue(entity, "softDelete"));
+
+    private static TenancyMode? TenancyOf(JsonElement entity, bool tenancyEnabled) =>
+        entity.TryGetProperty("tenancy", out var declared) && declared.ValueKind == JsonValueKind.String
+            ? declared.GetString() switch
+            {
+                "scoped" => TenancyMode.Scoped,
+                "global" => TenancyMode.Global,
+                _ => null,
+            }
+            : tenancyEnabled ? TenancyMode.Scoped : null;
+
+    private static bool IsTrue(JsonElement entity, string property) =>
+        entity.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.True;
+
     private static IEnumerable<DescriptorValidationError> FieldSemanticErrors(
-        string path, JsonProperty field, HashSet<string> entityNames)
+        string path, JsonProperty field, HashSet<string> entityNames, IReadOnlySet<string> managed)
     {
         foreach (var error in Unhonoured(path, field.Value, UnhonouredFeatures.OnAField))
         {
@@ -216,6 +268,11 @@ internal sealed class DescriptorValidator : IDescriptorValidator
                 $"Field references unknown entity '{target}'.",
                 $"Add an entity named '{target}', or point 'entity' at an existing one.",
                 DescriptorValidationSeverity.Error);
+        }
+
+        if (managed.Contains(field.Name))
+        {
+            yield return DeclaresAManagedColumn(path, field.Name);
         }
 
         if (ReservedQueryKeys.IsReserved(field.Name))
@@ -317,6 +374,27 @@ internal sealed class DescriptorValidator : IDescriptorValidator
         + $"on this field from the '{field}' parameter itself.",
         $"Rename the field. The reserved names are {ReservedQueryKeys.AsList}.",
         DescriptorValidationSeverity.Error);
+
+    /// <summary>
+    /// The refusal for a field that names a column the framework injects for this entity's traits.
+    /// </summary>
+    /// <remarks>
+    /// The sibling of <see cref="ShadowsAReservedQueryParameter"/> and deliberately shaped like it — both say
+    /// "this name is not yours to use", and both are answered here rather than at request time. The prose comes
+    /// from <see cref="ManagedColumnNames"/>, which the mapper's own refusal reads too, so a declaration cannot
+    /// be explained one way by the validator and another by the apply that follows it.
+    /// </remarks>
+    /// <param name="path">The field's JSON pointer.</param>
+    /// <param name="field">The managed column the entity declares.</param>
+    private static DescriptorValidationError DeclaresAManagedColumn(string path, string field)
+    {
+        var (consequence, fix) = ManagedColumnNames.Refusing(field);
+        return new(
+            path,
+            $"Field '{field}' is a framework-managed column and cannot be declared. {consequence}",
+            fix,
+            DescriptorValidationSeverity.Error);
+    }
 
     /// <summary>
     /// Reserved entity name for the built-in auth entity (schema: <c>entities.users</c> is

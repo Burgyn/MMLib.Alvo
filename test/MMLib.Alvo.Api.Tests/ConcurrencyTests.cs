@@ -516,34 +516,45 @@ public sealed class ConcurrencyTests
     }
 
     /// <summary>
-    /// The one descriptor that could switch this whole feature off silently is refused at <b>apply</b>: an
-    /// audited entity that declares its own <c>updated_at</c> and marks it <c>hidden</c>.
+    /// Both descriptors that could switch this whole feature off silently are refused at <b>apply</b>: an
+    /// audited entity declaring its own <c>updated_at</c>, whether it masks the column or retypes it.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// It is reachable, which is why it needed closing. The schema mapper injects a framework-managed column
-    /// only when the entity does not already declare a field of that name, so an author's own
-    /// <c>updated_at</c> wins — and a <c>hidden</c> flag on it drops the key from every returned record, so
+    /// Both were reachable, and the masked one is the milder. The schema mapper used to inject a
+    /// framework-managed column only when the entity did not already declare that name, so an author's own
+    /// <c>updated_at</c> won. Declared <c>hidden</c>, the mask drops the key from every returned record, so
     /// <c>RowVersionETag.For</c> finds no version, no <c>ETag</c> is minted, the caller has nothing to send as
-    /// <c>If-Match</c>, and <b>every fact in this file would still pass while the entity had no lost-update
-    /// protection at all</b>. Nothing would have raised: not the descriptor, not a request, not a response.
+    /// <c>If-Match</c>, and <b>every other fact in this file would still pass while the entity had no
+    /// lost-update protection at all</b>. Declared as <c>{"type":"string"}</c> it is worse: apply succeeded and
+    /// then every create answered 422 with an internal parameter name in the body, because the audit stamp
+    /// writes a timestamp into a column the schema calls text.
+    /// </para>
+    /// <para>
+    /// So the rule is not "you may not hide it" but "you may not declare it", and both fixtures are driven
+    /// together because a rule closing only the mask leaves the worse route open — which is exactly what the
+    /// first attempt did.
     /// </para>
     /// <para>
     /// Refused at apply on the settled precedent — <c>softDelete</c>, <c>computed</c>, and Task 5's
     /// <c>validation</c>/<c>default</c>/<c>rollup</c>: a descriptor that silently loses a documented guarantee
     /// fails at save, because a bad descriptor is a one-off configuration error and a per-request failure is
-    /// not. <c>PolicyCatalogBuilderTests</c> owns which columns the rule covers and why; this owns the claim
-    /// that the refusal really reaches <em>this</em> API's apply path, which the unit fact cannot show — a
-    /// migration runner that collected the catalog's errors and carried on would satisfy it and fail here.
+    /// not. <c>DescriptorValidatorTests</c> and <c>ManagedColumnNamesTests</c> own which columns the rule covers
+    /// and why; this owns the claim that the refusal really reaches <em>this</em> API's apply path, which no
+    /// unit fact can show — a migration runner that collected the errors and carried on would satisfy them all
+    /// and fail here.
     /// </para>
     /// </remarks>
-    [Fact]
-    public async Task An_audited_entity_that_hides_its_own_version_column_is_refused_at_apply()
+    /// <param name="descriptor">A fixture declaring <c>updated_at</c> on an audited entity.</param>
+    [Theory]
+    [InlineData("hidden-version.alvo.json")]
+    [InlineData("retyped-version.alvo.json")]
+    public async Task An_audited_entity_that_declares_its_own_version_column_is_refused_at_apply(string descriptor)
     {
         var failure = await Should.ThrowAsync<DescriptorValidationException>(
-            () => AlvoApiWorld.FromDescriptorAsync("hidden-version.alvo.json", [_admin]));
+            () => AlvoApiWorld.FromDescriptorAsync(descriptor, [_admin]));
 
-        failure.Message.ShouldContain("/entities/records/fields/updated_at/hidden", Case.Sensitive);
+        failure.Message.ShouldContain("/entities/records/fields/updated_at", Case.Sensitive);
         failure.Message.ShouldContain(
             "If-Match",
             Case.Sensitive,
@@ -658,8 +669,8 @@ public sealed class ConcurrencyTests
         {
             using var response = await world.SendAsync(
                 probe.Method, probe.Path, _admin, body: probe.Body, headers: probe.Headers);
-            probe.Expected.ShouldBe(
-                response.StatusCode, $"{probe.Method} {probe.Path} must reach the response this probe stands for");
+            response.StatusCode.ShouldBe(
+                probe.Expected, $"{probe.Method} {probe.Path} must reach the response this probe stands for");
             ShouldBeNoStore(response, $"{probe.Method} {probe.Path} answered {(int)response.StatusCode} and");
         }
 
