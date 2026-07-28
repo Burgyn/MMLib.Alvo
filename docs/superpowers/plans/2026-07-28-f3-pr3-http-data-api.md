@@ -536,7 +536,8 @@ mismatch → `AlvoPreconditionFailedException`. An entity with no version column
 precondition → the same exception with a message pointing at `audit: true`.
 
 `InMemoryAlvoData` implements the identical semantics over its dictionary, including the conflict and
-the tenant scoping. It is the reference the shipped backends are held to, so it may not be laxer.
+the record's full identity scope — **(tenant, acting user)**, never the tenant alone. It is the reference
+the shipped backends are held to, so it may not be laxer.
 
 - [ ] **Step 6: Rings, then the PostgreSQL leg**
 
@@ -852,12 +853,21 @@ git add -A && git commit -m "feat(api): parse the PostgREST filter, sort and pag
 | Schema-derived validation failed | 422 | `validation` |
 | Query string malformed | 422 | `malformed-query` |
 | `ArgumentException` out of the port | 422 | `malformed-query` |
-| `AlvoAuthorizationException` | 403 | `forbidden` |
+| `AlvoAuthorizationException` (policy refused) | 403 | `forbidden` |
+| The API key's scope excludes this entity/operation | 403 | `out-of-scope` |
 | `AlvoRecordNotFoundException` / `GetAsync` → null | 404 | `not-found` |
 | `AlvoPreconditionFailedException` | 412 | `precondition-failed` |
 | `AlvoIdempotencyConflictException` | 409 | `idempotency-conflict` |
 | Presented API key unusable | 401 | `unauthenticated` |
 | `InvalidOperationException` | 500 | `internal` |
+
+**A slug keys on the refusal's *kind*, never on its *reason*.** RFC 9457 makes `type` the
+machine-readable classification and `detail` explicitly unparseable prose, so a slug that encoded *why*
+policy refused would become exactly the oracle the deny-reason wording is written to avoid. That is also
+why `out-of-scope` is a legitimate second 403 while "row invisible to you" is not: a key's own scope is a
+fact about the caller's credential, not about whether data exists. Task 3 left a fact asserting a
+`detail` literal because status alone could not tell the two 403s apart — re-point it at the slug here,
+and delete the literal assertion.
 
 - [ ] **Step 1: Write the failing validation facts**
 
@@ -1013,14 +1023,35 @@ git add -A && git commit -m "feat(api): ETag and If-Match over the row version, 
 [Fact] public async Task Two_tenants_may_use_the_same_key_without_colliding()
 [Fact] public async Task Ten_concurrent_posts_with_one_key_create_exactly_one_row()
 [Fact] public async Task A_post_without_the_header_is_not_deduplicated()
+[Fact] public async Task Two_creates_differing_only_in_a_field_the_fingerprint_must_cover_are_a_conflict()
+[Fact] public async Task An_anonymous_caller_sending_the_header_is_refused_with_a_fix_suggestion()
 ```
+
+The last two exist because of what Task 2 settled below the port.
+
+`Two_creates_differing_only_in_a_field_the_fingerprint_must_cover_are_a_conflict` is the one gap Task 2's
+re-review could name and the port structurally cannot close: a fingerprint that omits the *entity* is
+fail-closed (the port answers a permanent not-found), but a fingerprint too coarse **within** one entity
+is **silently wrong** — the second, different request is answered with the first request's row and no
+error anywhere. The HTTP layer computes the fingerprint, so this is the only layer that can hold the
+guarantee. Write it so it fails if any body field is dropped from the digest: two payloads differing in
+exactly one field, same key, must be a 409.
+
+`An_anonymous_caller_sending_the_header_is_refused_with_a_fix_suggestion` pins the port's
+`EnsureIdentifiableCaller` guard end to end. **It is a 422, not a 401, and that was decided rather than
+inherited:** no credential was presented and rejected, so nothing failed authentication — the caller sent
+a well-formed request asking for a facility that requires a stable identity to scope by, which is 422's
+meaning and the port's existing malformed-request family. A 401 would also owe a `WWW-Authenticate`
+challenge for a request that never attempted authentication, and would blur the anonymous-versus-401
+line Task 3 kept deliberately disjoint.
 
 - [ ] **Step 2: Implement**
 
 `IdempotencyFingerprint` hashes method + route template + entity + the canonical JSON of the body
 (SHA-256, hex). Canonical means the JSON is re-serialized from the parsed document with sorted property
 names, so a reformatted-but-identical retry is a replay rather than a 409 — a retrying HTTP client is
-not required to reproduce byte-identical whitespace.
+not required to reproduce byte-identical whitespace. **Every field of the body is in the digest**; see
+the coarseness fact above for why an omission here is a silent wrong answer rather than a refusal.
 
 Cap the key length (`AlvoApiOptions.MaxIdempotencyKeyLength = 255`, matching the storage column) and
 refuse a longer one with 422 rather than truncating: two keys that differ past the cut would become one.
