@@ -869,6 +869,13 @@ fact about the caller's credential, not about whether data exists. Task 3 left a
 `detail` literal because status alone could not tell the two 403s apart — re-point it at the slug here,
 and delete the literal assertion.
 
+**One asymmetry validation must preserve deliberately, not by omission: a write to a `hidden` field is
+accepted.** `hidden` restricts *reading*; `readOnly` restricts *writing*. They are different flags and the
+port treats them as such, so a caller may legitimately write a field whose value they may not read back.
+Validation that "helpfully" refused it would silently change the port's contract — and would also hand the
+caller a hidden field's existence, which is the one thing Task 4's `hiddenFields` parameter exists to
+withhold. Add a fact asserting the write is accepted, so a later tidy-up cannot quietly reverse it.
+
 - [ ] **Step 1: Write the failing validation facts**
 
 ```csharp
