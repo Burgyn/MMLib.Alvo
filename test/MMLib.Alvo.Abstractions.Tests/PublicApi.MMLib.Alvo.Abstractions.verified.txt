@@ -186,6 +186,14 @@ namespace MMLib.Alvo.Data
         public AlvoOr(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoFilter> Filters) { }
         public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoFilter> Filters { get; init; }
     }
+    public sealed class AlvoPage : System.IEquatable<MMLib.Alvo.Data.AlvoPage>
+    {
+        public AlvoPage() { }
+        public required System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRecord> Items { get; init; }
+        public string? NextCursor { get; init; }
+        public long? TotalCount { get; init; }
+        public static MMLib.Alvo.Data.AlvoPage Empty { get; }
+    }
     public sealed class AlvoQuery : System.IEquatable<MMLib.Alvo.Data.AlvoQuery>
     {
         public AlvoQuery() { }
@@ -193,7 +201,9 @@ namespace MMLib.Alvo.Data
         public required string Entity { get; init; }
         public MMLib.Alvo.Data.AlvoFilter? Filter { get; init; }
         public int? Limit { get; init; }
+        public int? Offset { get; init; }
         public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoSort> Sort { get; init; }
+        public static void EnsurePagingWindowIsSane(MMLib.Alvo.Data.AlvoQuery query) { }
         public static void EnsureSortKeysCanBePaged(MMLib.Alvo.Data.AlvoQuery query, MMLib.Alvo.Schema.EntitySchema? entity) { }
     }
     public sealed class AlvoRecord : System.IEquatable<MMLib.Alvo.Data.AlvoRecord>
@@ -225,7 +235,7 @@ namespace MMLib.Alvo.Data
         System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord> CreateAsync(string entity, System.Collections.Generic.IReadOnlyDictionary<string, object?> values, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task DeleteAsync(string entity, System.Guid id, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord?> GetAsync(string entity, System.Guid id, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default);
-        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRecord>> QueryAsync(MMLib.Alvo.Data.AlvoQuery query, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoPage> QueryAsync(MMLib.Alvo.Data.AlvoQuery query, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord> UpdateAsync(string entity, System.Guid id, System.Collections.Generic.IReadOnlyDictionary<string, object?> values, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default);
     }
 }

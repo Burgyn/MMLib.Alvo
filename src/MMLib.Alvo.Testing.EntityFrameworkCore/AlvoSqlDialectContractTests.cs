@@ -262,6 +262,23 @@ public abstract class AlvoSqlDialectContractTests
     }
 
     /// <summary>
+    /// The offset is bound, never formatted, so the clause has to name the marker it was handed — the same
+    /// reasoning as <see cref="A_row_limit_clause_names_the_marker_and_carries_no_separator_of_its_own"/>, for
+    /// the sibling member. Answered generically rather than only over the two shipped dialects' shared
+    /// default, so <c>TSqlSqlDialect</c>'s own override — which spells the marker differently — is held to the
+    /// same obligation.
+    /// </summary>
+    [Fact]
+    public void A_row_offset_clause_names_the_marker_and_carries_no_separator_of_its_own()
+    {
+        var clause = CreateDialect().RowOffsetClause("@alvo_offset");
+
+        clause.ShouldContain("@alvo_offset");
+        clause.ShouldBe(clause.Trim());
+        clause.ShouldNotContain(";");
+    }
+
+    /// <summary>
     /// Every <see cref="CelValueType"/> is answered rather than refused. The renderer is asked for
     /// <em>every</em> comparison, so a type it has no repair for is returned unchanged — a dialect that threw
     /// would turn a legal rule into a runtime failure on whichever engine happens to be underneath.

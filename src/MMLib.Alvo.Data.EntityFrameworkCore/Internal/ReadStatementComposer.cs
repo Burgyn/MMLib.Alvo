@@ -65,6 +65,9 @@ internal sealed class ReadStatementComposer
         /// <summary>The page's maximum row count, or <see langword="null"/> for no explicit limit.</summary>
         internal int? Limit { get; init; }
 
+        /// <summary>The number of leading rows to skip, or <see langword="null"/> for none.</summary>
+        internal int? Offset { get; init; }
+
         /// <summary>
         /// Whether the projection ignores the decision's field mask. <see langword="true"/> only for the
         /// pre-image a <c>WITH CHECK</c> verdict is reached over: that check evaluates the complete stored
@@ -126,6 +129,7 @@ internal sealed class ReadStatementComposer
             .Append(string.Join(" AND ", terms.Select(term => $"({term})")))
             .Append(OrderByClause(entity, options))
             .Append(LimitClause(parameters, options))
+            .Append(OffsetClause(parameters, options))
             .Append(LockClause(options))
             .ToString();
 
@@ -150,21 +154,55 @@ internal sealed class ReadStatementComposer
             : string.Empty;
 
     private static bool RequiresTotalOrder(ReadStatementOptions options) =>
-        options.Sort.Count > 0 || options.Limit is not null || options.Anchor is not null;
+        options.Sort.Count > 0 || options.Limit is not null || options.Offset is not null || options.Anchor is not null;
 
     /// <summary>
     /// <c>RowLimitClause</c> carries no separator of its own, like <c>RowLockClause</c>, so the separating
     /// space is inserted here. The row count is bound, never formatted: it is caller-supplied.
     /// </summary>
+    /// <remarks>
+    /// Renders even when <see cref="ReadStatementOptions.Limit"/> is <see langword="null"/> but
+    /// <see cref="ReadStatementOptions.Offset"/> is not, binding <see cref="UnboundedRowCount"/> as the row
+    /// count: SQLite's grammar makes <c>OFFSET</c> a sub-clause of <c>LIMIT</c> and rejects a bare
+    /// <c>OFFSET</c> outright, so an offset with no caller-supplied limit still needs one rendered — a large
+    /// value both shipped engines accept as an ordinary row count, standing in for "no bound" rather than a
+    /// negative sentinel PostgreSQL's own <c>LIMIT</c> refuses.
+    /// </remarks>
     private string LimitClause(Dictionary<string, BoundValue> parameters, ReadStatementOptions options)
     {
-        if (options.Limit is not { } limit)
+        var limit = options.Limit ?? (options.Offset is not null ? UnboundedRowCount : (int?)null);
+        if (limit is not { } value)
         {
             return string.Empty;
         }
 
-        parameters[PolicyParameterPrefix.RowLimit] = BoundValue.FromFramework(limit);
+        parameters[PolicyParameterPrefix.RowLimit] = BoundValue.FromFramework(value);
         return " " + _dialect.RowLimitClause(_fields.RenderParameter(PolicyParameterPrefix.RowLimit));
+    }
+
+    /// <summary>
+    /// The row count <see cref="LimitClause"/> binds when a caller asks for <see cref="ReadStatementOptions.Offset"/>
+    /// with no explicit <see cref="ReadStatementOptions.Limit"/>. Large enough that no real page is ever
+    /// bounded by it, and small enough that it binds through the same <see langword="int"/> column
+    /// <see cref="AlvoQuery.Limit"/> itself does.
+    /// </summary>
+    private const int UnboundedRowCount = int.MaxValue;
+
+    /// <summary>
+    /// <c>RowOffsetClause</c> carries no separator of its own, like <c>RowLimitClause</c>. Composed
+    /// immediately after it, matching the one order both shipped engines' native grammar accepts
+    /// (<c>LIMIT n OFFSET m</c>) — see <see cref="IAlvoSqlDialect.RowOffsetClause"/>'s remarks for why this
+    /// is a fixed order rather than one a dialect can choose.
+    /// </summary>
+    private string OffsetClause(Dictionary<string, BoundValue> parameters, ReadStatementOptions options)
+    {
+        if (options.Offset is not { } offset)
+        {
+            return string.Empty;
+        }
+
+        parameters[PolicyParameterPrefix.RowOffset] = BoundValue.FromFramework(offset);
+        return " " + _dialect.RowOffsetClause(_fields.RenderParameter(PolicyParameterPrefix.RowOffset));
     }
 
     /// <summary>

@@ -164,14 +164,24 @@ public interface IAlvoData
     /// <param name="query">The entity, filter, sort, and paging to apply.</param>
     /// <param name="context">The caller performing the query.</param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
-    /// <returns>Every visible, matching row, with every <c>hidden</c> field stripped.</returns>
+    /// <returns>
+    /// One page of every visible, matching row, with every <c>hidden</c> field stripped.
+    /// <see cref="AlvoPage.NextCursor"/> is an opaque, provider-issued token — only the implementation that
+    /// issued it may interpret a later <see cref="AlvoQuery.After"/> carrying it back, and it is
+    /// <see langword="null"/> exactly when this page is the last one the query has. <see cref="AlvoPage.TotalCount"/>
+    /// is always <see langword="null"/> in F3: no implementation runs a <c>COUNT</c> query, because nothing
+    /// here has asked for one yet.
+    /// </returns>
     /// <exception cref="AlvoAuthorizationException">
     /// No policy allows <c>list</c> on this entity for <paramref name="context"/>, or
     /// <paramref name="query"/>'s filter or sort names a field this caller may not read or the schema
     /// does not declare.
     /// </exception>
-    /// <exception cref="ArgumentException"><paramref name="query"/>'s filter nests deeper than <see cref="AlvoFilter.MaxDepth"/>.</exception>
-    Task<IReadOnlyList<AlvoRecord>> QueryAsync(AlvoQuery query, AlvoContext context, CancellationToken cancellationToken = default);
+    /// <exception cref="ArgumentException">
+    /// <paramref name="query"/>'s filter nests deeper than <see cref="AlvoFilter.MaxDepth"/>, or its paging
+    /// window is malformed — see <see cref="AlvoQuery.EnsurePagingWindowIsSane"/>.
+    /// </exception>
+    Task<AlvoPage> QueryAsync(AlvoQuery query, AlvoContext context, CancellationToken cancellationToken = default);
 
     /// <summary>Reads a single row by id.</summary>
     /// <param name="entity">The entity name.</param>

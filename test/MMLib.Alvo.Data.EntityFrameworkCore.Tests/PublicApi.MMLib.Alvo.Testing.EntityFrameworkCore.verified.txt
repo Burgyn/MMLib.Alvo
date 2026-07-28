@@ -35,6 +35,7 @@ namespace MMLib.Alvo.Testing.Data
         [Xunit.InlineData(new object[] {
                 MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation.Update})]
         public void A_row_lock_clause_carries_no_separator_of_its_own(MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation mutation) { }
+        public void A_row_offset_clause_names_the_marker_and_carries_no_separator_of_its_own() { }
         [Xunit.InlineData(new object[] {
                 MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation.Delete})]
         [Xunit.InlineData(new object[] {
@@ -62,5 +63,6 @@ namespace MMLib.Alvo.Testing.Data
         public string RenderTable(MMLib.Alvo.Schema.EntitySchema entity, MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation? lockedPreImageFor) { }
         public string RowLimitClause(string rowCountParameterMarker) { }
         public string RowLockClause(MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation mutation) { }
+        public string RowOffsetClause(string rowOffsetParameterMarker) { }
     }
 }

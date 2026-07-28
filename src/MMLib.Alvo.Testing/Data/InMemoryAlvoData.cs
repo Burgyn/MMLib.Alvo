@@ -76,7 +76,7 @@ public sealed class InMemoryAlvoData : IAlvoData
     }
 
     /// <inheritdoc/>
-    public Task<IReadOnlyList<AlvoRecord>> QueryAsync(AlvoQuery query, AlvoContext context, CancellationToken cancellationToken = default)
+    public Task<AlvoPage> QueryAsync(AlvoQuery query, AlvoContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(query);
         ArgumentNullException.ThrowIfNull(context);
@@ -89,6 +89,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         }
 
         AlvoFilter.EnsureWithinLimits(query.Filter);
+        AlvoQuery.EnsurePagingWindowIsSane(query);
         EnsureQueryFieldsAvailable(query, decision);
         AlvoQuery.EnsureSortKeysCanBePaged(query, FindEntity(query.Entity));
 
@@ -101,11 +102,14 @@ public sealed class InMemoryAlvoData : IAlvoData
         var visible = snapshot
             .Where(row => IsVisible(row, decision, context))
             .Where(row => AlvoFilterEvaluator.Matches(query.Filter, row));
-        var ordered = ApplySort(visible, query.Sort);
-        var paged = ApplyPaging(ordered, query.Limit, query.After);
+        var ordered = ApplySort(visible, query.Sort).ToList();
+        var (page, nextCursor) = Page(ordered, query.Limit, query.Offset, query.After);
 
-        IReadOnlyList<AlvoRecord> result = [.. paged.Select(row => Mask(row, decision.HiddenFields))];
-        return Task.FromResult(result);
+        return Task.FromResult(new AlvoPage
+        {
+            Items = [.. page.Select(row => Mask(row, decision.HiddenFields))],
+            NextCursor = nextCursor,
+        });
     }
 
     /// <inheritdoc/>
@@ -505,10 +509,31 @@ public sealed class InMemoryAlvoData : IAlvoData
         }
     }
 
-    private static IEnumerable<AlvoRecord> ApplyPaging(IEnumerable<AlvoRecord> rows, int? limit, string? after)
+    /// <summary>
+    /// The paging half of <see cref="QueryAsync"/>, over the already sorted, policy-filtered set: skips past
+    /// <paramref name="after"/>'s anchor or <paramref name="offset"/>'s leading rows — <see cref="AlvoQuery.EnsurePagingWindowIsSane"/>
+    /// already refused a query naming both — then over-fetches one row past <paramref name="limit"/> so the
+    /// returned cursor can be derived from whether that extra row actually existed, never from
+    /// <c>Items.Count == limit</c>, which would mint one for a page that happened to end exactly there.
+    /// </summary>
+    private static (IReadOnlyList<AlvoRecord> Items, string? NextCursor) Page(
+        IReadOnlyList<AlvoRecord> ordered, int? limit, int? offset, string? after)
     {
-        var remaining = after is null ? rows : SkipUntilAfter(rows, after);
-        return limit is int max ? remaining.Take(max) : remaining;
+        var remaining = after is null ? ordered.AsEnumerable() : SkipUntilAfter(ordered, after);
+        if (offset is { } skip)
+        {
+            remaining = remaining.Skip(skip);
+        }
+
+        if (limit is not { } max)
+        {
+            return ([.. remaining], null);
+        }
+
+        var fetched = remaining.Take(max == int.MaxValue ? max : max + 1).ToList();
+        return fetched.Count <= max
+            ? (fetched, null)
+            : (fetched.GetRange(0, max), Cursor(fetched[max - 1]));
     }
 
     /// <summary>

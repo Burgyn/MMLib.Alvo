@@ -111,10 +111,10 @@ public sealed record AlvoQuery
     }
 
     /// <summary>
-    /// Whether this query asks for a page rather than the whole visible set — either bound of the keyset
-    /// window is enough, because both make the boundary observable.
+    /// Whether this query asks for a page rather than the whole visible set — any of the three paging
+    /// signals is enough, because each makes the boundary observable.
     /// </summary>
-    private bool IsPaged => Limit is not null || After is not null;
+    private bool IsPaged => Limit is not null || After is not null || Offset is not null;
 
     /// <summary>
     /// Whether <paramref name="entity"/> declares <paramref name="field"/> nullable. A field the entity does
@@ -134,6 +134,53 @@ public sealed record AlvoQuery
     /// where a keyset cursor does not.
     /// </summary>
     public string? After { get; init; }
+
+    /// <summary>
+    /// Gets the number of leading rows to skip, or <see langword="null"/> for none. The opt-in second
+    /// paging mode §2.1 requires beside the keyset default: simple for a UI that shows page numbers,
+    /// and wrong for a large set — an offset shifts under concurrent writes and degenerates on a million
+    /// rows, which is why <see cref="After"/> is the default and this is not.
+    /// </summary>
+    /// <remarks>
+    /// Mutually exclusive with <see cref="After"/>: they anchor the same window two different ways, so a
+    /// query carrying both is refused as malformed rather than served by whichever the implementation
+    /// happens to check first.
+    /// </remarks>
+    public int? Offset { get; init; }
+
+    /// <summary>
+    /// Throws when <paramref name="query"/>'s paging window is self-contradictory or out of range —
+    /// a negative <see cref="Limit"/> or <see cref="Offset"/>, or both <see cref="After"/> and
+    /// <see cref="Offset"/> set at once.
+    /// </summary>
+    /// <remarks>
+    /// Every <see cref="IAlvoData"/> implementation calls this before composing a page, in place of the
+    /// private negative-<see cref="Limit"/> check PR2 wrote twice, once per implementation. A rule of the
+    /// port belongs here, beside <see cref="EnsureSortKeysCanBePaged"/>, for the same reason that one
+    /// does — so a third implementation inherits the rule instead of writing a fourth copy of it.
+    /// </remarks>
+    /// <param name="query">The query about to be served.</param>
+    /// <exception cref="ArgumentException"><paramref name="query"/>'s paging window is malformed.</exception>
+    public static void EnsurePagingWindowIsSane(AlvoQuery query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        ArgumentOutOfRangeException.ThrowIfNegative(query.Limit ?? 0, nameof(Limit));
+
+        if (query.Offset is { } offset)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(offset, nameof(Offset));
+        }
+
+        if (query.After is not null && query.Offset is not null)
+        {
+            throw new ArgumentException(
+                "A query cannot combine a keyset cursor ('after') with an offset: they anchor the same "
+                + "paging window two different ways, and answering with only one would silently resolve an "
+                + "ambiguous request rather than refuse it. Send only one.",
+                nameof(query));
+        }
+    }
 }
 
 /// <summary>One sort key in an <see cref="AlvoQuery"/>'s <see cref="AlvoQuery.Sort"/> list.</summary>

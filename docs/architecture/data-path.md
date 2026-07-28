@@ -45,6 +45,7 @@ single declaration of every name this data path can generate:
 | `alvo_k<n>` | the keyset boundary's bound values | `KeysetSqlRenderer` |
 | `alvo_id` | the row id of a single-row read — a `get`, and an update's pre-image | `ReadStatementComposer.AddRowId` |
 | `alvo_limit` | a page's row limit — bound, never formatted into the text | `ReadStatementComposer` |
+| `alvo_offset` | `AlvoQuery.Offset`'s leading-row skip count — reserved for the same reason `alvo_limit` is, and named separately because T-SQL's `OFFSET … FETCH` needs the two as distinct markers | `ReadStatementComposer` |
 
 A write's own row id is **not** in that table: `update` and `delete` match the row with a LINQ `Where` over
 the policy root, and EF names that parameter after the C# local (`@id`). It cannot collide because every name

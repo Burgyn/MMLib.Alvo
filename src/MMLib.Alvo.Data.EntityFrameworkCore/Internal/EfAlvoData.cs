@@ -64,7 +64,7 @@ internal sealed class EfAlvoData : IAlvoData
     }
 
     /// <inheritdoc/>
-    public async Task<IReadOnlyList<AlvoRecord>> QueryAsync(
+    public async Task<AlvoPage> QueryAsync(
         AlvoQuery query, AlvoContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(query);
@@ -72,7 +72,7 @@ internal sealed class EfAlvoData : IAlvoData
 
         var decision = Resolve(query.Entity, DataOperation.List, context);
         AlvoFilter.EnsureWithinLimits(query.Filter);
-        EnsureLimitIsSane(query.Limit);
+        AlvoQuery.EnsurePagingWindowIsSane(query);
 
         using var db = _contexts.Create();
         var entity = Entity(db, query.Entity);
@@ -82,11 +82,42 @@ internal sealed class EfAlvoData : IAlvoData
         var anchor = await AnchorAsync(db, entity, decision, context, query, cancellationToken);
         if (query.After is not null && anchor is null)
         {
-            return [];
+            return AlvoPage.Empty;
         }
 
-        var rows = await PageAsync(db, entity, decision, context, query, anchor, cancellationToken);
-        return [.. rows.Select(row => RecordMaterializer.ToRecord(row, decision.HiddenFields))];
+        var fetched = await PageAsync(db, entity, decision, context, query, anchor, cancellationToken);
+        var (kept, nextCursor) = Paginated(fetched, query.Limit);
+        return new AlvoPage
+        {
+            Items = [.. kept.Select(row => RecordMaterializer.ToRecord(row, decision.HiddenFields))],
+            NextCursor = nextCursor,
+        };
+    }
+
+    /// <summary>
+    /// Splits an over-fetched row set back down to the page <paramref name="limit"/> asked for, and derives
+    /// <see cref="AlvoPage.NextCursor"/> from whether the extra row actually came back.
+    /// </summary>
+    /// <remarks>
+    /// Never derived from <c>Items.Count == limit</c>: that would mint a cursor for a page that happened to
+    /// return exactly <paramref name="limit"/> rows because the visible set ended there too, and the
+    /// client's next request would come back empty — a bug that only shows when the row count is a multiple
+    /// of the page size. <see cref="PageAsync"/> over-fetches by one row precisely so this can tell "more
+    /// rows exist" from "the set ended here" without a second round trip.
+    /// </remarks>
+    /// <param name="fetched">The rows <see cref="PageAsync"/> returned, over-fetched by one when <paramref name="limit"/> is set.</param>
+    /// <param name="limit">The caller's own page size, or <see langword="null"/> for the whole visible set.</param>
+    private static (List<Dictionary<string, object>> Kept, string? NextCursor) Paginated(
+        List<Dictionary<string, object>> fetched, int? limit)
+    {
+        if (limit is not { } value || fetched.Count <= value)
+        {
+            return (fetched, null);
+        }
+
+        var kept = fetched.GetRange(0, value);
+        var lastId = (Guid)kept[^1][AlvoDataContext.IdColumn];
+        return (kept, KeysetCursor.Encode(lastId));
     }
 
     /// <inheritdoc/>
@@ -398,16 +429,6 @@ internal sealed class EfAlvoData : IAlvoData
     }
 
     /// <summary>
-    /// A negative page size is a malformed query, not an authorization question: it discloses nothing, and a
-    /// caller needs to know their query shape was refused rather than their permissions — the same reasoning
-    /// (and the same exception family) as <see cref="AlvoFilter.EnsureWithinLimits"/>. It is refused here
-    /// rather than passed on because the two engines disagree about it: PostgreSQL raises, SQLite reads
-    /// <c>LIMIT -1</c> as "no limit at all" and silently returns the whole page.
-    /// </summary>
-    private static void EnsureLimitIsSane(int? limit) =>
-        ArgumentOutOfRangeException.ThrowIfNegative(limit ?? 0, nameof(AlvoQuery.Limit));
-
-    /// <summary>
     /// Resolves the entity from the <b>applied schema this context's model was built from</b>. A dynamic
     /// entity resolves to <see langword="null"/> here, so it is refused exactly like an unknown one — the
     /// dynamic driver is a different <see cref="IAlvoSqlDialect"/>, registered later, not a branch in this
@@ -469,6 +490,11 @@ internal sealed class EfAlvoData : IAlvoData
     /// the cursor boundary, the ordering and the limit — so the limit truncates the ordered, policy-filtered
     /// set and can never truncate the table before the predicate has seen it.
     /// </summary>
+    /// <remarks>
+    /// Fetches one row past <see cref="AlvoQuery.Limit"/> when it is set — the over-fetch
+    /// <see cref="Paginated"/> reads back to derive <see cref="AlvoPage.NextCursor"/> honestly, rather than
+    /// from whether this page happened to come back exactly full.
+    /// </remarks>
     private async Task<List<Dictionary<string, object>>> PageAsync(
         AlvoDataContext db, EntitySchema? entity, PolicyDecision decision, AlvoContext context,
         AlvoQuery query, KeysetAnchor? anchor, CancellationToken cancellationToken)
@@ -483,12 +509,26 @@ internal sealed class EfAlvoData : IAlvoData
                 Filter = query.Filter,
                 Anchor = anchor,
                 Sort = query.Sort,
-                Limit = query.Limit,
+                Limit = OverFetched(query.Limit),
+                Offset = query.Offset,
             },
             db.Rows(schema.Name).EntityType);
 
         return await Materialize(db, schema, statement).ToListAsync(cancellationToken);
     }
+
+    /// <summary>
+    /// One past <paramref name="limit"/>, so <see cref="Paginated"/> can tell a page that ends exactly at the
+    /// visible set's boundary from one with more rows after it. Clamped at <see cref="int.MaxValue"/> rather
+    /// than overflowing into a negative bound value a caller who set <see cref="AlvoQuery.Limit"/> to that
+    /// value could otherwise trigger.
+    /// </summary>
+    private static int? OverFetched(int? limit) => limit switch
+    {
+        null => null,
+        int.MaxValue => limit,
+        _ => limit + 1,
+    };
 
     /// <summary>
     /// Runs one composed statement as a <c>FromSql</c> root with <b>nothing composed over it</b>, so EF

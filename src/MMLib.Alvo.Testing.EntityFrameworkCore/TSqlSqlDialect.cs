@@ -104,4 +104,24 @@ public sealed class TSqlSqlDialect : IAlvoSqlDialect
         ArgumentNullException.ThrowIfNull(rowCountParameterMarker);
         return $"OFFSET 0 ROWS FETCH NEXT {rowCountParameterMarker} ROWS ONLY";
     }
+
+    /// <summary>
+    /// T-SQL's <c>OFFSET</c> is not a trailing clause the way <c>LIMIT</c>'s sibling is on the two shipped
+    /// engines — it has to precede <c>FETCH</c>, and <see cref="RowLimitClause"/> above already renders one
+    /// (hard-coded to zero, for a page with no caller-supplied offset). This member exists so the generic
+    /// contract suite can prove the seam is answerable at all — see <see cref="MMLib.Alvo.Testing.Data.AlvoSqlDialectContractTests.A_row_offset_clause_names_the_marker_and_carries_no_separator_of_its_own"/>
+    /// — and is deliberately <b>not</b> wired into a real fused statement here: doing that correctly needs the
+    /// limit marker in the same call this member never receives, exactly the shape
+    /// <see cref="MMLib.Alvo.Data.EntityFrameworkCore.IAlvoSqlDialect.RowLockClause"/>'s two-position answer
+    /// needed for locking. A real T-SQL driver composing both <see cref="MMLib.Alvo.Data.AlvoQuery.Limit"/>
+    /// and <see cref="MMLib.Alvo.Data.AlvoQuery.Offset"/> together would have to override
+    /// <see cref="RowLimitClause"/> to embed the true offset instead of the hard-coded zero, and answer
+    /// empty here — this rehearsal fake does not attempt that, because no shipped driver needs it and no
+    /// test exercises the combination.
+    /// </summary>
+    public string RowOffsetClause(string rowOffsetParameterMarker)
+    {
+        ArgumentNullException.ThrowIfNull(rowOffsetParameterMarker);
+        return $"OFFSET {rowOffsetParameterMarker} ROWS";
+    }
 }

@@ -70,10 +70,10 @@ public sealed class PostgreSqlAlvoDataFilterBindingTests : IAsyncLifetime
     private async Task<IAlvoData> DataAsync() =>
         (await _fixture.StartAsync(new SchemaModel([AlvoDataFixtures.Vehicle]))).Data;
 
-    private static Task<IReadOnlyList<AlvoRecord>> Query(IAlvoData data, AlvoFilter filter) => data.QueryAsync(
+    private static async Task<IReadOnlyList<AlvoRecord>> Query(IAlvoData data, AlvoFilter filter) => (await data.QueryAsync(
         new AlvoQuery { Entity = AlvoDataFixtures.Vehicle.Name, Filter = filter },
         AlvoDataFixtures.Caller,
-        TestContext.Current.CancellationToken);
+        TestContext.Current.CancellationToken)).Items;
 
     public ValueTask DisposeAsync() => _fixture.DisposeAsync();
 }
