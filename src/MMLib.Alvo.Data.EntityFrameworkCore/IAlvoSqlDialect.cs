@@ -206,11 +206,24 @@ public interface IAlvoSqlDialect
     string RowLockClause(PreImageMutation mutation);
 
     /// <summary>
-    /// Renders the clause that truncates an ordered page to at most the bound number of rows —
-    /// <c>LIMIT &lt;marker&gt;</c> on both engines Alvo ships, <c>FETCH FIRST &lt;marker&gt; ROWS ONLY</c> in
-    /// standard SQL, an <c>OFFSET … FETCH</c> pair on T-SQL.
+    /// Renders the clause that limits a read to <paramref name="rowCountParameterMarker"/> rows, skipping
+    /// <paramref name="rowOffsetParameterMarker"/> leading rows when one is given — <c>LIMIT &lt;marker&gt;
+    /// [OFFSET &lt;marker&gt;]</c> on both engines Alvo ships, an <c>OFFSET … FETCH</c> pair on T-SQL.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// <b>The limit and the offset are ONE member because they are one clause on at least one target
+    /// engine.</b> T-SQL spells the window <c>OFFSET &lt;m&gt; ROWS FETCH NEXT &lt;n&gt; ROWS ONLY</c> —
+    /// offset first, and <c>FETCH</c> cannot appear without a preceding <c>OFFSET</c> — while SQLite spells
+    /// it the other way around (<c>LIMIT &lt;n&gt; OFFSET &lt;m&gt;</c>) and rejects a bare <c>OFFSET</c>
+    /// with no <c>LIMIT</c> at all. An earlier revision of this port split the two into
+    /// <c>RowLimitClause</c> and <c>RowOffsetClause</c>, and the split let a dialect answer each half
+    /// correctly on its own while the *pair* was wrong: <c>MMLib.Alvo.Testing.Data.TSqlSqlDialect</c>'s
+    /// <c>RowLimitClause</c> hard-coded <c>OFFSET 0 ROWS</c> because it had no way to see the caller's real
+    /// offset, so a driver also implementing <c>RowOffsetClause</c> would have emitted two conflicting
+    /// <c>OFFSET</c> clauses — a silently wrong page, not a compile error or a thrown exception. One member
+    /// that receives both markers together makes that shape unrepresentable.
+    /// </para>
     /// <para>
     /// A <b>default interface member</b>, exactly like
     /// <see cref="MMLib.Alvo.Expressions.IFieldSqlRenderer"/>'s three two-valued members and for the same
@@ -218,11 +231,18 @@ public interface IAlvoSqlDialect
     /// dialect that genuinely differs implements it and adding it breaks no existing implementation.
     /// </para>
     /// <para>
-    /// <b>Why the limit is inside this statement rather than a LINQ <c>Take</c>.</b> EF pushes a
-    /// <c>FromSql</c> body into a derived table as soon as anything is composed over it, and a derived
-    /// table's row order is not guaranteed to survive into the outer query — so a limit applied outside
+    /// <b>Why the window is inside this statement rather than a LINQ <c>Take</c>/<c>Skip</c>.</b> EF pushes
+    /// a <c>FromSql</c> body into a derived table as soon as anything is composed over it, and a derived
+    /// table's row order is not guaranteed to survive into the outer query — so a window applied outside
     /// truncates a set whose order is undefined, which is a page that can skip or repeat a row. Ordering and
     /// truncation live in one statement so they cannot come apart.
+    /// </para>
+    /// <para>
+    /// <b>An offset with no explicit caller limit is not this member's problem to solve.</b> SQLite cannot
+    /// render a bare <c>OFFSET</c>, so the composer always supplies a row count — the caller's own
+    /// <see cref="MMLib.Alvo.Data.AlvoQuery.Limit"/> when one was given, or a sentinel meaning "no bound"
+    /// when only <see cref="MMLib.Alvo.Data.AlvoQuery.Offset"/> was. <paramref name="rowCountParameterMarker"/>
+    /// is therefore never optional here: a dialect is never asked to render an offset alone.
     /// </para>
     /// <para>
     /// <b>Return grammar.</b> The clause itself, carrying <b>no separator of its own</b> — no leading space,
@@ -235,37 +255,13 @@ public interface IAlvoSqlDialect
     /// marker rather than a number, because a limit is caller-supplied and this data path formats no
     /// caller-supplied value into SQL text.
     /// </param>
-    string RowLimitClause(string rowCountParameterMarker) => $"LIMIT {rowCountParameterMarker}";
-
-    /// <summary>
-    /// Renders the clause that skips <paramref name="rowOffsetParameterMarker"/> leading rows of the
-    /// ordered, policy-filtered set — <c>OFFSET &lt;marker&gt;</c> on both engines Alvo ships.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// A <b>default interface member</b>, exactly like <see cref="RowLimitClause"/> and for the same
-    /// reason: the default is right for every engine that spells this the PostgreSQL/SQLite way, so only a
-    /// dialect that genuinely differs implements it.
-    /// </para>
-    /// <para>
-    /// Separate from <see cref="RowLimitClause"/> rather than folded into it, because the two engines Alvo
-    /// ships agree an offset is composed <em>after</em> a limit (<c>LIMIT n OFFSET m</c>) while T-SQL spells
-    /// the pair the other way around and cannot render a limit without one (<c>OFFSET n ROWS FETCH NEXT m
-    /// ROWS ONLY</c> — the leading <c>OFFSET</c> is not optional there). A driver that needs to fuse them,
-    /// the way T-SQL does, overrides both members rather than gaining a second parameter on this one; see
-    /// <c>MMLib.Alvo.Testing.Data.TSqlSqlDialect</c>.
-    /// </para>
-    /// <para>
-    /// <b>Return grammar.</b> The clause itself, carrying <b>no separator of its own</b> — no leading space,
-    /// no terminator — exactly like <see cref="RowLimitClause"/>. The composer inserts the separating space
-    /// and places the result immediately after the limit clause, which is where both shipped engines'
-    /// grammar puts it.
-    /// </para>
-    /// </remarks>
     /// <param name="rowOffsetParameterMarker">
-    /// The already-rendered bind-parameter reference holding the number of rows to skip (e.g.
-    /// <c>@alvo_offset</c>). A marker rather than a number, for the same reason
-    /// <paramref name="rowOffsetParameterMarker"/>'s sibling on <see cref="RowLimitClause"/> is.
+    /// The already-rendered bind-parameter reference holding the number of leading rows to skip (e.g.
+    /// <c>@alvo_offset</c>), or <see langword="null"/> when the read has no offset. A marker rather than a
+    /// number, for the same reason <paramref name="rowCountParameterMarker"/> is.
     /// </param>
-    string RowOffsetClause(string rowOffsetParameterMarker) => $"OFFSET {rowOffsetParameterMarker}";
+    string RowWindowClause(string rowCountParameterMarker, string? rowOffsetParameterMarker = null) =>
+        rowOffsetParameterMarker is null
+            ? $"LIMIT {rowCountParameterMarker}"
+            : $"LIMIT {rowCountParameterMarker} OFFSET {rowOffsetParameterMarker}";
 }

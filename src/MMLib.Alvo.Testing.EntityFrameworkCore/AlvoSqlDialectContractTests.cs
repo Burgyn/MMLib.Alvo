@@ -2,6 +2,7 @@
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Schema;
 using Shouldly;
+using System.Text.RegularExpressions;
 using Xunit;
 
 namespace MMLib.Alvo.Testing.Data;
@@ -249,12 +250,13 @@ public abstract class AlvoSqlDialectContractTests
 
     /// <summary>
     /// The limit is bound, never formatted, so the clause has to name the marker it was handed — a dialect that
-    /// dropped it would truncate to nothing or not at all, on a row count the caller supplied.
+    /// dropped it would truncate to nothing or not at all, on a row count the caller supplied. Called with no
+    /// offset, the shape every read without one uses.
     /// </summary>
     [Fact]
-    public void A_row_limit_clause_names_the_marker_and_carries_no_separator_of_its_own()
+    public void A_row_window_clause_names_the_row_count_marker_and_carries_no_separator_of_its_own()
     {
-        var clause = CreateDialect().RowLimitClause("@alvo_limit");
+        var clause = CreateDialect().RowWindowClause("@alvo_limit");
 
         clause.ShouldContain("@alvo_limit");
         clause.ShouldBe(clause.Trim());
@@ -262,21 +264,48 @@ public abstract class AlvoSqlDialectContractTests
     }
 
     /// <summary>
-    /// The offset is bound, never formatted, so the clause has to name the marker it was handed — the same
-    /// reasoning as <see cref="A_row_limit_clause_names_the_marker_and_carries_no_separator_of_its_own"/>, for
-    /// the sibling member. Answered generically rather than only over the two shipped dialects' shared
+    /// The offset is bound, never formatted, so the clause has to name the marker it was handed too — the
+    /// same reasoning as <see cref="A_row_window_clause_names_the_row_count_marker_and_carries_no_separator_of_its_own"/>,
+    /// for the second argument. Answered generically rather than only over the two shipped dialects' shared
     /// default, so <c>TSqlSqlDialect</c>'s own override — which spells the marker differently — is held to the
     /// same obligation.
     /// </summary>
     [Fact]
-    public void A_row_offset_clause_names_the_marker_and_carries_no_separator_of_its_own()
+    public void A_row_window_clause_with_an_offset_names_both_markers_and_carries_no_separator_of_its_own()
     {
-        var clause = CreateDialect().RowOffsetClause("@alvo_offset");
+        var clause = CreateDialect().RowWindowClause("@alvo_limit", "@alvo_offset");
 
+        clause.ShouldContain("@alvo_limit");
         clause.ShouldContain("@alvo_offset");
         clause.ShouldBe(clause.Trim());
         clause.ShouldNotContain(";");
     }
+
+    /// <summary>
+    /// The defect this member exists to make unrepresentable: a dialect that renders the row count and the
+    /// offset as two independently-correct clauses can still get the *pair* wrong, the way an earlier
+    /// revision of <c>TSqlSqlDialect</c> did — its old <c>RowLimitClause</c> hard-coded <c>OFFSET 0 ROWS</c>,
+    /// so a driver that also answered a separate <c>RowOffsetClause</c> would have emitted two conflicting
+    /// <c>OFFSET</c> clauses in one statement. One call receiving both markers together closes that gap; this
+    /// asserts the closed shape generically rather than trusting one driver's docstring.
+    /// </summary>
+    [Fact]
+    public void A_row_window_clause_with_an_offset_renders_exactly_one_offset_keyword()
+    {
+        var clause = CreateDialect().RowWindowClause("@alvo_limit", "@alvo_offset");
+
+        CountOffsetKeywords(clause).ShouldBe(
+            1, "two OFFSET clauses in one statement is a silently wrong page, not merely untidy SQL.");
+    }
+
+    /// <summary>
+    /// Counts the <c>OFFSET</c> <b>keyword</b>, not the substring — <c>@alvo_offset</c>, the marker every
+    /// shipped dialect actually binds, itself contains the letters <c>offset</c>, so a plain substring count
+    /// would answer 2 for a dialect that is already correct. The word-boundary regex is what tells the
+    /// keyword from the parameter name it is followed by.
+    /// </summary>
+    private static int CountOffsetKeywords(string text) =>
+        Regex.Matches(text, @"\bOFFSET\b", RegexOptions.IgnoreCase).Count;
 
     /// <summary>
     /// Every <see cref="CelValueType"/> is answered rather than refused. The renderer is asked for

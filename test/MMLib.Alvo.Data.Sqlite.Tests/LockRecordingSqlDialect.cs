@@ -48,9 +48,10 @@ internal sealed class LockRecordingSqlDialect : IAlvoSqlDialect
     public string RenderNullProjection(string storeType) => _inner.RenderNullProjection(storeType);
 
     /// <summary>
-    /// Forwards the row-limit clause through the interface, because it is a default interface member SQLite
-    /// does not override — the point of forwarding is that this wrapper adds no dialect decision of its own.
+    /// Forwards the paging window clause through the interface, because it is a default interface member
+    /// SQLite does not override — the point of forwarding is that this wrapper adds no dialect decision of
+    /// its own.
     /// </summary>
-    public string RowLimitClause(string rowCountParameterMarker) =>
-        ((IAlvoSqlDialect)_inner).RowLimitClause(rowCountParameterMarker);
+    public string RowWindowClause(string rowCountParameterMarker, string? rowOffsetParameterMarker = null) =>
+        ((IAlvoSqlDialect)_inner).RowWindowClause(rowCountParameterMarker, rowOffsetParameterMarker);
 }
