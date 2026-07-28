@@ -12,8 +12,26 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Options" />
-    <PackageReference Include="Microsoft.Extensions.Options.DataAnnotations" />
+    <!-- The generated Data API is minimal-API delegates (§0 principle 8), so the core is an ASP.NET
+         Core library from PR3 on. Abstractions deliberately stays free of this — the ports must stay
+         implementable by a host that is not an ASP.NET application at all, and
+         MMLib.Alvo.Abstractions.Tests.ArchitectureTests holds that line. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- First-party ASP.NET Core tooling for a product promise: the OpenAPI document IS the contract an
+         agent reads (§0 principle 4), and an embedded host wants its Alvo endpoints documented too.
+         Scalar deliberately does NOT live here — picking a docs UI is a hosting decision, so it sits in
+         MMLib.Alvo.Host (design: "OpenAPI and Scalar"). -->
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Microsoft.Extensions.Options and .Options.DataAnnotations are deliberately NOT referenced here:
+         the Microsoft.AspNetCore.App framework reference above supplies both, and keeping the explicit
+         PackageReferences makes NuGet raise NU1510 ("will not be pruned"), which this repo treats as an
+         error. They are still referenced by the projects that have no framework reference. -->
     <!-- Build-time source generator only: emits the descriptor schema's validator types into this
          assembly at compile time, then drops out of the dependency graph (PrivateAssets=all), so
          it never flows to consumers of MMLib.Alvo. -->

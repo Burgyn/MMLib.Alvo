@@ -39,6 +39,20 @@
     <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.10" />
     <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.10" />
     <PackageVersion Include="Microsoft.Extensions.Options.DataAnnotations" Version="10.0.10" />
+    <!-- First-party ASP.NET Core tooling the core uses to emit the OpenAPI document. The ASP.NET Core
+         surface itself arrives through <FrameworkReference Include="Microsoft.AspNetCore.App" />, whose
+         version is the shared framework's and therefore not pinned here. -->
+    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.10" />
+    <!-- Microsoft.AspNetCore.OpenApi 10.0.10 transitively drags in Microsoft.OpenApi 2.0.0, which carries
+         a known-high NuGet audit advisory (GHSA-v5pm-xwqc-g5wc — a circular schema reference terminates
+         parsing, fixed upstream in 2.7.5). Same central transitive-pinning trick as SQLitePCLRaw and
+         System.Security.Cryptography.Xml below: pin the first patched version so it wins over the
+         transitive one, without any project taking a direct reference. -->
+    <PackageVersion Include="Microsoft.OpenApi" Version="2.7.5" />
+    <!-- Test-only: an in-process TestServer for the Data API suite. WebApplicationFactory is
+         deliberately not used — it needs an entry-point assembly, which does not exist until
+         MMLib.Alvo.Host lands in PR4. -->
+    <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="10.0.10" />
     <PackageVersion Include="Microsoft.SourceLink.GitHub" Version="10.0.301" />
     <PackageVersion Include="MinVer" Version="7.0.0" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.10" />

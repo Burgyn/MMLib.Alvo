@@ -1,7 +1,18 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/Burgyn/MMLib.Alvo")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Api.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Data.Sqlite.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Tests")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace MMLib.Alvo.Api
+{
+    public sealed class AlvoApiOptions
+    {
+        public AlvoApiOptions() { }
+        public int DefaultPageSize { get; set; }
+        public int MaxPageSize { get; set; }
+        public string RoutePrefix { get; set; }
+    }
+}
 namespace MMLib.Alvo.Auth
 {
     public sealed class AlvoAuthOptions
@@ -9,6 +20,7 @@ namespace MMLib.Alvo.Auth
         public AlvoAuthOptions() { }
         public System.Collections.Generic.IList<MMLib.Alvo.Auth.AlvoDevApiKey> DevKeys { get; }
         public string HeaderName { get; init; }
+        public string TenantHeaderName { get; init; }
     }
     public sealed class AlvoDevApiKey
     {
@@ -54,12 +66,23 @@ namespace MMLib.Alvo.Rules
         public static bool TryBuild(MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Expressions.ICelCompiler compiler, out MMLib.Alvo.Rules.PolicyCatalog? catalog, out System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Descriptor.DescriptorValidationError> errors) { }
     }
 }
+namespace Microsoft.AspNetCore.Builder
+{
+    public static class AlvoDataApiEndpointRouteBuilderExtensions
+    {
+        public static Microsoft.AspNetCore.Routing.IEndpointRouteBuilder MapAlvoDataApi(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints) { }
+    }
+}
 namespace Microsoft.Extensions.DependencyInjection
 {
     public static class AlvoBuilderExtensions
     {
         public static MMLib.Alvo.IAlvoBuilder FromDescriptor(this MMLib.Alvo.IAlvoBuilder builder, string path) { }
         public static MMLib.Alvo.IAlvoBuilder UseSchemaPrefix(this MMLib.Alvo.IAlvoBuilder builder, string prefix) { }
+    }
+    public static class AlvoDataApiExtensions
+    {
+        public static MMLib.Alvo.IAlvoBuilder AddDataApi(this MMLib.Alvo.IAlvoBuilder builder, System.Action<MMLib.Alvo.Api.AlvoApiOptions>? configure = null) { }
     }
     public static class AlvoServiceCollectionExtensions
     {

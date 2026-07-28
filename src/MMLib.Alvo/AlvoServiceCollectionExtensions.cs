@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo;
+using MMLib.Alvo.Api;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Expressions;
@@ -47,6 +48,7 @@ public static class AlvoServiceCollectionExtensions
         services.AddAlvoAuth();
         services.AddAlvoExpressions();
         services.AddAlvoRules();
+        services.AddAlvoApi();
 
         configure?.Invoke(builder);
 
