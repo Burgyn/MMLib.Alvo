@@ -46,9 +46,14 @@ public static class AlvoDataApiEndpointRouteBuilderExtensions
 
         ReservedQueryKeys.EnsureNoneIsShadowed(catalog.Entities);
 
+        // One catalogue for the whole applied descriptor, compiled here rather than per request — see
+        // FormatCatalog for why a caller-supplied value against an author-supplied pattern is a ReDoS
+        // surface, and why the compilation belongs at the same instant the route literals are fixed.
+        var formats = FormatCatalog.Build(catalog.Entities);
+
         foreach (var entity in catalog.Entities)
         {
-            DataApiEndpoints.Map(endpoints, entity, prefix, options, filters);
+            DataApiEndpoints.Map(endpoints, entity, prefix, options, filters, formats);
         }
 
         return endpoints;

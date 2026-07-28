@@ -46,6 +46,36 @@ public sealed record FieldSchema
     /// <summary>Gets the reference information for reference-type fields.</summary>
     public RefSchema? Reference { get; init; }
 
+    /// <summary>
+    /// Gets the validation format this field's values must satisfy — a built-in name
+    /// (<c>email</c>/<c>uri</c>/<c>phone</c>) or the name of a format the descriptor's top-level
+    /// <c>formats</c> block declares; <see langword="null"/> when the field declares none.
+    /// </summary>
+    /// <remarks>
+    /// On the applied schema rather than left in the descriptor because the two layers that need it cannot
+    /// see the descriptor: the HTTP layer enforces the format (the schema's own words — "enforced by Alvo
+    /// at the API layer") and the generated OpenAPI document reflects it. It names the <em>format</em>, not
+    /// its pattern, so a document can emit <c>format: email</c> for a built-in rather than leaking a regex
+    /// nobody authored.
+    /// </remarks>
+    public string? Format { get; init; }
+
+    /// <summary>
+    /// Gets the regular expression <see cref="Format"/> resolves to for a descriptor-declared format;
+    /// <see langword="null"/> for a built-in format (whose pattern the framework owns) and for a field
+    /// with no format at all.
+    /// </summary>
+    /// <remarks>
+    /// <b>Resolved onto the field rather than kept in a schema-level map, deliberately.</b> A
+    /// <see cref="SchemaModel"/> is rebuilt from its entities on more than one path — a rename pre-pass
+    /// aligns the current model, an introspector composes one from the database — and each of those
+    /// reconstructs the model from <see cref="EntitySchema"/> instances. A map beside
+    /// <see cref="SchemaModel.Entities"/> would be silently dropped by every one of them, and a dropped
+    /// pattern is a field that quietly stops being validated. Carried on the field, it survives every
+    /// rebuild that preserves the field.
+    /// </remarks>
+    public string? FormatPattern { get; init; }
+
     /// <summary>Gets a value indicating whether the field is indexed.</summary>
     public bool Indexed { get; init; }
 

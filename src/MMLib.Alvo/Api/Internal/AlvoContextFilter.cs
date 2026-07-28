@@ -102,12 +102,12 @@ internal sealed class AlvoContextFilter : IEndpointFilter
         var principal = await Resolve(presentedKey, context, options).ConfigureAwait(false);
         if (principal is null)
         {
-            return DataApiFailures.Unauthenticated(options.HeaderName);
+            return ProblemResultFactory.Unauthenticated(options.HeaderName);
         }
 
         return _scopeGate.Allows(principal, _entity, _operation)
             ? await Invoke(principal, context, next).ConfigureAwait(false)
-            : DataApiFailures.ScopeRefused();
+            : ProblemResultFactory.ScopeRefused();
     }
 
     private ValueTask<AlvoPrincipal?> Resolve(

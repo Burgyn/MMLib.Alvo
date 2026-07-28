@@ -1081,6 +1081,8 @@ namespace MMLib.Alvo.Schema
         public FieldSchema() { }
         public string? ComputedExpression { get; init; }
         public System.Collections.Generic.IReadOnlyList<string>? EnumValues { get; init; }
+        public string? Format { get; init; }
+        public string? FormatPattern { get; init; }
         public bool Indexed { get; init; }
         public int? MaxLength { get; init; }
         public required string Name { get; init; }

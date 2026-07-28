@@ -71,6 +71,67 @@ internal static class ResponseReading
             ?? throw Unexpected(response, text, "a problem document with a 'detail' member");
     }
 
+    /// <summary>
+    /// The RFC 9457 <c>type</c> of a refusal, as the slug alone. Requires a failed status and a
+    /// <c>type</c> under Alvo's own namespace, so a fact about <em>which kind</em> of refusal this is cannot
+    /// pass against a success or against the framework's default status-code URI.
+    /// </summary>
+    /// <param name="response">The response to read.</param>
+    internal static async Task<string> ReadProblemTypeAsync(this HttpResponseMessage response)
+    {
+        ArgumentNullException.ThrowIfNull(response);
+        var text = await response.ReadTextAsync();
+        if (response.IsSuccessStatusCode)
+        {
+            throw Unexpected(response, text, "a refusal carrying a problem document");
+        }
+
+        var type = (Parse(text) as JsonObject)?["type"]?.GetValue<string>()
+            ?? throw Unexpected(response, text, "a problem document with a 'type' member");
+
+        return type.StartsWith(AlvoProblemTypes.BaseUri, StringComparison.Ordinal)
+            ? type[AlvoProblemTypes.BaseUri.Length..]
+            : throw Unexpected(response, text, $"a 'type' under {AlvoProblemTypes.BaseUri}");
+    }
+
+    /// <summary>
+    /// The <c>violations</c> array of a refusal, as (pointer, code) pairs. Requires a failed status and a
+    /// non-empty array: a refusal with no violation gives an agent nothing to act on, so a fact asserting
+    /// <em>which</em> violations came back must not be satisfiable by a response carrying none.
+    /// </summary>
+    /// <param name="response">The response to read.</param>
+    internal static async Task<IReadOnlyList<(string Pointer, string Code)>> ReadViolationsAsync(
+        this HttpResponseMessage response)
+    {
+        ArgumentNullException.ThrowIfNull(response);
+        var text = await response.ReadTextAsync();
+        if (response.IsSuccessStatusCode)
+        {
+            throw Unexpected(response, text, "a refusal carrying a problem document");
+        }
+
+        if (Parse(text) is not JsonObject body || body["violations"] is not JsonArray violations)
+        {
+            throw Unexpected(response, text, "a problem document with a 'violations' array");
+        }
+
+        return violations.Count == 0
+            ? throw Unexpected(response, text, "at least one violation")
+            : [.. violations.OfType<JsonObject>().Select(violation =>
+                (violation["pointer"]!.GetValue<string>(), violation["code"]!.GetValue<string>()))];
+    }
+
+    /// <summary>Every <c>fixSuggestion</c> the refusal's violations carry, so a fact can hold every one to §0 principle 4.</summary>
+    /// <param name="response">The response to read.</param>
+    internal static async Task<IReadOnlyList<string?>> ReadFixSuggestionsAsync(this HttpResponseMessage response)
+    {
+        ArgumentNullException.ThrowIfNull(response);
+        _ = await response.ReadViolationsAsync();
+        var body = await response.ReadJsonObjectAsync();
+        return [.. body["violations"]!.AsArray().OfType<JsonObject>()
+            .Select(violation => violation["fixSuggestion"]?.GetValue<string>())];
+    }
+
     /// <summary>The raw body text, for the facts that must assert a value appears <em>nowhere</em> in it.</summary>
     /// <param name="response">The response to read.</param>
     internal static Task<string> ReadTextAsync(this HttpResponseMessage response)

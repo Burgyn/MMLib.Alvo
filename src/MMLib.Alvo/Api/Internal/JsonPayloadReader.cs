@@ -1,6 +1,5 @@
 ﻿using Microsoft.AspNetCore.Http;
 using MMLib.Alvo.Schema;
-using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -14,9 +13,10 @@ namespace MMLib.Alvo.Api.Internal;
 /// This is <b>binding, not validation</b>. The port publishes a typed contract —
 /// <see cref="FieldClrType"/> is that contract, in the ports, and this <em>reads</em> it rather than
 /// restating it — and JSON carries none of those types, so something has to convert before the port can
-/// be called at all. Task 5's <c>RecordValidator</c> validates <em>over</em> these values (required, max
-/// length, scale, enum, format, FK existence) and reports every violation as RFC 7807; it does not
-/// replace this.
+/// be called at all. <see cref="RecordValidator"/> validates <em>over</em> these values (required, max
+/// length, scale, enum, format, reference existence); it does not replace this, and the two report into one
+/// list of <see cref="AlvoViolation"/> so a body with a bad type <em>and</em> a missing required field is
+/// one response rather than two round trips.
 /// </para>
 /// <para>
 /// <b>Everything here runs after authorization and before validation.</b> <c>DataApiEndpoints</c> resolves
@@ -34,54 +34,51 @@ namespace MMLib.Alvo.Api.Internal;
 /// <para>
 /// <b>An undeclared key is refused before it is materialised</b> — not to withhold anything, but so no
 /// attacker-controlled value is re-serialised into a string on its way to a refusal that was already
-/// certain. See <see cref="UndeclaredFieldFailure"/> for what the wording does and does not protect.
+/// certain. See <see cref="PayloadViolations.UnknownField"/> for what the wording does and does not
+/// protect.
+/// </para>
+/// <para>
+/// <b>A body-level refusal stops the read; a per-field one does not.</b> A body that is too large, too
+/// deep, not an object or not JSON has nothing to bind, so it produces exactly one violation. Once the
+/// document is a bindable object, every offending <em>key</em> is reported — one violation per field rather
+/// than the first failure ending the read, which is the same reason the query parser collects.
 /// </para>
 /// </remarks>
 internal static class JsonPayloadReader
 {
-    /// <summary>The refusal for a key the entity does not declare.</summary>
-    /// <remarks>
-    /// <para>
-    /// <b>The declared, non-hidden schema shape is public, and this wording is not trying to hide it.</b>
-    /// Alvo maps route literals from the applied schema, so an undeclared entity already answers 404 where a
-    /// declared one answers 403 — entity existence is disclosed before authorization, by design, and that
-    /// design is what lets the OpenAPI document list real paths. Task 8 then publishes the declared,
-    /// non-hidden field list to anyone who can read the document. A framework cannot both publish its schema
-    /// shape and treat that shape as confidential. What is confidential is <em>data</em>.
-    /// </para>
-    /// <para>
-    /// <b>The one carve-out: a <c>hidden</c> field's name.</b> That is a field the descriptor author marked
-    /// confidential and Task 8 excludes from the document, so its name must stay indistinguishable from an
-    /// unknown one — which is why the query parser takes the resolved mask
-    /// (<c>DataApiEndpoints.MaskedFields</c>) and refuses both with one identical violation. On this write
-    /// path there is nothing to distinguish: <c>hidden</c> restricts reading, so a hidden field is
-    /// legitimately writable and is simply accepted.
-    /// </para>
-    /// <para>
-    /// So the message names neither the key nor the entity for a plainer reason than secrecy: it is
-    /// caller-supplied text, echoing it back is a log-injection vector, and the port's own refusal
-    /// (<c>QueryFieldGuard</c>) already says exactly this much.
-    /// </para>
-    /// </remarks>
-    private const string UndeclaredFieldFailure =
-        "The request body names a field that is not writable on this entity. Send only the fields the "
-        + "entity declares.";
-
-    private const string NotAnObjectFailure =
-        "The request body must be a JSON object mapping field names to values.";
-
-    private const string MalformedJsonFailure = "The request body is not well-formed JSON.";
-
     /// <summary>One buffer's worth of body; the size bound trips on chunk boundaries, so this only sets the granularity.</summary>
     private const int ReadChunkBytes = 8 * 1024;
+
+    /// <summary>What one body read produced: the bound values, and every reason a field or the body was refused.</summary>
+    /// <param name="Values">
+    /// The bound field values — every key that bound, even when another key did not, so
+    /// <see cref="RecordValidator"/> can measure the rest of the payload in the same pass.
+    /// </param>
+    /// <param name="Violations">Every reason the body was refused; empty when it bound completely.</param>
+    internal sealed record Payload(Dictionary<string, object?> Values, IReadOnlyList<AlvoViolation> Violations)
+    {
+        /// <summary>
+        /// Whether the body was a JSON object this entity's fields could be read out of at all.
+        /// </summary>
+        /// <remarks>
+        /// <b>A body that was not must not be validated <em>as if it were empty</em>.</b> An array, a scalar,
+        /// a truncated document or an over-bound body binds no field, so running the record validator over it
+        /// would report every required field as missing beside the real reason — telling a caller who sent
+        /// <c>[1,2,3]</c> to supply <c>name</c>, which is advice about a body they did not send. Recognised by
+        /// the pointer rather than by a flag: <see cref="PayloadViolations.BodyPointer"/> is RFC 6901's pointer
+        /// to the whole document, so "this refusal is about the body, not a field" is already stated in the
+        /// violation itself.
+        /// </remarks>
+        internal bool BoundAsAnObject => Violations.All(violation => violation.Pointer.Length > 0);
+    }
 
     /// <summary>Reads and binds the request body, or reports why it could not be.</summary>
     /// <param name="request">The request whose body to read.</param>
     /// <param name="entity">The entity being written, as the applied schema declares it.</param>
     /// <param name="options">The payload bounds to enforce.</param>
     /// <param name="cancellationToken">A token to cancel the read.</param>
-    /// <returns>The bound field values, or the failure to render as a 422.</returns>
-    internal static async Task<(Dictionary<string, object?>? Values, string? Failure)> ReadAsync(
+    /// <returns>The bound field values plus every violation that stopped part of the body binding.</returns>
+    internal static async Task<Payload> ReadAsync(
         HttpRequest request, EntitySchema entity, AlvoApiOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -93,12 +90,15 @@ internal static class JsonPayloadReader
             .ConfigureAwait(false);
         if (readFailure is not null)
         {
-            return (null, readFailure);
+            return Refused(readFailure);
         }
 
         var shapeFailure = EnsureWithinShapeBounds(body.GetBuffer().AsSpan(0, (int)body.Length), options);
-        return shapeFailure is not null ? (null, shapeFailure) : Bind(body, entity, options);
+        return shapeFailure is not null ? Refused(shapeFailure) : Bind(body, entity, options);
     }
+
+    /// <summary>A body that bound nothing at all, carrying the one violation that stopped it.</summary>
+    private static Payload Refused(AlvoViolation violation) => new([], [violation]);
 
     /// <summary>
     /// Copies the body into <paramref name="destination"/>, refusing at the first chunk that would cross
@@ -106,12 +106,12 @@ internal static class JsonPayloadReader
     /// reading a byte; a chunked body that declares no length is bounded all the same, because the check
     /// is on what has actually arrived.
     /// </summary>
-    private static async Task<string?> ReadBoundedAsync(
+    private static async Task<AlvoViolation?> ReadBoundedAsync(
         HttpRequest request, MemoryStream destination, int maxBytes, CancellationToken cancellationToken)
     {
         if (request.ContentLength > maxBytes)
         {
-            return TooLargeFailure(maxBytes);
+            return PayloadViolations.TooLarge(maxBytes);
         }
 
         var chunk = new byte[ReadChunkBytes];
@@ -120,7 +120,7 @@ internal static class JsonPayloadReader
         {
             if (destination.Length + read > maxBytes)
             {
-                return TooLargeFailure(maxBytes);
+                return PayloadViolations.TooLarge(maxBytes);
             }
 
             destination.Write(chunk, 0, read);
@@ -151,7 +151,7 @@ internal static class JsonPayloadReader
     /// simply never the first to speak.
     /// </para>
     /// </remarks>
-    private static string? EnsureWithinShapeBounds(ReadOnlySpan<byte> utf8Body, AlvoApiOptions options)
+    private static AlvoViolation? EnsureWithinShapeBounds(ReadOnlySpan<byte> utf8Body, AlvoApiOptions options)
     {
         var reader = new Utf8JsonReader(
             utf8Body,
@@ -161,14 +161,14 @@ internal static class JsonPayloadReader
         {
             if (!reader.Read() || reader.TokenType != JsonTokenType.StartObject)
             {
-                return NotAnObjectFailure;
+                return PayloadViolations.NotAnObject();
             }
 
             return ScanShape(ref reader, options);
         }
         catch (JsonException)
         {
-            return MalformedJsonFailure;
+            return PayloadViolations.MalformedJson();
         }
     }
 
@@ -184,23 +184,19 @@ internal static class JsonPayloadReader
     /// every token (it no longer <c>Skip</c>s a property's value), so this is a counter placement rather
     /// than a second pass.
     /// </remarks>
-    private static string? ScanShape(ref Utf8JsonReader reader, AlvoApiOptions options)
+    private static AlvoViolation? ScanShape(ref Utf8JsonReader reader, AlvoApiOptions options)
     {
         var names = 0;
         while (reader.Read())
         {
             if (reader.CurrentDepth > options.MaxPayloadDepth)
             {
-                return string.Create(
-                    CultureInfo.InvariantCulture,
-                    $"The request body nests deeper than {options.MaxPayloadDepth} levels, the configured maximum.");
+                return PayloadViolations.TooDeep(options.MaxPayloadDepth);
             }
 
             if (reader.TokenType == JsonTokenType.PropertyName && ++names > options.MaxPayloadKeys)
             {
-                return string.Create(
-                    CultureInfo.InvariantCulture,
-                    $"The request body carries more than {options.MaxPayloadKeys} fields, the configured maximum.");
+                return PayloadViolations.TooManyKeys(options.MaxPayloadKeys);
             }
         }
 
@@ -208,8 +204,12 @@ internal static class JsonPayloadReader
     }
 
     /// <summary>Parses the already-bounded body into a node tree and binds every key to its declared type.</summary>
-    private static (Dictionary<string, object?>? Values, string? Failure) Bind(
-        MemoryStream body, EntitySchema entity, AlvoApiOptions options)
+    /// <remarks>
+    /// A key that cannot be bound does not stop the ones after it: each contributes its own violation and
+    /// the rest of the payload still binds, so <see cref="RecordValidator"/> measures what is there in the
+    /// same pass and the caller sees every problem at once.
+    /// </remarks>
+    private static Payload Bind(MemoryStream body, EntitySchema entity, AlvoApiOptions options)
     {
         body.Position = 0;
         var node = JsonNode.Parse(
@@ -218,28 +218,41 @@ internal static class JsonPayloadReader
             documentOptions: new JsonDocumentOptions { MaxDepth = options.MaxPayloadDepth });
         if (node is not JsonObject payload)
         {
-            return (null, NotAnObjectFailure);
+            return Refused(PayloadViolations.NotAnObject());
         }
 
         var declared = DeclaredFields(entity);
         var values = new Dictionary<string, object?>(StringComparer.Ordinal);
+        var violations = new List<AlvoViolation>();
         foreach (var (key, value) in payload)
         {
-            if (!declared.TryGetValue(key, out var field))
-            {
-                // Task 5: this becomes an AlvoViolation carrying a JSON Pointer and a fix suggestion.
-                return (null, UndeclaredFieldFailure);
-            }
-
-            if (!TryBind(key, value, field, out var bound, out var failure))
-            {
-                return (null, failure);
-            }
-
-            values[key] = bound;
+            BindOne(key, value, declared, values, violations);
         }
 
-        return (values, null);
+        return new Payload(values, violations);
+    }
+
+    /// <summary>Binds one key, or records why it could not be bound.</summary>
+    private static void BindOne(
+        string key,
+        JsonNode? value,
+        Dictionary<string, FieldSchema> declared,
+        Dictionary<string, object?> values,
+        List<AlvoViolation> violations)
+    {
+        if (!declared.TryGetValue(key, out var field))
+        {
+            violations.Add(PayloadViolations.UnknownField());
+            return;
+        }
+
+        if (TryBind(value, field, out var bound))
+        {
+            values[key] = bound;
+            return;
+        }
+
+        violations.Add(PayloadViolations.UnrepresentableValue(field));
     }
 
     /// <summary>
@@ -265,29 +278,22 @@ internal static class JsonPayloadReader
     /// composed it — family 3 in <c>IAlvoData</c>'s table, rendered 500. An earlier version caught it
     /// too and rendered 422, telling the caller to fix a request that was fine.
     /// </remarks>
-    private static bool TryBind(
-        string key, JsonNode? node, FieldSchema field, out object? value, out string? failure)
+    private static bool TryBind(JsonNode? node, FieldSchema field, out object? value)
     {
         if (node is null)
         {
             value = null;
-            failure = null;
             return true;
         }
 
         try
         {
             value = Convert(node, field);
-            failure = null;
             return true;
         }
         catch (JsonException)
         {
-            // Task 5: one AlvoViolation per offending field, rather than the first failure stopping the read.
             value = null;
-            failure = string.Create(
-                CultureInfo.InvariantCulture,
-                $"The value supplied for '{key}' is not a valid {field.Type.ToString().ToLowerInvariant()}.");
             return false;
         }
     }
@@ -305,8 +311,4 @@ internal static class JsonPayloadReader
     private static object? Convert(JsonNode node, FieldSchema field) => field.Type == FieldType.Json
         ? node.ToJsonString(DataApiJson.Options)
         : node.Deserialize(FieldClrType.Of(field), DataApiJson.Options);
-
-    private static string TooLargeFailure(int maxBytes) => string.Create(
-        CultureInfo.InvariantCulture,
-        $"The request body is larger than {maxBytes} bytes, the configured maximum.");
 }

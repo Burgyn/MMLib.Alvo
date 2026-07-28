@@ -15,6 +15,20 @@ namespace MMLib.Alvo.Api
         public int MaxRequestBodyBytes { get; set; }
         public string RoutePrefix { get; set; }
     }
+    public static class AlvoProblemTypes
+    {
+        public const string BaseUri = "https://alvo.dev/errors/";
+        public const string Forbidden = "forbidden";
+        public const string IdempotencyConflict = "idempotency-conflict";
+        public const string MalformedQuery = "malformed-query";
+        public const string NotFound = "not-found";
+        public const string OutOfScope = "out-of-scope";
+        public const string PreconditionFailed = "precondition-failed";
+        public const string Unauthenticated = "unauthenticated";
+        public const string Validation = "validation";
+        public static System.Collections.Generic.IReadOnlyList<string> All { get; }
+        public static string UriOf(string slug) { }
+    }
     public sealed class AlvoViolation : System.IEquatable<MMLib.Alvo.Api.AlvoViolation>
     {
         public AlvoViolation(string Pointer, string Code, string Message, string? FixSuggestion) { }

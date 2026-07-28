@@ -1,5 +1,4 @@
-﻿using MMLib.Alvo.Data;
-using System.Net;
+﻿using System.Net;
 using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Api.Tests;
@@ -28,13 +27,19 @@ public sealed class DataApiAuthTests
     /// </summary>
     /// <remarks>
     /// <para>
-    /// It asserts the problem <c>detail</c>, not only the status, and it uses a <b>write</b>: the
+    /// It asserts the problem <c>type</c>, not only the status, and it uses a <b>write</b>: the
     /// vehicle-registry rules are row predicates, so an anonymous <em>list</em> is an honest 200 with
     /// zero visible rows, which says nothing about who refused. A create is refused outright, and the
-    /// port's own wording (<see cref="AlvoAuthorizationException.WriteRejectedByPolicy"/> — read from the
-    /// port, not restated here) is what distinguishes a policy refusal from the scope gate's: the one
-    /// regression that would otherwise hide, since applying the gate to an anonymous caller with no
+    /// <c>forbidden</c> slug is what distinguishes a policy refusal from the scope gate's <c>out-of-scope</c>:
+    /// the one regression that would otherwise hide, since applying the gate to an anonymous caller with no
     /// scopes also produces 403.
+    /// </para>
+    /// <para>
+    /// It used to assert the port's <c>detail</c> literal, because before Task 5 that prose was the only thing
+    /// that could tell the two 403s apart. Re-pointed at the slug on purpose: RFC 9457 makes <c>type</c> the
+    /// classification a client may branch on and <c>detail</c> prose it "ought not" parse, and a test pinning
+    /// that literal held the deny reason's deliberate genericity hostage — the wording could not be made
+    /// <em>more</em> generic without failing a test. <c>ProblemDetailsTests</c> holds the pair of slugs.
     /// </para>
     /// <para>
     /// The admin control is not decoration: without it, this fact would pass on a server that refused
@@ -51,9 +56,10 @@ public sealed class DataApiAuthTests
 
         anonymous.StatusCode.ShouldBe(
             HttpStatusCode.Forbidden, "a missing credential is an anonymous caller the policy denies, never a 401");
-        (await anonymous.ReadProblemDetailAsync()).ShouldBe(
-            AlvoAuthorizationException.WriteRejectedByPolicy,
-            "the refusal must come from the policy inside the port, not from the scope gate");
+        (await anonymous.ReadProblemTypeAsync()).ShouldBe(
+            AlvoProblemTypes.Forbidden,
+            "the refusal must come from the policy inside the port, not from the scope gate — whose slug is "
+            + "out-of-scope");
         authorized.StatusCode.ShouldBe(
             HttpStatusCode.Created, "or the anonymous refusal above could be a blanket denial of every write");
     }
@@ -75,9 +81,10 @@ public sealed class DataApiAuthTests
         afterAnonymous.ShouldNotBeEmpty(
             "the filter must have reached the accessor at all, or 'every publish was null' is vacuously true");
         afterAnonymous.ShouldAllBe(principal => principal == null);
-        (await anonymous.ReadProblemDetailAsync()).ShouldBe(
-            AlvoAuthorizationException.WriteRejectedByPolicy,
-            "the anonymous context still reached the port — 'no principal' is not 'no caller'");
+        (await anonymous.ReadProblemTypeAsync()).ShouldBe(
+            AlvoProblemTypes.Forbidden,
+            "the anonymous context still reached the port — 'no principal' is not 'no caller', and the scope "
+            + "gate would have answered out-of-scope");
         keyed.StatusCode.ShouldBe(HttpStatusCode.OK);
         world.PublishedPrincipals.ShouldContain(
             principal => principal != null && principal.KeyId == _admin.KeyId,

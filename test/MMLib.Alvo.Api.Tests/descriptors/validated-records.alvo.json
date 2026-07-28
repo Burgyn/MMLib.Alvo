@@ -1,0 +1,69 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "validated-records",
+  "description": "One entity carrying every facet schema-derived validation enforces (required, maxLength, precision/scale, enum values, a built-in and a declared format, a readOnly field, a hidden field, a ref) plus the entity that ref points at. Every rule permits every caller EXCEPT the reference target's row predicate, so a refusal here is always about the payload — never about access — and the one row-level exclusion is there so 'the caller cannot see it' and 'it does not exist' can be compared.",
+  "auth": {
+    "providers": ["local"],
+    "roles": ["auditor"]
+  },
+  "formats": {
+    "sku-code": {
+      "pattern": "[A-Z]{3}-[0-9]{4}",
+      "description": "Three upper-case letters, a dash, four digits. Deliberately written WITHOUT ^...$ so the anchoring FormatCatalog applies is what refuses a value with trailing text; an author-anchored pattern could not tell the two apart."
+    },
+    "greedy": {
+      "pattern": "(a+)+b",
+      "description": "The textbook catastrophic-backtracking pattern, here so the ReDoS defence is measured rather than described."
+    }
+  },
+  "entities": {
+    "catalogs": {
+      "description": "The reference target. Its list/get predicate hides a row whose 'visible' is false from every caller EXCEPT an 'auditor' — so 'exists but you cannot see it' is reachable over HTTP, and the row's existence is still provable by a caller who can read it. Without that second caller, 'unresolved' could not be told from 'the seed never wrote a row'.",
+      "fields": {
+        "name": { "type": "string", "required": true, "maxLength": 60 },
+        "visible": { "type": "boolean", "required": true }
+      },
+      "rules": {
+        "list": "visible == true || 'auditor' in @user.roles",
+        "get": "visible == true || 'auditor' in @user.roles",
+        "create": "true",
+        "update": "true",
+        "delete": "true"
+      }
+    },
+    "vaults": {
+      "description": "A reference target with NO 'get' rule at all, so default-deny refuses every read of it outright — the one way to make the reference probe's own AlvoAuthorizationException reachable over HTTP. It exists so 'a read this caller may not perform' is proved to fold into the same unresolved-reference violation rather than escaping as a 403 about an entity the caller never asked for.",
+      "fields": {
+        "label": { "type": "string", "required": true, "maxLength": 60 }
+      },
+      "rules": {
+        "list": "true",
+        "create": "true"
+      }
+    },
+    "items": {
+      "description": "One row carrying every validated facet.",
+      "fields": {
+        "name": { "type": "string", "required": true, "maxLength": 10 },
+        "quantity": { "type": "integer", "required": true },
+        "sku": { "type": "string", "format": "sku-code", "maxLength": 40 },
+        "contact": { "type": "string", "format": "email", "maxLength": 120 },
+        "pathological": { "type": "string", "format": "greedy", "maxLength": 200 },
+        "price": { "type": "decimal", "precision": 6, "scale": 2 },
+        "status": { "type": "enum", "values": ["draft", "active", "retired"] },
+        "slug": { "type": "string", "readOnly": true, "maxLength": 40 },
+        "secret": { "type": "string", "hidden": true, "maxLength": 40 },
+        "catalog_id": { "type": "ref", "entity": "catalogs", "onDelete": "restrict" },
+        "vault_id": { "type": "ref", "entity": "vaults", "onDelete": "restrict" }
+      },
+      "rules": {
+        "list": "true",
+        "get": "true",
+        "create": "true",
+        "update": "true",
+        "delete": "true"
+      }
+    }
+  }
+}

@@ -38,20 +38,22 @@ internal static class DataApiEndpoints
     /// <param name="prefix">The normalized route prefix, with no trailing slash.</param>
     /// <param name="options">The API options the delegates read paging defaults from.</param>
     /// <param name="filters">Builds the authorization filter each endpoint carries.</param>
+    /// <param name="formats">The applied descriptor's compiled field formats, shared by every endpoint.</param>
     internal static void Map(
         IEndpointRouteBuilder endpoints,
         EntitySchema entity,
         string prefix,
         AlvoApiOptions options,
-        AlvoContextFilterFactory filters)
+        AlvoContextFilterFactory filters,
+        FormatCatalog formats)
     {
         var collection = $"{prefix}/{entity.Name}";
         var item = $"{collection}/{{id:guid}}";
 
         MapList(endpoints, entity, collection, options, filters);
         MapGet(endpoints, entity, item, filters);
-        MapCreate(endpoints, entity, collection, options, filters);
-        MapUpdate(endpoints, entity, item, options, filters);
+        MapCreate(endpoints, entity, collection, options, filters, formats);
+        MapUpdate(endpoints, entity, item, options, filters, formats);
         MapDelete(endpoints, entity, item, filters);
     }
 
@@ -67,14 +69,14 @@ internal static class DataApiEndpoints
                     IPolicyEngine policies,
                     IAlvoContextAccessor caller,
                     CancellationToken ct) =>
-                DataApiFailures.GuardAsync(async () =>
+                ProblemResultFactory.GuardAsync(async () =>
                 {
                     var context = Caller(caller);
                     if (!QueryStringParser.TryParse(
                             http.Request.Query, entity, MaskedFields(policies, entity.Name, context), options,
                             out var request, out var violations))
                     {
-                        return DataApiFailures.MalformedQuery(violations);
+                        return ProblemResultFactory.MalformedQuery(violations);
                     }
 
                     var page = await data.QueryAsync(request!.Query, context, ct).ConfigureAwait(false);
@@ -85,14 +87,14 @@ internal static class DataApiEndpoints
     private static void MapGet(
         IEndpointRouteBuilder endpoints, EntitySchema entity, string pattern, AlvoContextFilterFactory filters) =>
         endpoints.MapGet(pattern, (Guid id, IAlvoData data, IAlvoContextAccessor caller, CancellationToken ct) =>
-                DataApiFailures.GuardAsync(async () =>
+                ProblemResultFactory.GuardAsync(async () =>
                 {
                     var record = await data.GetAsync(entity.Name, id, Caller(caller), ct).ConfigureAwait(false);
 
                     // Task 6: the ETag for this row's version is added here.
                     // A row the caller's policy excludes reads exactly like one that was never there, so
                     // this 404 is the same 404 AlvoRecordNotFoundException produces.
-                    return record is null ? DataApiFailures.NotFound() : Json(record.Values);
+                    return record is null ? ProblemResultFactory.NotFound() : Json(record.Values);
                 }))
             .Protect(entity, DataOperation.Get, filters);
 
@@ -101,28 +103,29 @@ internal static class DataApiEndpoints
         EntitySchema entity,
         string pattern,
         AlvoApiOptions options,
-        AlvoContextFilterFactory filters) =>
+        AlvoContextFilterFactory filters,
+        FormatCatalog formats) =>
         endpoints.MapPost(pattern, (
                     HttpContext http,
                     IAlvoData data,
                     IPolicyEngine policies,
                     IAlvoContextAccessor caller,
                     CancellationToken ct) =>
-                DataApiFailures.GuardAsync(async () =>
+                ProblemResultFactory.GuardAsync(async () =>
                 {
                     var context = Caller(caller);
-                    EnsureOperationIsAllowed(policies, entity.Name, DataOperation.Create, context);
+                    var decision = EnsureOperationIsAllowed(policies, entity.Name, DataOperation.Create, context);
 
-                    var (values, failure) = await JsonPayloadReader
-                        .ReadAsync(http.Request, entity, options, ct).ConfigureAwait(false);
-                    if (failure is not null)
+                    var (values, violations) = await ReadAndValidateAsync(
+                        http, entity, options, decision, isCreate: true, formats, data, context, ct)
+                        .ConfigureAwait(false);
+                    if (violations.Count > 0)
                     {
-                        return DataApiFailures.Malformed(failure);
+                        return ProblemResultFactory.Validation(violations);
                     }
 
-                    // Task 5: schema-derived validation runs here, reporting every violation.
                     // Task 7: the Idempotency-Key header becomes the AlvoIdempotency token.
-                    var record = await data.CreateAsync(entity.Name, values!, context, null, ct).ConfigureAwait(false);
+                    var record = await data.CreateAsync(entity.Name, values, context, null, ct).ConfigureAwait(false);
                     return Created($"{pattern}/{AssignedId(record)}", record.Values);
                 }))
             .Protect(entity, DataOperation.Create, filters);
@@ -132,7 +135,8 @@ internal static class DataApiEndpoints
         EntitySchema entity,
         string pattern,
         AlvoApiOptions options,
-        AlvoContextFilterFactory filters) =>
+        AlvoContextFilterFactory filters,
+        FormatCatalog formats) =>
         endpoints.MapPatch(pattern, (
                     Guid id,
                     HttpContext http,
@@ -140,21 +144,21 @@ internal static class DataApiEndpoints
                     IPolicyEngine policies,
                     IAlvoContextAccessor caller,
                     CancellationToken ct) =>
-                DataApiFailures.GuardAsync(async () =>
+                ProblemResultFactory.GuardAsync(async () =>
                 {
                     var context = Caller(caller);
-                    EnsureOperationIsAllowed(policies, entity.Name, DataOperation.Update, context);
+                    var decision = EnsureOperationIsAllowed(policies, entity.Name, DataOperation.Update, context);
 
-                    var (values, failure) = await JsonPayloadReader
-                        .ReadAsync(http.Request, entity, options, ct).ConfigureAwait(false);
-                    if (failure is not null)
+                    var (values, violations) = await ReadAndValidateAsync(
+                        http, entity, options, decision, isCreate: false, formats, data, context, ct)
+                        .ConfigureAwait(false);
+                    if (violations.Count > 0)
                     {
-                        return DataApiFailures.Malformed(failure);
+                        return ProblemResultFactory.Validation(violations);
                     }
 
-                    // Task 5: schema-derived validation runs here.
                     // Task 6: the If-Match header becomes the AlvoPrecondition passed below.
-                    var record = await data.UpdateAsync(entity.Name, id, values!, context, null, ct).ConfigureAwait(false);
+                    var record = await data.UpdateAsync(entity.Name, id, values, context, null, ct).ConfigureAwait(false);
                     return Json(record.Values);
                 }))
             .Protect(entity, DataOperation.Update, filters);
@@ -162,7 +166,7 @@ internal static class DataApiEndpoints
     private static void MapDelete(
         IEndpointRouteBuilder endpoints, EntitySchema entity, string pattern, AlvoContextFilterFactory filters) =>
         endpoints.MapDelete(pattern, (Guid id, IAlvoData data, IAlvoContextAccessor caller, CancellationToken ct) =>
-                DataApiFailures.GuardAsync(async () =>
+                ProblemResultFactory.GuardAsync(async () =>
                 {
                     // Task 6: the If-Match header becomes the AlvoPrecondition passed below.
                     await data.DeleteAsync(entity.Name, id, Caller(caller), null, ct).ConfigureAwait(false);
@@ -218,16 +222,83 @@ internal static class DataApiEndpoints
     /// before the body" from "refused after it".
     /// </para>
     /// </remarks>
+    /// <returns>
+    /// The allow decision, whose <see cref="PolicyDecision.ReadOnlyFields"/> the validator needs. Returned
+    /// rather than resolved a second time: the mask is a per-caller CEL result, and two resolutions of the
+    /// same triple are two chances to validate against a mask the port will not apply.
+    /// </returns>
     /// <exception cref="AlvoAuthorizationException">No policy allows this operation for this caller.</exception>
-    private static void EnsureOperationIsAllowed(
+    private static PolicyDecision EnsureOperationIsAllowed(
         IPolicyEngine policies, string entity, DataOperation operation, AlvoContext context)
     {
         var decision = policies.Resolve(entity, operation, context);
-        if (decision.IsDenied)
-        {
-            throw new AlvoAuthorizationException(decision.DenyReason!);
-        }
+        return decision.IsDenied ? throw new AlvoAuthorizationException(decision.DenyReason!) : decision;
     }
+
+    /// <summary>
+    /// Reads the request body and validates it against the entity's declared shape, returning the values the
+    /// port would be called with plus <b>every</b> reason it must not be.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// One helper for both write verbs, because the two differ in exactly one bit — whether an absent
+    /// required field is a missing value (a create) or an unchanged one (a partial update) — and that bit is
+    /// <c>IAlvoData.UpdateAsync</c>'s own contract rather than a judgement made here.
+    /// </para>
+    /// <para>
+    /// The reader's <em>field-level</em> violations are carried into the validation rather than
+    /// short-circuiting it, so a body with a mistyped value <em>and</em> a missing required field is answered
+    /// once. The fields the reader already refused are excluded, because a value that never bound cannot be
+    /// measured against the rules it never reached. A <em>body-level</em> refusal does short-circuit — see
+    /// <see cref="JsonPayloadReader.Payload.BoundAsAnObject"/> for why validating a body that is not an object
+    /// answers with advice about a request the caller never sent.
+    /// </para>
+    /// </remarks>
+    private static async Task<(Dictionary<string, object?> Values, IReadOnlyList<AlvoViolation> Violations)>
+        ReadAndValidateAsync(
+            HttpContext http,
+            EntitySchema entity,
+            AlvoApiOptions options,
+            PolicyDecision decision,
+            bool isCreate,
+            FormatCatalog formats,
+            IAlvoData data,
+            AlvoContext context,
+            CancellationToken ct)
+    {
+        var payload = await JsonPayloadReader
+            .ReadAsync(http.Request, entity, options, ct).ConfigureAwait(false);
+        if (!payload.BoundAsAnObject)
+        {
+            return (payload.Values, payload.Violations);
+        }
+
+        var validated = await RecordValidator.ValidateAsync(
+            new RecordValidationRequest(
+                entity,
+                payload.Values,
+                isCreate,
+                decision.ReadOnlyFields,
+                RefusedFields(payload.Violations),
+                formats,
+                data,
+                context),
+            ct).ConfigureAwait(false);
+
+        return (payload.Values, [.. payload.Violations, .. validated]);
+    }
+
+    /// <summary>The field names the body reader already refused, read back off its own violations' pointers.</summary>
+    /// <remarks>
+    /// Derived from the violations rather than tracked beside them, so the two cannot disagree: a reader that
+    /// stops reporting a field also stops suppressing the validator's checks for it, which is the direction
+    /// that fails loudly rather than silently.
+    /// </remarks>
+    private static HashSet<string> RefusedFields(IReadOnlyList<AlvoViolation> violations) =>
+        violations
+            .Select(violation => PayloadViolations.FieldOf(violation.Pointer))
+            .OfType<string>()
+            .ToHashSet(StringComparer.Ordinal);
 
     /// <summary>
     /// The caller <see cref="AlvoContextFilter"/> published for this request, or

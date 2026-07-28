@@ -164,7 +164,10 @@ public sealed class PayloadBindingTests
             HttpMethod.Post, "/api/vehicles", _admin, body: Vehicle(ownerId, year: 2020));
 
         badYear.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
-        (await badYear.ReadProblemDetailAsync()).ShouldContain("year");
+        (await badYear.ReadViolationsAsync()).ShouldBe(
+            [("/year", "invalid-value")],
+            "the violation's JSON Pointer is what names the field now — the message names the declared type, "
+            + "never the caller's value");
         goodYear.StatusCode.ShouldBe(
             HttpStatusCode.Created, "the same field accepts a well-typed value, so the refusal is about the value");
     }
@@ -234,16 +237,16 @@ public sealed class PayloadBindingTests
         };
         var owner = Guid.NewGuid();
 
-        var (values, failure) = await JsonPayloadReader.ReadAsync(
+        var payload = await JsonPayloadReader.ReadAsync(
             Request($@"{{""owner_id"":""{owner}"",""year"":2020,""plate"":""ACME-1""}}"),
             entity,
             new AlvoApiOptions(),
             TestContext.Current.CancellationToken);
 
-        failure.ShouldBeNull();
-        values!["owner_id"].ShouldBe(owner);
-        values["year"].ShouldBe(2020L);
-        values["plate"].ShouldBe("ACME-1");
+        payload.Violations.ShouldBeEmpty();
+        payload.Values["owner_id"].ShouldBe(owner);
+        payload.Values["year"].ShouldBe(2020L);
+        payload.Values["plate"].ShouldBe("ACME-1");
     }
 
     /// <summary>

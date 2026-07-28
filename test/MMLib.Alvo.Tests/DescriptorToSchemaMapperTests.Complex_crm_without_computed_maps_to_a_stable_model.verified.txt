@@ -68,6 +68,8 @@
           Unique: true,
           Nullable: true,
           MaxLength: 8,
+          Format: sk-ico,
+          FormatPattern: ^[0-9]{8}$,
           Indexed: false
         },
         {
@@ -180,6 +182,7 @@
           Required: false,
           Unique: false,
           Nullable: true,
+          Format: email,
           Indexed: false
         },
         {
@@ -187,6 +190,7 @@
           Required: false,
           Unique: false,
           Nullable: true,
+          Format: phone,
           Indexed: false
         },
         {
