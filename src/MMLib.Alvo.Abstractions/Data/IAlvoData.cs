@@ -46,7 +46,7 @@ namespace MMLib.Alvo.Data;
 ///     <description>Means, and what a request layer should render</description>
 ///   </listheader>
 ///   <item>
-///     <term><see cref="ArgumentException"/> (including its derived types)</term>
+///     <term><see cref="ArgumentException"/> and its derived types, <b>except <see cref="ArgumentNullException"/></b></term>
 ///     <description>
 ///     <b>The query or payload is malformed.</b> A filter past
 ///     <see cref="AlvoFilter.MaxDepth"/>/<see cref="AlvoFilter.MaxTerms"/>/<see cref="AlvoFilter.MaxInCandidates"/>,
@@ -56,6 +56,18 @@ namespace MMLib.Alvo.Data;
 ///     field, or a <see langword="null"/> where a nested filter belongs. Nothing about the caller's
 ///     permissions is in question and nothing is being hidden: the shape is wrong. Render 422 with the
 ///     message's fix suggestion.
+///     <para>
+///     <b><see cref="ArgumentNullException"/> is excluded and belongs to the last family below</b>, even
+///     though it derives from this one. <em>No request can express a null argument.</em> A
+///     <see langword="null"/> reaching a member of this port means its caller — the HTTP layer, a hook, an
+///     automation action — passed one where this contract forbids it, which is a broken invariant of the
+///     code rather than a malformed request. Rendered as a 422 it tells a caller to fix a request that was
+///     fine, and it swallows the stack trace a host's logging exists to record. So every
+///     <c>ArgumentNullException.ThrowIfNull</c> guarding this port's own parameters raises an
+///     implementation defect, never a caller error. PR3's HTTP layer excludes it from the malformed-query
+///     arm for exactly this reason; the exclusion is stated <em>here</em> because a provider author reads
+///     this table and not that layer.
+///     </para>
 ///     </description>
 ///   </item>
 ///   <item>

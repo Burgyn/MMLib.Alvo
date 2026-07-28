@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Descriptor.Internal;
 using MMLib.Alvo.Schema;
 using System.Text.Json.Nodes;
 using FieldType = MMLib.Alvo.Schema.FieldType;
@@ -105,32 +106,28 @@ public class DescriptorToSchemaMapperTests
     }
 
     /// <summary>
-    /// Every field-level feature the frozen schema declares and this build does not honour is refused at
-    /// <b>apply</b>, naming the feature and what to do instead.
+    /// <b>The tie between the two refusal passes.</b> Every entry in
+    /// <see cref="UnhonouredFeatures.OnAField"/> — the table <c>DescriptorValidator</c> reports from — is one
+    /// the <em>mapper</em> also throws for, driven off that table rather than off a copy of it.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Silently dropping one is the defect class this repo has closed four times, and three of these four
-    /// were being dropped: <c>validation: "value >= 0"</c> with <c>-5</c> in the body answered 201, and a
-    /// <c>required</c> field with a <c>default</c> was an INSERT of NULL into a NOT NULL column rather than a
-    /// defaulted row.
+    /// This is the fact whose absence let the list become four hand-written copies. A theory with its own
+    /// <c>[InlineData]</c> per feature proves each arm works and proves nothing about whether the two passes
+    /// agree: adding a fifth feature to the validator's table and forgetting the mapper left both green. Driven
+    /// off the table, a new entry fails here until the mapper honours it too, and there is nowhere to add a
+    /// feature that only one pass refuses.
     /// </para>
     /// <para>
-    /// One case per feature, each over a descriptor declaring <em>only</em> that feature, so deleting any one
-    /// arm of the guard fails exactly one case and names it. A single descriptor carrying all four would be
-    /// satisfied by whichever arm happens to run first.
+    /// The declaration is synthesised from the table's own path, so the theory needs no per-feature JSON
+    /// either — the one thing it cannot derive is a <em>value</em> the schema accepts for each key, which
+    /// <see cref="DeclarationFor"/> supplies and which fails loudly for a key it has not been taught.
     /// </para>
     /// </remarks>
-    /// <param name="feature">The descriptor key under test.</param>
-    /// <param name="declaration">How the field declares it.</param>
-    /// <param name="fixMentions">A word the fix suggestion must carry, so "unsupported" alone cannot pass.</param>
+    /// <param name="path">The table entry's path.</param>
     [Theory]
-    [InlineData("computed", @"""computed"": ""net * 1.2""", "#21")]
-    [InlineData("rollup", @"""rollup"": { ""from"": ""lines"", ""op"": ""count"" }", "query")]
-    [InlineData("validation", @"""validation"": ""value >= 0""", "before-hook")]
-    [InlineData("default", @"""default"": 1", "explicitly")]
-    public void Map_refuses_every_field_feature_it_does_not_honour(
-        string feature, string declaration, string fixMentions)
+    [MemberData(nameof(EveryUnhonouredFieldFeature))]
+    public void Map_refuses_every_field_feature_the_table_records(string path)
     {
         var json = $$"""
         { "apiVersion": "alvo.dev/v1", "name": "demo",
@@ -138,35 +135,151 @@ public class DescriptorToSchemaMapperTests
             "lines": { "fields": { "invoice_id": { "type": "uuid" } } },
             "invoices": { "fields": {
               "net": { "type": "decimal", "precision": 8, "scale": 2 },
-              "amount": { "type": "decimal", "precision": 8, "scale": 2, {{declaration}} } } } } }
+              "amount": { "type": "decimal", "precision": 8, "scale": 2, {{DeclarationFor(path)}} } } } } }
         """;
 
         var ex = Should.Throw<InvalidDataException>(() => MapInline(json));
 
-        ex.Message.ShouldContain(feature);
+        ex.Message.ShouldContain(path);
         ex.Message.ShouldContain("amount");
-        ex.Message.ShouldContain(fixMentions);
+    }
+
+    /// <summary>The same tie one layer up, for the entity-level table — <c>softDelete</c> and the six hook points.</summary>
+    /// <param name="path">The table entry's path.</param>
+    [Theory]
+    [MemberData(nameof(EveryUnhonouredEntityFeature))]
+    public void Map_refuses_every_entity_feature_the_table_records(string path)
+    {
+        var json = $$"""
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "notes": {
+            {{DeclarationFor(path)}},
+            "fields": { "title": { "type": "string" } } } } }
+        """;
+
+        var ex = Should.Throw<InvalidDataException>(() => MapInline(json));
+
+        ex.Message.ShouldContain(path);
+        ex.Message.ShouldContain("notes");
+    }
+
+    public static TheoryData<string> EveryUnhonouredFieldFeature() =>
+        [.. UnhonouredFeatures.OnAField.Select(feature => feature.Path)];
+
+    public static TheoryData<string> EveryUnhonouredEntityFeature() =>
+        [.. UnhonouredFeatures.OnAnEntity.Select(feature => feature.Path)];
+
+    /// <summary>
+    /// A schema-valid declaration of one table entry, for the theories that are driven off the table.
+    /// </summary>
+    /// <remarks>
+    /// It <b>throws</b> for a path it does not know rather than guessing a shape, so adding a table entry
+    /// fails the theory with "teach DeclarationFor about it" instead of silently testing a key the schema
+    /// would have rejected anyway — which would be a green theory case asserting nothing.
+    /// </remarks>
+    /// <param name="path">The table entry's path.</param>
+    private static string DeclarationFor(string path) => path switch
+    {
+        "computed" => @"""computed"": ""net * 1.2""",
+        "rollup" => @"""rollup"": { ""from"": ""lines"", ""op"": ""count"" }",
+        "validation" => @"""validation"": ""value >= 0""",
+        "default" => @"""default"": 1",
+        "softDelete" => @"""softDelete"": true",
+        _ when path.StartsWith("hooks/before", StringComparison.Ordinal) =>
+            $@"""hooks"": {{ ""{path["hooks/".Length..]}"": [ {{ ""action"": {{ ""reject"": ""no"" }} }} ] }}",
+        // An after-hook's action is polymorphic on a 'type' discriminator (AutomationAction), so a shape
+        // without it does not parse at all — which is what the first version of this method got wrong, and
+        // what the theory caught by throwing NotSupportedException instead of InvalidDataException.
+        _ when path.StartsWith("hooks/after", StringComparison.Ordinal) =>
+            $@"""hooks"": {{ ""{path["hooks/".Length..]}"": [ {{ ""action"": {{ ""type"": ""webhook"", ""endpoint"": ""notify"" }} }} ] }}",
+        _ => throw new InvalidOperationException(
+            $"'{path}' is in UnhonouredFeatures but DeclarationFor does not know how to declare it. Teach it "
+            + "a schema-valid declaration, or the theory case would assert nothing."),
+    };
+
+    /// <summary>
+    /// <b>Every example this repository ships as runnable really maps</b> — no refusal, no exception.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The apply-time refusals are right, and their fallout was not: three shipped examples declared features
+    /// the build does not honour, so a user following the README got a file that would be rejected. Two were
+    /// cleaned; <c>complex-crm</c> is deliberately kept rich and carries a
+    /// <see cref="AlvoExamples.NotRunnableMarker"/> saying so.
+    /// </para>
+    /// <para>
+    /// Driven off the tree rather than a list of names, so a <em>new</em> example is covered the moment it is
+    /// added — nobody has to remember to extend a theory. The non-empty assertion is what stops the whole
+    /// thing passing vacuously if the enumeration ever returns nothing (a moved directory, a renamed
+    /// extension), which is the failure mode a file-scanning fact has.
+    /// </para>
+    /// </remarks>
+    /// <param name="descriptorPath">One runnable example.</param>
+    [Theory]
+    [MemberData(nameof(EveryRunnableExample))]
+    public void Every_runnable_example_maps_without_refusal(string descriptorPath)
+    {
+        var descriptor = AlvoDescriptor.Parse(File.ReadAllText(descriptorPath));
+
+        var model = DescriptorToSchemaMapper.Map(descriptor);
+
+        model.Entities.ShouldNotBeEmpty($"'{Path.GetFileName(descriptorPath)}' mapped to no entities at all");
     }
 
     /// <summary>
-    /// The negative leg for the whole guard: a field declaring <b>none</b> of the four maps without
-    /// complaint, so the four cases above are about the features rather than about the mapper refusing every
-    /// decimal.
+    /// <b>And every example marked not runnable really is refused.</b> This is the half that makes the marker
+    /// a claim rather than a comment.
+    /// </summary>
+    /// <remarks>
+    /// Without it, nothing would force the marker to shrink: when <c>default</c>, <c>rollup</c>,
+    /// <c>computed</c> and hooks eventually land, <c>complex-crm</c> becomes appliable and its
+    /// <c>NOT-RUNNABLE.md</c> would quietly go on telling readers to start elsewhere. With it, the last of
+    /// those features to land fails this fact until the file is deleted — which is the only kind of marker
+    /// worth having.
+    /// </remarks>
+    /// <param name="descriptorPath">One example marked not runnable.</param>
+    [Theory]
+    [MemberData(nameof(EveryExampleMarkedNotRunnable))]
+    public void Every_example_marked_not_runnable_really_is_refused(string descriptorPath)
+    {
+        var descriptor = AlvoDescriptor.Parse(File.ReadAllText(descriptorPath));
+
+        Should.Throw<InvalidDataException>(
+            () => DescriptorToSchemaMapper.Map(descriptor),
+            $"'{Path.GetFileName(descriptorPath)}' carries {AlvoExamples.NotRunnableMarker} but now applies "
+            + "cleanly — delete the marker, and the README paragraph that points readers away from it");
+    }
+
+    public static TheoryData<string> EveryRunnableExample()
+    {
+        var runnable = AlvoExamples.Runnable().ToList();
+        runnable.ShouldNotBeEmpty("the examples tree must be findable, or this theory covers nothing");
+        return [.. runnable];
+    }
+
+    public static TheoryData<string> EveryExampleMarkedNotRunnable() => [.. AlvoExamples.NotRunnable()];
+
+    /// <summary>
+    /// The negative leg for the whole guard: a field and an entity declaring <b>none</b> of the table's
+    /// features map without complaint, so the theories above are about the features rather than about the
+    /// mapper refusing everything.
     /// </summary>
     [Fact]
-    public void A_field_declaring_none_of_the_unhonoured_features_maps_normally()
+    public void A_descriptor_declaring_none_of_the_unhonoured_features_maps_normally()
     {
         var json = """
         { "apiVersion": "alvo.dev/v1", "name": "demo",
-          "entities": { "invoices": { "fields": {
+          "entities": { "invoices": { "softDelete": false, "audit": true, "fields": {
             "amount": { "type": "decimal", "precision": 8, "scale": 2 } } } } }
         """;
 
-        var amount = MapInline(json).Entities.Single(e => e.Name == "invoices")
-            .Fields.Single(f => f.Name == "amount");
+        var invoices = MapInline(json).Entities.Single(e => e.Name == "invoices");
+        var amount = invoices.Fields.Single(f => f.Name == "amount");
 
         amount.Precision.ShouldBe(8);
         amount.Scale.ShouldBe(2);
+        invoices.SoftDelete.ShouldBeFalse("a flag written as false is not a declaration");
+        invoices.Fields.ShouldNotContain(field => field.Name == "deleted_at");
     }
 
     // Full-model regression freeze: the rich complex-crm fixture exercises every mapping
@@ -199,7 +312,13 @@ public class DescriptorToSchemaMapperTests
 
         foreach (var (_, entity) in json["entities"]!.AsObject())
         {
-            foreach (var (_, field) in entity!["fields"]!.AsObject())
+            // Entity-level unhonoured features are stripped unconditionally: the fixture declares hooks on
+            // two entities, and they are refused before any field is looked at, so leaving them would make
+            // every one of these facts fail for the entity's reason rather than the field's.
+            entity!.AsObject().Remove("hooks");
+            entity.AsObject().Remove("softDelete");
+
+            foreach (var (_, field) in entity["fields"]!.AsObject())
             {
                 foreach (var key in keys)
                 {

@@ -75,9 +75,13 @@ public sealed class ProblemDetailsTests
     /// document from a resource representation without guessing from the status code.
     /// </summary>
     /// <remarks>
-    /// The successful control is here on purpose: <c>application/json</c> for a 200 and
-    /// <c>application/problem+json</c> for a refusal is the distinction, and a server that answered
-    /// <c>problem+json</c> for everything would satisfy the refusal half alone.
+    /// <para>
+    /// <b>What this adds, now that the media type is pinned per slug.</b> Both per-slug helpers assert it —
+    /// over every factory entry point and every endpoint probe — so the refusal half of this fact is covered
+    /// many times over. What is left here, and nowhere else, is the <em>success</em> half: a 200 must be
+    /// <c>application/json</c>, because a server answering <c>problem+json</c> for everything would satisfy
+    /// every refusal assertion in the suite and still be wrong.
+    /// </para>
     /// </remarks>
     [Fact]
     public async Task A_problem_response_is_application_problem_json()
@@ -434,6 +438,14 @@ public sealed class ProblemDetailsTests
 
         await result.ExecuteAsync(context);
 
+        // RFC 9457 §3 requires application/problem+json, and pinning it *here* rather than in one fact is
+        // what makes the requirement hold for every entry point: this helper executes all of them, so one
+        // line covers N results instead of the single path a dedicated fact could reach. The regression it
+        // catches is a new call site that bypasses the factory — the 401 challenge being likeliest, since it
+        // is the one result that wraps another.
+        context.Response.ContentType.ShouldBe(
+            ProblemMediaType, "every problem this factory writes must be a problem document on the wire");
+
         body.Position = 0;
         var document = await JsonSerializer.DeserializeAsync<JsonObject>(
             body, cancellationToken: TestContext.Current.CancellationToken);
@@ -449,8 +461,17 @@ public sealed class ProblemDetailsTests
     {
         using var response = await world.SendAsync(
             probe.Method, probe.Path, probe.Key, body: probe.Body, headers: probe.Headers);
+
+        // The same pin, over the live API: every refusal a real endpoint produces is a problem document,
+        // not only the two A_problem_response_is_application_problem_json happens to drive.
+        response.Content.Headers.ContentType!.MediaType.ShouldBe(
+            ProblemMediaType, $"{probe.Method} {probe.Path} answered a refusal that is not a problem document");
+
         return await response.ReadProblemTypeAsync();
     }
+
+    /// <summary>The media type RFC 9457 §3 requires of a problem document.</summary>
+    private const string ProblemMediaType = "application/problem+json";
 
     private static async Task<Guid> SeedInvisibleCatalogAsync(AlvoApiWorld world, TestApiKey key)
     {

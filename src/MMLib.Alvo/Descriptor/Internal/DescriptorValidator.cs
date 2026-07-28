@@ -182,13 +182,9 @@ internal sealed class DescriptorValidator : IDescriptorValidator
     private static IEnumerable<DescriptorValidationError> EntitySemanticErrors(
         JsonProperty entity, HashSet<string> entityNames)
     {
-        if (DeclaresSoftDelete(entity.Value))
+        foreach (var error in Unhonoured($"/entities/{entity.Name}", entity.Value, UnhonouredFeatures.OnAnEntity))
         {
-            yield return new DescriptorValidationError(
-                $"/entities/{entity.Name}/softDelete",
-                "Soft delete is not supported yet: a delete would remove the row and reads would not exclude it.",
-                "Remove 'softDelete' or track the soft-delete implementation issue.",
-                DescriptorValidationSeverity.Error);
+            yield return error;
         }
 
         if (!entity.Value.TryGetProperty("fields", out var fields) || fields.ValueKind != JsonValueKind.Object)
@@ -208,13 +204,9 @@ internal sealed class DescriptorValidator : IDescriptorValidator
     private static IEnumerable<DescriptorValidationError> FieldSemanticErrors(
         string path, JsonProperty field, HashSet<string> entityNames)
     {
-        foreach (var unhonoured in UnhonouredFieldFeatures)
+        foreach (var error in Unhonoured(path, field.Value, UnhonouredFeatures.OnAField))
         {
-            if (field.Value.TryGetProperty(unhonoured.Key, out _))
-            {
-                yield return new DescriptorValidationError(
-                    path, unhonoured.Consequence, unhonoured.Fix, DescriptorValidationSeverity.Error);
-            }
+            yield return error;
         }
 
         if (IsUnknownRef(field.Value, entityNames, out var target))
@@ -233,55 +225,69 @@ internal sealed class DescriptorValidator : IDescriptorValidator
     }
 
     /// <summary>
-    /// Every field-level feature the frozen schema declares that this build does not honour, refused at
-    /// <b>apply</b> with the consequence stated and an alternative named.
+    /// Reports every feature <see cref="UnhonouredFeatures"/> records as declared-and-unhonoured that this
+    /// descriptor node declares, as a structured error carrying the JSON path, the consequence and the fix.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The mapper refuses the same four (<c>DescriptorToSchemaMapper</c>'s
-    /// <c>EnsureEveryDeclaredFeatureIsHonoured</c>) because it is the only guard an embedded host that never
-    /// validates still passes through. This pass exists beside it so the refusal is a structured error with a
-    /// JSON path and a fix suggestion rather than an exception message — §0 principle 4 — and so a descriptor
-    /// carrying three of them reports all three instead of the first.
+    /// <b>The table is shared with the mapper, and that is the whole point of it.</b> The mapper throws for
+    /// each of these; this pass reports all of them at once with a path and a fix suggestion (§0 principle 4),
+    /// which is the only form a dashboard or a CLI <c>validate</c> can show. They were two hand-written
+    /// lists plus two more in the test files, and <c>validation</c> was silently dropped for a whole task
+    /// because a fifth <c>if</c> is an easy thing to forget.
     /// </para>
     /// <para>
-    /// A list rather than four <c>if</c> blocks: the four differ only in their wording, and one of them
-    /// (<c>validation</c>) was missed for a whole task precisely because adding a fifth <c>if</c> is an easy
-    /// thing to forget. A table makes the omission visible.
+    /// A feature is detected here from raw JSON, before anything is parsed, because this pass runs even when
+    /// the schema pass has already failed — so it cannot depend on the descriptor being parseable. The
+    /// table's <see cref="UnhonouredFeature{T}.Path"/> is a JSON Pointer path precisely so a nested
+    /// declaration (a single <c>hooks/beforeUpdate</c> point) is found by walking it, and the pointer this
+    /// error reports is built from the same string that found it.
     /// </para>
     /// </remarks>
-    private static IReadOnlyList<UnhonouredFeature> UnhonouredFieldFeatures => _unhonouredFieldFeatures;
+    /// <typeparam name="T">The descriptor type the table's predicate inspects; unused here, since this pass reads JSON.</typeparam>
+    /// <param name="path">The JSON pointer of the field or entity.</param>
+    /// <param name="node">Its raw JSON.</param>
+    /// <param name="unhonoured">The table to report from.</param>
+    private static IEnumerable<DescriptorValidationError> Unhonoured<T>(
+        string path, JsonElement node, IReadOnlyList<UnhonouredFeature<T>> unhonoured)
+    {
+        foreach (var feature in unhonoured.Where(feature => Declares(node, feature.Path)))
+        {
+            yield return new DescriptorValidationError(
+                $"{path}/{feature.Path}", feature.Consequence, feature.Fix, DescriptorValidationSeverity.Error);
+        }
+    }
 
-    private static readonly UnhonouredFeature[] _unhonouredFieldFeatures =
-    [
-        new(
-            "computed",
-            "Computed fields are not supported yet: the expression is never evaluated, so the column stays null.",
-            "Remove 'computed' or track the CEL→SQL compiler in #21."),
-        new(
-            "rollup",
-            "Rollups are not supported yet: nothing maintains the aggregate, so the column reads as "
-            + "permanently null while looking like data.",
-            "Remove 'rollup' and compute the aggregate in a query for now; rollups are deferred past F3."),
-        new(
-            "validation",
-            "Field 'validation' is not evaluated yet, so a value the expression forbids is accepted — the "
-            + "field is not constrained at all.",
-            "Remove 'validation'. Enforce the rule in a before-hook, or express it with a facet the API does "
-            + "validate — 'maxLength', 'precision'/'scale', enum 'values' or a 'format'."),
-        new(
-            "default",
-            "Field 'default' is not honoured yet: no column default is emitted and the value is dropped "
-            + "before any writer sees it, so the field is simply null — and on a 'required' field that is an "
-            + "INSERT of NULL into a NOT NULL column.",
-            "Remove 'default' and send the value explicitly on create."),
-    ];
+    /// <summary>
+    /// Whether <paramref name="node"/> declares the feature at <paramref name="featurePath"/>, walking a
+    /// slash-separated path so a nested hook point is found as precisely as a top-level key.
+    /// </summary>
+    /// <remarks>
+    /// A declaration is a present, <em>non-empty</em> value. <c>softDelete: false</c> is not a declaration —
+    /// PR2 established that, and the negative leg is asserted — and neither is <c>"beforeUpdate": []</c>, an
+    /// empty list that asks for nothing. Both would otherwise be refused for declaring a feature they
+    /// decline to use, which is a refusal an author cannot act on.
+    /// </remarks>
+    /// <param name="node">The field's or entity's raw JSON.</param>
+    /// <param name="featurePath">The table's slash-separated path.</param>
+    private static bool Declares(JsonElement node, string featurePath)
+    {
+        var current = node;
+        foreach (var segment in featurePath.Split('/'))
+        {
+            if (current.ValueKind != JsonValueKind.Object || !current.TryGetProperty(segment, out current))
+            {
+                return false;
+            }
+        }
 
-    /// <summary>One schema-declared field feature this build does not honour.</summary>
-    /// <param name="Key">The descriptor key.</param>
-    /// <param name="Consequence">What silently happens instead, stated concretely rather than as "unsupported".</param>
-    /// <param name="Fix">What to do instead.</param>
-    private sealed record UnhonouredFeature(string Key, string Consequence, string Fix);
+        return current.ValueKind switch
+        {
+            JsonValueKind.False or JsonValueKind.Null => false,
+            JsonValueKind.Array => current.GetArrayLength() > 0,
+            _ => true,
+        };
+    }
 
     /// <summary>
     /// A field whose name the Data API's query string reserves, refused at <b>apply</b> time.
@@ -311,10 +317,6 @@ internal sealed class DescriptorValidator : IDescriptorValidator
         + $"on this field from the '{field}' parameter itself.",
         $"Rename the field. The reserved names are {ReservedQueryKeys.AsList}.",
         DescriptorValidationSeverity.Error);
-
-    private static bool DeclaresSoftDelete(JsonElement entity) =>
-        entity.TryGetProperty("softDelete", out var softDelete)
-        && softDelete.ValueKind == JsonValueKind.True;
 
     /// <summary>
     /// Reserved entity name for the built-in auth entity (schema: <c>entities.users</c> is

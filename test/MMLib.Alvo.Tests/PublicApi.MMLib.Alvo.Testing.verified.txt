@@ -2,6 +2,14 @@
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace MMLib.Alvo.Testing
 {
+    public static class AlvoExamples
+    {
+        public static string NotRunnableMarker { get; }
+        public static System.Collections.Generic.IEnumerable<string> Descriptors() { }
+        public static bool IsMarkedNotRunnable(string descriptorPath) { }
+        public static System.Collections.Generic.IEnumerable<string> NotRunnable() { }
+        public static System.Collections.Generic.IEnumerable<string> Runnable() { }
+    }
     [System.AttributeUsage(System.AttributeTargets.Assembly, AllowMultiple=false)]
     public sealed class ArchTargetAttribute : System.Attribute
     {

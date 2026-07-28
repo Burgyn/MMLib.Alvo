@@ -1218,6 +1218,35 @@ One issue each, labelled `enhancement`, milestone F4 unless noted, each naming w
 - A `Link: rel="next"` header, if a consumer asks — deliberately not shipped, so `next` has one home.
 - Rate limiting and per-key quotas (§2.12), which the API surface now makes reachable.
 
+**Against PR6, not F4 — `field.default`, split into its literal and CEL halves.** PR3 refuses `default` at
+apply (it was silently dropped: no DDL default is emitted anywhere and the mapper discards the value, so a
+`required` field carrying one is an INSERT of NULL into a NOT NULL column). The refusal is right and stays,
+but the ergonomic loss is **real and immediate, not theoretical** — `simple-tasks` lost `done: false` and
+`priority: "normal"`, `vehicle-registry` lost `passed: true`, and every caller must now send those fields on
+every create. So this is the first thing PR6 should pick up, and it splits cleanly:
+
+- **A *literal* default** (`"default": false`, `"default": "normal"`, `"default": 1`) is cheap and
+  self-contained: emit a column `DEFAULT` in the generated DDL and bind the value at insert time when the
+  payload omits the field. It restores every default the examples lost.
+- **A *CEL* default** (`"default": {"$cel": "@user.id"}`, `{"$cel": "now()"}`) is not: it needs the caller
+  context at write time, which is the `computed` machinery rather than a column default, so it stays refused
+  until that lands.
+
+**Why PR6 and not here.** Emitting a DDL default changes generated SQL on **both** engines and moves the
+per-engine migration snapshot baselines — that is the schema/migration layer, not the HTTP layer. PR6 already
+owns `computed` and `rollup`, which are the same "value produced at write time" family, so the three share a
+design rather than getting three.
+
+Implementing either half means deleting its entry from `Descriptor.Internal.UnhonouredFeatures.OnAField` —
+which is what makes the refusal removable rather than load-bearing — and, once the last such entry goes,
+deleting `examples/complex-crm/NOT-RUNNABLE.md`, which
+`DescriptorToSchemaMapperTests.Every_example_marked_not_runnable_really_is_refused` will demand.
+
+**Also against PR5 (#22): the six `entity.hooks.*` entries.** Refused per hook point precisely so PR5 can
+delete one entry per hook point it implements instead of facing an all-or-nothing switch. `simple-tasks` lost
+its `beforeUpdate` mutate *and* the `completed_at` column that hook was the only writer of — the column would
+otherwise have shipped permanently null, which is the same silent-wrong-value outcome `rollup` is refused for.
+
 - [ ] **Step 4: ring2, the three gates, and the PR**
 
 1. `scripts/test-ring2`

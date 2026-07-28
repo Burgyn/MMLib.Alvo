@@ -1,5 +1,6 @@
 ﻿using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Descriptor.Internal;
+using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Tests.Descriptor;
 
@@ -48,49 +49,92 @@ public class DescriptorValidatorTests
     }
 
     /// <summary>
-    /// Every field feature the frozen schema declares and this build does not honour is reported here as a
-    /// <b>structured</b> error — a JSON path, what silently happens instead, and what to do about it.
+    /// Every feature the shared table records is reported here as a <b>structured</b> error — a JSON pointer
+    /// naming the offending key, what silently happens instead, and what to do about it.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The mapper refuses the same four with an exception, which is the guard an embedded host that never
-    /// validates still passes through; this pass is what makes the refusal agent-first, and it is the only one
-    /// a dashboard or a CLI <c>validate</c> can show. Three of the four were reported by neither: a
-    /// <c>validation</c> expression was simply dropped, so a value it forbade came back 201.
+    /// Driven off <see cref="UnhonouredFeatures"/> rather than a per-feature list, for the reason the mapper's
+    /// twin theory gives: the list was four hand-written copies and <c>validation</c> was silently dropped for
+    /// a whole task. The mapper's theory proves the mapper throws for each entry; this one proves the
+    /// validator reports each entry; between them there is nowhere to add a feature only one pass refuses.
     /// </para>
     /// <para>
-    /// The message is asserted to name the <em>consequence</em> and not merely the word "unsupported" — an
-    /// author who is told "not supported yet" removes the key and moves on, while one who is told the field is
-    /// therefore unconstrained knows what they lost.
+    /// The message is asserted to say more than "unsupported": each entry must name the <em>consequence</em>,
+    /// because an author told "not supported yet" removes the key and moves on, while one told the field is
+    /// therefore unconstrained knows what they lost. Asserted as "not the bare word", not as a specific
+    /// phrase, so the wording can improve without the fact needing an edit.
     /// </para>
     /// </remarks>
-    /// <param name="declaration">How the field declares the feature.</param>
-    /// <param name="messageMentions">A word the message must carry, describing what happens instead.</param>
-    /// <param name="fixMentions">A word the fix suggestion must carry.</param>
+    /// <param name="path">The table entry's path.</param>
     [Theory]
-    [InlineData(@"""computed"": ""net * 1.2""", "never evaluated", "#21")]
-    [InlineData(@"""rollup"": { ""from"": ""lines"", ""op"": ""count"" }", "maintains", "query")]
-    [InlineData(@"""validation"": ""value >= 0""", "not constrained", "before-hook")]
-    [InlineData(@"""default"": 1", "NOT NULL", "explicitly")]
-    public void Every_unhonoured_field_feature_is_a_structured_error(
-        string declaration, string messageMentions, string fixMentions)
+    [MemberData(nameof(EveryUnhonouredFieldFeature))]
+    public void Every_unhonoured_field_feature_is_a_structured_error(string path)
     {
         var json = $$"""
         { "apiVersion": "alvo.dev/v1", "name": "demo",
           "entities": {
             "lines": { "fields": { "invoice_id": { "type": "uuid" } } },
             "invoices": { "fields": {
-              "amount": { "type": "decimal", "precision": 18, "scale": 2, {{declaration}} } } } } }
+              "amount": { "type": "decimal", "precision": 18, "scale": 2, {{DeclarationFor(path)}} } } } } }
         """;
 
-        var result = _validator.Validate(json);
+        var error = _validator.Validate(json).Errors
+            .ShouldHaveSingleItem($"'{path}' must be reported exactly once");
 
-        var error = result.Errors.ShouldHaveSingleItem();
-        error.Path.ShouldBe("/entities/invoices/fields/amount");
-        error.Message.ShouldContain(messageMentions);
-        error.FixSuggestion.ShouldNotBeNull().ShouldContain(fixMentions);
+        error.Path.ShouldBe(
+            $"/entities/invoices/fields/amount/{path}",
+            "the pointer names the offending key, not merely the field carrying it");
+        error.FixSuggestion.ShouldNotBeNull().Length.ShouldBeGreaterThan(20);
         error.Severity.ShouldBe(DescriptorValidationSeverity.Error);
+        error.Message.ShouldNotBe(
+            "Not supported yet.", "every entry names what silently happens instead of the feature");
+        error.Message.Length.ShouldBeGreaterThan(40);
     }
+
+    /// <summary>The same, one layer up: <c>softDelete</c> and every hook point, each reported on its own pointer.</summary>
+    /// <param name="path">The table entry's path.</param>
+    [Theory]
+    [MemberData(nameof(EveryUnhonouredEntityFeature))]
+    public void Every_unhonoured_entity_feature_is_a_structured_error(string path)
+    {
+        var json = $$"""
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "notes": {
+            {{DeclarationFor(path)}},
+            "fields": { "title": { "type": "string" } } } } }
+        """;
+
+        var error = _validator.Validate(json).Errors
+            .ShouldHaveSingleItem($"'{path}' must be reported exactly once");
+
+        error.Path.ShouldBe($"/entities/notes/{path}");
+        error.FixSuggestion.ShouldNotBeNull().Length.ShouldBeGreaterThan(20);
+    }
+
+    public static TheoryData<string> EveryUnhonouredFieldFeature() =>
+        [.. UnhonouredFeatures.OnAField.Select(feature => feature.Path)];
+
+    public static TheoryData<string> EveryUnhonouredEntityFeature() =>
+        [.. UnhonouredFeatures.OnAnEntity.Select(feature => feature.Path)];
+
+    /// <summary>A schema-valid declaration of one table entry; throws for a path it has not been taught.</summary>
+    /// <param name="path">The table entry's path.</param>
+    private static string DeclarationFor(string path) => path switch
+    {
+        "computed" => @"""computed"": ""net * 1.2""",
+        "rollup" => @"""rollup"": { ""from"": ""lines"", ""op"": ""count"" }",
+        "validation" => @"""validation"": ""value >= 0""",
+        "default" => @"""default"": 1",
+        "softDelete" => @"""softDelete"": true",
+        _ when path.StartsWith("hooks/before", StringComparison.Ordinal) =>
+            $@"""hooks"": {{ ""{path["hooks/".Length..]}"": [ {{ ""action"": {{ ""reject"": ""no"" }} }} ] }}",
+        _ when path.StartsWith("hooks/after", StringComparison.Ordinal) =>
+            $@"""hooks"": {{ ""{path["hooks/".Length..]}"": [ {{ ""action"": {{ ""type"": ""webhook"", ""endpoint"": ""notify"" }} }} ] }}",
+        _ => throw new InvalidOperationException(
+            $"'{path}' is in UnhonouredFeatures but DeclarationFor does not know how to declare it. Teach it "
+            + "a schema-valid declaration, or the theory case would assert nothing."),
+    };
 
     /// <summary>
     /// A field declaring two of them reports <b>both</b>, not the first — the same every-violation promise
@@ -121,17 +165,129 @@ public class DescriptorValidatorTests
               "validation": "value >= 0", "default": 1 } } } } }
         """;
 
-        var result = _validator.Validate(json);
+        var reported = _validator.Validate(json).Errors.Select(error => error.Path).ToList();
 
-        var atTheField = result.Errors
-            .Where(error => error.Path == "/entities/invoices/fields/amount")
-            .ToList();
-        atTheField.ShouldContain(
-            error => error.Message.Contains("not constrained", StringComparison.Ordinal),
-            "the 'validation' refusal must be reported");
-        atTheField.ShouldContain(
-            error => error.Message.Contains("NOT NULL", StringComparison.Ordinal),
-            "and the 'default' refusal beside it — reporting only the first costs an apply per key");
+        reported.ShouldContain("/entities/invoices/fields/amount/validation");
+        reported.ShouldContain(
+            "/entities/invoices/fields/amount/default",
+            "reporting only the first costs the author an apply per key");
+    }
+
+    /// <summary>
+    /// <b>The table covers every hook point the frozen schema declares</b> — asserted against
+    /// <c>schema/project.schema.json</c>, not against a copy of the list.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the direction the table-driven theories structurally cannot cover. They are driven <em>off</em>
+    /// the table, so deleting an entry shrinks their own data and they go on passing while the feature
+    /// silently becomes accepted again — measured: dropping <c>afterDelete</c> left every theory green. The
+    /// only assertion that catches it is one whose expected set comes from outside the code under test, which
+    /// is the same argument that anchored the built-in formats to the schema's <c>format</c> enum.
+    /// </para>
+    /// <para>
+    /// Hook points can be asserted as an <em>exact</em> set because all six are unhonoured today. As PR5
+    /// implements them this fact is what has to be narrowed, deliberately, one point at a time — which is the
+    /// per-hook-point refusal doing its job.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void The_unhonoured_table_covers_every_hook_point_the_schema_declares()
+    {
+        var declared = SchemaProperties("$defs", "entity", "properties", "hooks");
+
+        declared.ShouldBe(
+            ["beforeCreate", "beforeUpdate", "beforeDelete", "afterCreate", "afterUpdate", "afterDelete"],
+            ignoreOrder: true,
+            "read from the frozen schema — if this changed, the schema changed and the table owes it a visit");
+        UnhonouredFeatures.OnAnEntity
+            .Select(feature => feature.Path)
+            .Where(path => path.StartsWith("hooks/", StringComparison.Ordinal))
+            .Select(path => path["hooks/".Length..])
+            .ShouldBe(
+                declared,
+                ignoreOrder: true,
+                "a hook point missing from the table is one that silently runs nothing again; PR5 narrows this "
+                + "as it implements them");
+    }
+
+    /// <summary>
+    /// Every path in either table names a key the frozen schema actually declares, so a typo'd entry cannot
+    /// sit there matching nothing.
+    /// </summary>
+    /// <remarks>
+    /// An entry whose path no descriptor can carry is worse than no entry: it reads as a refusal that exists
+    /// and refuses nothing, and neither the mapper's theory nor the validator's would notice, because both
+    /// synthesise their test descriptor from the same string.
+    /// </remarks>
+    [Fact]
+    public void Every_unhonoured_path_names_a_key_the_schema_declares()
+    {
+        var fieldKeys = SchemaProperties("$defs", "field");
+        var entityKeys = SchemaProperties("$defs", "entity");
+        var hookPoints = SchemaProperties("$defs", "entity", "properties", "hooks");
+
+        UnhonouredFeatures.OnAField.Select(feature => feature.Path).ShouldBeSubsetOf(fieldKeys);
+        foreach (var path in UnhonouredFeatures.OnAnEntity.Select(feature => feature.Path))
+        {
+            var segments = path.Split('/');
+            entityKeys.ShouldContain(segments[0], $"'{path}' names no key of the entity schema");
+            if (segments.Length > 1)
+            {
+                hookPoints.ShouldContain(segments[1], $"'{path}' names no declared hook point");
+            }
+        }
+    }
+
+    /// <summary>
+    /// The property names the frozen schema declares at one location, navigated by path.
+    /// </summary>
+    /// <remarks>
+    /// Navigated rather than keyed on <c>$defs</c>, because the hooks object is <em>inline</em> under
+    /// <c>$defs/entity/properties/hooks</c> rather than a definition of its own — a fact worth encoding here
+    /// rather than working around, since a fact that cannot find its anchor asserts nothing.
+    /// </remarks>
+    /// <param name="path">The path from the schema root down to the node whose <c>properties</c> to read.</param>
+    private static List<string> SchemaProperties(params string[] path)
+    {
+        JsonNode node = JsonNode.Parse(File.ReadAllText(
+            Path.Combine(RepositoryRoot.Find(), "schema", "project.schema.json")))!;
+        foreach (var segment in path)
+        {
+            node = node[segment]
+                ?? throw new InvalidOperationException(
+                    $"The schema has no '{string.Join("/", path)}' — this fact's anchor moved, so it is "
+                    + "asserting against nothing until the path is corrected.");
+        }
+
+        var names = node["properties"]!.AsObject().Select(property => property.Key).ToList();
+        names.ShouldNotBeEmpty($"'{string.Join("/", path)}' declares no properties");
+        return names;
+    }
+
+    /// <summary>
+    /// A declaration written as <c>false</c> or as an empty list is <b>not</b> a declaration, so it earns no
+    /// refusal.
+    /// </summary>
+    /// <remarks>
+    /// PR2 established the negative leg for <c>softDelete: false</c>, and the table inherits it: refusing a
+    /// feature an author explicitly declined to use is a refusal they cannot act on. An empty
+    /// <c>beforeUpdate: []</c> is the same statement in list form, and it is the one the per-hook-point
+    /// refusal made newly possible.
+    /// </remarks>
+    [Fact]
+    public void A_feature_declined_by_value_is_not_a_declaration()
+    {
+        var json = """
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "notes": {
+            "softDelete": false,
+            "hooks": { "beforeUpdate": [] },
+            "fields": { "title": { "type": "string" } } } } }
+        """;
+
+        _validator.Validate(json).IsValid.ShouldBeTrue(
+            "false is not 'declared', and an empty hook list asks for nothing");
     }
 
     /// <summary>

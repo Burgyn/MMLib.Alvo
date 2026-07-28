@@ -160,14 +160,12 @@ internal static class ProblemResultFactory
         {
             // Last, because it is the widest of the five: the malformed-query/payload channel.
             //
-            // ArgumentNullException is deliberately excluded even though it derives from ArgumentException
-            // and the port's family is "ArgumentException, including its derived types". A null argument is
-            // never a malformed request — the request cannot express one. It means this layer, or the port,
-            // passed a null where its own contract forbids one, which is family 5 ("an invariant the
-            // implementation itself relies on is broken", rendered 500 by the host with its stack trace
-            // intact). The guarded region grew several ThrowIfNull calls of its own with validation and the
-            // format catalogue, so without this the first of those to fire would have been reported to the
-            // caller as "your payload is malformed" — advice about a request that was fine.
+            // ArgumentNullException is excluded, and that exclusion is IAlvoData's own rule rather than this
+            // layer's local opinion — see the port's family table, which states it there because a provider
+            // author reads the port and not this file. In short: no request can express a null argument, so
+            // one reaching here is a broken invariant (family 5, rendered 500 by the host with its stack
+            // trace intact), and the region this guards grew several ThrowIfNull calls of its own when
+            // validation and the format catalogue landed inside it.
             return Malformed(exception.Message);
         }
     }

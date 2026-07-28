@@ -257,15 +257,22 @@ public sealed class ValidationTests
     /// <para>
     /// <c>greedy</c> is declared as <c>(a+)+b</c> — the textbook exponential-backtracking pattern — and the
     /// value is a run of <c>a</c>s with no <c>b</c>, which is the input that makes a backtracking engine
-    /// explore every partition of the run. With neither of <c>FormatCatalog</c>'s two defences the request
-    /// does not return at all: sixty <c>a</c>s is on the order of 2^60 paths, so this fact does not fail
-    /// slowly, it hangs the run — which is exactly the production symptom.
+    /// explore every partition of the run.
     /// </para>
     /// <para>
-    /// The elapsed bound is deliberately far above both defences (<c>NonBacktracking</c> finishes in
-    /// microseconds, the timeout fallback in ~100 ms) and far below anything backtracking would take, so it
-    /// is not a flaky timing assertion. The status matters as much: a timeout that escaped as a 500 would
-    /// turn a refused value into a broken invariant, so "refused" and "promptly" are asserted together.
+    /// <b>This pattern measures defence 1 and nothing else.</b> <c>NonBacktracking</c> compiles
+    /// <c>(a+)+b</c> happily, so the fast engine is what answers here and the match timeout is never
+    /// consulted — remove <c>NonBacktracking</c> alone and this fact still passes (measured), because the
+    /// timeout then catches it. Remove <em>both</em> and the request does not return at all: sixty
+    /// <c>a</c>s is on the order of 2^60 paths, so the failure is a hung run rather than a red assertion,
+    /// which is exactly the production symptom. The fallback and the timeout get their own facts over the
+    /// <c>lookahead-*</c> formats, which are the only shapes that reach them.
+    /// </para>
+    /// <para>
+    /// The elapsed bound is far above what either defence costs and far below anything backtracking would
+    /// take, so it is not a flaky timing assertion. The status matters as much: a timeout that escaped as a
+    /// 500 would turn a refused value into a broken invariant, so "refused" and "promptly" are asserted
+    /// together.
     /// </para>
     /// </remarks>
     [Fact]

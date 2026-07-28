@@ -44,8 +44,7 @@
           "values": ["low", "normal", "high"]
         },
         "done": { "type": "boolean" },
-        "due_on": { "type": "date" },
-        "completed_at": { "type": "datetime", "readOnly": true }
+        "due_on": { "type": "date" }
       },
       "rules": {
         "list": "has(project_id)",
@@ -53,14 +52,6 @@
         "create": "'authenticated' in @user.roles",
         "update": "'authenticated' in @user.roles",
         "delete": "'authenticated' in @user.roles"
-      },
-      "hooks": {
-        "beforeUpdate": [
-          {
-            "condition": "changed(done) && new.done == true",
-            "action": { "mutate": { "completed_at": { "$cel": "now()" } } }
-          }
-        ]
       },
       "indexes": [
         { "fields": ["project_id", "done"] }

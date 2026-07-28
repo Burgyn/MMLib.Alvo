@@ -79,8 +79,12 @@ public sealed class AddAlvoIntegrationTests : IDisposable
     /// <summary>
     /// Regression guard for Task 11 Finding 2: the showcase descriptor's rules must stay compilable
     /// end to end (descriptor → mapper → migration → policy catalog priming), not merely
-    /// schema-valid. Unlike <c>simple-tasks</c>, <c>vehicle-registry</c> has no <c>computed</c>/
-    /// <c>rollup</c> field, so nothing else blocks a full apply.
+    /// schema-valid. Both this descriptor and <c>simple-tasks</c> apply as they stand — the features the
+    /// build does not honour (<c>computed</c>, <c>rollup</c>, <c>validation</c>, <c>default</c>,
+    /// <c>softDelete</c>, <c>hooks</c>) were removed from every runnable example when the apply-time
+    /// refusals landed; <c>complex-crm</c> keeps them and is marked not runnable. <c>examples/README.md</c>
+    /// carries the table, and <c>DescriptorToSchemaMapperTests.Every_runnable_example_maps_without_refusal</c>
+    /// holds it.
     /// </summary>
     [Fact]
     public async Task AddAlvo_UseSqlite_FromDescriptor_migrates_the_real_vehicle_registry_descriptor()

@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Api.Internal;
+using MMLib.Alvo.Descriptor.Internal;
 using MMLib.Alvo.Schema;
 using System.Text.RegularExpressions;
 using SchemaFieldType = MMLib.Alvo.Schema.FieldType;
@@ -102,10 +103,11 @@ internal static class DescriptorToSchemaMapper
             fields.Add(MapField(fname, f, formats));
         }
 
+        EnsureEveryDeclaredFeatureIsHonoured(name, e, UnhonouredFeatures.OnAnEntity);
+
         var tenancy = ResolveTenancy(e.Tenancy, tenancyEnabled);
         bool audit = e.Audit == true;
-        bool softDelete = EnsureSoftDeleteIsImplementable(name, e);
-        AddManagedColumns(fields, e, tenancy, audit, softDelete);
+        AddManagedColumns(fields, e, tenancy, audit, softDelete: false);
 
         var indexes = (e.Indexes ?? [])
             .Select(i => new IndexSchema(i.Fields, i.Unique == true)).ToList();
@@ -116,7 +118,7 @@ internal static class DescriptorToSchemaMapper
             RenamedFrom = e.RenamedFrom,
             Storage = EntityStorage.Physical,
             Tenancy = tenancy,
-            SoftDelete = softDelete,
+            SoftDelete = false,
             Audit = audit,
             Fields = fields,
             Indexes = indexes,
@@ -144,32 +146,6 @@ internal static class DescriptorToSchemaMapper
             AddManagedColumn(fields, e, AlvoManagedColumns.DeletedAt, OptionalInstantColumn);
         }
     }
-
-    /// <summary>
-    /// Refuses <c>softDelete</c>, which is <b>declared in the frozen descriptor schema and not implemented
-    /// in F3</b>.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// The schema promises "DELETE becomes a soft delete, and reads/list/get/rollup auto-exclude
-    /// soft-deleted rows. A restore operation is provided." None of that exists: the data path
-    /// hard-deletes the row and lists a row whose <c>deleted_at</c> is set. Measured on real PostgreSQL,
-    /// where <c>DeleteAsync</c> removed a row from a <c>softDelete: true</c> entity outright — irrecoverable
-    /// data loss where the contract promises recoverability.
-    /// </para>
-    /// <para>
-    /// So it is refused at <b>apply</b> time, loudly, exactly as <c>computed</c> is: failing closed on a
-    /// descriptor beats silently destroying rows, and Alvo's own rule is that a bad descriptor fails at save
-    /// rather than per request. Implementing it is deliberately <em>not</em> in scope here — soft delete
-    /// changes what every read means, and that interacts with the policy predicate.
-    /// </para>
-    /// </remarks>
-    private static bool EnsureSoftDeleteIsImplementable(string name, EntityDescriptor e) => e.SoftDelete == true
-        ? throw new InvalidDataException(
-            $"Entity '{name}' declares 'softDelete', which is not supported yet: the delete path would " +
-            "hard-delete the row and reads would not exclude it, losing data the descriptor promises is " +
-            "recoverable. Remove 'softDelete' or track the soft-delete implementation issue.")
-        : false;
 
     /// <summary>
     /// Appends one framework-managed column <b>unless the descriptor already declares that name</b>.
@@ -221,7 +197,7 @@ internal static class DescriptorToSchemaMapper
     private static FieldSchema MapField(
         string name, FieldDescriptor f, IReadOnlyDictionary<string, string> formats)
     {
-        EnsureEveryDeclaredFeatureIsHonoured(name, f);
+        EnsureEveryDeclaredFeatureIsHonoured(name, f, UnhonouredFeatures.OnAField);
 
         return new()
         {
@@ -244,95 +220,37 @@ internal static class DescriptorToSchemaMapper
     }
 
     /// <summary>
-    /// Refuses, at apply, every field-level feature the frozen schema declares and this build does
-    /// <b>not</b> implement.
+    /// Refuses, at apply, every feature <see cref="UnhonouredFeatures"/> records as declared by the frozen
+    /// schema and not honoured by this build.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>Silently discarding a schema-declared feature is the defect class this repo has now closed four
-    /// times</b>, and the shape of the closure is settled: <c>softDelete</c> and <c>computed</c> are refused
-    /// here and reported by <c>DescriptorValidator</c>, because a descriptor that asks for behaviour it does
-    /// not get is a lie the author cannot see. Each of the three added here sat in the identical position —
-    /// parsed onto <see cref="FieldDescriptor"/>, dropped by this mapper, nothing raised:
+    /// <b>Silently discarding a schema-declared feature is the defect class this repo has now closed five
+    /// times</b>, and the shape of the closure is settled: refuse at apply, name the consequence, name the
+    /// alternative. What is <em>not</em> settled by repetition is the list, which is why the list lives in one
+    /// table both this pass and <c>DescriptorValidator</c> read — four hand-written copies of it let
+    /// <c>validation</c> be dropped for a whole task, and a fifth copy would do it again.
     /// </para>
-    /// <list type="bullet">
-    ///   <item>
-    ///   <b><c>validation</c></b> is the worst of the three, because it fails <em>open on caller input</em>:
-    ///   <c>validation: "value >= 0"</c> with <c>-5</c> in the body was answered 201. A field the author
-    ///   believes is constrained is not.
-    ///   </item>
-    ///   <item>
-    ///   <b><c>default</c></b> is honoured nowhere — no DDL default is emitted, and the value is dropped
-    ///   before any writer sees it — so a <c>required</c> field with a <c>default</c> is not merely
-    ///   un-defaulted, it is an INSERT of NULL into a NOT NULL column. Refusing the descriptor is the only
-    ///   answer that is neither a silent wrong value nor a store-level 500 per request.
-    ///   </item>
-    ///   <item>
-    ///   <b><c>rollup</c></b> promises a framework-maintained aggregate. Unmaintained, it reads as a
-    ///   permanently null column that looks like data.
-    ///   </item>
-    /// </list>
     /// <para>
-    /// Each refusal names what to do instead, because "not supported" without an alternative sends an agent
-    /// looking for a flag to flip.
+    /// This walk is the guard an embedded host that never calls <c>IDescriptorValidator</c> still passes
+    /// through, so it must exist beside the structured-error pass rather than behind it. It stops at the
+    /// first match because an exception carries one message; reporting all of them is the validator's job.
     /// </para>
     /// </remarks>
-    /// <param name="name">The field being mapped.</param>
-    /// <param name="f">Its descriptor.</param>
-    /// <exception cref="InvalidDataException">The field declares a feature this build does not honour.</exception>
-    private static void EnsureEveryDeclaredFeatureIsHonoured(string name, FieldDescriptor f)
+    /// <typeparam name="T">The descriptor being checked — a field's or an entity's.</typeparam>
+    /// <param name="name">The field or entity name, for the message.</param>
+    /// <param name="descriptor">The parsed descriptor.</param>
+    /// <param name="unhonoured">The table of features to refuse.</param>
+    /// <exception cref="InvalidDataException">It declares a feature this build does not honour.</exception>
+    private static void EnsureEveryDeclaredFeatureIsHonoured<T>(
+        string name, T descriptor, IReadOnlyList<UnhonouredFeature<T>> unhonoured)
     {
-        if (f.Computed is not null)
+        foreach (var feature in unhonoured.Where(feature => feature.IsDeclaredBy(descriptor)))
         {
-            throw Unhonoured(
-                name,
-                "computed",
-                "computed fields require the CEL→SQL compiler arriving in #21",
-                "Remove 'computed' or track #21.");
-        }
-
-        if (f.Rollup is not null)
-        {
-            throw Unhonoured(
-                name,
-                "rollup",
-                "nothing maintains the aggregate, so the column would read as permanently null",
-                "Remove 'rollup' and compute the aggregate in a query for now; rollups are deferred past F3.");
-        }
-
-        if (f.Validation is not null)
-        {
-            throw Unhonoured(
-                name,
-                "validation",
-                "the expression is never evaluated, so a value it forbids is accepted",
-                "Remove 'validation'. Until it is implemented, enforce the rule in a before-hook, or express "
-                + "it with a facet the API does validate — 'maxLength', 'precision'/'scale', enum 'values' "
-                + "or a 'format'.");
-        }
-
-        if (f.Default is not null)
-        {
-            throw Unhonoured(
-                name,
-                "default",
-                "the value is not written by anything and no column default is emitted, so the field is "
-                + "simply null — and on a 'required' field that is an INSERT of NULL into a NOT NULL column",
-                "Remove 'default' and send the value explicitly on create.");
+            throw new InvalidDataException(
+                $"'{name}' declares '{feature.Path}'. {feature.Consequence} {feature.Fix}");
         }
     }
-
-    /// <summary>
-    /// The one wording for "the descriptor asks for something this build does not do", so four features
-    /// cannot be refused four different ways.
-    /// </summary>
-    /// <param name="field">The field declaring it.</param>
-    /// <param name="feature">The descriptor key.</param>
-    /// <param name="consequence">What silently happens instead, stated concretely.</param>
-    /// <param name="fix">What to do instead.</param>
-    private static InvalidDataException Unhonoured(
-        string field, string feature, string consequence, string fix) => new(
-        $"Field '{field}' declares '{feature}', which is not supported yet: {consequence}. {fix}");
 
     /// <summary>
     /// Resolves a field's <c>format</c> to the pattern that enforces it: <see langword="null"/> for a
@@ -361,33 +279,12 @@ internal static class DescriptorToSchemaMapper
         var declared = formats.Keys.Order(StringComparer.Ordinal).ToList();
         throw new InvalidDataException(
             $"Field '{field}' declares format '{format}', which is neither a built-in "
-            + $"({string.Join(", ", BuiltInFormats.Order(StringComparer.Ordinal))}) nor a format the "
+            + $"({string.Join(", ", FormatCatalog.BuiltIns.Keys.Order(StringComparer.Ordinal))}) nor a format the "
             + "descriptor's top-level 'formats' block declares"
             + (declared.Count == 0
                 ? ". Declare it there, or use a built-in."
                 : $". Declared formats: {string.Join(", ", declared)}."));
     }
-
-    /// <summary>
-    /// The built-in format names, <b>read from the one authority</b> rather than restated here.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// The names and the patterns they mean are one fact, and <c>Api.Internal.FormatCatalog</c> owns it. A
-    /// second copy here was exactly the drift it looks like: deleting a pattern from the catalogue left this
-    /// list still accepting the name, so the format resolved to nothing and validated nothing — a clean
-    /// build, a green suite, and caller input silently unchecked. Reaching across a feature boundary for a
-    /// shared list is the move <c>DescriptorValidator</c> already makes for <c>ReservedQueryKeys</c>, and for
-    /// the same stated reason: one list is the point.
-    /// </para>
-    /// <para>
-    /// Deliberately <b>not</b> extended with extra names. The F2 design records "extending the built-in
-    /// <c>format</c> enum with more values" as additive-but-not-in-v1, so a build that accepted <c>url</c> or
-    /// <c>uuid</c> as built-ins would silently accept a descriptor the published schema's enum branch does not
-    /// list, and a descriptor written against it would stop validating on any other build.
-    /// </para>
-    /// </remarks>
-    internal static IEnumerable<string> BuiltInFormats => FormatCatalog.BuiltIns.Keys;
 
     private static SchemaFieldType MapType(FieldType t) => t switch
     {
