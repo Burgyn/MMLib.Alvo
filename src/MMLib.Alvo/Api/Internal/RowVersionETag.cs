@@ -56,14 +56,25 @@ internal static class RowVersionETag
     /// two copies are how the request layer comes to advertise a tag the port refuses to compare.
     /// </para>
     /// <para>
-    /// The value has to be a <see cref="DateTimeOffset"/>, and that is a real second condition rather than a
-    /// cast written defensively. An entity may declare its own field called <c>updated_at</c> — the schema
-    /// mapper then leaves the caller's declaration in place instead of injecting the managed column — so an
-    /// audited entity can carry a version column of some other type, or a <c>hidden</c> one the mask drops.
-    /// Both cases yield no tag, which matches what the port does with them:
-    /// <see cref="AlvoPrecondition.EnsureMatches"/> refuses any precondition against a stored value that is
-    /// not a <see cref="DateTimeOffset"/>. Minting a tag from such a column would advertise a precondition
-    /// that can never be satisfied.
+    /// <b>The value has to be a <see cref="DateTimeOffset"/>, and that is a real second condition rather than a
+    /// cast written defensively.</b> An entity may declare its own field called <c>updated_at</c> — the schema
+    /// mapper injects a managed column only when the entity does <em>not</em> declare a field of that name
+    /// (<c>DescriptorToSchemaMapper.AddManagedColumn</c>) — so an author's declaration wins and an audited
+    /// entity can carry a version column of some other type. Refusing to tag it matches what the port does
+    /// with it: <see cref="AlvoPrecondition.EnsureMatches"/> refuses any precondition against a stored value
+    /// that is not a <see cref="DateTimeOffset"/>, so a tag minted from such a column would advertise a
+    /// precondition that can never be satisfied.
+    /// </para>
+    /// <para>
+    /// <b>A <em>masked</em> version column was a different case, and it is why this branch no longer has to
+    /// carry it.</b> A hidden <c>updated_at</c> is still a <see cref="DateTimeOffset"/> in the store and the
+    /// port would compare it perfectly well — the mask only drops the key from the returned record. So the
+    /// consequence was not a refused precondition but a <em>missing</em> one: no <c>ETag</c> minted, nothing
+    /// for the caller to send as <c>If-Match</c>, and <b>optimistic concurrency off for that entity with
+    /// nothing raised anywhere</b> — the silent lost update this type exists to prevent. A request layer cannot
+    /// fix that, because it cannot invent a value the caller may not read; so it is refused at <em>apply</em>
+    /// instead, on the same precedent as <c>softDelete</c> and <c>computed</c>. See
+    /// <c>Rules.Internal.PolicyCatalogBuilder</c>'s framework-managed-column rule.
     /// </para>
     /// </remarks>
     internal static string? For(AlvoRecord record, EntitySchema entity)
@@ -98,10 +109,14 @@ internal static class RowVersionETag
     /// spelled.
     /// </para>
     /// <para>
-    /// One version has exactly one spelling. Leading zeros parse to the same instant but are refused, because
-    /// strong comparison is octet-for-octet: accepting a second spelling of one version would make the tag
-    /// this API mints not the only tag it honours, and the set of accepted spellings is then something a
-    /// later reader has to reconstruct from the parser.
+    /// <b>One version has exactly one spelling, and that is enforced by requiring the tag to be the one
+    /// <see cref="Encode"/> would produce</b> rather than by screening the digits. Strong comparison is
+    /// octet-for-octet, so accepting a second spelling of one version — <c>"0638…"</c> — would mean the tag
+    /// this API mints is not the only tag it honours. Comparing against the encoder makes the two exact
+    /// inverses <em>by construction</em>: the earlier version screened for a leading zero instead, which
+    /// rejected every non-canonical spelling but also rejected <c>"0"</c> — a tag <see cref="Encode"/> itself
+    /// produces for <see cref="DateTimeOffset.MinValue"/>. One tag it could mint and would not honour is a
+    /// small hole, but it is a hole in the claim, and a claim with a hole is worse than a narrower claim.
     /// </para>
     /// </remarks>
     internal static bool TryParse(string? headerValue, out AlvoPrecondition precondition)
@@ -112,7 +127,13 @@ internal static class RowVersionETag
             return false;
         }
 
-        precondition = new AlvoPrecondition(new DateTimeOffset(ticks, TimeSpan.Zero));
+        var version = new DateTimeOffset(ticks, TimeSpan.Zero);
+        if (!string.Equals(Encode(version), headerValue, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        precondition = new AlvoPrecondition(version);
         return true;
     }
 
@@ -120,18 +141,27 @@ internal static class RowVersionETag
     /// <param name="headerValue">One <c>entity-tag</c>, quotes included.</param>
     /// <param name="ticks">The decoded <see cref="DateTimeOffset.UtcTicks"/>.</param>
     /// <remarks>
+    /// <para>
     /// <see cref="NumberStyles.None"/> is what makes the digits <em>only</em> digits: it admits no sign, no
     /// whitespace, no group separator and no exponent, so <c>"+1"</c>, <c>" 1"</c> and <c>"1,000"</c> are all
     /// refused rather than quietly denoting some instant. The upper bound is checked here because
     /// <see cref="long"/> reaches far past <see cref="DateTimeOffset.MaxValue"/>, and the
     /// <see cref="DateTimeOffset"/> constructor answers an out-of-range tick count with an exception — a
     /// caller-controlled header must not be able to raise one.
+    /// </para>
+    /// <para>
+    /// The value is read verbatim, with no <c>Trim</c>. Kestrel has already stripped the optional whitespace
+    /// RFC 9110 §5.5 allows around a field value, and the only caller hands over one
+    /// <see cref="Microsoft.Net.Http.Headers.EntityTagHeaderValue"/>'s own opaque part — which cannot carry
+    /// surrounding whitespace and still have parsed. Trimming here looked defensive and was unreachable, which
+    /// is worse than either trimming or not: it implied a case that does not exist.
+    /// </para>
     /// </remarks>
     private static bool TryTicks(string? headerValue, out long ticks)
     {
         ticks = 0;
-        var tag = headerValue?.Trim() ?? string.Empty;
-        if (tag.Length < 3 || tag[0] != Quote || tag[^1] != Quote || tag[1] == '0')
+        var tag = headerValue ?? string.Empty;
+        if (tag.Length < 3 || tag[0] != Quote || tag[^1] != Quote)
         {
             return false;
         }

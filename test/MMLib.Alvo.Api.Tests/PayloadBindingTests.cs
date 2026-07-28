@@ -330,6 +330,49 @@ public sealed class PayloadBindingTests
             HttpStatusCode.OK, "a visible field is filterable, so the refusal above is about the mask");
     }
 
+    /// <summary>
+    /// The same equality for a caller the <c>list</c> policy <b>denies</b> — the half that did not hold, for
+    /// the caller most likely to be asking.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This was a live oracle.</b> <c>PolicyDecision.Deny</c> carries an <em>empty</em>
+    /// <c>HiddenFields</c>, so a denied lister used to reach the query parser with no mask at all: a filter
+    /// over the declared-but-hidden <c>secret</c> parsed cleanly and earned the port's 403, while a filter over
+    /// a name that does not exist was refused by the parser as a 422. Two responses, one bit, and the answer to
+    /// "does this entity have a field called <c>secret</c>" — from a caller who may read none of it. The fix is
+    /// that the endpoint resolves the decision <em>before</em> parsing, so a denied lister is answered 403
+    /// whatever they asked for.
+    /// </para>
+    /// <para>
+    /// The sibling above proves the invariant for an <em>authorized</em> caller, and it held there all along —
+    /// which is exactly why this needed a fact of its own. Byte equality of the whole body, not "both are
+    /// refusals": the two used to differ in status, slug, prose and violations, and any one of those is the
+    /// oracle.
+    /// </para>
+    /// <para>
+    /// The key carries <c>ledgers:read</c> deliberately. Without the scope the request never reaches a policy
+    /// at all — the scope gate answers <c>out-of-scope</c> from the endpoint filter — so both requests would be
+    /// equal for a reason that has nothing to do with the mask, and the fact could not fail.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_denied_lister_cannot_tell_a_hidden_field_from_an_unknown_one_either()
+    {
+        var scopedButUnroled = new TestApiKey("no-auditor-key", ["authenticated"], ["ledgers:read"]);
+        await using var world = await AlvoApiWorld.FromDescriptorAsync("masked-notes.alvo.json", [scopedButUnroled]);
+
+        using var hidden = await world.SendAsync(HttpMethod.Get, "/api/ledgers?secret=eq.x", scopedButUnroled);
+        using var unknown = await world.SendAsync(HttpMethod.Get, "/api/ledgers?nosuchfield=eq.x", scopedButUnroled);
+
+        hidden.StatusCode.ShouldBe(
+            HttpStatusCode.Forbidden, "a denied lister must be refused for being denied, not for their filter");
+        hidden.StatusCode.ShouldBe(unknown.StatusCode);
+        (await hidden.ReadTextAsync()).ShouldBe(
+            await unknown.ReadTextAsync(),
+            "any difference answers 'does this entity have a field called secret' to a caller who may read none of it");
+    }
+
     private static async Task<Guid> CreateOwnerAsync(AlvoApiWorld world, string name)
     {
         using var response = await world.SendAsync(

@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Primitives;
 using Microsoft.Net.Http.Headers;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Data;
@@ -27,8 +28,17 @@ namespace MMLib.Alvo.Api.Internal;
 /// <para>
 /// Every delegate reads its caller from <see cref="IAlvoContextAccessor"/>, which
 /// <see cref="AlvoContextFilter"/> published, and hands it to the port explicitly: the port takes
-/// <see cref="AlvoContext"/> as a parameter on purpose, and this layer neither re-checks nor bypasses a
-/// single authorization decision.
+/// <see cref="AlvoContext"/> as a parameter on purpose.
+/// </para>
+/// <para>
+/// <b>All five delegates resolve the operation's decision before doing any work, and none of them is the
+/// authority for it.</b> The distinction is the whole of this layer's relationship with authorization, and
+/// it is worth stating precisely rather than as "this layer never re-checks a decision", which the code
+/// contradicts at five call sites. What each delegate does is refuse, up front, exactly what the port
+/// would refuse anyway — same engine, same catalog, same context — and then call the port, which resolves
+/// again and remains the authority. So nothing is admitted here that the port would refuse, and nothing is
+/// refused here that the port would admit. See <see cref="EnsureOperationIsAllowed"/> for why the refusal
+/// has to be up front on every verb and not only on the two that read a body.
 /// </para>
 /// </remarks>
 internal static class DataApiEndpoints
@@ -73,8 +83,13 @@ internal static class DataApiEndpoints
                 ProblemResultFactory.GuardAsync(async () =>
                 {
                     var context = Caller(caller);
+                    var decision = EnsureOperationIsAllowed(policies, entity.Name, DataOperation.List, context);
+
+                    // The parser needs this caller's mask so a filter over a hidden field is refused exactly
+                    // as one over an undeclared field is; the decision resolved above is that mask, which is
+                    // why the refusal has to come first. See EnsureOperationIsAllowed for the oracle it closes.
                     if (!QueryStringParser.TryParse(
-                            http.Request.Query, entity, MaskedFields(policies, entity.Name, context), options,
+                            http.Request.Query, entity, decision.HiddenFields, options,
                             out var request, out var violations))
                     {
                         return ProblemResultFactory.MalformedQuery(violations);
@@ -86,16 +101,23 @@ internal static class DataApiEndpoints
             .Protect(entity, DataOperation.List, filters);
 
     private static void MapGet(
-        IEndpointRouteBuilder endpoints, EntitySchema entity, string pattern, AlvoContextFilterFactory filters) =>
+        IEndpointRouteBuilder endpoints,
+        EntitySchema entity,
+        string pattern,
+        AlvoContextFilterFactory filters) =>
         endpoints.MapGet(pattern, (
                     Guid id,
                     HttpContext http,
                     IAlvoData data,
+                    IPolicyEngine policies,
                     IAlvoContextAccessor caller,
                     CancellationToken ct) =>
                 ProblemResultFactory.GuardAsync(async () =>
                 {
-                    var record = await data.GetAsync(entity.Name, id, Caller(caller), ct).ConfigureAwait(false);
+                    var context = Caller(caller);
+                    _ = EnsureOperationIsAllowed(policies, entity.Name, DataOperation.Get, context);
+
+                    var record = await data.GetAsync(entity.Name, id, context, ct).ConfigureAwait(false);
 
                     // A row the caller's policy excludes reads exactly like one that was never there, so
                     // this 404 is the same 404 AlvoRecordNotFoundException produces.
@@ -173,17 +195,24 @@ internal static class DataApiEndpoints
             .Protect(entity, DataOperation.Update, filters);
 
     private static void MapDelete(
-        IEndpointRouteBuilder endpoints, EntitySchema entity, string pattern, AlvoContextFilterFactory filters) =>
+        IEndpointRouteBuilder endpoints,
+        EntitySchema entity,
+        string pattern,
+        AlvoContextFilterFactory filters) =>
         endpoints.MapDelete(pattern, (
                     Guid id,
                     HttpContext http,
                     IAlvoData data,
+                    IPolicyEngine policies,
                     IAlvoContextAccessor caller,
                     CancellationToken ct) =>
                 ProblemResultFactory.GuardAsync(async () =>
                 {
+                    var context = Caller(caller);
+                    _ = EnsureOperationIsAllowed(policies, entity.Name, DataOperation.Delete, context);
+
                     var precondition = Precondition(http.Request);
-                    await data.DeleteAsync(entity.Name, id, Caller(caller), precondition, ct).ConfigureAwait(false);
+                    await data.DeleteAsync(entity.Name, id, context, precondition, ct).ConfigureAwait(false);
                     return Results.NoContent();
                 }))
             .Protect(entity, DataOperation.Delete, filters);
@@ -217,22 +246,48 @@ internal static class DataApiEndpoints
             .WithMetadata(new DataApiOperationMetadata(entity.Name, operation));
 
     /// <summary>
-    /// Refuses a write whose policy decision is already a denial, <b>before</b> the request body is read.
+    /// Refuses an operation whose policy decision is already a denial, <b>before</b> this delegate does any
+    /// work of its own — reads the body, parses the query string, or looks at a precondition header.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Two reasons, neither of them confidentiality. First, resource cost: parsing up to
+    /// <b>Called on all five verbs, and the uniformity is load-bearing rather than tidiness.</b> It started
+    /// on the two write verbs, for two reasons that only applied there. First, resource cost: parsing up to
     /// <see cref="AlvoApiOptions.MaxRequestBodyBytes"/> on behalf of a caller who cannot succeed is a
     /// denial-of-service amplifier, and it is the same reasoning the payload bounds exist for. Second,
     /// precedence: an unauthorized caller must be told they are unauthorized, not that their body was
     /// malformed — the second answer sends an agent to fix the wrong thing.
     /// </para>
     /// <para>
+    /// <b>On <c>list</c> a third reason applies, and it is a confidentiality one — leaving it off was a live
+    /// oracle.</b> A denied decision carries an <em>empty</em>
+    /// <see cref="PolicyDecision.HiddenFields"/> (<see cref="PolicyDecision.Deny"/> says so), so a denied
+    /// lister used to reach <see cref="QueryStringParser"/> with no mask at all: a filter over a
+    /// declared-but-hidden field parsed cleanly and earned the port's 403, while a filter over an undeclared
+    /// field was refused by the parser as a 422. That one-bit difference answers "does this entity have a
+    /// field called X" for exactly the caller most likely to be asking — and it is the leak §2.1 warns about
+    /// and the entire reason the mask is threaded through the parser at all. Resolving here first makes both
+    /// answers the same 403, and it costs nothing: the decision this returns is the mask the parser needs, so
+    /// the resolve replaces the one the mask used to need rather than adding to it.
+    /// </para>
+    /// <para>
+    /// On <c>delete</c> it buys precedence: a denied caller sending an unusable <c>If-Match</c> is answered
+    /// 403 rather than the 412 <see cref="Precondition"/> would raise about a header they were never going to
+    /// get to use.
+    /// </para>
+    /// <para>
+    /// <b>On <c>get</c> it changes nothing a caller can observe, and that is stated rather than dressed up.</b>
+    /// <c>GetAsync</c> resolves the same decision and raises the same exception, so a denied reader sees the
+    /// same 403 with or without this call, and no fact can tell the two builds apart. It is here for
+    /// uniformity — so "which verbs check up front" is not a question a reader has to answer by reading five
+    /// delegates — and it costs one resolve on a denied read that was going to be refused anyway.
+    /// </para>
+    /// <para>
     /// <b>This does not become a second authorization authority.</b> It refuses only what the port would
     /// refuse anyway, from the same engine, catalog and context — and the port resolves the decision again
     /// and remains the authority, so nothing is admitted here that the port would refuse. It cannot
-    /// pre-empt a <c>WITH CHECK</c> or tenant-scope failure, which need the candidate post-image and stay
-    /// where they belong.
+    /// pre-empt a <c>WITH CHECK</c> or tenant-scope failure, or a row-level <c>USING</c> exclusion, all of
+    /// which need a row and stay where they belong.
     /// </para>
     /// <para>
     /// It raises the port's own exception rather than composing a result, so the refusal a caller sees is
@@ -241,9 +296,10 @@ internal static class DataApiEndpoints
     /// </para>
     /// </remarks>
     /// <returns>
-    /// The allow decision, whose <see cref="PolicyDecision.ReadOnlyFields"/> the validator needs. Returned
-    /// rather than resolved a second time: the mask is a per-caller CEL result, and two resolutions of the
-    /// same triple are two chances to validate against a mask the port will not apply.
+    /// The allow decision: <see cref="PolicyDecision.ReadOnlyFields"/> for a write's validator,
+    /// <see cref="PolicyDecision.HiddenFields"/> for the list's query parser. Returned rather than resolved a
+    /// second time, because both are per-caller CEL results and two resolutions of the same triple are two
+    /// chances to judge a request against a mask the port will not apply.
     /// </returns>
     /// <exception cref="AlvoAuthorizationException">No policy allows this operation for this caller.</exception>
     private static PolicyDecision EnsureOperationIsAllowed(
@@ -337,33 +393,6 @@ internal static class DataApiEndpoints
         accessor.Principal?.Context ?? AlvoContext.Anonymous;
 
     /// <summary>
-    /// The fields this caller may not read — the mask this caller's <c>list</c> policy resolved, so a filter, sort or projection naming a
-    /// masked field is refused exactly as one naming an undeclared field is.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <b>This is the one thing the request layer takes from a policy decision, and it takes nothing else.</b>
-    /// Whether the caller may list at all stays the port's answer — resolved again inside
-    /// <c>QueryAsync</c> — so the "neither re-checks nor bypasses a single authorization decision" rule holds:
-    /// no request is admitted here that the port would refuse, and none is refused here that the port would
-    /// admit.
-    /// </para>
-    /// <para>
-    /// It has to happen <em>before</em> parsing because the alternative is an oracle. Leave the mask out and a
-    /// filter over a masked field is refused by the port (403) while one over a field that does not exist is
-    /// refused by the parser (422) — and that one-bit difference answers "does this entity have a field called
-    /// X" for any caller who can compare two responses. §2.1's warning is exactly that: a filter over a hidden
-    /// field leaks its value one comparison at a time.
-    /// </para>
-    /// <para>
-    /// A denied decision carries an empty mask, which is correct rather than lax: the port refuses the whole
-    /// read before any field name matters, so nothing is disclosed by parsing a query that will not be served.
-    /// </para>
-    /// </remarks>
-    private static IReadOnlySet<string> MaskedFields(IPolicyEngine policies, string entity, AlvoContext context) =>
-        policies.Resolve(entity, DataOperation.List, context).HiddenFields;
-
-    /// <summary>
     /// The id the store assigned. Asserted rather than interpolated: <c>IAlvoData</c>'s contract is that
     /// a returned record carries every framework-managed column, <c>id</c> included, so a missing one is
     /// a broken invariant (family 3, rendered 500) — not a reason to emit a <c>Location</c> header ending
@@ -420,13 +449,20 @@ internal static class DataApiEndpoints
     /// <exception cref="AlvoPreconditionFailedException">The request carries a precondition this API cannot evaluate.</exception>
     private static AlvoPrecondition? Precondition(HttpRequest request)
     {
-        EnsureNoIfNoneMatch(request);
         var header = request.Headers.IfMatch;
-        if (header.Count == 0)
-        {
-            return null;
-        }
+        var precondition = header.Count == 0 ? null : IfMatch(header);
 
+        // Last, so If-Match is evaluated first: RFC 9110 §13.2.2 fixes that order, and it is the order that
+        // reports the more specific problem when a request carries both headers.
+        EnsureNoIfNoneMatch(request, sentIfMatch: header.Count > 0);
+        return precondition;
+    }
+
+    /// <summary>The one row version an <c>If-Match</c> names, or <see langword="null"/> for <c>*</c>.</summary>
+    /// <param name="header">The <c>If-Match</c> field values, already known to be non-empty.</param>
+    /// <exception cref="AlvoPreconditionFailedException">The header is not one tag this API can compare.</exception>
+    private static AlvoPrecondition? IfMatch(StringValues header)
+    {
         if (!EntityTagHeaderValue.TryParseStrictList(header, out var tags) || tags.Count != 1 || tags[0].IsWeak)
         {
             throw new AlvoPreconditionFailedException(UnusableIfMatch);
@@ -441,23 +477,41 @@ internal static class DataApiEndpoints
     /// Refuses a write that carries <c>If-None-Match</c>, rather than ignoring the header.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// On a write, RFC 9110 §13.1.2 makes <c>If-None-Match</c> a precondition like any other — "act only if
     /// the row is <em>not</em> at this version" — and <see cref="AlvoPrecondition"/> expresses only the
     /// positive form. Passing the request through would be the silently-ignored precondition
     /// <see cref="AlvoPrecondition.EnsureSupported"/> exists to refuse, one header along: the caller sent a
-    /// condition, read a <c>200</c>, and overwrote a concurrent writer anyway. So the refusal names the
-    /// header the caller almost certainly meant.
+    /// condition, read a <c>200</c>, and overwrote a concurrent writer anyway.
+    /// </para>
+    /// <para>
+    /// <b>Labelled deviation from RFC 9110 §13.1.2.</b> The spec would have a <em>non-matching</em>
+    /// <c>If-None-Match</c> on a write simply succeed, and only a matching one answer 412; Alvo refuses the
+    /// header outright, matching or not. The reason is that Alvo cannot evaluate it at all — there is no
+    /// negative form on the port's channel — so "it did not match" is not something this API knows, and a
+    /// conforming success would be indistinguishable from a precondition that was never checked. Alvo's rule
+    /// that a standard is adopted rather than varied silently is why this is written down rather than left to
+    /// be discovered from a 412.
+    /// </para>
     /// </remarks>
     /// <param name="request">The request to inspect.</param>
+    /// <param name="sentIfMatch">
+    /// Whether the same request also carried a usable <c>If-Match</c>, which decides only the fix suggestion:
+    /// telling a caller to send the header they already sent is worse than saying nothing.
+    /// </param>
     /// <exception cref="AlvoPreconditionFailedException">The request carries <c>If-None-Match</c>.</exception>
-    private static void EnsureNoIfNoneMatch(HttpRequest request)
+    private static void EnsureNoIfNoneMatch(HttpRequest request, bool sentIfMatch)
     {
         if (request.Headers.IfNoneMatch.Count > 0)
         {
             throw new AlvoPreconditionFailedException(
                 "'If-None-Match' is evaluated on a read and cannot condition a write here: this API compares a "
-                + "record against the version a caller holds, never against a version it must not have. Send "
-                + "'If-Match' with the 'ETag' a previous response returned, or send the write with neither.");
+                + "record against the version a caller holds, never against a version it must not have. "
+                + (sentIfMatch
+                    ? "Drop 'If-None-Match' and keep the 'If-Match' you already sent, which is the precondition "
+                        + "this write will honour."
+                    : "Drop 'If-None-Match'; to make the write conditional, send 'If-Match' with the 'ETag' a "
+                        + "previous response returned."));
         }
     }
 
@@ -472,13 +526,11 @@ internal static class DataApiEndpoints
     /// their condition held.
     /// </para>
     /// <para>
-    /// <b>Which headers are refused and which are ignored is split by what a wrong answer costs.</b> On a
-    /// write, ignoring one lets a caller believe they conditioned a change they did not, so every write verb
-    /// either evaluates the header or refuses it — this method for the create, <see cref="Precondition"/> and
-    /// <see cref="EnsureNoIfNoneMatch"/> for the update and delete. On a read the worst outcome is a response
-    /// body the caller said they already had, so a read ignores what it cannot use: <c>If-Match</c> is not
-    /// honoured on a read at all today, and neither header is honoured on a list, which has no version of its
-    /// own. Both are gaps in coverage rather than in safety.
+    /// Every <em>write</em> verb therefore either evaluates a precondition header or refuses it — this method
+    /// for the create, <see cref="Precondition"/> and <see cref="EnsureNoIfNoneMatch"/> for the update and
+    /// delete — because ignoring one on a write lets a caller believe they conditioned a change they did not.
+    /// What the <em>read</em> side does with these headers, and why, is stated once on
+    /// <see cref="Representation"/>.
     /// </para>
     /// </remarks>
     /// <param name="request">The request to inspect.</param>
@@ -515,9 +567,24 @@ internal static class DataApiEndpoints
     /// Comparison is ordinal over the opaque part and ignores the caller's <c>W/</c> prefix, which is exactly
     /// the <em>weak</em> comparison RFC 9110 §13.1.2 prescribes for <c>If-None-Match</c> — and deliberately
     /// not the strong one <see cref="Precondition"/> applies to <c>If-Match</c>. The two headers really do
-    /// have different comparison functions in the spec, and the reason the asymmetry is safe is the same
-    /// reason <see cref="IsAlreadyHeld"/> refuses nothing: the worst a wrong answer here costs is a response
-    /// body the caller already had.
+    /// have different comparison functions in the spec.
+    /// </para>
+    /// <para>
+    /// <b>The read side's two gaps, stated once and here.</b> <c>If-Match</c> is not honoured on a read, and
+    /// neither header is honoured on a <em>list</em> (which has no version of its own to compare). The honest
+    /// reason is <b>not</b> that a read cannot afford to evaluate them: the tag is minted two lines below and
+    /// <see cref="IsAlreadyHeld"/> already parses the sibling header, so honouring <c>If-Match</c> on a single
+    /// row would be about three lines. It is that doing so is <em>pointless</em> — RFC 9110 §13.1.1 on a
+    /// <c>GET</c> means "send me the body only if it is still this version", and answering 412 instead of a
+    /// body saves a caller nothing they cannot get by comparing the tag they were sent. So the gap is
+    /// deliberate and cheap to close if a caller ever wants it, not deferred because it is expensive.
+    /// </para>
+    /// <para>
+    /// That is also why the asymmetry with the write side is safe: an unhonoured header on a read costs a
+    /// response body the caller said they already had, whereas an unhonoured one on a write costs somebody
+    /// their change. <b>Both gaps are client-observable, so a code remark is not where they belong</b> — they
+    /// have to reach the OpenAPI description Task 8 publishes, since a caller who cannot read this file has no
+    /// other way to learn that a header they sent was ignored.
     /// </para>
     /// </remarks>
     /// <param name="request">The request whose <c>If-None-Match</c> to honour.</param>
@@ -533,9 +600,8 @@ internal static class DataApiEndpoints
 
     /// <summary>Whether the caller's <c>If-None-Match</c> covers <paramref name="entityTag"/>.</summary>
     /// <remarks>
-    /// A header this API cannot parse means "no match" rather than a refusal, and the asymmetry with
-    /// <c>If-Match</c> is deliberate: failing to honour <c>If-None-Match</c> costs the caller a response body
-    /// they already had, while failing to honour <c>If-Match</c> costs someone their write.
+    /// A header this API cannot parse means "no match" rather than a refusal — see
+    /// <see cref="Representation"/> for why a read may ignore what a write must refuse.
     /// </remarks>
     /// <param name="request">The request to read.</param>
     /// <param name="entityTag">The tag of the representation about to be written.</param>

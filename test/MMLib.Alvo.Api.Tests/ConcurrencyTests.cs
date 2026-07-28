@@ -1,4 +1,5 @@
-﻿using System.Globalization;
+﻿using MMLib.Alvo.Descriptor;
+using System.Globalization;
 using System.Net;
 using System.Text.Json.Nodes;
 
@@ -306,12 +307,19 @@ public sealed class ConcurrencyTests
     /// any matches, which <c>AlvoPrecondition</c>'s single version cannot express — so an implementation that
     /// simply took the first tag would serve this request, and one that refuses the ambiguity must not.
     /// </para>
+    /// <para>
+    /// The third is the padded spelling. Strong comparison is octet-for-octet, so <c>"0638…"</c> is not the tag
+    /// this API minted even though it decodes to the same instant — and only the current version can show that,
+    /// since a padded stale tag earns a 412 either way. It is what makes the encoder and the parser provably
+    /// exact inverses rather than approximately so.
+    /// </para>
     /// </remarks>
     [Fact]
     public async Task An_if_match_this_api_cannot_compare_is_refused_even_when_it_names_the_current_version()
     {
         await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin]);
         var owner = await SeedOwnerAsync(world, "Uncomparable");
+        var padded = $"\"0{owner.ETag.Trim('"')}\"";
 
         using var weak = await world.SendAsync(
             HttpMethod.Patch, Owner(owner.Id), _admin, body: Rename("Weakly"), headers: IfMatch($"W/{owner.ETag}"));
@@ -321,12 +329,18 @@ public sealed class ConcurrencyTests
             _admin,
             body: Rename("Listed"),
             headers: IfMatch($"{owner.ETag}, \"638000000000000001\""));
+        using var noncanonical = await world.SendAsync(
+            HttpMethod.Patch, Owner(owner.Id), _admin, body: Rename("Padded"), headers: IfMatch(padded));
 
         weak.StatusCode.ShouldBe(
             HttpStatusCode.PreconditionFailed, "RFC 9110 §13.1.1's strong comparison can never match a weak tag");
         listed.StatusCode.ShouldBe(
             HttpStatusCode.PreconditionFailed, "a disjunction of versions cannot be expressed on the port's channel");
-        (await NameOfAsync(world, owner.Id)).ShouldBe("Uncomparable", "neither refused write may have landed");
+        noncanonical.StatusCode.ShouldBe(
+            HttpStatusCode.PreconditionFailed,
+            $"'{padded}' decodes to the current version but is not the tag this API minted, and strong "
+            + "comparison is octet-for-octet");
+        (await NameOfAsync(world, owner.Id)).ShouldBe("Uncomparable", "none of the refused writes may have landed");
     }
 
     /// <summary>
@@ -431,7 +445,9 @@ public sealed class ConcurrencyTests
     /// Beyond the brief, and deliberately. RFC 9110 §13.1.2 makes <c>If-None-Match</c> a precondition on any
     /// method, so a caller who sends one on a PATCH and reads a 200 has been told their condition held. The
     /// only two honest answers are to evaluate it or to refuse it, and <c>AlvoPrecondition</c> expresses only
-    /// the positive form.
+    /// the positive form. The deviation this creates — the spec would let a <em>non-matching</em>
+    /// <c>If-None-Match</c> simply succeed — is labelled on <c>EnsureNoIfNoneMatch</c> rather than left to be
+    /// discovered from a 412.
     /// </remarks>
     [Fact]
     public async Task An_if_none_match_on_a_write_is_refused_rather_than_ignored()
@@ -448,6 +464,125 @@ public sealed class ConcurrencyTests
         deleted.StatusCode.ShouldBe(HttpStatusCode.PreconditionFailed);
         (await patched.ReadProblemDetailAsync()).ShouldContain("If-Match", Case.Sensitive);
         (await NameOfAsync(world, owner.Id)).ShouldBe("Unwritten", "neither refused write may have landed");
+    }
+
+    /// <summary>
+    /// With <b>both</b> precondition headers present, <c>If-Match</c> is evaluated first — the order RFC 9110
+    /// §13.2.2 fixes — and the refusal never tells a caller to send a header they already sent.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Both orderings answer 412, so neither the status nor "the write did not land" can tell them apart; only
+    /// <em>which</em> problem is reported can. So the first request pairs an unusable <c>If-Match</c> with an
+    /// <c>If-None-Match</c> and requires the <c>If-Match</c> diagnosis: an implementation that refused
+    /// <c>If-None-Match</c> first reports the less specific of the two and passes every other fact in this file.
+    /// </para>
+    /// <para>
+    /// The second request is the message wart. With a <em>usable</em> <c>If-Match</c> alongside, the old wording
+    /// answered "Send 'If-Match' with the 'ETag' a previous response returned" — advice to do the thing the
+    /// caller had just done, which reads as a contradiction and sends an agent in a circle.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task With_both_headers_the_if_match_is_evaluated_first_and_the_advice_is_not_circular()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin]);
+        var owner = await SeedOwnerAsync(world, "Both");
+        var both = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["If-Match"] = "not-a-tag",
+            ["If-None-Match"] = "*",
+        };
+        var usable = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["If-Match"] = owner.ETag,
+            ["If-None-Match"] = "*",
+        };
+
+        using var unusableFirst = await world.SendAsync(
+            HttpMethod.Patch, Owner(owner.Id), _admin, body: Rename("Neither"), headers: both);
+        using var usableAlongside = await world.SendAsync(
+            HttpMethod.Patch, Owner(owner.Id), _admin, body: Rename("Neither"), headers: usable);
+
+        (await unusableFirst.ReadProblemDetailAsync()).ShouldContain(
+            "The 'If-Match' header is not one entity tag",
+            Case.Sensitive,
+            "RFC 9110 §13.2.2 evaluates If-Match first, so its problem is the one reported");
+        (await usableAlongside.ReadProblemDetailAsync()).ShouldContain(
+            "keep the 'If-Match' you already sent",
+            Case.Sensitive,
+            "a fix suggestion must never tell a caller to send the header they just sent");
+        (await NameOfAsync(world, owner.Id)).ShouldBe("Both", "neither refused write may have landed");
+    }
+
+    /// <summary>
+    /// The one descriptor that could switch this whole feature off silently is refused at <b>apply</b>: an
+    /// audited entity that declares its own <c>updated_at</c> and marks it <c>hidden</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// It is reachable, which is why it needed closing. The schema mapper injects a framework-managed column
+    /// only when the entity does not already declare a field of that name, so an author's own
+    /// <c>updated_at</c> wins — and a <c>hidden</c> flag on it drops the key from every returned record, so
+    /// <c>RowVersionETag.For</c> finds no version, no <c>ETag</c> is minted, the caller has nothing to send as
+    /// <c>If-Match</c>, and <b>every fact in this file would still pass while the entity had no lost-update
+    /// protection at all</b>. Nothing would have raised: not the descriptor, not a request, not a response.
+    /// </para>
+    /// <para>
+    /// Refused at apply on the settled precedent — <c>softDelete</c>, <c>computed</c>, and Task 5's
+    /// <c>validation</c>/<c>default</c>/<c>rollup</c>: a descriptor that silently loses a documented guarantee
+    /// fails at save, because a bad descriptor is a one-off configuration error and a per-request failure is
+    /// not. <c>PolicyCatalogBuilderTests</c> owns which columns the rule covers and why; this owns the claim
+    /// that the refusal really reaches <em>this</em> API's apply path, which the unit fact cannot show — a
+    /// migration runner that collected the catalog's errors and carried on would satisfy it and fail here.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task An_audited_entity_that_hides_its_own_version_column_is_refused_at_apply()
+    {
+        var failure = await Should.ThrowAsync<DescriptorValidationException>(
+            () => AlvoApiWorld.FromDescriptorAsync("hidden-version.alvo.json", [_admin]));
+
+        failure.Message.ShouldContain("/entities/records/fields/updated_at/hidden", Case.Sensitive);
+        failure.Message.ShouldContain(
+            "If-Match",
+            Case.Sensitive,
+            "§0 principle 4: the refusal must say what the author is about to lose, not only that it is refused");
+    }
+
+    /// <summary>
+    /// A caller the <c>delete</c> policy denies is told they are unauthorized, not that their
+    /// <c>If-Match</c> was unusable — 403 outranks 412.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The delete used to read the precondition header first, because Task 3 put the up-front policy check only
+    /// on the two verbs that read a body, where the reason was resource cost. So a denied caller sending a
+    /// malformed header got a 412 — an answer about a header they were never going to get to use, which sends
+    /// an agent to fix the wrong thing. It disclosed nothing (the 412 depends only on the caller's own header),
+    /// but it was the wrong diagnosis, and the precedence rule is uniform now.
+    /// </para>
+    /// <para>
+    /// <c>ledgers</c> declares no <c>delete</c> rule at all, so default-deny refuses it for every caller. The
+    /// key still holds the write scope — without it the scope gate would answer first, from a different slug,
+    /// and the fact would be measuring that instead.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_denied_caller_is_refused_before_their_precondition_header_is()
+    {
+        var scoped = new TestApiKey("ledger-writer", ["authenticated"], ["ledgers:read", "ledgers:write"]);
+        await using var world = await AlvoApiWorld.FromDescriptorAsync("masked-notes.alvo.json", [scoped]);
+        var path = $"/api/ledgers/{Guid.NewGuid()}";
+
+        using var malformed = await world.SendAsync(HttpMethod.Delete, path, scoped, headers: IfMatch("not-a-tag"));
+        using var plain = await world.SendAsync(HttpMethod.Delete, path, scoped);
+
+        malformed.StatusCode.ShouldBe(
+            HttpStatusCode.Forbidden,
+            "a denied caller must be told they are denied, not that their header was unusable");
+        (await malformed.ReadTextAsync()).ShouldBe(
+            await plain.ReadTextAsync(), "and the header must make no difference at all to what they are told");
     }
 
     /// <summary>
@@ -493,10 +628,16 @@ public sealed class ConcurrencyTests
     /// the header is part of the tag's design rather than hardening added beside it.
     /// </para>
     /// <para>
-    /// The 401 is the one that pins the filter's <em>order</em>: it is written by the authorization filter
-    /// itself, so it is only stamped if the header is applied by a filter that wraps it. A no-store written
-    /// inside the endpoint delegate, or by a filter added second, passes every other case here and fails
-    /// this one.
+    /// The 401 and the 403 are the two that pin the filter's <em>order</em>: both are written by the
+    /// authorization filter itself, so they are only stamped if the header comes from a filter that wraps it. A
+    /// no-store written inside the endpoint delegate, or by a filter added second, passes every other case here
+    /// and fails those two. They are asserted separately because they leave that filter by different exits —
+    /// an unusable credential and a scope that does not cover the entity.
+    /// </para>
+    /// <para>
+    /// The <em>successful</em> 200 of a <c>PATCH</c> is measured too, and that needed saying: the only PATCH in
+    /// the probe list carries a malformed <c>If-Match</c> and therefore always 412s, so the header's coverage
+    /// had a hole exactly where a write succeeds — the response that actually carries a fresh <c>ETag</c>.
     /// </para>
     /// <para>
     /// The assertion never touches <c>Headers.CacheControl?.NoStore</c>, and that is not style. A
@@ -509,22 +650,30 @@ public sealed class ConcurrencyTests
     [Fact]
     public async Task Every_response_a_generated_endpoint_produces_is_no_store()
     {
-        await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin]);
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin, _narrow]);
         var owner = await SeedOwnerAsync(world, "Uncacheable");
         var ghost = new TestApiKey("ghost-key", ["admin"], ["*:read"]);
 
         foreach (var probe in Everything(owner))
         {
             using var response = await world.SendAsync(
-                probe.Method, probe.Path, probe.Key ?? _admin, body: probe.Body, headers: probe.Headers);
+                probe.Method, probe.Path, _admin, body: probe.Body, headers: probe.Headers);
+            probe.Expected.ShouldBe(
+                response.StatusCode, $"{probe.Method} {probe.Path} must reach the response this probe stands for");
             ShouldBeNoStore(response, $"{probe.Method} {probe.Path} answered {(int)response.StatusCode} and");
         }
 
         using var unauthenticated = await world.SendAsync(HttpMethod.Get, Owner(owner.Id), ghost);
-        unauthenticated.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, "or the 401 below is not being measured");
-        ShouldBeNoStore(
-            unauthenticated, "the 401 the authorization filter itself answers with, which only a filter wrapping it stamps,");
+        using var outOfScope = await world.SendAsync(HttpMethod.Get, Owner(owner.Id), _narrow);
+
+        unauthenticated.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, "or the 401 is not being measured");
+        ShouldBeNoStore(unauthenticated, "the 401 the authorization filter itself answers with");
+        outOfScope.StatusCode.ShouldBe(HttpStatusCode.Forbidden, "or the 403 is not being measured");
+        ShouldBeNoStore(outOfScope, "the 403 the scope gate answers with, on that filter's other exit,");
     }
+
+    /// <summary>A key whose scopes cover a different entity, so the scope gate answers 403 from the filter itself.</summary>
+    private static readonly TestApiKey _narrow = new("narrow-key", ["admin", "authenticated"], ["vehicles:read"]);
 
     /// <summary>Requires a response to carry <c>Cache-Control: no-store</c>, failing when it carries no such header.</summary>
     /// <param name="response">The response to measure.</param>
@@ -536,30 +685,41 @@ public sealed class ConcurrencyTests
         cacheControl.NoStore.ShouldBeTrue($"{what} carried '{cacheControl}' rather than no-store");
     }
 
-    /// <summary>One response of every kind a row's endpoints can produce, for the header claim above.</summary>
+    /// <summary>
+    /// One response of every kind a row's endpoints can produce, for the header claim above — each paired with
+    /// the status it must reach.
+    /// </summary>
+    /// <remarks>
+    /// The expected status is part of the probe because a probe that quietly stopped reaching its own case would
+    /// still be measured for the header and still pass. That is not hypothetical: the successful <c>PATCH</c>
+    /// below is here precisely because the only other one always 412s, so the 200 of a write — the response that
+    /// carries a fresh <c>ETag</c> — was never measured at all. The order matters: the successful PATCH must
+    /// come before the DELETE that removes the row.
+    /// </remarks>
     private static IEnumerable<Probe> Everything(SeededOwner owner) =>
     [
-        new(HttpMethod.Get, "/api/owners", null, null, null),
-        new(HttpMethod.Get, Owner(owner.Id), null, null, null),
-        new(HttpMethod.Get, Owner(owner.Id), null, null, IfNoneMatch(owner.ETag)),
-        new(HttpMethod.Get, Owner(Guid.NewGuid()), null, null, null),
-        new(HttpMethod.Post, "/api/owners", null, new JsonObject { ["name"] = "Another Ltd" }, null),
-        new(HttpMethod.Patch, Owner(owner.Id), null, Rename("Renamed"), IfMatch("not-a-tag")),
-        new(HttpMethod.Delete, Owner(owner.Id), null, null, IfMatch("*")),
+        new(HttpMethod.Get, "/api/owners", null, null, HttpStatusCode.OK),
+        new(HttpMethod.Get, Owner(owner.Id), null, null, HttpStatusCode.OK),
+        new(HttpMethod.Get, Owner(owner.Id), null, IfNoneMatch(owner.ETag), HttpStatusCode.NotModified),
+        new(HttpMethod.Get, Owner(Guid.NewGuid()), null, null, HttpStatusCode.NotFound),
+        new(HttpMethod.Post, "/api/owners", new JsonObject { ["name"] = "Another Ltd" }, null, HttpStatusCode.Created),
+        new(HttpMethod.Patch, Owner(owner.Id), Rename("Renamed"), null, HttpStatusCode.OK),
+        new(HttpMethod.Patch, Owner(owner.Id), Rename("Refused"), IfMatch("not-a-tag"), HttpStatusCode.PreconditionFailed),
+        new(HttpMethod.Delete, Owner(owner.Id), null, IfMatch("*"), HttpStatusCode.NoContent),
     ];
 
     /// <summary>One request the no-store claim is measured over.</summary>
     /// <param name="Method">The HTTP method.</param>
     /// <param name="Path">The request path.</param>
-    /// <param name="Key">The key to present, or <see langword="null"/> for the admin key.</param>
     /// <param name="Body">The body to send, or <see langword="null"/> for none.</param>
     /// <param name="Headers">Any further headers to present.</param>
+    /// <param name="Expected">The status this probe must reach, or it is measuring the wrong response.</param>
     private sealed record Probe(
         HttpMethod Method,
         string Path,
-        TestApiKey? Key,
         JsonObject? Body,
-        IReadOnlyDictionary<string, string>? Headers);
+        IReadOnlyDictionary<string, string>? Headers,
+        HttpStatusCode Expected);
 
     /// <summary>A created owner and the tag its 201 handed out.</summary>
     /// <param name="Id">The row's assigned id.</param>

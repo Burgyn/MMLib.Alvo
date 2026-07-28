@@ -271,6 +271,91 @@ public class PolicyCatalogBuilderTests
     }
 
     /// <summary>
+    /// No framework-managed column may be marked <c>hidden</c>, because masking one switches off framework
+    /// behaviour the descriptor never asked to lose — and nothing raises when it does.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>updated_at</c> is the case that motivated the rule and the worst of them: it is the column
+    /// <c>AlvoManagedColumns.VersionColumn</c> names, so masking it leaves the HTTP layer with no <c>ETag</c>
+    /// to hand out and a caller with no <c>If-Match</c> to send — <b>optimistic concurrency off, silently, for
+    /// that entity</b>. It is reachable because <c>DescriptorToSchemaMapper.AddManagedColumn</c> injects a
+    /// managed column only when the entity does not declare a field of that name, so an author's own
+    /// declaration wins and can carry any flag the schema allows.
+    /// </para>
+    /// <para>
+    /// Driven per column rather than asserted over the set, so a rule that happened to cover only
+    /// <c>updated_at</c> — or only the audit four — fails on the others. The entity is scoped <em>and</em>
+    /// audited so every managed name is in its trait set at once; <c>id</c> stays with its own fact above,
+    /// which carries its own distinct reason (a masked key cannot materialise at all).
+    /// </para>
+    /// </remarks>
+    /// <param name="column">The framework-managed column the flag names.</param>
+    [Theory]
+    [InlineData("tenant_id")]
+    [InlineData("created_at")]
+    [InlineData("created_by")]
+    [InlineData("updated_at")]
+    [InlineData("updated_by")]
+    public void A_hidden_flag_on_a_framework_managed_column_is_refused_at_save(string column)
+    {
+        var descriptor = Descriptor("orders", Entity(fields: Flagged(column, "hidden")));
+
+        PolicyCatalog.TryBuild(descriptor, ManagedSchema(), CelFixtures.Compiler, out var catalog, out var errors)
+            .ShouldBeFalse();
+
+        catalog.ShouldBeNull();
+        var error = errors.ShouldHaveSingleItem();
+        error.Path.ShouldBe($"/entities/orders/fields/{column}/hidden");
+        error.FixSuggestion.ShouldNotBeNull().ShouldContain(
+            "declare it under a different name",
+            Case.Sensitive,
+            "the usual cause is an author who wanted a column of their own, so the fix has to say so");
+    }
+
+    /// <summary>
+    /// <c>readOnly</c> on <c>tenant_id</c> is <b>accepted</b> — the deliberate limit of the rule above, and
+    /// the reason it is written for one flag rather than both.
+    /// </summary>
+    /// <remarks>
+    /// <c>tenant_id</c> is the one managed column a caller may legitimately write, and only on a create
+    /// (<c>AlvoManagedColumns.IsCallerWritable</c>), so marking it read-only is a real narrowing an author may
+    /// want rather than a mistake. Refusing every flag on every managed column would have taken it away, and
+    /// a rule with no fact for its own boundary is a rule whose boundary moves by accident.
+    /// </remarks>
+    [Fact]
+    public void A_read_only_flag_on_the_one_caller_writable_managed_column_is_accepted()
+    {
+        var descriptor = Descriptor("orders", Entity(fields: Flagged("tenant_id", "readOnly")));
+
+        PolicyCatalog.TryBuild(descriptor, ManagedSchema(), CelFixtures.Compiler, out var catalog, out var errors)
+            .ShouldBeTrue(string.Join(" ", errors.Select(error => error.Message)));
+
+        catalog.ShouldNotBeNull();
+    }
+
+    /// <summary>
+    /// A field named like a managed column on an entity that does <b>not</b> carry it stays flaggable — the
+    /// rule is answered from the entity's traits, never from a name list.
+    /// </summary>
+    /// <remarks>
+    /// An entity without <c>audit</c> may legitimately declare an ordinary <c>created_at</c>, and refusing a
+    /// <c>hidden</c> flag on that would refuse a field the framework does not manage. It is the same reasoning
+    /// <c>AlvoManagedColumns</c>' own remarks give for answering membership from traits, and this is where the
+    /// two would silently diverge.
+    /// </remarks>
+    [Fact]
+    public void A_hidden_flag_on_a_managed_name_the_entity_does_not_manage_is_accepted()
+    {
+        var descriptor = Descriptor("orders", Entity(fields: Flagged("created_at", "hidden")));
+
+        PolicyCatalog.TryBuild(descriptor, Schema(), CelFixtures.Compiler, out var catalog, out var errors)
+            .ShouldBeTrue(string.Join(" ", errors.Select(error => error.Message)));
+
+        catalog.ShouldNotBeNull();
+    }
+
+    /// <summary>
     /// The sibling half of DoD criterion 3 — "a rule naming a nonexistent column fails at save, not at
     /// request time". A flag naming a field the schema does not contain was silently accepted and then
     /// masked nothing, so a typo in a <c>hidden</c> flag quietly exposed the field it meant to hide.
@@ -356,6 +441,30 @@ public class PolicyCatalogBuilderTests
         };
 
     private static SchemaModel Schema() => new([CelFixtures.Orders]);
+
+    /// <summary>
+    /// <see cref="CelFixtures.Orders"/> as a <em>scoped and audited</em> entity carrying every
+    /// framework-managed column at once, so one theory covers the whole set.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="CelFixtures.Orders"/> declares <c>created_at</c> as an ordinary field and does not declare
+    /// <c>audit</c>, which is exactly the case
+    /// <see cref="A_hidden_flag_on_a_managed_name_the_entity_does_not_manage_is_accepted"/> needs — so the two
+    /// schemas have to differ, rather than one being edited to serve both.
+    /// </remarks>
+    private static SchemaModel ManagedSchema() => new([
+        CelFixtures.Orders with
+        {
+            Audit = true,
+            Fields =
+            [
+                .. CelFixtures.Orders.Fields,
+                new FieldSchema { Name = "created_by", Type = MMLib.Alvo.Schema.FieldType.Uuid, Nullable = true },
+                new FieldSchema { Name = "updated_at", Type = MMLib.Alvo.Schema.FieldType.DateTime, Nullable = true },
+                new FieldSchema { Name = "updated_by", Type = MMLib.Alvo.Schema.FieldType.Uuid, Nullable = true },
+            ],
+        },
+    ]);
 
     private static EntityDescriptor Entity(AccessRules? rules = null, IReadOnlyDictionary<string, FieldDescriptor>? fields = null) =>
         new() { Fields = fields ?? new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal), Rules = rules };

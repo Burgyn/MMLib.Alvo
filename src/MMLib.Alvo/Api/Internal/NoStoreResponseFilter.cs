@@ -29,6 +29,18 @@ namespace MMLib.Alvo.Api.Internal;
 /// writing whenever it likes.
 /// </para>
 /// <para>
+/// <b>In tension with the <c>304</c> path, and <c>no-store</c> is the one that wins.</b> RFC 9111 §5.2.2.5
+/// bars <em>every</em> cache from storing the response, private ones included — so a strictly conforming
+/// client keeps no stored representation to revalidate, and <c>DataApiEndpoints.Representation</c>'s
+/// <c>304</c> is formally moot for it. The trade is deliberate: these responses are policy-masked per caller,
+/// and the weaker <c>private</c> would leave "may this be kept" to every intermediary and browser on the
+/// path, which is not a decision Alvo can supervise. What survives, and is the point, is that <b>keeping an
+/// entity tag is not caching a representation</b>: a caller who intends a conditional write has to retain the
+/// tag anyway — that is what <c>If-Match</c> is — and retaining it stores no row data. So the <c>304</c>
+/// serves a client that kept the tag and nothing else, which is the client this API is written for, while a
+/// client that stored the body was never entitled to.
+/// </para>
+/// <para>
 /// Stateless, so one instance serves every endpoint — see <see cref="Instance"/>.
 /// </para>
 /// </remarks>
