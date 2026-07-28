@@ -265,9 +265,16 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
     /// <param name="key">The API key to present, or <see langword="null"/> to present none at all.</param>
     /// <param name="tenant">The tenant to request, or <see langword="null"/> to request none.</param>
     /// <param name="body">A JSON body to send, or <see langword="null"/> for none.</param>
+    /// <param name="headers">Any further request headers to present, by name.</param>
     internal Task<HttpResponseMessage> SendAsync(
-        HttpMethod method, string path, TestApiKey? key = null, string? tenant = null, JsonObject? body = null) =>
-        SendRawAsync(method, path, key, tenant, body is null ? null : JsonContent.Create(body, JsonMediaType));
+        HttpMethod method,
+        string path,
+        TestApiKey? key = null,
+        string? tenant = null,
+        JsonObject? body = null,
+        IReadOnlyDictionary<string, string>? headers = null) =>
+        SendRawAsync(
+            method, path, key, tenant, body is null ? null : JsonContent.Create(body, JsonMediaType), headers);
 
     /// <summary>
     /// Sends a request with a body this world does not serialize for the caller — for the facts about
@@ -278,8 +285,18 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
     /// <param name="key">The API key to present, or <see langword="null"/> to present none at all.</param>
     /// <param name="tenant">The tenant to request, or <see langword="null"/> to request none.</param>
     /// <param name="content">The body to send verbatim, or <see langword="null"/> for none.</param>
+    /// <param name="headers">
+    /// Any further request headers to present, by name — added <em>without validation</em>, which is the
+    /// whole point: a fact about a malformed <c>If-Match</c> cannot be written through a client that refuses
+    /// to send one.
+    /// </param>
     internal async Task<HttpResponseMessage> SendRawAsync(
-        HttpMethod method, string path, TestApiKey? key = null, string? tenant = null, HttpContent? content = null)
+        HttpMethod method,
+        string path,
+        TestApiKey? key = null,
+        string? tenant = null,
+        HttpContent? content = null,
+        IReadOnlyDictionary<string, string>? headers = null)
     {
         using var request = new HttpRequestMessage(method, path);
         if (key is not null)
@@ -290,6 +307,12 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
         if (tenant is not null)
         {
             request.Headers.TryAddWithoutValidation(_authOptions.TenantHeaderName, tenant);
+        }
+
+        foreach (var (name, value) in headers ?? new Dictionary<string, string>(StringComparer.Ordinal))
+        {
+            request.Headers.TryAddWithoutValidation(name, value).ShouldBeTrue(
+                $"the world must really present '{name}', or the fact below measures a request it never sent");
         }
 
         request.Content = content;

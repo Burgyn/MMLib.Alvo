@@ -186,14 +186,15 @@ public sealed class ProblemDetailsTests
 
     /// <summary>
     /// Every slug the Data API can answer with today <b>is</b> answered with, over a real endpoint — and the
-    /// two that are not yet reachable are named, so the task that makes them reachable has to come back here.
+    /// one that is not yet reachable is named, so the task that makes it reachable has to come back here.
     /// </summary>
     /// <remarks>
     /// <para>
     /// The pending set is asserted in <em>both</em> directions: each pending slug must still be unreachable,
-    /// and every other slug must be reachable. So Task 6 wiring <c>If-Match</c> fails this fact until
-    /// <c>precondition-failed</c> is moved out of the list and given an endpoint-level fact — which is the
-    /// point. A one-directional allow-list would silently absorb them forever.
+    /// and every other slug must be reachable. Task 6 wiring <c>If-Match</c> failed this fact until
+    /// <c>precondition-failed</c> was moved out of the list and given the probe below — which was the point,
+    /// and Task 7's <c>Idempotency-Key</c> owes it the same visit. A one-directional allow-list would
+    /// silently absorb them forever.
     /// </para>
     /// <para>
     /// Reachability is measured by driving real requests, one per slug, against a real store — not by
@@ -215,22 +216,21 @@ public sealed class ProblemDetailsTests
             "every slug not pending a later task must be reachable from an endpoint");
 
         PendingUntilALaterTask.ShouldBe(
-            [AlvoProblemTypes.PreconditionFailed, AlvoProblemTypes.IdempotencyConflict],
+            [AlvoProblemTypes.IdempotencyConflict],
             ignoreOrder: true,
-            "these two need Task 6's If-Match and Task 7's Idempotency-Key before a caller can cause them; "
-            + "when either lands, move its slug into a probe above rather than leaving it parked here");
+            "this one needs Task 7's Idempotency-Key before a caller can cause it; when it lands, move its "
+            + "slug into a probe above rather than leaving it parked here");
     }
 
     /// <summary>
     /// The slugs no request can yet produce, because the header that causes them is not wired up.
     /// </summary>
     /// <remarks>
-    /// <c>ProblemResultFactory.GuardAsync</c> already maps both exception families — the mapping is
+    /// <c>ProblemResultFactory.GuardAsync</c> already maps the exception family — the mapping is
     /// <c>IAlvoData</c>'s contract and was settled in Task 3 — so what is missing is a caller-facing way to
-    /// raise them, not the rendering.
+    /// raise it, not the rendering.
     /// </remarks>
-    private static string[] PendingUntilALaterTask =>
-        [AlvoProblemTypes.PreconditionFailed, AlvoProblemTypes.IdempotencyConflict];
+    private static string[] PendingUntilALaterTask => [AlvoProblemTypes.IdempotencyConflict];
 
     private static readonly TestApiKey _narrow = new("narrow-key", ["authenticated"], ["vehicles:read"]);
 
@@ -254,6 +254,16 @@ public sealed class ProblemDetailsTests
 
         // A credential that was presented and cannot be resolved.
         new(HttpMethod.Get, "/api/owners", new TestApiKey("ghost-key", ["admin"], ["*:read"]), null),
+
+        // An If-Match against an entity that keeps no version of a row, so it cannot answer the question.
+        // Decided from the schema alone, before any row is looked up, which is why the id needs to exist no
+        // more than the query-parser probe's does. ConcurrencyTests owns the behaviour; this owns the slug.
+        new(
+            HttpMethod.Patch,
+            "/api/inspections/8e2b1f5c-0000-4000-8000-000000000000",
+            _admin,
+            new JsonObject { ["notes"] = "conditional" },
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["If-Match"] = "\"638000000000000000\"" }),
     ];
 
     /// <summary>Every problem the factory can render, one per entry point and per <c>GuardAsync</c> arm.</summary>
@@ -318,7 +328,8 @@ public sealed class ProblemDetailsTests
 
     private static async Task<string> SlugAnsweredByAsync(AlvoApiWorld world, Probe probe)
     {
-        using var response = await world.SendAsync(probe.Method, probe.Path, probe.Key, body: probe.Body);
+        using var response = await world.SendAsync(
+            probe.Method, probe.Path, probe.Key, body: probe.Body, headers: probe.Headers);
         return await response.ReadProblemTypeAsync();
     }
 
@@ -336,5 +347,11 @@ public sealed class ProblemDetailsTests
     /// <param name="Path">The request path.</param>
     /// <param name="Key">The key to present, or <see langword="null"/> for an anonymous caller.</param>
     /// <param name="Body">The body to send, or <see langword="null"/> for none.</param>
-    private sealed record Probe(HttpMethod Method, string Path, TestApiKey? Key, JsonObject? Body);
+    /// <param name="Headers">Any further request headers the refusal needs, by name.</param>
+    private sealed record Probe(
+        HttpMethod Method,
+        string Path,
+        TestApiKey? Key,
+        JsonObject? Body,
+        IReadOnlyDictionary<string, string>? Headers = null);
 }

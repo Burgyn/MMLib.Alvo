@@ -132,6 +132,37 @@ internal static class ResponseReading
             .Select(violation => violation["fixSuggestion"]?.GetValue<string>())];
     }
 
+    /// <summary>
+    /// The strong entity tag a response carries, quotes included — and a refusal when it carries none.
+    /// </summary>
+    /// <remarks>
+    /// It reads the <em>raw</em> header rather than <c>Headers.ETag</c>, and then requires that
+    /// <c>HttpClient</c> could parse it as a strong tag. <c>Headers.ETag</c> alone answers
+    /// <see langword="null"/> for a header that is present but unparsable, so a fact feeding a tag back as
+    /// <c>If-Match</c> would send the string "null" and read the resulting 412 as the mechanism working.
+    /// Requiring the tag here is what makes "no tag was minted" fail at the fact that needed one, naming the
+    /// response, rather than three requests later.
+    /// </remarks>
+    /// <param name="response">The response to read.</param>
+    internal static string ETagOf(this HttpResponseMessage response)
+    {
+        ArgumentNullException.ThrowIfNull(response);
+        var raw = response.Headers.TryGetValues("ETag", out var values) ? string.Join(", ", values) : null;
+        if (raw is null)
+        {
+            throw new InvalidOperationException(
+                $"Expected an ETag, but the {(int)response.StatusCode} response carried no such header.");
+        }
+
+        var parsed = response.Headers.ETag
+            ?? throw new InvalidOperationException($"The ETag '{raw}' is not a well-formed entity tag.");
+
+        return parsed.IsWeak
+            ? throw new InvalidOperationException(
+                $"The ETag '{raw}' is weak, so RFC 9110 §13.1.1's strong comparison could never match it.")
+            : parsed.Tag;
+    }
+
     /// <summary>The raw body text, for the facts that must assert a value appears <em>nowhere</em> in it.</summary>
     /// <param name="response">The response to read.</param>
     internal static Task<string> ReadTextAsync(this HttpResponseMessage response)
