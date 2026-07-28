@@ -44,9 +44,15 @@ namespace MMLib.Alvo.Api.Internal;
 /// three, exactly as <c>EntityRouteCatalog</c> records.
 /// </para>
 /// <para>
-/// A pattern that reaches here is already known to parse: <c>DescriptorToSchemaMapper</c> refuses an
-/// unparseable one at apply, where a descriptor mistake belongs. That is why nothing here has a "bad
-/// pattern" branch — it would be unreachable, and an unreachable branch is a claim no fact can hold.
+/// <b>An unparseable pattern is refused twice, and the second time is not redundant.</b>
+/// <c>DescriptorToSchemaMapper</c> refuses one at apply, where a descriptor mistake belongs — but
+/// <see cref="FieldSchema.FormatPattern"/> is a <em>public</em> member, so a <see cref="SchemaModel"/> the
+/// mapper never built (a host with its own <c>ISchemaRegistry</c>, a hand-assembled model, F7's dynamic
+/// registry) can carry a pattern nothing checked. An earlier remark here claimed that made a bad-pattern
+/// branch unreachable; making the member public falsified it, and the branch was <see cref="Regex"/>'s own
+/// <see cref="ArgumentException"/> escaping <c>MapAlvoDataApi</c> with no mention of which format was at
+/// fault. So <see cref="Build"/> refuses at <em>catalogue-build</em> time — startup, once, naming the format
+/// — rather than at the first request that happens to reach the field.
 /// </para>
 /// </remarks>
 internal sealed class FormatCatalog
@@ -65,11 +71,21 @@ internal sealed class FormatCatalog
     internal static TimeSpan MatchTimeout { get; } = TimeSpan.FromMilliseconds(100);
 
     /// <summary>
-    /// The built-in formats, exactly the enum branch of the descriptor schema's <c>field.format</c>.
+    /// <b>The one authority on the built-in formats</b> — which names they are and what each one means —
+    /// exactly the enum branch of the descriptor schema's <c>field.format</c>.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Every one is deliberately written in the subset <see cref="RegexOptions.NonBacktracking"/> accepts
+    /// <b>Names and patterns together, in one place, because they are one fact.</b> The mapper needs the
+    /// <em>names</em> (a name it recognises resolves no pattern from the descriptor's <c>formats</c> block)
+    /// and this catalogue needs the <em>patterns</em>, and for one commit they were two hand-written lists
+    /// with nothing tying them: deleting <c>uri</c> and <c>phone</c> from the pattern list left the mapper
+    /// still accepting both names, so both formats silently validated nothing — a clean build, a green suite,
+    /// and a fail-open on caller input. <c>DescriptorToSchemaMapper</c> reads this dictionary's keys, the same
+    /// way <c>DescriptorValidator</c> reads <see cref="ReservedQueryKeys"/> rather than restating it.
+    /// </para>
+    /// <para>
+    /// Every pattern is deliberately written in the subset <see cref="RegexOptions.NonBacktracking"/> accepts
     /// and with no nested quantifier, so the framework's own patterns cannot be the ReDoS the fallback
     /// exists for.
     /// </para>
@@ -80,6 +96,8 @@ internal sealed class FormatCatalog
     /// cannot argue with. A caller who needs a stricter rule declares a named format and owns it.
     /// </para>
     /// </remarks>
+    internal static IReadOnlyDictionary<string, string> BuiltIns => _builtIns;
+
     private static readonly Dictionary<string, string> _builtIns = new(StringComparer.Ordinal)
     {
         // A local part, one '@', a dotted domain — the shape a mistyped address fails and a real one passes.
@@ -98,7 +116,16 @@ internal sealed class FormatCatalog
     private FormatCatalog(Dictionary<string, Regex> formats) => _formats = formats;
 
     /// <summary>Compiles every format the applied schema's fields name.</summary>
+    /// <remarks>
+    /// Called once, from <c>MapAlvoDataApi</c>, so a pattern this build cannot compile fails the host at
+    /// startup beside the route-mapping guards rather than per request.
+    /// </remarks>
     /// <param name="entities">The applied schema's entities.</param>
+    /// <exception cref="InvalidOperationException">
+    /// A field carries a <see cref="FieldSchema.FormatPattern"/> that is not a regular expression. Not
+    /// reachable through <c>DescriptorToSchemaMapper</c>, which refuses one at apply — but reachable through
+    /// any other producer of a <see cref="SchemaModel"/>, since the member is public.
+    /// </exception>
     internal static FormatCatalog Build(IReadOnlyList<EntitySchema> entities)
     {
         ArgumentNullException.ThrowIfNull(entities);
@@ -141,7 +168,12 @@ internal sealed class FormatCatalog
             // The backtracking fallback ran out of time on a caller-supplied value. Refusing is the only
             // safe answer: "I could not decide" must not become "it passed", and it must not become a 500
             // either — the request is refused with a violation naming the format, exactly as a value that
-            // provably did not match would be. Unreachable for a pattern the linear-time engine accepted.
+            // provably did not match would be.
+            //
+            // Reached only by a pattern NonBacktracking would not compile (a lookaround, a backreference, an
+            // atomic group) whose core is catastrophic. That shape is in the suite on purpose — see
+            // ValidationTests' 'lookahead-greedy' format — because for one round it was not, and this arm and
+            // the fallback that leads to it were both unreached.
             return false;
         }
     }
@@ -165,7 +197,7 @@ internal sealed class FormatCatalog
         var pattern = field.FormatPattern ?? _builtIns.GetValueOrDefault(format);
         if (pattern is not null)
         {
-            formats[format] = Compile(pattern);
+            formats[format] = Compile(format, pattern);
         }
     }
 
@@ -180,7 +212,7 @@ internal sealed class FormatCatalog
     /// still applied even when the author already wrote their own anchors; an anchor asserted twice matches
     /// exactly what it matched once.
     /// </remarks>
-    private static Regex Compile(string pattern)
+    private static Regex Compile(string format, string pattern)
     {
         var anchored = $@"\A(?:{pattern})\z";
         try
@@ -190,9 +222,40 @@ internal sealed class FormatCatalog
         catch (NotSupportedException)
         {
             // The pattern uses a construct the linear-time engine cannot express (lookaround, a
-            // backreference, an atomic group). It is still a valid regular expression — the mapper proved
-            // that at apply — so it runs on the backtracking engine, where the timeout is the only bound.
-            return new Regex(anchored, RegexOptions.CultureInvariant, MatchTimeout);
+            // backreference, an atomic group). It is still a valid regular expression, so it runs on the
+            // backtracking engine, where MatchTimeout is the only bound — and Satisfies refuses a value it
+            // cannot decide in time rather than admitting it.
+            return Backtracking(format, anchored);
+        }
+        catch (ArgumentException exception)
+        {
+            throw NotARegularExpression(format, exception);
         }
     }
+
+    /// <summary>The backtracking fallback, kept separate so its own construction failure is named too.</summary>
+    private static Regex Backtracking(string format, string anchored)
+    {
+        try
+        {
+            return new Regex(anchored, RegexOptions.CultureInvariant, MatchTimeout);
+        }
+        catch (ArgumentException exception)
+        {
+            throw NotARegularExpression(format, exception);
+        }
+    }
+
+    /// <summary>
+    /// The refusal for a pattern that is not a regular expression, naming the format so the descriptor
+    /// author knows which one — family 3 in <c>IAlvoData</c>'s table: an invariant of whoever composed the
+    /// schema, never a caller's mistake.
+    /// </summary>
+    /// <param name="format">The format whose pattern would not compile.</param>
+    /// <param name="cause">What <see cref="Regex"/> said about it.</param>
+    private static InvalidOperationException NotARegularExpression(string format, Exception cause) => new(
+        $"The applied schema declares format '{format}' with a pattern that is not a valid regular "
+        + $"expression: {cause.Message} A descriptor is refused at apply, so this schema was composed by "
+        + "something else — fix the pattern at its source.",
+        cause);
 }

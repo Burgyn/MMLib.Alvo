@@ -69,7 +69,7 @@
         },
         "inspector_name": { "type": "string", "required": true, "maxLength": 120 },
         "inspected_on": { "type": "date", "required": true },
-        "passed": { "type": "boolean", "default": true },
+        "passed": { "type": "boolean" },
         "notes": { "type": "text" }
       },
       "rules": {

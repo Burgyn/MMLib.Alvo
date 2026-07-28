@@ -88,24 +88,111 @@ public class DescriptorToSchemaMapperTests
     // generated audit/soft-delete columns, refs) is already fully covered, at 100% mutation
     // coverage, by the other tests in this file, so this fixture's role is proving the computed
     // guardrail fires on a real, schema-valid descriptor rather than re-snapshotting the mapping.
+    //
+    // The fixture declares three features this build does not honour ('default', 'rollup', 'computed'),
+    // and the mapper refuses at the first one it meets — which is 'default', on an earlier entity. The
+    // other two are stripped here so this fact is about the 'computed' arm specifically; the arms
+    // themselves get one fact each in Map_refuses_every_field_feature_it_does_not_honour below.
     [Fact]
     public void Complex_crm_mapping_rejects_computed()
     {
-        var ex = Should.Throw<InvalidDataException>(() => Map("complex-crm/crm.alvo.json"));
+        var json = ComplexCrmWithout("default", "rollup");
+
+        var ex = Should.Throw<InvalidDataException>(() => MapInline(json));
 
         ex.Message.ShouldContain("computed");
         ex.Message.ShouldContain("#21");
     }
 
+    /// <summary>
+    /// Every field-level feature the frozen schema declares and this build does not honour is refused at
+    /// <b>apply</b>, naming the feature and what to do instead.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Silently dropping one is the defect class this repo has closed four times, and three of these four
+    /// were being dropped: <c>validation: "value >= 0"</c> with <c>-5</c> in the body answered 201, and a
+    /// <c>required</c> field with a <c>default</c> was an INSERT of NULL into a NOT NULL column rather than a
+    /// defaulted row.
+    /// </para>
+    /// <para>
+    /// One case per feature, each over a descriptor declaring <em>only</em> that feature, so deleting any one
+    /// arm of the guard fails exactly one case and names it. A single descriptor carrying all four would be
+    /// satisfied by whichever arm happens to run first.
+    /// </para>
+    /// </remarks>
+    /// <param name="feature">The descriptor key under test.</param>
+    /// <param name="declaration">How the field declares it.</param>
+    /// <param name="fixMentions">A word the fix suggestion must carry, so "unsupported" alone cannot pass.</param>
+    [Theory]
+    [InlineData("computed", @"""computed"": ""net * 1.2""", "#21")]
+    [InlineData("rollup", @"""rollup"": { ""from"": ""lines"", ""op"": ""count"" }", "query")]
+    [InlineData("validation", @"""validation"": ""value >= 0""", "before-hook")]
+    [InlineData("default", @"""default"": 1", "explicitly")]
+    public void Map_refuses_every_field_feature_it_does_not_honour(
+        string feature, string declaration, string fixMentions)
+    {
+        var json = $$"""
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": {
+            "lines": { "fields": { "invoice_id": { "type": "uuid" } } },
+            "invoices": { "fields": {
+              "net": { "type": "decimal", "precision": 8, "scale": 2 },
+              "amount": { "type": "decimal", "precision": 8, "scale": 2, {{declaration}} } } } } }
+        """;
+
+        var ex = Should.Throw<InvalidDataException>(() => MapInline(json));
+
+        ex.Message.ShouldContain(feature);
+        ex.Message.ShouldContain("amount");
+        ex.Message.ShouldContain(fixMentions);
+    }
+
+    /// <summary>
+    /// The negative leg for the whole guard: a field declaring <b>none</b> of the four maps without
+    /// complaint, so the four cases above are about the features rather than about the mapper refusing every
+    /// decimal.
+    /// </summary>
+    [Fact]
+    public void A_field_declaring_none_of_the_unhonoured_features_maps_normally()
+    {
+        var json = """
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "invoices": { "fields": {
+            "amount": { "type": "decimal", "precision": 8, "scale": 2 } } } } }
+        """;
+
+        var amount = MapInline(json).Entities.Single(e => e.Name == "invoices")
+            .Fields.Single(f => f.Name == "amount");
+
+        amount.Precision.ShouldBe(8);
+        amount.Scale.ShouldBe(2);
+    }
+
     // Full-model regression freeze: the rich complex-crm fixture exercises every mapping
     // concern in one place (managed-column injection, ref FKs, tenancy, audit, softDelete,
     // renamedFrom, indexes, all field types) across multiple entities — a breadth the
-    // narrower, branch-level tests above don't give. 'computed' (gross_total/line_total) is
-    // rejected by the mapper until #21 (CEL→SQL compiler), so it is stripped at the JSON level
-    // here — the one not-yet-supported feature — before mapping; everything else in the
-    // fixture stays intact. Drop the stripping and snapshot the descriptor directly once #21 lands.
+    // narrower, branch-level tests above don't give. The features this build does not honour
+    // ('computed' on gross_total/line_total, 'default' and 'rollup' elsewhere) are refused by
+    // the mapper, so they are stripped at the JSON level here before mapping; everything else in
+    // the fixture stays intact. None of the four ever reached the mapped model, so stripping them
+    // changes no snapshot line — the fixture keeps them because its job is to document the
+    // descriptor format, not to be applied. Drop the stripping per feature as each is implemented.
     [Fact]
-    public async Task Complex_crm_without_computed_maps_to_a_stable_model()
+    public async Task Complex_crm_without_its_unhonoured_features_maps_to_a_stable_model()
+    {
+        var m = DescriptorToSchemaMapper.Map(
+            AlvoDescriptor.Parse(ComplexCrmWithout("computed", "rollup", "validation", "default")));
+
+        await Verify(m);
+    }
+
+    /// <summary>
+    /// The <c>complex-crm</c> showcase with some field keys removed — the only way to map a fixture whose
+    /// job is to document every key the schema declares, including the ones this build refuses.
+    /// </summary>
+    /// <param name="keys">The field keys to strip.</param>
+    private static string ComplexCrmWithout(params string[] keys)
     {
         var path = Path.Combine(RepositoryRoot.Find(), "examples", "complex-crm", "crm.alvo.json");
         var json = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
@@ -114,14 +201,14 @@ public class DescriptorToSchemaMapperTests
         {
             foreach (var (_, field) in entity!["fields"]!.AsObject())
             {
-                field!.AsObject().Remove("computed");
+                foreach (var key in keys)
+                {
+                    field!.AsObject().Remove(key);
+                }
             }
         }
 
-        var descriptor = AlvoDescriptor.Parse(json.ToJsonString());
-        var m = DescriptorToSchemaMapper.Map(descriptor);
-
-        await Verify(m);
+        return json.ToJsonString();
     }
 
     /// <summary>

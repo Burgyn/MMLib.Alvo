@@ -48,6 +48,93 @@ public class DescriptorValidatorTests
     }
 
     /// <summary>
+    /// Every field feature the frozen schema declares and this build does not honour is reported here as a
+    /// <b>structured</b> error — a JSON path, what silently happens instead, and what to do about it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The mapper refuses the same four with an exception, which is the guard an embedded host that never
+    /// validates still passes through; this pass is what makes the refusal agent-first, and it is the only one
+    /// a dashboard or a CLI <c>validate</c> can show. Three of the four were reported by neither: a
+    /// <c>validation</c> expression was simply dropped, so a value it forbade came back 201.
+    /// </para>
+    /// <para>
+    /// The message is asserted to name the <em>consequence</em> and not merely the word "unsupported" — an
+    /// author who is told "not supported yet" removes the key and moves on, while one who is told the field is
+    /// therefore unconstrained knows what they lost.
+    /// </para>
+    /// </remarks>
+    /// <param name="declaration">How the field declares the feature.</param>
+    /// <param name="messageMentions">A word the message must carry, describing what happens instead.</param>
+    /// <param name="fixMentions">A word the fix suggestion must carry.</param>
+    [Theory]
+    [InlineData(@"""computed"": ""net * 1.2""", "never evaluated", "#21")]
+    [InlineData(@"""rollup"": { ""from"": ""lines"", ""op"": ""count"" }", "maintains", "query")]
+    [InlineData(@"""validation"": ""value >= 0""", "not constrained", "before-hook")]
+    [InlineData(@"""default"": 1", "NOT NULL", "explicitly")]
+    public void Every_unhonoured_field_feature_is_a_structured_error(
+        string declaration, string messageMentions, string fixMentions)
+    {
+        var json = $$"""
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": {
+            "lines": { "fields": { "invoice_id": { "type": "uuid" } } },
+            "invoices": { "fields": {
+              "amount": { "type": "decimal", "precision": 18, "scale": 2, {{declaration}} } } } } }
+        """;
+
+        var result = _validator.Validate(json);
+
+        var error = result.Errors.ShouldHaveSingleItem();
+        error.Path.ShouldBe("/entities/invoices/fields/amount");
+        error.Message.ShouldContain(messageMentions);
+        error.FixSuggestion.ShouldNotBeNull().ShouldContain(fixMentions);
+        error.Severity.ShouldBe(DescriptorValidationSeverity.Error);
+    }
+
+    /// <summary>
+    /// A field declaring two of them reports <b>both</b>, not the first — the same every-violation promise
+    /// the Data API keeps, one layer down.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The mapper stops at the first, because an exception can only carry one; that is why this pass exists
+    /// beside it rather than only behind it. An author fixing them one apply at a time pays a round trip per
+    /// key.
+    /// </para>
+    /// <para>
+    /// Asserted by <em>which</em> refusals are present rather than by a total count. This descriptor is
+    /// deliberately schema-valid, but a count would still couple the fact to however many findings any other
+    /// pass happens to produce for the same field — and that coupling is what makes a fact fail for a reason
+    /// its name does not claim. <c>computed</c> is left out for the same reason: combined with <c>default</c>
+    /// it is refused by the schema pass too, which is a different statement.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void A_field_declaring_several_unhonoured_features_reports_all_of_them()
+    {
+        var json = """
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "invoices": { "fields": {
+            "amount": {
+              "type": "decimal", "precision": 18, "scale": 2,
+              "validation": "value >= 0", "default": 1 } } } } }
+        """;
+
+        var result = _validator.Validate(json);
+
+        var atTheField = result.Errors
+            .Where(error => error.Path == "/entities/invoices/fields/amount")
+            .ToList();
+        atTheField.ShouldContain(
+            error => error.Message.Contains("not constrained", StringComparison.Ordinal),
+            "the 'validation' refusal must be reported");
+        atTheField.ShouldContain(
+            error => error.Message.Contains("NOT NULL", StringComparison.Ordinal),
+            "and the 'default' refusal beside it — reporting only the first costs an apply per key");
+    }
+
+    /// <summary>
     /// A field whose name the Data API's query string reserves is refused at <b>apply</b>, one error per
     /// offending field, naming the field and the reserved list.
     /// </summary>

@@ -1,4 +1,6 @@
-﻿using System.Diagnostics;
+﻿using MMLib.Alvo.Api.Internal;
+using MMLib.Alvo.Schema;
+using System.Diagnostics;
 using System.Net;
 using System.Text.Json.Nodes;
 
@@ -286,6 +288,116 @@ public sealed class ValidationTests
     }
 
     /// <summary>
+    /// The <b>fallback</b> arm: a pattern <see cref="System.Text.RegularExpressions.RegexOptions.NonBacktracking"/>
+    /// refuses to compile still enforces its format — accepting what it should and refusing what it should.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The linear-time engine cannot express a lookahead, so <c>(?=[A-Z])[A-Za-z]{2,8}</c> compiles only on
+    /// the backtracking engine. Until this fact existed, no descriptor in the suite used such a pattern:
+    /// <c>(a+)+b</c> compiles under <c>NonBacktracking</c>, so the entire fallback — and the timeout the
+    /// fallback depends on — was unreached, and deleting it was invisible.
+    /// </para>
+    /// <para>
+    /// Both directions are asserted because a fallback that threw, or that matched nothing, would be caught
+    /// only by the accepting half, and one that matched everything only by the refusing half.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_format_the_linear_time_engine_cannot_compile_is_still_enforced()
+    {
+        await using var world = await WorldAsync();
+
+        using var refused = await world.SendAsync(
+            HttpMethod.Post, "/api/items", _admin, body: WithField("capitalised", "lowercase"));
+        using var accepted = await world.SendAsync(
+            HttpMethod.Post, "/api/items", _admin, body: WithField("capitalised", "Capital"));
+
+        refused.StatusCode.ShouldBe(
+            HttpStatusCode.UnprocessableEntity,
+            "the backtracking fallback must enforce the format, not silently admit everything");
+        (await refused.ReadViolationsAsync()).ShouldBe([("/capitalised", "format")]);
+        accepted.StatusCode.ShouldBe(
+            HttpStatusCode.Created, "and it must still admit a value the pattern matches");
+    }
+
+    /// <summary>
+    /// The <b>fail-closed timeout</b> arm: a value the backtracking engine cannot decide inside the match
+    /// timeout is <b>refused</b>, promptly — never admitted, and never a 500.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the arm the linear-time engine cannot protect, because the pattern
+    /// (<c>(?=(a+)+b)a*</c> — a catastrophic core behind a lookahead) is one it refuses to compile. On the
+    /// backtracking engine, 3 000 <c>a</c>s with no <c>b</c> is exponential, so the timeout is the only thing
+    /// standing between a caller-supplied string and a held thread.
+    /// </para>
+    /// <para>
+    /// <b>"Refused" is as load-bearing as "promptly".</b> A <c>RegexMatchTimeoutException</c> left uncaught
+    /// would leave the field's format undecided and answer 500 — turning a value the framework declined to
+    /// judge into a broken invariant. Answering <see langword="true"/> instead would admit it. So the status,
+    /// the violation and the elapsed time are asserted together.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_value_the_backtracking_engine_cannot_decide_in_time_is_refused_not_admitted()
+    {
+        await using var world = await WorldAsync();
+
+        var stopwatch = Stopwatch.StartNew();
+        using var refused = await world.SendAsync(
+            HttpMethod.Post, "/api/items", _admin, body: WithField("backtracking", new string('a', 3_000)));
+        stopwatch.Stop();
+
+        refused.StatusCode.ShouldBe(
+            HttpStatusCode.UnprocessableEntity,
+            "a value the engine could not decide must be refused — not admitted, and not rendered as a 500");
+        (await refused.ReadViolationsAsync()).ShouldBe([("/backtracking", "format")]);
+        stopwatch.Elapsed.ShouldBeLessThan(
+            TimeSpan.FromSeconds(10),
+            "the match timeout is the only bound on this pattern; without it the request never returns");
+    }
+
+    /// <summary>
+    /// A <see cref="FieldSchema.FormatPattern"/> that is not a regular expression is refused when the
+    /// catalogue is <b>built</b> — at startup, naming the format — not at the first request to reach the
+    /// field.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>DescriptorToSchemaMapper</c> refuses an unparseable pattern at apply, and for a while that was
+    /// offered as proof that this branch could not be reached. Making <see cref="FieldSchema.FormatPattern"/>
+    /// public falsified it: any other producer of a <see cref="SchemaModel"/> — a host with its own
+    /// <c>ISchemaRegistry</c>, a hand-assembled model, F7's dynamic registry — can carry a pattern nothing
+    /// checked, and <c>Regex</c>'s own <c>ArgumentException</c> would then escape <c>MapAlvoDataApi</c> without
+    /// naming which format was at fault.
+    /// </para>
+    /// <para>
+    /// Driven directly rather than over HTTP, because the point is that no request is involved: the failure
+    /// belongs to whoever composed the schema, and it happens before a route can serve anything.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void A_format_pattern_that_is_not_a_regular_expression_is_refused_when_the_catalogue_is_built()
+    {
+        var broken = new EntitySchema
+        {
+            Name = "items",
+            Fields =
+            [
+                new FieldSchema { Name = "code", Type = FieldType.String, Format = "half-open", FormatPattern = "([0-9" },
+            ],
+        };
+
+        var exception = Should.Throw<InvalidOperationException>(() => FormatCatalog.Build([broken]));
+
+        exception.Message.ShouldContain(
+            "half-open", Case.Sensitive, "the refusal must name the format, or the author cannot find it");
+        FormatCatalog.Build([broken with { Fields = [new FieldSchema { Name = "code", Type = FieldType.String }] }])
+            .ShouldNotBeNull("a schema with no pattern still builds, so the refusal is about the pattern");
+    }
+
+    /// <summary>
     /// <b>A write to a <c>readOnly</c> field is 422 from validation, and the port's 403 stays the
     /// backstop.</b> Both are correct in their own layer, and this fact pins which one an HTTP caller sees.
     /// </summary>
@@ -480,11 +592,96 @@ public sealed class ValidationTests
             content: AlvoApiWorld.RawJson(@"{""name"":""n"",""quantity"":1,""smuggled_field"":1}"));
 
         refused.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
-        (await refused.ReadViolationsAsync()).Select(violation => violation.Code)
-            .ShouldBe(["unknown-field"]);
-        var body = await refused.ReadTextAsync();
-        body.ShouldNotContain("smuggled_field");
-        body.ShouldNotContain("items");
+        (await refused.ReadViolationsAsync()).ShouldBe(
+            [("/smuggled_field", "unknown-field")],
+            "the pointer must name the caller's own key — it is a location in their request, not a claim "
+            + "about the entity — and against the body pointer this violation once discarded every other one");
+        (await refused.ReadProblemDetailAsync()).ShouldNotContain(
+            "smuggled_field",
+            Case.Sensitive,
+            "the prose is what gets logged and re-rendered, so it stays free of caller-supplied text");
+        (await refused.ReadTextAsync()).ShouldNotContain(
+            "items", Case.Sensitive, "and no wording names the entity");
+    }
+
+    /// <summary>
+    /// <b>An unrecognised key does not suppress the rest.</b> Four violations of four different kinds — an
+    /// unknown key, a missing required field, a value over its length bound, and a write to a read-only
+    /// field — arrive in one response.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the fact whose absence let a Critical ship. The unknown-key violation carried the empty body
+    /// pointer while the reader inferred "the body did not bind" from an empty pointer, so <em>one</em>
+    /// unrecognised key made the reader discard everything else: this exact payload reported <b>1</b>
+    /// violation where the same payload without the smuggled key reported <b>4</b>.
+    /// </para>
+    /// <para>
+    /// The control is what makes it discriminating rather than merely true: the same body <em>minus</em> the
+    /// smuggled key must report exactly the other three. Without it, a validator that dropped one of the
+    /// three for an unrelated reason would still satisfy a count, and the "4 versus 1" asymmetry — the shape
+    /// of the original defect — would be invisible.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task An_unrecognised_key_does_not_suppress_the_other_violations()
+    {
+        await using var world = await WorldAsync();
+        const string WithSmuggledKey =
+            @"{""smuggled"":1,""quantity"":1,""sku"":""xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"",""slug"":""x""}";
+        const string WithoutIt =
+            @"{""quantity"":1,""sku"":""xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"",""slug"":""x""}";
+
+        using var withKey = await world.SendRawAsync(
+            HttpMethod.Post, "/api/items", _admin, content: AlvoApiWorld.RawJson(WithSmuggledKey));
+        using var withoutKey = await world.SendRawAsync(
+            HttpMethod.Post, "/api/items", _admin, content: AlvoApiWorld.RawJson(WithoutIt));
+
+        withKey.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
+        (await withKey.ReadViolationsAsync()).ShouldBe(
+            [
+                ("/smuggled", "unknown-field"),
+                ("/name", "required"),
+                ("/sku", "max-length"),
+                ("/slug", "read-only-field"),
+            ],
+            ignoreOrder: true,
+            "one unrecognised key must not cost the caller the other three violations");
+        (await withoutKey.ReadViolationsAsync()).ShouldBe(
+            [("/name", "required"), ("/sku", "max-length"), ("/slug", "read-only-field")],
+            ignoreOrder: true,
+            "the same payload without the smuggled key reports the other three — so the four above are the "
+            + "three plus one, not a coincidence");
+    }
+
+    /// <summary>
+    /// Two unrecognised keys are two violations, not one: they are distinguishable by pointer, so the
+    /// de-duplication that collapses identical refusals must not collapse these.
+    /// </summary>
+    /// <remarks>
+    /// Task 4 added de-duplication by <c>(code, pointer)</c> for the query parser, where several refusals
+    /// genuinely are the same statement. Here they are not — each names a different key the caller has to
+    /// remove — and a caller told about one of two bad keys pays a round trip to learn about the second.
+    /// </remarks>
+    [Fact]
+    public async Task Two_unrecognised_keys_are_two_violations()
+    {
+        await using var world = await WorldAsync();
+
+        using var refused = await world.SendRawAsync(
+            HttpMethod.Post, "/api/items", _admin,
+            content: AlvoApiWorld.RawJson(@"{""name"":""n"",""quantity"":1,""first"":1,""second"":2}"));
+
+        refused.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
+        (await refused.ReadViolationsAsync()).ShouldBe(
+            [("/first", "unknown-field"), ("/second", "unknown-field")],
+            ignoreOrder: true,
+            "each unrecognised key is its own fix, so each earns its own violation");
+        var detail = await refused.ReadProblemDetailAsync();
+        detail.Split("not writable on this entity").Length.ShouldBe(
+            2,
+            "the two violations share one sentence, and the prose joins it once — the detail is for a human, "
+            + "the array is the machine half that names both keys");
     }
 
     /// <summary>
@@ -590,6 +787,87 @@ public sealed class ValidationTests
         refused.StatusCode.ShouldBe(
             HttpStatusCode.Forbidden, "the scope gate must answer before a reference probe is worth running");
         accepted.StatusCode.ShouldBe(HttpStatusCode.Created);
+    }
+
+    /// <summary>
+    /// <b>Every built-in format the frozen schema enumerates is one this build actually enforces</b>, and no
+    /// more — asserted against <c>schema/project.schema.json</c>'s own enum branch rather than a hand-written
+    /// copy of it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The names and their patterns were briefly two lists with nothing tying them: deleting <c>uri</c> and
+    /// <c>phone</c> from the pattern list built clean and left the whole suite green while both formats
+    /// silently validated nothing. A format that validates nothing is a fail-open on caller input, and the
+    /// only assertion that catches it is one that reads the authoritative set from outside the code under
+    /// test — the schema is that outside source, and it is frozen.
+    /// </para>
+    /// <para>
+    /// Both directions matter. A name the schema lists but the catalogue lacks resolves to no pattern and
+    /// validates nothing; a name the catalogue carries but the schema does not lets a descriptor that only
+    /// this build accepts stop validating on any other one.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Every_built_in_format_the_schema_declares_is_one_this_build_enforces()
+    {
+        var schema = JsonNode.Parse(File.ReadAllText(
+            Path.Combine(RepositoryRoot.Find(), "schema", "project.schema.json")))!;
+        var declared = schema["$defs"]!["field"]!["properties"]!["format"]!["anyOf"]!
+            .AsArray()
+            .SelectMany(branch => branch!["enum"]?.AsArray() ?? [])
+            .Select(name => name!.GetValue<string>())
+            .ToList();
+
+        declared.ShouldBe(
+            ["email", "uri", "phone"],
+            ignoreOrder: true,
+            "read from the frozen schema — if this changes, the schema changed and the catalogue owes it a visit");
+        FormatCatalog.BuiltIns.Keys.ShouldBe(
+            declared,
+            ignoreOrder: true,
+            "a name the schema lists and the catalogue lacks validates nothing; a name only the catalogue "
+            + "carries accepts a descriptor no other build honours");
+        FormatCatalog.BuiltIns.Values.ShouldAllBe(pattern => pattern.Length > 0);
+    }
+
+    /// <summary>
+    /// Each built-in is enforced <em>end to end</em>, so a pattern that exists but is never applied cannot
+    /// pass the catalogue fact above.
+    /// </summary>
+    /// <remarks>
+    /// The set fact proves the names line up; it cannot prove a pattern reaches a request. These two cases do,
+    /// over the live API, and they are why deleting a built-in's pattern now fails something a caller would
+    /// notice rather than only an inventory.
+    /// </remarks>
+    /// <param name="field">The field declaring the built-in under test.</param>
+    /// <param name="rejected">A value the format must refuse.</param>
+    /// <param name="accepted">A value the format must admit.</param>
+    [Theory]
+    [InlineData("contact", "not-an-address", "owner@example.com")]
+    [InlineData("homepage", "example.com", "https://example.com/x")]
+    [InlineData("telephone", "no-digits-here", "+421 900 123 456")]
+    public async Task Each_built_in_format_is_enforced_over_the_live_api(
+        string field, string rejected, string accepted)
+    {
+        await using var world = await WorldAsync();
+
+        using var refused = await world.SendAsync(
+            HttpMethod.Post, "/api/items", _admin, body: WithField(field, rejected));
+        using var allowed = await world.SendAsync(
+            HttpMethod.Post, "/api/items", _admin, body: WithField(field, accepted));
+
+        refused.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
+        (await refused.ReadViolationsAsync()).ShouldBe([($"/{field}", "format")]);
+        allowed.StatusCode.ShouldBe(
+            HttpStatusCode.Created, "or the refusal is this format refusing everything rather than enforcing");
+    }
+
+    private static JsonObject WithField(string field, string value)
+    {
+        var body = Item();
+        body[field] = value;
+        return body;
     }
 
     private static Task<AlvoApiWorld> WorldAsync(IReadOnlyList<TestApiKey>? keys = null) =>

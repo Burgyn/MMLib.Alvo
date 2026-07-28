@@ -12,16 +12,11 @@
       "audit": true,
       "fields": {
         "name": { "type": "string", "required": true, "maxLength": 120 },
-        "color": { "type": "string", "maxLength": 7, "default": "#4f46e5" },
+        "color": { "type": "string", "maxLength": 7 },
         "owner_id": {
           "type": "ref",
           "entity": "users",
-          "required": true,
-          "default": { "$cel": "@user.id" }
-        },
-        "open_tasks": {
-          "type": "integer",
-          "rollup": { "from": "tasks", "op": "count", "where": "done == false" }
+          "required": true
         }
       },
       "rules": {
@@ -46,10 +41,9 @@
         "notes": { "type": "text" },
         "priority": {
           "type": "enum",
-          "values": ["low", "normal", "high"],
-          "default": "normal"
+          "values": ["low", "normal", "high"]
         },
-        "done": { "type": "boolean", "default": false },
+        "done": { "type": "boolean" },
         "due_on": { "type": "date" },
         "completed_at": { "type": "datetime", "readOnly": true }
       },

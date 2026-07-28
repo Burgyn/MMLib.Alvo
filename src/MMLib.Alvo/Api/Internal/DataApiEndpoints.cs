@@ -310,7 +310,8 @@ internal static class DataApiEndpoints
     /// <remarks>
     /// Derived from the violations rather than tracked beside them, so the two cannot disagree: a reader that
     /// stops reporting a field also stops suppressing the validator's checks for it, which is the direction
-    /// that fails loudly rather than silently.
+    /// that fails loudly rather than silently. An unrecognised key's pointer lands in this set too and is
+    /// simply inert — it names no field the entity declares, so there is nothing for it to suppress.
     /// </remarks>
     private static HashSet<string> RefusedFields(IReadOnlyList<AlvoViolation> violations) =>
         violations

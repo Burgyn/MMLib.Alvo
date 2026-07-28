@@ -116,12 +116,25 @@ internal static class PayloadViolations
     /// <para>
     /// <b>The one carve-out — a <c>hidden</c> field's name — does not apply on this path.</b> <c>hidden</c>
     /// restricts reading, so a hidden field is legitimately writable and is simply accepted; there is
-    /// nothing here to tell apart from an unknown name. The message still names neither the key nor the
-    /// entity, for the plainer reason above: the key is caller-supplied text.
+    /// nothing here to tell apart from an unknown name.
+    /// </para>
+    /// <para>
+    /// <b>The pointer names the key; the message still does not.</b> A JSON Pointer is a <em>location in the
+    /// request the caller authored</em> — it says "this key of yours is the problem", which they already knew
+    /// they sent, and it makes no claim about which fields the entity has. Without it, a caller sending five
+    /// keys learns only that one of them is wrong. The message is a different thing: it is prose that gets
+    /// logged and re-rendered, so it stays free of caller-supplied text.
+    /// </para>
+    /// <para>
+    /// Naming the key is also what stops this violation from being read as a statement about the
+    /// <em>document</em>. Against <see cref="BodyPointer"/> it was exactly that: the reader inferred "the body
+    /// did not bind" from an empty pointer, so a single unrecognised key discarded every other violation in
+    /// the response — see <c>JsonPayloadReader.Payload</c>.
     /// </para>
     /// </remarks>
-    internal static AlvoViolation UnknownField() => new(
-        BodyPointer,
+    /// <param name="key">The key the payload carried, as the caller spelled it.</param>
+    internal static AlvoViolation UnknownField(string key) => new(
+        PointerTo(key),
         "unknown-field",
         "The request body names a field that is not writable on this entity. Send only the fields the "
         + "entity declares.",

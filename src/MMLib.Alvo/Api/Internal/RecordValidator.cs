@@ -237,8 +237,22 @@ internal static class RecordValidator
     /// Probes every queued reference and reports the ones that could not be resolved.
     /// </summary>
     /// <remarks>
-    /// <b>Last, and only for values that already passed every other check</b> — each probe is a database
-    /// round trip, so a payload that was going to be refused anyway must not pay for them.
+    /// <para>
+    /// <b>Last, and only for the fields that passed every other check.</b> Each probe is a database round
+    /// trip, so a field whose value was already refused never earns one.
+    /// </para>
+    /// <para>
+    /// <b>A deviation from the plan's cost clause, recorded as one.</b> The plan says the probes "must not run
+    /// for input that was going to fail anyway", which read strictly means skipping them entirely once any
+    /// other field has a violation. They still run, and the reason is the promise this whole task exists to
+    /// keep: suppressing a reference violation because a different field was also wrong is "every violation of
+    /// the first kind", the exact defect a single unrecognised key once caused across the whole response. The
+    /// cost of the deviation is bounded and not caller-controlled — one round trip per <em>declared</em> ref
+    /// field, a number the descriptor author fixes, and only for values that were otherwise acceptable — and
+    /// it is paid strictly after authorization, so an unauthorized caller never reaches it
+    /// (<c>An_unauthorized_write_is_refused_before_its_body_is_validated</c>). If that trade ever needs
+    /// revisiting, the answer is a bound on probes per request, not a silently dropped violation.
+    /// </para>
     /// </remarks>
     private static async Task AddUnresolvedReferencesAsync(
         List<FieldSchema> references,

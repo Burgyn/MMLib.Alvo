@@ -208,13 +208,13 @@ internal sealed class DescriptorValidator : IDescriptorValidator
     private static IEnumerable<DescriptorValidationError> FieldSemanticErrors(
         string path, JsonProperty field, HashSet<string> entityNames)
     {
-        if (field.Value.TryGetProperty("computed", out _))
+        foreach (var unhonoured in UnhonouredFieldFeatures)
         {
-            yield return new DescriptorValidationError(
-                path,
-                "Computed fields are not supported yet.",
-                "Remove 'computed' or track the CEL→SQL compiler in #21.",
-                DescriptorValidationSeverity.Error);
+            if (field.Value.TryGetProperty(unhonoured.Key, out _))
+            {
+                yield return new DescriptorValidationError(
+                    path, unhonoured.Consequence, unhonoured.Fix, DescriptorValidationSeverity.Error);
+            }
         }
 
         if (IsUnknownRef(field.Value, entityNames, out var target))
@@ -231,6 +231,57 @@ internal sealed class DescriptorValidator : IDescriptorValidator
             yield return ShadowsAReservedQueryParameter(path, field.Name);
         }
     }
+
+    /// <summary>
+    /// Every field-level feature the frozen schema declares that this build does not honour, refused at
+    /// <b>apply</b> with the consequence stated and an alternative named.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The mapper refuses the same four (<c>DescriptorToSchemaMapper</c>'s
+    /// <c>EnsureEveryDeclaredFeatureIsHonoured</c>) because it is the only guard an embedded host that never
+    /// validates still passes through. This pass exists beside it so the refusal is a structured error with a
+    /// JSON path and a fix suggestion rather than an exception message — §0 principle 4 — and so a descriptor
+    /// carrying three of them reports all three instead of the first.
+    /// </para>
+    /// <para>
+    /// A list rather than four <c>if</c> blocks: the four differ only in their wording, and one of them
+    /// (<c>validation</c>) was missed for a whole task precisely because adding a fifth <c>if</c> is an easy
+    /// thing to forget. A table makes the omission visible.
+    /// </para>
+    /// </remarks>
+    private static IReadOnlyList<UnhonouredFeature> UnhonouredFieldFeatures => _unhonouredFieldFeatures;
+
+    private static readonly UnhonouredFeature[] _unhonouredFieldFeatures =
+    [
+        new(
+            "computed",
+            "Computed fields are not supported yet: the expression is never evaluated, so the column stays null.",
+            "Remove 'computed' or track the CEL→SQL compiler in #21."),
+        new(
+            "rollup",
+            "Rollups are not supported yet: nothing maintains the aggregate, so the column reads as "
+            + "permanently null while looking like data.",
+            "Remove 'rollup' and compute the aggregate in a query for now; rollups are deferred past F3."),
+        new(
+            "validation",
+            "Field 'validation' is not evaluated yet, so a value the expression forbids is accepted — the "
+            + "field is not constrained at all.",
+            "Remove 'validation'. Enforce the rule in a before-hook, or express it with a facet the API does "
+            + "validate — 'maxLength', 'precision'/'scale', enum 'values' or a 'format'."),
+        new(
+            "default",
+            "Field 'default' is not honoured yet: no column default is emitted and the value is dropped "
+            + "before any writer sees it, so the field is simply null — and on a 'required' field that is an "
+            + "INSERT of NULL into a NOT NULL column.",
+            "Remove 'default' and send the value explicitly on create."),
+    ];
+
+    /// <summary>One schema-declared field feature this build does not honour.</summary>
+    /// <param name="Key">The descriptor key.</param>
+    /// <param name="Consequence">What silently happens instead, stated concretely rather than as "unsupported".</param>
+    /// <param name="Fix">What to do instead.</param>
+    private sealed record UnhonouredFeature(string Key, string Consequence, string Fix);
 
     /// <summary>
     /// A field whose name the Data API's query string reserves, refused at <b>apply</b> time.

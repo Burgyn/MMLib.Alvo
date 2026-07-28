@@ -36,17 +36,27 @@ public sealed class ProblemDetailsTests
     private static readonly TestApiKey _admin = new("admin-key", ["admin", "authenticated"], ["*:read", "*:write"]);
 
     /// <summary>
-    /// Every problem <c>type</c> is a <c>https://alvo.dev/errors/…</c> URI and every 422 carries its
-    /// violations — not the framework's default status-code URI, which classifies a refusal by the number the
-    /// caller already read off the status line.
+    /// A refused query and a refused body each carry an <c>alvo.dev/errors</c> <c>type</c> and their
+    /// <c>violations</c> — not the framework's default status-code URI, which classifies a refusal by the
+    /// number the caller already read off the status line.
     /// </summary>
     /// <remarks>
-    /// Two refusals from two different code paths (the query parser and the record validator) are asserted,
-    /// because they render through different factory entry points and a call site left on
-    /// <c>Results.Problem</c>'s default is invisible in any single-path fact.
+    /// <para>
+    /// Named for the two paths it drives rather than for "every problem response", which it cannot show: the
+    /// claim about <em>every</em> slug belongs to
+    /// <see cref="Every_problem_type_slug_is_one_the_factory_actually_emits"/> and
+    /// <see cref="Only_the_slugs_awaiting_a_later_task_are_unreachable_over_http"/>, which enumerate the
+    /// catalogue and drive one request per slug. A fact whose name promises more than it asserts is how a gap
+    /// comes to look covered.
+    /// </para>
+    /// <para>
+    /// Two paths and not one, because the query parser and the record validator render through different
+    /// factory entry points: a single call site left on <c>Results.Problem</c>'s default is invisible in a
+    /// one-path fact.
+    /// </para>
     /// </remarks>
     [Fact]
-    public async Task Every_problem_response_carries_the_alvo_dev_type_uri_and_the_violations_array()
+    public async Task A_refused_query_and_a_refused_body_both_carry_an_alvo_type_and_their_violations()
     {
         await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin]);
 
@@ -150,6 +160,78 @@ public sealed class ProblemDetailsTests
     }
 
     /// <summary>
+    /// <c>GuardAsync</c> renders a <b>malformed-argument</b> refusal from the port as a 422, and lets a
+    /// <b>null-argument</b> failure propagate — because the second is Alvo's own broken invariant, not a
+    /// caller's malformed request.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>IAlvoData</c>'s family table says "<c>ArgumentException</c>, including its derived types" is the
+    /// malformed-query channel, and <see cref="ArgumentNullException"/> derives from it — so the widest arm
+    /// swallowed it. A request cannot express a null argument: reaching that arm means this layer or the port
+    /// passed a null where its own contract forbids one, which is family 5 (rendered 500 by the host, with the
+    /// stack trace its logging exists to record). Rendering it as 422 tells the caller to fix a request that
+    /// was fine — the same laundering the payload reader's <c>NotSupportedException</c> arm was fixed for.
+    /// </para>
+    /// <para>
+    /// It matters now rather than in principle: the region <c>GuardAsync</c> wraps grew several
+    /// <c>ArgumentNullException.ThrowIfNull</c> calls of its own when validation and the format catalogue
+    /// landed inside it.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_malformed_argument_is_rendered_but_a_null_argument_propagates()
+    {
+        var malformed = await ProblemResultFactory.GuardAsync(
+            () => throw new ArgumentException("the filter is not a filter", "query"));
+
+        (await SlugWrittenByAsync(malformed)).ShouldBe(
+            AlvoProblemTypes.MalformedQuery, "the port's malformed-query channel is a 422 the caller can act on");
+
+        var propagated = await Should.ThrowAsync<ArgumentNullException>(
+            () => ProblemResultFactory.GuardAsync(() => throw new ArgumentNullException("values")));
+
+        propagated.ParamName.ShouldBe(
+            "values",
+            "a null argument is Alvo's own broken invariant — it must reach the host with its stack trace, "
+            + "never be rendered to the caller as a malformed request");
+    }
+
+    /// <summary>
+    /// <see cref="AlvoProblemTypes.UriOf"/> mints a URI only for a slug the catalogue declares, and refuses
+    /// anything else — so a call site cannot invent a <c>type</c> that no documentation exists for.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The guard is the whole reason <see cref="AlvoProblemTypes.UriOf"/> exists rather than a string
+    /// concatenation at each call site: an un-catalogued slug would be an <c>alvo.dev/errors/…</c> URI
+    /// resolving to nothing, which is worse than the framework default because it <em>looks</em> documented.
+    /// It had no fact, so deleting it changed nothing observable.
+    /// </para>
+    /// <para>
+    /// The refusal names the slug and lists the declared ones, because the caller of this method is a
+    /// framework author reading an exception message, and "invalid slug" without the list is a trip to the
+    /// source.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void UriOf_mints_a_uri_only_for_a_declared_slug()
+    {
+        foreach (var slug in AlvoProblemTypes.All)
+        {
+            AlvoProblemTypes.UriOf(slug).ShouldBe(AlvoProblemTypes.BaseUri + slug);
+        }
+
+        var refused = Should.Throw<ArgumentException>(() => AlvoProblemTypes.UriOf("quota-exceeded"));
+
+        refused.Message.ShouldContain("quota-exceeded");
+        refused.Message.ShouldContain(
+            AlvoProblemTypes.NotFound, Case.Sensitive, "the refusal lists the declared slugs, or it sends the reader to the source");
+        Should.Throw<ArgumentException>(() => AlvoProblemTypes.UriOf(AlvoProblemTypes.NotFound.ToUpperInvariant()))
+            .ShouldNotBeNull("the comparison is ordinal — a slug is a wire token, not a word");
+    }
+
+    /// <summary>
     /// <b>No slug in the catalogue is one the factory cannot produce.</b> A catalogue with an entry nothing
     /// emits is documentation of a behaviour that does not exist, and an agent branching on it waits forever
     /// for a classification it will never see.
@@ -193,8 +275,15 @@ public sealed class ProblemDetailsTests
     /// The pending set is asserted in <em>both</em> directions: each pending slug must still be unreachable,
     /// and every other slug must be reachable. Task 6 wiring <c>If-Match</c> failed this fact until
     /// <c>precondition-failed</c> was moved out of the list and given the probe below — which was the point,
-    /// and Task 7's <c>Idempotency-Key</c> owes it the same visit. A one-directional allow-list would
-    /// silently absorb them forever.
+    /// and Task 7's <c>Idempotency-Key</c> owes it the same visit.
+    /// </para>
+    /// <para>
+    /// <b>The "still unreachable" direction is a request, not a list comparison.</b> It used to compare
+    /// <c>PendingUntilALaterTask</c> with its own literal, which could only fail on the cleanup edit — so
+    /// Task 6 landing did not fail it, and would not have failed it had the slug been left parked. The pending
+    /// slug is now driven by a request that <em>presents the header that causes it</em>
+    /// (<see cref="ADuplicateIdempotencyKeyIsStillIgnored"/>): today the header is inert and the second write
+    /// succeeds, so the day Task 7 honours it, that assertion fails and the list has to shrink.
     /// </para>
     /// <para>
     /// Reachability is measured by driving real requests, one per slug, against a real store — not by
@@ -215,20 +304,50 @@ public sealed class ProblemDetailsTests
             AlvoProblemTypes.All.Except(PendingUntilALaterTask, StringComparer.Ordinal).Order(StringComparer.Ordinal),
             "every slug not pending a later task must be reachable from an endpoint");
 
-        PendingUntilALaterTask.ShouldBe(
-            [AlvoProblemTypes.IdempotencyConflict],
-            ignoreOrder: true,
-            "this one needs Task 7's Idempotency-Key before a caller can cause it; when it lands, move its "
-            + "slug into a probe above rather than leaving it parked here");
+        await ADuplicateIdempotencyKeyIsStillIgnored(world);
     }
 
     /// <summary>
-    /// The slugs no request can yet produce, because the header that causes them is not wired up.
+    /// Presents <c>Idempotency-Key</c> twice with two <em>different</em> bodies and asserts the header is
+    /// still inert — the one thing that makes <see cref="AlvoProblemTypes.IdempotencyConflict"/>'s place on
+    /// the pending list a fact rather than a note.
+    /// </summary>
+    /// <remarks>
+    /// A reused key with a different fingerprint is precisely what <c>IAlvoData</c> answers
+    /// <c>AlvoIdempotencyConflictException</c> for, so once Task 7 turns the header into an
+    /// <c>AlvoIdempotency</c> token the second request becomes a 409 and this assertion fails — forcing the
+    /// slug out of <see cref="PendingUntilALaterTask"/> and into a probe. Until then the two creates both
+    /// succeed and produce two distinct rows, which is the behaviour a caller sees today and the reason the
+    /// slug is unreachable.
+    /// </remarks>
+    /// <param name="world">The running API.</param>
+    private static async Task ADuplicateIdempotencyKeyIsStillIgnored(AlvoApiWorld world)
+    {
+        var key = new Dictionary<string, string>(StringComparer.Ordinal) { ["Idempotency-Key"] = "task-7-owes-this" };
+
+        using var first = await world.SendAsync(
+            HttpMethod.Post, "/api/owners", _admin, body: new JsonObject { ["name"] = "First Ltd" }, headers: key);
+        using var second = await world.SendAsync(
+            HttpMethod.Post, "/api/owners", _admin, body: new JsonObject { ["name"] = "Second Ltd" }, headers: key);
+
+        first.StatusCode.ShouldBe(HttpStatusCode.Created);
+        second.StatusCode.ShouldBe(
+            HttpStatusCode.Created,
+            "the same Idempotency-Key with a different body is still accepted, so 'idempotency-conflict' is "
+            + "genuinely unreachable — when Task 7 makes this a 409, move the slug out of the pending list");
+        (await second.ReadJsonObjectAsync())["id"]!.GetValue<Guid>().ShouldNotBe(
+            (await first.ReadJsonObjectAsync())["id"]!.GetValue<Guid>(),
+            "two rows, not a replay — the header is inert rather than half-honoured");
+    }
+
+    /// <summary>
+    /// The slugs no request can yet produce, because the header that causes them is not honoured yet.
     /// </summary>
     /// <remarks>
     /// <c>ProblemResultFactory.GuardAsync</c> already maps the exception family — the mapping is
     /// <c>IAlvoData</c>'s contract and was settled in Task 3 — so what is missing is a caller-facing way to
-    /// raise it, not the rendering.
+    /// raise it, not the rendering. That "missing" is asserted by
+    /// <see cref="ADuplicateIdempotencyKeyIsStillIgnored"/> rather than described here.
     /// </remarks>
     private static string[] PendingUntilALaterTask => [AlvoProblemTypes.IdempotencyConflict];
 

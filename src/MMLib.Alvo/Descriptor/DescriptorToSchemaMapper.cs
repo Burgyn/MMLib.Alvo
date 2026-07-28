@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Schema;
+﻿using MMLib.Alvo.Api.Internal;
+using MMLib.Alvo.Schema;
 using System.Text.RegularExpressions;
 using SchemaFieldType = MMLib.Alvo.Schema.FieldType;
 
@@ -78,12 +79,14 @@ internal static class DescriptorToSchemaMapper
     }
 
     /// <summary>
-    /// A timeout on the throwaway instance used only to <em>parse</em> a pattern. It never matches
-    /// anything, so the value is immaterial — but <see cref="Regex"/> rejects
-    /// <see cref="Regex.InfiniteMatchTimeout"/>-free construction nowhere, and passing an explicit one
-    /// keeps the analyzer that requires a timeout satisfied at the one place a caller-authored pattern is
-    /// compiled outside <c>Api.Internal.FormatCatalog</c>.
+    /// The match timeout on the throwaway <see cref="Regex"/> built only to <em>parse</em> a pattern.
     /// </summary>
+    /// <remarks>
+    /// The instance is never matched against anything, so the value cannot affect behaviour — it is here
+    /// because a <see cref="Regex"/> constructed without an explicit timeout is a finding in its own right,
+    /// and this is one of the two places in the framework where an author-supplied pattern is compiled at
+    /// all (the other, <c>Api.Internal.FormatCatalog</c>, is where the timeout does real work).
+    /// </remarks>
     private static TimeSpan PatternSyntaxCheckTimeout => TimeSpan.FromMilliseconds(100);
 
     private static bool IsPhysical(EntityDescriptor e) => (e.Storage ?? StorageMode.Physical) == StorageMode.Physical;
@@ -218,12 +221,7 @@ internal static class DescriptorToSchemaMapper
     private static FieldSchema MapField(
         string name, FieldDescriptor f, IReadOnlyDictionary<string, string> formats)
     {
-        if (f.Computed is not null)
-        {
-            throw new InvalidDataException(
-                $"Field '{name}' declares 'computed', which is not supported yet: computed fields " +
-                "require the CEL→SQL compiler arriving in #21. Remove 'computed' or track #21.");
-        }
+        EnsureEveryDeclaredFeatureIsHonoured(name, f);
 
         return new()
         {
@@ -246,6 +244,97 @@ internal static class DescriptorToSchemaMapper
     }
 
     /// <summary>
+    /// Refuses, at apply, every field-level feature the frozen schema declares and this build does
+    /// <b>not</b> implement.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Silently discarding a schema-declared feature is the defect class this repo has now closed four
+    /// times</b>, and the shape of the closure is settled: <c>softDelete</c> and <c>computed</c> are refused
+    /// here and reported by <c>DescriptorValidator</c>, because a descriptor that asks for behaviour it does
+    /// not get is a lie the author cannot see. Each of the three added here sat in the identical position —
+    /// parsed onto <see cref="FieldDescriptor"/>, dropped by this mapper, nothing raised:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>
+    ///   <b><c>validation</c></b> is the worst of the three, because it fails <em>open on caller input</em>:
+    ///   <c>validation: "value >= 0"</c> with <c>-5</c> in the body was answered 201. A field the author
+    ///   believes is constrained is not.
+    ///   </item>
+    ///   <item>
+    ///   <b><c>default</c></b> is honoured nowhere — no DDL default is emitted, and the value is dropped
+    ///   before any writer sees it — so a <c>required</c> field with a <c>default</c> is not merely
+    ///   un-defaulted, it is an INSERT of NULL into a NOT NULL column. Refusing the descriptor is the only
+    ///   answer that is neither a silent wrong value nor a store-level 500 per request.
+    ///   </item>
+    ///   <item>
+    ///   <b><c>rollup</c></b> promises a framework-maintained aggregate. Unmaintained, it reads as a
+    ///   permanently null column that looks like data.
+    ///   </item>
+    /// </list>
+    /// <para>
+    /// Each refusal names what to do instead, because "not supported" without an alternative sends an agent
+    /// looking for a flag to flip.
+    /// </para>
+    /// </remarks>
+    /// <param name="name">The field being mapped.</param>
+    /// <param name="f">Its descriptor.</param>
+    /// <exception cref="InvalidDataException">The field declares a feature this build does not honour.</exception>
+    private static void EnsureEveryDeclaredFeatureIsHonoured(string name, FieldDescriptor f)
+    {
+        if (f.Computed is not null)
+        {
+            throw Unhonoured(
+                name,
+                "computed",
+                "computed fields require the CEL→SQL compiler arriving in #21",
+                "Remove 'computed' or track #21.");
+        }
+
+        if (f.Rollup is not null)
+        {
+            throw Unhonoured(
+                name,
+                "rollup",
+                "nothing maintains the aggregate, so the column would read as permanently null",
+                "Remove 'rollup' and compute the aggregate in a query for now; rollups are deferred past F3.");
+        }
+
+        if (f.Validation is not null)
+        {
+            throw Unhonoured(
+                name,
+                "validation",
+                "the expression is never evaluated, so a value it forbids is accepted",
+                "Remove 'validation'. Until it is implemented, enforce the rule in a before-hook, or express "
+                + "it with a facet the API does validate — 'maxLength', 'precision'/'scale', enum 'values' "
+                + "or a 'format'.");
+        }
+
+        if (f.Default is not null)
+        {
+            throw Unhonoured(
+                name,
+                "default",
+                "the value is not written by anything and no column default is emitted, so the field is "
+                + "simply null — and on a 'required' field that is an INSERT of NULL into a NOT NULL column",
+                "Remove 'default' and send the value explicitly on create.");
+        }
+    }
+
+    /// <summary>
+    /// The one wording for "the descriptor asks for something this build does not do", so four features
+    /// cannot be refused four different ways.
+    /// </summary>
+    /// <param name="field">The field declaring it.</param>
+    /// <param name="feature">The descriptor key.</param>
+    /// <param name="consequence">What silently happens instead, stated concretely.</param>
+    /// <param name="fix">What to do instead.</param>
+    private static InvalidDataException Unhonoured(
+        string field, string feature, string consequence, string fix) => new(
+        $"Field '{field}' declares '{feature}', which is not supported yet: {consequence}. {fix}");
+
+    /// <summary>
     /// Resolves a field's <c>format</c> to the pattern that enforces it: <see langword="null"/> for a
     /// built-in (the framework owns those patterns) and the declared pattern for a named format. A name
     /// that is neither is refused here, at apply.
@@ -259,7 +348,7 @@ internal static class DescriptorToSchemaMapper
     private static string? ResolveFormatPattern(
         string field, string? format, IReadOnlyDictionary<string, string> formats)
     {
-        if (format is null || BuiltInFormats.Contains(format))
+        if (format is null || FormatCatalog.BuiltIns.ContainsKey(format))
         {
             return null;
         }
@@ -280,19 +369,25 @@ internal static class DescriptorToSchemaMapper
     }
 
     /// <summary>
-    /// The formats the framework itself implements — exactly the enum branch of the descriptor schema's
-    /// <c>field.format</c>, no more.
+    /// The built-in format names, <b>read from the one authority</b> rather than restated here.
     /// </summary>
     /// <remarks>
-    /// Deliberately <b>not</b> extended with extra names here. The F2 design records "extending the
-    /// built-in <c>format</c> enum with more values" as additive-but-not-in-v1, so a build that accepted
-    /// <c>url</c> or <c>uuid</c> as built-ins would silently accept a descriptor the published schema's
-    /// enum branch does not list, and a descriptor written against it would stop validating on any other
-    /// build. The patterns live in <c>Api.Internal.FormatCatalog</c>; this is only the set of names the
-    /// mapper accepts without a declaration.
+    /// <para>
+    /// The names and the patterns they mean are one fact, and <c>Api.Internal.FormatCatalog</c> owns it. A
+    /// second copy here was exactly the drift it looks like: deleting a pattern from the catalogue left this
+    /// list still accepting the name, so the format resolved to nothing and validated nothing — a clean
+    /// build, a green suite, and caller input silently unchecked. Reaching across a feature boundary for a
+    /// shared list is the move <c>DescriptorValidator</c> already makes for <c>ReservedQueryKeys</c>, and for
+    /// the same stated reason: one list is the point.
+    /// </para>
+    /// <para>
+    /// Deliberately <b>not</b> extended with extra names. The F2 design records "extending the built-in
+    /// <c>format</c> enum with more values" as additive-but-not-in-v1, so a build that accepted <c>url</c> or
+    /// <c>uuid</c> as built-ins would silently accept a descriptor the published schema's enum branch does not
+    /// list, and a descriptor written against it would stop validating on any other build.
+    /// </para>
     /// </remarks>
-    internal static IReadOnlySet<string> BuiltInFormats { get; } =
-        new HashSet<string>(StringComparer.Ordinal) { "email", "uri", "phone" };
+    internal static IEnumerable<string> BuiltInFormats => FormatCatalog.BuiltIns.Keys;
 
     private static SchemaFieldType MapType(FieldType t) => t switch
     {

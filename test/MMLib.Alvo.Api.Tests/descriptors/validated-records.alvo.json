@@ -14,7 +14,15 @@
     },
     "greedy": {
       "pattern": "(a+)+b",
-      "description": "The textbook catastrophic-backtracking pattern, here so the ReDoS defence is measured rather than described."
+      "description": "The textbook catastrophic-backtracking pattern. It compiles on the linear-time engine, so it measures defence 1 (RegexOptions.NonBacktracking) and nothing else."
+    },
+    "lookahead-greedy": {
+      "pattern": "(?=(a+)+b)a*",
+      "description": "The same catastrophic core behind a lookahead, which RegexOptions.NonBacktracking refuses to compile — so this is the only pattern shape that reaches FormatCatalog's backtracking fallback and its fail-closed match timeout. Without it both arms are unreached and their deletion is invisible."
+    },
+    "lookahead-cheap": {
+      "pattern": "(?=[A-Z])[A-Za-z]{2,8}",
+      "description": "A lookahead pattern with no catastrophic core: it also takes the backtracking fallback, and it must still accept and refuse ordinary values — so 'the fallback compiles' is proved separately from 'the timeout refuses'."
     }
   },
   "entities": {
@@ -49,7 +57,11 @@
         "quantity": { "type": "integer", "required": true },
         "sku": { "type": "string", "format": "sku-code", "maxLength": 40 },
         "contact": { "type": "string", "format": "email", "maxLength": 120 },
-        "pathological": { "type": "string", "format": "greedy", "maxLength": 200 },
+        "homepage": { "type": "string", "format": "uri", "maxLength": 200 },
+        "telephone": { "type": "string", "format": "phone", "maxLength": 40 },
+        "pathological": { "type": "string", "format": "greedy", "maxLength": 4000 },
+        "backtracking": { "type": "string", "format": "lookahead-greedy", "maxLength": 4000 },
+        "capitalised": { "type": "string", "format": "lookahead-cheap", "maxLength": 40 },
         "price": { "type": "decimal", "precision": 6, "scale": 2 },
         "status": { "type": "enum", "values": ["draft", "active", "retired"] },
         "slug": { "type": "string", "readOnly": true, "maxLength": 40 },

@@ -19,10 +19,11 @@ namespace MMLib.Alvo.Api.Internal;
 /// keeps the <c>violations</c> array on the one shape <see cref="AlvoViolation"/> publishes.
 /// </para>
 /// <para>
-/// <b><see cref="InvalidOperationException"/> is deliberately not caught.</b> Its contract is "an invariant
-/// the implementation itself relies on is broken", which is never a well-formed request from an authorized
-/// caller; swallowing it into a hand-made 500 would lose the stack trace the host's own logging is there to
-/// record. It propagates, and the host answers 500 — see <see cref="AlvoProblemTypes"/> for why the
+/// <b><see cref="InvalidOperationException"/> is deliberately not caught, and neither is
+/// <see cref="ArgumentNullException"/>.</b> Both mean "an invariant the implementation itself relies on is
+/// broken" — <c>IAlvoData</c>'s fifth family — which is never a well-formed request from an authorized
+/// caller; swallowing either into a hand-made 500 would lose the stack trace the host's own logging is there
+/// to record. They propagate, and the host answers 500 — see <see cref="AlvoProblemTypes"/> for why the
 /// catalogue therefore has no slug for it.
 /// </para>
 /// </remarks>
@@ -155,9 +156,18 @@ internal static class ProblemResultFactory
         {
             return Problem(StatusCodes.Status409Conflict, AlvoProblemTypes.IdempotencyConflict, exception.Message);
         }
-        catch (ArgumentException exception)
+        catch (ArgumentException exception) when (exception is not ArgumentNullException)
         {
             // Last, because it is the widest of the five: the malformed-query/payload channel.
+            //
+            // ArgumentNullException is deliberately excluded even though it derives from ArgumentException
+            // and the port's family is "ArgumentException, including its derived types". A null argument is
+            // never a malformed request — the request cannot express one. It means this layer, or the port,
+            // passed a null where its own contract forbids one, which is family 5 ("an invariant the
+            // implementation itself relies on is broken", rendered 500 by the host with its stack trace
+            // intact). The guarded region grew several ThrowIfNull calls of its own with validation and the
+            // format catalogue, so without this the first of those to fire would have been reported to the
+            // caller as "your payload is malformed" — advice about a request that was fine.
             return Malformed(exception.Message);
         }
     }

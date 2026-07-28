@@ -32,10 +32,10 @@ namespace MMLib.Alvo.Api.Internal;
 /// finished document has already paid the cost.
 /// </para>
 /// <para>
-/// <b>An undeclared key is refused before it is materialised</b> — not to withhold anything, but so no
-/// attacker-controlled value is re-serialised into a string on its way to a refusal that was already
-/// certain. See <see cref="PayloadViolations.UnknownField"/> for what the wording does and does not
-/// protect.
+/// <b>An undeclared key is refused before its value is materialised</b> — not to withhold anything, but so
+/// no attacker-controlled <em>value</em> is re-serialised into a string on its way to a refusal that was
+/// already certain. The key itself is named, as the violation's JSON Pointer; see
+/// <see cref="PayloadViolations.UnknownField"/> for why that is the location and not a disclosure.
 /// </para>
 /// <para>
 /// <b>A body-level refusal stops the read; a per-field one does not.</b> A body that is too large, too
@@ -50,27 +50,33 @@ internal static class JsonPayloadReader
     private const int ReadChunkBytes = 8 * 1024;
 
     /// <summary>What one body read produced: the bound values, and every reason a field or the body was refused.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b><paramref name="BoundAsAnObject"/> is stated by the reader, never inferred from a violation's
+    /// pointer.</b> It was inferred once — "every pointer is non-empty, so the body must have bound" — and
+    /// that made a structural fact ride on an in-band value: an unrecognised <em>key</em> reported against
+    /// the body pointer, so one such key made the reader conclude the whole body had failed to bind, and
+    /// every other violation was discarded. A payload simultaneously missing a required field, over a length
+    /// bound and writing a read-only field came back with <b>one</b> violation. Two different questions
+    /// cannot share one representation; this record answers the structural one explicitly and nothing else
+    /// encodes it.
+    /// </para>
+    /// <para>
+    /// It exists at all because <b>a body that is not an object must not be validated as if it were
+    /// empty</b>: an array, a scalar, a truncated document or an over-bound body binds no field, so running
+    /// the record validator over it would report every required field as missing beside the real reason —
+    /// telling a caller who sent <c>[1,2,3]</c> to supply <c>name</c>, which is advice about a body they
+    /// never sent.
+    /// </para>
+    /// </remarks>
     /// <param name="Values">
     /// The bound field values — every key that bound, even when another key did not, so
     /// <see cref="RecordValidator"/> can measure the rest of the payload in the same pass.
     /// </param>
     /// <param name="Violations">Every reason the body was refused; empty when it bound completely.</param>
-    internal sealed record Payload(Dictionary<string, object?> Values, IReadOnlyList<AlvoViolation> Violations)
-    {
-        /// <summary>
-        /// Whether the body was a JSON object this entity's fields could be read out of at all.
-        /// </summary>
-        /// <remarks>
-        /// <b>A body that was not must not be validated <em>as if it were empty</em>.</b> An array, a scalar,
-        /// a truncated document or an over-bound body binds no field, so running the record validator over it
-        /// would report every required field as missing beside the real reason — telling a caller who sent
-        /// <c>[1,2,3]</c> to supply <c>name</c>, which is advice about a body they did not send. Recognised by
-        /// the pointer rather than by a flag: <see cref="PayloadViolations.BodyPointer"/> is RFC 6901's pointer
-        /// to the whole document, so "this refusal is about the body, not a field" is already stated in the
-        /// violation itself.
-        /// </remarks>
-        internal bool BoundAsAnObject => Violations.All(violation => violation.Pointer.Length > 0);
-    }
+    /// <param name="BoundAsAnObject">Whether the body was a JSON object this entity's fields could be read out of at all.</param>
+    internal sealed record Payload(
+        Dictionary<string, object?> Values, IReadOnlyList<AlvoViolation> Violations, bool BoundAsAnObject);
 
     /// <summary>Reads and binds the request body, or reports why it could not be.</summary>
     /// <param name="request">The request whose body to read.</param>
@@ -98,7 +104,7 @@ internal static class JsonPayloadReader
     }
 
     /// <summary>A body that bound nothing at all, carrying the one violation that stopped it.</summary>
-    private static Payload Refused(AlvoViolation violation) => new([], [violation]);
+    private static Payload Refused(AlvoViolation violation) => new([], [violation], BoundAsAnObject: false);
 
     /// <summary>
     /// Copies the body into <paramref name="destination"/>, refusing at the first chunk that would cross
@@ -229,7 +235,7 @@ internal static class JsonPayloadReader
             BindOne(key, value, declared, values, violations);
         }
 
-        return new Payload(values, violations);
+        return new Payload(values, violations, BoundAsAnObject: true);
     }
 
     /// <summary>Binds one key, or records why it could not be bound.</summary>
@@ -242,7 +248,7 @@ internal static class JsonPayloadReader
     {
         if (!declared.TryGetValue(key, out var field))
         {
-            violations.Add(PayloadViolations.UnknownField());
+            violations.Add(PayloadViolations.UnknownField(key));
             return;
         }
 
