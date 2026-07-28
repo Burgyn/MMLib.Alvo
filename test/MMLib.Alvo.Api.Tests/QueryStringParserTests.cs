@@ -4,6 +4,8 @@ using MMLib.Alvo.Api.Internal;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Schema;
 using System.Globalization;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace MMLib.Alvo.Api.Tests;
 
@@ -75,6 +77,81 @@ public sealed class QueryStringParserTests
         Render(parsed!.Query.Filter).ShouldBe(expectedTree);
     }
 
+    /// <summary>
+    /// An accepted operand reaches the port in the CLR type the field is <b>carried</b> as, not as the text it
+    /// arrived in.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The tree-shape facts above cannot see this: their formatter stringifies, so a parser that handed the raw
+    /// text on after a successful <c>long.TryParse</c> renders identically and passes every one of them. So does
+    /// the end-to-end suite, which filtered only a string field.
+    /// </para>
+    /// <para>
+    /// It is the bug class PR2 spent a whole fix wave on. SQLite compares <c>TEXT</c> lexically, so a
+    /// <c>decimal</c> column filtered with a string operand answered <c>price &gt; 100</c> with a row priced
+    /// 12.34 — the same fail-open, in the channel a caller controls per request.
+    /// </para>
+    /// <para>
+    /// <see cref="FieldClrType"/> is the authority for what the type must be; writing the expected types out
+    /// here would be the third copy of a mapping that exists precisely so there is one.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData("year=eq.2020", "year")]
+    [InlineData("year=gte.-7", "year")]
+    [InlineData("price=eq.1500.50", "price")]
+    [InlineData("price=lt.9", "price")]
+    [InlineData("passed=eq.true", "passed")]
+    [InlineData("id=eq.8bf3c0de-0000-4000-8000-000000000001", "id")]
+    [InlineData("owner_id=eq.8bf3c0de-0000-4000-8000-000000000001", "owner_id")]
+    [InlineData("serviced_at=gte.2024-01-31T09:30:00Z", "serviced_at")]
+    [InlineData("inspected_on=gte.2024-01-31", "inspected_on")]
+    [InlineData("make=eq.vw", "make")]
+    [InlineData("make=like.v%", "make")]
+    [InlineData("notes=eq.anything", "notes")]
+    public void An_accepted_operand_reaches_the_port_as_the_type_the_field_is_carried_as(
+        string queryString, string field)
+    {
+        TryParse(queryString, out var parsed, out var violations).ShouldBeTrue(Because(violations));
+
+        var comparison = parsed!.Query.Filter.ShouldBeOfType<AlvoComparison>();
+        comparison.Value.ShouldNotBeNull();
+        comparison.Value!.GetType().ShouldBe(FieldClrType.Of(Declared(field)));
+    }
+
+    /// <summary>
+    /// Every candidate of an <c>in</c> list is typed too — the position a per-value conversion is easiest to
+    /// forget, since only the first one is ever eyeballed.
+    /// </summary>
+    [Fact]
+    public void Every_in_candidate_reaches_the_port_as_the_type_the_field_is_carried_as()
+    {
+        TryParse("year=in.(1999,2020,-7)", out var parsed, out var violations).ShouldBeTrue(Because(violations));
+
+        var candidates = Candidates(parsed!.Query.Filter);
+        candidates.Count.ShouldBe(3);
+        candidates.ShouldAllBe(candidate => candidate!.GetType() == FieldClrType.Of(Declared("year")));
+    }
+
+    /// <summary>
+    /// <c>is</c> is the one operator whose operand is not a value of the field's type: it carries SQL's own three
+    /// identity operands, and <c>null</c> must arrive as a real <see langword="null"/> rather than the text.
+    /// </summary>
+    [Theory]
+    [InlineData("notes=is.null", null)]
+    [InlineData("passed=is.true", true)]
+    [InlineData("passed=is.false", false)]
+    public void An_is_operand_reaches_the_port_as_null_or_a_boolean(string queryString, bool? expected)
+    {
+        TryParse(queryString, out var parsed, out var violations).ShouldBeTrue(Because(violations));
+
+        parsed!.Query.Filter.ShouldBeOfType<AlvoComparison>().Value.ShouldBe(expected);
+    }
+
+    private static FieldSchema Declared(string field) =>
+        _vehicles.Fields.Single(candidate => string.Equals(candidate.Name, field, StringComparison.Ordinal));
+
     [Theory]
     [InlineData("nosuchfield=eq.1")]          // unknown field
     [InlineData("year=nosuchop.1")]           // operator off the allow-list
@@ -140,7 +217,7 @@ public sealed class QueryStringParserTests
     {
         TryParse(queryString, out _, out var violations).ShouldBeFalse();
 
-        violations.Select(violation => violation.Code).ShouldContain(code);
+        Codes(violations).ShouldBe([code]);
     }
 
     /// <summary>
@@ -164,6 +241,26 @@ public sealed class QueryStringParserTests
     [Fact]
     public void A_select_naming_a_hidden_field_is_refused_exactly_like_an_unknown_one() =>
         OnlyViolation("select=secret").ShouldBe(OnlyViolation("select=nosuchfield"));
+
+    /// <summary>
+    /// The parser's refusal is <b>byte-equal</b> to the port's, because both read one constant on the port.
+    /// </summary>
+    /// <remarks>
+    /// It was three hand-synced literals — this parser, the EF driver's <c>QueryFieldGuard</c> and the in-memory
+    /// reference — pinned by nothing. That is the one message where drift is not a cosmetic inconsistency: the
+    /// parser refuses before the port is ever reached, so the two wordings are never observed side by side, and a
+    /// caller who could tell "refused by the parser" from "refused by the port" would have the field-existence
+    /// oracle the <c>hiddenFields</c> parameter exists to close.
+    /// </remarks>
+    [Fact]
+    public void The_unavailable_field_refusal_is_the_ports_own_wording()
+    {
+        QueryViolations.UnavailableFieldMessage.ShouldBe(AlvoAuthorizationException.QueryFieldUnavailable);
+
+        OnlyViolation("secret=eq.x").Message.ShouldBe(AlvoAuthorizationException.QueryFieldUnavailable);
+        OnlyViolation("order=nosuchfield").Message.ShouldBe(AlvoAuthorizationException.QueryFieldUnavailable);
+        OnlyViolation("select=secret").Message.ShouldBe(AlvoAuthorizationException.QueryFieldUnavailable);
+    }
 
     /// <summary>
     /// A mistyped reserved keyword is refused as an unavailable field, and refused <em>identically</em>: in this
@@ -205,6 +302,33 @@ public sealed class QueryStringParserTests
                 .ShouldNotContain(marker, Case.Insensitive);
         }
     }
+
+    /// <summary>
+    /// Every refusal this parser raises carries a fix suggestion. <see cref="AlvoViolation.FixSuggestion"/> is
+    /// nullable for a violation forwarded from a source that has none; nothing here is such a source, and §0
+    /// principle 4 makes the suggestion part of the contract rather than a nicety.
+    /// </summary>
+    [Fact]
+    public void Every_refusal_carries_a_fix_suggestion()
+    {
+        var refusals = _everyRefusal.SelectMany(queryString =>
+        {
+            TryParse(queryString, out _, out var violations).ShouldBeFalse(queryString);
+            return violations;
+        }).ToList();
+
+        refusals.Count.ShouldBeGreaterThanOrEqualTo(_everyRefusal.Length);
+        refusals.ShouldAllBe(violation => !string.IsNullOrWhiteSpace(violation.FixSuggestion));
+    }
+
+    /// <summary>One query string per refusal this parser can raise, so the fix-suggestion fact covers all of them.</summary>
+    private static readonly string[] _everyRefusal =
+    [
+        "nosuchfield=eq.1", "secret=eq.1", "year=nosuchop.1", "year=eq", "year=gte.notanumber",
+        "make=eq.a%00b", "notes=is.hello", "make=in.skoda", "or=(", "or=()", "year=like.2",
+        "limit=0", "offset=-1", "after=", "after=abc&offset=1", "order=", "order=year.sideways",
+        "order=year,year", "order=color", "select=", "select=nosuchfield", "limit=1&limit=2",
+    ];
 
     /// <summary>
     /// The allow-list is derived from <see cref="AlvoFilterOperator"/>, so this fact is what stops that
@@ -310,6 +434,27 @@ public sealed class QueryStringParserTests
         parsed!.Query.After.ShouldBe(cursor);
     }
 
+    /// <summary>
+    /// A cursor longer than any page could have minted is refused rather than handed to a provider's decoder.
+    /// </summary>
+    /// <remarks>
+    /// The cursor is the one caller-supplied string this layer deliberately does not interpret, and it is reachable
+    /// <b>without authentication</b> — so an unbounded one is free work for an anonymous caller on the way to a
+    /// decoder. Asserted on both sides of the bound, since a fact only past it would pass against no bound at all
+    /// once the transport's own request-line limit did the refusing.
+    /// </remarks>
+    [Fact]
+    public void A_cursor_longer_than_any_page_could_have_issued_is_refused()
+    {
+        var longest = new string('c', 512);
+
+        TryParse($"after={longest}", out var accepted, out var violations).ShouldBeTrue(Because(violations));
+        TryParse($"after={longest}c", out _, out var refused).ShouldBeFalse();
+
+        accepted!.Query.After.ShouldBe(longest);
+        Codes(refused).ShouldBe(["invalid-cursor"]);
+    }
+
     [Theory]
     [InlineData("order=year", "year asc nulls-last")]
     [InlineData("order=year.desc", "year desc nulls-last")]
@@ -383,19 +528,71 @@ public sealed class QueryStringParserTests
     }
 
     /// <summary>
-    /// The term budget is per <b>request</b>, not per parameter, so a caller cannot multiply the port's breadth
-    /// limit by sending many filters. The boundary is asserted on both sides of the cap.
+    /// The <c>in</c>-candidate allowance is spent across the <b>whole query</b>, not per list — the bound the
+    /// port cannot express, because it measures only the longest list.
     /// </summary>
+    /// <remarks>
+    /// Two lists of 600 are 1200 bind parameters in one statement while each passes the per-list cap, and the
+    /// maximum number of terms each with a maximum list is 256 000 — past the 32 766 ceiling the per-list number
+    /// was measured against. Asserted at the boundary on both sides: two lists summing to exactly the allowance
+    /// parse, and one candidate more does not.
+    /// </remarks>
+    [Fact]
+    public void The_in_candidate_allowance_is_spent_across_the_whole_query()
+    {
+        var half = AlvoFilter.MaxInCandidates / 2;
+        var atAllowance = $"{InList("year", half)}&{InList("price", AlvoFilter.MaxInCandidates - half)}";
+        var oneTooMany = $"{InList("year", half)}&{InList("price", AlvoFilter.MaxInCandidates - half + 1)}";
+
+        TryParse(atAllowance, out _, out var accepted).ShouldBeTrue(Because(accepted));
+        TryParse(oneTooMany, out _, out var refused).ShouldBeFalse();
+
+        Codes(refused).ShouldBe(["too-many-in-candidates"]);
+    }
+
+    /// <summary>
+    /// The term budget is per <b>request</b>, not per parameter, so a caller cannot multiply the port's breadth
+    /// limit by sending many filters. Asserted at the <b>exact</b> boundary, on both sides, and on the code set
+    /// rather than on membership.
+    /// </summary>
+    /// <remarks>
+    /// The boundary is <c>MaxTerms - 1</c> parameters, not <c>MaxTerms</c>: the conjunction those parameters are
+    /// wrapped in is itself a node, so N parameters produce N + 1 nodes. Getting that off by one is what let the
+    /// port's own guard answer at exactly 256 parameters, emitting the code documented as unreachable — and the
+    /// earlier version of this fact asserted <em>membership</em>, so it saw <c>filter-too-wide</c>, was satisfied,
+    /// and never noticed the second violation beside it.
+    /// </remarks>
     [Fact]
     public void The_term_budget_is_spent_across_every_parameter_not_reset_per_parameter()
     {
-        var justInside = string.Join("&", Enumerable.Range(0, AlvoFilter.MaxTerms - 1).Select(_ => "year=gte.1"));
-        var justOutside = string.Join("&", Enumerable.Range(0, AlvoFilter.MaxTerms + 1).Select(_ => "year=gte.1"));
+        var largestTree = string.Join("&", Enumerable.Range(0, AlvoFilter.MaxTerms - 1).Select(_ => "year=gte.1"));
+        var oneNodeTooMany = string.Join("&", Enumerable.Range(0, AlvoFilter.MaxTerms).Select(_ => "year=gte.1"));
 
-        TryParse(justInside, out _, out var accepted).ShouldBeTrue(Because(accepted));
-        TryParse(justOutside, out _, out var refused).ShouldBeFalse();
+        TryParse(largestTree, out _, out var accepted).ShouldBeTrue(Because(accepted));
+        TryParse(oneNodeTooMany, out _, out var refused).ShouldBeFalse();
 
-        refused.Select(violation => violation.Code).ShouldContain("filter-too-wide");
+        Codes(refused).ShouldBe(["filter-too-wide"]);
+    }
+
+    /// <summary>
+    /// The conjunction those parameters are wrapped in is charged like any other node, so the largest tree a
+    /// caller can build is exactly the port's own limit — never one node past it.
+    /// </summary>
+    /// <remarks>
+    /// This is the fact whose absence let <c>filter-beyond-port-limits</c> reach a caller. It asserts the node
+    /// count the port itself would measure, so it fails whether the conjunction goes uncharged or is charged too
+    /// late to bound anything.
+    /// </remarks>
+    [Fact]
+    public void The_largest_filter_a_caller_can_build_is_exactly_the_ports_own_term_limit()
+    {
+        var largestTree = string.Join("&", Enumerable.Range(0, AlvoFilter.MaxTerms - 1).Select(_ => "year=gte.1"));
+
+        TryParse(largestTree, out var parsed, out var violations).ShouldBeTrue(Because(violations));
+
+        var conjunction = parsed!.Query.Filter.ShouldBeOfType<AlvoAnd>();
+        conjunction.Filters.Count.ShouldBe(AlvoFilter.MaxTerms - 1);
+        Should.NotThrow(() => AlvoFilter.EnsureWithinLimits(parsed.Query.Filter));
     }
 
     /// <summary>
@@ -405,13 +602,34 @@ public sealed class QueryStringParserTests
     /// happen. The plan asserted the opposite; this fact is what settles it.
     /// </summary>
     [Fact]
-    public void Every_reserved_query_parameter_is_a_name_the_descriptor_would_accept_as_a_field() =>
-        ReservedQueryKeys.All.ShouldAllBe(key => IsLegalFieldName(key));
+    public void Every_reserved_query_parameter_is_a_name_the_descriptor_would_accept_as_a_field()
+    {
+        var grammar = FieldNameGrammar();
 
-    private static bool IsLegalFieldName(string name) =>
-        name.Length is > 0 and <= 63
-        && char.IsAsciiLetterLower(name[0])
-        && name.All(character => char.IsAsciiLetterLower(character) || char.IsAsciiDigit(character) || character == '_');
+        ReservedQueryKeys.All.ShouldAllBe(key => Regex.IsMatch(key, grammar, RegexOptions.None, _regexTimeout));
+    }
+
+    /// <summary>
+    /// The field-name pattern read from <c>schema/project.schema.json</c> itself.
+    /// </summary>
+    /// <remarks>
+    /// Read rather than restated. An inlined copy of the grammar keeps this fact green through exactly the change
+    /// that should retire it — the schema growing the reserved-word exclusion that would make the collision
+    /// impossible — so the fact would go on justifying a guard that had become dead. Reading the frozen artifact
+    /// means a narrowed pattern fails here and the guard's justification is re-examined.
+    /// </remarks>
+    private static string FieldNameGrammar()
+    {
+        var schema = JsonDocument.Parse(
+            File.ReadAllText(Path.Combine(RepositoryRoot.Find(), "schema", "project.schema.json")));
+        return schema.RootElement
+            .GetProperty("$defs").GetProperty("entity")
+            .GetProperty("properties").GetProperty("fields")
+            .GetProperty("propertyNames").GetProperty("pattern")
+            .GetString()!;
+    }
+
+    private static readonly TimeSpan _regexTimeout = TimeSpan.FromSeconds(1);
 
     /// <summary>
     /// So the ambiguity is refused once, at mapping, naming the entity, the field and the fix — never
@@ -459,11 +677,21 @@ public sealed class QueryStringParserTests
         Render(parsed!.Query.Filter).ShouldBe("NOT (year == 2020 OR year == 2021)");
     }
 
-    private static string InList(int candidates) =>
-        "year=in.(" + string.Join(",", Enumerable.Range(1, candidates)) + ")";
+    private static string InList(int candidates) => InList("year", candidates);
+
+    private static string InList(string field, int candidates) =>
+        $"{field}=in.(" + string.Join(",", Enumerable.Range(1, candidates)) + ")";
 
     private static IReadOnlyList<object?> Candidates(AlvoFilter? filter) =>
         (IReadOnlyList<object?>)((AlvoComparison)filter!).Value!;
+
+    /// <summary>
+    /// The distinct codes a refusal carried. Asserted as a <b>set</b> rather than with
+    /// <c>ShouldContain</c>, which is satisfied by a parser that emits every code it knows — and which is how
+    /// a second, wrong violation rode along beside the right one unnoticed.
+    /// </summary>
+    private static IReadOnlyList<string> Codes(IReadOnlyList<AlvoViolation> violations) =>
+        [.. violations.Select(violation => violation.Code).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
 
     private static AlvoViolation OnlyViolation(string queryString)
     {

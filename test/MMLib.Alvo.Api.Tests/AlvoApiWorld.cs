@@ -293,8 +293,49 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
         }
 
         request.Content = content;
-        return await _client.SendAsync(request, TestContext.Current.CancellationToken);
+        var response = await _client.SendAsync(request, TestContext.Current.CancellationToken);
+        await EnsureNothingInternalLeakedAsync(response);
+        return response;
     }
+
+    /// <summary>
+    /// Screens <b>every</b> response the whole API suite produces for text no caller may ever be shown.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Here rather than in a fact of its own, because both claims are global and a per-fact assertion only
+    /// covers the responses somebody remembered to check. Both entries were live defects, not hypotheticals:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>
+    ///   <c>filter-beyond-port-limits</c> is documented as a defect report the parser's own accounting makes
+    ///   unreachable. A caller <em>could</em> trigger it (256 filter parameters), and the fact that was offered
+    ///   as evidence could not fire. This is what "unreachable" now means: no response in the suite carries it.
+    ///   </item>
+    ///   <item>
+    ///   <c>(Parameter '…')</c> is what <see cref="ArgumentException"/> appends to a message. It shipped in 422
+    ///   bodies because the method meant to strip it cut at a newline the suffix is not behind.
+    ///   </item>
+    /// </list>
+    /// <para>
+    /// The body is read here and again by whichever reader a fact uses; <c>HttpClient</c> buffers a
+    /// <c>TestServer</c> response, so repeated reads are the same bytes.
+    /// </para>
+    /// </remarks>
+    private static async Task EnsureNothingInternalLeakedAsync(HttpResponseMessage response)
+    {
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        foreach (var internalDetail in _neverInAResponse)
+        {
+            body.ShouldNotContain(
+                internalDetail,
+                Case.Sensitive,
+                $"a {(int)response.StatusCode} response carried '{internalDetail}', which no caller may see");
+        }
+    }
+
+    /// <summary>Text that reaching a caller is a defect, whichever endpoint produced the response.</summary>
+    private static readonly string[] _neverInAResponse = ["filter-beyond-port-limits", "(Parameter '"];
 
     /// <summary>A raw JSON body, sent exactly as written.</summary>
     /// <param name="json">The body text.</param>

@@ -31,11 +31,15 @@ internal static class QueryViolations
 
     /// <summary>
     /// The one refusal for a field name this caller cannot use — undeclared, masked, or a mistyped reserved
-    /// keyword read as a filter. Worded as the port words the same refusal, and naming neither the field nor
-    /// which of the three it was.
+    /// keyword read as a filter — naming neither the field nor which of the three it was.
     /// </summary>
-    internal const string UnavailableFieldMessage =
-        "The query references a field that is not available to this caller.";
+    /// <remarks>
+    /// <b>Read from the port, not worded here.</b> This is the message whose sameness across layers <em>is</em>
+    /// the confidentiality property, and it was a hand-synced literal in three assemblies before
+    /// <see cref="AlvoAuthorizationException.QueryFieldUnavailable"/> existed. The parser refuses before the port
+    /// is reached, so the two are never observed side by side and nothing would have caught them drifting.
+    /// </remarks>
+    internal const string UnavailableFieldMessage = AlvoAuthorizationException.QueryFieldUnavailable;
 
     /// <summary>The refusal for a field name this caller cannot use.</summary>
     /// <param name="pointer">Which parameter the name appeared in.</param>
@@ -133,13 +137,23 @@ internal static class QueryViolations
         $"Send at most {AlvoFilter.MaxTerms} terms across the whole query. A filter this wide is a statement "
         + "the engine may refuse outright.");
 
-    /// <summary>The refusal for an <c>in</c> list longer than the port's candidate limit.</summary>
+    /// <summary>
+    /// The refusal for too many <c>in</c> candidates — in one list, or across the whole query.
+    /// </summary>
+    /// <remarks>
+    /// <b>The total matters as much as the longest list, and the port only measures the longest.</b>
+    /// <see cref="AlvoFilter.MaxInCandidates"/> is per-list, so a filter carrying the maximum number of terms each
+    /// with a maximum list is <c>MaxTerms × MaxInCandidates</c> — 256 000 bind parameters in one statement, well
+    /// past the 32 766 ceiling <see cref="AlvoFilter.MaxInCandidates"/>' own remarks measured on SQLite, and every
+    /// one of them caller-supplied. Capping the total at the same number bounds the statement while still letting
+    /// a single list use the whole allowance.
+    /// </remarks>
     internal static AlvoViolation TooManyInCandidates() => new(
         FilterPointer,
         "too-many-in-candidates",
-        "An 'in' filter lists more candidates than this API parses.",
-        $"List at most {AlvoFilter.MaxInCandidates} candidates. Split the list across requests — every "
-        + "candidate becomes its own bind parameter.");
+        "The query lists more 'in' candidates than this API parses.",
+        $"List at most {AlvoFilter.MaxInCandidates} candidates in one filter and across the whole query. Split "
+        + "them across requests — every candidate becomes its own bind parameter.");
 
     /// <summary>
     /// The refusal for a filter the <em>port's</em> own guard rejected, carrying the port's own wording.
@@ -177,12 +191,21 @@ internal static class QueryViolations
         "Send offset=0 or higher — or, better, page with the 'after' cursor, which does not shift under "
         + "concurrent writes.");
 
-    /// <summary>The refusal for an empty cursor, which is not a cursor a page ever issued.</summary>
-    internal static AlvoViolation InvalidCursor() => new(
+    /// <summary>
+    /// The refusal for a cursor no page could have issued — empty, or longer than this API passes through.
+    /// </summary>
+    /// <remarks>
+    /// One refusal for both, because a cursor is opaque: this layer cannot say <em>why</em> a cursor is wrong
+    /// beyond "no page minted that", and distinguishing the two would start describing the encoding to a caller
+    /// who is contractually not supposed to know it.
+    /// </remarks>
+    /// <param name="maxLength">The longest cursor this API passes through.</param>
+    internal static AlvoViolation InvalidCursor(int maxLength) => new(
         ReservedQueryKeys.After,
         "invalid-cursor",
-        "The cursor is empty.",
-        "Send the 'next' value a previous page returned, or omit 'after' for the first page.");
+        "The cursor is empty or longer than any page could have issued.",
+        $"Send the 'next' value a previous page returned — at most {maxLength} characters — or omit 'after' for "
+        + "the first page.");
 
     /// <summary>The refusal for a query anchoring one window two ways, carrying the port's own wording.</summary>
     /// <param name="message">The port's own refusal text.</param>
@@ -204,16 +227,26 @@ internal static class QueryViolations
     /// The refusal for a sort key a paged read cannot use, carrying the port's own wording.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// This one <em>does</em> name the field, because the port's message does and because the field is
     /// provably declared and unmasked by the time this is reachable — the availability check runs first, so
     /// naming it answers nothing the caller did not already know.
+    /// </para>
+    /// <para>
+    /// <b>The fix names only the achievable action.</b> The port's own message offers a second one — read the
+    /// whole set with no limit, offset or cursor — which <em>this surface cannot do</em>: every list gets
+    /// <see cref="AlvoApiOptions.DefaultPageSize"/>, so a caller following that advice sends the identical
+    /// request, is refused identically, and has nowhere left to go. Repeating a suggestion the layer forbids is
+    /// worse than omitting it. The underlying limitation belongs in the Data API's own documentation, not in a
+    /// per-request message.
+    /// </para>
     /// </remarks>
     /// <param name="message">The port's own refusal text.</param>
     internal static AlvoViolation UnpageableSortKey(string message) => new(
         ReservedQueryKeys.Order,
         "unpageable-sort-key",
         message,
-        "Sort by a required field, or ask for the whole set with no limit, offset or cursor.");
+        "Sort by a field the entity declares required.");
 
     /// <summary>
     /// The refusal for a sort key named twice. A repeated key can never change the order — the first

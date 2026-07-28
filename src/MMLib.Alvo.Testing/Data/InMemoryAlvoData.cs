@@ -407,7 +407,11 @@ public sealed class InMemoryAlvoData : IAlvoData
     /// a caller must not be able to tell "this field exists but is hidden from you" from "this field
     /// does not exist", and the name itself is caller-supplied text this port will not echo.
     /// </summary>
-    private const string UnavailableQueryFieldMessage = "The query references a field that is not available to this caller.";
+    /// <summary>
+    /// Read from the port, like every other refusal this reference shares with a shipped driver — a reference
+    /// that worded it differently would teach a driver author the wrong contract.
+    /// </summary>
+    private const string UnavailableQueryFieldMessage = AlvoAuthorizationException.QueryFieldUnavailable;
 
     private AlvoRecord? FindVisible(string entity, Guid id, PolicyDecision decision, AlvoContext context)
     {

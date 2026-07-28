@@ -1,4 +1,5 @@
 ﻿using Corvus.Json;
+using MMLib.Alvo.Api.Internal;
 using MMLib.Alvo.Descriptor.SchemaGen;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
@@ -197,26 +198,68 @@ internal sealed class DescriptorValidator : IDescriptorValidator
 
         foreach (var field in fields.EnumerateObject())
         {
-            var path = $"/entities/{entity.Name}/fields/{field.Name}";
-            if (field.Value.TryGetProperty("computed", out _))
+            foreach (var error in FieldSemanticErrors($"/entities/{entity.Name}/fields/{field.Name}", field, entityNames))
             {
-                yield return new DescriptorValidationError(
-                    path,
-                    "Computed fields are not supported yet.",
-                    "Remove 'computed' or track the CEL→SQL compiler in #21.",
-                    DescriptorValidationSeverity.Error);
-            }
-
-            if (IsUnknownRef(field.Value, entityNames, out var target))
-            {
-                yield return new DescriptorValidationError(
-                    path,
-                    $"Field references unknown entity '{target}'.",
-                    $"Add an entity named '{target}', or point 'entity' at an existing one.",
-                    DescriptorValidationSeverity.Error);
+                yield return error;
             }
         }
     }
+
+    private static IEnumerable<DescriptorValidationError> FieldSemanticErrors(
+        string path, JsonProperty field, HashSet<string> entityNames)
+    {
+        if (field.Value.TryGetProperty("computed", out _))
+        {
+            yield return new DescriptorValidationError(
+                path,
+                "Computed fields are not supported yet.",
+                "Remove 'computed' or track the CEL→SQL compiler in #21.",
+                DescriptorValidationSeverity.Error);
+        }
+
+        if (IsUnknownRef(field.Value, entityNames, out var target))
+        {
+            yield return new DescriptorValidationError(
+                path,
+                $"Field references unknown entity '{target}'.",
+                $"Add an entity named '{target}', or point 'entity' at an existing one.",
+                DescriptorValidationSeverity.Error);
+        }
+
+        if (ReservedQueryKeys.IsReserved(field.Name))
+        {
+            yield return ShadowsAReservedQueryParameter(path, field.Name);
+        }
+    }
+
+    /// <summary>
+    /// A field whose name the Data API's query string reserves, refused at <b>apply</b> time.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The descriptor's own field grammar (<c>^[a-z][a-z0-9_]{0,62}$</c>) accepts every reserved name, so
+    /// <c>?limit=10</c> against an entity declaring a <c>limit</c> field is genuinely ambiguous. Resolving that
+    /// per request — silently preferring one reading, or refusing the request — would make a descriptor problem
+    /// look like a caller problem, against this framework's rule that a bad descriptor fails at save.
+    /// </para>
+    /// <para>
+    /// <b>Here rather than only at route mapping</b> because the descriptor is wrong whether or not the API is
+    /// mounted: an embedded host that never calls <c>MapAlvoDataApi</c> would otherwise get no refusal at all,
+    /// and would discover the collision when it first exposed the entity. The mapping-time guard stays as the
+    /// belt for a descriptor that was applied before this check existed.
+    /// </para>
+    /// <para>
+    /// The reserved list belongs to the Data API and is read from there rather than restated, which is why this
+    /// validator reaches across a feature boundary for it. One list is the point — a second copy here is how the
+    /// apply-time refusal and the parser come to disagree about which names are reserved.
+    /// </para>
+    /// </remarks>
+    private static DescriptorValidationError ShadowsAReservedQueryParameter(string path, string field) => new(
+        path,
+        $"Field name '{field}' is reserved by the Data API's query string, so a request could not tell a filter "
+        + $"on this field from the '{field}' parameter itself.",
+        $"Rename the field. The reserved names are {ReservedQueryKeys.AsList}.",
+        DescriptorValidationSeverity.Error);
 
     private static bool DeclaresSoftDelete(JsonElement entity) =>
         entity.TryGetProperty("softDelete", out var softDelete)

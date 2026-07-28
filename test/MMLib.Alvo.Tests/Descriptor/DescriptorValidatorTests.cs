@@ -47,6 +47,62 @@ public class DescriptorValidatorTests
         computed.FixSuggestion.ShouldNotBeNull().ShouldContain("#21");
     }
 
+    /// <summary>
+    /// A field whose name the Data API's query string reserves is refused at <b>apply</b>, one error per
+    /// offending field, naming the field and the reserved list.
+    /// </summary>
+    /// <remarks>
+    /// The descriptor's own field grammar accepts every reserved name, so <c>?limit=10</c> against an entity
+    /// declaring a <c>limit</c> field is genuinely ambiguous. It is refused here rather than only at route mapping
+    /// because the descriptor is wrong whether or not the API is mounted — an embedded host that never maps the
+    /// Data API would otherwise get no refusal at all.
+    /// </remarks>
+    [Theory]
+    [InlineData("limit")]
+    [InlineData("offset")]
+    [InlineData("order")]
+    [InlineData("select")]
+    [InlineData("after")]
+    [InlineData("or")]
+    [InlineData("and")]
+    [InlineData("not")]
+    public void Field_shadowing_a_reserved_query_parameter_is_rejected(string reserved)
+    {
+        var json = $$"""
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "widgets": { "fields": {
+            "{{reserved}}": { "type": "integer" } } } } }
+        """;
+
+        var result = _validator.Validate(json);
+
+        result.IsValid.ShouldBeFalse();
+        var shadowed = result.Errors.ShouldHaveSingleItem();
+        shadowed.Path.ShouldBe($"/entities/widgets/fields/{reserved}");
+        shadowed.Message.ShouldContain(reserved);
+        shadowed.FixSuggestion.ShouldNotBeNull().ShouldContain("Rename the field");
+    }
+
+    /// <summary>
+    /// A field whose name is merely <em>similar</em> to a reserved one is accepted. Without this the theory above
+    /// would pass against a validator that refused every field name it was shown.
+    /// </summary>
+    [Theory]
+    [InlineData("limits")]
+    [InlineData("sort_order")]
+    [InlineData("selected")]
+    [InlineData("Limit")]
+    public void Field_merely_resembling_a_reserved_query_parameter_is_accepted(string name)
+    {
+        var json = $$"""
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "widgets": { "fields": {
+            "{{name}}": { "type": "integer" } } } } }
+        """;
+
+        _validator.Validate(json).Errors.ShouldNotContain(error => error.Message.Contains("reserved"));
+    }
+
     [Fact]
     public void Ref_to_unknown_entity_is_rejected()
     {

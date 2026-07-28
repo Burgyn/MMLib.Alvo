@@ -38,7 +38,7 @@ internal sealed record DataApiPage
     /// <summary>Wraps one page the port returned, projected to the fields the request selected.</summary>
     /// <param name="page">The page to render.</param>
     /// <param name="select">The fields to keep, or <see langword="null"/> to keep every field the port returned.</param>
-    internal static DataApiPage From(AlvoPage page, IReadOnlyList<string>? select = null)
+    internal static DataApiPage From(AlvoPage page, IReadOnlyList<string>? select)
     {
         ArgumentNullException.ThrowIfNull(page);
         return new DataApiPage

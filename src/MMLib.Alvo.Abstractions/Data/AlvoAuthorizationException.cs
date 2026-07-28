@@ -40,6 +40,33 @@ public sealed class AlvoAuthorizationException : Exception
     /// </remarks>
     public const string WriteRejectedByPolicy = "The write was rejected by policy.";
 
+    /// <summary>
+    /// The refusal for a filter, sort key or projection naming a field the caller cannot use — one the entity
+    /// does not declare, <b>or</b> one <see cref="Rules.PolicyDecision.HiddenFields"/> hides.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Its sameness is the security property, so it cannot live in a literal per assembly.</b> §2.1's warning
+    /// is that a filter over a hidden field leaks that field's value one comparison at a time
+    /// (<c>salary.gt.&lt;x&gt;</c>, repeated, is a binary search), which is why "does not exist" and "exists and
+    /// is hidden from you" must be one indistinguishable answer. A one-bit difference between the two —
+    /// including a differently worded message from a different layer — <em>is</em> the oracle.
+    /// </para>
+    /// <para>
+    /// It was written out three times before it lived here: both shipped <see cref="IAlvoData"/> implementations
+    /// and PR3's query-string parser, hand-synced, pinned by no test. That is the same defect
+    /// <see cref="WriteRejectedByPolicy"/> exists to prevent, in the one message where divergence is not a
+    /// cosmetic inconsistency but a disclosure channel. The parser refuses before the port is reached, so the two
+    /// are never even observed side by side — which is exactly why nothing would have caught them drifting.
+    /// </para>
+    /// <para>
+    /// It names neither the field nor which of the two conditions applied. A field name is also the one
+    /// caller-supplied string that reaches SQL as an identifier, so it is attacker-controlled text this framework
+    /// will not echo into a response or a log.
+    /// </para>
+    /// </remarks>
+    public const string QueryFieldUnavailable = "The query references a field that is not available to this caller.";
+
     /// <summary>Initializes a new instance of the <see cref="AlvoAuthorizationException"/> class.</summary>
     public AlvoAuthorizationException()
         : base(DefaultMessage)

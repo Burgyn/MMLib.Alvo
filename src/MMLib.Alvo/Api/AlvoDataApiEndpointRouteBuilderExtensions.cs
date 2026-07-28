@@ -44,6 +44,8 @@ public static class AlvoDataApiEndpointRouteBuilderExtensions
         var filters = services.GetRequiredService<AlvoContextFilterFactory>();
         var prefix = NormalizePrefix(options.RoutePrefix);
 
+        ReservedQueryKeys.EnsureNoneIsShadowed(catalog.Entities);
+
         foreach (var entity in catalog.Entities)
         {
             DataApiEndpoints.Map(endpoints, entity, prefix, options, filters);

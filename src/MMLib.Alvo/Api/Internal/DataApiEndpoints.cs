@@ -45,8 +45,6 @@ internal static class DataApiEndpoints
         AlvoApiOptions options,
         AlvoContextFilterFactory filters)
     {
-        ReservedQueryKeys.EnsureNoneIsShadowed(entity);
-
         var collection = $"{prefix}/{entity.Name}";
         var item = $"{collection}/{{id:guid}}";
 

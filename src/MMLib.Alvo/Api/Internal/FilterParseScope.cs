@@ -34,4 +34,21 @@ internal sealed class FilterParseScope(QueryFieldResolver fields)
     /// because every one of them is a node a backend then has to walk.
     /// </summary>
     internal bool TryChargeNode() => ++_nodes <= AlvoFilter.MaxTerms;
+
+    private int _candidates;
+
+    /// <summary>
+    /// Charges <paramref name="count"/> <c>in</c> candidates against this request's <b>total</b>, answering
+    /// <see langword="false"/> once the allowance is spent.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="AlvoFilter.MaxInCandidates"/> is a per-list bound and the port measures only the longest list,
+    /// so nothing below this caps the <em>sum</em>: the maximum number of terms each carrying a maximum list is
+    /// <c>MaxTerms × MaxInCandidates</c> = 256 000 bind parameters in one statement, past the 32 766 ceiling that
+    /// bound was measured against. This is a limit on the statement rather than on the tree, which is why it lives
+    /// beside the node budget instead of being folded into it.
+    /// </remarks>
+    /// <param name="count">How many candidates one list carries.</param>
+    internal bool TryChargeCandidates(int count) =>
+        (_candidates += count) <= AlvoFilter.MaxInCandidates;
 }

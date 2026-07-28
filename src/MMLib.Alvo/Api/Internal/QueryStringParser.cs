@@ -55,6 +55,18 @@ internal static class QueryStringParser
     /// </summary>
     private const int MaxReportedViolations = 20;
 
+    /// <summary>
+    /// The longest opaque cursor this API will pass through to a provider.
+    /// </summary>
+    /// <remarks>
+    /// A keyset cursor encodes the sort key's values for one row, so a few hundred characters is far past anything
+    /// a page mints — and without a bound this is a caller-supplied string of arbitrary length handed to a
+    /// provider's decoder on a path reachable <b>without authentication</b>. Kestrel's request-line limit caps it
+    /// at some kilobytes in practice, which is a property of the transport rather than a decision this layer made.
+    /// A cursor past this is refused as malformed, exactly as an empty one is.
+    /// </remarks>
+    private const int MaxCursorLength = 512;
+
     /// <summary>Parses <paramref name="query"/> for a list request over <paramref name="entity"/>.</summary>
     /// <param name="query">The request's query string.</param>
     /// <param name="entity">The entity being listed, as the applied schema declares it.</param>
@@ -158,16 +170,36 @@ internal static class QueryStringParser
         /// </summary>
         private void ReadFilter(string key, string value)
         {
-            var negated = key.StartsWith(ReservedQueryKeys.NotPrefix, StringComparison.Ordinal);
-            var name = negated ? key[ReservedQueryKeys.NotPrefix.Length..] : key;
+            var (negated, name) = FilterGroupParser.SplitNegation(key);
 
-            if (FilterGroupParser.TryParseNamed(name, value, negated, _scope, 1, out var filter, out var violation))
+            if (!FilterGroupParser.TryParseNamed(name, value, negated, _scope, 1, out var filter, out var violation))
             {
-                _terms.Add(filter!);
+                Add(violation!);
                 return;
             }
 
-            Add(violation!);
+            _terms.Add(filter!);
+            ChargeTheConjunction();
+        }
+
+        /// <summary>
+        /// Charges the node the top-level conjunction will occupy, the moment a <b>second</b> parameter makes it
+        /// certain to exist.
+        /// </summary>
+        /// <remarks>
+        /// Charged on arrival rather than at build time, because a budget spent after the tree is assembled does
+        /// not bound the tree. That was measured, not theorised: <c>?year=gte.1</c> repeated 256 times charged
+        /// 256 leaves, added the 257th node anyway, and left the port's own guard to answer — so a caller saw
+        /// <c>filter-beyond-port-limits</c>, the code documented as unreachable, beside the
+        /// <c>filter-too-wide</c> they actually needed. Charging here keeps the running total equal to the node
+        /// count of the tree that will be produced.
+        /// </remarks>
+        private void ChargeTheConjunction()
+        {
+            if (_terms.Count == 2 && !_scope.TryChargeNode())
+            {
+                Add(QueryViolations.FilterTooWide());
+            }
         }
 
         private void ReadOrder(string value)
@@ -182,10 +214,18 @@ internal static class QueryStringParser
         }
 
         /// <summary>
-        /// A page size past <see cref="AlvoApiOptions.MaxPageSize"/> is <b>refused, not clamped</b>: a client
-        /// that asked for 1000 rows and silently received 200 computes its own paging arithmetic from a number
-        /// no response ever told it about.
+        /// A page size past <see cref="AlvoApiOptions.MaxPageSize"/> is <b>refused, not clamped</b>: a client that
+        /// asked for 1000 rows and silently received 200 computes its own paging arithmetic from a number no
+        /// response ever told it about.
         /// </summary>
+        /// <remarks>
+        /// <b>A deliberate tightening of the port's own bound, recorded as one.</b>
+        /// <see cref="AlvoQuery.EnsurePagingWindowIsSane"/> refuses a <em>negative</em> limit; this refuses zero
+        /// and anything past the configured maximum as well. Zero is not a smaller page, it is a request that can
+        /// never return a row — a silently disabled read rather than a configured limit — and the maximum is
+        /// §2.1's requirement, which the port has no way to know. The port's guard still runs, so nothing is
+        /// admitted here that it would refuse.
+        /// </remarks>
         private void ReadLimit(string value)
         {
             if (TryReadWholeNumber(value, out var limit) && limit >= 1 && limit <= options.MaxPageSize)
@@ -209,15 +249,16 @@ internal static class QueryStringParser
         }
 
         /// <summary>
-        /// The cursor is opaque and provider-owned, so it is echoed verbatim and never decoded here. A forged
-        /// one is the provider's problem and already yields an empty page rather than a leak; the one thing
-        /// this can tell is that an <em>empty</em> string is not a cursor any page issued.
+        /// The cursor is opaque and provider-owned, so it is echoed verbatim and never decoded here. A forged one
+        /// is the provider's problem and already yields an empty page rather than a leak; the two things this can
+        /// tell are that an <em>empty</em> string is not a cursor any page issued, and that one longer than any
+        /// page could have minted is not either.
         /// </summary>
         private void ReadAfter(string value)
         {
-            if (value.Length == 0)
+            if (value.Length is 0 or > MaxCursorLength)
             {
-                Add(QueryViolations.InvalidCursor());
+                Add(QueryViolations.InvalidCursor(MaxCursorLength));
                 return;
             }
 
@@ -291,37 +332,43 @@ internal static class QueryStringParser
         /// the caller added terms.
         /// </summary>
         /// <remarks>
-        /// The conjunction is charged against the term budget like every other node, and the level it occupies
-        /// is one of the two <see cref="FilterGroupParser.MaxNesting"/> reserves. That is what makes the port's
-        /// own guard unreachable from here rather than merely usually satisfied.
+        /// Its node was already charged by <see cref="ChargeTheConjunction"/> when the second parameter arrived,
+        /// and the level it occupies is one of the two <see cref="FilterGroupParser.MaxNesting"/> reserves — so
+        /// this only assembles.
         /// </remarks>
-        private AlvoFilter? Conjoin()
+        private AlvoFilter? Conjoin() => _terms.Count switch
         {
-            if (_terms.Count < 2)
-            {
-                return _terms.Count == 1 ? _terms[0] : null;
-            }
+            0 => null,
+            1 => _terms[0],
+            _ => new AlvoAnd(_terms),
+        };
 
-            if (!_scope.TryChargeNode())
-            {
-                Add(QueryViolations.FilterTooWide());
-            }
-
-            return new AlvoAnd(_terms);
-        }
-
+        /// <summary>
+        /// Runs the port's own rules over what this parse produced.
+        /// </summary>
+        /// <remarks>
+        /// <b>The filter's structural guard runs last, and only when nothing else was refused.</b> The paging
+        /// and sort rules are about the paging window rather than the filter, so they always run and can report
+        /// beside a filter violation. <see cref="AlvoFilter.EnsureWithinLimits"/> is the belt: it exists to catch
+        /// a divergence between this parser's accounting and the port's, so running it while the parser has
+        /// <em>already</em> refused would report the parser's own overflow twice — once with the code that names
+        /// the caller's fix, and once with the code that means "the API's accounting is broken". That is exactly
+        /// what shipped, and it is why <see cref="QueryViolations.FilterBeyondPortLimits"/> was reachable.
+        /// </remarks>
         private void EnsureWithinPortRules(AlvoQuery query)
         {
-            Record(() => AlvoFilter.EnsureWithinLimits(query.Filter), QueryViolations.FilterBeyondPortLimits);
             Record(() => AlvoQuery.EnsurePagingWindowIsSane(query), QueryViolations.ConflictingPagingWindow);
             Record(() => AlvoQuery.EnsureSortKeysCanBePaged(query, entity), QueryViolations.UnpageableSortKey);
+
+            if (_violations.Count == 0)
+            {
+                Record(() => AlvoFilter.EnsureWithinLimits(query.Filter), QueryViolations.FilterBeyondPortLimits);
+            }
         }
 
         /// <summary>
-        /// Runs one of the port's guards and records its refusal as a violation. The message is taken up to
-        /// its first line break, because <see cref="ArgumentException"/> appends
-        /// <c>(Parameter '…')</c> — an internal parameter name, which is neither the caller's business nor
-        /// meaningful in a problem document.
+        /// Runs one of the port's guards and records its refusal as a violation, in the port's own wording with
+        /// the .NET argument machinery stripped off it.
         /// </summary>
         private void Record(Action guard, Func<string, AlvoViolation> asViolation)
         {
@@ -331,15 +378,32 @@ internal static class QueryStringParser
             }
             catch (ArgumentException exception)
             {
-                Add(asViolation(FirstLine(exception.Message)));
+                Add(asViolation(WithoutArgumentDetail(exception.Message)));
             }
         }
 
-        private static string FirstLine(string message)
+        /// <summary>
+        /// <see cref="ArgumentException.Message"/> with everything <see cref="ArgumentException"/> itself appends
+        /// removed — the <c>(Parameter '…')</c> suffix and, for a range exception, the <c>Actual value was …</c>
+        /// line after it.
+        /// </summary>
+        /// <remarks>
+        /// The suffix is appended on the <b>same line</b>, separated by a space, so an earlier version of this
+        /// that only cut at the first newline stripped nothing at all and shipped <c>(Parameter 'query')</c> in
+        /// 422 bodies. An internal argument name is an implementation detail of the guard, not part of the
+        /// contract an agent reads; <c>AlvoApiWorld</c> now screens every response in the suite for it, so the
+        /// claim is asserted rather than described.
+        /// </remarks>
+        private static string WithoutArgumentDetail(string message)
         {
-            var newline = message.IndexOf('\n');
-            return newline < 0 ? message : message[..newline].TrimEnd();
+            var appended = message.IndexOf(ArgumentNameSuffix, StringComparison.Ordinal);
+            var text = appended < 0 ? message : message[..appended];
+            var newline = text.IndexOf('\n');
+            return (newline < 0 ? text : text[..newline]).TrimEnd();
         }
+
+        /// <summary>How <see cref="ArgumentException"/> introduces the argument name it appends to a message.</summary>
+        private const string ArgumentNameSuffix = " (Parameter '";
 
         private void Add(AlvoViolation violation)
         {

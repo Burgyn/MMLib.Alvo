@@ -14,7 +14,8 @@ namespace MMLib.Alvo.Api.Internal;
 /// descriptor and <c>?limit=10</c> would be genuinely ambiguous. Resolving that per request — either silently
 /// preferring one reading, or refusing the request — would make a descriptor problem look like a caller
 /// problem, which is the opposite of Alvo's rule that a bad descriptor fails once, at apply/startup.
-/// <see cref="EnsureNoneIsShadowed"/> is that refusal.
+/// <see cref="EnsureNoneIsShadowed(Schema.EntitySchema)"/> is that refusal, and <c>DescriptorValidator</c> raises
+/// the same collision at apply time.
 /// </para>
 /// <para>
 /// <c>not</c> is reserved even though it is only ever a <em>prefix</em>. As a top-level key it would be
@@ -67,11 +68,41 @@ internal static class ReservedQueryKeys
     internal static bool IsReserved(string key) => _reserved.Contains(key);
 
     /// <summary>
+    /// Throws when any of <paramref name="entities"/> declares a field whose name a query-string key reserves.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The whole applied schema is checked before a single route is mapped.</b> Per-entity it would map every
+    /// route up to the offending entity and then throw, leaving a host half-mapped on a startup failure — a state
+    /// nobody should have to reason about, and one whose symptom (some entities reachable, some not) says nothing
+    /// about its cause.
+    /// </para>
+    /// <para>
+    /// <b>This is the belt, not the primary guard.</b> A descriptor declaring such a field is refused at
+    /// <em>apply</em> time by <c>DescriptorValidator</c>, which is where a bad descriptor belongs — it is wrong
+    /// whether or not the API is mounted. This still exists because an applied schema can reach route mapping
+    /// without ever having passed that validation: a descriptor applied by an earlier build, or F7's
+    /// dynamic-entity registry, which never goes through the descriptor validator at all.
+    /// </para>
+    /// </remarks>
+    /// <param name="entities">Every entity about to get routes.</param>
+    /// <exception cref="InvalidOperationException">A declared field shadows a reserved query-string key.</exception>
+    internal static void EnsureNoneIsShadowed(IEnumerable<Schema.EntitySchema> entities)
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+
+        foreach (var entity in entities)
+        {
+            EnsureNoneIsShadowed(entity);
+        }
+    }
+
+    /// <summary>
     /// Throws when <paramref name="entity"/> declares a field whose name a query-string key reserves, so the
     /// ambiguity is a startup failure naming the entity, the field and the fix — not a route that silently
     /// cannot filter by that field.
     /// </summary>
-    /// <param name="entity">The entity about to get routes.</param>
+    /// <param name="entity">The entity to check.</param>
     /// <exception cref="InvalidOperationException">A declared field shadows a reserved query-string key.</exception>
     internal static void EnsureNoneIsShadowed(Schema.EntitySchema entity)
     {

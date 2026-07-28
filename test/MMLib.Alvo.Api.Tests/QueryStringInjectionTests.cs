@@ -16,33 +16,59 @@ namespace MMLib.Alvo.Api.Tests;
 /// operator is always the newest one.
 /// </para>
 /// <para>
+/// <b>The world is tenant-scoped, and that is what makes the row-set claim mean anything.</b> The first version
+/// of this suite ran over the vehicle registry, whose rules are role predicates, and asserted
+/// <c>items.Count &lt;= 3</c> against a seed of exactly three visible rows — a bound equal to the total, which no
+/// injection could ever exceed. Here the caller is keyed to one tenant and rows exist in another, so
+/// "policy-consistent" is checkable: a payload that widened the predicate returns a foreign row and fails the
+/// theory by <em>identity</em>, not by count.
+/// </para>
+/// <para>
 /// <b>Why the live API rather than the parser.</b> The parser could refuse every payload and this suite would
-/// still be worthless if a value reached the engine as statement text somewhere below it. The three claims
-/// asserted here are only observable end to end: the response is a policy-consistent 200 or a refusal and
-/// <em>never</em> a 500; the table's row count is unchanged; and no response body leaks SQL or the engine's own
-/// error vocabulary — which is what turns a refusal into a schema-disclosure channel.
+/// still be worthless if a value reached the engine as statement text somewhere below it. The claims asserted
+/// here are only observable end to end: the response is a policy-consistent 200 or a refusal and <em>never</em> a
+/// 500; the table's row count is unchanged; and no response body leaks SQL or the engine's own error
+/// vocabulary — which is what turns a refusal into a schema-disclosure channel.
 /// </para>
 /// </remarks>
 public sealed class QueryStringInjectionTests
 {
-    private static readonly TestApiKey _admin = new("admin-key", ["admin", "authenticated"], ["*:read", "*:write"]);
+    private const string Table = "notes";
+
+    private const string Field = "title";
+
+    private static readonly Guid _ourTenant = Guid.NewGuid();
+
+    private static readonly Guid _theirTenant = Guid.NewGuid();
+
+    private static readonly TestApiKey _caller =
+        new("tenant-ours", ["authenticated"], ["notes:read", "notes:write"], _ourTenant);
+
+    private static readonly TestApiKey _other =
+        new("tenant-theirs", ["authenticated"], ["notes:read", "notes:write"], _theirTenant);
+
+    /// <summary>Titles seeded in the caller's own tenant, and in the one they may never read.</summary>
+    private static readonly string[] _ourTitles = ["alpha", "beta", "gamma"];
+
+    private static readonly string[] _theirTitles = ["delta", "epsilon"];
+
+    private static int SeededRows => _ourTitles.Length + _theirTitles.Length;
 
     /// <summary>
-    /// The classic payloads, plus the three byte-level ones an ASCII-only corpus misses: a NUL (which
-    /// PostgreSQL cannot represent at all and SQLite silently accepts), a right-to-left override, and a
-    /// combining sequence.
+    /// The classic payloads, plus the three byte-level ones an ASCII-only corpus misses: a NUL (which PostgreSQL
+    /// cannot represent at all and SQLite silently accepts), a right-to-left override, and a combining sequence.
     /// </summary>
     private static readonly string[] _payloads =
     [
         "' OR 1=1 --",
-        "'; DROP TABLE vehicles; --",
+        $"'; DROP TABLE {Table}; --",
         "%27",
         "\" OR \"\"=\"",
-        "1; DELETE FROM vehicles",
+        $"1; DELETE FROM {Table}",
         "1' UNION SELECT * FROM sqlite_master --",
         "\0",
         "‮evil",
-        "évil",
+        "évil",
         "%' OR '1'='1",
     ];
 
@@ -54,7 +80,7 @@ public sealed class QueryStringInjectionTests
     private static readonly string[] _mustNotLeak =
     [
         "SELECT", "WHERE", "FROM", "sqlite", "SQLite", "no such column", "no such table",
-        "unrecognized token", "syntax error", "Exception", "vehicles\"",
+        "unrecognized token", "syntax error", "Exception",
     ];
 
     /// <summary>Every operator the port declares, by its wire spelling — the enum is the source, not a literal list.</summary>
@@ -65,18 +91,18 @@ public sealed class QueryStringInjectionTests
     public async Task Injection_through_every_operator_changes_no_row_and_leaks_no_error(string @operator)
     {
         await using var world = await SeededAsync();
-        var before = await world.CountRowsAsync("vehicles");
+        var visible = await VisibleTitlesAsync(world);
 
         foreach (var payload in _payloads)
         {
             using var response = await world.SendAsync(
-                HttpMethod.Get, $"/api/vehicles?make={Uri.EscapeDataString(Term(@operator, payload))}", _admin);
+                HttpMethod.Get, $"/api/{Table}?{Field}={Uri.EscapeDataString(Term(@operator, payload))}", _caller);
 
             var body = await response.ReadTextAsync();
-            ShouldBeServedOrRefused(response, body, @operator, payload);
+            ShouldBeServedOrRefused(response, body, @operator, payload, visible);
             ShouldLeakNothing(body, @operator, payload);
-            (await world.CountRowsAsync("vehicles")).ShouldBe(
-                before, $"'{@operator}' with payload {Describe(payload)} changed the table");
+            (await world.CountRowsAsync(Table)).ShouldBe(
+                SeededRows, $"'{@operator}' with payload {Describe(payload)} changed the table");
         }
     }
 
@@ -91,19 +117,18 @@ public sealed class QueryStringInjectionTests
     public async Task Injection_through_an_identifier_position_is_refused_and_leaks_no_error(string parameter)
     {
         await using var world = await SeededAsync();
-        var before = await world.CountRowsAsync("vehicles");
 
         foreach (var payload in _payloads)
         {
             using var response = await world.SendAsync(
-                HttpMethod.Get, $"/api/vehicles?{parameter}={Uri.EscapeDataString(payload)}", _admin);
+                HttpMethod.Get, $"/api/{Table}?{parameter}={Uri.EscapeDataString(payload)}", _caller);
 
             var body = await response.ReadTextAsync();
             response.StatusCode.ShouldBe(
                 HttpStatusCode.UnprocessableEntity,
                 $"an identifier position must refuse {Describe(payload)}, not compose it — body: {body}");
             ShouldLeakNothing(body, parameter, payload);
-            (await world.CountRowsAsync("vehicles")).ShouldBe(before);
+            (await world.CountRowsAsync(Table)).ShouldBe(SeededRows);
         }
     }
 
@@ -120,13 +145,33 @@ public sealed class QueryStringInjectionTests
 
         using var injected = await world.SendAsync(
             HttpMethod.Get,
-            $"/api/vehicles?make=eq.{Uri.EscapeDataString("'; DROP TABLE vehicles; --")}",
-            _admin);
-        using var honest = await world.SendAsync(HttpMethod.Get, "/api/vehicles?make=eq.skoda", _admin);
+            $"/api/{Table}?{Field}=eq.{Uri.EscapeDataString($"'; DROP TABLE {Table}; --")}",
+            _caller);
+        using var honest = await world.SendAsync(HttpMethod.Get, $"/api/{Table}?{Field}=eq.alpha", _caller);
 
-        (await injected.ReadItemsAsync()).ShouldBeEmpty("no row's make is the payload");
-        (await honest.ReadItemsAsync()).Count.ShouldBe(1, "or the empty result above proves nothing");
-        (await world.CountRowsAsync("vehicles")).ShouldBe(SeededVehicles);
+        (await injected.ReadItemsAsync()).ShouldBeEmpty("no row's title is the payload");
+        (await honest.ReadFieldAsync(Field)).ShouldBe(["alpha"], "or the empty result above proves nothing");
+        (await world.CountRowsAsync(Table)).ShouldBe(SeededRows);
+    }
+
+    /// <summary>
+    /// The row-set claim in its own right: a filter another tenant's row would satisfy still returns nothing,
+    /// because a caller's filter is applied <em>in addition to</em> the policy predicate and can only narrow.
+    /// </summary>
+    /// <remarks>
+    /// The control matters twice over — the same filter, run by the tenant that owns the row, must return it, or
+    /// this fact would pass against a server that answered every filtered read with nothing.
+    /// </remarks>
+    [Fact]
+    public async Task A_filter_matching_another_tenants_row_returns_nothing_to_this_caller()
+    {
+        await using var world = await SeededAsync();
+
+        using var ours = await world.SendAsync(HttpMethod.Get, $"/api/{Table}?{Field}=eq.delta", _caller);
+        using var theirs = await world.SendAsync(HttpMethod.Get, $"/api/{Table}?{Field}=eq.delta", _other);
+
+        (await ours.ReadItemsAsync()).ShouldBeEmpty("'delta' belongs to the other tenant");
+        (await theirs.ReadFieldAsync(Field)).ShouldBe(["delta"], "or the empty result above proves nothing");
     }
 
     /// <summary>
@@ -139,7 +184,7 @@ public sealed class QueryStringInjectionTests
     {
         await using var world = await SeededAsync();
 
-        using var response = await world.SendAsync(HttpMethod.Get, "/api/vehicles?make=eq.sko%00da", _admin);
+        using var response = await world.SendAsync(HttpMethod.Get, $"/api/{Table}?{Field}=eq.al%00pha", _caller);
 
         response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
         (await response.ReadProblemDetailAsync()).ShouldContain("NUL");
@@ -147,15 +192,15 @@ public sealed class QueryStringInjectionTests
 
     /// <summary>
     /// A refusal must not become a field-existence oracle over HTTP either. Asserted on the whole response body
-    /// rather than on a parsed member, so a leak through <c>detail</c>, a <c>violations</c> entry or an
-    /// extension all fail it.
+    /// rather than on a parsed member, so a leak through <c>detail</c>, a <c>violations</c> entry or an extension
+    /// all fail it.
     /// </summary>
     [Fact]
     public async Task A_refusal_over_http_never_echoes_the_field_name_the_caller_asked_about()
     {
         await using var world = await SeededAsync();
 
-        using var response = await world.SendAsync(HttpMethod.Get, "/api/vehicles?zqmarkerqz=eq.1", _admin);
+        using var response = await world.SendAsync(HttpMethod.Get, $"/api/{Table}?zqmarkerqz=eq.1", _caller);
 
         response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
         (await response.ReadTextAsync()).ShouldNotContain("zqmarkerqz", Case.Insensitive);
@@ -165,19 +210,24 @@ public sealed class QueryStringInjectionTests
     /// Each operator with a payload in the position that operator actually reads: <c>in</c> takes a list and
     /// <c>is</c> takes only null/true/false, so handing either a bare payload would test the wrong refusal.
     /// </summary>
-    private static string Term(string @operator, string payload) => @operator switch
-    {
-        "in" => $"in.({payload})",
-        _ => $"{@operator}.{payload}",
-    };
+    private static string Term(string @operator, string payload) =>
+        @operator == "in" ? $"in.({payload})" : $"{@operator}.{payload}";
 
     /// <summary>
-    /// A payload is either answered or refused — never a 500 — and an answer never carries more rows than the
-    /// caller's policy already showed them. The row-count half is the "policy-consistent" claim: a payload that
-    /// widened the predicate would come back with rows this caller's own unfiltered read does not contain.
+    /// A payload is either answered or refused — never a 500 — and an answer carries <b>only rows this caller's
+    /// policy already shows them</b>, identified by title rather than counted.
     /// </summary>
+    /// <remarks>
+    /// The subset check by identity is the property §2.1 asks for. A count bound cannot express it: with the seed
+    /// equal to the visible set, <c>Count &lt;= visible</c> is satisfied by any answer at all — including one
+    /// carrying the other tenant's rows in place of this caller's.
+    /// </remarks>
     private static void ShouldBeServedOrRefused(
-        HttpResponseMessage response, string body, string @operator, string payload)
+        HttpResponseMessage response,
+        string body,
+        string @operator,
+        string payload,
+        IReadOnlyList<string> visible)
     {
         ((int)response.StatusCode).ShouldBeOneOf(
             [(int)HttpStatusCode.OK, (int)HttpStatusCode.UnprocessableEntity],
@@ -191,12 +241,14 @@ public sealed class QueryStringInjectionTests
 
         var items = (JsonNode.Parse(body) as JsonObject)?["items"] as JsonArray
             ?? throw new InvalidOperationException($"a 200 must carry an items envelope, but the body was: {body}");
-        items.Count.ShouldBeLessThanOrEqualTo(
-            SeededVehicles,
-            $"'{@operator}' with payload {Describe(payload)} returned more rows than this caller can see at all");
-    }
 
-    private const int SeededVehicles = 3;
+        foreach (var title in items.Select(row => row![Field]!.GetValue<string>()))
+        {
+            visible.ShouldContain(
+                title,
+                $"'{@operator}' with payload {Describe(payload)} returned a row this caller's policy withholds");
+        }
+    }
 
     private static void ShouldLeakNothing(string body, string parameter, string payload)
     {
@@ -220,33 +272,37 @@ public sealed class QueryStringInjectionTests
                 : character.ToString()));
 
     /// <summary>
-    /// Three vehicles behind one owner, created through the API so every row is one the port itself wrote.
+    /// Every title this caller can see at all, read through an unfiltered list — so the subset check compares
+    /// against the policy's own answer rather than against what the seed intended.
+    /// </summary>
+    private static async Task<IReadOnlyList<string>> VisibleTitlesAsync(AlvoApiWorld world)
+    {
+        using var response = await world.SendAsync(HttpMethod.Get, $"/api/{Table}", _caller);
+        var titles = await response.ReadFieldAsync(Field);
+
+        titles.ShouldBe(_ourTitles, ignoreOrder: true, "the caller must see their own tenant's rows and no others");
+        return [.. titles.Select(title => title!)];
+    }
+
+    /// <summary>
+    /// Rows in the caller's tenant <b>and</b> in one they may never read, each created through the API by the key
+    /// that owns it, so every row is one the port itself wrote under the tenant it belongs to.
     /// </summary>
     private static async Task<AlvoApiWorld> SeededAsync()
     {
-        var world = await AlvoApiWorld.VehicleRegistryAsync([_admin]);
-        var owner = await CreateAsync(world, "owners", new JsonObject { ["name"] = "Acme Ltd" });
-
-        foreach (var make in new[] { "skoda", "vw", "audi" })
-        {
-            await CreateAsync(world, "vehicles", new JsonObject
-            {
-                ["vin"] = $"VIN-{make}",
-                ["plate"] = $"PLATE-{make}",
-                ["make"] = make,
-                ["model"] = "model",
-                ["year"] = 2020,
-                ["owner_id"] = owner,
-            });
-        }
-
+        var world = await AlvoApiWorld.TenantNotesAsync([_caller, _other]);
+        await SeedAsync(world, _caller, _ourTitles);
+        await SeedAsync(world, _other, _theirTitles);
         return world;
     }
 
-    private static async Task<string> CreateAsync(AlvoApiWorld world, string entity, JsonObject body)
+    private static async Task SeedAsync(AlvoApiWorld world, TestApiKey key, IEnumerable<string> titles)
     {
-        using var created = await world.SendAsync(HttpMethod.Post, $"/api/{entity}", _admin, body: body);
-        created.StatusCode.ShouldBe(HttpStatusCode.Created, await created.ReadTextAsync());
-        return (await created.ReadJsonObjectAsync())["id"]!.GetValue<Guid>().ToString();
+        foreach (var title in titles)
+        {
+            var body = new JsonObject { [Field] = title, ["tenant_id"] = key.Tenant!.Value.ToString() };
+            using var created = await world.SendAsync(HttpMethod.Post, $"/api/{Table}", key, body: body);
+            created.StatusCode.ShouldBe(HttpStatusCode.Created, await created.ReadTextAsync());
+        }
     }
 }

@@ -51,8 +51,7 @@ internal static class FilterGroupParser
 
         filter = null;
         violation = null;
-        var negated = member.StartsWith(ReservedQueryKeys.NotPrefix, StringComparison.Ordinal);
-        var bare = negated ? member[ReservedQueryKeys.NotPrefix.Length..] : member;
+        var (negated, bare) = SplitNegation(member);
 
         if (negated && !TryDescend(scope, depth, out violation))
         {
@@ -132,6 +131,22 @@ internal static class FilterGroupParser
     private static int Below(int depth, bool negated) => negated ? depth + 1 : depth;
 
     private static AlvoFilter Negated(AlvoFilter filter, bool negated) => negated ? new AlvoNot(filter) : filter;
+
+    /// <summary>
+    /// Strips the negation prefix, if any, from a name or a group member. Exactly <b>one</b> <c>not.</c> is ever
+    /// removed — <c>not.not.x.eq.1</c> is not in the grammar, and reading it as a double negation would invent a
+    /// spelling. One implementation because the rule is one rule; the two <em>splits</em> below it (a key from its
+    /// value, a member from its operator) genuinely differ and stay apart.
+    /// </summary>
+    /// <param name="text">The key or member as the caller wrote it.</param>
+    internal static (bool Negated, string Bare) SplitNegation(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+
+        return text.StartsWith(ReservedQueryKeys.NotPrefix, StringComparison.Ordinal)
+            ? (true, text[ReservedQueryKeys.NotPrefix.Length..])
+            : (false, text);
+    }
 
     /// <summary>
     /// A group member with its negation prefix already removed. Exactly one <c>not.</c> is ever stripped:

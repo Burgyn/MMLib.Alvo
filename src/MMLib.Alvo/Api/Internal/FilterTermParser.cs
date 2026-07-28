@@ -65,11 +65,15 @@ internal static class FilterTermParser
             return false;
         }
 
-        return TryCompare(declared, operatorAndValue, out filter, out violation);
+        return TryCompare(declared, operatorAndValue, scope, out filter, out violation);
     }
 
     private static bool TryCompare(
-        FieldSchema declared, string operatorAndValue, out AlvoFilter? filter, out AlvoViolation? violation)
+        FieldSchema declared,
+        string operatorAndValue,
+        FilterParseScope scope,
+        out AlvoFilter? filter,
+        out AlvoViolation? violation)
     {
         filter = null;
         var separator = operatorAndValue.IndexOf('.');
@@ -85,7 +89,8 @@ internal static class FilterTermParser
             return false;
         }
 
-        if (!TryReadOperand(declared, @operator, operatorAndValue[(separator + 1)..], out var value, out violation))
+        if (!TryReadOperand(
+                declared, @operator, operatorAndValue[(separator + 1)..], scope, out var value, out violation))
         {
             return false;
         }
@@ -98,13 +103,14 @@ internal static class FilterTermParser
         FieldSchema declared,
         AlvoFilterOperator @operator,
         string operand,
+        FilterParseScope scope,
         out object? value,
         out AlvoViolation? violation)
     {
         value = null;
         if (@operator == AlvoFilterOperator.In)
         {
-            return TryReadCandidates(declared, operand, out value, out violation);
+            return TryReadCandidates(declared, operand, scope, out value, out violation);
         }
 
         if (@operator == AlvoFilterOperator.Is)
@@ -174,7 +180,11 @@ internal static class FilterTermParser
     /// parameter, so an unbounded list is a statement the engine may refuse outright.
     /// </summary>
     private static bool TryReadCandidates(
-        FieldSchema declared, string operand, out object? value, out AlvoViolation? violation)
+        FieldSchema declared,
+        string operand,
+        FilterParseScope scope,
+        out object? value,
+        out AlvoViolation? violation)
     {
         value = null;
         if (!ParenthesisedList.TrySplit(operand, out var candidates))
@@ -183,7 +193,7 @@ internal static class FilterTermParser
             return false;
         }
 
-        if (candidates.Count > AlvoFilter.MaxInCandidates)
+        if (candidates.Count > AlvoFilter.MaxInCandidates || !scope.TryChargeCandidates(candidates.Count))
         {
             violation = QueryViolations.TooManyInCandidates();
             return false;

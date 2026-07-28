@@ -30,7 +30,17 @@ namespace MMLib.Alvo.Api;
 /// </param>
 /// <param name="Code">A stable kebab-case code, e.g. <c>required</c>, <c>max-length</c>, <c>unavailable-field</c>.</param>
 /// <param name="Message">A human sentence, free of caller-supplied text.</param>
-/// <param name="FixSuggestion">What to change — §0 principle 4 makes this part of the contract, not a nicety.</param>
+/// <param name="FixSuggestion">
+/// What to change — §0 principle 4 makes this part of the contract, not a nicety.
+/// <para>
+/// Nullable, and <b>no producer in this framework returns <see langword="null"/></b>: every refusal the query
+/// parser and the request validator raise carries one, and
+/// <c>QueryStringParserTests.Every_refusal_carries_a_fix_suggestion</c> holds them to it. It stays nullable for
+/// the one case that would otherwise be answered with a lie — a violation forwarded from a source that has no fix
+/// to offer (a host's own validator, or a future federated backend). An empty string would be worse: a caller
+/// cannot tell "no suggestion" from "the suggestion is blank".
+/// </para>
+/// </param>
 public sealed record AlvoViolation(
 #pragma warning disable CA1720 // "Pointer" is RFC 6901's own term for this member, not the CLR's.
     [property: JsonPropertyName("pointer")] string Pointer,
