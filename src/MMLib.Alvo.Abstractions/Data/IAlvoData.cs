@@ -289,6 +289,14 @@ public interface IAlvoData
     /// a field the policy marks read-only. <c>tenant_id</c> is not rejected here — see the type
     /// remarks — but a value that fails the tenant scope still raises this exception via
     /// <c>WITH CHECK</c>.
+    /// <para>
+    /// <b>Or, on a replay, no policy allows <c>get</c> on this entity for <paramref name="context"/>.</b>
+    /// Listed here because it is the one cause a caller cannot infer from the create path: a replay reads
+    /// the recorded row under a <c>get</c> decision, so a caller permitted to create but not to read is
+    /// refused at the replay rather than at the original write. Named on this member deliberately — the
+    /// type remarks and <c>data-path.md</c>'s failure table carry it too, but a tooling "Exceptions" view
+    /// shows only what the member declares.
+    /// </para>
     /// </exception>
     /// <exception cref="AlvoIdempotencyConflictException">
     /// <paramref name="idempotency"/>'s key was already used for a request with a different fingerprint.
