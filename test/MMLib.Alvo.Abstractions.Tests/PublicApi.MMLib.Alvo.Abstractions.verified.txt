@@ -139,6 +139,7 @@ namespace MMLib.Alvo.Data
     }
     public sealed class AlvoAuthorizationException : System.Exception
     {
+        public const string WriteRejectedByPolicy = "The write was rejected by policy.";
         public AlvoAuthorizationException() { }
         public AlvoAuthorizationException(string message) { }
         public AlvoAuthorizationException(string message, System.Exception innerException) { }
@@ -1068,6 +1069,11 @@ namespace MMLib.Alvo.Schema
     {
         Physical = 0,
         Dynamic = 1,
+    }
+    public static class FieldClrType
+    {
+        public static System.Type Of(MMLib.Alvo.Schema.FieldSchema field) { }
+        public static System.Type Of(MMLib.Alvo.Schema.FieldType type) { }
     }
     public sealed class FieldSchema : System.IEquatable<MMLib.Alvo.Schema.FieldSchema>
     {

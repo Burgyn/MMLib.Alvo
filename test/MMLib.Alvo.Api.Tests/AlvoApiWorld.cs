@@ -49,35 +49,30 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
     private readonly WebApplication _app;
     private readonly SqlCapture _capture;
     private readonly HttpClient _client;
-    private readonly string _connectionString;
     private readonly AlvoAuthOptions _authOptions;
 
     private AlvoApiWorld(
         SqliteConnection keepAlive,
         WebApplication app,
         SqlCapture capture,
-        string connectionString,
         AlvoAuthOptions authOptions)
     {
         _keepAlive = keepAlive;
         _app = app;
         _capture = capture;
-        _connectionString = connectionString;
         _authOptions = authOptions;
         _client = app.GetTestClient();
     }
 
     /// <summary>Starts a world over the repository's <c>examples/vehicle-registry</c> descriptor.</summary>
     /// <param name="keys">The dev API keys the world issues.</param>
-    /// <param name="routePrefix">A non-default <see cref="AlvoApiOptions.RoutePrefix"/>, or <see langword="null"/> for the default.</param>
-    /// <param name="revokedKeyId">The one key id whose stored record is revoked, for the 401 diagnosis that dev-key configuration cannot express.</param>
+    /// <param name="setup">Anything the world's host is configured differently from the default.</param>
     internal static Task<AlvoApiWorld> VehicleRegistryAsync(
-        IReadOnlyList<TestApiKey>? keys = null, string? routePrefix = null, string? revokedKeyId = null) =>
+        IReadOnlyList<TestApiKey>? keys = null, AlvoApiWorldSetup? setup = null) =>
         StartAsync(
             Path.Combine(RepositoryRoot.Find(), "examples", "vehicle-registry", "vehicles.alvo.json"),
             keys ?? [],
-            routePrefix,
-            revokedKeyId);
+            setup ?? new AlvoApiWorldSetup());
 
     /// <summary>Starts a world over the tenant-scoped <c>notes</c> descriptor this project ships.</summary>
     /// <param name="keys">The dev API keys the world issues.</param>
@@ -85,18 +80,17 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
         StartAsync(
             Path.Combine(AppContext.BaseDirectory, "descriptors", "tenant-notes.alvo.json"),
             keys,
-            routePrefix: null,
-            revokedKeyId: null);
+            new AlvoApiWorldSetup());
 
     private static async Task<AlvoApiWorld> StartAsync(
-        string descriptorPath, IReadOnlyList<TestApiKey> keys, string? routePrefix, string? revokedKeyId)
+        string descriptorPath, IReadOnlyList<TestApiKey> keys, AlvoApiWorldSetup setup)
     {
         var databaseName = $"alvo-api-{Guid.NewGuid():N}";
         var connectionString = $"Data Source={databaseName};Mode=Memory;Cache=Shared";
         var keepAlive = new SqliteConnection(connectionString);
         await keepAlive.OpenAsync(TestContext.Current.CancellationToken);
 
-        var app = BuildApp(descriptorPath, connectionString, keys, routePrefix, revokedKeyId);
+        var app = BuildApp(descriptorPath, connectionString, keys, setup);
         await ApplyDescriptorAsync(app);
 
         app.MapAlvoDataApi();
@@ -104,30 +98,45 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
         await app.StartAsync(TestContext.Current.CancellationToken);
 
         var authOptions = app.Services.GetRequiredService<IOptions<AlvoAuthOptions>>().Value;
-        return new AlvoApiWorld(keepAlive, app, capture, connectionString, authOptions);
+        return new AlvoApiWorld(keepAlive, app, capture, authOptions);
     }
 
     /// <summary>
-    /// Wires the host exactly as a consumer would, with one substitution the dev-key surface cannot
-    /// express: <see cref="AlvoDevApiKey"/> has no revocation field, so a world that needs a revoked
-    /// key registers a decorating <see cref="IApiKeyStore"/> <em>before</em> <c>AddAlvo</c> — the same
-    /// <c>TryAdd</c> seam a host with a database-backed key store uses. Everything the dev-key surface
-    /// can express goes through it, so authentication itself is never faked.
+    /// Wires the host exactly as a consumer would, with two substitutions at the <c>TryAdd</c> seam a
+    /// host would use anyway.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="AlvoDevApiKey"/> has no revocation field, so a world that needs a revoked key registers
+    /// a decorating <see cref="IApiKeyStore"/>. Everything the dev-key surface <em>can</em> express goes
+    /// through it, so authentication itself is never faked.
+    /// </para>
+    /// <para>
+    /// The ambient accessor is wrapped in a recorder over the production one, so a fact can assert
+    /// <em>what was published</em> — "an anonymous caller has no principal" is a statement about the
+    /// accessor, invisible in any response.
+    /// </para>
+    /// </remarks>
     private static WebApplication BuildApp(
         string descriptorPath,
         string connectionString,
         IReadOnlyList<TestApiKey> keys,
-        string? routePrefix,
-        string? revokedKeyId)
+        AlvoApiWorldSetup setup)
     {
         var builder = WebApplication.CreateSlimBuilder();
         builder.WebHost.UseTestServer();
+        builder.Services.AddSingleton<IAlvoContextAccessor>(new RecordingContextAccessor(new AlvoContextAccessor()));
 
-        if (revokedKeyId is not null)
+        if (setup.RevokedKeyId is not null)
         {
             builder.Services.AddSingleton<IApiKeyStore>(services => new RevokedKeyStore(
-                new InMemoryApiKeyStore(services.GetRequiredService<IOptions<AlvoAuthOptions>>()), revokedKeyId));
+                new InMemoryApiKeyStore(services.GetRequiredService<IOptions<AlvoAuthOptions>>()),
+                setup.RevokedKeyId));
+        }
+
+        if (setup.ConfigureHostJson is not null)
+        {
+            builder.Services.ConfigureHttpJsonOptions(json => setup.ConfigureHostJson(json.SerializerOptions));
         }
 
         builder.Services.Configure<AlvoAuthOptions>(options =>
@@ -141,13 +150,7 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
         builder.Services.AddAlvo(alvo => alvo
             .UseSqlite(connectionString)
             .FromDescriptor(descriptorPath)
-            .AddDataApi(api =>
-            {
-                if (routePrefix is not null)
-                {
-                    api.RoutePrefix = routePrefix;
-                }
-            }));
+            .AddDataApi(setup.ConfigureApi ?? (_ => { })));
 
         return builder.Build();
     }
@@ -187,14 +190,34 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
     /// <summary>Forgets every recorded statement, so a fact asserts on the ones its own request produced.</summary>
     internal void ClearStatements() => _capture.Clear();
 
+    /// <summary>
+    /// Every principal this world's ambient accessor has been asked to publish, in order —
+    /// <see langword="null"/> entries included, since those are the clears.
+    /// </summary>
+    internal IReadOnlyList<AlvoPrincipal?> PublishedPrincipals =>
+        ((RecordingContextAccessor)_app.Services.GetRequiredService<IAlvoContextAccessor>()).Published;
+
     /// <summary>Sends a request, presenting <paramref name="key"/> and <paramref name="tenant"/> the way an HTTP caller would.</summary>
     /// <param name="method">The HTTP method.</param>
     /// <param name="path">The request path, including the route prefix.</param>
     /// <param name="key">The API key to present, or <see langword="null"/> to present none at all.</param>
     /// <param name="tenant">The tenant to request, or <see langword="null"/> to request none.</param>
     /// <param name="body">A JSON body to send, or <see langword="null"/> for none.</param>
-    internal async Task<HttpResponseMessage> SendAsync(
-        HttpMethod method, string path, TestApiKey? key = null, string? tenant = null, JsonObject? body = null)
+    internal Task<HttpResponseMessage> SendAsync(
+        HttpMethod method, string path, TestApiKey? key = null, string? tenant = null, JsonObject? body = null) =>
+        SendRawAsync(method, path, key, tenant, body is null ? null : JsonContent.Create(body, JsonMediaType));
+
+    /// <summary>
+    /// Sends a request with a body this world does not serialize for the caller — for the facts about
+    /// bodies the API must <em>refuse</em>, which a typed <see cref="JsonObject"/> cannot express.
+    /// </summary>
+    /// <param name="method">The HTTP method.</param>
+    /// <param name="path">The request path, including the route prefix.</param>
+    /// <param name="key">The API key to present, or <see langword="null"/> to present none at all.</param>
+    /// <param name="tenant">The tenant to request, or <see langword="null"/> to request none.</param>
+    /// <param name="content">The body to send verbatim, or <see langword="null"/> for none.</param>
+    internal async Task<HttpResponseMessage> SendRawAsync(
+        HttpMethod method, string path, TestApiKey? key = null, string? tenant = null, HttpContent? content = null)
     {
         using var request = new HttpRequestMessage(method, path);
         if (key is not null)
@@ -207,31 +230,19 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
             request.Headers.TryAddWithoutValidation(_authOptions.TenantHeaderName, tenant);
         }
 
-        if (body is not null)
-        {
-            request.Content = JsonContent.Create(body, new MediaTypeHeaderValue("application/json"));
-        }
-
+        request.Content = content;
         return await _client.SendAsync(request, TestContext.Current.CancellationToken);
     }
 
-    /// <summary>Inserts a row straight into the database, bypassing policy — a world's own seeding is not the act under test.</summary>
-    /// <param name="sql">The insert statement, with <c>$name</c> placeholders.</param>
-    /// <param name="parameters">The parameter values by placeholder name.</param>
-    internal async Task SeedAsync(string sql, params (string Name, object Value)[] parameters)
-    {
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(TestContext.Current.CancellationToken);
+    /// <summary>A raw JSON body, sent exactly as written.</summary>
+    /// <param name="json">The body text.</param>
+    internal static StringContent RawJson(string json) => new(json, _mediaTypeEncoding, JsonMediaTypeName);
 
-        await using var command = connection.CreateCommand();
-        command.CommandText = sql;
-        foreach (var (name, value) in parameters)
-        {
-            command.Parameters.AddWithValue(name, value);
-        }
+    private const string JsonMediaTypeName = "application/json";
 
-        await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
-    }
+    private static readonly System.Text.Encoding _mediaTypeEncoding = System.Text.Encoding.UTF8;
+
+    private static MediaTypeHeaderValue JsonMediaType => new(JsonMediaTypeName);
 
     public async ValueTask DisposeAsync()
     {
@@ -261,7 +272,54 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
         public ValueTask TouchAsync(string keyId, DateTimeOffset usedAt, CancellationToken cancellationToken) =>
             inner.TouchAsync(keyId, usedAt, cancellationToken);
     }
+
+    /// <summary>
+    /// Records every publish while delegating to the production accessor, so a fact can assert what was
+    /// published rather than only what the response said. "An anonymous caller has no principal" is a
+    /// statement about this seam and is invisible in any response body.
+    /// </summary>
+    private sealed class RecordingContextAccessor(IAlvoContextAccessor inner) : IAlvoContextAccessor
+    {
+        private readonly List<AlvoPrincipal?> _published = [];
+
+        internal IReadOnlyList<AlvoPrincipal?> Published
+        {
+            get
+            {
+                lock (_published)
+                {
+                    return [.. _published];
+                }
+            }
+        }
+
+        public AlvoPrincipal? Principal
+        {
+            get => inner.Principal;
+            set
+            {
+                lock (_published)
+                {
+                    _published.Add(value);
+                }
+
+                inner.Principal = value;
+            }
+        }
+    }
 }
+
+/// <summary>Everything an <see cref="AlvoApiWorld"/> may be configured differently from the default.</summary>
+/// <param name="ConfigureApi">Configures <see cref="AlvoApiOptions"/> — the route prefix, the paging defaults, the payload bounds.</param>
+/// <param name="RevokedKeyId">The one key id whose stored record is revoked, for the 401 diagnosis dev-key configuration cannot express.</param>
+/// <param name="ConfigureHostJson">
+/// Configures the <em>host's</em> JSON options, for the facts that a host's serializer settings cannot
+/// move Alvo's wire contract.
+/// </param>
+internal sealed record AlvoApiWorldSetup(
+    Action<AlvoApiOptions>? ConfigureApi = null,
+    string? RevokedKeyId = null,
+    Action<System.Text.Json.JsonSerializerOptions>? ConfigureHostJson = null);
 
 /// <summary>One dev API key a world issues, in the shape a test reads best.</summary>
 /// <param name="KeyId">The key's public identifier.</param>

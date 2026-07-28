@@ -1,4 +1,5 @@
 ﻿using Microsoft.AspNetCore.Http;
+using Microsoft.Net.Http.Headers;
 using MMLib.Alvo.Data;
 
 namespace MMLib.Alvo.Api.Internal;
@@ -25,20 +26,46 @@ namespace MMLib.Alvo.Api.Internal;
 internal static class DataApiFailures
 {
     /// <summary>
+    /// The authentication scheme a 401 advertises. Not one of the IANA-registered schemes, because Alvo's
+    /// dev credential is not one: it is a header-carried API key, and RFC 7235's <c>auth-param</c> syntax
+    /// is what lets the challenge say <em>which</em> header without inventing a scheme's semantics.
+    /// </summary>
+    /// <remarks>
+    /// The name is <see cref="Auth.AlvoAuthOptions.HeaderName"/>'s value at runtime, so a host that moved
+    /// the header is advertising the header it actually reads. #36's real identity providers will add
+    /// their own challenge beside this one, which is why the header is appended rather than assigned.
+    /// </remarks>
+    private const string ApiKeyScheme = "AlvoApiKey";
+
+    /// <summary>
     /// The 401 for a credential that was presented and cannot be used — unknown, revoked, expired,
     /// malformed, or naming a tenant it was not issued for. One wording for all of them, because
     /// telling them apart would let a caller enumerate key ids one request at a time.
     /// </summary>
-    internal static IResult Unauthenticated() => Problem(
-        StatusCodes.Status401Unauthorized,
-        "The presented API key could not be used. Check the key, whether it has been revoked or has expired, "
-        + "and whether it was issued for the tenant you requested.");
+    /// <remarks>
+    /// RFC 7235 §3.1 makes <c>WWW-Authenticate</c> a <b>MUST</b> on a 401, and it is the only thing that
+    /// makes the status actionable without documentation: it names the scheme and the header the caller
+    /// should have used, so an agent can discover how to authenticate instead of guessing.
+    /// </remarks>
+    /// <param name="headerName">The header a credential is read from, named in the challenge.</param>
+    internal static IResult Unauthenticated(string headerName) => new UnauthenticatedResult(
+        Problem(
+            StatusCodes.Status401Unauthorized,
+            "The presented API key could not be used. Check the key, whether it has been revoked or has expired, "
+            + "and whether it was issued for the tenant you requested."),
+        $"{ApiKeyScheme} header=\"{headerName}\"");
 
     /// <summary>
-    /// The 403 for a resolved key whose scopes do not cover this operation. It names neither the entity
-    /// nor the operation: the refusal happens before any row is consulted, and a message naming the
-    /// entity would answer "does this entity exist" for a caller whose scopes keep them out of it.
+    /// The 403 for a resolved key whose scopes do not cover this operation.
     /// </summary>
+    /// <remarks>
+    /// The wording names neither the entity nor the operation, and what that protects is <b>the shape of
+    /// the key's own grant</b> — not the entity's existence, which the 403-vs-404 split already discloses
+    /// to anyone who can compare two requests. A message naming the missing scope would let a caller map
+    /// out which entities their key does and does not cover, one request at a time, which is a fingerprint
+    /// of the credential rather than of the data. The scope a key holds is knowable to whoever issued it;
+    /// it should not be re-derivable by probing.
+    /// </remarks>
     internal static IResult ScopeRefused() => Problem(
         StatusCodes.Status403Forbidden,
         "The presented API key's scopes do not permit this operation. Grant the key the scope it needs.");
@@ -101,4 +128,21 @@ internal static class DataApiFailures
     // the violations array. The status mapping above is already settled and moves with it unchanged.
     private static IResult Problem(int statusCode, string detail) =>
         Results.Problem(detail: detail, statusCode: statusCode);
+
+    /// <summary>
+    /// A problem response plus the <c>WWW-Authenticate</c> challenge RFC 7235 requires on a 401. A
+    /// wrapper rather than a header written at the call site, so the challenge cannot be forgotten by a
+    /// second path that also answers 401 — there is exactly one way to produce one.
+    /// </summary>
+    /// <param name="problem">The problem response to write.</param>
+    /// <param name="challenge">The challenge value.</param>
+    private sealed class UnauthenticatedResult(IResult problem, string challenge) : IResult
+    {
+        public Task ExecuteAsync(HttpContext httpContext)
+        {
+            ArgumentNullException.ThrowIfNull(httpContext);
+            httpContext.Response.Headers.Append(HeaderNames.WWWAuthenticate, challenge);
+            return problem.ExecuteAsync(httpContext);
+        }
+    }
 }

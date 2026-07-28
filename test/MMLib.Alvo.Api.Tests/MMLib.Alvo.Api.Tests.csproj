@@ -4,9 +4,10 @@
     The HTTP Data API's own test project. It has no sibling production assembly — the API is a
     *feature inside* MMLib.Alvo, not a package (docs/architecture/package-boundary.md), and
     MMLib.Alvo.Tests already owns that assembly's architecture rules and public-API baseline. So it
-    opts out of the linked os B shared tests, exactly as MMLib.Alvo.Conventions.Tests does: leaving
-    them on would make TestTarget.Resolve() try to load a non-existent "MMLib.Alvo.Api", and would
-    approve MMLib.Alvo's public API a second time from a second baseline.
+    opts out of the shared architecture and public-API tests that test/Directory.Build.props links into
+    every test project, exactly as MMLib.Alvo.Conventions.Tests does: leaving them on would make
+    TestTarget.Resolve() try to load a non-existent "MMLib.Alvo.Api", and would approve MMLib.Alvo's
+    public API a second time from a second baseline.
   -->
   <PropertyGroup>
     <AlvoSharedArchTests>false</AlvoSharedArchTests>

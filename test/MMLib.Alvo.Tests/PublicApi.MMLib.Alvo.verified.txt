@@ -10,6 +10,9 @@ namespace MMLib.Alvo.Api
         public AlvoApiOptions() { }
         public int DefaultPageSize { get; set; }
         public int MaxPageSize { get; set; }
+        public int MaxPayloadDepth { get; set; }
+        public int MaxPayloadKeys { get; set; }
+        public int MaxRequestBodyBytes { get; set; }
         public string RoutePrefix { get; set; }
     }
 }

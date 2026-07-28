@@ -23,6 +23,36 @@ public class AlvoContextAccessorTests
         provider.GetRequiredService<IAlvoContextAccessor>().ShouldNotBeNull();
     }
 
+    /// <summary>
+    /// Outside a request it reads <see langword="null"/>, and that means "no caller was published" — never
+    /// "anonymous". The post-commit paths (the outbox dispatcher, after-hooks, automation actions) run
+    /// exactly here, which is why they pass an explicit <see cref="AlvoContext"/> to <c>IAlvoData</c>
+    /// rather than consulting this, and why the accessor's own documentation says so.
+    /// </summary>
+    [Fact]
+    public void A_freshly_resolved_accessor_reads_null_outside_a_request()
+        => Accessor().Principal.ShouldBeNull();
+
+    /// <summary>
+    /// Last writer wins, and the outer caller is not restored — the documented behaviour, asserted so the
+    /// documentation cannot drift from it. A push/pop scope is deliberately not built: nothing nests today,
+    /// and an unreachable control is the defect class this PR keeps closing.
+    /// </summary>
+    [Fact]
+    public void Publishing_over_a_published_caller_replaces_it_and_does_not_restore_the_outer_one()
+    {
+        var accessor = Accessor();
+        var outer = Principal();
+        var inner = Principal();
+
+        accessor.Principal = outer;
+        accessor.Principal = inner;
+        accessor.Principal.ShouldBe(inner);
+
+        accessor.Principal = null;
+        accessor.Principal.ShouldBeNull("nesting is not supported, so the outer caller does not come back");
+    }
+
     [Fact]
     public async Task A_published_caller_is_visible_to_the_code_the_flow_continues_into()
     {

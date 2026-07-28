@@ -456,7 +456,7 @@ public sealed class InMemoryAlvoData : IAlvoData
 
         if (!passesCheck || !passesTenantScope)
         {
-            throw new AlvoAuthorizationException("The write was rejected by policy.");
+            throw new AlvoAuthorizationException(AlvoAuthorizationException.WriteRejectedByPolicy);
         }
     }
 

@@ -18,6 +18,28 @@ public sealed class AlvoAuthorizationException : Exception
 {
     private const string DefaultMessage = "The operation was not authorized.";
 
+    /// <summary>
+    /// The refusal every implementation raises when a candidate write fails its <c>WITH CHECK</c>
+    /// predicate or the synthesized tenant scope.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// On the port because <b>three</b> places have to say it identically: both shipped
+    /// <see cref="IAlvoData"/> implementations (the reference one and the EF one, which the adversarial
+    /// suite holds to the same outcomes), and the HTTP layer's own fact that a refusal came from
+    /// <em>policy</em> rather than from the API-key scope gate — a distinction the status code alone cannot
+    /// carry, since both render 403. Three literals is how a reference implementation and a driver come to
+    /// answer the same refusal with two different messages, and how a test asserting one of them quietly
+    /// stops asserting anything.
+    /// </para>
+    /// <para>
+    /// The wording names neither the entity, the row, nor which predicate refused — the same rule every
+    /// message on this exception follows. It does say "policy", deliberately: that is the layer an operator
+    /// has to go and look at, and it is already knowable from the descriptor they wrote.
+    /// </para>
+    /// </remarks>
+    public const string WriteRejectedByPolicy = "The write was rejected by policy.";
+
     /// <summary>Initializes a new instance of the <see cref="AlvoAuthorizationException"/> class.</summary>
     public AlvoAuthorizationException()
         : base(DefaultMessage)

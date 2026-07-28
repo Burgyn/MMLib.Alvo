@@ -2,7 +2,6 @@
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Rules;
-using System.Collections.Frozen;
 
 namespace MMLib.Alvo.Api.Internal;
 
@@ -27,7 +26,11 @@ namespace MMLib.Alvo.Api.Internal;
 ///   policy is default-deny, so a caller with no credential is a caller whose policy happens to permit
 ///   nothing — the policy engine inside the port answers, and an entity whose rules do admit
 ///   <c>anon</c> (public reference data) keeps working. 401 would make that impossible and would send
-///   an agent to fix a credential when the answer is a rule.
+///   an agent to fix a credential when the answer is a rule. <b>No principal is published for such a
+///   caller</b>: an anonymous caller has no key, so there is nothing for an
+///   <see cref="AlvoPrincipal"/> to describe, and inventing one with a sentinel <c>KeyId</c> would make
+///   every later reader of <see cref="IAlvoContextAccessor"/> need to know the convention.
+///   <see cref="AlvoContext.Anonymous"/> already says it.
 ///   </item>
 ///   <item>
 ///   <b>A key that was presented and cannot be used → 401.</b> Unknown, revoked, expired, malformed,
@@ -58,13 +61,6 @@ namespace MMLib.Alvo.Api.Internal;
 /// </remarks>
 internal sealed class AlvoContextFilter : IEndpointFilter
 {
-    private static readonly AlvoPrincipal _anonymous = new()
-    {
-        Context = AlvoContext.Anonymous,
-        Scopes = FrozenSet<ApiKeyScope>.Empty,
-        KeyId = string.Empty,
-    };
-
     private readonly string _entity;
     private readonly DataOperation _operation;
     private readonly IAlvoContextResolver _resolver;
@@ -96,21 +92,22 @@ internal sealed class AlvoContextFilter : IEndpointFilter
 
         var options = _authOptions.Value;
         var presentedKey = Presented(context.HttpContext.Request, options.HeaderName);
-        var principal = presentedKey is null
-            ? _anonymous
-            : await Resolve(presentedKey, context, options).ConfigureAwait(false);
+        if (presentedKey is null)
+        {
+            // No credential, so no principal: there is no key to describe. The endpoint reads
+            // AlvoContext.Anonymous from the accessor's absence, and the policy decides.
+            return await Invoke(principal: null, context, next).ConfigureAwait(false);
+        }
 
+        var principal = await Resolve(presentedKey, context, options).ConfigureAwait(false);
         if (principal is null)
         {
-            return DataApiFailures.Unauthenticated();
+            return DataApiFailures.Unauthenticated(options.HeaderName);
         }
 
-        if (presentedKey is not null && !_scopeGate.Allows(principal, _entity, _operation))
-        {
-            return DataApiFailures.ScopeRefused();
-        }
-
-        return await Invoke(principal, context, next).ConfigureAwait(false);
+        return _scopeGate.Allows(principal, _entity, _operation)
+            ? await Invoke(principal, context, next).ConfigureAwait(false)
+            : DataApiFailures.ScopeRefused();
     }
 
     private ValueTask<AlvoPrincipal?> Resolve(
@@ -121,12 +118,17 @@ internal sealed class AlvoContextFilter : IEndpointFilter
             context.HttpContext.RequestAborted);
 
     /// <summary>
-    /// Publishes the caller for the duration of the endpoint delegate and takes it away again. The
-    /// clear is a <c>finally</c> rather than a trailing statement so a throwing endpoint cannot leave a
-    /// caller published on the ambient context this request's thread later reuses.
+    /// Publishes the caller for the duration of the endpoint delegate and takes it away again.
     /// </summary>
+    /// <remarks>
+    /// <paramref name="principal"/> is <see langword="null"/> for an anonymous caller and that is
+    /// published as-is: an anonymous caller <em>has</em> no principal, so there is nothing to invent and
+    /// no reader has to know a sentinel convention to spot one. The clear is a <c>finally</c> rather than
+    /// a trailing statement so a throwing endpoint cannot leave a caller published on the ambient context
+    /// this request's thread later reuses.
+    /// </remarks>
     private async ValueTask<object?> Invoke(
-        AlvoPrincipal principal, EndpointFilterInvocationContext context, EndpointFilterDelegate next)
+        AlvoPrincipal? principal, EndpointFilterInvocationContext context, EndpointFilterDelegate next)
     {
         _accessor.Principal = principal;
         try
