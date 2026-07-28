@@ -88,11 +88,13 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
     /// <summary>Starts a world over one of this project's own descriptor fixtures.</summary>
     /// <param name="fileName">The descriptor file's name under <c>descriptors/</c>.</param>
     /// <param name="keys">The dev API keys the world issues.</param>
-    internal static Task<AlvoApiWorld> FromDescriptorAsync(string fileName, IReadOnlyList<TestApiKey>? keys = null) =>
+    /// <param name="setup">Anything the world's host is configured differently from the default.</param>
+    internal static Task<AlvoApiWorld> FromDescriptorAsync(
+        string fileName, IReadOnlyList<TestApiKey>? keys = null, AlvoApiWorldSetup? setup = null) =>
         StartAsync(
             Path.Combine(AppContext.BaseDirectory, "descriptors", fileName),
             keys ?? [],
-            new AlvoApiWorldSetup());
+            setup ?? new AlvoApiWorldSetup());
 
     private static async Task<AlvoApiWorld> StartAsync(
         string descriptorPath, IReadOnlyList<TestApiKey> keys, AlvoApiWorldSetup setup)
@@ -209,11 +211,18 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
     /// empty sequence when nothing registered one, and a fact over an empty sequence proves nothing.
     /// </remarks>
     internal IReadOnlyList<string> Routes =>
-        [.. ((IEndpointRouteBuilder)_app).DataSources
-            .SelectMany(source => source.Endpoints)
-            .OfType<RouteEndpoint>()
+        [.. Endpoints
             .SelectMany(endpoint => Methods(endpoint).Select(method => $"{method} {endpoint.RoutePattern.RawText}"))
             .Order(StringComparer.Ordinal)];
+
+    /// <summary>
+    /// Every mapped endpoint, for the facts that assert on an endpoint's <em>metadata</em> rather than on
+    /// the response it produces.
+    /// </summary>
+    internal IReadOnlyList<RouteEndpoint> Endpoints =>
+        [.. ((IEndpointRouteBuilder)_app).DataSources
+            .SelectMany(source => source.Endpoints)
+            .OfType<RouteEndpoint>()];
 
     private static IEnumerable<string> Methods(RouteEndpoint endpoint) =>
         endpoint.Metadata.GetMetadata<IHttpMethodMetadata>()?.HttpMethods ?? ["*"];

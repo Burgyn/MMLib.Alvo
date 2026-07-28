@@ -33,11 +33,16 @@ internal sealed class AlvoApiOptionsValidator : IValidateOptions<AlvoApiOptions>
     }
 
     /// <summary>
-    /// The prefix must survive normalization into a legal route pattern. Normalization strips one
-    /// leading and one trailing slash, so <c>"/"</c> and <c>"//"</c> collapse to nothing — which is
-    /// legal (mounting at the root) — but an <em>interior</em> empty segment cannot be repaired and is
-    /// what produced the opaque routing failure.
+    /// The prefix must survive normalization into a legal route pattern. Normalization trims whitespace and
+    /// every leading and trailing slash, so <c>"/"</c>, <c>"//"</c> and <c>" / "</c> all collapse to nothing
+    /// — legal, and it mounts the entities at the root. An <em>interior</em> empty segment cannot be
+    /// repaired and is what produces the opaque <c>RoutePatternException</c> this check exists to pre-empt.
     /// </summary>
+    /// <remarks>
+    /// Accepting a value here is a claim that it <em>mounts</em>, not merely that it parses as a string,
+    /// which is why <c>DataApiRoutingTests.The_route_prefix_can_mount_at_the_root</c> serves a request over
+    /// the normalized form instead of asserting that this method returned success.
+    /// </remarks>
     private static void ValidateRoutePrefix(string prefix, List<string> failures)
     {
         if (prefix is null)

@@ -1,4 +1,8 @@
-﻿using System.Net;
+﻿using Microsoft.AspNetCore.Http.Metadata;
+using Microsoft.AspNetCore.Routing;
+using MMLib.Alvo.Api.Internal;
+using MMLib.Alvo.Rules;
+using System.Net;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -161,21 +165,10 @@ public sealed class DataApiRoutingTests
                 json.DictionaryKeyPolicy = JsonNamingPolicy.SnakeCaseUpper;
             }));
 
-        using var created = await world.SendAsync(
-            HttpMethod.Post, "/api/owners", admin, body: new JsonObject { ["name"] = "Acme Ltd" });
-        var ownerId = (await created.ReadJsonObjectAsync())["id"]!.GetValue<Guid>();
-        using var vehicle = await world.SendAsync(HttpMethod.Post, "/api/vehicles", admin, body: new JsonObject
-        {
-            ["vin"] = "VIN01234567890123",
-            ["plate"] = "ACME-001",
-            ["make"] = "Skoda",
-            ["model"] = "Octavia",
-            ["year"] = 2020,
-            ["owner_id"] = ownerId.ToString(),
-        });
-
+        using var vehicle = await CreateVehicleAsync(world, admin);
         vehicle.StatusCode.ShouldBe(
             HttpStatusCode.Created, "the snake_case field name must still be accepted on the way in");
+
         var vehicleId = (await vehicle.ReadJsonObjectAsync())["id"]!.GetValue<Guid>();
         using var read = await world.SendAsync(HttpMethod.Get, $"/api/vehicles/{vehicleId}", admin);
         using var listed = await world.SendAsync(HttpMethod.Get, "/api/vehicles", admin);
@@ -194,6 +187,24 @@ public sealed class DataApiRoutingTests
         }
     }
 
+    /// <summary>Creates an owner and a vehicle referencing it, and returns the vehicle's response.</summary>
+    private static async Task<HttpResponseMessage> CreateVehicleAsync(AlvoApiWorld world, TestApiKey admin)
+    {
+        using var owner = await world.SendAsync(
+            HttpMethod.Post, "/api/owners", admin, body: new JsonObject { ["name"] = "Acme Ltd" });
+        var ownerId = (await owner.ReadJsonObjectAsync())["id"]!.GetValue<Guid>();
+
+        return await world.SendAsync(HttpMethod.Post, "/api/vehicles", admin, body: new JsonObject
+        {
+            ["vin"] = "VIN01234567890123",
+            ["plate"] = "ACME-001",
+            ["make"] = "Skoda",
+            ["model"] = "Octavia",
+            ["year"] = 2020,
+            ["owner_id"] = ownerId.ToString(),
+        });
+    }
+
     /// <summary>
     /// The envelope's own two members are pinned the same way and for the same reason: they are what the
     /// OpenAPI document will describe.
@@ -210,5 +221,90 @@ public sealed class DataApiRoutingTests
         var body = await response.ReadJsonObjectAsync();
         body.ContainsKey("items").ShouldBeTrue();
         body.ContainsKey("next").ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// A prefix of nothing but slashes mounts the entities at the root — and this fact <b>serves a
+    /// request</b> to prove it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The lesson this fact was rewritten to carry: <b>a validator returning success is not evidence that a
+    /// value works.</b> Its predecessor asserted only that <c>AlvoApiOptionsValidator</c> accepted
+    /// <c>"/"</c>, and passed for a whole round while <c>NormalizePrefix("/")</c> returned <c>"/"</c>,
+    /// <c>Map</c> built <c>"//owners"</c>, and <c>RoutePatternFactory.Parse</c> threw on the empty segment.
+    /// Nothing mounted. Only mounting proves mounting.
+    /// </para>
+    /// <para>
+    /// All three spellings are exercised, because they reduce through the same trim and a fix that repaired
+    /// only <c>"/"</c> would leave the other two throwing.
+    /// </para>
+    /// </remarks>
+    /// <param name="prefix">A configured prefix that carries no path segment at all.</param>
+    [Theory]
+    [InlineData("/")]
+    [InlineData("//")]
+    [InlineData(" / ")]
+    public async Task The_route_prefix_can_mount_at_the_root(string prefix)
+    {
+        var reader = new TestApiKey("reader", ["authenticated"], ["*:read"]);
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync(
+            [reader], new AlvoApiWorldSetup(api => api.RoutePrefix = prefix));
+
+        world.Routes.ShouldContain("GET /owners");
+
+        using var response = await world.SendAsync(HttpMethod.Get, "/owners", reader);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, "the root-mounted route must actually serve");
+        (await response.ReadItemsAsync()).ShouldNotBeNull();
+    }
+
+    /// <summary>
+    /// Every generated endpoint carries an operation marker, and the operation matches the verb and shape of
+    /// its own route. This is the half of the authorization guarantee that <b>scales</b>: the five per-verb
+    /// facts prove the gate refuses, and they name five literal paths, so a sixth endpoint added later would
+    /// be covered by nothing. This one is written over the endpoint table, so it covers whatever is mapped.
+    /// </summary>
+    /// <remarks>
+    /// It asserts the marker rather than the filter because <c>AddEndpointFilter</c> leaves nothing in
+    /// <c>Endpoint.Metadata</c>. What makes the marker sufficient evidence is
+    /// <c>DataApiEndpoints.Protect</c>: it attaches both in one call, so a marker without a filter cannot be
+    /// written.
+    /// </remarks>
+    [Fact]
+    public async Task Every_generated_endpoint_carries_an_operation_marker_matching_its_verb()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync();
+
+        var endpoints = world.Endpoints;
+
+        endpoints.Count.ShouldBe(_entities.Length * 5, "or this fact is asserting over the wrong set");
+        foreach (var endpoint in endpoints)
+        {
+            var marker = endpoint.Metadata.GetMetadata<DataApiOperationMetadata>();
+            marker.ShouldNotBeNull($"{endpoint.RoutePattern.RawText} carries no operation marker, so nothing gates it");
+            _entities.ShouldContain(marker.Entity);
+            marker.Operation.ShouldBe(ExpectedOperation(endpoint));
+        }
+    }
+
+    /// <summary>
+    /// The operation a route's own shape implies, derived from the verb plus whether the pattern addresses one
+    /// row — so a marker that says <c>List</c> on a <c>DELETE</c> fails rather than being taken at its word.
+    /// </summary>
+    private static DataOperation ExpectedOperation(RouteEndpoint endpoint)
+    {
+        var method = endpoint.Metadata.GetMetadata<IHttpMethodMetadata>()!.HttpMethods.Single();
+        var addressesOneRow = endpoint.RoutePattern.RawText!.EndsWith("{id:guid}", StringComparison.Ordinal);
+
+        return method switch
+        {
+            "GET" when addressesOneRow => DataOperation.Get,
+            "GET" => DataOperation.List,
+            "POST" => DataOperation.Create,
+            "PATCH" => DataOperation.Update,
+            "DELETE" => DataOperation.Delete,
+            _ => throw new InvalidOperationException($"Unexpected generated route: {method} {endpoint.RoutePattern.RawText}"),
+        };
     }
 }

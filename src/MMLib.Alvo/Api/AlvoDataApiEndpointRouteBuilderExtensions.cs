@@ -54,9 +54,19 @@ public static class AlvoDataApiEndpointRouteBuilderExtensions
 
     /// <summary>
     /// Reduces a configured prefix to the one form a route pattern can be built from: a single leading
-    /// slash, no trailing one — so <c>"api"</c>, <c>"/api"</c> and <c>"/api/"</c> mount in the same place
+    /// slash and no trailing one, so <c>"api"</c>, <c>"/api"</c> and <c>"/api/"</c> mount in the same place
     /// instead of producing three different route tables.
     /// </summary>
-    private static string NormalizePrefix(string prefix) =>
-        string.IsNullOrWhiteSpace(prefix) ? string.Empty : $"/{prefix.Trim().Trim('/')}";
+    /// <remarks>
+    /// A prefix that is <em>only</em> slashes or whitespace reduces to the empty string, which mounts the
+    /// entities at the root (<c>/owners</c>). That case is the one this used to get wrong: it returned
+    /// <c>"/"</c>, the caller appended <c>"/owners"</c>, and <c>RoutePatternFactory.Parse("//owners")</c>
+    /// threw on the empty segment while the options validator had already reported the value as valid. A
+    /// validator returning success is not evidence that a value mounts.
+    /// </remarks>
+    private static string NormalizePrefix(string prefix)
+    {
+        var trimmed = prefix?.Trim().Trim('/') ?? string.Empty;
+        return trimmed.Length == 0 ? string.Empty : $"/{trimmed}";
+    }
 }

@@ -55,8 +55,14 @@ public sealed class PayloadBindingTests
         content.Headers.ContentLength.ShouldBeNull("or this fact is the Content-Length case again");
     }
 
+    /// <summary>
+    /// The depth bound refuses, and its message <b>names itself</b> — it was the one bound whose refusal
+    /// came back as "not well-formed JSON", because the reader raises the same exception for a too-deep body
+    /// as for a broken one. An agent cannot act on that: it would go looking for a syntax error that is not
+    /// there.
+    /// </summary>
     [Fact]
-    public async Task A_body_nested_deeper_than_the_configured_maximum_is_refused()
+    public async Task A_body_nested_deeper_than_the_configured_maximum_is_refused_naming_the_bound()
     {
         await using var world = await AlvoApiWorld.VehicleRegistryAsync(
             [_admin], new AlvoApiWorldSetup(api => api.MaxPayloadDepth = 4));
@@ -65,6 +71,7 @@ public sealed class PayloadBindingTests
             HttpMethod.Post, "/api/owners", _admin, content: AlvoApiWorld.RawJson(Nested(depth: 16)));
 
         response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
+        (await response.ReadProblemDetailAsync()).ShouldContain("nests deeper than 4");
     }
 
     [Fact]
@@ -81,23 +88,38 @@ public sealed class PayloadBindingTests
     }
 
     /// <summary>
-    /// A wide-but-shallow object is what a depth cap alone misses, so the key bound has to bite where the
-    /// depth bound does not. Without this control the fact above could be passing for the wrong reason.
+    /// The key bound counts property names at <b>every</b> depth, so nesting a wide object one level does not
+    /// escape it.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the bound that was not a bound. Counting only depth 1 meant
+    /// <c>{"name":{…150 000 keys…}}</c> satisfied the key cap, satisfied the depth cap at depth 2, fitted
+    /// inside <see cref="AlvoApiOptions.MaxRequestBodyBytes"/>, and was then materialised in full — roughly
+    /// 20–40× memory amplification per request, refused only afterwards.
+    /// </para>
+    /// <para>
+    /// Only the key count can explain this refusal: the body is a few dozen bytes, far under the size bound,
+    /// and nests two levels, far under the depth bound — and the message is asserted to name the key bound
+    /// rather than any 422 being accepted. Its predecessor set <c>MaxPayloadDepth = 32</c>, which is the
+    /// default, and sent the same flat object as the fact above it: one fact written twice.
+    /// </para>
+    /// </remarks>
     [Fact]
-    public async Task A_wide_but_shallow_body_is_within_the_depth_bound_and_still_refused_by_the_key_bound()
+    public async Task A_wide_object_nested_below_the_top_level_is_still_refused_by_the_key_bound()
     {
         await using var world = await AlvoApiWorld.VehicleRegistryAsync(
-            [_admin], new AlvoApiWorldSetup(api =>
-            {
-                api.MaxPayloadKeys = 3;
-                api.MaxPayloadDepth = 32;
-            }));
+            [_admin], new AlvoApiWorldSetup(api => api.MaxPayloadKeys = 3));
 
         using var response = await world.SendRawAsync(
-            HttpMethod.Post, "/api/owners", _admin, content: AlvoApiWorld.RawJson(WideObject(keys: 10)));
+            HttpMethod.Post, "/api/owners", _admin,
+            content: AlvoApiWorld.RawJson($@"{{""name"":{WideObject(keys: 10)}}}"));
 
         response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
+        (await response.ReadProblemDetailAsync()).ShouldContain(
+            "more than 3 fields",
+            Case.Sensitive,
+            "the key bound must be what refused it, not the size or depth bound");
     }
 
     [Fact]
@@ -222,6 +244,87 @@ public sealed class PayloadBindingTests
         values!["owner_id"].ShouldBe(owner);
         values["year"].ShouldBe(2020L);
         values["plate"].ShouldBe("ACME-1");
+    }
+
+    /// <summary>
+    /// An unauthorized caller is refused <b>before</b> the body is read, so a body that would itself be
+    /// refused still earns the authorization refusal.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Two reasons the ordering matters, neither of them confidentiality: parsing up to
+    /// <see cref="AlvoApiOptions.MaxRequestBodyBytes"/> for a caller who cannot succeed is a
+    /// denial-of-service amplifier, and telling an unauthorized caller their body was malformed sends an
+    /// agent to fix the wrong thing.
+    /// </para>
+    /// <para>
+    /// Both refusal routes are exercised, because they are decided in different places: the scope gate lives
+    /// in the endpoint filter, and the policy decision is resolved by the endpoint itself. The bodies are
+    /// deliberately over the configured bound <em>and</em> malformed, so a 422 would be unambiguous evidence
+    /// that the read happened first.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task An_unauthorized_write_is_refused_before_the_body_is_read()
+    {
+        var readOnly = new TestApiKey("reader-key", ["admin", "authenticated"], ["owners:read"]);
+        var tenantless = new TestApiKey("no-tenant", ["authenticated"], ["notes:read", "notes:write"]);
+        await using var scoped = await AlvoApiWorld.VehicleRegistryAsync(
+            [readOnly], new AlvoApiWorldSetup(api => api.MaxRequestBodyBytes = 32));
+        await using var tenanted = await AlvoApiWorld.TenantNotesAsync([tenantless]);
+
+        // A fresh content per request: disposing an HttpRequestMessage disposes its content, so a shared
+        // instance makes the second send throw ObjectDisposedException rather than assert anything.
+        using var scopeRefused = await scoped.SendRawAsync(
+            HttpMethod.Post, "/api/owners", readOnly,
+            content: AlvoApiWorld.RawJson($@"{{""name"":""{new string('x', 512)}"","));
+        using var createRefused = await tenanted.SendRawAsync(
+            HttpMethod.Post, "/api/notes", tenantless, content: AlvoApiWorld.RawJson(@"{""title"":"));
+        using var patchRefused = await tenanted.SendRawAsync(
+            HttpMethod.Patch, $"/api/notes/{Guid.NewGuid()}", tenantless,
+            content: AlvoApiWorld.RawJson(@"{""title"":"));
+
+        scopeRefused.StatusCode.ShouldBe(
+            HttpStatusCode.Forbidden, "the scope gate must answer before the oversized body is read");
+        createRefused.StatusCode.ShouldBe(
+            HttpStatusCode.Forbidden, "the create's policy decision must answer before the malformed body is read");
+        patchRefused.StatusCode.ShouldBe(
+            HttpStatusCode.Forbidden, "and the update's must too — both write endpoints were reordered");
+    }
+
+    /// <summary>
+    /// The one carve-out in an otherwise public schema shape: a <c>hidden</c> field's name must be
+    /// <b>indistinguishable</b> from a name that does not exist — status and body, byte for byte.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The rest of the declared shape is deliberately public: route literals disclose entity existence
+    /// before authorization, and Task 8 publishes the declared non-hidden field list. A <c>hidden</c> field
+    /// is the exception, because the descriptor author marked it confidential and the document excludes it —
+    /// so a filter over it must not be told apart from a filter over nothing.
+    /// </para>
+    /// <para>
+    /// End to end over the live API, whereas <c>QueryStringParserTests</c> asserts the same equality at the
+    /// parser with a hand-built mask: the parser can be right while the endpoint passes it the wrong mask,
+    /// and only this level notices that. Equality of the whole body, not "both are 422".
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_filter_over_a_hidden_field_answers_exactly_like_one_over_an_unknown_field()
+    {
+        var reader = new TestApiKey("reader-key", ["authenticated"], ["notes:read"]);
+        await using var world = await AlvoApiWorld.FromDescriptorAsync("masked-notes.alvo.json", [reader]);
+
+        using var hidden = await world.SendAsync(HttpMethod.Get, "/api/notes?secret=eq.x", reader);
+        using var unknown = await world.SendAsync(HttpMethod.Get, "/api/notes?nosuchfield=eq.x", reader);
+        using var declared = await world.SendAsync(HttpMethod.Get, "/api/notes?title=eq.x", reader);
+
+        hidden.StatusCode.ShouldBe(unknown.StatusCode);
+        (await hidden.ReadTextAsync()).ShouldBe(
+            await unknown.ReadTextAsync(),
+            "any difference answers 'does this entity have a field called secret' one request at a time");
+        declared.StatusCode.ShouldBe(
+            HttpStatusCode.OK, "a visible field is filterable, so the refusal above is about the mask");
     }
 
     private static async Task<Guid> CreateOwnerAsync(AlvoApiWorld world, string name)

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "masked-notes",
+  "description": "One entity with a hidden field and rules that permit every caller, so a fact about the hidden field's NAME is not also a fact about the caller's access. The carve-out being tested: a hidden field's name must stay indistinguishable from an unknown one, because Task 8 excludes it from the published document while the rest of the declared shape is public.",
+  "auth": {
+    "providers": ["local"]
+  },
+  "entities": {
+    "notes": {
+      "description": "A note with one field the descriptor author marked confidential.",
+      "fields": {
+        "title": { "type": "string", "required": true, "maxLength": 120 },
+        "secret": { "type": "string", "hidden": true }
+      },
+      "rules": {
+        "list": "true",
+        "get": "true",
+        "create": "true",
+        "update": "true",
+        "delete": "true"
+      }
+    }
+  }
+}

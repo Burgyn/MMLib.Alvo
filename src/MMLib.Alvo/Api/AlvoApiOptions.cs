@@ -18,12 +18,13 @@ public sealed class AlvoApiOptions
 {
     /// <summary>The route prefix every generated endpoint sits under. Default <c>/api</c>.</summary>
     /// <remarks>
-    /// Configurable because an embedded host is mounting Alvo <em>beside</em> its own endpoints and
-    /// must be able to keep the two apart. A leading and trailing <c>/</c> is normalized away, so
-    /// <c>"api"</c>, <c>"/api"</c> and <c>"/api/"</c> all mount at the same place; anything that cannot
-    /// normalize into a legal route pattern — an empty segment, a route-parameter brace, a wildcard, a
-    /// query or fragment marker — is refused at startup rather than left to fail when the first route
-    /// is built.
+    /// Configurable because an embedded host is mounting Alvo <em>beside</em> its own endpoints and must be
+    /// able to keep the two apart. A leading and trailing <c>/</c> is normalized away, so <c>"api"</c>,
+    /// <c>"/api"</c> and <c>"/api/"</c> all mount at the same place — and a prefix that is nothing but
+    /// slashes or whitespace (<c>""</c>, <c>"/"</c>, <c>"//"</c>, <c>" / "</c>) reduces to the empty string,
+    /// mounting the entities at the root as <c>/owners</c>. Anything that cannot reduce to a legal route
+    /// pattern — an <em>interior</em> empty segment, a route-parameter brace, a wildcard, a query or
+    /// fragment marker — is refused at startup rather than left to fail when the first route is built.
     /// </remarks>
     public string RoutePrefix { get; set; } = "/api";
 
@@ -58,12 +59,15 @@ public sealed class AlvoApiOptions
     /// </remarks>
     public int MaxPayloadDepth { get; set; } = 32;
 
-    /// <summary>How many keys a request body's top-level object may carry. Default 512.</summary>
+    /// <summary>How many property names a request body may carry <em>in total, at any depth</em>. Default 512.</summary>
     /// <remarks>
-    /// The bound <see cref="MaxPayloadDepth"/> misses: a wide-but-shallow object escapes a depth cap
-    /// entirely, which is exactly why <see cref="Data.AlvoFilter.MaxTerms"/> exists beside
-    /// <see cref="Data.AlvoFilter.MaxDepth"/>. 512 is far more fields than any entity the schema admits
-    /// declares, so a legitimate payload never approaches it.
+    /// The bound <see cref="MaxPayloadDepth"/> misses: a wide object escapes a depth cap entirely, which is
+    /// exactly why <see cref="Data.AlvoFilter.MaxTerms"/> exists beside
+    /// <see cref="Data.AlvoFilter.MaxDepth"/>. It counts at <b>every</b> depth rather than at the top level,
+    /// because a top-level-only count is not a bound at all: one level of nesting
+    /// (<c>{"name":{…150 000 keys…}}</c>) satisfies it while still costing the memory the count exists to
+    /// cap. 512 is far more fields than any entity the schema admits declares, so a legitimate payload never
+    /// approaches it.
     /// </remarks>
     public int MaxPayloadKeys { get; set; } = 512;
 }

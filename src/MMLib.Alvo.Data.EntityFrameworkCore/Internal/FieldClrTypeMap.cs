@@ -17,17 +17,9 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// </remarks>
 internal static class FieldClrTypeMap
 {
-    internal static Type Exact(FieldSchema field)
-    {
-        ArgumentNullException.ThrowIfNull(field);
-        return Wrap(FieldClrType.Of(field.Type), field.Nullable);
-    }
+    internal static Type Exact(FieldSchema field) => Wrap(FieldClrType.Of(field), field.Nullable);
 
-    internal static Type Optional(FieldSchema field)
-    {
-        ArgumentNullException.ThrowIfNull(field);
-        return Wrap(FieldClrType.Of(field.Type), nullable: true);
-    }
+    internal static Type Optional(FieldSchema field) => Wrap(FieldClrType.Of(field), nullable: true);
 
     private static Type Wrap(Type type, bool nullable) =>
         nullable && type.IsValueType ? typeof(Nullable<>).MakeGenericType(type) : type;

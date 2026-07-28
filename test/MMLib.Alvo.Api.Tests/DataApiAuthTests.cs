@@ -72,6 +72,8 @@ public sealed class DataApiAuthTests
         var afterAnonymous = world.PublishedPrincipals;
         using var keyed = await world.SendAsync(HttpMethod.Get, "/api/owners", _admin);
 
+        afterAnonymous.ShouldNotBeEmpty(
+            "the filter must have reached the accessor at all, or 'every publish was null' is vacuously true");
         afterAnonymous.ShouldAllBe(principal => principal == null);
         (await anonymous.ReadProblemDetailAsync()).ShouldBe(
             AlvoAuthorizationException.WriteRejectedByPolicy,
@@ -242,6 +244,16 @@ public sealed class DataApiAuthTests
         patch.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
         statementsAfterPatch.ShouldBeEmpty("the gate must refuse before the row is locked or written");
         (await stillOriginal.ReadJsonObjectAsync())["name"]!.GetValue<string>().ShouldBe("Acme Ltd");
+
+        // The positive half. Without it this fact only ever sees a refusal, and a refusal is what a broken
+        // PATCH endpoint produces too — a 403 for a caller who cannot patch proves nothing until some caller
+        // can.
+        using var allowed = await world.SendAsync(
+            HttpMethod.Patch, $"/api/owners/{ownerId}", _admin, body: Owner("Renamed Ltd"));
+        using var afterPatch = await world.SendAsync(HttpMethod.Get, $"/api/owners/{ownerId}", reader);
+
+        allowed.StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await afterPatch.ReadJsonObjectAsync())["name"]!.GetValue<string>().ShouldBe("Renamed Ltd");
     }
 
     /// <summary>
@@ -264,6 +276,14 @@ public sealed class DataApiAuthTests
         delete.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
         statementsAfterDelete.ShouldBeEmpty("the gate must refuse before the delete is composed");
         stillThere.StatusCode.ShouldBe(HttpStatusCode.OK, "the row must survive a refused delete");
+
+        // The positive half: a write-scoped key does delete it, and the row is then gone. Without this the
+        // fact is satisfied by a DELETE endpoint that refuses everyone.
+        using var allowed = await world.SendAsync(HttpMethod.Delete, $"/api/owners/{ownerId}", _admin);
+        using var afterDelete = await world.SendAsync(HttpMethod.Get, $"/api/owners/{ownerId}", reader);
+
+        allowed.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        afterDelete.StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }
 
     /// <summary>

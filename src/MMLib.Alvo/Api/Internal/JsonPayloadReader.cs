@@ -19,30 +19,50 @@ namespace MMLib.Alvo.Api.Internal;
 /// replace this.
 /// </para>
 /// <para>
-/// <b>Everything here runs before policy and without authentication.</b> An anonymous caller's POST is
-/// parsed before the port has any say, which makes this the one part of the Data API an unauthenticated
-/// request can put to work. So it is bounded three ways
+/// <b>Everything here runs after authorization and before validation.</b> <c>DataApiEndpoints</c> resolves
+/// the operation's policy decision and the API-key scope gate <em>before</em> calling this, so a caller who
+/// is going to be refused never pays for a parse — doing megabytes of work on behalf of a request that
+/// cannot succeed is a denial-of-service amplifier, and it is also the correct precedence: an unauthorized
+/// caller must not be told their body was malformed. It is still bounded three ways
 /// (<see cref="AlvoApiOptions.MaxRequestBodyBytes"/>, <see cref="AlvoApiOptions.MaxPayloadDepth"/>,
-/// <see cref="AlvoApiOptions.MaxPayloadKeys"/>) and every bound refuses <em>before</em> the work it
-/// exists to prevent: the size bound stops at the first chunk that would cross it rather than buffering
-/// the body first, and the depth and key bounds are decided by a forward-only
-/// <see cref="Utf8JsonReader"/> scan that builds no node tree. A bound applied to a finished document has
-/// already paid the cost.
+/// <see cref="AlvoApiOptions.MaxPayloadKeys"/>), because an <em>authorized</em> caller can be hostile too,
+/// and every bound refuses <em>before</em> the work it exists to prevent: the size bound stops at the first
+/// chunk that would cross it rather than buffering the body first, and the depth and key bounds are decided
+/// by a forward-only <see cref="Utf8JsonReader"/> scan that builds no node tree. A bound applied to a
+/// finished document has already paid the cost.
 /// </para>
 /// <para>
-/// <b>An undeclared key is refused before it is materialised.</b> The port refuses it too — its own
-/// single check, with a message that does not confirm whether the field exists — but refusing here means
-/// no attacker-controlled value is ever re-serialised into a string on its way to a refusal that was
-/// already certain, and the wording below says no more than the port's does.
+/// <b>An undeclared key is refused before it is materialised</b> — not to withhold anything, but so no
+/// attacker-controlled value is re-serialised into a string on its way to a refusal that was already
+/// certain. See <see cref="UndeclaredFieldFailure"/> for what the wording does and does not protect.
 /// </para>
 /// </remarks>
 internal static class JsonPayloadReader
 {
-    /// <summary>
-    /// The refusal for a key the entity does not declare. Deliberately as uninformative as the port's own
-    /// (<c>QueryFieldGuard</c>): it names neither the key nor the entity, so it cannot answer "does this
-    /// entity have a field called X?" one request at a time.
-    /// </summary>
+    /// <summary>The refusal for a key the entity does not declare.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The declared, non-hidden schema shape is public, and this wording is not trying to hide it.</b>
+    /// Alvo maps route literals from the applied schema, so an undeclared entity already answers 404 where a
+    /// declared one answers 403 — entity existence is disclosed before authorization, by design, and that
+    /// design is what lets the OpenAPI document list real paths. Task 8 then publishes the declared,
+    /// non-hidden field list to anyone who can read the document. A framework cannot both publish its schema
+    /// shape and treat that shape as confidential. What is confidential is <em>data</em>.
+    /// </para>
+    /// <para>
+    /// <b>The one carve-out: a <c>hidden</c> field's name.</b> That is a field the descriptor author marked
+    /// confidential and Task 8 excludes from the document, so its name must stay indistinguishable from an
+    /// unknown one — which is why the query parser takes the resolved mask
+    /// (<c>DataApiEndpoints.MaskedFields</c>) and refuses both with one identical violation. On this write
+    /// path there is nothing to distinguish: <c>hidden</c> restricts reading, so a hidden field is
+    /// legitimately writable and is simply accepted.
+    /// </para>
+    /// <para>
+    /// So the message names neither the key nor the entity for a plainer reason than secrecy: it is
+    /// caller-supplied text, echoing it back is a log-injection vector, and the port's own refusal
+    /// (<c>QueryFieldGuard</c>) already says exactly this much.
+    /// </para>
+    /// </remarks>
     private const string UndeclaredFieldFailure =
         "The request body names a field that is not writable on this entity. Send only the fields the "
         + "entity declares.";
@@ -110,15 +130,32 @@ internal static class JsonPayloadReader
     }
 
     /// <summary>
-    /// Decides the shape bounds — is it an object at all, how deep does it nest, how many keys does its
-    /// top level carry — from a forward-only scan that builds nothing. The reader itself enforces the
-    /// depth cap, so a pathological body is refused mid-scan rather than after a tree exists for it.
+    /// Decides the shape bounds — is it an object at all, how deep does it nest, how many property names does
+    /// it carry <em>anywhere</em> — from a forward-only scan that builds nothing.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The reader's own <see cref="JsonReaderOptions.MaxDepth"/> is deliberately given headroom over
+    /// <see cref="AlvoApiOptions.MaxPayloadDepth"/>. The reader raises the same <see cref="JsonException"/>
+    /// for a too-deep body as for a malformed one, so anything the reader refuses could only ever be reported
+    /// as "not well-formed JSON" — the one bound whose message could not name itself, which sends an agent
+    /// hunting a syntax error that is not there. Checking <see cref="Utf8JsonReader.CurrentDepth"/> first
+    /// means the depth refusal names the depth.
+    /// </para>
+    /// <para>
+    /// The headroom is <b>two</b> levels, not one, because the two numbers are counted differently:
+    /// <see cref="JsonReaderOptions.MaxDepth"/> counts the outermost container as level 1 while
+    /// <see cref="Utf8JsonReader.CurrentDepth"/> reports it as 0. With only one level of slack the reader
+    /// threw on the very token whose <see cref="Utf8JsonReader.CurrentDepth"/> the check needed to see, and
+    /// the named message was unreachable — measured, not reasoned. The reader remains a hard backstop; it is
+    /// simply never the first to speak.
+    /// </para>
+    /// </remarks>
     private static string? EnsureWithinShapeBounds(ReadOnlySpan<byte> utf8Body, AlvoApiOptions options)
     {
         var reader = new Utf8JsonReader(
             utf8Body,
-            new JsonReaderOptions { MaxDepth = options.MaxPayloadDepth, AllowTrailingCommas = false });
+            new JsonReaderOptions { MaxDepth = options.MaxPayloadDepth + 2, AllowTrailingCommas = false });
 
         try
         {
@@ -127,39 +164,44 @@ internal static class JsonPayloadReader
                 return NotAnObjectFailure;
             }
 
-            return CountTopLevelKeys(ref reader, options.MaxPayloadKeys);
+            return ScanShape(ref reader, options);
         }
         catch (JsonException)
         {
-            // Covers a malformed body and one past MaxPayloadDepth alike: the reader raises the same
-            // exception for both, and telling them apart is Task 5's structured-violation job.
             return MalformedJsonFailure;
         }
     }
 
     /// <summary>
-    /// Walks the top-level object, refusing as soon as the key count crosses <paramref name="maxKeys"/> —
-    /// a wide-but-shallow object is exactly what a depth cap alone misses.
+    /// Walks every token of the body, refusing as soon as the property-name count or the nesting depth
+    /// crosses its bound.
     /// </summary>
-    private static string? CountTopLevelKeys(ref Utf8JsonReader reader, int maxKeys)
+    /// <remarks>
+    /// <b>Property names are counted at every depth, not just the top level.</b> Counting only depth 1 was a
+    /// bound that did not bound: <c>{"name":{…150 000 keys…}}</c> satisfied it, satisfied the depth cap at
+    /// depth 2, fitted inside <see cref="AlvoApiOptions.MaxRequestBodyBytes"/>, and was then materialised in
+    /// full — a ~20–40× memory amplification per request, refused only afterwards. The scan already visits
+    /// every token (it no longer <c>Skip</c>s a property's value), so this is a counter placement rather
+    /// than a second pass.
+    /// </remarks>
+    private static string? ScanShape(ref Utf8JsonReader reader, AlvoApiOptions options)
     {
-        var keys = 0;
-        while (reader.Read() && reader.TokenType != JsonTokenType.EndObject)
+        var names = 0;
+        while (reader.Read())
         {
-            if (reader.TokenType != JsonTokenType.PropertyName)
-            {
-                continue;
-            }
-
-            if (++keys > maxKeys)
+            if (reader.CurrentDepth > options.MaxPayloadDepth)
             {
                 return string.Create(
                     CultureInfo.InvariantCulture,
-                    $"The request body carries more than {maxKeys} fields, the configured maximum.");
+                    $"The request body nests deeper than {options.MaxPayloadDepth} levels, the configured maximum.");
             }
 
-            reader.Read();
-            reader.Skip();
+            if (reader.TokenType == JsonTokenType.PropertyName && ++names > options.MaxPayloadKeys)
+            {
+                return string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"The request body carries more than {options.MaxPayloadKeys} fields, the configured maximum.");
+            }
         }
 
         return null;
@@ -235,7 +277,7 @@ internal static class JsonPayloadReader
 
         try
         {
-            value = Convert(node, field.Type);
+            value = Convert(node, field);
             failure = null;
             return true;
         }
@@ -260,9 +302,9 @@ internal static class JsonPayloadReader
     /// taken verbatim. That is a serialization detail of one type, not a second opinion about which CLR
     /// type it maps to.
     /// </remarks>
-    private static object? Convert(JsonNode node, FieldType type) => type == FieldType.Json
+    private static object? Convert(JsonNode node, FieldSchema field) => field.Type == FieldType.Json
         ? node.ToJsonString(DataApiJson.Options)
-        : node.Deserialize(FieldClrType.Of(type), DataApiJson.Options);
+        : node.Deserialize(FieldClrType.Of(field), DataApiJson.Options);
 
     private static string TooLargeFailure(int maxBytes) => string.Create(
         CultureInfo.InvariantCulture,
