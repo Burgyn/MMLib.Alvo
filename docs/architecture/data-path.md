@@ -666,6 +666,17 @@ database through the full container, each asserting the table physically exists 
 names it. The names are spelled out in the test rather than read from `FrameworkTableNames`, because taking
 them from the member under test is how a name dropped from that member stops being checked at all.
 
+**What actually breaks first, measured by deleting a name from that member**, is not the planned `DROP` this
+section has claimed since PR2 — it is a hard `InvalidOperationException` out of the model build, *"the property
+'id' cannot be added to the type 'alvo_idempotency'"*, because a bookkeeping table has no row key and the
+property-bag model requires one. And it breaks on **every first run**, not only on a re-apply:
+`SchemaMigrationRunner` reads the applied snapshot first — which is what creates these tables — and then falls
+back to introspection because that read found no revision yet. Five pre-existing `AddAlvoIntegrationTests`
+facts fail alongside the two new ones, so the exclusion was never as uncovered as it looked; what was missing
+was a fact that *names the reason*, which is what makes a future failure diagnosable rather than mystifying.
+The silent-`DROP` framing stays in the docs as the failure mode that would appear if the model builder ever
+tolerated a keyless table.
+
 **Its bind-parameter names (`@key`, `@scope`, `@fingerprint`, `@row_id`, `@created_at`) are
 deliberately not in `PolicyParameterPrefix`.** That registry exists because one composed *read* statement
 carries fragments from several renderers that never see each other's output; these two statements are
