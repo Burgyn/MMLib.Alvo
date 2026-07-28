@@ -266,11 +266,11 @@ internal sealed class EfAlvoData : IAlvoData
     {
         using var db = _contexts.Create();
         var (schema, candidate) = AuthorizedCandidate(db, entity, values, decision, context);
+        await EnsureIdempotencyTableAsync(db, cancellationToken);
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var records = new IdempotencyScope(
             db.Database.GetDbConnection(), transaction.GetDbTransaction(), _idempotencyTable, token, context);
-        await records.EnsureTableAsync(cancellationToken);
 
         var recorded = await records.FindAsync(cancellationToken);
         var result = recorded is { } record
@@ -329,22 +329,55 @@ internal sealed class EfAlvoData : IAlvoData
     }
 
     /// <summary>
+    /// Ensures the idempotency table exists, once per process and <b>before</b> the write transaction begins.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Outside the transaction, deliberately: run inside it, this DDL is a serialization point that hides the
+    /// primary key the concurrency control actually rests on — see
+    /// <see cref="IdempotencyTable.EnsureAsync"/>, where that is measured. Outside it, the statement commits on
+    /// its own, so remembering that it succeeded is honest rather than a claim a later rollback could undo.
+    /// </para>
+    /// <para>
+    /// A plain <see langword="volatile"/> flag with no gate around it: two callers racing the first create both
+    /// run <c>CREATE TABLE IF NOT EXISTS</c>, which is idempotent by construction, and a genuine collision on
+    /// the very first one is a storage write failure the caller's retry already handles. A semaphore would buy
+    /// nothing and would make this type disposable.
+    /// </para>
+    /// <para>
+    /// It is only reached by a create that carries a token; an ordinary create never touches this table.
+    /// </para>
+    /// </remarks>
+    private async Task EnsureIdempotencyTableAsync(AlvoDataContext db, CancellationToken cancellationToken)
+    {
+        if (_idempotencyTableEnsured)
+        {
+            return;
+        }
+
+        var connection = db.Database.GetDbConnection();
+        await RelationalSqlBatch.OpenAsync(connection, cancellationToken);
+        await IdempotencyTable.EnsureAsync(connection, _idempotencyTable, cancellationToken);
+        _idempotencyTableEnsured = true;
+    }
+
+    /// <inheritdoc cref="EnsureIdempotencyTableAsync"/>
+    private volatile bool _idempotencyTableEnsured;
+
+    /// <summary>
     /// One transaction's view of the idempotency table: the connection, the transaction, the table name and
     /// the token, bound together so the four of them are not threaded through every call site separately.
     /// </summary>
     /// <remarks>
     /// A struct over the statements in <see cref="IdempotencyTable"/> rather than a second place that composes
     /// SQL — that type stays the only one that writes this table's text, and this only stops four arguments
-    /// from being repeated at each of the three call sites.
+    /// from being repeated at both call sites.
     /// </remarks>
     private readonly struct IdempotencyScope(
         DbConnection connection, DbTransaction transaction, string tableName, AlvoIdempotency token,
         AlvoContext context)
     {
         private string TenantKey => IdempotencyTable.TenantKey(context);
-
-        internal Task EnsureTableAsync(CancellationToken cancellationToken) =>
-            IdempotencyTable.EnsureAsync(connection, transaction, tableName, cancellationToken);
 
         internal Task<IdempotencyTable.IdempotencyRecord?> FindAsync(CancellationToken cancellationToken) =>
             IdempotencyTable.FindAsync(connection, transaction, tableName, token.Key, TenantKey, cancellationToken);

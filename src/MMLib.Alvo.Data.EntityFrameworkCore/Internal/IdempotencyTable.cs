@@ -95,26 +95,34 @@ internal static class IdempotencyTable
     internal readonly record struct IdempotencyRecord(string Fingerprint, Guid RowId);
 
     /// <summary>
-    /// Creates the table inside <paramref name="transaction"/> if it does not exist yet.
+    /// Creates the table if it does not exist yet, on <paramref name="connection"/> and outside any
+    /// transaction.
     /// </summary>
-    /// <param name="connection">The write transaction's own connection.</param>
-    /// <param name="transaction">The in-flight write transaction.</param>
+    /// <param name="connection">An open connection; opened by the caller, never owned here.</param>
     /// <param name="tableName">The table name.</param>
     /// <param name="ct">A token to cancel the operation.</param>
     /// <remarks>
-    /// Run per idempotent create rather than memoized once per process, deliberately. A memo set inside a
-    /// transaction that later rolls back is a lie — both engines roll DDL back with everything else — and the
-    /// alternative, creating the table on a second connection outside the transaction, would give the table two
-    /// creators and, on SQLite, a second writer contending with the transaction that is about to need it. An
-    /// existing table makes this a schema lookup, and it is only reached by a create that carries a token.
+    /// <para>
+    /// <b>Deliberately not inside the write transaction, and measured.</b> Run there, this DDL <em>serializes
+    /// two concurrent idempotent creates</em>: PostgreSQL will not let two transactions create one table name
+    /// at once, so the second blocks on the first until it commits and then finds the record already there.
+    /// The result is still correct — but the primary key, which is the actual concurrency control, is never
+    /// reached, so <c>Two_concurrent_creates_with_one_idempotency_key_produce_exactly_one_row</c> passed with
+    /// the <c>PRIMARY KEY</c> clause deleted from the DDL above. A guard that cannot fail is not a guard.
+    /// </para>
+    /// <para>
+    /// Outside a transaction it commits on its own, which is also what makes a caller's ensure-once memo
+    /// honest: a memo set inside a transaction that later rolls back would claim a table exists that was
+    /// rolled back with everything else. Two connections racing the very first create may still collide here
+    /// — a duplicate-relation error on PostgreSQL — which is a storage write failure like any other and is
+    /// retried by the caller, whose next attempt finds the table in place.
+    /// </para>
     /// </remarks>
-    internal static async Task EnsureAsync(
-        DbConnection connection, DbTransaction transaction, string tableName, CancellationToken ct)
+    internal static async Task EnsureAsync(DbConnection connection, string tableName, CancellationToken ct)
     {
         var command = connection.CreateCommand();
         await using (command.ConfigureAwait(false))
         {
-            command.Transaction = transaction;
             command.CommandText = Ddl(tableName);
             await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }

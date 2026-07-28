@@ -516,13 +516,107 @@ transaction closes all four. It goes through the same composed root; `create` ha
 constrains it is the tenant scope the candidate was already checked against plus the row id just written, and
 a row that cannot be read back is an invariant violation rather than a "not found".
 
-**The `If-Match` precondition channel is PR3's, deliberately.** `UpdateAsync` has no argument that can carry a
-caller's expected version, and adding one is a change to a shipped public interface with two implementations
-and an inherited contract suite — so it is a decision, not a detail. The *mechanism* is already in the right
-place and this is the note that says so: the merge-then-check pre-image is read inside the transaction under
-the driver's row lock, which is exactly where a version comparison belongs. Nothing here should be reshaped in
-anticipation; PR3 widens the signature when it owns the precondition semantics (which header, which column,
-what a missing one means).
+### The `If-Match` precondition channel, landed in PR3 (#90)
+
+PR2 left this as a note saying the *mechanism* was already in the right place — the merge-then-check pre-image
+is read inside the transaction under the driver's row lock, which is exactly where a version comparison
+belongs — and that PR3 would widen the signature when it owned the semantics. It now has, and this is what it
+decided.
+
+`UpdateAsync` and `DeleteAsync` take an `AlvoPrecondition?`; `CreateAsync` takes an `AlvoIdempotency?`. Both
+sit **before** `CancellationToken`, which is a source break for a caller that passed the token positionally
+(several tests in this repository did) and deliberately not a new overload: two overloads of a security-core
+member is two things to keep in step.
+
+**The version is `DateTimeOffset`, not an opaque string.** This port does not know what an HTTP `ETag` is; the
+encoding belongs to the layer that speaks HTTP. `AlvoManagedColumns.VersionColumn` answers which column
+versions a row, from the entity's **traits** — `updated_at`, and only on an `audit` entity — so a non-audited
+entity has no version source at all.
+
+**The version only ever comes out of the database.** PostgreSQL's `timestamptz` keeps microseconds, SQLite
+keeps rendered text, and a .NET clock keeps 100-nanosecond ticks, so a version minted from `TimeProvider` at
+write time would not equal the value the same write stored and every following `If-Match` would fail with
+nothing to diagnose. `EfAlvoData.StoredVersion` reads it off the row-locked pre-image the `WITH CHECK` verdict
+is already reached over — no second read — and `CreateAsync`'s existing re-read is what gives a 201 a version
+in the first place. `AlvoDataConcurrencyTests.The_version_a_write_returns_is_the_one_a_following_precondition_accepts`
+chains create → update → update, each precondition minted from the record the previous call returned.
+
+**Three ordering rules, and they are the contract rather than an implementation detail:**
+
+1. The comparison happens **inside the write transaction, against the locked pre-image**, so it cannot race the
+   write it guards.
+2. An entity with **no version column refuses a precondition** rather than ignoring it
+   (`AlvoPrecondition.EnsureSupported`, from the schema alone, before any row lookup). A silently ignored
+   `If-Match` is a lost update the caller believes it prevented — the only one of the three possible answers
+   that tells them nothing.
+3. **Invisibility outranks the precondition.** A row the `USING` predicate excludes raises
+   `AlvoRecordNotFoundException` whichever precondition was supplied. The other order would confirm a row's
+   existence to a caller who cannot read it, one request at a time, which is the oracle this port's whole
+   failure contract exists to close.
+
+The precondition is compared **before** `WITH CHECK`, which is a free choice between two already-visible-row
+decisions: a stale precondition means the caller's patch was computed against a row that no longer exists in
+that form, so a verdict over their merged post-image would be a verdict about a merge that should not happen.
+
+### The idempotency-record table
+
+`CreateAsync` with an `AlvoIdempotency` token records the key against the row it created, so a replay carrying
+the same key and fingerprint returns that row and writes nothing. `IdempotencyTable` owns the name (via
+`AlvoOptions.SchemaPrefix`, like the versions table), the DDL, and the two statements:
+
+```sql
+CREATE TABLE IF NOT EXISTS alvo_idempotency (
+    key TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    entity TEXT NOT NULL,
+    row_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (key, tenant_id)
+)
+```
+
+- **`tenant_id` is part of the primary key, not a column beside it.** A key is the caller's own string, so two
+  tenants will collide on `"1"` sooner rather than later, and a shared key space would answer one tenant's
+  replay with another tenant's row id. A global entity has no tenant, so `IdempotencyTable.TenantKey`
+  substitutes the all-zero GUID — already reserved framework-wide to mean "no identity" — and the column stays
+  `NOT NULL`.
+- **The record stores a row id, never a response body.** A replay re-reads the row through the caller's
+  *current* policy, so it cannot hand back a representation that policy would no longer produce, and a row that
+  has since been deleted answers `AlvoRecordNotFoundException` like any other missing row.
+- **A different fingerprint under one key is a conflict, not a replay** (`AlvoIdempotencyConflictException`).
+  Answering with the first row would report success for a create that never happened and silently discard the
+  second payload.
+- **The record's insert *is* the concurrency control.** Two requests carrying one key can both find no record
+  and both insert a row; the primary key is what makes exactly one of them commit. The loser is rolled back and
+  restarted, and its next attempt finds the winner's record and answers as a replay —
+  `EfAlvoData.ReplayableCreateAsync`, four attempts over ~30 ms. Which failure the loser sees is
+  engine-specific and neither is distinguishable without a provider error code (which this package does not
+  read — see `VersionRowWriter`'s own translation): PostgreSQL violates the primary key, SQLite refuses the
+  write with `database is locked` before the key is ever consulted. A failure that is *not* a race costs the
+  whole retry budget and is then rethrown unchanged.
+
+**The `CREATE TABLE IF NOT EXISTS` runs outside the write transaction, and that is measured rather than
+tidiness.** Run *inside* it, the DDL serializes two concurrent idempotent creates — PostgreSQL will not let two
+transactions create one table name at once, so the second blocks until the first commits and then finds the
+record already there. The outcome is still correct, but the primary key is never reached: with the DDL inside
+the transaction, `Two_concurrent_creates_with_one_idempotency_key_produce_exactly_one_row` **passed on real
+PostgreSQL with the `PRIMARY KEY` clause deleted from the DDL**. Moving it out (ensure-once, on the context's
+connection, before `BeginTransactionAsync`) makes the same deletion fail the fact, which is the only state in
+which that fact is evidence of anything. A memo set outside a transaction is also honest, where one set inside
+a transaction that later rolls back would claim a table exists that was rolled back with everything else.
+
+**`EfCoreSchemaIntrospector` excludes it**, through `SystemSchemaInitializer.FrameworkTableNames` — one member
+returning every framework table rather than a name per caller, because an introspector that knows about one and
+not the next would plan a `DROP` for it on the following re-apply, silently, and the symptom would be a lost
+idempotency history rather than an error.
+
+**Its bind-parameter names (`@key`, `@tenant_id`, `@fingerprint`, `@entity`, `@row_id`, `@created_at`) are
+deliberately not in `PolicyParameterPrefix`.** That registry exists because one composed *read* statement
+carries fragments from several renderers that never see each other's output; these two statements are
+hand-written, single-fragment, and touch no entity table, so there is no second contributor a name could
+collide with. `IdempotencyTable.cs` is added to `ChangeTrackerReachTests`' SQL-composing allow-list on the same
+ground the five other framework-table files earn their place: it never touches an entity table.
 
 ### Row locking has two grammars, and T-SQL uses the one that is not a trailing clause
 
@@ -696,11 +790,16 @@ validator owns. It is not implemented and is declared here rather than left look
 | `get` of an invisible or absent row | `null` | the engine |
 | `update`/`delete` of an invisible or absent row | `AlvoRecordNotFoundException`, identical message | rows affected / pre-image |
 | Post-image fails `WITH CHECK` or the tenant scope | `AlvoAuthorizationException` | `IPredicateEvaluator` |
+| A precondition that does not match the locked pre-image's version, or a precondition against an entity with no version column | `AlvoPreconditionFailedException` | the pre-image / the schema alone |
+| An idempotency key already used for a request with a different fingerprint | `AlvoIdempotencyConflictException` | the recorded fingerprint |
 
-**Three families, and the boundary between them is the contract.** A request layer above this port has
+**Five families, and the boundary between them is the contract.** A request layer above this port has
 nothing but the exception type to map a status code from, so it is stated on `IAlvoData`'s own remarks, where
 a PR3 author reads it: `ArgumentException` = malformed query (422), `AlvoAuthorizationException` = denial
-(403), `InvalidOperationException` = an invariant this implementation relies on (500).
+(403), `InvalidOperationException` = an invariant this implementation relies on (500), and PR3's two additions
+— `AlvoPreconditionFailedException` = 412 (re-read and retry) and `AlvoIdempotencyConflictException` = 409
+(send a fresh key). Neither of the last two is folded into `ArgumentException`: the request was well-formed,
+and "your version is stale" and "your body is malformed" are different instructions to a client.
 
 That needed settling because the two shipped implementations gave **four different answers** to four
 malformed inputs:
@@ -1140,6 +1239,13 @@ reconstruct the reasoning from a scattered set of remarks.
 | `Limit = 0` is accepted and renders `LIMIT 0` | Both engines agree on it, so it is not an engine-agnosticism defect — but whether "give me nothing" is an empty page or a refusal is a request-layer decision | `ReadStatementComposer` |
 | A **`NUL` in a text value on the *write* path** still surfaces as `DbUpdateException` | The read path refuses it in the binder (PostgreSQL cannot encode it, SQLite can); the write analogue is one more storage-constraint violation, on the same boundary as the row above | `PredicateParameterBinder` holds the read-side guard |
 | The query-string surface, the offset mode, and a server-enforced maximum page size | `AlvoQuery.After` is opaque by contract and PR2 owns only its encoding | `KeysetCursor` |
+
+Two of those rows are now closed: `AlvoQuery.Offset` (PR3 task 1) and the `If-Match`/`Idempotency-Key`
+channels (PR3 task 2, #90 — see *The `If-Match` precondition channel* above). What PR3's own HTTP layer still
+owns, and this port deliberately does not: how a version is spelled on the wire (`ETag` quoting, weak vs
+strong), what a request's idempotency **fingerprint** is computed over, and whether an idempotency record is
+ever pruned — nothing expires one today, so the table grows monotonically, which is a retention decision an
+operator has to make rather than one this port should guess.
 
 ### PR5 — outbox, events and hooks (#22)
 
