@@ -860,6 +860,9 @@ validator owns. It is not implemented and is declared here rather than left look
 | Post-image fails `WITH CHECK` or the tenant scope | `AlvoAuthorizationException` | `IPredicateEvaluator` |
 | A precondition that does not match the locked pre-image's version, or a precondition against an entity with no version column | `AlvoPreconditionFailedException` | the pre-image / the schema alone |
 | An idempotency key already used for a request with a different fingerprint | `AlvoIdempotencyConflictException` | the recorded fingerprint |
+| A replay whose entity allows this caller no `get` at all | `AlvoAuthorizationException` | a freshly resolved `get` decision |
+| A replay whose recorded row is absent, or invisible under that `get` decision | `AlvoRecordNotFoundException`, identical message | that decision + the row |
+| An idempotency token from an anonymous caller | `ArgumentException` family | the token and the context alone |
 
 **Five families, and the boundary between them is the contract.** A request layer above this port has
 nothing but the exception type to map a status code from, so it is stated on `IAlvoData`'s own remarks, where

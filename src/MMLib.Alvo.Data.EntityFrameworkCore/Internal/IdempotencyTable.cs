@@ -3,9 +3,9 @@
 namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 
 /// <summary>
-/// Alvo's own idempotency-record table: the name, the DDL, and the three statements the write path runs
-/// against it. A framework bookkeeping table like the descriptor-versions one, not something the
-/// descriptor-diff engine produces.
+/// Alvo's own idempotency-record table: its name, the DDL that creates it, and the two statements the write
+/// path reads and writes a record with. A framework bookkeeping table like the descriptor-versions one, not
+/// something the descriptor-diff engine produces.
 /// </summary>
 /// <remarks>
 /// <para>

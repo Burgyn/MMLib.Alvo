@@ -28,7 +28,10 @@
 /// (<see cref="AlvoIdempotency.IdentityOf"/>), so a caller only ever collides with a key they used themselves:
 /// this exception says "you have already used this key for something else", never "somebody has". Withholding
 /// the key from the message would not have achieved that on its own, because the 409-versus-201 outcome is
-/// itself the signal; only the scoping removes it.
+/// itself the signal; only the scoping removes it. That holds for every caller who can hold a key at all —
+/// an anonymous one cannot, because it has no identity to scope by, and
+/// <see cref="AlvoIdempotency.EnsureIdentifiableCaller"/> refuses the token rather than letting a shared key
+/// space make this message a probe again.
 /// </para>
 /// </remarks>
 public sealed class AlvoIdempotencyConflictException : Exception

@@ -149,6 +149,7 @@ internal sealed class EfAlvoData : IAlvoData
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentNullException.ThrowIfNull(values);
         ArgumentNullException.ThrowIfNull(context);
+        AlvoIdempotency.EnsureIdentifiableCaller(idempotency, context);
 
         var decision = Resolve(entity, DataOperation.Create, context);
 

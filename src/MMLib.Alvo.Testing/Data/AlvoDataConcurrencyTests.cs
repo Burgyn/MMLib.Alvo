@@ -383,20 +383,29 @@ public abstract class AlvoDataConcurrencyTests
     }
 
     /// <summary>
-    /// A replay is a read, so it is masked like one: the record it answers with carries exactly the fields an
-    /// <see cref="IAlvoData.GetAsync"/> by that same caller returns, and the field this caller's
-    /// <c>hidden</c> expression covers is absent from both.
+    /// A replay returns the same field set a <see cref="IAlvoData.GetAsync"/> by that caller returns: the field
+    /// this caller's <c>hidden</c> expression covers is absent from both, so a replay is masked like the read
+    /// it is.
     /// </summary>
     /// <remarks>
-    /// <c>hidden</c> is resolved per entity and per caller rather than per operation, so a <c>create</c>
-    /// decision's mask and a <c>get</c> decision's coincide for one caller today; what this fact pins is that
-    /// a replay is masked <em>at all</em>, against the projection a <c>get</c> produces. Returning the stored
-    /// row unmasked is the one-line change that fails it, and it is also the guard that would catch a future
-    /// per-operation mask divergence — the second reason the replay resolves <c>get</c> rather than reusing the
-    /// create decision.
+    /// <para>
+    /// <b>The axis this discriminates is "masked or not".</b> Returning the stored row unmasked is the one-line
+    /// production change that fails it, and that is a real and easy mistake on a path that already has the row
+    /// in hand.
+    /// </para>
+    /// <para>
+    /// <b>The axis it cannot discriminate is the operation.</b> <c>PolicyEngine</c> builds every decision's mask
+    /// from the same <c>policy.Hidden</c> plus the context, so <c>hidden</c> is per entity and per caller and
+    /// never per operation: a <c>create</c> decision's mask and a <c>get</c> decision's are equal for one
+    /// caller, and swapping which one the replay uses changes nothing here. The name says "the same field set a
+    /// get returns" rather than "masks as a get would" for exactly that reason — a name that promises more than
+    /// the body can deliver is a vacuous test one level up. What proves the replay reads under <c>get</c> is
+    /// <see cref="A_replay_on_an_entity_the_caller_cannot_read_is_refused_rather_than_answered"/>, on the
+    /// visibility axis, where the two decisions genuinely differ.
+    /// </para>
     /// </remarks>
     [Fact]
-    public async Task A_replay_masks_hidden_fields_as_a_get_by_that_caller_would()
+    public async Task A_replay_returns_the_same_field_set_a_get_by_that_caller_returns()
     {
         var world = await MaskedWorldAsync();
         var token = TokenFor(Vaults);
@@ -475,6 +484,62 @@ public abstract class AlvoDataConcurrencyTests
         (await world.Data.QueryAsync(new AlvoQuery { Entity = Receipts }, world.Caller, Ct)).Items.ShouldBeEmpty();
     }
 
+    /// <summary>
+    /// An idempotency key needs an identity to be scoped to, and every anonymous caller carries the same
+    /// reserved all-zero one — so a token from an anonymous caller is refused rather than filed under a key
+    /// space every anonymous caller shares.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The refusal is the malformed-request family (422) with a fix suggestion, not a denial: the caller is not
+    /// being told they may not create — the same create without a token still lands, which is the counterweight
+    /// in the same act — they are being told this combination cannot be served.
+    /// </para>
+    /// <para>
+    /// <b>This is also the fact that proves both implementations call the guard</b>, because it is inherited:
+    /// the port owns the rule (<see cref="AlvoIdempotency.EnsureIdentifiableCaller"/>) and an implementation
+    /// that skipped the call would fail here on its own leg while the other stayed green.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task An_idempotency_token_from_an_anonymous_caller_is_refused_with_a_fix_suggestion()
+    {
+        var world = await AnonymousWorldAsync();
+
+        var refusal = await Should.ThrowAsync<ArgumentException>(() => world.Data.CreateAsync(
+            Orders, Payload("first"), AlvoContext.Anonymous, TokenFor(Orders), Ct));
+        refusal.Message.ShouldContain("without an idempotency key");
+
+        var created = await world.Data.CreateAsync(
+            Orders, Payload("first"), AlvoContext.Anonymous, cancellationToken: Ct);
+        created["title"].ShouldBe("first");
+    }
+
+    /// <summary>
+    /// The counterweight that keeps the refusal narrow: <see cref="AlvoContext.System"/> carries a
+    /// <b>distinct</b> reserved user id, not the all-zero one, so a system-context token scopes like any other
+    /// caller's and stays legal — including its replay.
+    /// </summary>
+    /// <remarks>
+    /// Measured rather than assumed: <c>AlvoContext.Anonymous.User</c> is the all-zero
+    /// <see cref="UserId"/> and <c>AlvoContext.System(...).User</c> is <c>…-0000000000a1</c>. Were they equal,
+    /// the two would share one key space and refusing only the anonymous one would be a half-measure — so this
+    /// fact is what makes the guard's exemption a checked property rather than a reading of the code.
+    /// </remarks>
+    [Fact]
+    public async Task An_idempotency_token_from_the_system_context_is_accepted()
+    {
+        var world = await AuditedWorldAsync();
+        var system = AlvoContext.System(tenant: null);
+        var token = TokenFor(Orders);
+
+        var created = await world.Data.CreateAsync(Orders, Payload("first"), system, token, Ct);
+        var replay = await world.Data.CreateAsync(Orders, Payload("first"), system, token, Ct);
+
+        IdOf(replay).ShouldBe(IdOf(created));
+        (await world.Data.QueryAsync(new AlvoQuery { Entity = Orders }, system, Ct)).Items.Count.ShouldBe(1);
+    }
+
     private const string Orders = "orders";
     private const string Receipts = "receipts";
     private const string Tickets = "tickets";
@@ -515,6 +580,16 @@ public abstract class AlvoDataConcurrencyTests
 
     /// <summary>An audited, global <c>orders</c> entity every operation is permitted on.</summary>
     private Task<World> AuditedWorldAsync() => WorldAsync(EntityFixture.Permissive(Orders, audit: true));
+
+    /// <summary>
+    /// An audited <c>orders</c> entity whose rules admit the anonymous caller, so the token refusal is reached
+    /// on a create the policy would otherwise allow — and the tokenless create in the same fact really lands.
+    /// </summary>
+    private Task<World> AnonymousWorldAsync() => WorldAsync(
+        EntityFixture.Permissive(Orders, audit: true) with
+        {
+            Rules = new AccessRules { List = "true", Get = "true", Create = "true" },
+        });
 
     /// <summary>A non-audited <c>drafts</c> entity — the one with no version column at all.</summary>
     private Task<World> UnauditedWorldAsync() => WorldAsync(EntityFixture.Permissive(Drafts, audit: false));
@@ -655,7 +730,11 @@ public abstract class AlvoDataConcurrencyTests
         Fields = [.. SchemaFieldsOf(entity)],
     };
 
-    private static IEnumerable<FieldSchema> SchemaFieldsOf(EntityFixture entity)
+    /// <summary>The row key and whatever the fixture declares, then whatever its traits inject.</summary>
+    private static IEnumerable<FieldSchema> SchemaFieldsOf(EntityFixture entity) =>
+        [.. DeclaredFieldsOf(entity), .. ManagedFieldsOf(entity)];
+
+    private static IEnumerable<FieldSchema> DeclaredFieldsOf(EntityFixture entity)
     {
         yield return new FieldSchema { Name = AlvoManagedColumns.Id, Type = SchemaField.Uuid, Required = true };
         yield return new FieldSchema { Name = "title", Type = SchemaField.String, Nullable = true };
@@ -674,26 +753,25 @@ public abstract class AlvoDataConcurrencyTests
         {
             yield return new FieldSchema { Name = hidden.Field, Type = SchemaField.String, Nullable = true };
         }
-
-        if (entity.Tenancy == EntityTenancy.Scoped)
-        {
-            yield return new FieldSchema
-            {
-                Name = AlvoManagedColumns.TenantId,
-                Type = SchemaField.Uuid,
-                Required = true,
-                Indexed = true,
-            };
-        }
-
-        if (entity.Audit)
-        {
-            foreach (var field in AuditFields)
-            {
-                yield return field;
-            }
-        }
     }
+
+    /// <summary>The columns the framework injects for these traits, in the mapper's own order.</summary>
+    private static IEnumerable<FieldSchema> ManagedFieldsOf(EntityFixture entity) =>
+    [
+        .. entity.Tenancy == EntityTenancy.Scoped ? TenantField : [],
+        .. entity.Audit ? AuditFields : [],
+    ];
+
+    private static IEnumerable<FieldSchema> TenantField =>
+    [
+        new FieldSchema
+        {
+            Name = AlvoManagedColumns.TenantId,
+            Type = SchemaField.Uuid,
+            Required = true,
+            Indexed = true,
+        },
+    ];
 
     /// <summary>
     /// The audit quartet as the schema mapper injects it. <c>updated_at</c> is <c>required</c> — the version

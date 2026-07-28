@@ -59,6 +59,14 @@ public sealed record PolicyDecision
     /// <c>list</c>/<c>get</c>/<c>delete</c>/<c>update</c>, <see langword="null"/> for <c>create</c>
     /// (there is no stored row to filter) and for any denied decision.
     /// </summary>
+    /// <remarks>
+    /// <b>A <see langword="null"/> here is not "no filter needed" — a data port renders it as a constant
+    /// true.</b> So a <c>create</c> decision must never be used to read a stored row: doing so returns the row
+    /// whoever owns it, with no predicate at all. That is not hypothetical — it is the bypass F3 PR3 shipped and
+    /// then fixed, where an idempotency replay re-read its recorded row under the create decision and handed one
+    /// caller another caller's row. A path that has a row id and needs the row must resolve <c>get</c> for the
+    /// caller it is acting as.
+    /// </remarks>
     public CompiledExpression? Using { get; }
 
     /// <summary>

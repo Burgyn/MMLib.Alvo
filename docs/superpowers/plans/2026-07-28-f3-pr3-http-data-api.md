@@ -462,39 +462,73 @@ internal static class IdempotencyTable
 }
 ```
 
-DDL, added to `SystemSchemaInitializer.EnsureAsync` and written to be identical on both engines:
+> **As built (#90, after two review rounds).** The DDL and the replay description below are the
+> **shipped** ones, not the ones this plan first proposed — a later task reading this passage is reading a
+> requirement, so the superseded shapes are gone rather than annotated. What changed and why is in
+> `docs/architecture/data-path.md` under *The idempotency-record table*; the short version is that a
+> tenant-only scope let two users in one tenant share a key space, and re-reading the recorded row under
+> the **create** decision returned it whoever owned it.
+
+DDL, owned by `IdempotencyTable.Ddl` (so the write path and `SystemSchemaInitializer.EnsureAsync` create
+it from one string), written to be identical on the two shipped engines:
 
 ```sql
 CREATE TABLE IF NOT EXISTS alvo_idempotency (
-    key TEXT NOT NULL,
-    tenant_id TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    scope TEXT NOT NULL,
     fingerprint TEXT NOT NULL,
-    entity TEXT NOT NULL,
     row_id TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    PRIMARY KEY (key, tenant_id)
+    PRIMARY KEY (idempotency_key, scope)
 )
 ```
 
-`tenant_id` is part of the primary key, not a column beside it: a key is the caller's own string, so
-two tenants will collide on `"1"` sooner rather than later, and a shared key space would let one
-tenant's replay return another tenant's row id. Use a fixed sentinel (`AlvoContext.Tenant is null` →
-the empty GUID's text) so the key stays `NOT NULL` on a global entity. Store `row_id` rather than a
-response body: the row is re-read through the policy on replay, so a replay cannot hand a caller a
-representation their current policy would not produce.
+`scope` is part of the primary key, not a column beside it, and it carries the tenant **and the acting
+user** — `AlvoIdempotency.IdentityOf(context)`, one authority on the port that both implementations call.
+A key is the caller's own opaque string, so two clients collide on `"1"` across tenants and just as
+easily within one; a key space shared between two users in one tenant is a row-level authorization
+bypass, not a collision nuisance. The tenantless sentinel is the literal `global`, which no GUID text can
+equal, so no non-empty guard on `TenantId` is needed. An **anonymous** caller has no identity to scope by
+— every one carries the same reserved all-zero `UserId` — so a token from one is refused with an
+`ArgumentException` (`AlvoIdempotency.EnsureIdentifiableCaller`); `AlvoContext.System`'s user id is a
+distinct reserved value, so a system-context token stays legal.
 
-`EfCoreSchemaIntrospector` must exclude this table exactly as it excludes the descriptor-versions one,
-or a re-apply plans to drop it.
+There is **no `entity` column**: `AlvoIdempotency.Fingerprint` covers the entity by contract (an HTTP
+fingerprint hashes method, path and body, and the path names the entity), so a matched fingerprint already
+proves the replay is for the same entity, and the same key on a different entity is a 409. A caller whose
+fingerprint does not distinguish the entity is fail-closed, never cross-entity: the recorded id is re-read
+under the entity being served and is not there. Store `row_id` rather than a response body, so a replay
+is a real read rather than a cache.
+
+`idempotency_key` is not named `key`, because `KEY` is reserved in T-SQL. The portability claim is scoped
+to SQLite and PostgreSQL; `TEXT` would need to become `nvarchar` on T-SQL, which is follow-up work for
+whoever writes that driver.
+
+The `CREATE TABLE IF NOT EXISTS` runs **outside** the write transaction. Inside it, the DDL serializes two
+concurrent idempotent creates (PostgreSQL will not let two transactions create one table name at once), so
+the primary key — the actual concurrency control — is never reached and the concurrency fact passes with
+the `PRIMARY KEY` clause deleted.
+
+`EfCoreSchemaIntrospector` must exclude this table and the descriptor-versions one, through
+`SystemSchemaInitializer.FrameworkTableNames`; otherwise the runner's introspection fallback reports a
+keyless table and the model build throws on **every first run**.
 
 - [ ] **Step 5: Wire both implementations**
 
 `EfAlvoData.CreateAsync` with an idempotency token, inside the existing transaction:
 
-1. `SELECT row_id, fingerprint FROM alvo_idempotency WHERE key = @k AND tenant_id = @t`;
-2. found and fingerprints match → re-read the row through the policy and return it (no insert);
+1. `SELECT fingerprint, row_id FROM alvo_idempotency WHERE idempotency_key = @key AND scope = @scope`;
+2. found and fingerprints match (`AlvoIdempotency.Matches`, ordinal) → **resolve `get` for this caller**
+   and re-read the recorded row under that decision, reading *and* masking through it, then return it (no
+   insert). Never under the `create` decision this call arrived with: a create decision's `USING` is
+   `null` by contract and renders as a constant true, so reading through it returns the row whoever owns
+   it. Not visible under that decision → `AlvoRecordNotFoundException`; no `get` policy for this caller
+   at all → `AlvoAuthorizationException`;
 3. found and fingerprints differ → `AlvoIdempotencyConflictException`;
-4. not found → insert the row, then insert the idempotency record in the same transaction; a unique
-   violation on that insert means a concurrent request won, so roll back and restart at (1).
+4. not found → insert the row, then insert the idempotency record in the same transaction; a failed write
+   means a concurrent request may have won, so roll back and restart at (1) — bounded (ten attempts,
+   ~450 ms), and on exhaustion an `InvalidOperationException` carrying the provider exception, because a
+   raw `DbException` is outside the failure families `IAlvoData` promises.
 
 `UpdateAsync`/`DeleteAsync`: after the pre-image is read under its lock and after the policy `USING`
 check has decided visibility, compare the pre-image's version column to `precondition.Version`;

@@ -165,11 +165,21 @@ namespace MMLib.Alvo.Data;
 ///   </item>
 /// </list>
 /// <para>
-/// An idempotency record stores the created <b>row id</b>, never a rendered response, and a replay re-reads
-/// that row through the caller's current policy. So a replay cannot hand back a representation the caller's
-/// policy would not produce today, and it cannot resurrect a row they have since lost access to. The record
-/// is keyed on the key <em>and</em> the tenant — see <see cref="AlvoIdempotency"/> for why that is identity
-/// rather than a column beside it.
+/// <b>An idempotency record stores the created row id, and a replay re-reads that row under a freshly
+/// resolved <c>get</c> decision for the replaying caller</b> — reading <em>and</em> masking through it. Not
+/// under the <c>create</c> decision the call arrived with, and the reason is the one a future implementer has
+/// to know rather than rediscover: a <c>create</c> decision has no <c>USING</c> predicate by contract
+/// (<see cref="PolicyDecision.Using"/> is <see langword="null"/> — there is no stored row to filter when the
+/// decision is made), and a null <c>USING</c> renders as a constant true, so a create decision must never be
+/// used to read a stored row. Reading under <c>get</c> is what makes a replay unable to hand back a row the
+/// caller could not read directly, or a projection their own <c>hidden</c> set would not produce. A caller who
+/// may create but not read therefore has a replay refused rather than answered.
+/// </para>
+/// <para>
+/// The record's identity is the caller's key plus a <b>scope of (tenant, acting user)</b> — see
+/// <see cref="AlvoIdempotency.IdentityOf"/> for why the user belongs in it and why that is identity rather
+/// than a column beside it. An anonymous caller has no identity to scope by, so a token from one is refused
+/// outright (<see cref="AlvoIdempotency.EnsureIdentifiableCaller"/>).
 /// </para>
 /// <para>
 /// <b>The returned key set and CLR types are part of the contract, not an implementation detail.</b>
@@ -260,8 +270,10 @@ public interface IAlvoData
     /// <param name="idempotency">
     /// The caller's idempotency token, or <see langword="null"/> for an ordinary create. With a token, the
     /// first create is recorded against it and a replay carrying the same
-    /// <see cref="AlvoIdempotency.Fingerprint"/> returns that same row — re-read through the caller's current
-    /// policy — and writes nothing.
+    /// <see cref="AlvoIdempotency.Fingerprint"/> returns that same row — re-read under a freshly resolved
+    /// <c>get</c> decision for the replaying caller, never under this <c>create</c> decision — and writes
+    /// nothing. The record is scoped to the caller's tenant <em>and</em> user, and a token from an anonymous
+    /// caller is refused, because there is no identity to scope it by.
     /// </param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>The created row, with every <c>hidden</c> field stripped.</returns>
@@ -282,10 +294,18 @@ public interface IAlvoData
     /// <paramref name="idempotency"/>'s key was already used for a request with a different fingerprint.
     /// </exception>
     /// <exception cref="AlvoRecordNotFoundException">
-    /// <paramref name="idempotency"/> replays a create whose row no longer exists, or is no longer visible to
-    /// <paramref name="context"/>. A replay re-reads through the policy rather than returning a cached body,
-    /// so a row that has since been deleted or moved out of reach reads exactly as it would on any other
-    /// read — the alternative is answering a caller with a representation their policy would now refuse.
+    /// <paramref name="idempotency"/> replays a create whose row no longer exists, <b>or is not visible under
+    /// the <c>get</c> decision resolved for <paramref name="context"/></b>. A replay re-reads rather than
+    /// returning a cached body, so a row that has since been deleted or moved out of reach reads exactly as it
+    /// would on any other read — the alternative is answering a caller with a representation their policy would
+    /// now refuse.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="idempotency"/> is supplied for an anonymous <paramref name="context"/>. Every anonymous
+    /// caller carries the same reserved all-zero <see cref="UserId"/>, so their keys would share one space and
+    /// one caller's replay could reach another's record — see
+    /// <see cref="AlvoIdempotency.EnsureIdentifiableCaller"/>. Decided from the token and the context alone,
+    /// before any policy is resolved, so it discloses nothing about the entity.
     /// </exception>
     Task<AlvoRecord> CreateAsync(string entity, IReadOnlyDictionary<string, object?> values, AlvoContext context, AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default);
 

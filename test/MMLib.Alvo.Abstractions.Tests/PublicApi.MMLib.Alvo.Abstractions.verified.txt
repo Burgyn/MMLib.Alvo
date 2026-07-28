@@ -178,6 +178,7 @@ namespace MMLib.Alvo.Data
         public string Key { get; init; }
         public static string TenantlessScope { get; }
         public bool Matches(string storedFingerprint) { }
+        public static void EnsureIdentifiableCaller(MMLib.Alvo.Data.AlvoIdempotency? idempotency, MMLib.Alvo.AlvoContext context) { }
         public static string IdentityOf(MMLib.Alvo.AlvoContext context) { }
     }
     public sealed class AlvoIdempotencyConflictException : System.Exception

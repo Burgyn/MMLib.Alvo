@@ -22,7 +22,10 @@
 /// <remarks>
 /// <para>
 /// <b>The key is scoped to the tenant <em>and</em> to the acting user, and that scoping is part of the
-/// record's identity rather than a column beside it</b> — see <see cref="IdentityOf"/>.
+/// record's identity rather than a column beside it</b> — see <see cref="IdentityOf"/>. It follows that an
+/// <b>anonymous caller cannot hold a key at all</b>: every anonymous caller carries the same reserved all-zero
+/// <see cref="UserId"/>, so there is no identity to scope by and a token from one is refused outright — see
+/// <see cref="EnsureIdentifiableCaller"/>.
 /// </para>
 /// <para>
 /// <b>An implementation stores the row's id, never a rendered response.</b> On replay the row is re-read
@@ -61,10 +64,18 @@ public readonly record struct AlvoIdempotency(string Key, string Fingerprint)
     /// <b>The tenantless sentinel is the literal <see cref="TenantlessScope"/>, not the empty GUID.</b> It
     /// cannot be the text of any GUID, so no real tenant can collide with it and no non-empty guard on
     /// <see cref="TenantId"/> is needed to keep that true — where the empty GUID relied on an invariant
-    /// nothing enforces. The user part needs no sentinel of its own: the all-zero <see cref="UserId"/> is
-    /// already reserved framework-wide to mean "no identity" (see <see cref="AlvoContext.Anonymous"/>), so its
-    /// text is unambiguous. The separator is <c>/</c>, which occurs in neither a GUID nor the sentinel, so the
-    /// two parts can never be read as one another.
+    /// nothing enforces. The separator is <c>/</c>, which occurs in neither a GUID nor the sentinel, so the two
+    /// parts can never be read as one another.
+    /// </para>
+    /// <para>
+    /// <b>The scoping claim above holds only for a caller who has an identity, which is why an anonymous one is
+    /// refused before it gets here.</b> The all-zero <see cref="UserId"/> is reserved framework-wide to mean
+    /// "no identity" (see <see cref="AlvoContext.Anonymous"/>), so <em>every</em> anonymous caller in a tenant
+    /// would produce the same scope and share one key space — the exact collision this member exists to remove,
+    /// reintroduced for the one caller who cannot be told apart from the next.
+    /// <see cref="EnsureIdentifiableCaller"/> is what keeps this method's contract true rather than
+    /// conditionally true, and it is stated here because a reader who takes this scope as unconditionally
+    /// per-caller would build on a claim that is false in that one case.
     /// </para>
     /// </remarks>
     public static string IdentityOf(AlvoContext context)
@@ -77,6 +88,54 @@ public readonly record struct AlvoIdempotency(string Key, string Fingerprint)
     /// The tenant part of <see cref="IdentityOf"/> for a caller with no tenant — a global entity's writes.
     /// </summary>
     public static string TenantlessScope => "global";
+
+    /// <summary>
+    /// Throws when <paramref name="idempotency"/> is supplied for a caller who has no identity to scope it by.
+    /// </summary>
+    /// <param name="idempotency">The caller's token, or <see langword="null"/> when they sent none.</param>
+    /// <param name="context">The caller the create is performed as.</param>
+    /// <remarks>
+    /// <para>
+    /// <b>Fail closed, because the alternatives are worse.</b> A record's identity is
+    /// <see cref="IdentityOf"/>'s scope, and every <see cref="AlvoContext.Anonymous"/> caller carries the same
+    /// reserved all-zero <see cref="UserId"/> — so on an entity whose policy permits anonymous creates, every
+    /// anonymous caller in a tenant would share one key space, and one caller's replay could reach another's
+    /// record. The only other options were a silently shared key space or an identity invented per request
+    /// (which is not an identity, and would make every replay a miss). Refusing says so out loud.
+    /// </para>
+    /// <para>
+    /// <b><see cref="AlvoContext.System"/> is unaffected</b>, and that is a checked property rather than a
+    /// hope: its user id is a distinct reserved value, not the all-zero one, so a system-context token scopes
+    /// like any other caller's. <c>An_idempotency_token_from_the_system_context_is_accepted</c> pins it.
+    /// </para>
+    /// <para>
+    /// <b>The malformed-request family, with a fix suggestion</b> — a request layer renders it 422. It is not a
+    /// denial: the caller is not being told they may not create, they are being told this <em>combination</em>
+    /// of an anonymous identity and an idempotency key cannot be served. Decided from the token and the context
+    /// alone, before any policy is resolved or any entity is looked up, so it discloses nothing about the
+    /// entity — the answer is identical for one that does not exist.
+    /// </para>
+    /// <para>
+    /// On the port, beside the other rules every implementation must obey
+    /// (<see cref="AlvoFilter.EnsureWithinLimits"/>, <see cref="AlvoQuery.EnsurePagingWindowIsSane"/>,
+    /// <see cref="AlvoPrecondition.EnsureSupported"/>), so a third implementation inherits it instead of
+    /// writing a fourth copy — and so the inherited contract suite proves both shipped ones call it.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentException"><paramref name="context"/> is anonymous and a token was supplied.</exception>
+    public static void EnsureIdentifiableCaller(AlvoIdempotency? idempotency, AlvoContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        if (idempotency is not null && context.User.Value == default)
+        {
+            throw new ArgumentException(
+                "An idempotency key needs a caller it can be scoped to, and an anonymous caller has none: "
+                + "every anonymous caller shares one reserved identity, so their keys would share one space "
+                + "and one caller's retry could be answered with another's row. Authenticate the caller, or "
+                + "send this create without an idempotency key.",
+                nameof(idempotency));
+        }
+    }
 
     /// <summary>
     /// Whether <paramref name="storedFingerprint"/> is the fingerprint of the request this token carries.
