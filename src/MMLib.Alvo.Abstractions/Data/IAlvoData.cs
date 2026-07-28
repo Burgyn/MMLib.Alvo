@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Rules;
+using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Data;
 
@@ -35,7 +36,7 @@ namespace MMLib.Alvo.Data;
 /// all. Neither exception's message names the entity, the row id, or whether the row exists.
 /// </para>
 /// <para>
-/// <b>Three exception families, and the boundary between them is the contract — not a detail.</b> A layer
+/// <b>Five exception families, and the boundary between them is the contract — not a detail.</b> A layer
 /// above this port (PR3's RFC 7807 problem-details layer) has nothing but the exception type to map a status
 /// code from, so an implementation must place every refusal in exactly one of these:
 /// </para>
@@ -63,6 +64,27 @@ namespace MMLib.Alvo.Data;
 ///     <b>The operation is not permitted.</b> No policy allows it, a filter or sort names a field this caller
 ///     may not read, a payload names a framework-managed or read-only field, or a candidate post-image fails
 ///     <c>WITH CHECK</c> or the tenant scope. Render 403.
+///     </description>
+///   </item>
+///   <item>
+///     <term><see cref="AlvoPreconditionFailedException"/></term>
+///     <description>
+///     <b>The write carried a version the stored row does not have.</b> The row has been written since the
+///     caller read it, or the entity keeps no version of a row at all (no <c>audit</c>, so no
+///     <see cref="AlvoManagedColumns.VersionColumn"/>) and cannot answer the question — refused rather than
+///     ignored, because a silently ignored precondition is a lost update the caller believes it prevented.
+///     Neither the request nor the caller's permissions is at fault, so neither of the two families above
+///     fits. Render 412; the fix is to re-read and retry.
+///     </description>
+///   </item>
+///   <item>
+///     <term><see cref="AlvoIdempotencyConflictException"/></term>
+///     <description>
+///     <b>An idempotency key was reused for a different request.</b> Same
+///     <see cref="AlvoIdempotency.Key"/>, different <see cref="AlvoIdempotency.Fingerprint"/>: answering with
+///     the first row would silently discard the second payload, and creating a second row would break the
+///     promise the key exists to make. The payload itself is well-formed, so this is not the malformed-query
+///     channel. Render 409; the fix is a fresh key, not a corrected body.
 ///     </description>
 ///   </item>
 ///   <item>
@@ -112,6 +134,42 @@ namespace MMLib.Alvo.Data;
 /// implementation's own schema does not know refuses the write outright rather than skipping the check:
 /// a mismatch between the policy catalog and the implementation's schema must not be the one path on
 /// which an unvalidated payload reaches storage.
+/// </para>
+/// <para>
+/// <b>A write's two concurrency channels, and where each one is decided.</b> An
+/// <see cref="AlvoPrecondition"/> is the caller's claim about the version they are changing, and an
+/// <see cref="AlvoIdempotency"/> token is their claim that a create may already have happened. Both are
+/// optional, and an implementation must honour three rules about them:
+/// </para>
+/// <list type="bullet">
+///   <item>
+///   <b>The precondition is compared inside the write transaction, against the row-locked pre-image</b> the
+///   <c>WITH CHECK</c> verdict is already reached over — never against a row read on a second, earlier trip.
+///   That is what stops the comparison racing the write it guards: between an unlocked read and the write, a
+///   concurrent writer can advance the row and the precondition would have approved a lost update. No second
+///   read is needed or permitted; the pre-image is already there.
+///   </item>
+///   <item>
+///   <b>An entity with no version column refuses a precondition rather than ignoring it</b>
+///   (<see cref="AlvoPreconditionFailedException"/>, via <see cref="AlvoPrecondition.EnsureSupported"/>). A
+///   silently ignored <c>If-Match</c> is a lost update the caller believes it prevented — the worst of the
+///   three possible answers, because nothing tells them it happened. Decided from the schema alone, before
+///   any row lookup, so it cannot answer "does this row exist" either.
+///   </item>
+///   <item>
+///   <b>Invisibility outranks the precondition.</b> A row the caller's <c>USING</c> predicate excludes raises
+///   <see cref="AlvoRecordNotFoundException"/> whichever precondition was supplied — never
+///   <see cref="AlvoPreconditionFailedException"/>. Ordered the other way round, "412 rather than 404" would
+///   confirm that a row exists to a caller who may not read it, one request at a time, which is precisely the
+///   oracle the failure contract above exists to close.
+///   </item>
+/// </list>
+/// <para>
+/// An idempotency record stores the created <b>row id</b>, never a rendered response, and a replay re-reads
+/// that row through the caller's current policy. So a replay cannot hand back a representation the caller's
+/// policy would not produce today, and it cannot resurrect a row they have since lost access to. The record
+/// is keyed on the key <em>and</em> the tenant — see <see cref="AlvoIdempotency"/> for why that is identity
+/// rather than a column beside it.
 /// </para>
 /// <para>
 /// <b>The returned key set and CLR types are part of the contract, not an implementation detail.</b>
@@ -199,8 +257,19 @@ public interface IAlvoData
     /// <param name="entity">The entity name.</param>
     /// <param name="values">The field values to write; the id is always assigned by the implementation.</param>
     /// <param name="context">The caller performing the create.</param>
+    /// <param name="idempotency">
+    /// The caller's idempotency token, or <see langword="null"/> for an ordinary create. With a token, the
+    /// first create is recorded against it and a replay carrying the same
+    /// <see cref="AlvoIdempotency.Fingerprint"/> returns that same row — re-read through the caller's current
+    /// policy — and writes nothing.
+    /// </param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>The created row, with every <c>hidden</c> field stripped.</returns>
+    /// <remarks>
+    /// <b>The row this returns is the row the store holds</b>, re-read inside the write transaction, not the
+    /// payload that was sent: that is what gives a database default, a framework-assigned audit value, and
+    /// therefore a usable version a following <see cref="AlvoPrecondition"/> can carry.
+    /// </remarks>
     /// <exception cref="AlvoAuthorizationException">
     /// No policy allows <c>create</c> on this entity for <paramref name="context"/>,
     /// <paramref name="values"/> supplies <c>id</c> (always rejected — see the type remarks),
@@ -209,7 +278,16 @@ public interface IAlvoData
     /// remarks — but a value that fails the tenant scope still raises this exception via
     /// <c>WITH CHECK</c>.
     /// </exception>
-    Task<AlvoRecord> CreateAsync(string entity, IReadOnlyDictionary<string, object?> values, AlvoContext context, CancellationToken cancellationToken = default);
+    /// <exception cref="AlvoIdempotencyConflictException">
+    /// <paramref name="idempotency"/>'s key was already used for a request with a different fingerprint.
+    /// </exception>
+    /// <exception cref="AlvoRecordNotFoundException">
+    /// <paramref name="idempotency"/> replays a create whose row no longer exists, or is no longer visible to
+    /// <paramref name="context"/>. A replay re-reads through the policy rather than returning a cached body,
+    /// so a row that has since been deleted or moved out of reach reads exactly as it would on any other
+    /// read — the alternative is answering a caller with a representation their policy would now refuse.
+    /// </exception>
+    Task<AlvoRecord> CreateAsync(string entity, IReadOnlyDictionary<string, object?> values, AlvoContext context, AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default);
 
     /// <summary>Updates a row by id with a partial set of field values.</summary>
     /// <param name="entity">The entity name.</param>
@@ -220,9 +298,21 @@ public interface IAlvoData
     /// with these values), never over <paramref name="values"/> alone.
     /// </param>
     /// <param name="context">The caller performing the update.</param>
+    /// <param name="precondition">
+    /// The version the caller believes the row holds, or <see langword="null"/> to write unconditionally.
+    /// Compared against the row-locked pre-image inside the write transaction — see the type remarks for the
+    /// ordering rules, which are part of the contract.
+    /// </param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>The updated row, with every <c>hidden</c> field stripped.</returns>
-    /// <exception cref="AlvoRecordNotFoundException">The row does not exist, or the caller's policy <c>USING</c> predicate excludes it.</exception>
+    /// <exception cref="AlvoRecordNotFoundException">
+    /// The row does not exist, or the caller's policy <c>USING</c> predicate excludes it — whichever
+    /// <paramref name="precondition"/> was supplied, because invisibility outranks the precondition.
+    /// </exception>
+    /// <exception cref="AlvoPreconditionFailedException">
+    /// <paramref name="precondition"/> does not match the stored row's version, or this entity keeps no
+    /// version of a row at all.
+    /// </exception>
     /// <exception cref="AlvoAuthorizationException">
     /// No policy allows <c>update</c> on this entity for <paramref name="context"/>;
     /// <paramref name="values"/> supplies <c>id</c> or <c>tenant_id</c> (both always rejected on
@@ -231,14 +321,26 @@ public interface IAlvoData
     /// its <c>WITH CHECK</c> predicate; or <paramref name="values"/> writes a field the policy marks
     /// read-only.
     /// </exception>
-    Task<AlvoRecord> UpdateAsync(string entity, Guid id, IReadOnlyDictionary<string, object?> values, AlvoContext context, CancellationToken cancellationToken = default);
+    Task<AlvoRecord> UpdateAsync(string entity, Guid id, IReadOnlyDictionary<string, object?> values, AlvoContext context, AlvoPrecondition? precondition = null, CancellationToken cancellationToken = default);
 
     /// <summary>Deletes a row by id.</summary>
     /// <param name="entity">The entity name.</param>
     /// <param name="id">The row id.</param>
     /// <param name="context">The caller performing the delete.</param>
+    /// <param name="precondition">
+    /// The version the caller believes the row holds, or <see langword="null"/> to delete unconditionally.
+    /// Compared against the row-locked pre-image inside the delete's own transaction, under the same ordering
+    /// rules an update follows.
+    /// </param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
-    /// <exception cref="AlvoRecordNotFoundException">The row does not exist, or the caller's policy <c>USING</c> predicate excludes it.</exception>
+    /// <exception cref="AlvoRecordNotFoundException">
+    /// The row does not exist, or the caller's policy <c>USING</c> predicate excludes it — whichever
+    /// <paramref name="precondition"/> was supplied.
+    /// </exception>
+    /// <exception cref="AlvoPreconditionFailedException">
+    /// <paramref name="precondition"/> does not match the stored row's version, or this entity keeps no
+    /// version of a row at all.
+    /// </exception>
     /// <exception cref="AlvoAuthorizationException">No policy allows <c>delete</c> on this entity for <paramref name="context"/>.</exception>
-    Task DeleteAsync(string entity, Guid id, AlvoContext context, CancellationToken cancellationToken = default);
+    Task DeleteAsync(string entity, Guid id, AlvoContext context, AlvoPrecondition? precondition = null, CancellationToken cancellationToken = default);
 }

@@ -1,8 +1,11 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Storage;
+using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
+using System.Data.Common;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore;
 
@@ -39,6 +42,7 @@ internal sealed class EfAlvoData : IAlvoData
     private readonly ReadStatementComposer _statements;
     private readonly AlvoDataContextFactory _contexts;
     private readonly TimeProvider _time;
+    private readonly string _idempotencyTable;
 
     internal EfAlvoData(
         IPolicyEngine policy,
@@ -47,7 +51,8 @@ internal sealed class EfAlvoData : IAlvoData
         IFieldSqlRenderer fields,
         IAlvoSqlDialect dialect,
         AlvoDataContextFactory contexts,
-        TimeProvider time)
+        TimeProvider time,
+        AlvoOptions options)
     {
         ArgumentNullException.ThrowIfNull(policy);
         ArgumentNullException.ThrowIfNull(evaluator);
@@ -56,11 +61,13 @@ internal sealed class EfAlvoData : IAlvoData
         ArgumentNullException.ThrowIfNull(dialect);
         ArgumentNullException.ThrowIfNull(contexts);
         ArgumentNullException.ThrowIfNull(time);
+        ArgumentNullException.ThrowIfNull(options);
         _policy = policy;
         _evaluator = evaluator;
         _statements = new ReadStatementComposer(predicates, fields, dialect);
         _contexts = contexts;
         _time = time;
+        _idempotencyTable = IdempotencyTable.NameFor(options.SchemaPrefix);
     }
 
     /// <inheritdoc/>
@@ -137,7 +144,7 @@ internal sealed class EfAlvoData : IAlvoData
     /// <inheritdoc/>
     public async Task<AlvoRecord> CreateAsync(
         string entity, IReadOnlyDictionary<string, object?> values, AlvoContext context,
-        CancellationToken cancellationToken = default)
+        AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentNullException.ThrowIfNull(values);
@@ -145,18 +152,207 @@ internal sealed class EfAlvoData : IAlvoData
 
         var decision = Resolve(entity, DataOperation.Create, context);
 
-        using var db = _contexts.Create();
-        var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
-        WritePayloadGuard.EnsureWritable(values, schema, decision, isUpdate: false);
+        return idempotency is { } token
+            ? await ReplayableCreateAsync(entity, values, decision, context, token, cancellationToken)
+            : await CreatedAsync(entity, values, decision, context, cancellationToken);
+    }
 
-        var candidate = Candidate(db.Rows(entity).EntityType, Stamped(schema, values, context, isUpdate: false));
-        EnsureWriteAllowed(decision, RecordMaterializer.ToRecord(candidate, _noMask), previous: null, context);
+    /// <summary>One ordinary create: the authorized candidate, inserted and re-read inside one transaction.</summary>
+    private async Task<AlvoRecord> CreatedAsync(
+        string entity, IReadOnlyDictionary<string, object?> values, PolicyDecision decision, AlvoContext context,
+        CancellationToken cancellationToken)
+    {
+        using var db = _contexts.Create();
+        var (schema, candidate) = AuthorizedCandidate(db, entity, values, decision, context);
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var stored = await InsertAsync(db, schema, decision, context, candidate, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
         return RecordMaterializer.ToRecord(stored, decision.HiddenFields);
+    }
+
+    /// <summary>
+    /// The candidate row this create would insert, already refused if the payload named a field a caller may
+    /// not write and already checked against <c>WITH CHECK</c> and the tenant scope.
+    /// </summary>
+    /// <remarks>
+    /// Built per attempt rather than once, so a retried attempt re-stamps its audit instant and mints a fresh
+    /// row id: the previous attempt's id was rolled back, and reusing a candidate a change tracker has already
+    /// seen is how a retry turns into a second insert of the same object.
+    /// </remarks>
+    private (EntitySchema Schema, Dictionary<string, object> Candidate) AuthorizedCandidate(
+        AlvoDataContext db, string entity, IReadOnlyDictionary<string, object?> values, PolicyDecision decision,
+        AlvoContext context)
+    {
+        var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
+        WritePayloadGuard.EnsureWritable(values, schema, decision, isUpdate: false);
+
+        var candidate = Candidate(db.Rows(entity).EntityType, Stamped(schema, values, context, isUpdate: false));
+        EnsureWriteAllowed(decision, RecordMaterializer.ToRecord(candidate, _noMask), previous: null, context);
+
+        return (schema, candidate);
+    }
+
+    /// <summary>
+    /// One create carrying an idempotency token, retried while storage refuses the write because a rival
+    /// holding the same key is mid-flight.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why a retry rather than an error-code check.</b> The loser of the race fails one of two ways and
+    /// neither is distinguishable without reading a provider-specific code, which this package does not do
+    /// (see <see cref="VersionRowWriter"/>'s own translation for the precedent): on PostgreSQL it violates the
+    /// idempotency table's primary key, and on SQLite it is refused with <c>database is locked</c> the moment
+    /// it tries to write while the winner holds the file — before the primary key is ever consulted. Rolling
+    /// back and starting over converges on both, because the next attempt's lookup finds the record the
+    /// winner committed and answers as a replay.
+    /// </para>
+    /// <para>
+    /// The budget is small and finite. A failure that is <em>not</em> a race — a <c>NOT NULL</c> violation, say
+    /// — costs the whole budget and is then rethrown unchanged, which is the deliberate trade: a wrong answer
+    /// is never returned, only a slower one, and a request-validation layer above this port catches that class
+    /// of payload before it arrives.
+    /// </para>
+    /// </remarks>
+    private async Task<AlvoRecord> ReplayableCreateAsync(
+        string entity, IReadOnlyDictionary<string, object?> values, PolicyDecision decision, AlvoContext context,
+        AlvoIdempotency token, CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await CreatedOrReplayedAsync(entity, values, decision, context, token, cancellationToken);
+            }
+            catch (Exception failure) when (attempt < ContendedCreateAttempts && IsStorageWriteFailure(failure))
+            {
+                await Task.Delay(_contentionBackoff * attempt, cancellationToken);
+            }
+        }
+    }
+
+    /// <summary>
+    /// How many times a contended idempotent create starts over before the storage failure is rethrown, and
+    /// how long it waits between attempts. Four attempts over ~30 ms: long enough for a rival's own
+    /// transaction to commit, short enough that a genuine failure is not held back noticeably.
+    /// </summary>
+    private const int ContendedCreateAttempts = 4;
+
+    /// <inheritdoc cref="ContendedCreateAttempts"/>
+    private static readonly TimeSpan _contentionBackoff = TimeSpan.FromMilliseconds(5);
+
+    /// <summary>
+    /// Whether <paramref name="failure"/> is storage refusing a write. <c>SaveChanges</c> wraps the provider's
+    /// exception in <see cref="DbUpdateException"/> while a hand-built command throws
+    /// <see cref="DbException"/> straight through, so both spellings have to be named — matching only one is
+    /// how half the retry silently stops working.
+    /// </summary>
+    private static bool IsStorageWriteFailure(Exception failure) =>
+        failure is DbException or DbUpdateException;
+
+    /// <summary>
+    /// One attempt at an idempotent create, inside one transaction: ensure the record table, look the key up,
+    /// and then either replay the recorded row or insert this one and record it.
+    /// </summary>
+    /// <remarks>
+    /// The lookup and the two inserts share the transaction the row itself is written in, which is what makes
+    /// "the row exists" and "the key is recorded" one fact rather than two — a record committed without its
+    /// row would answer every later replay with a row id that never existed.
+    /// </remarks>
+    private async Task<AlvoRecord> CreatedOrReplayedAsync(
+        string entity, IReadOnlyDictionary<string, object?> values, PolicyDecision decision, AlvoContext context,
+        AlvoIdempotency token, CancellationToken cancellationToken)
+    {
+        using var db = _contexts.Create();
+        var (schema, candidate) = AuthorizedCandidate(db, entity, values, decision, context);
+
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var records = new IdempotencyScope(
+            db.Database.GetDbConnection(), transaction.GetDbTransaction(), _idempotencyTable, token, context);
+        await records.EnsureTableAsync(cancellationToken);
+
+        var recorded = await records.FindAsync(cancellationToken);
+        var result = recorded is { } record
+            ? await ReplayedAsync(db, schema, decision, context, record, token, cancellationToken)
+            : await RecordedCreateAsync(db, schema, decision, context, candidate, records, cancellationToken);
+
+        await transaction.CommitAsync(cancellationToken);
+        return result;
+    }
+
+    /// <summary>
+    /// Inserts the row and records the key against it, in that order and in one transaction. The record's
+    /// primary key is the concurrency control: a rival that already committed one for this key makes this
+    /// insert fail, which is what <see cref="ReplayableCreateAsync"/> turns into a replay.
+    /// </summary>
+    private async Task<AlvoRecord> RecordedCreateAsync(
+        AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context,
+        Dictionary<string, object> candidate, IdempotencyScope records, CancellationToken cancellationToken)
+    {
+        var stored = await InsertAsync(db, schema, decision, context, candidate, cancellationToken);
+        await records.InsertAsync(
+            schema.Name, (Guid)candidate[AlvoDataContext.IdColumn], _time.GetUtcNow(), cancellationToken);
+
+        return RecordMaterializer.ToRecord(stored, decision.HiddenFields);
+    }
+
+    /// <summary>
+    /// The answer to a replay: the recorded row, <b>re-read through this caller's current policy</b>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Never a stored copy of the first response. Re-reading is what keeps a replay from handing back a
+    /// representation the caller's policy would not produce today — a field that has since become
+    /// <c>hidden</c> for them stays hidden, and a row they can no longer see is not resurrected. It also means
+    /// a row that has since been deleted answers <see cref="AlvoRecordNotFoundException"/>, which is the same
+    /// thing every other read of a missing row says.
+    /// </para>
+    /// <para>
+    /// A different fingerprint under the same key is refused before the row is read at all: it is not a replay,
+    /// and answering with the first request's row would report success for a create that never happened.
+    /// </para>
+    /// </remarks>
+    private async Task<AlvoRecord> ReplayedAsync(
+        AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context,
+        IdempotencyTable.IdempotencyRecord record, AlvoIdempotency token, CancellationToken cancellationToken)
+    {
+        if (!string.Equals(record.Fingerprint, token.Fingerprint, StringComparison.Ordinal))
+        {
+            throw new AlvoIdempotencyConflictException();
+        }
+
+        var row = await SingleAsync(db, schema, decision, context, record.RowId, lockFor: null, cancellationToken)
+            ?? throw new AlvoRecordNotFoundException();
+
+        return RecordMaterializer.ToRecord(row, decision.HiddenFields);
+    }
+
+    /// <summary>
+    /// One transaction's view of the idempotency table: the connection, the transaction, the table name and
+    /// the token, bound together so the four of them are not threaded through every call site separately.
+    /// </summary>
+    /// <remarks>
+    /// A struct over the statements in <see cref="IdempotencyTable"/> rather than a second place that composes
+    /// SQL — that type stays the only one that writes this table's text, and this only stops four arguments
+    /// from being repeated at each of the three call sites.
+    /// </remarks>
+    private readonly struct IdempotencyScope(
+        DbConnection connection, DbTransaction transaction, string tableName, AlvoIdempotency token,
+        AlvoContext context)
+    {
+        private string TenantKey => IdempotencyTable.TenantKey(context);
+
+        internal Task EnsureTableAsync(CancellationToken cancellationToken) =>
+            IdempotencyTable.EnsureAsync(connection, transaction, tableName, cancellationToken);
+
+        internal Task<IdempotencyTable.IdempotencyRecord?> FindAsync(CancellationToken cancellationToken) =>
+            IdempotencyTable.FindAsync(connection, transaction, tableName, token.Key, TenantKey, cancellationToken);
+
+        internal Task InsertAsync(
+            string entity, Guid rowId, DateTimeOffset createdAt, CancellationToken cancellationToken) =>
+            IdempotencyTable.InsertAsync(
+                connection, transaction, tableName, token, TenantKey, entity, rowId, createdAt, cancellationToken);
     }
 
     /// <summary>
@@ -237,7 +433,7 @@ internal sealed class EfAlvoData : IAlvoData
     /// </remarks>
     public async Task<AlvoRecord> UpdateAsync(
         string entity, Guid id, IReadOnlyDictionary<string, object?> values, AlvoContext context,
-        CancellationToken cancellationToken = default)
+        AlvoPrecondition? precondition = null, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentNullException.ThrowIfNull(values);
@@ -248,10 +444,12 @@ internal sealed class EfAlvoData : IAlvoData
         using var db = _contexts.Create();
         var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
         WritePayloadGuard.EnsureWritable(values, schema, decision, isUpdate: true);
+        AlvoPrecondition.EnsureSupported(precondition, schema);
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var postImage = await WriteAsync(
-            db, schema, decision, context, id, Stamped(schema, values, context, isUpdate: true), cancellationToken);
+            db, schema, decision, context, id, Stamped(schema, values, context, isUpdate: true), precondition,
+            cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
         return RecordMaterializer.ToRecord(postImage, decision.HiddenFields);
@@ -273,7 +471,8 @@ internal sealed class EfAlvoData : IAlvoData
 
     /// <inheritdoc/>
     public async Task DeleteAsync(
-        string entity, Guid id, AlvoContext context, CancellationToken cancellationToken = default)
+        string entity, Guid id, AlvoContext context, AlvoPrecondition? precondition = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentNullException.ThrowIfNull(context);
@@ -283,9 +482,10 @@ internal sealed class EfAlvoData : IAlvoData
         using var db = _contexts.Create();
         var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
         EnsureNotSoftDeleted(schema);
+        AlvoPrecondition.EnsureSupported(precondition, schema);
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        await EraseAsync(db, schema, decision, context, id, cancellationToken);
+        await EraseAsync(db, schema, decision, context, id, precondition, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
 
@@ -316,11 +516,12 @@ internal sealed class EfAlvoData : IAlvoData
     /// </remarks>
     private async Task EraseAsync(
         AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context,
-        Guid id, CancellationToken cancellationToken)
+        Guid id, AlvoPrecondition? precondition, CancellationToken cancellationToken)
     {
-        _ = await SingleAsync(
+        var stored = await SingleAsync(
             db, schema, decision, context, id, PreImageMutation.Delete, cancellationToken, unmasked: true)
             ?? throw new AlvoRecordNotFoundException();
+        AlvoPrecondition.EnsureMatches(precondition, StoredVersion(schema, stored));
 
         var affected = await RowOf(PolicyRoot(db, schema, decision, context), id)
             .ExecuteDeleteAsync(cancellationToken);
@@ -359,11 +560,13 @@ internal sealed class EfAlvoData : IAlvoData
     /// </summary>
     private async Task<Dictionary<string, object>> WriteAsync(
         AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context,
-        Guid id, IReadOnlyDictionary<string, object?> values, CancellationToken cancellationToken)
+        Guid id, IReadOnlyDictionary<string, object?> values, AlvoPrecondition? precondition,
+        CancellationToken cancellationToken)
     {
         var stored = await SingleAsync(
             db, schema, decision, context, id, PreImageMutation.Update, cancellationToken, unmasked: true)
             ?? throw new AlvoRecordNotFoundException();
+        AlvoPrecondition.EnsureMatches(precondition, StoredVersion(schema, stored));
 
         var preImage = RecordMaterializer.ToRecord(stored, _noMask);
         EnsureWriteAllowed(decision, Merge(preImage, values), preImage, context);
@@ -376,6 +579,31 @@ internal sealed class EfAlvoData : IAlvoData
         return await SingleAsync(db, schema, decision, context, id, lockFor: null, cancellationToken)
             ?? throw new AlvoRecordNotFoundException();
     }
+
+    /// <summary>
+    /// The version the row-locked pre-image carries, or <see langword="null"/> when the entity keeps none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Read off the pre-image the <c>WITH CHECK</c> verdict is already reached over, never with a second
+    /// query. That is what makes the comparison unraceable: the row is held under the driver's lock
+    /// (<see cref="PreImageMutation"/>) from this read until the write commits, so nothing can advance the
+    /// version between "the version matches" and "the write landed". A version read before the transaction —
+    /// or on another connection — would approve exactly the lost update the precondition exists to stop.
+    /// </para>
+    /// <para>
+    /// <b>Where this sits in the order is the contract.</b> The pre-image read is already constrained by
+    /// <c>USING</c>, so a row this caller cannot see has raised
+    /// <see cref="AlvoRecordNotFoundException"/> before the version is ever looked at — invisibility outranks
+    /// the precondition, and the precondition can never answer "does that row exist". It runs <em>before</em>
+    /// <c>WITH CHECK</c> for the opposite reason: a stale precondition means the caller's whole patch was
+    /// computed against a row that no longer exists in that form, so a verdict over their merged post-image
+    /// would be a verdict about a merge that should not happen. Both are already-visible-row decisions, so
+    /// neither ordering leaks anything; this one just answers the more useful of the two.
+    /// </para>
+    /// </remarks>
+    private static object? StoredVersion(EntitySchema schema, Dictionary<string, object> preImage) =>
+        AlvoManagedColumns.VersionColumn(schema) is { } column ? preImage.GetValueOrDefault(column) : null;
 
     private async Task<int> AffectedAsync(
         AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context,

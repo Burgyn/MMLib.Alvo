@@ -171,6 +171,18 @@ namespace MMLib.Alvo.Data
         In = 8,
         Is = 9,
     }
+    public readonly struct AlvoIdempotency : System.IEquatable<MMLib.Alvo.Data.AlvoIdempotency>
+    {
+        public AlvoIdempotency(string Key, string Fingerprint) { }
+        public string Fingerprint { get; init; }
+        public string Key { get; init; }
+    }
+    public sealed class AlvoIdempotencyConflictException : System.Exception
+    {
+        public AlvoIdempotencyConflictException() { }
+        public AlvoIdempotencyConflictException(string message) { }
+        public AlvoIdempotencyConflictException(string message, System.Exception innerException) { }
+    }
     public sealed class AlvoNot : MMLib.Alvo.Data.AlvoFilter, System.IEquatable<MMLib.Alvo.Data.AlvoNot>
     {
         public AlvoNot(MMLib.Alvo.Data.AlvoFilter Filter) { }
@@ -193,6 +205,19 @@ namespace MMLib.Alvo.Data
         public string? NextCursor { get; init; }
         public long? TotalCount { get; init; }
         public static MMLib.Alvo.Data.AlvoPage Empty { get; }
+    }
+    public readonly struct AlvoPrecondition : System.IEquatable<MMLib.Alvo.Data.AlvoPrecondition>
+    {
+        public AlvoPrecondition(System.DateTimeOffset Version) { }
+        public System.DateTimeOffset Version { get; init; }
+        public static void EnsureMatches(MMLib.Alvo.Data.AlvoPrecondition? precondition, object? storedVersion) { }
+        public static void EnsureSupported(MMLib.Alvo.Data.AlvoPrecondition? precondition, MMLib.Alvo.Schema.EntitySchema entity) { }
+    }
+    public sealed class AlvoPreconditionFailedException : System.Exception
+    {
+        public AlvoPreconditionFailedException() { }
+        public AlvoPreconditionFailedException(string message) { }
+        public AlvoPreconditionFailedException(string message, System.Exception innerException) { }
     }
     public sealed class AlvoQuery : System.IEquatable<MMLib.Alvo.Data.AlvoQuery>
     {
@@ -232,11 +257,11 @@ namespace MMLib.Alvo.Data
     }
     public interface IAlvoData
     {
-        System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord> CreateAsync(string entity, System.Collections.Generic.IReadOnlyDictionary<string, object?> values, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default);
-        System.Threading.Tasks.Task DeleteAsync(string entity, System.Guid id, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord> CreateAsync(string entity, System.Collections.Generic.IReadOnlyDictionary<string, object?> values, MMLib.Alvo.AlvoContext context, MMLib.Alvo.Data.AlvoIdempotency? idempotency = default, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task DeleteAsync(string entity, System.Guid id, MMLib.Alvo.AlvoContext context, MMLib.Alvo.Data.AlvoPrecondition? precondition = default, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord?> GetAsync(string entity, System.Guid id, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoPage> QueryAsync(MMLib.Alvo.Data.AlvoQuery query, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default);
-        System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord> UpdateAsync(string entity, System.Guid id, System.Collections.Generic.IReadOnlyDictionary<string, object?> values, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord> UpdateAsync(string entity, System.Guid id, System.Collections.Generic.IReadOnlyDictionary<string, object?> values, MMLib.Alvo.AlvoContext context, MMLib.Alvo.Data.AlvoPrecondition? precondition = default, System.Threading.CancellationToken cancellationToken = default);
     }
 }
 namespace MMLib.Alvo.Descriptor
@@ -1021,6 +1046,7 @@ namespace MMLib.Alvo.Schema
         public static System.Collections.Generic.IReadOnlySet<string> For(MMLib.Alvo.Schema.TenancyMode? tenancy, bool audit, bool softDelete) { }
         public static bool IsCallerWritable(string column, bool isUpdate) { }
         public static string RefusalReason(string column, bool isUpdate) { }
+        public static string? VersionColumn(MMLib.Alvo.Schema.EntitySchema entity) { }
     }
     public sealed class EntitySchema : System.IEquatable<MMLib.Alvo.Schema.EntitySchema>
     {

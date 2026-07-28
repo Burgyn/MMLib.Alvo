@@ -121,7 +121,10 @@ public class ChangeTrackerReachTests
     /// history, the system schema), by running SQL EF's own generator produced, or by being the one seam that
     /// binds parameters rather than composing a row statement:
     /// <c>EfCoreDescriptorVersionStore</c>, <c>EfCoreRuntimeSchemaWriter</c>, <c>SystemSchemaInitializer</c>,
-    /// <c>RelationalSqlBatch</c> and <c>VersionRowWriter</c> never touch an entity table;
+    /// <c>IdempotencyTable</c>, <c>RelationalSqlBatch</c> and <c>VersionRowWriter</c> never touch an entity
+    /// table — <c>IdempotencyTable</c> in particular reads and writes only the idempotency-record table, and
+    /// exists as its own file precisely so the row-statement file does not also become the place framework
+    /// bookkeeping SQL is written;
     /// <c>PredicateParameterBinder</c> creates a command only to reach the provider's parameter factory;
     /// <c>EfCoreSchemaMigrator</c> executes the migrator's generated statements;
     /// <c>SqliteCaseSensitiveLike</c> runs one connection pragma and can carry no row predicate at all; and
@@ -177,6 +180,7 @@ public class ChangeTrackerReachTests
         "EfCoreDescriptorVersionStore.cs",
         "EfCoreRuntimeSchemaWriter.cs",
         "EfCoreSchemaMigrator.cs",
+        "IdempotencyTable.cs",
         "PredicateParameterBinder.cs",
         "RelationalSqlBatch.cs",
         "SqliteCaseSensitiveLike.cs",

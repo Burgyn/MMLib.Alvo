@@ -303,11 +303,11 @@ public sealed class SqliteAlvoDataWriteTests : IAsyncDisposable
         var patch = new Dictionary<string, object?> { ["title"] = "x" };
 
         await Should.ThrowAsync<ArgumentNullException>(() => world.Data.UpdateAsync(
-            "notes", world.AliceRowId, patch, null!, TestContext.Current.CancellationToken));
+            "notes", world.AliceRowId, patch, null!, cancellationToken: TestContext.Current.CancellationToken));
         await Should.ThrowAsync<ArgumentNullException>(() => world.Data.DeleteAsync(
-            "notes", world.AliceRowId, null!, TestContext.Current.CancellationToken));
+            "notes", world.AliceRowId, null!, cancellationToken: TestContext.Current.CancellationToken));
         await Should.ThrowAsync<ArgumentNullException>(() => world.Data.CreateAsync(
-            "notes", patch, null!, TestContext.Current.CancellationToken));
+            "notes", patch, null!, cancellationToken: TestContext.Current.CancellationToken));
     }
 
     /// <summary>

@@ -132,7 +132,8 @@ public sealed class InMemoryAlvoData : IAlvoData
 
     /// <inheritdoc/>
     public Task<AlvoRecord> CreateAsync(
-        string entity, IReadOnlyDictionary<string, object?> values, AlvoContext context, CancellationToken cancellationToken = default)
+        string entity, IReadOnlyDictionary<string, object?> values, AlvoContext context,
+        AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentNullException.ThrowIfNull(values);
@@ -156,15 +157,85 @@ public sealed class InMemoryAlvoData : IAlvoData
 
         lock (_gate)
         {
+            if (Replay(entity, decision, context, idempotency) is { } replayed)
+            {
+                return Task.FromResult(replayed);
+            }
+
             RowsForLocked(entity).Add(postImage);
+            RecordIdempotencyLocked(idempotency, context, (Guid)candidate[IdField]!);
         }
 
         return Task.FromResult(Mask(postImage, decision.HiddenFields));
     }
 
+    /// <summary>
+    /// The row a replay of <paramref name="idempotency"/> answers with, or <see langword="null"/> when this key
+    /// has not been used in this tenant yet.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Called with <see cref="_gate"/> held, together with the insert and the record below, so the lookup and
+    /// the write are one atomic act. That is this store's stand-in for the shipped backends' transaction plus
+    /// the record table's primary key — without it, two concurrent creates could both find no record and both
+    /// insert, which is the exact failure the inherited concurrency suite forbids.
+    /// </para>
+    /// <para>
+    /// The recorded <b>row id</b> is re-read through the caller's current policy rather than a stored copy of
+    /// the first response being returned, exactly as a shipped backend must: a replay may not hand back a
+    /// representation the caller's policy would no longer produce, and a row that has since been deleted or
+    /// moved out of reach answers <see cref="AlvoRecordNotFoundException"/> like any other missing row.
+    /// </para>
+    /// </remarks>
+    private AlvoRecord? Replay(
+        string entity, PolicyDecision decision, AlvoContext context, AlvoIdempotency? idempotency)
+    {
+        if (idempotency is not { } token || !_idempotency.TryGetValue(IdempotencyKey(token, context), out var record))
+        {
+            return null;
+        }
+
+        if (!string.Equals(record.Fingerprint, token.Fingerprint, StringComparison.Ordinal))
+        {
+            throw new AlvoIdempotencyConflictException();
+        }
+
+        var stored = RowsForLocked(entity).Find(row => IsRow(row, record.RowId));
+        return stored is not null && IsVisible(stored, decision, context)
+            ? Mask(stored, decision.HiddenFields)
+            : throw new AlvoRecordNotFoundException();
+    }
+
+    private void RecordIdempotencyLocked(AlvoIdempotency? idempotency, AlvoContext context, Guid rowId)
+    {
+        if (idempotency is { } token)
+        {
+            _idempotency[IdempotencyKey(token, context)] = new IdempotencyRecord(token.Fingerprint, rowId);
+        }
+    }
+
+    /// <summary>
+    /// A record's identity: the caller's key <b>and</b> their tenant, never the key alone.
+    /// </summary>
+    /// <remarks>
+    /// A key is the caller's own string, so two tenants will collide on <c>"1"</c> sooner rather than later,
+    /// and in a shared key space one tenant's replay would be answered with another tenant's row — a
+    /// cross-tenant read through the one channel meant to be a safe retry. A tenantless caller gets the
+    /// all-zero <see cref="Guid"/>, already reserved framework-wide to mean "no identity", so the two spaces
+    /// cannot overlap either.
+    /// </remarks>
+    private static (string Key, Guid Tenant) IdempotencyKey(AlvoIdempotency token, AlvoContext context) =>
+        (token.Key, context.Tenant?.Value ?? Guid.Empty);
+
+    /// <summary>What one used idempotency key recorded: the request it was used for, and the row it created.</summary>
+    private readonly record struct IdempotencyRecord(string Fingerprint, Guid RowId);
+
+    private readonly Dictionary<(string Key, Guid Tenant), IdempotencyRecord> _idempotency = [];
+
     /// <inheritdoc/>
     public Task<AlvoRecord> UpdateAsync(
-        string entity, Guid id, IReadOnlyDictionary<string, object?> values, AlvoContext context, CancellationToken cancellationToken = default)
+        string entity, Guid id, IReadOnlyDictionary<string, object?> values, AlvoContext context,
+        AlvoPrecondition? precondition = null, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentNullException.ThrowIfNull(values);
@@ -180,6 +251,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         var schema = EnsureFieldsDeclared(entity, values);
         EnsureNoManagedColumnWrite(values, schema, isUpdate: true);
         EnsureNoReadOnlyWrite(values, decision.ReadOnlyFields);
+        AlvoPrecondition.EnsureSupported(precondition, schema);
         var stamped = AlvoAuditStamp.Applied(schema, values, context, _time, isUpdate: true);
 
         lock (_gate)
@@ -192,6 +264,7 @@ public sealed class InMemoryAlvoData : IAlvoData
                 throw new AlvoRecordNotFoundException();
             }
 
+            AlvoPrecondition.EnsureMatches(precondition, StoredVersion(schema, stored));
             var merged = Merge(stored, stamped);
             EnsureWriteAllowed(decision, merged, stored, context);
 
@@ -201,7 +274,9 @@ public sealed class InMemoryAlvoData : IAlvoData
     }
 
     /// <inheritdoc/>
-    public Task DeleteAsync(string entity, Guid id, AlvoContext context, CancellationToken cancellationToken = default)
+    public Task DeleteAsync(
+        string entity, Guid id, AlvoContext context, AlvoPrecondition? precondition = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentNullException.ThrowIfNull(context);
@@ -214,6 +289,11 @@ public sealed class InMemoryAlvoData : IAlvoData
         }
 
         EnsureNotSoftDeleted(entity);
+        var schema = FindEntity(entity);
+        if (schema is not null)
+        {
+            AlvoPrecondition.EnsureSupported(precondition, schema);
+        }
 
         lock (_gate)
         {
@@ -225,11 +305,27 @@ public sealed class InMemoryAlvoData : IAlvoData
                 throw new AlvoRecordNotFoundException();
             }
 
+            AlvoPrecondition.EnsureMatches(precondition, StoredVersion(schema, stored));
             list.RemoveAt(index);
         }
 
         return Task.CompletedTask;
     }
+
+    /// <summary>
+    /// The version <paramref name="stored"/> carries, or <see langword="null"/> when the entity keeps none —
+    /// read off the very row the write is about to change, under <see cref="_gate"/>, which is this store's
+    /// equivalent of the shipped backends' row-locked pre-image. A version read before taking the lock could
+    /// approve exactly the lost update the precondition exists to stop.
+    /// </summary>
+    /// <remarks>
+    /// An entity this store's schema does not know yields <see langword="null"/>, which
+    /// <see cref="AlvoPrecondition.EnsureMatches"/> refuses — fail-closed, like every other unknown-entity
+    /// answer here. A caller reaching this point with an unknown entity has already been refused on the write
+    /// paths, which resolve the schema first.
+    /// </remarks>
+    private static object? StoredVersion(EntitySchema? schema, AlvoRecord stored) =>
+        schema is not null && AlvoManagedColumns.VersionColumn(schema) is { } column ? stored[column] : null;
 
     /// <summary>
     /// Rejects a filter or sort key naming a field this caller may not read — either because the mask

@@ -251,7 +251,8 @@ public class InMemoryAlvoDataTests
         var caller = Caller();
 
         var ex = await Should.ThrowAsync<AlvoAuthorizationException>(() => data.CreateAsync(
-            "items", new Dictionary<string, object?> { ["title"] = "x", ["bogus"] = "y" }, caller, ct));
+            "items", new Dictionary<string, object?> { ["title"] = "x", ["bogus"] = "y" }, caller,
+            cancellationToken: ct));
 
         ex.Message.ShouldNotContain("bogus");
         ex.Message.ShouldNotContain("items");
@@ -271,7 +272,7 @@ public class InMemoryAlvoDataTests
         var caller = Caller();
 
         await Should.ThrowAsync<AlvoAuthorizationException>(() => data.CreateAsync(
-            "ghosts", new Dictionary<string, object?> { ["title"] = "x" }, caller, ct));
+            "ghosts", new Dictionary<string, object?> { ["title"] = "x" }, caller, cancellationToken: ct));
     }
 
     private static Dictionary<string, FieldDescriptor> StringField() => new(StringComparer.Ordinal)

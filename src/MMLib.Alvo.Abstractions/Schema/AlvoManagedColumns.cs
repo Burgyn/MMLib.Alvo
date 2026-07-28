@@ -94,6 +94,33 @@ public static class AlvoManagedColumns
     }
 
     /// <summary>
+    /// The column whose value versions a row for optimistic concurrency, or <see langword="null"/>
+    /// when the entity has none. Only an audited entity has one: <c>updated_at</c> exists because
+    /// <c>audit: true</c> asked for it, so a non-audited entity cannot answer "has this row changed"
+    /// at all — and a request layer must refuse an <c>If-Match</c> against it rather than pretend.
+    /// </summary>
+    /// <param name="entity">The entity, as the applied schema declares it.</param>
+    /// <remarks>
+    /// <para>
+    /// Answered from the entity's <em>traits</em> like every other question here, and for the same reason:
+    /// an entity that does not declare <c>audit</c> may legitimately declare an ordinary field called
+    /// <c>updated_at</c>, and versioning a row by a column the framework does not write would compare a
+    /// value the caller themselves can change — a precondition anyone can satisfy is not a precondition.
+    /// </para>
+    /// <para>
+    /// One member rather than a <c>VersionColumn</c>/<c>HasVersion</c> pair: <see langword="null"/> already
+    /// answers "has none", and a second way to ask one question is a second thing to keep in step. The
+    /// refusal itself lives at <see cref="Data.AlvoPrecondition.EnsureSupported"/>, so both shipped
+    /// implementations word it identically.
+    /// </para>
+    /// </remarks>
+    public static string? VersionColumn(EntitySchema entity)
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        return entity.Audit ? UpdatedAt : null;
+    }
+
+    /// <summary>
     /// Whether a caller's own write payload may carry <paramref name="column"/>.
     /// </summary>
     /// <param name="column">A column name, managed or not.</param>

@@ -25,7 +25,7 @@ public sealed class SqliteAlvoDataAuditTests : IAsyncDisposable
         var host = await StartAsync(clock);
         var caller = Caller;
 
-        var created = await host.Data.CreateAsync("invoices", Payload("first"), caller, Cancellation);
+        var created = await host.Data.CreateAsync("invoices", Payload("first"), caller, cancellationToken: Cancellation);
 
         created[AlvoManagedColumns.CreatedAt].ShouldBe(Created);
         created[AlvoManagedColumns.UpdatedAt].ShouldBe(Created);
@@ -38,10 +38,10 @@ public sealed class SqliteAlvoDataAuditTests : IAsyncDisposable
     {
         var clock = new SteppingTimeProvider(Created, Updated);
         var host = await StartAsync(clock);
-        var created = await host.Data.CreateAsync("invoices", Payload("first"), Caller, Cancellation);
+        var created = await host.Data.CreateAsync("invoices", Payload("first"), Caller, cancellationToken: Cancellation);
 
         var updated = await host.Data.UpdateAsync(
-            "invoices", (Guid)created["id"]!, Payload("second"), Caller, Cancellation);
+            "invoices", (Guid)created["id"]!, Payload("second"), Caller, cancellationToken: Cancellation);
 
         updated[AlvoManagedColumns.CreatedAt].ShouldBe(Created);
         updated[AlvoManagedColumns.UpdatedAt].ShouldBe(Updated);
@@ -57,7 +57,7 @@ public sealed class SqliteAlvoDataAuditTests : IAsyncDisposable
     {
         var host = await StartAsync(new SteppingTimeProvider(Created, Updated));
 
-        var created = await host.Data.CreateAsync("invoices", Payload("anon"), AlvoContext.Anonymous, Cancellation);
+        var created = await host.Data.CreateAsync("invoices", Payload("anon"), AlvoContext.Anonymous, cancellationToken: Cancellation);
 
         created[AlvoManagedColumns.CreatedBy].ShouldBeNull();
         created[AlvoManagedColumns.UpdatedBy].ShouldBeNull();

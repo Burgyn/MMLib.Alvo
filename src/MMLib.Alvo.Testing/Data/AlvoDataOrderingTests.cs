@@ -251,7 +251,8 @@ public abstract class AlvoDataOrderingTests
         var data = await EmptyLedgerAsync();
         var written = Midnight.AddHours(1).ToOffset(TimeSpan.FromHours(-2));
 
-        var created = await data.CreateAsync(Entity, Payload(written), Caller, TestContext.Current.CancellationToken);
+        var created = await data.CreateAsync(
+            Entity, Payload(written), Caller, cancellationToken: TestContext.Current.CancellationToken);
 
         Occurred(created).ShouldBe(Midnight.AddHours(1));
         (await InstantsAsync(data)).ShouldBe([Midnight.AddHours(1)]);
@@ -263,7 +264,7 @@ public abstract class AlvoDataOrderingTests
     {
         var data = await EmptyLedgerAsync();
         var created = await data.CreateAsync(
-            Entity, Payload(Midnight), Caller, TestContext.Current.CancellationToken);
+            Entity, Payload(Midnight), Caller, cancellationToken: TestContext.Current.CancellationToken);
         var moved = Midnight.AddHours(2).ToOffset(TimeSpan.FromHours(-5));
 
         var updated = await data.UpdateAsync(
@@ -271,7 +272,7 @@ public abstract class AlvoDataOrderingTests
             (Guid)created["id"]!,
             new Dictionary<string, object?>(StringComparer.Ordinal) { ["occurred_at"] = moved },
             Caller,
-            TestContext.Current.CancellationToken);
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Occurred(updated).ShouldBe(Midnight.AddHours(2));
         (await InstantsAsync(data)).ShouldBe([Midnight.AddHours(2)]);
@@ -340,7 +341,7 @@ public abstract class AlvoDataOrderingTests
                 ["occurred_at"] = "2026-01-01T00:00:00Z",
             },
             Caller,
-            TestContext.Current.CancellationToken);
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Amount(created).ShouldBe(100m);
         Occurred(created).ShouldBe(Midnight);
@@ -354,7 +355,7 @@ public abstract class AlvoDataOrderingTests
                 ["occurred_at"] = "2026-01-01T02:00:00Z",
             },
             Caller,
-            TestContext.Current.CancellationToken);
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Amount(updated).ShouldBe(250m);
         Occurred(updated).ShouldBe(Midnight.AddHours(2));
