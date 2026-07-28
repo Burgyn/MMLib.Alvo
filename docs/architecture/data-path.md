@@ -566,35 +566,65 @@ the same key and fingerprint returns that row and writes nothing. `IdempotencyTa
 
 ```sql
 CREATE TABLE IF NOT EXISTS alvo_idempotency (
-    key TEXT NOT NULL,
-    tenant_id TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    scope TEXT NOT NULL,
     fingerprint TEXT NOT NULL,
-    entity TEXT NOT NULL,
     row_id TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    PRIMARY KEY (key, tenant_id)
+    PRIMARY KEY (idempotency_key, scope)
 )
 ```
 
-- **`tenant_id` is part of the primary key, not a column beside it.** A key is the caller's own string, so two
-  tenants will collide on `"1"` sooner rather than later, and a shared key space would answer one tenant's
-  replay with another tenant's row id. A global entity has no tenant, so `IdempotencyTable.TenantKey`
-  substitutes the all-zero GUID — already reserved framework-wide to mean "no identity" — and the column stays
-  `NOT NULL`.
+- **`scope` is part of the primary key, not a column beside it, and it carries the tenant *and* the acting
+  user.** A key is the caller's own opaque string, so two clients collide on `"1"` — across tenants, and just
+  as easily *within* one. A key space shared between two users in one tenant let one client's replay return the
+  other's row, which is a row-level authorization bypass rather than a collision nuisance; it also made the
+  409-versus-201 outcome a probe of the other client's key space. The scope is built by one member on the port,
+  `AlvoIdempotency.IdentityOf`, because the reference implementation has to answer it identically and the two
+  copies had no test that could catch them drifting. Its tenantless sentinel is the literal `global` rather
+  than the empty GUID: no GUID text can equal it, so it needs no non-empty guard on `TenantId` — the empty-GUID
+  version relied on an invariant nothing enforces.
+- **No `entity` column.** One was stored and never read, which is a control that does not exist: it made a key
+  unique per scope across every entity while telling the lookup nothing, so reusing a key on a second entity
+  silently created nothing at all. `AlvoIdempotency.Fingerprint` covers the entity by contract (an HTTP
+  fingerprint hashes method, path and body, and the path names the entity), so a matched fingerprint already
+  proves the replay is for the entity the original wrote — and the same key on a different entity is a 409 like
+  any other different request. A caller whose fingerprint does *not* distinguish the entity is still never
+  handed a wrong row: the recorded id is re-read under the entity being served, is not there, and the answer is
+  `AlvoRecordNotFoundException`. Both arms are pinned by
+  `The_same_key_on_a_different_entity_is_a_conflict_not_a_silent_replay`.
+- **`idempotency_key`, not `key`.** `KEY` is reserved in T-SQL, and §0 names Azure SQL as a target engine; this
+  repository has already paid once for a T-SQL trap a seam's shape hid (see *Row locking has two grammars*).
+  The **portability claim for this DDL is scoped to the two shipped engines**: `TEXT` is deprecated on T-SQL and
+  would need `nvarchar` there. That mapping is follow-up work for whoever writes that driver rather than a
+  guess made here for a driver nobody is writing.
 - **The record stores a row id, never a response body.** A replay re-reads the row through the caller's
-  *current* policy, so it cannot hand back a representation that policy would no longer produce, and a row that
-  has since been deleted answers `AlvoRecordNotFoundException` like any other missing row.
+  *current* `get` policy, so it cannot hand back a representation that policy would no longer produce, and a row
+  that has since been deleted answers `AlvoRecordNotFoundException` like any other missing row.
 - **A different fingerprint under one key is a conflict, not a replay** (`AlvoIdempotencyConflictException`).
   Answering with the first row would report success for a create that never happened and silently discard the
   second payload.
 - **The record's insert *is* the concurrency control.** Two requests carrying one key can both find no record
   and both insert a row; the primary key is what makes exactly one of them commit. The loser is rolled back and
   restarted, and its next attempt finds the winner's record and answers as a replay —
-  `EfAlvoData.ReplayableCreateAsync`, four attempts over ~30 ms. Which failure the loser sees is
-  engine-specific and neither is distinguishable without a provider error code (which this package does not
-  read — see `VersionRowWriter`'s own translation): PostgreSQL violates the primary key, SQLite refuses the
-  write with `database is locked` before the key is ever consulted. A failure that is *not* a race costs the
-  whole retry budget and is then rethrown unchanged.
+  `EfAlvoData.ReplayableCreateAsync`, ten attempts over ~450 ms, sized so ordinary contention on a real engine
+  cannot exhaust it and still bounded, because a loop that retries forever turns a permanently failing write
+  into a hung request. Which failure the loser sees is engine-specific and neither is distinguishable without a
+  provider error code (which this package does not read — see `VersionRowWriter`'s own translation):
+  PostgreSQL violates the primary key, SQLite refuses the write with `database is locked` before the key is
+  ever consulted.
+- **Exhaustion is `InvalidOperationException` with the provider exception inside**, not the raw
+  `DbException`/`DbUpdateException`. The raw one escaped the five families `IAlvoData` promises a request layer
+  can map a status from, so PR3's problem-details layer would have rendered a provider message as an unhandled
+  500. It is family 3 — an invariant this implementation relies on — and the message names the exhausted retry
+  and the constraint that guards the write.
+- **Why a broad catch cannot become a false replay.** The retry catches any storage write failure, which
+  includes a unique violation in the caller's *own* data (a duplicate `vin`). That never becomes a replay of an
+  unrelated row, and the reason is structural rather than a classification: an attempt answers as a replay
+  **only** if the lookup finds a record for this key in this scope, and a duplicate `vin` commits no such
+  record, so every attempt takes the insert path again and fails again. Pinned on a real engine by
+  `SqliteIdempotentCreateFailureTests` — which also needs the engine, since the in-memory reference cannot
+  declare a unique constraint.
 
 **The `CREATE TABLE IF NOT EXISTS` runs outside the write transaction, and that is measured rather than
 tidiness.** Run *inside* it, the DDL serializes two concurrent idempotent creates — PostgreSQL will not let two
@@ -606,17 +636,44 @@ connection, before `BeginTransactionAsync`) makes the same deletion fail the fac
 which that fact is evidence of anything. A memo set outside a transaction is also honest, where one set inside
 a transaction that later rolls back would claim a table exists that was rolled back with everything else.
 
-**`EfCoreSchemaIntrospector` excludes it**, through `SystemSchemaInitializer.FrameworkTableNames` — one member
-returning every framework table rather than a name per caller, because an introspector that knows about one and
-not the next would plan a `DROP` for it on the following re-apply, silently, and the symptom would be a lost
-idempotency history rather than an error.
+**A replay re-reads under a freshly resolved `get` decision, never under the `create` decision the call
+arrived with.** That was a row-level authorization bypass, and it is worth stating plainly because the first
+implementation looked right: `create` has no stored row to filter, so `PolicyDecision.Using` is `null` by
+contract and `ReadStatementComposer` renders it as a constant true. A replay read that way returns the recorded
+row *whoever owns it* — and with the record's scope missing the acting user, a second client in the same tenant
+sending the same key reached the first client's record and was handed their row. Two independent changes close
+it, and each closes a different future one: the scope now carries the user (so the collision is unreachable),
+and the read now resolves `get` (so even a reachable one is filtered by the caller's own predicate, and masked
+by the caller's own `hidden` set — masking is per caller, and a replay must return what a `GET` by that caller
+would). `A_replay_by_a_second_user_in_the_same_tenant_never_returns_the_first_users_row` fails if either half is
+reverted, differently each way.
 
-**Its bind-parameter names (`@key`, `@tenant_id`, `@fingerprint`, `@entity`, `@row_id`, `@created_at`) are
+A consequence, deliberate: a caller who may **create but not read** has their replay refused with
+`AlvoAuthorizationException`, while their original create succeeded and returned its own row. A replay *is* a
+read of a stored row, so it must satisfy `get`; falling back to the create decision when `get` denies is exactly
+the bypass above. `A_replay_on_an_entity_the_caller_cannot_read_is_refused_rather_than_answered` pins it, and is
+the fact that makes the `get` half independently observable now that the scoping makes cross-user collisions
+unreachable.
+
+**`EfCoreSchemaIntrospector` excludes both bookkeeping tables**, through
+`SystemSchemaInitializer.FrameworkTableNames` — one member returning every framework table rather than a name
+per caller, because an introspector that knows about one and not the next would plan a `DROP` for it on the
+following re-apply, silently, and the symptom would be a lost idempotency history rather than an error. The
+runner's fallback is the path that reaches it: `SchemaMigrationRunner` diffs against introspection whenever
+there is no applied snapshot. **One fact per table**, in `AddAlvoIntegrationTests` against a real SQLite
+database through the full container, each asserting the table physically exists (non-vacuity, read from
+`sqlite_master`), that introspection does not report it as an entity, and that no step of the resulting plan
+names it. The names are spelled out in the test rather than read from `FrameworkTableNames`, because taking
+them from the member under test is how a name dropped from that member stops being checked at all.
+
+**Its bind-parameter names (`@key`, `@scope`, `@fingerprint`, `@row_id`, `@created_at`) are
 deliberately not in `PolicyParameterPrefix`.** That registry exists because one composed *read* statement
 carries fragments from several renderers that never see each other's output; these two statements are
 hand-written, single-fragment, and touch no entity table, so there is no second contributor a name could
 collide with. `IdempotencyTable.cs` is added to `ChangeTrackerReachTests`' SQL-composing allow-list on the same
-ground the five other framework-table files earn their place: it never touches an entity table.
+ground the five other framework-table files earn their place: it never touches an entity table. Its
+`created_at` text form comes from `StoredInstant.Text`, this codebase's single conversion authority, rather
+than a second `ToString("O")` beside `VersionRowWriter`'s.
 
 ### Row locking has two grammars, and T-SQL uses the one that is not a trailing clause
 

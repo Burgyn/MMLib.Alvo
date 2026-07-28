@@ -157,7 +157,7 @@ public sealed class InMemoryAlvoData : IAlvoData
 
         lock (_gate)
         {
-            if (Replay(entity, decision, context, idempotency) is { } replayed)
+            if (Replay(entity, context, idempotency) is { } replayed)
             {
                 return Task.FromResult(replayed);
             }
@@ -171,7 +171,7 @@ public sealed class InMemoryAlvoData : IAlvoData
 
     /// <summary>
     /// The row a replay of <paramref name="idempotency"/> answers with, or <see langword="null"/> when this key
-    /// has not been used in this tenant yet.
+    /// has not been used in this scope yet.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -181,28 +181,39 @@ public sealed class InMemoryAlvoData : IAlvoData
     /// insert, which is the exact failure the inherited concurrency suite forbids.
     /// </para>
     /// <para>
-    /// The recorded <b>row id</b> is re-read through the caller's current policy rather than a stored copy of
-    /// the first response being returned, exactly as a shipped backend must: a replay may not hand back a
-    /// representation the caller's policy would no longer produce, and a row that has since been deleted or
-    /// moved out of reach answers <see cref="AlvoRecordNotFoundException"/> like any other missing row.
+    /// The recorded <b>row id</b> is re-read under a freshly resolved <c>get</c> decision for the replaying
+    /// caller, never under the <c>create</c> decision the call arrived with — <c>create</c> has no stored row
+    /// to filter, so its <see cref="PolicyDecision.Using"/> is <see langword="null"/> and a shipped backend
+    /// renders that as a constant true, which returns the recorded row whoever owns it. Resolving <c>get</c>
+    /// also gets the mask right, because <c>hidden</c> is evaluated per caller. A caller who may create but not
+    /// read has the replay refused by <see cref="Denied"/>, exactly as a shipped backend refuses it.
+    /// </para>
+    /// <para>
+    /// A row that has since been deleted, or moved out of this caller's reach, answers
+    /// <see cref="AlvoRecordNotFoundException"/> like any other missing row.
     /// </para>
     /// </remarks>
-    private AlvoRecord? Replay(
-        string entity, PolicyDecision decision, AlvoContext context, AlvoIdempotency? idempotency)
+    private AlvoRecord? Replay(string entity, AlvoContext context, AlvoIdempotency? idempotency)
     {
         if (idempotency is not { } token || !_idempotency.TryGetValue(IdempotencyKey(token, context), out var record))
         {
             return null;
         }
 
-        if (!string.Equals(record.Fingerprint, token.Fingerprint, StringComparison.Ordinal))
+        if (!token.Matches(record.Fingerprint))
         {
             throw new AlvoIdempotencyConflictException();
         }
 
+        var read = _policy.Resolve(entity, DataOperation.Get, context);
+        if (read.IsDenied)
+        {
+            throw Denied(read);
+        }
+
         var stored = RowsForLocked(entity).Find(row => IsRow(row, record.RowId));
-        return stored is not null && IsVisible(stored, decision, context)
-            ? Mask(stored, decision.HiddenFields)
+        return stored is not null && IsVisible(stored, read, context)
+            ? Mask(stored, read.HiddenFields)
             : throw new AlvoRecordNotFoundException();
     }
 
@@ -215,22 +226,25 @@ public sealed class InMemoryAlvoData : IAlvoData
     }
 
     /// <summary>
-    /// A record's identity: the caller's key <b>and</b> their tenant, never the key alone.
+    /// A record's identity: the caller's key, qualified by the scope the port defines.
     /// </summary>
     /// <remarks>
-    /// A key is the caller's own string, so two tenants will collide on <c>"1"</c> sooner rather than later,
-    /// and in a shared key space one tenant's replay would be answered with another tenant's row — a
-    /// cross-tenant read through the one channel meant to be a safe retry. A tenantless caller gets the
-    /// all-zero <see cref="Guid"/>, already reserved framework-wide to mean "no identity", so the two spaces
-    /// cannot overlap either.
+    /// The scope comes from <see cref="AlvoIdempotency.IdentityOf"/> rather than being assembled here. It was
+    /// assembled here, and identically in the EF driver, with nothing that could catch the two drifting apart —
+    /// the same situation the precondition's two rules were hoisted onto the port to avoid.
     /// </remarks>
-    private static (string Key, Guid Tenant) IdempotencyKey(AlvoIdempotency token, AlvoContext context) =>
-        (token.Key, context.Tenant?.Value ?? Guid.Empty);
+    private static (string Key, string Scope) IdempotencyKey(AlvoIdempotency token, AlvoContext context) =>
+        (token.Key, AlvoIdempotency.IdentityOf(context));
 
     /// <summary>What one used idempotency key recorded: the request it was used for, and the row it created.</summary>
     private readonly record struct IdempotencyRecord(string Fingerprint, Guid RowId);
 
-    private readonly Dictionary<(string Key, Guid Tenant), IdempotencyRecord> _idempotency = [];
+    /// <summary>
+    /// Records by (key, scope). A value tuple of strings compares each half with
+    /// <see cref="EqualityComparer{T}.Default"/>, which for <see cref="string"/> is ordinal — the same
+    /// comparison <see cref="AlvoIdempotency.Matches"/> makes, and the only safe one for caller-supplied text.
+    /// </summary>
+    private readonly Dictionary<(string Key, string Scope), IdempotencyRecord> _idempotency = [];
 
     /// <inheritdoc/>
     public Task<AlvoRecord> UpdateAsync(

@@ -209,10 +209,23 @@ internal sealed class EfAlvoData : IAlvoData
     /// winner committed and answers as a replay.
     /// </para>
     /// <para>
-    /// The budget is small and finite. A failure that is <em>not</em> a race — a <c>NOT NULL</c> violation, say
-    /// — costs the whole budget and is then rethrown unchanged, which is the deliberate trade: a wrong answer
-    /// is never returned, only a slower one, and a request-validation layer above this port catches that class
-    /// of payload before it arrives.
+    /// <b>Why a broad catch cannot become a false replay.</b> This catches any storage write failure, which
+    /// includes a unique-constraint violation in the caller's <em>own</em> entity — a duplicate <c>vin</c>,
+    /// say. That never turns into a replay of an unrelated row, and the reason is structural rather than a
+    /// classification: the only thing a retry does is start the attempt over, and an attempt answers as a
+    /// replay <b>only</b> if the lookup finds a record for this key in this scope. A duplicate <c>vin</c>
+    /// commits no such record, so every attempt takes the insert path again and fails again, and the loop ends
+    /// at <see cref="ExhaustedAsRetryLimit"/> with the provider's exception as the inner one. Matching this
+    /// table's constraint specifically would need a provider error code, which is what
+    /// <see cref="VersionRowWriter"/> deliberately does not read.
+    /// </para>
+    /// <para>
+    /// <b>Exhaustion stays inside the port's five failure families.</b> The raw
+    /// <see cref="DbException"/>/<see cref="DbUpdateException"/> used to propagate, outside the contract
+    /// <see cref="IAlvoData"/> promises a request layer can map a status from — PR3's problem-details layer
+    /// would have rendered a provider message as an unhandled 500. It is now an
+    /// <see cref="InvalidOperationException"/>, which is that contract's family for an invariant this
+    /// implementation relies on, with the provider exception preserved as the inner one.
     /// </para>
     /// </remarks>
     private async Task<AlvoRecord> ReplayableCreateAsync(
@@ -225,22 +238,44 @@ internal sealed class EfAlvoData : IAlvoData
             {
                 return await CreatedOrReplayedAsync(entity, values, decision, context, token, cancellationToken);
             }
-            catch (Exception failure) when (attempt < ContendedCreateAttempts && IsStorageWriteFailure(failure))
+            catch (Exception failure) when (IsStorageWriteFailure(failure))
             {
+                if (attempt >= ContendedCreateAttempts)
+                {
+                    throw ExhaustedAsRetryLimit(failure);
+                }
+
                 await Task.Delay(_contentionBackoff * attempt, cancellationToken);
             }
         }
     }
 
     /// <summary>
-    /// How many times a contended idempotent create starts over before the storage failure is rethrown, and
-    /// how long it waits between attempts. Four attempts over ~30 ms: long enough for a rival's own
-    /// transaction to commit, short enough that a genuine failure is not held back noticeably.
+    /// How many times a contended idempotent create starts over, and how long it waits between attempts.
     /// </summary>
-    private const int ContendedCreateAttempts = 4;
+    /// <remarks>
+    /// Ten attempts with a linearly growing pause — about 450 ms in total. Sized so ordinary contention on a
+    /// real engine cannot exhaust it: a rival's own transaction is a handful of statements, so the first pause
+    /// already outlasts it, and the remaining attempts exist for a queue of rivals on one key rather than for
+    /// one. Still bounded, because a loop that retries forever turns a permanently failing write into a hung
+    /// request instead of an answer.
+    /// </remarks>
+    private const int ContendedCreateAttempts = 10;
 
     /// <inheritdoc cref="ContendedCreateAttempts"/>
-    private static readonly TimeSpan _contentionBackoff = TimeSpan.FromMilliseconds(5);
+    private static readonly TimeSpan _contentionBackoff = TimeSpan.FromMilliseconds(10);
+
+    /// <summary>
+    /// The exhausted retry, as this port's own failure contract rather than the provider's exception.
+    /// </summary>
+    /// <param name="failure">The last storage write failure, preserved as the inner exception.</param>
+    private static InvalidOperationException ExhaustedAsRetryLimit(Exception failure) =>
+        new(
+            $"An idempotent create was retried {ContendedCreateAttempts} times and storage refused the write "
+            + "every time. The write is guarded by the idempotency table's primary key "
+            + "(idempotency_key, scope), so a refusal this persistent is either sustained contention on that "
+            + "one key or a constraint this create violates on its own — the inner exception says which.",
+            failure);
 
     /// <summary>
     /// Whether <paramref name="failure"/> is storage refusing a write. <c>SaveChanges</c> wraps the provider's
@@ -274,7 +309,7 @@ internal sealed class EfAlvoData : IAlvoData
 
         var recorded = await records.FindAsync(cancellationToken);
         var result = recorded is { } record
-            ? await ReplayedAsync(db, schema, decision, context, record, token, cancellationToken)
+            ? await ReplayedAsync(db, schema, context, record, token, cancellationToken)
             : await RecordedCreateAsync(db, schema, decision, context, candidate, records, cancellationToken);
 
         await transaction.CommitAsync(cancellationToken);
@@ -291,8 +326,7 @@ internal sealed class EfAlvoData : IAlvoData
         Dictionary<string, object> candidate, IdempotencyScope records, CancellationToken cancellationToken)
     {
         var stored = await InsertAsync(db, schema, decision, context, candidate, cancellationToken);
-        await records.InsertAsync(
-            schema.Name, (Guid)candidate[AlvoDataContext.IdColumn], _time.GetUtcNow(), cancellationToken);
+        await records.InsertAsync((Guid)candidate[AlvoDataContext.IdColumn], _time.GetUtcNow(), cancellationToken);
 
         return RecordMaterializer.ToRecord(stored, decision.HiddenFields);
     }
@@ -309,23 +343,39 @@ internal sealed class EfAlvoData : IAlvoData
     /// thing every other read of a missing row says.
     /// </para>
     /// <para>
+    /// <b>Read under a freshly resolved <c>get</c> decision, never under the <c>create</c> decision this call
+    /// arrived with.</b> That was a row-level authorization bypass, not a tidiness point: <c>create</c> has no
+    /// stored row to filter, so <see cref="PolicyDecision.Using"/> is <see langword="null"/> by contract and
+    /// the composer renders it as a constant true — a replay read that way returns the recorded row whoever
+    /// owns it. Resolving <c>get</c> also gets the mask right, because <c>hidden</c> is evaluated per caller:
+    /// a replay must return what a <c>GET</c> by <em>this</em> caller would.
+    /// </para>
+    /// <para>
+    /// A caller who may create but not read therefore has their replay refused with
+    /// <see cref="AlvoAuthorizationException"/> from <see cref="Resolve"/>, while their original create
+    /// succeeded. That asymmetry is deliberate and is the only safe direction: a replay <em>is</em> a read of a
+    /// stored row, so it must satisfy <c>get</c>, and falling back to the create decision when <c>get</c>
+    /// denies is precisely the bypass above.
+    /// </para>
+    /// <para>
     /// A different fingerprint under the same key is refused before the row is read at all: it is not a replay,
     /// and answering with the first request's row would report success for a create that never happened.
     /// </para>
     /// </remarks>
     private async Task<AlvoRecord> ReplayedAsync(
-        AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context,
+        AlvoDataContext db, EntitySchema schema, AlvoContext context,
         IdempotencyTable.IdempotencyRecord record, AlvoIdempotency token, CancellationToken cancellationToken)
     {
-        if (!string.Equals(record.Fingerprint, token.Fingerprint, StringComparison.Ordinal))
+        if (!token.Matches(record.Fingerprint))
         {
             throw new AlvoIdempotencyConflictException();
         }
 
-        var row = await SingleAsync(db, schema, decision, context, record.RowId, lockFor: null, cancellationToken)
+        var read = Resolve(schema.Name, DataOperation.Get, context);
+        var row = await SingleAsync(db, schema, read, context, record.RowId, lockFor: null, cancellationToken)
             ?? throw new AlvoRecordNotFoundException();
 
-        return RecordMaterializer.ToRecord(row, decision.HiddenFields);
+        return RecordMaterializer.ToRecord(row, read.HiddenFields);
     }
 
     /// <summary>
@@ -377,15 +427,18 @@ internal sealed class EfAlvoData : IAlvoData
         DbConnection connection, DbTransaction transaction, string tableName, AlvoIdempotency token,
         AlvoContext context)
     {
-        private string TenantKey => IdempotencyTable.TenantKey(context);
+        /// <summary>
+        /// The key's scope, from the port's own authority rather than assembled here — see
+        /// <see cref="AlvoIdempotency.IdentityOf"/> for why the acting user is part of it.
+        /// </summary>
+        private string Scope => AlvoIdempotency.IdentityOf(context);
 
         internal Task<IdempotencyTable.IdempotencyRecord?> FindAsync(CancellationToken cancellationToken) =>
-            IdempotencyTable.FindAsync(connection, transaction, tableName, token.Key, TenantKey, cancellationToken);
+            IdempotencyTable.FindAsync(connection, transaction, tableName, token.Key, Scope, cancellationToken);
 
-        internal Task InsertAsync(
-            string entity, Guid rowId, DateTimeOffset createdAt, CancellationToken cancellationToken) =>
+        internal Task InsertAsync(Guid rowId, DateTimeOffset createdAt, CancellationToken cancellationToken) =>
             IdempotencyTable.InsertAsync(
-                connection, transaction, tableName, token, TenantKey, entity, rowId, createdAt, cancellationToken);
+                connection, transaction, tableName, token, Scope, rowId, createdAt, cancellationToken);
     }
 
     /// <summary>

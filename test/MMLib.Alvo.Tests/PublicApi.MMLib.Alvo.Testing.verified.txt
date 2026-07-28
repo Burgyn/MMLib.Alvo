@@ -175,6 +175,9 @@ namespace MMLib.Alvo.Testing.Data
         protected AlvoDataConcurrencyTests() { }
         public System.Threading.Tasks.Task A_delete_whose_precondition_is_stale_is_refused_and_the_row_survives() { }
         public System.Threading.Tasks.Task A_precondition_against_an_entity_with_no_version_column_is_refused_not_ignored() { }
+        public System.Threading.Tasks.Task A_replay_by_a_second_user_in_the_same_tenant_never_returns_the_first_users_row() { }
+        public System.Threading.Tasks.Task A_replay_masks_hidden_fields_as_a_get_by_that_caller_would() { }
+        public System.Threading.Tasks.Task A_replay_on_an_entity_the_caller_cannot_read_is_refused_rather_than_answered() { }
         public System.Threading.Tasks.Task A_stale_precondition_is_refused_before_the_policy_check_reveals_anything() { }
         public System.Threading.Tasks.Task An_idempotency_key_is_scoped_to_its_tenant_so_one_tenant_cannot_replay_anothers() { }
         public System.Threading.Tasks.Task An_update_whose_precondition_is_stale_is_refused_and_changes_nothing() { }
@@ -183,6 +186,7 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task Replaying_an_idempotency_key_returns_the_row_and_creates_no_second_one() { }
         public System.Threading.Tasks.Task Replaying_an_idempotency_key_with_the_same_fingerprint_returns_the_first_row() { }
         public System.Threading.Tasks.Task The_same_idempotency_key_with_a_different_fingerprint_is_a_conflict() { }
+        public System.Threading.Tasks.Task The_same_key_on_a_different_entity_is_a_conflict_not_a_silent_replay() { }
         public System.Threading.Tasks.Task The_version_a_write_returns_is_the_one_a_following_precondition_accepts() { }
         public System.Threading.Tasks.Task Two_concurrent_creates_with_one_idempotency_key_produce_exactly_one_row() { }
     }

@@ -19,12 +19,12 @@ namespace MMLib.Alvo.Testing.Data;
 /// <para>
 /// A suite of its own rather than a section of <see cref="AlvoDataAdversarialTests"/>, on the same reasoning
 /// that separated <see cref="AlvoDataPagingTests"/>: these facts are about what happens when <em>two</em>
-/// writes meet, so several of them need a second write, a second caller, or a second tenant before they can
-/// ask their question at all — and one of them needs two calls genuinely in flight at once. The adversarial
-/// suite's shape is "one caller, one act, what may they not do"; nothing here fits it.
+/// writes meet, so several of them need a second write, a second caller, a second tenant or a second entity
+/// before they can ask their question at all — and one of them needs two calls genuinely in flight at once.
+/// The adversarial suite's shape is "one caller, one act, what may they not do"; nothing here fits it.
 /// </para>
 /// <para>
-/// <b>Every fact is written to be able to fail for the reason its name claims</b>, which for three of them
+/// <b>Every fact is written to be able to fail for the reason its name claims</b>, which for several of them
 /// takes deliberate construction:
 /// </para>
 /// <list type="bullet">
@@ -43,6 +43,13 @@ namespace MMLib.Alvo.Testing.Data;
 ///   <see cref="A_stale_precondition_is_refused_before_the_policy_check_reveals_anything"/> uses one stale
 ///   version against two rows — one visible to the caller, one not — so the two exception types are the only
 ///   thing that distinguishes a correct check order from an inverted one.
+///   </item>
+///   <item>
+///   <see cref="A_replay_by_a_second_user_in_the_same_tenant_never_returns_the_first_users_row"/> is the
+///   row-level authorization fact this suite was missing in its first round, and it needs <b>both</b> halves
+///   of the fix to pass: a replay read under the <c>create</c> decision returns another user's row (that
+///   decision has no <c>USING</c> predicate at all), and a record identity that omits the acting user lets the
+///   second caller reach the first caller's record in the first place.
 ///   </item>
 ///   <item>
 ///   <see cref="Two_concurrent_creates_with_one_idempotency_key_produce_exactly_one_row"/> starts both calls
@@ -80,10 +87,10 @@ public abstract class AlvoDataConcurrencyTests
     public async Task An_update_whose_precondition_matches_the_stored_version_succeeds()
     {
         var world = await AuditedWorldAsync();
-        var created = await world.Data.CreateAsync(Orders, Payload("first"), world.Caller);
+        var created = await world.Data.CreateAsync(Orders, Payload("first"), world.Caller, cancellationToken: Ct);
 
         var updated = await world.Data.UpdateAsync(
-            Orders, IdOf(created), Payload("second"), world.Caller, new AlvoPrecondition(VersionOf(created)));
+            Orders, IdOf(created), Payload("second"), world.Caller, new AlvoPrecondition(VersionOf(created)), Ct);
 
         updated["title"].ShouldBe("second");
     }
@@ -98,15 +105,16 @@ public abstract class AlvoDataConcurrencyTests
     public async Task An_update_whose_precondition_is_stale_is_refused_and_changes_nothing()
     {
         var world = await AuditedWorldAsync();
-        var created = await world.Data.CreateAsync(Orders, Payload("first"), world.Caller);
+        var created = await world.Data.CreateAsync(Orders, Payload("first"), world.Caller, cancellationToken: Ct);
         var stale = VersionOf(created);
-        var advanced = await world.Data.UpdateAsync(Orders, IdOf(created), Payload("second"), world.Caller);
+        var advanced = await world.Data.UpdateAsync(
+            Orders, IdOf(created), Payload("second"), world.Caller, cancellationToken: Ct);
         VersionOf(advanced).ShouldNotBe(stale, "a write must advance the version, or nothing below discriminates");
 
         await Should.ThrowAsync<AlvoPreconditionFailedException>(() => world.Data.UpdateAsync(
-            Orders, IdOf(created), Payload("third"), world.Caller, new AlvoPrecondition(stale)));
+            Orders, IdOf(created), Payload("third"), world.Caller, new AlvoPrecondition(stale), Ct));
 
-        var stored = await world.Data.GetAsync(Orders, IdOf(created), world.Caller);
+        var stored = await world.Data.GetAsync(Orders, IdOf(created), world.Caller, Ct);
         stored.ShouldNotBeNull();
         stored!["title"].ShouldBe("second", "the refused write must not have landed");
     }
@@ -120,17 +128,19 @@ public abstract class AlvoDataConcurrencyTests
     public async Task A_delete_whose_precondition_is_stale_is_refused_and_the_row_survives()
     {
         var world = await AuditedWorldAsync();
-        var created = await world.Data.CreateAsync(Orders, Payload("first"), world.Caller);
+        var created = await world.Data.CreateAsync(Orders, Payload("first"), world.Caller, cancellationToken: Ct);
         var stale = VersionOf(created);
-        var advanced = await world.Data.UpdateAsync(Orders, IdOf(created), Payload("second"), world.Caller);
+        var advanced = await world.Data.UpdateAsync(
+            Orders, IdOf(created), Payload("second"), world.Caller, cancellationToken: Ct);
         VersionOf(advanced).ShouldNotBe(stale, "a write must advance the version, or nothing below discriminates");
 
         await Should.ThrowAsync<AlvoPreconditionFailedException>(() => world.Data.DeleteAsync(
-            Orders, IdOf(created), world.Caller, new AlvoPrecondition(stale)));
-        (await world.Data.GetAsync(Orders, IdOf(created), world.Caller)).ShouldNotBeNull();
+            Orders, IdOf(created), world.Caller, new AlvoPrecondition(stale), Ct));
+        (await world.Data.GetAsync(Orders, IdOf(created), world.Caller, Ct)).ShouldNotBeNull();
 
-        await world.Data.DeleteAsync(Orders, IdOf(created), world.Caller, new AlvoPrecondition(VersionOf(advanced)));
-        (await world.Data.GetAsync(Orders, IdOf(created), world.Caller)).ShouldBeNull();
+        await world.Data.DeleteAsync(
+            Orders, IdOf(created), world.Caller, new AlvoPrecondition(VersionOf(advanced)), Ct);
+        (await world.Data.GetAsync(Orders, IdOf(created), world.Caller, Ct)).ShouldBeNull();
     }
 
     /// <summary>
@@ -144,17 +154,23 @@ public abstract class AlvoDataConcurrencyTests
     public async Task A_precondition_against_an_entity_with_no_version_column_is_refused_not_ignored()
     {
         var world = await UnauditedWorldAsync();
-        var created = await world.Data.CreateAsync(Drafts, Payload("first"), world.Caller);
+        var created = await world.Data.CreateAsync(Drafts, Payload("first"), world.Caller, cancellationToken: Ct);
 
         var refusal = await Should.ThrowAsync<AlvoPreconditionFailedException>(() => world.Data.UpdateAsync(
-            Drafts, IdOf(created), Payload("second"), world.Caller, new AlvoPrecondition(DateTimeOffset.UnixEpoch)));
+            Drafts,
+            IdOf(created),
+            Payload("second"),
+            world.Caller,
+            new AlvoPrecondition(DateTimeOffset.UnixEpoch),
+            Ct));
         refusal.Message.ShouldContain("audit");
 
-        var stored = await world.Data.GetAsync(Drafts, IdOf(created), world.Caller);
+        var stored = await world.Data.GetAsync(Drafts, IdOf(created), world.Caller, Ct);
         stored.ShouldNotBeNull();
         stored!["title"].ShouldBe("first", "the refused write must not have landed");
 
-        var updated = await world.Data.UpdateAsync(Drafts, IdOf(created), Payload("second"), world.Caller);
+        var updated = await world.Data.UpdateAsync(
+            Drafts, IdOf(created), Payload("second"), world.Caller, cancellationToken: Ct);
         updated["title"].ShouldBe("second");
     }
 
@@ -170,12 +186,12 @@ public abstract class AlvoDataConcurrencyTests
     public async Task The_version_a_write_returns_is_the_one_a_following_precondition_accepts()
     {
         var world = await AuditedWorldAsync();
-        var created = await world.Data.CreateAsync(Orders, Payload("first"), world.Caller);
+        var created = await world.Data.CreateAsync(Orders, Payload("first"), world.Caller, cancellationToken: Ct);
 
         var updated = await world.Data.UpdateAsync(
-            Orders, IdOf(created), Payload("second"), world.Caller, new AlvoPrecondition(VersionOf(created)));
+            Orders, IdOf(created), Payload("second"), world.Caller, new AlvoPrecondition(VersionOf(created)), Ct);
         var again = await world.Data.UpdateAsync(
-            Orders, IdOf(created), Payload("third"), world.Caller, new AlvoPrecondition(VersionOf(updated)));
+            Orders, IdOf(created), Payload("third"), world.Caller, new AlvoPrecondition(VersionOf(updated)), Ct);
 
         again["title"].ShouldBe("third");
     }
@@ -192,19 +208,22 @@ public abstract class AlvoDataConcurrencyTests
     public async Task A_stale_precondition_is_refused_before_the_policy_check_reveals_anything()
     {
         var world = await OwnedWorldAsync();
-        var hers = await world.Data.CreateAsync(Tickets, OwnedPayload("hers", world.Alice), world.Alice);
-        var his = await world.Data.CreateAsync(Tickets, OwnedPayload("his", world.Bob), world.Bob);
+        var hers = await world.Data.CreateAsync(
+            Tickets, OwnedPayload("hers", world.Alice), world.Alice, cancellationToken: Ct);
+        var his = await world.Data.CreateAsync(
+            Tickets, OwnedPayload("his", world.Bob), world.Bob, cancellationToken: Ct);
         var stale = VersionOf(hers);
-        var advanced = await world.Data.UpdateAsync(Tickets, IdOf(hers), Payload("hers-again"), world.Alice);
+        var advanced = await world.Data.UpdateAsync(
+            Tickets, IdOf(hers), Payload("hers-again"), world.Alice, cancellationToken: Ct);
         VersionOf(advanced).ShouldNotBe(stale, "a write must advance the version, or nothing below discriminates");
 
         await Should.ThrowAsync<AlvoPreconditionFailedException>(() => world.Data.UpdateAsync(
-            Tickets, IdOf(hers), Payload("x"), world.Alice, new AlvoPrecondition(stale)));
+            Tickets, IdOf(hers), Payload("x"), world.Alice, new AlvoPrecondition(stale), Ct));
 
         await Should.ThrowAsync<AlvoRecordNotFoundException>(() => world.Data.UpdateAsync(
-            Tickets, IdOf(his), Payload("x"), world.Alice, new AlvoPrecondition(stale)));
+            Tickets, IdOf(his), Payload("x"), world.Alice, new AlvoPrecondition(stale), Ct));
         await Should.ThrowAsync<AlvoRecordNotFoundException>(() => world.Data.DeleteAsync(
-            Tickets, IdOf(his), world.Alice, new AlvoPrecondition(stale)));
+            Tickets, IdOf(his), world.Alice, new AlvoPrecondition(stale), Ct));
     }
 
     /// <summary>
@@ -217,10 +236,10 @@ public abstract class AlvoDataConcurrencyTests
     public async Task Replaying_an_idempotency_key_with_the_same_fingerprint_returns_the_first_row()
     {
         var world = await AuditedWorldAsync();
-        var token = new AlvoIdempotency(NewKey(), "fingerprint-of-the-first-request");
+        var token = TokenFor(Orders);
 
-        var first = await world.Data.CreateAsync(Orders, Payload("first"), world.Caller, token);
-        var replay = await world.Data.CreateAsync(Orders, Payload("first"), world.Caller, token);
+        var first = await world.Data.CreateAsync(Orders, Payload("first"), world.Caller, token, Ct);
+        var replay = await world.Data.CreateAsync(Orders, Payload("first"), world.Caller, token, Ct);
 
         IdOf(replay).ShouldBe(IdOf(first));
         VersionOf(replay).ShouldBe(VersionOf(first), "a replay returns the stored row, it does not write again");
@@ -236,12 +255,12 @@ public abstract class AlvoDataConcurrencyTests
     public async Task Replaying_an_idempotency_key_returns_the_row_and_creates_no_second_one()
     {
         var world = await AuditedWorldAsync();
-        var token = new AlvoIdempotency(NewKey(), "fingerprint-of-the-first-request");
+        var token = TokenFor(Orders);
 
-        await world.Data.CreateAsync(Orders, Payload("first"), world.Caller, token);
-        await world.Data.CreateAsync(Orders, Payload("first"), world.Caller, token);
+        await world.Data.CreateAsync(Orders, Payload("first"), world.Caller, token, Ct);
+        await world.Data.CreateAsync(Orders, Payload("first"), world.Caller, token, Ct);
 
-        var all = await world.Data.QueryAsync(new AlvoQuery { Entity = Orders }, world.Caller);
+        var all = await world.Data.QueryAsync(new AlvoQuery { Entity = Orders }, world.Caller, Ct);
         all.Items.Count.ShouldBe(1);
     }
 
@@ -257,12 +276,12 @@ public abstract class AlvoDataConcurrencyTests
         var key = NewKey();
 
         await world.Data.CreateAsync(
-            Orders, Payload("first"), world.Caller, new AlvoIdempotency(key, "fingerprint-of-the-first"));
+            Orders, Payload("first"), world.Caller, new AlvoIdempotency(key, "fingerprint-of-the-first"), Ct);
 
         await Should.ThrowAsync<AlvoIdempotencyConflictException>(() => world.Data.CreateAsync(
-            Orders, Payload("second"), world.Caller, new AlvoIdempotency(key, "fingerprint-of-the-second")));
+            Orders, Payload("second"), world.Caller, new AlvoIdempotency(key, "fingerprint-of-the-second"), Ct));
 
-        var all = await world.Data.QueryAsync(new AlvoQuery { Entity = Orders }, world.Caller);
+        var all = await world.Data.QueryAsync(new AlvoQuery { Entity = Orders }, world.Caller, Ct);
         all.Items.Count.ShouldBe(1);
     }
 
@@ -274,18 +293,27 @@ public abstract class AlvoDataConcurrencyTests
     /// with the <em>same</em> row: the loser is translated into a replay, never into a raw provider
     /// exception the caller has no contract for.
     /// </summary>
+    /// <remarks>
+    /// <b>Only the PostgreSQL leg carries the proof that the unique constraint is what makes this true</b>, so
+    /// a future change that drops that leg is dropping the evidence. On SQLite the loser is refused with
+    /// <c>database is locked</c> before the constraint is ever consulted, so the file-level write lock
+    /// serializes the pair; <c>InMemoryAlvoData</c> is synchronous, so two calls started here never interleave
+    /// inside it at all. Both legs still prove that the replay path exists and that the two callers converge on
+    /// one row — deleting the record lookup fails this fact everywhere — but deleting the table's
+    /// <c>PRIMARY KEY</c> fails it on PostgreSQL alone.
+    /// </remarks>
     [Fact]
     public async Task Two_concurrent_creates_with_one_idempotency_key_produce_exactly_one_row()
     {
         var world = await AuditedWorldAsync();
-        var token = new AlvoIdempotency(NewKey(), "fingerprint-of-the-retried-request");
+        var token = TokenFor(Orders);
 
-        var first = world.Data.CreateAsync(Orders, Payload("first"), world.Caller, token);
-        var second = world.Data.CreateAsync(Orders, Payload("first"), world.Caller, token);
+        var first = world.Data.CreateAsync(Orders, Payload("first"), world.Caller, token, Ct);
+        var second = world.Data.CreateAsync(Orders, Payload("first"), world.Caller, token, Ct);
         var both = await Task.WhenAll(first, second);
 
         IdOf(both[1]).ShouldBe(IdOf(both[0]), "the loser of the race must be answered with the winner's row");
-        var all = await world.Data.QueryAsync(new AlvoQuery { Entity = Orders }, world.Caller);
+        var all = await world.Data.QueryAsync(new AlvoQuery { Entity = Orders }, world.Caller, Ct);
         all.Items.Count.ShouldBe(1);
     }
 
@@ -299,25 +327,173 @@ public abstract class AlvoDataConcurrencyTests
     public async Task An_idempotency_key_is_scoped_to_its_tenant_so_one_tenant_cannot_replay_anothers()
     {
         var world = await TenantedWorldAsync();
-        var token = new AlvoIdempotency("1", "fingerprint-both-tenants-happen-to-share");
+        var token = new AlvoIdempotency("1", $"{Invoices}:fingerprint-both-tenants-happen-to-share");
 
-        var acme = await world.Data.CreateAsync(Invoices, TenantPayload("acme", world.Acme), world.AcmeCaller, token);
+        var acme = await world.Data.CreateAsync(
+            Invoices, TenantPayload("acme", world.Acme), world.AcmeCaller, token, Ct);
         var globex = await world.Data.CreateAsync(
-            Invoices, TenantPayload("globex", world.Globex), world.GlobexCaller, token);
+            Invoices, TenantPayload("globex", world.Globex), world.GlobexCaller, token, Ct);
 
         IdOf(globex).ShouldNotBe(IdOf(acme), "a shared key space would answer one tenant with another's row");
         globex["title"].ShouldBe("globex");
-        (await world.Data.QueryAsync(new AlvoQuery { Entity = Invoices }, world.AcmeCaller)).Items.Count.ShouldBe(1);
-        (await world.Data.QueryAsync(new AlvoQuery { Entity = Invoices }, world.GlobexCaller)).Items.Count.ShouldBe(1);
+        (await world.Data.QueryAsync(new AlvoQuery { Entity = Invoices }, world.AcmeCaller, Ct))
+            .Items.Count.ShouldBe(1);
+        (await world.Data.QueryAsync(new AlvoQuery { Entity = Invoices }, world.GlobexCaller, Ct))
+            .Items.Count.ShouldBe(1);
+    }
+
+    /// <summary>
+    /// The row-level authorization fact this suite was missing: two users in <b>one tenant</b> who happen to
+    /// send the same key are two different clients, and the second must get their own row — never the first
+    /// user's. It takes <b>both</b> halves of the fix to pass, and each half fails it differently.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// With the record's identity scoped to the tenant alone, the second caller's lookup <em>finds the first
+    /// caller's record</em>. What happened next was the bypass: a replay re-read under the <c>create</c>
+    /// decision carries no <c>USING</c> predicate at all (<c>create</c> has no stored row to filter, so that
+    /// predicate is <see langword="null"/> by contract and a backend renders it as a constant true), so the
+    /// second caller was handed the first caller's row.
+    /// </para>
+    /// <para>
+    /// Re-reading under a <c>get</c> decision alone would turn that leak into an
+    /// <see cref="AlvoRecordNotFoundException"/> — better, and still wrong: these are two distinct requests and
+    /// the answer is two rows. Scoping the identity to the acting user is what makes the collision
+    /// unreachable, which is why the assertion below is a <em>new row</em> rather than a refusal.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_replay_by_a_second_user_in_the_same_tenant_never_returns_the_first_users_row()
+    {
+        var world = await OwnedWorldAsync();
+        var shared = new AlvoIdempotency("1", $"{Tickets}:a-fingerprint-two-clients-happen-to-share");
+
+        var hers = await world.Data.CreateAsync(
+            Tickets, OwnedPayload("hers", world.Alice), world.Alice, shared, Ct);
+        var his = await world.Data.CreateAsync(Tickets, OwnedPayload("his", world.Bob), world.Bob, shared, Ct);
+
+        IdOf(his).ShouldNotBe(IdOf(hers), "one client's key must never reach another client's record");
+        his["owner_id"].ShouldBe(world.Bob.User.Value);
+        his["title"].ShouldBe("his");
+
+        (await world.Data.QueryAsync(new AlvoQuery { Entity = Tickets }, world.Alice, Ct))
+            .Items.ShouldHaveSingleItem()["id"].ShouldBe(IdOf(hers));
+        (await world.Data.QueryAsync(new AlvoQuery { Entity = Tickets }, world.Bob, Ct))
+            .Items.ShouldHaveSingleItem()["id"].ShouldBe(IdOf(his));
+    }
+
+    /// <summary>
+    /// A replay is a read, so it is masked like one: the record it answers with carries exactly the fields an
+    /// <see cref="IAlvoData.GetAsync"/> by that same caller returns, and the field this caller's
+    /// <c>hidden</c> expression covers is absent from both.
+    /// </summary>
+    /// <remarks>
+    /// <c>hidden</c> is resolved per entity and per caller rather than per operation, so a <c>create</c>
+    /// decision's mask and a <c>get</c> decision's coincide for one caller today; what this fact pins is that
+    /// a replay is masked <em>at all</em>, against the projection a <c>get</c> produces. Returning the stored
+    /// row unmasked is the one-line change that fails it, and it is also the guard that would catch a future
+    /// per-operation mask divergence — the second reason the replay resolves <c>get</c> rather than reusing the
+    /// create decision.
+    /// </remarks>
+    [Fact]
+    public async Task A_replay_masks_hidden_fields_as_a_get_by_that_caller_would()
+    {
+        var world = await MaskedWorldAsync();
+        var token = TokenFor(Vaults);
+        var payload = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["title"] = "first",
+            ["secret"] = "shh",
+        };
+
+        var created = await world.Data.CreateAsync(Vaults, payload, world.Caller, token, Ct);
+        var replay = await world.Data.CreateAsync(Vaults, payload, world.Caller, token, Ct);
+        var read = await world.Data.GetAsync(Vaults, IdOf(created), world.Caller, Ct);
+
+        read.ShouldNotBeNull();
+        replay.Values.Keys.OrderBy(key => key, StringComparer.Ordinal)
+            .ShouldBe(read!.Values.Keys.OrderBy(key => key, StringComparer.Ordinal));
+        replay.Values.ContainsKey("secret").ShouldBeFalse("a replay is a read, and this caller may not read it");
+    }
+
+    /// <summary>
+    /// A replay of a create on an entity this caller may write but not read is refused, rather than answered
+    /// out of the <c>create</c> decision that carries no read predicate.
+    /// </summary>
+    /// <remarks>
+    /// The asymmetry is deliberate and is the only safe direction: the original create legitimately returned
+    /// its own row, but a replay <em>is</em> a read of a stored row, so it must satisfy <c>get</c> — and
+    /// falling back to the create decision when <c>get</c> denies is exactly the bypass this round fixed. The
+    /// second create with a fresh key in the same act is the counterweight: writing still works, so this cannot
+    /// be satisfied by refusing every create on such an entity.
+    /// </remarks>
+    [Fact]
+    public async Task A_replay_on_an_entity_the_caller_cannot_read_is_refused_rather_than_answered()
+    {
+        var world = await WriteOnlyWorldAsync();
+        var token = TokenFor(Dropbox);
+
+        var created = await world.Data.CreateAsync(Dropbox, Payload("first"), world.Caller, token, Ct);
+        created["title"].ShouldBe("first");
+
+        await Should.ThrowAsync<AlvoAuthorizationException>(() => world.Data.CreateAsync(
+            Dropbox, Payload("first"), world.Caller, token, Ct));
+
+        var another = await world.Data.CreateAsync(
+            Dropbox, Payload("second"), world.Caller, TokenFor(Dropbox), Ct);
+        IdOf(another).ShouldNotBe(IdOf(created));
+    }
+
+    /// <summary>
+    /// One key on two entities. A conforming fingerprint covers the entity (see
+    /// <see cref="AlvoIdempotency.Fingerprint"/>), so this is a different request under a used key — a
+    /// conflict, not a silent nothing. The second arm is the fail-closed branch for a caller whose fingerprint
+    /// does <em>not</em> distinguish the entity: the recorded row id is not in the entity being served, so the
+    /// answer is <see cref="AlvoRecordNotFoundException"/> and never a cross-entity row.
+    /// </summary>
+    /// <remarks>
+    /// This is what makes the dropped <c>entity</c> column safe. Storing it and never reading it — the first
+    /// round's shape — made one key unique per scope across every entity while telling the lookup nothing, so
+    /// reusing a key on a second entity silently created nothing at all.
+    /// </remarks>
+    [Fact]
+    public async Task The_same_key_on_a_different_entity_is_a_conflict_not_a_silent_replay()
+    {
+        var world = await TwoEntityWorldAsync();
+        var key = NewKey();
+
+        await world.Data.CreateAsync(
+            Orders, Payload("first"), world.Caller, new AlvoIdempotency(key, $"{Orders}:body"), Ct);
+
+        await Should.ThrowAsync<AlvoIdempotencyConflictException>(() => world.Data.CreateAsync(
+            Receipts, Payload("first"), world.Caller, new AlvoIdempotency(key, $"{Receipts}:body"), Ct));
+
+        await Should.ThrowAsync<AlvoRecordNotFoundException>(() => world.Data.CreateAsync(
+            Receipts, Payload("first"), world.Caller, new AlvoIdempotency(key, $"{Orders}:body"), Ct));
+
+        (await world.Data.QueryAsync(new AlvoQuery { Entity = Orders }, world.Caller, Ct)).Items.Count.ShouldBe(1);
+        (await world.Data.QueryAsync(new AlvoQuery { Entity = Receipts }, world.Caller, Ct)).Items.ShouldBeEmpty();
     }
 
     private const string Orders = "orders";
+    private const string Receipts = "receipts";
     private const string Tickets = "tickets";
     private const string Drafts = "drafts";
     private const string Invoices = "invoices";
+    private const string Vaults = "vaults";
+    private const string Dropbox = "dropbox";
+
+    private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     /// <summary>A key no other fact can collide with, so facts stay independent even on a shared store.</summary>
     private static string NewKey() => $"key-{Guid.NewGuid():N}";
+
+    /// <summary>
+    /// A fresh token whose fingerprint covers <paramref name="entity"/>, as
+    /// <see cref="AlvoIdempotency.Fingerprint"/> requires of whoever computes one.
+    /// </summary>
+    /// <param name="entity">The entity the fingerprinted request writes.</param>
+    private static AlvoIdempotency TokenFor(string entity) => new(NewKey(), $"{entity}:a-request-digest");
 
     private static Dictionary<string, object?> Payload(string title) =>
         new(StringComparer.Ordinal) { ["title"] = title };
@@ -338,132 +514,185 @@ public abstract class AlvoDataConcurrencyTests
         (DateTimeOffset)record[AlvoManagedColumns.UpdatedAt]!;
 
     /// <summary>An audited, global <c>orders</c> entity every operation is permitted on.</summary>
-    private Task<World> AuditedWorldAsync() => WorldAsync(Orders, audit: true, EntityTenancy.Global, PermissiveRules);
+    private Task<World> AuditedWorldAsync() => WorldAsync(EntityFixture.Permissive(Orders, audit: true));
 
     /// <summary>A non-audited <c>drafts</c> entity — the one with no version column at all.</summary>
-    private Task<World> UnauditedWorldAsync() => WorldAsync(Drafts, audit: false, EntityTenancy.Global, PermissiveRules);
+    private Task<World> UnauditedWorldAsync() => WorldAsync(EntityFixture.Permissive(Drafts, audit: false));
 
     /// <summary>
     /// An audited <c>tickets</c> entity row-scoped by owner, so one caller's row is genuinely invisible to
-    /// the other — which is what lets the check-order fact tell 404 from 412.
+    /// the other — which is what lets the check-order and cross-user facts tell their answers apart.
     /// </summary>
     private Task<World> OwnedWorldAsync() => WorldAsync(
-        Tickets,
-        audit: true,
-        EntityTenancy.Global,
-        new AccessRules
+        EntityFixture.Permissive(Tickets, audit: true) with
         {
-            List = OwnerRule,
-            Get = OwnerRule,
-            Create = OwnerRule,
-            Update = OwnerRule,
-            Delete = OwnerRule,
-        },
-        _ownerField);
+            Rules = OwnerRules,
+            Extra = ("owner_id", DescField.Uuid),
+        });
 
     /// <summary>An audited, tenant-scoped <c>invoices</c> entity, plus a caller in each of two tenants.</summary>
-    private Task<World> TenantedWorldAsync() =>
-        WorldAsync(Invoices, audit: true, EntityTenancy.Scoped, PermissiveRules);
+    private Task<World> TenantedWorldAsync() => WorldAsync(
+        EntityFixture.Permissive(Invoices, audit: true) with { Tenancy = EntityTenancy.Scoped });
+
+    /// <summary>
+    /// An audited <c>vaults</c> entity with a field whose <c>hidden</c> expression covers a non-admin caller,
+    /// so a replay's projection is comparable against what a <c>get</c> by that caller returns.
+    /// </summary>
+    private Task<World> MaskedWorldAsync() => WorldAsync(
+        EntityFixture.Permissive(Vaults, audit: true) with { Hidden = ("secret", "!('admin' in @user.roles)") });
+
+    /// <summary>
+    /// An audited <c>dropbox</c> entity a caller may write and not read — no <c>get</c> rule at all, so the
+    /// replay's own read has nothing to resolve.
+    /// </summary>
+    private Task<World> WriteOnlyWorldAsync() => WorldAsync(
+        EntityFixture.Permissive(Dropbox, audit: true) with { Rules = new AccessRules { Create = "true" } });
+
+    /// <summary>Two audited, permissive entities in one store, for the one-key-two-entities fact.</summary>
+    private Task<World> TwoEntityWorldAsync() => WorldAsync(
+        EntityFixture.Permissive(Orders, audit: true),
+        EntityFixture.Permissive(Receipts, audit: true));
 
     private const string OwnerRule = "owner_id == @user.id";
 
-    private static AccessRules PermissiveRules => new()
+    private static AccessRules OwnerRules => new()
     {
-        List = "true",
-        Get = "true",
-        Create = "true",
-        Update = "true",
-        Delete = "true",
+        List = OwnerRule,
+        Get = OwnerRule,
+        Create = OwnerRule,
+        Update = OwnerRule,
+        Delete = OwnerRule,
     };
 
-    private static readonly (string Name, DescField Type) _ownerField = ("owner_id", DescField.Uuid);
+    /// <summary>
+    /// One entity of a fixture: the traits the descriptor and the schema have to agree on, in one place so the
+    /// pair cannot drift.
+    /// </summary>
+    /// <param name="Name">The entity name.</param>
+    /// <param name="Audit">Whether it declares <c>audit</c>, and therefore has a version column.</param>
+    /// <param name="Tenancy">Its tenancy.</param>
+    /// <param name="Rules">The access rules to compile.</param>
+    /// <param name="Extra">An additional required field, for the owner-scoped fixture.</param>
+    /// <param name="Hidden">A field and the <c>hidden</c> expression that masks it, for the masking fixture.</param>
+    private sealed record EntityFixture(
+        string Name,
+        bool Audit,
+        EntityTenancy Tenancy,
+        AccessRules Rules,
+        (string Name, DescField Type)? Extra = null,
+        (string Field, string Expression)? Hidden = null)
+    {
+        internal static EntityFixture Permissive(string name, bool audit) => new(
+            name,
+            audit,
+            EntityTenancy.Global,
+            new AccessRules { List = "true", Get = "true", Create = "true", Update = "true", Delete = "true" });
+    }
 
     /// <summary>
-    /// One entity, its descriptor and its schema paired by hand — the schema mapper that injects the managed
-    /// columns is <see langword="internal"/> to the core, so this suite pairs them exactly as the adversarial
-    /// suite does, and the audit quartet is listed explicitly because a real backend has to create those
-    /// columns before a version can exist.
+    /// A store over <paramref name="entities"/>, its descriptor and its schema paired by hand — the schema
+    /// mapper that injects the managed columns is <see langword="internal"/> to the core, so this suite pairs
+    /// them exactly as the adversarial suite does.
     /// </summary>
-    /// <param name="entity">The entity name.</param>
-    /// <param name="audit">Whether the entity declares <c>audit</c>, and therefore has a version column.</param>
-    /// <param name="tenancy">The entity's tenancy.</param>
-    /// <param name="rules">The access rules to compile.</param>
-    /// <param name="extra">An additional required field, for the owner-scoped fixture.</param>
-    private async Task<World> WorldAsync(
-        string entity,
-        bool audit,
-        EntityTenancy tenancy,
-        AccessRules rules,
-        (string Name, DescField Type)? extra = null)
+    /// <param name="entities">The entities the fixture declares.</param>
+    private async Task<World> WorldAsync(params EntityFixture[] entities)
     {
-        var fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
-        {
-            ["title"] = new() { Type = DescField.String },
-        };
-        if (extra is { } field)
-        {
-            fields[field.Name] = new FieldDescriptor { Type = field.Type, Required = true };
-        }
-
         var descriptor = new AlvoDescriptor
         {
             ApiVersion = "alvo.dev/v1",
             Name = "concurrency-fixture",
-            Entities = new Dictionary<string, EntityDescriptor>(StringComparer.Ordinal)
-            {
-                [entity] = new EntityDescriptor { Tenancy = tenancy, Audit = audit, Fields = fields, Rules = rules },
-            },
+            Entities = entities.ToDictionary(entity => entity.Name, DescriptorOf, StringComparer.Ordinal),
         };
 
         var data = await CreateAsync(
-            new SchemaModel([SchemaOf(entity, audit, tenancy, extra)]),
+            new SchemaModel([.. entities.Select(SchemaOf)]),
             descriptor,
             new Dictionary<string, IReadOnlyList<AlvoRecord>>(StringComparer.Ordinal));
 
         return new World(data);
     }
 
-    private static EntitySchema SchemaOf(
-        string entity, bool audit, EntityTenancy tenancy, (string Name, DescField Type)? extra)
+    private static EntityDescriptor DescriptorOf(EntityFixture entity) => new()
     {
-        List<FieldSchema> fields =
-        [
-            new FieldSchema { Name = AlvoManagedColumns.Id, Type = SchemaField.Uuid, Required = true },
-            new FieldSchema { Name = "title", Type = SchemaField.String, Nullable = true },
-        ];
-        if (extra is { } field)
+        Tenancy = entity.Tenancy,
+        Audit = entity.Audit,
+        Fields = DescriptorFieldsOf(entity),
+        Rules = entity.Rules,
+    };
+
+    private static Dictionary<string, FieldDescriptor> DescriptorFieldsOf(EntityFixture entity)
+    {
+        var fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
         {
-            fields.Add(new FieldSchema
-            {
-                Name = field.Name,
-                Type = Enum.Parse<SchemaField>(field.Type.ToString()),
-                Required = true,
-            });
+            ["title"] = new() { Type = DescField.String },
+        };
+        if (entity.Extra is { } extra)
+        {
+            fields[extra.Name] = new FieldDescriptor { Type = extra.Type, Required = true };
         }
 
-        if (tenancy == EntityTenancy.Scoped)
+        if (entity.Hidden is { } hidden)
         {
-            fields.Add(new FieldSchema
+            fields[hidden.Field] = new FieldDescriptor
+            {
+                Type = DescField.String,
+                Hidden = BoolOrCel.FromExpression(hidden.Expression),
+            };
+        }
+
+        return fields;
+    }
+
+    /// <summary>
+    /// The schema half of one fixture entity: the row key, the declared fields, and whichever framework
+    /// columns the traits ask for.
+    /// </summary>
+    private static EntitySchema SchemaOf(EntityFixture entity) => new()
+    {
+        Name = entity.Name,
+        Tenancy = entity.Tenancy == EntityTenancy.Scoped ? TenancyMode.Scoped : TenancyMode.Global,
+        Audit = entity.Audit,
+        Fields = [.. SchemaFieldsOf(entity)],
+    };
+
+    private static IEnumerable<FieldSchema> SchemaFieldsOf(EntityFixture entity)
+    {
+        yield return new FieldSchema { Name = AlvoManagedColumns.Id, Type = SchemaField.Uuid, Required = true };
+        yield return new FieldSchema { Name = "title", Type = SchemaField.String, Nullable = true };
+
+        if (entity.Extra is { } extra)
+        {
+            yield return new FieldSchema
+            {
+                Name = extra.Name,
+                Type = Enum.Parse<SchemaField>(extra.Type.ToString()),
+                Required = true,
+            };
+        }
+
+        if (entity.Hidden is { } hidden)
+        {
+            yield return new FieldSchema { Name = hidden.Field, Type = SchemaField.String, Nullable = true };
+        }
+
+        if (entity.Tenancy == EntityTenancy.Scoped)
+        {
+            yield return new FieldSchema
             {
                 Name = AlvoManagedColumns.TenantId,
                 Type = SchemaField.Uuid,
                 Required = true,
                 Indexed = true,
-            });
+            };
         }
 
-        if (audit)
+        if (entity.Audit)
         {
-            fields.AddRange(AuditFields);
+            foreach (var field in AuditFields)
+            {
+                yield return field;
+            }
         }
-
-        return new EntitySchema
-        {
-            Name = entity,
-            Tenancy = tenancy == EntityTenancy.Scoped ? TenancyMode.Scoped : TenancyMode.Global,
-            Audit = audit,
-            Fields = fields,
-        };
     }
 
     /// <summary>
@@ -486,18 +715,25 @@ public abstract class AlvoDataConcurrencyTests
         /// <summary>The single caller the global fixtures write as.</summary>
         internal AlvoContext Caller { get; } = NewCaller(tenant: null);
 
-        internal AlvoContext Alice { get; } = NewCaller(tenant: null);
-
-        internal AlvoContext Bob { get; } = NewCaller(tenant: null);
-
         internal TenantId Acme { get; } = TenantId.New();
 
         internal TenantId Globex { get; } = TenantId.New();
+
+        /// <summary>
+        /// Two callers <b>in one tenant</b>, which is what the cross-user replay fact needs: with a record
+        /// identity scoped to the tenant alone, these two would share one key space.
+        /// </summary>
+        internal AlvoContext Alice => _alice ??= NewCaller(Acme);
+
+        /// <inheritdoc cref="Alice"/>
+        internal AlvoContext Bob => _bob ??= NewCaller(Acme);
 
         internal AlvoContext AcmeCaller => _acmeCaller ??= NewCaller(Acme);
 
         internal AlvoContext GlobexCaller => _globexCaller ??= NewCaller(Globex);
 
+        private AlvoContext? _alice;
+        private AlvoContext? _bob;
         private AlvoContext? _acmeCaller;
         private AlvoContext? _globexCaller;
 

@@ -64,6 +64,21 @@ internal static class StoredInstant
         _ => throw new InvalidCastException($"'{value.GetType()}' cannot be read as a timestamp."),
     };
 
+    /// <summary>
+    /// <paramref name="instant"/> as the round-trippable text a framework bookkeeping table stores it as.
+    /// </summary>
+    /// <param name="instant">The instant to render.</param>
+    /// <remarks>
+    /// Here, rather than spelled out at each call site, for the reason this whole type exists: two copies of
+    /// one conversion are how the two copies come to disagree. It was written twice —
+    /// <see cref="Internal.VersionRowWriter"/> and <see cref="Internal.IdempotencyTable"/> — before it lived anywhere, and both
+    /// read it now. <c>"O"</c> under the invariant culture, because those columns are <c>TEXT</c> on both
+    /// shipped engines and a culture-sensitive rendering of an instant is a value the writing process cannot
+    /// necessarily read back.
+    /// </remarks>
+    internal static string Text(DateTimeOffset instant) =>
+        instant.ToString("O", CultureInfo.InvariantCulture);
+
     /// <summary>Whether a column of <paramref name="clrType"/> holds an instant.</summary>
     /// <param name="clrType">The column's CLR type, nullable or not.</param>
     internal static bool IsTimestamp(Type clrType)

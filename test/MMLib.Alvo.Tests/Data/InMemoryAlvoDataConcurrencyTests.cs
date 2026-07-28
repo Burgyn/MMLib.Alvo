@@ -14,7 +14,7 @@ namespace MMLib.Alvo.Tests.Data;
 /// idempotency key it scoped globally, would teach a driver author the wrong contract from the inherited
 /// suite.
 /// </summary>
-public class InMemoryAlvoDataConcurrencyTests : AlvoDataConcurrencyTests
+public sealed class InMemoryAlvoDataConcurrencyTests : AlvoDataConcurrencyTests
 {
     protected override Task<IAlvoData> CreateAsync(
         SchemaModel schema, AlvoDescriptor descriptor, IReadOnlyDictionary<string, IReadOnlyList<AlvoRecord>> seed)

@@ -104,7 +104,7 @@ internal sealed class VersionRowWriter : IDisposable
             RelationalSqlBatch.AddParameter(command, "@author", (object?)version.Author ?? DBNull.Value);
             RelationalSqlBatch.AddParameter(command, "@reason", (object?)version.Reason ?? DBNull.Value);
             RelationalSqlBatch.AddParameter(command, "@rolled_back_from", (object?)version.RolledBackFrom ?? DBNull.Value);
-            RelationalSqlBatch.AddParameter(command, "@created_at", version.CreatedAt.ToString("O", CultureInfo.InvariantCulture));
+            RelationalSqlBatch.AddParameter(command, "@created_at", StoredInstant.Text(version.CreatedAt));
 
             await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }

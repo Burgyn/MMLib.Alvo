@@ -19,9 +19,16 @@
 /// advice a <c>422</c> would not carry.
 /// </para>
 /// <para>
-/// The message names neither the key nor the entity: the key is caller-supplied text this port does not echo
-/// (it is a log-injection vector like every other such string here), and a message confirming which key is
-/// already in use would let one caller probe another's keys.
+/// The message names neither the key nor the entity: the key is caller-supplied text this port does not echo,
+/// a log-injection vector like every other such string here.
+/// </para>
+/// <para>
+/// <b>It cannot be used to probe another client's keys — and that is a property of the record's identity, not
+/// of this message.</b> A stored record is scoped to the tenant <em>and</em> to the acting user
+/// (<see cref="AlvoIdempotency.IdentityOf"/>), so a caller only ever collides with a key they used themselves:
+/// this exception says "you have already used this key for something else", never "somebody has". Withholding
+/// the key from the message would not have achieved that on its own, because the 409-versus-201 outcome is
+/// itself the signal; only the scoping removes it.
 /// </para>
 /// </remarks>
 public sealed class AlvoIdempotencyConflictException : Exception
