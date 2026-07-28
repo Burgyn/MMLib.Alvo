@@ -28,6 +28,9 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.TestHost" />
+    <!-- The query-string parser is the framework's most attacker-exposed surface, so its facts include a
+         property run over a generated corpus — §2.1's "adversarial/fuzz" acceptance criterion. -->
+    <PackageReference Include="CsCheck" />
   </ItemGroup>
 
   <!-- The statement recorder, linked rather than copied for the same reason the engine test projects

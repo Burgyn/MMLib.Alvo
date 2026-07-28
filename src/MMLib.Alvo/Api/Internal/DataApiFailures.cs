@@ -88,6 +88,32 @@ internal static class DataApiFailures
         Problem(StatusCodes.Status422UnprocessableEntity, detail);
 
     /// <summary>
+    /// The 422 for a query string that could not be parsed, carrying every reason rather than the first.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The <c>violations</c> extension is what §0 principle 4 asks for — a machine-readable code and a fix
+    /// suggestion per problem, so an agent can repair its request without guessing. Task 5's
+    /// <c>ProblemResultFactory</c> takes over the <em>rendering</em> (the <c>alvo.dev/errors</c> type URI,
+    /// the same array for body validation); the 422 and the array's shape are already the contract.
+    /// </para>
+    /// <para>
+    /// The <c>detail</c> is the violations' own messages, which are built from constants and server-owned
+    /// values only (see <see cref="AlvoViolation"/>) — so no caller-supplied text is reflected into the
+    /// response, and this is not the place a NUL, an RTL override or a quote comes back out.
+    /// </para>
+    /// </remarks>
+    /// <param name="violations">Every reason the query string was refused.</param>
+    internal static IResult MalformedQuery(IReadOnlyList<AlvoViolation> violations)
+    {
+        ArgumentNullException.ThrowIfNull(violations);
+        return Results.Problem(
+            detail: string.Join(" ", violations.Select(violation => violation.Message).Distinct(StringComparer.Ordinal)),
+            statusCode: StatusCodes.Status422UnprocessableEntity,
+            extensions: new Dictionary<string, object?> { ["violations"] = violations });
+    }
+
+    /// <summary>
     /// Runs <paramref name="operation"/> and maps every refusal <c>IAlvoData</c> is allowed to raise
     /// onto its status code.
     /// </summary>

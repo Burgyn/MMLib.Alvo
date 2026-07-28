@@ -45,6 +45,8 @@ internal static class DataApiEndpoints
         AlvoApiOptions options,
         AlvoContextFilterFactory filters)
     {
+        ReservedQueryKeys.EnsureNoneIsShadowed(entity);
+
         var collection = $"{prefix}/{entity.Name}";
         var item = $"{collection}/{{id:guid}}";
 
@@ -61,14 +63,24 @@ internal static class DataApiEndpoints
         string pattern,
         AlvoApiOptions options,
         AlvoContextFilterFactory filters) =>
-        endpoints.MapGet(pattern, (IAlvoData data, IAlvoContextAccessor caller, CancellationToken ct) =>
+        endpoints.MapGet(pattern, (
+                    HttpContext http,
+                    IAlvoData data,
+                    IPolicyEngine policies,
+                    IAlvoContextAccessor caller,
+                    CancellationToken ct) =>
                 DataApiFailures.GuardAsync(async () =>
                 {
-                    // Task 4: the query string becomes the AlvoQuery here — filter, order, limit, offset,
-                    // after, select — validated against this entity's own fields before the port sees it.
-                    var query = new AlvoQuery { Entity = entity.Name, Limit = options.DefaultPageSize };
-                    var page = await data.QueryAsync(query, Caller(caller), ct).ConfigureAwait(false);
-                    return Json(DataApiPage.From(page));
+                    var context = Caller(caller);
+                    if (!QueryStringParser.TryParse(
+                            http.Request.Query, entity, MaskedFields(policies, entity.Name, context), options,
+                            out var request, out var violations))
+                    {
+                        return DataApiFailures.MalformedQuery(violations);
+                    }
+
+                    var page = await data.QueryAsync(request!.Query, context, ct).ConfigureAwait(false);
+                    return Json(DataApiPage.From(page, request.Select));
                 }))
             .AddEndpointFilter(filters.For(entity.Name, DataOperation.List));
 
@@ -158,6 +170,33 @@ internal static class DataApiEndpoints
     /// </remarks>
     private static AlvoContext Caller(IAlvoContextAccessor accessor) =>
         accessor.Principal?.Context ?? AlvoContext.Anonymous;
+
+    /// <summary>
+    /// The fields this caller may not read — the mask this caller's <c>list</c> policy resolved, so a filter, sort or projection naming a
+    /// masked field is refused exactly as one naming an undeclared field is.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This is the one thing the request layer takes from a policy decision, and it takes nothing else.</b>
+    /// Whether the caller may list at all stays the port's answer — resolved again inside
+    /// <c>QueryAsync</c> — so the "neither re-checks nor bypasses a single authorization decision" rule holds:
+    /// no request is admitted here that the port would refuse, and none is refused here that the port would
+    /// admit.
+    /// </para>
+    /// <para>
+    /// It has to happen <em>before</em> parsing because the alternative is an oracle. Leave the mask out and a
+    /// filter over a masked field is refused by the port (403) while one over a field that does not exist is
+    /// refused by the parser (422) — and that one-bit difference answers "does this entity have a field called
+    /// X" for any caller who can compare two responses. §2.1's warning is exactly that: a filter over a hidden
+    /// field leaks its value one comparison at a time.
+    /// </para>
+    /// <para>
+    /// A denied decision carries an empty mask, which is correct rather than lax: the port refuses the whole
+    /// read before any field name matters, so nothing is disclosed by parsing a query that will not be served.
+    /// </para>
+    /// </remarks>
+    private static IReadOnlySet<string> MaskedFields(IPolicyEngine policies, string entity, AlvoContext context) =>
+        policies.Resolve(entity, DataOperation.List, context).HiddenFields;
 
     /// <summary>
     /// The id the store assigned. Asserted rather than interpolated: <c>IAlvoData</c>'s contract is that

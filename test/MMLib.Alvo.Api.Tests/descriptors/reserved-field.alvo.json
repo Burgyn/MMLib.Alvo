@@ -1,0 +1,25 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "reserved-field",
+  "description": "One entity declaring a field named 'limit' — a name the descriptor's own field grammar accepts and the Data API's query string reserves. It exists so the collision is refused by a fact rather than assumed away: mapping this descriptor must fail at startup, naming the entity, the field and the fix.",
+  "auth": {
+    "providers": ["local"]
+  },
+  "entities": {
+    "widgets": {
+      "description": "A widget whose 'limit' field shadows the paging parameter.",
+      "fields": {
+        "name": { "type": "string", "required": true, "maxLength": 120 },
+        "limit": { "type": "integer" }
+      },
+      "rules": {
+        "list": "true",
+        "get": "true",
+        "create": "true",
+        "update": "true",
+        "delete": "true"
+      }
+    }
+  }
+}

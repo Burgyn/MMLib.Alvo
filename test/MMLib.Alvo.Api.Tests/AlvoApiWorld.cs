@@ -50,17 +50,20 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
     private readonly SqlCapture _capture;
     private readonly HttpClient _client;
     private readonly AlvoAuthOptions _authOptions;
+    private readonly string _connectionString;
 
     private AlvoApiWorld(
         SqliteConnection keepAlive,
         WebApplication app,
         SqlCapture capture,
-        AlvoAuthOptions authOptions)
+        AlvoAuthOptions authOptions,
+        string connectionString)
     {
         _keepAlive = keepAlive;
         _app = app;
         _capture = capture;
         _authOptions = authOptions;
+        _connectionString = connectionString;
         _client = app.GetTestClient();
     }
 
@@ -82,6 +85,15 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
             keys,
             new AlvoApiWorldSetup());
 
+    /// <summary>Starts a world over one of this project's own descriptor fixtures.</summary>
+    /// <param name="fileName">The descriptor file's name under <c>descriptors/</c>.</param>
+    /// <param name="keys">The dev API keys the world issues.</param>
+    internal static Task<AlvoApiWorld> FromDescriptorAsync(string fileName, IReadOnlyList<TestApiKey>? keys = null) =>
+        StartAsync(
+            Path.Combine(AppContext.BaseDirectory, "descriptors", fileName),
+            keys ?? [],
+            new AlvoApiWorldSetup());
+
     private static async Task<AlvoApiWorld> StartAsync(
         string descriptorPath, IReadOnlyList<TestApiKey> keys, AlvoApiWorldSetup setup)
     {
@@ -90,6 +102,28 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
         var keepAlive = new SqliteConnection(connectionString);
         await keepAlive.OpenAsync(TestContext.Current.CancellationToken);
 
+        try
+        {
+            return await StartAsync(descriptorPath, keys, setup, databaseName, connectionString, keepAlive);
+        }
+        catch
+        {
+            // A world whose mapping is *meant* to fail is a fact of its own, so the keep-alive connection
+            // (and with it the in-memory database) has to be released on that path too — a leaked one holds a
+            // shared cache alive for the rest of the run.
+            await keepAlive.DisposeAsync();
+            throw;
+        }
+    }
+
+    private static async Task<AlvoApiWorld> StartAsync(
+        string descriptorPath,
+        IReadOnlyList<TestApiKey> keys,
+        AlvoApiWorldSetup setup,
+        string databaseName,
+        string connectionString,
+        SqliteConnection keepAlive)
+    {
         var app = BuildApp(descriptorPath, connectionString, keys, setup);
         await ApplyDescriptorAsync(app);
 
@@ -98,7 +132,7 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
         await app.StartAsync(TestContext.Current.CancellationToken);
 
         var authOptions = app.Services.GetRequiredService<IOptions<AlvoAuthOptions>>().Value;
-        return new AlvoApiWorld(keepAlive, app, capture, authOptions);
+        return new AlvoApiWorld(keepAlive, app, capture, authOptions, connectionString);
     }
 
     /// <summary>
@@ -189,6 +223,25 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
 
     /// <summary>Forgets every recorded statement, so a fact asserts on the ones its own request produced.</summary>
     internal void ClearStatements() => _capture.Clear();
+
+    /// <summary>
+    /// How many rows a table holds, read straight from this world's database rather than through the API.
+    /// </summary>
+    /// <remarks>
+    /// "No row was written, and the table still exists" is the load-bearing half of an injection fact, and it
+    /// cannot be asked of the endpoint under test: a caller's policy already hides rows, so a list that came
+    /// back empty proves nothing about the table. This goes around the API on purpose. The table name is a
+    /// literal supplied by the fact, never by generated input.
+    /// </remarks>
+    /// <param name="table">The table to count.</param>
+    internal async Task<long> CountRowsAsync(string table)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(TestContext.Current.CancellationToken);
+        await using var count = connection.CreateCommand();
+        count.CommandText = $"SELECT COUNT(*) FROM \"{table}\"";
+        return (long)(await count.ExecuteScalarAsync(TestContext.Current.CancellationToken))!;
+    }
 
     /// <summary>
     /// Every principal this world's ambient accessor has been asked to publish, in order —

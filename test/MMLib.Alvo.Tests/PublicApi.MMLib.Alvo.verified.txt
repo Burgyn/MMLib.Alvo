@@ -15,6 +15,18 @@ namespace MMLib.Alvo.Api
         public int MaxRequestBodyBytes { get; set; }
         public string RoutePrefix { get; set; }
     }
+    public sealed class AlvoViolation : System.IEquatable<MMLib.Alvo.Api.AlvoViolation>
+    {
+        public AlvoViolation(string Pointer, string Code, string Message, string? FixSuggestion) { }
+        [System.Text.Json.Serialization.JsonPropertyName("code")]
+        public string Code { get; init; }
+        [System.Text.Json.Serialization.JsonPropertyName("fixSuggestion")]
+        public string? FixSuggestion { get; init; }
+        [System.Text.Json.Serialization.JsonPropertyName("message")]
+        public string Message { get; init; }
+        [System.Text.Json.Serialization.JsonPropertyName("pointer")]
+        public string Pointer { get; init; }
+    }
 }
 namespace MMLib.Alvo.Auth
 {
