@@ -399,9 +399,10 @@ public abstract class AlvoDataConcurrencyTests
     /// never per operation: a <c>create</c> decision's mask and a <c>get</c> decision's are equal for one
     /// caller, and swapping which one the replay uses changes nothing here. The name says "the same field set a
     /// get returns" rather than "masks as a get would" for exactly that reason — a name that promises more than
-    /// the body can deliver is a vacuous test one level up. What proves the replay reads under <c>get</c> is
-    /// <see cref="A_replay_on_an_entity_the_caller_cannot_read_is_refused_rather_than_answered"/>, on the
-    /// visibility axis, where the two decisions genuinely differ.
+    /// the body can deliver is a vacuous test one level up. What proves the replay reads under <c>get</c>, and
+    /// stops answering the full row the moment <c>get</c> is denied outright, is
+    /// <see cref="A_replay_on_an_entity_the_caller_cannot_read_performs_no_row_read"/>, on the visibility axis,
+    /// where the two decisions genuinely differ.
     /// </para>
     /// </remarks>
     [Fact]
@@ -426,31 +427,48 @@ public abstract class AlvoDataConcurrencyTests
     }
 
     /// <summary>
-    /// A replay of a create on an entity this caller may write but not read is refused, rather than answered
-    /// out of the <c>create</c> decision that carries no read predicate.
+    /// A replay of a create on an entity this caller may write but not read is no longer refused: it answers
+    /// with the id alone, and — the fact that matters — it performs <b>no row read</b> to produce it.
     /// </summary>
     /// <remarks>
-    /// The asymmetry is deliberate and is the only safe direction: the original create legitimately returned
-    /// its own row, but a replay <em>is</em> a read of a stored row, so it must satisfy <c>get</c> — and
-    /// falling back to the create decision when <c>get</c> denies is exactly the bypass this round fixed. The
-    /// second create with a fresh key in the same act is the counterweight: writing still works, so this cannot
-    /// be satisfied by refusing every create on such an entity.
+    /// <para>
+    /// <b>Why "no row read" cannot be proved by inspecting the answer alone.</b> A regression that read the
+    /// recorded row under the <c>create</c> decision — the exact bypass the row-level fix above closes — and
+    /// then discarded every field but <c>id</c> would produce an identical-looking id-only record, because
+    /// <c>create</c>'s <c>USING</c> predicate is <see langword="null"/> and a backend renders that as a
+    /// constant true: it matches any existing row, so the read would silently succeed and this fact would pass
+    /// for the wrong reason.
+    /// </para>
+    /// <para>
+    /// <b>The structural proof: the row is hard-deleted before the replay.</b> <see cref="Dropbox"/> is given a
+    /// <c>delete</c> rule for exactly this — the caller removes their own row outright once created. With the
+    /// row physically gone, <em>any</em> read of <c>record.RowId</c> fails with
+    /// <see cref="AlvoRecordNotFoundException"/>, whichever decision or predicate it is read under — a
+    /// constant-true <c>create</c> predicate included, since there is no row left for any predicate to match.
+    /// The only way this fact can still pass is for the replay to never issue that read at all and answer from
+    /// the idempotency record's own <c>RowId</c> instead, which is exactly the fix's claim. A predicate-based
+    /// proof (excluding the row from a <em>configured</em> rule) cannot do this: it would still let a
+    /// create-decision read through, since that predicate is never consulted.
+    /// </para>
     /// </remarks>
     [Fact]
-    public async Task A_replay_on_an_entity_the_caller_cannot_read_is_refused_rather_than_answered()
+    public async Task A_replay_on_an_entity_the_caller_cannot_read_performs_no_row_read()
     {
         var world = await WriteOnlyWorldAsync();
         var token = TokenFor(Dropbox);
 
         var created = await world.Data.CreateAsync(Dropbox, Payload("first"), world.Caller, token, Ct);
-        created["title"].ShouldBe("first");
+        await world.Data.DeleteAsync(Dropbox, IdOf(created), world.Caller, cancellationToken: Ct);
 
-        await Should.ThrowAsync<AlvoAuthorizationException>(() => world.Data.CreateAsync(
-            Dropbox, Payload("first"), world.Caller, token, Ct));
+        var replay = await world.Data.CreateAsync(Dropbox, Payload("first"), world.Caller, token, Ct);
+
+        IdOf(replay).ShouldBe(IdOf(created), "the replay must still name the row it created, gone or not");
+        replay.Values.Keys.ShouldBe(
+            [AlvoManagedColumns.Id], "no field beyond the id may appear — none but the id was ever read");
 
         var another = await world.Data.CreateAsync(
             Dropbox, Payload("second"), world.Caller, TokenFor(Dropbox), Ct);
-        IdOf(another).ShouldNotBe(IdOf(created));
+        IdOf(another).ShouldNotBe(IdOf(created), "writing under a fresh key must still work on this entity");
     }
 
     /// <summary>
@@ -695,11 +713,16 @@ public abstract class AlvoDataConcurrencyTests
         EntityFixture.Permissive(Vaults, audit: true) with { Hidden = ("secret", "!('admin' in @user.roles)") });
 
     /// <summary>
-    /// An audited <c>dropbox</c> entity a caller may write and not read — no <c>get</c> rule at all, so the
-    /// replay's own read has nothing to resolve.
+    /// An audited <c>dropbox</c> entity a caller may write and not read — no <c>get</c> or <c>list</c> rule at
+    /// all, so the replay's own read has nothing to resolve. <c>delete</c> is granted too, deliberately: it is
+    /// still a write, and it is what lets <see cref="A_replay_on_an_entity_the_caller_cannot_read_performs_no_row_read"/>
+    /// remove the row out from under a replay to prove structurally that nothing reads it.
     /// </summary>
     private Task<World> WriteOnlyWorldAsync() => WorldAsync(
-        EntityFixture.Permissive(Dropbox, audit: true) with { Rules = new AccessRules { Create = "true" } });
+        EntityFixture.Permissive(Dropbox, audit: true) with
+        {
+            Rules = new AccessRules { Create = "true", Delete = "true" },
+        });
 
     /// <summary>Two audited, permissive entities in one store, for the one-key-two-entities fact.</summary>
     private Task<World> TwoEntityWorldAsync() => WorldAsync(

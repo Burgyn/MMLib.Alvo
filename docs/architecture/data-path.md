@@ -648,12 +648,27 @@ by the caller's own `hidden` set — masking is per caller, and a replay must re
 would). `A_replay_by_a_second_user_in_the_same_tenant_never_returns_the_first_users_row` fails if either half is
 reverted, differently each way.
 
-A consequence, deliberate: a caller who may **create but not read** has their replay refused with
-`AlvoAuthorizationException`, while their original create succeeded and returned its own row. A replay *is* a
-read of a stored row, so it must satisfy `get`; falling back to the create decision when `get` denies is exactly
-the bypass above. `A_replay_on_an_entity_the_caller_cannot_read_is_refused_rather_than_answered` pins it, and is
-the fact that makes the `get` half independently observable now that the scoping makes cross-user collisions
-unreachable.
+**A retry must not be worse than the create it replays, so a `get`-denied replay is no longer refused.** A caller
+who may **create but not read** used to have their replay refused with `AlvoAuthorizationException`, while their
+original create succeeded and returned its own row — the feature exists to make "did my first attempt land"
+answerable, and for this caller it answered "you are not allowed to ask". When `_policy.Resolve(entity, Get,
+context)` comes back denied outright (no policy allows `get` at all), the replay now answers with an `AlvoRecord`
+carrying **only `id`**, taken from the idempotency record's own `RowId` — and performs **no row read** to produce
+it. The safety argument is the record's own identity: it is keyed on the key, the tenant *and* the acting user
+(`AlvoIdempotency.IdentityOf`), so a match proves this caller created that row, and the id disclosed is exactly
+the id their own original `201` already gave them, in the body and in `Location`. This must never fall back to
+reading the row under the `create` decision to mint that id-only record — that read is precisely the bypass
+above, even with every field but `id` then discarded, because `create`'s `null` `Using` predicate would match the
+row regardless of who owns it. `A_replay_on_an_entity_the_caller_cannot_read_performs_no_row_read` pins it, and
+proves the "no read" half structurally by deleting the row before the replay: with the row physically gone, any
+read of it — under any decision, `create`'s constant-true predicate included — answers
+`AlvoRecordNotFoundException`, so the fact can only pass if the replay never reads it at all.
+
+**The sibling case stays exactly as it was, deliberately.** A *configured* `get` whose own predicate excludes
+this specific row (an entity whose rule is `USING (status == 'published')`, say) still reads, and the replay
+still answers `AlvoRecordNotFoundException` — indistinguishable from a row that was genuinely deleted. Telling
+the two apart would need a second, policy-free read, and refusing to add one is the more conservative of the two
+errors; it is filed as an issue rather than fixed here.
 
 **`EfCoreSchemaIntrospector` excludes both bookkeeping tables**, through
 `SystemSchemaInitializer.FrameworkTableNames` — one member returning every framework table rather than a name

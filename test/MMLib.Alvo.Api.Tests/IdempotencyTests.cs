@@ -131,6 +131,59 @@ public sealed class IdempotencyTests
     }
 
     /// <summary>
+    /// A replay must not be worse than the create it replays: a caller who may <c>create</c> but not <c>get</c>
+    /// retries an identical keyed <c>POST</c> and still gets <b>201</b>, the same <c>Location</c> as the
+    /// original, and a body carrying <c>id</c> and nothing else.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>ledgers</c> (<c>masked-notes.alvo.json</c>) is the entity because it declares no <c>get</c> or
+    /// <c>list</c> rule at all, so <em>every</em> caller is denied outright regardless of role or scope — the
+    /// row-level policy engine does not consult scopes at all, so <c>ledgers:write</c> is enough to create and
+    /// to replay, and there is no scope that would ever let this key read one back.
+    /// </para>
+    /// <para>
+    /// <b>The key fact is the body's key set, not merely that <c>id</c> is present.</b> "And nothing else" is
+    /// the confidentiality half of the fix: a body that also carried <c>title</c> would mean the replay read the
+    /// row after all, which is the bypass this round closes even when the row happens to belong to nobody but
+    /// this caller.
+    /// </para>
+    /// <para>
+    /// <b><c>ledgers</c> declares <c>audit: true</c> deliberately, and this is what "verify rather than assume"
+    /// means for <c>RowVersionETag.For</c>.</b> The first create is an ordinary re-read and carries a real
+    /// <c>ETag</c>; the retry's id-only record has no version column at all, so
+    /// <c>RowVersionETag.For(record, entity)</c> must fall through to <see langword="null"/> rather than throw
+    /// or mint one from a value that is not there. Asserting the retry has <em>no</em> <c>ETag</c> — on an
+    /// entity whose ordinary create does have one — is what tells a genuine degradation apart from this entity
+    /// simply never carrying a version to begin with.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_caller_who_may_create_but_not_get_still_gets_201_on_retry_with_an_id_only_body()
+    {
+        var key = new TestApiKey("write-only", ["authenticated"], ["ledgers:write"]);
+        await using var world = await AlvoApiWorld.FromDescriptorAsync("masked-notes.alvo.json", [key]);
+        var body = new JsonObject { ["title"] = "Ledger row" };
+
+        using var first = await world.SendAsync(
+            HttpMethod.Post, "/api/ledgers", key, body: body, headers: Key("write-only-1"));
+        using var retried = await world.SendAsync(
+            HttpMethod.Post, "/api/ledgers", key, body: body, headers: Key("write-only-1"));
+
+        first.StatusCode.ShouldBe(HttpStatusCode.Created, await first.ReadTextAsync());
+        first.Headers.ETag.ShouldNotBeNull("the counterweight: this entity's ordinary create does carry a tag");
+        retried.StatusCode.ShouldBe(
+            HttpStatusCode.Created, $"a retry must not be punished for being a retry: {await retried.ReadTextAsync()}");
+        retried.Headers.Location!.ToString().ShouldBe(first.Headers.Location!.ToString());
+        retried.Headers.ETag.ShouldBeNull(
+            "an id-only record has no version to tag — RowVersionETag.For must degrade, not throw or invent one");
+        (await IdOfAsync(retried)).ShouldBe(await IdOfAsync(first));
+        (await retried.ReadJsonObjectAsync()).Select(field => field.Key).ShouldBe(
+            ["id"], "the body must carry the id and nothing else — a fuller body means the row was read");
+        (await world.CountRowsAsync("ledgers")).ShouldBe(1, "a replay must not write a second row");
+    }
+
+    /// <summary>
     /// The same key with a different body is a 409 that says to send a fresh key — never the first row, and
     /// never a second row.
     /// </summary>

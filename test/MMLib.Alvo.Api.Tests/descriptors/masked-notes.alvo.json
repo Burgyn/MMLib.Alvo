@@ -22,7 +22,8 @@
       }
     },
     "ledgers": {
-      "description": "The same shape as 'notes', with NO 'list' or 'get' rule at all — so default-deny refuses every read outright, which is the only way to reach a DENIED decision for a lister. A role test like \"'auditor' in @user.roles\" cannot do it: a rule compiles to a row-level USING predicate, so a caller without the role gets an ALLOW carrying a predicate that matches nothing (200 with an empty page), never IsDenied. A caller must still hold the 'ledgers:read' scope to get this far, since a scope refusal answers a different slug from the endpoint filter and never resolves a policy.",
+      "description": "The same shape as 'notes', with NO 'list' or 'get' rule at all — so default-deny refuses every read outright, which is the only way to reach a DENIED decision for a lister. A role test like \"'auditor' in @user.roles\" cannot do it: a rule compiles to a row-level USING predicate, so a caller without the role gets an ALLOW carrying a predicate that matches nothing (200 with an empty page), never IsDenied. A caller must still hold the 'ledgers:read' scope to get this far, since a scope refusal answers a different slug from the endpoint filter and never resolves a policy. 'audit: true' is deliberate too: it gives a caller who may create but not get an ordinary create with a real ETag, so an id-only replay's ETag-less response is a verified degradation rather than a coincidence of this entity carrying no version column at all.",
+      "audit": true,
       "fields": {
         "title": { "type": "string", "required": true, "maxLength": 120 },
         "secret": { "type": "string", "hidden": true }

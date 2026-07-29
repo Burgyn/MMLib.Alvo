@@ -333,15 +333,20 @@ internal sealed class EfAlvoData : IAlvoData
     }
 
     /// <summary>
-    /// The answer to a replay: the recorded row, <b>re-read through this caller's current policy</b>.
+    /// The answer to a replay: the recorded row, <b>re-read through this caller's current policy</b> — or,
+    /// when that policy refuses <c>get</c> outright, the id alone, disclosed with no row read at all.
     /// </summary>
     /// <remarks>
     /// <para>
     /// Never a stored copy of the first response. Re-reading is what keeps a replay from handing back a
     /// representation the caller's policy would not produce today — a field that has since become
     /// <c>hidden</c> for them stays hidden, and a row they can no longer see is not resurrected. It also means
-    /// a row that has since been deleted answers <see cref="AlvoRecordNotFoundException"/>, which is the same
-    /// thing every other read of a missing row says.
+    /// a row that has since been deleted, or that a <em>configured</em> <c>get</c>'s own predicate excludes
+    /// (an entity whose rule is <c>USING (status == 'published')</c>, say), answers
+    /// <see cref="AlvoRecordNotFoundException"/>, which is the same thing every other read of a missing row
+    /// says. That sibling case is deliberately left exactly as it stands: telling "invisible to me" apart from
+    /// "genuinely gone since" would need a second, policy-free read, and refusing to add one is the more
+    /// conservative of the two errors.
     /// </para>
     /// <para>
     /// <b>Read under a freshly resolved <c>get</c> decision, never under the <c>create</c> decision this call
@@ -352,11 +357,17 @@ internal sealed class EfAlvoData : IAlvoData
     /// a replay must return what a <c>GET</c> by <em>this</em> caller would.
     /// </para>
     /// <para>
-    /// A caller who may create but not read therefore has their replay refused with
-    /// <see cref="AlvoAuthorizationException"/> from <see cref="Resolve"/>, while their original create
-    /// succeeded. That asymmetry is deliberate and is the only safe direction: a replay <em>is</em> a read of a
-    /// stored row, so it must satisfy <c>get</c>, and falling back to the create decision when <c>get</c>
-    /// denies is precisely the bypass above.
+    /// <b>A caller who may create but not read is no longer refused for retrying.</b> When <c>get</c> is
+    /// denied outright — no policy allows it at all, so <see cref="PolicyDecision.IsDenied"/> is
+    /// <see langword="true"/> before any row is touched — the retry must not be worse than the create it
+    /// replays: it answers with an <see cref="AlvoRecord"/> carrying only <see cref="AlvoManagedColumns.Id"/>,
+    /// taken from <paramref name="record"/>'s own <c>RowId</c>. The safety argument rests on
+    /// <see cref="AlvoIdempotency.IdentityOf"/>: the record is keyed on the key, the tenant and the acting
+    /// user, so a match <em>proves this caller created that row</em> — the id disclosed is exactly the id
+    /// their own original 201 already gave them, in the body and in <c>Location</c>, and nothing more is
+    /// disclosed because no field of the row is ever read. This must never fall back to the <c>create</c>
+    /// decision to produce that id — doing so would read the row under the predicate-free decision the
+    /// paragraph above exists to forbid, even if every field but <c>id</c> were then discarded.
     /// </para>
     /// <para>
     /// A different fingerprint under the same key is refused before the row is read at all: it is not a replay,
@@ -372,12 +383,32 @@ internal sealed class EfAlvoData : IAlvoData
             throw new AlvoIdempotencyConflictException();
         }
 
-        var read = Resolve(schema.Name, DataOperation.Get, context);
+        var read = _policy.Resolve(schema.Name, DataOperation.Get, context);
+        if (read.IsDenied)
+        {
+            return IdOnly(record.RowId);
+        }
+
         var row = await SingleAsync(db, schema, read, context, record.RowId, lockFor: null, cancellationToken)
             ?? throw new AlvoRecordNotFoundException();
 
         return RecordMaterializer.ToRecord(row, read.HiddenFields);
     }
+
+    /// <summary>
+    /// The narrowest possible answer to a replay: <paramref name="rowId"/> and nothing else, from the
+    /// idempotency record already in hand.
+    /// </summary>
+    /// <remarks>
+    /// An id-only <see cref="AlvoRecord"/> rather than an empty one or a <see langword="null"/> return,
+    /// because <see cref="IAlvoData.CreateAsync"/> returns a non-nullable <see cref="AlvoRecord"/> — widening
+    /// it to <c>AlvoRecord?</c> for one caller, or inventing a sentinel value, would cost this port a fourth
+    /// contract change in a PR that has already taken three. An id-only record needs neither, and discloses
+    /// nothing the caller's own <c>Location</c> header does not already carry.
+    /// </remarks>
+    /// <param name="rowId">The row id the idempotency record already names.</param>
+    private static AlvoRecord IdOnly(Guid rowId) =>
+        new(new Dictionary<string, object?>(StringComparer.Ordinal) { [AlvoDataContext.IdColumn] = rowId });
 
     /// <summary>
     /// Ensures the idempotency table exists, once per process and <b>before</b> the write transaction begins.

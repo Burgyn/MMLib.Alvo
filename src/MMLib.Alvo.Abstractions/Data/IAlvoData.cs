@@ -290,15 +290,22 @@ public interface IAlvoData
     /// first create is recorded against it and a replay carrying the same
     /// <see cref="AlvoIdempotency.Fingerprint"/> returns that same row — re-read under a freshly resolved
     /// <c>get</c> decision for the replaying caller, never under this <c>create</c> decision — and writes
-    /// nothing. The record is scoped to the caller's tenant <em>and</em> user, and a token from an anonymous
-    /// caller is refused, because there is no identity to scope it by.
+    /// nothing. When no policy allows <c>get</c> at all, the replay is not refused: it answers with the id
+    /// alone, taken from the recorded key and never from a row read, because a match on the record's identity
+    /// already proves this caller created that row. The record is scoped to the caller's tenant <em>and</em>
+    /// user, and a token from an anonymous caller is refused, because there is no identity to scope it by.
     /// </param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
-    /// <returns>The created row, with every <c>hidden</c> field stripped.</returns>
+    /// <returns>
+    /// The created row, with every <c>hidden</c> field stripped — or, on a replay whose caller's <c>get</c> is
+    /// denied outright, an <see cref="AlvoRecord"/> carrying only <c>id</c>, with no row read performed. See
+    /// <paramref name="idempotency"/> and <c>EfAlvoData.ReplayedAsync</c>'s remarks for the safety argument.
+    /// </returns>
     /// <remarks>
     /// <b>The row this returns is the row the store holds</b>, re-read inside the write transaction, not the
     /// payload that was sent: that is what gives a database default, a framework-assigned audit value, and
-    /// therefore a usable version a following <see cref="AlvoPrecondition"/> can carry.
+    /// therefore a usable version a following <see cref="AlvoPrecondition"/> can carry. The id-only replay
+    /// answer above is the one exception, and it is deliberate: it never reads the row at all.
     /// </remarks>
     /// <exception cref="AlvoAuthorizationException">
     /// No policy allows <c>create</c> on this entity for <paramref name="context"/>,
@@ -307,24 +314,16 @@ public interface IAlvoData
     /// a field the policy marks read-only. <c>tenant_id</c> is not rejected here — see the type
     /// remarks — but a value that fails the tenant scope still raises this exception via
     /// <c>WITH CHECK</c>.
-    /// <para>
-    /// <b>Or, on a replay, no policy allows <c>get</c> on this entity for <paramref name="context"/>.</b>
-    /// Listed here because it is the one cause a caller cannot infer from the create path: a replay reads
-    /// the recorded row under a <c>get</c> decision, so a caller permitted to create but not to read is
-    /// refused at the replay rather than at the original write. Named on this member deliberately — the
-    /// type remarks and <c>data-path.md</c>'s failure table carry it too, but a tooling "Exceptions" view
-    /// shows only what the member declares.
-    /// </para>
     /// </exception>
     /// <exception cref="AlvoIdempotencyConflictException">
     /// <paramref name="idempotency"/>'s key was already used for a request with a different fingerprint.
     /// </exception>
     /// <exception cref="AlvoRecordNotFoundException">
-    /// <paramref name="idempotency"/> replays a create whose row no longer exists, <b>or is not visible under
-    /// the <c>get</c> decision resolved for <paramref name="context"/></b>. A replay re-reads rather than
-    /// returning a cached body, so a row that has since been deleted or moved out of reach reads exactly as it
-    /// would on any other read — the alternative is answering a caller with a representation their policy would
-    /// now refuse.
+    /// <paramref name="idempotency"/> replays a create whose row no longer exists, or is excluded by a
+    /// <em>configured</em> <c>get</c> rule's own predicate for <paramref name="context"/> — an entity whose
+    /// rule is <c>USING (status == 'published')</c>, say. A replay re-reads rather than returning a cached
+    /// body, so a row that has since been deleted or moved out of reach reads exactly as it would on any other
+    /// read. This does <b>not</b> apply when no policy allows <c>get</c> at all: see the id-only answer above.
     /// </exception>
     /// <exception cref="ArgumentException">
     /// <paramref name="idempotency"/> is supplied for an anonymous <paramref name="context"/>. Every anonymous

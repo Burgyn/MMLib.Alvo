@@ -186,12 +186,22 @@ public sealed class InMemoryAlvoData : IAlvoData
     /// caller, never under the <c>create</c> decision the call arrived with — <c>create</c> has no stored row
     /// to filter, so its <see cref="PolicyDecision.Using"/> is <see langword="null"/> and a shipped backend
     /// renders that as a constant true, which returns the recorded row whoever owns it. Resolving <c>get</c>
-    /// also gets the mask right, because <c>hidden</c> is evaluated per caller. A caller who may create but not
-    /// read has the replay refused by <see cref="Denied"/>, exactly as a shipped backend refuses it.
+    /// also gets the mask right, because <c>hidden</c> is evaluated per caller.
     /// </para>
     /// <para>
-    /// A row that has since been deleted, or moved out of this caller's reach, answers
-    /// <see cref="AlvoRecordNotFoundException"/> like any other missing row.
+    /// <b>A caller who may create but not read is no longer refused for retrying.</b> When <c>get</c> is denied
+    /// outright — no policy allows it at all — the retry must not be worse than the create it replays, so this
+    /// answers with an <see cref="AlvoRecord"/> carrying only <c>id</c>, taken from <paramref name="entity"/>'s
+    /// recorded <c>RowId</c>, and performs <b>no row read</b>: the record's identity
+    /// (<see cref="AlvoIdempotency.IdentityOf"/> — key, tenant and acting user) already proves this caller
+    /// created that row, so the id disclosed is the one their own original create already gave them. This must
+    /// never fall back to reading the row under the <c>create</c> decision to build that answer — exactly the
+    /// bypass the paragraph above forbids.
+    /// </para>
+    /// <para>
+    /// A <em>configured</em> <c>get</c> whose own predicate excludes this row, or a row that has since been
+    /// deleted, still answers <see cref="AlvoRecordNotFoundException"/> like any other missing row — that
+    /// sibling case is unchanged and deliberately so; see <c>EfAlvoData.ReplayedAsync</c>'s remarks.
     /// </para>
     /// </remarks>
     private AlvoRecord? Replay(string entity, AlvoContext context, AlvoIdempotency? idempotency)
@@ -209,7 +219,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         var read = _policy.Resolve(entity, DataOperation.Get, context);
         if (read.IsDenied)
         {
-            throw Denied(read);
+            return IdOnly(record.RowId);
         }
 
         var stored = RowsForLocked(entity).Find(row => IsRow(row, record.RowId));
@@ -217,6 +227,15 @@ public sealed class InMemoryAlvoData : IAlvoData
             ? Mask(stored, read.HiddenFields)
             : throw new AlvoRecordNotFoundException();
     }
+
+    /// <summary>
+    /// The narrowest possible answer to a replay: <paramref name="rowId"/> and nothing else, matching
+    /// <c>EfAlvoData</c>'s own id-only answer so both implementations of this port agree on the shape a
+    /// get-denied replay returns.
+    /// </summary>
+    /// <param name="rowId">The row id the idempotency record already names.</param>
+    private static AlvoRecord IdOnly(Guid rowId) =>
+        new(new Dictionary<string, object?>(StringComparer.Ordinal) { [IdField] = rowId });
 
     private void RecordIdempotencyLocked(AlvoIdempotency? idempotency, AlvoContext context, Guid rowId)
     {
