@@ -181,6 +181,7 @@ namespace MMLib.Alvo.Testing.Data
     public abstract class AlvoDataConcurrencyTests
     {
         protected AlvoDataConcurrencyTests() { }
+        public System.Threading.Tasks.Task A_blank_idempotency_key_is_refused_by_the_port() { }
         public System.Threading.Tasks.Task A_delete_whose_precondition_is_stale_is_refused_and_the_row_survives() { }
         public System.Threading.Tasks.Task A_precondition_against_an_entity_with_no_version_column_is_refused_not_ignored() { }
         public System.Threading.Tasks.Task A_replay_by_a_second_user_in_the_same_tenant_never_returns_the_first_users_row() { }
@@ -188,6 +189,7 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task A_replay_returns_the_same_field_set_a_get_by_that_caller_returns() { }
         public System.Threading.Tasks.Task A_stale_precondition_is_refused_before_the_policy_check_reveals_anything() { }
         public System.Threading.Tasks.Task An_idempotency_key_is_scoped_to_its_tenant_so_one_tenant_cannot_replay_anothers() { }
+        public System.Threading.Tasks.Task An_idempotency_key_past_the_ports_byte_bound_is_refused() { }
         public System.Threading.Tasks.Task An_idempotency_token_from_an_anonymous_caller_is_refused_with_a_fix_suggestion() { }
         public System.Threading.Tasks.Task An_idempotency_token_from_the_system_context_is_accepted() { }
         public System.Threading.Tasks.Task An_update_whose_precondition_is_stale_is_refused_and_changes_nothing() { }

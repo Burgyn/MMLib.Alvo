@@ -213,10 +213,16 @@ public sealed class IdempotencyTests
     /// instead, and the message names the bound so an agent can shorten its own key rather than guess.
     /// </para>
     /// <para>
-    /// The bound is configured down to 8 rather than measured at the default 255, so a build that hard-coded the
-    /// number fails: <see cref="AlvoApiOptions.MaxIdempotencyKeyLength"/> has to be what is read. A key of
+    /// The bound is configured down to 8 rather than measured at the default, so a build that hard-coded the
+    /// number fails: <see cref="AlvoApiOptions.MaxIdempotencyKeyBytes"/> has to be what is read. A key of
     /// exactly the bound is accepted in the same fact, because "refuse everything longer than zero" passes any
     /// one-sided version of this.
+    /// </para>
+    /// <para>
+    /// <b>The bound is counted in UTF-8 bytes, and the third request is what makes that more than a remark.</b>
+    /// Eight two-byte characters are 8 <c>string.Length</c> and 16 bytes — accepted by a character count,
+    /// refused by a byte count. The unit matters because the rule exists to keep the key inside a btree index
+    /// entry, which is measured in bytes; a build that counted characters would pass every other assertion here.
     /// </para>
     /// <para>
     /// The last request pairs the over-long key with a body that would earn a 422 of its own, and requires the
@@ -230,11 +236,12 @@ public sealed class IdempotencyTests
     {
         const int bound = 8;
         await using var world = await AlvoApiWorld.VehicleRegistryAsync(
-            [_admin], new AlvoApiWorldSetup(ConfigureApi: api => api.MaxIdempotencyKeyLength = bound));
+            [_admin], new AlvoApiWorldSetup(ConfigureApi: api => api.MaxIdempotencyKeyBytes = bound));
         var body = new JsonObject { ["name"] = "Bounded Ltd" };
 
         using var atTheBound = await PostAsync(world, "owners", body, new string('k', bound));
         using var pastIt = await PostAsync(world, "owners", body, new string('k', bound + 1));
+        using var withinCharsButNotBytes = await PostAsync(world, "owners", body, new string('é', bound));
         using var pastItWithABadBody = await PostAsync(
             world, "owners", new JsonObject { ["name"] = new string('n', 200) }, new string('k', bound + 1));
 
@@ -246,11 +253,13 @@ public sealed class IdempotencyTests
             bound.ToString(CultureInfo.InvariantCulture),
             Case.Sensitive,
             "the refusal must name the bound the host configured, or the caller cannot act on it");
+        withinCharsButNotBytes.StatusCode.ShouldBe(
+            HttpStatusCode.UnprocessableEntity,
+            $"{bound} two-byte characters are {bound * 2} bytes, and the bound is a byte bound because the "
+            + $"index entry it protects is: {await withinCharsButNotBytes.ReadTextAsync()}");
         (await pastItWithABadBody.ReadProblemTypeAsync()).ShouldBe(
             AlvoProblemTypes.MalformedQuery, "an unusable key outranks whatever the body says");
         (await world.CountRowsAsync("owners")).ShouldBe(1, "only the accepted key may have written a row");
-        new AlvoApiOptions().MaxIdempotencyKeyLength.ShouldBe(
-            255, "the default is what the record's own storage is sized for — see the option's remarks");
     }
 
     /// <summary>
@@ -259,10 +268,17 @@ public sealed class IdempotencyTests
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Beyond the brief, and for the same reason a multi-tag <c>If-Match</c> is refused: two field lines are two
-    /// keys and a create can be recorded under one, so picking either answers a question the caller did not ask.
-    /// A blank key is worse than useless — every caller who sent one would share it, which is precisely the
-    /// shared key space scoping the record per user exists to remove.
+    /// Beyond the brief. The <b>repeated</b> header is the one rule here that is HTTP's own — a token carries one
+    /// key, so the port cannot see the ambiguity at all — and it is refused for the reason a multi-tag
+    /// <c>If-Match</c> is: two field lines are two keys, a create is recorded under one, and picking either
+    /// answers a question the caller did not ask.
+    /// </para>
+    /// <para>
+    /// The <b>blank</b> key is refused by the port (<c>AlvoIdempotency.EnsureUsableKey</c>) and measured there
+    /// too — <c>AlvoDataConcurrencyTests.A_blank_idempotency_key_is_refused_by_the_port</c> is the fact that
+    /// matters, because an embedded host can send one with no HTTP in front of it, and the empty string
+    /// <em>succeeds</em> into <c>PRIMARY KEY (idempotency_key, scope)</c> and gives every caller in a scope one
+    /// shared record. What this fact adds is only that the refusal survives the trip over HTTP as a 422.
     /// </para>
     /// <para>
     /// The duplicate cannot be expressed through a dictionary, which is why
@@ -340,22 +356,26 @@ public sealed class IdempotencyTests
     }
 
     /// <summary>
-    /// Ten requests carrying one key, in flight together, produce one row and one record — and every one of
-    /// them is answered with that row.
+    /// Ten posts carrying one key, dispatched together, are all answered with one row — however the server
+    /// happened to interleave them.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>What this proves, and what it does not — measured, not assumed.</b> It proves the <em>outcome</em>
-    /// over real HTTP: ten 201s, one id, one row in the entity's table and one row in the idempotency table.
-    /// It does <b>not</b> prove which mechanism produced that outcome. Instrumenting the run showed
-    /// <em>exactly one</em> <c>INSERT INTO "owners"</c> attempted across all ten requests, so on this world the
-    /// nine losers never raced the insert at all: SQLite's shared cache serialized them and each found the
-    /// record the winner had already committed. The record's <c>PRIMARY KEY (idempotency_key, scope)</c> — the
-    /// constraint that actually decides a real race — is therefore <em>not</em> what this fact exercises. That
-    /// claim belongs to the port's own suite on real PostgreSQL
-    /// (<c>Two_concurrent_creates_with_one_idempotency_key_produce_exactly_one_row</c>), where deleting the
-    /// <c>PRIMARY KEY</c> clause makes it fail. What is left here, and is worth having, is that ten in-flight
-    /// requests under one key are all answered with the one row rather than nine of them failing or forking.
+    /// <b>The name says "however they interleave" rather than "concurrent" because the interleaving is not this
+    /// fact's to promise, and measuring it showed why.</b> Instrumenting the run showed <em>exactly one</em>
+    /// <c>INSERT INTO "owners"</c> attempted across all ten requests: SQLite's shared cache serialized the nine
+    /// losers, each of which then found the record the winner had already committed, so no request ever raced
+    /// the insert. The brief's name for this fact (<c>Ten_concurrent_posts_…</c>) described the inputs and
+    /// implied a race that did not happen — a name that needs its remarks to stop being a claim is a name doing
+    /// the wrong job.
+    /// </para>
+    /// <para>
+    /// <b>So what is proved is the outcome, and it is worth proving:</b> ten 201s, one id, one row in the
+    /// entity's table and one row in the idempotency table — rather than nine failures, nine forks, or a record
+    /// without its row. The record's <c>PRIMARY KEY (idempotency_key, scope)</c>, which is what would decide a
+    /// genuine race, is <em>not</em> exercised here; that claim belongs to the port's own suite on real
+    /// PostgreSQL (<c>Two_concurrent_creates_with_one_idempotency_key_produce_exactly_one_row</c>), where
+    /// deleting the <c>PRIMARY KEY</c> clause makes it fail.
     /// </para>
     /// <para>
     /// The idempotency table's row count is asserted as well as the entity's, because they are two different
@@ -364,7 +384,7 @@ public sealed class IdempotencyTests
     /// </para>
     /// </remarks>
     [Fact]
-    public async Task Ten_concurrent_posts_with_one_key_create_exactly_one_row()
+    public async Task Ten_posts_with_one_key_are_all_answered_with_one_row_however_they_interleave()
     {
         await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin]);
         var body = new JsonObject { ["name"] = "Contended Ltd" };

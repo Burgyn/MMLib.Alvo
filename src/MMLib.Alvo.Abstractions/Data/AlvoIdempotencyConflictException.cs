@@ -30,7 +30,7 @@
 /// the key from the message would not have achieved that on its own, because the 409-versus-201 outcome is
 /// itself the signal; only the scoping removes it. That holds for every caller who can hold a key at all —
 /// an anonymous one cannot, because it has no identity to scope by, and
-/// <see cref="AlvoIdempotency.EnsureIdentifiableCaller"/> refuses the token rather than letting a shared key
+/// <see cref="AlvoIdempotency.EnsureUsableKey"/> refuses the token rather than letting a shared key
 /// space make this message a probe again.
 /// </para>
 /// </remarks>

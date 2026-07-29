@@ -54,26 +54,29 @@ namespace MMLib.Alvo.Api.Internal;
 /// </remarks>
 internal static class IdempotencyFingerprint
 {
-    /// <summary>The fingerprint of one create: its method, its route template, its entity and its body.</summary>
+    /// <summary>The fingerprint of one create: its method, its entity and its body.</summary>
     /// <param name="method">The request method, e.g. <c>POST</c>.</param>
-    /// <param name="routeTemplate">
-    /// The route this endpoint was mapped as, not the request's own path. They coincide for a collection
-    /// <c>POST</c>, and the template is the one that names what was written rather than how it was addressed.
-    /// </param>
-    /// <param name="entity">
-    /// The entity being written. Redundant with <paramref name="routeTemplate"/> today, and named anyway: the
-    /// entity axis is the one the port fails <em>closed</em> on, so it is stated rather than inferred from a
-    /// prefix an option can change.
-    /// </param>
+    /// <param name="entity">The entity being written, as the applied schema names it.</param>
     /// <param name="body">The request body, as the payload reader parsed it.</param>
     /// <returns>A lower-case hex SHA-256 digest.</returns>
     /// <remarks>
     /// <para>
-    /// The four parts are joined by a newline, which cannot be mistaken for part of a neighbour: the first
-    /// three are server-owned tokens — an HTTP method, a route pattern the options validator refuses a control
-    /// character in, and a schema entity name — and the caller-controlled part is last <em>and</em> carries no
-    /// raw newline, because a JSON writer escapes every control character inside a string. So no two different
-    /// (method, route, entity, body) tuples share a digest input.
+    /// <b>The route is deliberately <em>not</em> in the digest, and it was once.</b> Including the mapped
+    /// template embedded <see cref="AlvoApiOptions.RoutePrefix"/>, so moving the prefix — a deployment-time
+    /// configuration change — invalidated every stored fingerprint, and a client retry that straddled that
+    /// redeploy became a 409 rather than a replay. What identifies the operation is <em>what</em> was written
+    /// and <em>how</em>, not where an operator chose to mount the API. Dropping it also removed the one part of
+    /// the digest no fact could hold on its own: entity and template were mutually redundant (the template
+    /// contains the entity name), so removing either alone killed nothing and only their conjunction was
+    /// covered.
+    /// </para>
+    /// <para>
+    /// The three parts are joined by a newline, which cannot be mistaken for part of a neighbour, and the
+    /// operative reason is the <b>schema's</b> rather than the API's: an entity name is constrained by
+    /// <c>project.schema.json</c> to <c>^[a-z][a-z0-9_]{0,62}$</c>, so it can hold no separator; the method is
+    /// one token from HTTP's own closed set; and the caller-controlled part is last <em>and</em> carries no raw
+    /// newline, because a JSON writer escapes every control character inside a string. So no two different
+    /// (method, entity, body) triples share a digest input.
     /// </para>
     /// <para>
     /// SHA-256 rather than a fast non-cryptographic hash: the consequence of a collision is one caller's create
@@ -82,10 +85,10 @@ internal static class IdempotencyFingerprint
     /// only ever meets a value the same caller's earlier request produced.
     /// </para>
     /// </remarks>
-    internal static string Of(string method, string routeTemplate, string entity, JsonObject body)
+    internal static string Of(string method, string entity, JsonObject body)
     {
         ArgumentNullException.ThrowIfNull(body);
-        var input = $"{method}\n{routeTemplate}\n{entity}\n{Canonical(body)}";
+        var input = $"{method}\n{entity}\n{Canonical(body)}";
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(input)));
     }
 

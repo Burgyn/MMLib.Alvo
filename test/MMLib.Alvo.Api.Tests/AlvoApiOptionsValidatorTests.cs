@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using MMLib.Alvo.Data;
 
 namespace MMLib.Alvo.Api.Tests;
 
@@ -78,7 +79,37 @@ public class AlvoApiOptionsValidatorTests
     [Fact]
     public void A_non_positive_idempotency_key_bound_is_refused_naming_the_option()
         => ShouldFail(
-            api => api.MaxIdempotencyKeyLength = 0, nameof(AlvoApiOptions.MaxIdempotencyKeyLength));
+            api => api.MaxIdempotencyKeyBytes = 0, nameof(AlvoApiOptions.MaxIdempotencyKeyBytes));
+
+    /// <summary>
+    /// An idempotency key bound <b>wider than the port's own</b> is refused, and the default is exactly the
+    /// port's — so the number lives in one place and this layer can only ever narrow it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The upper bound is the half that matters. <c>AlvoIdempotency.EnsureUsableKey</c> refuses a key past
+    /// <c>MaxKeyBytes</c> for <em>every</em> caller, so a host configuring a wider one here would publish a
+    /// <c>maxLength</c> in the OpenAPI document for a key the port then rejects — the caller would meet a 422
+    /// for a key this API told them to send.
+    /// </para>
+    /// <para>
+    /// The default is asserted <em>against the port's constant</em>, never against the literal 255. Pinning the
+    /// number in a second place is what the single-authority rule exists to prevent, and a fact that restated it
+    /// would be that second place.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void An_idempotency_key_bound_wider_than_the_ports_own_is_refused()
+    {
+        ShouldFail(
+            api => api.MaxIdempotencyKeyBytes = AlvoIdempotency.MaxKeyBytes + 1,
+            nameof(AlvoApiOptions.MaxIdempotencyKeyBytes));
+
+        Validate(api => api.MaxIdempotencyKeyBytes = AlvoIdempotency.MaxKeyBytes).ShouldBeNull(
+            "the port's own bound must be configurable, or 'may only narrow' is 'must narrow'");
+        new AlvoApiOptions().MaxIdempotencyKeyBytes.ShouldBe(
+            AlvoIdempotency.MaxKeyBytes, "the default inherits the port's number rather than restating it");
+    }
 
     /// <summary>
     /// The validation must run at <b>startup</b>, not at the first request: that is the whole difference

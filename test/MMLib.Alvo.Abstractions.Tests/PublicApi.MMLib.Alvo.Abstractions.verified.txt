@@ -175,12 +175,14 @@ namespace MMLib.Alvo.Data
     }
     public readonly struct AlvoIdempotency : System.IEquatable<MMLib.Alvo.Data.AlvoIdempotency>
     {
+        public const int MaxKeyBytes = 255;
         public AlvoIdempotency(string Key, string Fingerprint) { }
         public string Fingerprint { get; init; }
         public string Key { get; init; }
         public static string TenantlessScope { get; }
         public bool Matches(string storedFingerprint) { }
-        public static void EnsureIdentifiableCaller(MMLib.Alvo.Data.AlvoIdempotency? idempotency, MMLib.Alvo.AlvoContext context) { }
+        public static void EnsureUsableKey(string? key, MMLib.Alvo.AlvoContext context) { }
+        public static void EnsureUsableToken(MMLib.Alvo.Data.AlvoIdempotency? idempotency, MMLib.Alvo.AlvoContext context) { }
         public static string IdentityOf(MMLib.Alvo.AlvoContext context) { }
     }
     public sealed class AlvoIdempotencyConflictException : System.Exception

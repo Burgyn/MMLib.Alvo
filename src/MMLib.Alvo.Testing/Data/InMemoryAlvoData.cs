@@ -138,7 +138,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentNullException.ThrowIfNull(values);
         ArgumentNullException.ThrowIfNull(context);
-        AlvoIdempotency.EnsureIdentifiableCaller(idempotency, context);
+        AlvoIdempotency.EnsureUsableToken(idempotency, context);
         cancellationToken.ThrowIfCancellationRequested();
 
         var decision = _policy.Resolve(entity, DataOperation.Create, context);

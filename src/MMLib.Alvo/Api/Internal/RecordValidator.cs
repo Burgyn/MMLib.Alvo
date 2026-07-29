@@ -228,10 +228,22 @@ internal static class RecordValidator
             ? PayloadViolations.EnumValue(field)
             : null;
 
+    /// <summary>
+    /// The format refusal for one value — <b>and the two of them are different refusals</b>.
+    /// </summary>
+    /// <remarks>
+    /// A value that was matched and did not match is the caller's to fix; a match that did not finish inside
+    /// <c>FormatCatalog.MatchTimeout</c> concluded nothing about the value, and telling that caller to correct
+    /// it sends them to fix something that may well be valid. Both refuse the request, because an unevaluable
+    /// check must fail closed, and they say different things.
+    /// </remarks>
     private static AlvoViolation? FailedFormat(FieldSchema field, object value, FormatCatalog formats) =>
-        value is string text && !formats.Satisfies(field, text)
-            ? PayloadViolations.Format(field)
-            : null;
+        value is not string text ? null : formats.Check(field, text) switch
+        {
+            FormatCatalog.FormatVerdict.Failed => PayloadViolations.Format(field),
+            FormatCatalog.FormatVerdict.Undecided => PayloadViolations.FormatNotEvaluated(field),
+            _ => null,
+        };
 
     /// <summary>
     /// Probes every queued reference and reports the ones that could not be resolved.

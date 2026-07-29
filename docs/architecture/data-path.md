@@ -1315,8 +1315,44 @@ Two of those rows are now closed: `AlvoQuery.Offset` (PR3 task 1) and the `If-Ma
 channels (PR3 task 2, #90 — see *The `If-Match` precondition channel* above). What PR3's own HTTP layer still
 owns, and this port deliberately does not: how a version is spelled on the wire (`ETag` quoting, weak vs
 strong), what a request's idempotency **fingerprint** is computed over, and whether an idempotency record is
-ever pruned — nothing expires one today, so the table grows monotonically, which is a retention decision an
-operator has to make rather than one this port should guess.
+ever pruned.
+
+The **fingerprint** clause is now closed too: PR3 task 7 defines it as `SHA-256(method \n entity \n canonical
+body)`, hex, where *canonical* means re-serialized from the parsed document with property names sorted
+ordinally (`MMLib.Alvo.Api.Internal.IdempotencyFingerprint`). The route is deliberately **not** in the digest,
+so moving `AlvoApiOptions.RoutePrefix` does not invalidate stored fingerprints.
+
+#### Idempotency-record retention is an operator's job, and there is nothing automatic yet
+
+Task 7 wired `Idempotency-Key` over HTTP, which makes `<prefix>_idempotency` the one framework table an
+outside caller can add rows to. **Nothing expires a record**, so the table grows by one row per keyed create,
+for ever — every row is read at most once (by the retry it exists to answer) and then never again.
+
+Scope of the growth, stated so it is not mistaken for something worse: a record requires a caller who
+authenticated **and** passed the entity's `create` policy, so it is a strict subset of the writes that caller
+may already perform. There is no unauthenticated amplification and no cross-tenant reach (the record's scope
+is the tenant plus the acting user — `AlvoIdempotency.IdentityOf`). It is a housekeeping cost, not a
+vulnerability.
+
+Until a retention window ships, prune it by hand. The `created_at` column exists for exactly this and nothing
+else reads it:
+
+```sql
+-- Records older than the longest retry window any client of yours uses. Nothing reads a record after the
+-- retry it answers, so anything past that window is dead weight. Run it as often as the table's growth
+-- warrants; it takes no lock a write path waits on for long, and a concurrent create simply inserts again.
+DELETE FROM alvo_idempotency WHERE created_at < '2026-01-01T00:00:00.0000000+00:00';
+```
+
+`created_at` is stored as portable text in the round-trip format `StoredInstant.Text` writes
+(`DateTimeOffset` with `"O"`), so it compares lexicographically in the same order it compares chronologically
+as long as every row carries the same offset — which the framework's own clock guarantees, since it always
+writes UTC. Deleting a record for a key a client is *still* retrying costs that client one duplicate row on
+its next retry rather than a replay, so the window has to outlast the longest retry any client performs.
+
+**Filed, not built:** a configurable retention window plus a background sweep. It is scheduler-shaped work —
+Alvo has no hosted-service seam yet — and it belongs with whatever ships the first one rather than bolted onto
+a request path.
 
 ### PR5 — outbox, events and hooks (#22)
 

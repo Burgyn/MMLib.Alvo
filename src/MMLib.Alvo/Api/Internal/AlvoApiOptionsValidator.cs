@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.Options;
+using MMLib.Alvo.Data;
 using System.Buffers;
 
 namespace MMLib.Alvo.Api.Internal;
@@ -92,8 +93,33 @@ internal sealed class AlvoApiOptionsValidator : IValidateOptions<AlvoApiOptions>
         RequirePositive(options.MaxRequestBodyBytes, nameof(AlvoApiOptions.MaxRequestBodyBytes), failures);
         RequirePositive(options.MaxPayloadDepth, nameof(AlvoApiOptions.MaxPayloadDepth), failures);
         RequirePositive(options.MaxPayloadKeys, nameof(AlvoApiOptions.MaxPayloadKeys), failures);
-        RequirePositive(
-            options.MaxIdempotencyKeyLength, nameof(AlvoApiOptions.MaxIdempotencyKeyLength), failures);
+        ValidateIdempotencyKeyBound(options, failures);
+    }
+
+    /// <summary>
+    /// The key bound must be positive <b>and no wider than the port's own</b>
+    /// (<see cref="AlvoIdempotency.MaxKeyBytes"/>).
+    /// </summary>
+    /// <remarks>
+    /// The upper check is the one that is not ceremony. The bound exists because the key is half of the
+    /// idempotency record's primary key and PostgreSQL caps a btree index entry at roughly 2700 bytes, and the
+    /// port refuses anything past its own number for <em>every</em> caller — so a host configuring a wider one
+    /// here would advertise (in the OpenAPI document's <c>maxLength</c>, no less) a key length the port will
+    /// refuse, and the caller would meet a 422 for a key this layer told them to send. An option may narrow a
+    /// port rule; it may not contradict one.
+    /// </remarks>
+    private static void ValidateIdempotencyKeyBound(AlvoApiOptions options, List<string> failures)
+    {
+        RequirePositive(options.MaxIdempotencyKeyBytes, nameof(AlvoApiOptions.MaxIdempotencyKeyBytes), failures);
+
+        if (options.MaxIdempotencyKeyBytes > AlvoIdempotency.MaxKeyBytes)
+        {
+            failures.Add(
+                $"{nameof(AlvoApiOptions.MaxIdempotencyKeyBytes)} is {options.MaxIdempotencyKeyBytes}; it must "
+                + $"not exceed {AlvoIdempotency.MaxKeyBytes} bytes, which is the bound "
+                + $"{nameof(AlvoIdempotency)}.{nameof(AlvoIdempotency.MaxKeyBytes)} enforces for every caller. "
+                + "Lower this option, or leave it at its default to inherit the port's bound.");
+        }
     }
 
     /// <summary>

@@ -497,7 +497,7 @@ public abstract class AlvoDataConcurrencyTests
     /// </para>
     /// <para>
     /// <b>This is also the fact that proves both implementations call the guard</b>, because it is inherited:
-    /// the port owns the rule (<see cref="AlvoIdempotency.EnsureIdentifiableCaller"/>) and an implementation
+    /// the port owns the rule (<see cref="AlvoIdempotency.EnsureUsableKey"/>) and an implementation
     /// that skipped the call would fail here on its own leg while the other stayed green.
     /// </para>
     /// </remarks>
@@ -538,6 +538,84 @@ public abstract class AlvoDataConcurrencyTests
 
         IdOf(replay).ShouldBe(IdOf(created));
         (await world.Data.QueryAsync(new AlvoQuery { Entity = Orders }, system, Ct)).Items.Count.ShouldBe(1);
+    }
+
+    /// <summary>
+    /// A <b>blank</b> idempotency key is refused, and it is refused by the port — because a request layer is not
+    /// the only caller, and this is the rule whose absence is silent.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// An embedded host reaches <c>CreateAsync</c> with no HTTP in front of it, and
+    /// <see cref="AlvoIdempotency"/> is a <c>readonly record struct</c>: <c>default(AlvoIdempotency)</c> and
+    /// <c>new AlvoIdempotency("", "")</c> both exist and no constructor can be made to run, so a static guard is
+    /// the only shape that can hold this at all. Both spellings are driven here for exactly that reason.
+    /// </para>
+    /// <para>
+    /// <b>Why blank is the worst of the three key rules.</b> The empty string lands in
+    /// <c>PRIMARY KEY (idempotency_key, scope)</c> and <em>succeeds</em>, so every caller in one scope who ever
+    /// sent a blank key would share a single record — the shared key space
+    /// <see cref="AlvoIdempotency.IdentityOf"/> exists to remove, restored silently. An over-long key at least
+    /// fails loudly at storage; a blank one starts answering the wrong row.
+    /// </para>
+    /// <para>
+    /// The tokenless create at the end is the counterweight, exactly as in the anonymous fact: it proves the
+    /// refusal is about the key rather than about a create this world would refuse anyway.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_blank_idempotency_key_is_refused_by_the_port()
+    {
+        var world = await AuditedWorldAsync();
+
+        foreach (var blank in new[] { string.Empty, "   ", null! })
+        {
+            var refusal = await Should.ThrowAsync<ArgumentException>(() => world.Data.CreateAsync(
+                Orders, Payload("first"), world.Caller, new AlvoIdempotency(blank, "a-digest"), Ct));
+            refusal.Message.ShouldContain("must not be blank");
+        }
+
+        await Should.ThrowAsync<ArgumentException>(() => world.Data.CreateAsync(
+            Orders, Payload("first"), world.Caller, default(AlvoIdempotency), Ct));
+
+        var created = await world.Data.CreateAsync(Orders, Payload("first"), world.Caller, cancellationToken: Ct);
+        created["title"].ShouldBe("first");
+    }
+
+    /// <summary>
+    /// A key past <see cref="AlvoIdempotency.MaxKeyBytes"/> is refused by the port, <b>counted in UTF-8
+    /// bytes</b> — and a key of exactly the bound is accepted.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The unit is the fact.</b> The bound exists because the key is half of the record's composite primary
+    /// key and PostgreSQL caps a btree index entry at roughly 2700 bytes. Counted in UTF-16
+    /// <c>string.Length</c> — which is how the HTTP layer first spelled it — a key of two-byte characters is
+    /// half its byte size, so <see cref="AlvoIdempotency.MaxKeyBytes"/> characters of <c>é</c> pass a character
+    /// count while being twice the bound in bytes. That key is the second oversized case below; a build counting
+    /// characters accepts it and fails here.
+    /// </para>
+    /// <para>
+    /// On the port rather than only in a request layer for the reason the blank rule is: an embedded host is a
+    /// caller too, and it is the one that can hand storage an unbounded index key.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task An_idempotency_key_past_the_ports_byte_bound_is_refused()
+    {
+        var world = await AuditedWorldAsync();
+        var atTheBound = new string('k', AlvoIdempotency.MaxKeyBytes);
+
+        var created = await world.Data.CreateAsync(
+            Orders, Payload("first"), world.Caller, new AlvoIdempotency(atTheBound, "a-digest"), Ct);
+        created["title"].ShouldBe("first", "a key of exactly the bound must be usable");
+
+        foreach (var oversized in new[] { atTheBound + "k", new string('é', AlvoIdempotency.MaxKeyBytes) })
+        {
+            var refusal = await Should.ThrowAsync<ArgumentException>(() => world.Data.CreateAsync(
+                Orders, Payload("second"), world.Caller, new AlvoIdempotency(oversized, "a-digest"), Ct));
+            refusal.Message.ShouldContain("bytes when encoded as UTF-8");
+        }
     }
 
     private const string Orders = "orders";

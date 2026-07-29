@@ -345,6 +345,16 @@ public sealed class ValidationTests
     /// judge into a broken invariant. Answering <see langword="true"/> instead would admit it. So the status,
     /// the violation and the elapsed time are asserted together.
     /// </para>
+    /// <para>
+    /// <b>And the code is <c>format-not-evaluated</c>, not <c>format</c> — the distinction this fact now
+    /// carries.</b> Both are 422 and both refuse, so nothing but the code can tell them apart, and rendering a
+    /// timeout as "does not match" was a live defect rather than a wording preference: a valid
+    /// <c>retry@example.com</c> was refused as malformed once in nine full-module runs, because on a loaded
+    /// machine the wall clock ran out on a pattern that matches in microseconds. That answer tells a caller to
+    /// fix a value that is fine — a fail-<em>wrong</em>, not a fail-closed — and it is how an intermittently red
+    /// suite gets written off as a flake. <see cref="A_mismatch_and_an_unevaluable_check_are_told_apart_by_their_code"/> holds the
+    /// other side.
+    /// </para>
     /// </remarks>
     [Fact]
     public async Task A_value_the_backtracking_engine_cannot_decide_in_time_is_refused_not_admitted()
@@ -359,10 +369,62 @@ public sealed class ValidationTests
         refused.StatusCode.ShouldBe(
             HttpStatusCode.UnprocessableEntity,
             "a value the engine could not decide must be refused — not admitted, and not rendered as a 500");
-        (await refused.ReadViolationsAsync()).ShouldBe([("/backtracking", "format")]);
+        (await refused.ReadViolationsAsync()).ShouldBe(
+            [("/backtracking", "format-not-evaluated")],
+            "an unevaluable check is refused under its own code — 'format' would tell the caller their value "
+            + "was wrong, which is a thing this request never established");
+        (await refused.ReadFixSuggestionsAsync()).ShouldAllBe(
+            fix => fix!.Contains("Retry", StringComparison.Ordinal),
+            "and the fix is a retry, not an edit: nothing about the value was found wrong");
         stopwatch.Elapsed.ShouldBeLessThan(
             TimeSpan.FromSeconds(10),
             "the match timeout is the only bound on this pattern; without it the request never returns");
+    }
+
+    /// <summary>
+    /// "It does not match" and "it could not be evaluated" are <b>two codes</b>, both reachable, and a build
+    /// cannot collapse them into one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Both refuse with 422 and neither carries the pattern, so <em>nothing but the code</em> can tell a caller
+    /// which happened — which is why they were the same code for one round, and why that was a live defect
+    /// rather than a wording preference. A valid <c>retry@example.com</c> was refused with "A value does not
+    /// match the 'email' format" once in nine full-module runs: the pattern is linear and matches in
+    /// microseconds, so what expired was the wall clock on a loaded machine. The caller was told to fix a value
+    /// that was correct — a fail-<em>wrong</em>, not a fail-closed — and an intermittent red suite of that shape
+    /// is how a real defect gets written off as a flake.
+    /// </para>
+    /// <para>
+    /// Both halves are driven in one fact deliberately. Asserting only the timeout arm would pass on a build
+    /// that answered <c>format-not-evaluated</c> for <em>every</em> format failure, and asserting only the
+    /// mismatch would pass on the build this replaced. Together they pin the pair.
+    /// </para>
+    /// <para>
+    /// The mismatch case is a genuinely non-matching address and the unevaluable case is the pathological
+    /// pattern from the fact above, so both are deterministic — neither depends on the machine being loaded.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_mismatch_and_an_unevaluable_check_are_told_apart_by_their_code()
+    {
+        await using var world = await WorldAsync();
+
+        using var mismatched = await world.SendAsync(
+            HttpMethod.Post, "/api/items", _admin, body: WithField("contact", "not-an-address"));
+        using var unevaluable = await world.SendAsync(
+            HttpMethod.Post, "/api/items", _admin, body: WithField("backtracking", new string('a', 3_000)));
+        using var valid = await world.SendAsync(
+            HttpMethod.Post, "/api/items", _admin, body: WithField("contact", "retry@example.com"));
+
+        (await mismatched.ReadViolationsAsync()).ShouldBe(
+            [("/contact", "format")], "a value that was matched and failed is the caller's to fix");
+        (await unevaluable.ReadViolationsAsync()).ShouldBe(
+            [("/backtracking", "format-not-evaluated")],
+            "a check that never finished concluded nothing about the value, and must not say it did");
+        valid.StatusCode.ShouldBe(
+            HttpStatusCode.Created,
+            $"and the address that was once refused as malformed is valid: {await valid.ReadTextAsync()}");
     }
 
     /// <summary>

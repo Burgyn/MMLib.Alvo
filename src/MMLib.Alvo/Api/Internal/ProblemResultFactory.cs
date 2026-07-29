@@ -184,16 +184,21 @@ internal static class ProblemResultFactory
     /// <b>It belongs on the arm above and not only in the query parser, which is where it started.</b> The
     /// parser strips the port's guards it calls itself; this arm renders every <em>other</em>
     /// <see cref="ArgumentException"/> the port can raise, and those carry a <c>paramName</c> too — the first
-    /// one a caller can actually reach is <c>AlvoIdempotency.EnsureIdentifiableCaller</c>, whose refusal would
-    /// otherwise have shipped <c>(Parameter 'idempotency')</c> in a 422 body. The suffix is appended on the
+    /// one a caller can actually reach is <c>AlvoIdempotency.EnsureUsableKey</c>, whose refusal would
+    /// otherwise have shipped <c>(Parameter 'key')</c> in a 422 body. The suffix is appended on the
     /// <b>same line</b>, separated by a space, so a version of this that cut only at the first newline
     /// stripped nothing at all.
+    /// </para>
+    /// <para>
+    /// It takes a non-null <see cref="string"/> and guards nothing: both call sites pass
+    /// <see cref="Exception.Message"/>, which is never <see langword="null"/>, so a
+    /// <c>ThrowIfNull</c> here was a check no caller could reach — and an unreachable guard reads as a
+    /// possibility the caller has to consider.
     /// </para>
     /// </remarks>
     /// <param name="message">The exception message to sanitize.</param>
     internal static string WithoutArgumentDetail(string message)
     {
-        ArgumentNullException.ThrowIfNull(message);
         var appended = message.IndexOf(ArgumentNameSuffix, StringComparison.Ordinal);
         var text = appended < 0 ? message : message[..appended];
         var newline = text.IndexOf('\n');

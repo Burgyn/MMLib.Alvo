@@ -63,12 +63,27 @@ internal sealed class FormatCatalog
     /// and finishes far inside it.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Generous enough that no legitimate value on a machine under load is refused for being slow, and
     /// short enough that a request cannot be made to hold a thread: a pathological pattern driven by a
     /// hostile value would otherwise run until the request was cancelled, which for a keep-alive client is
     /// "never".
+    /// </para>
+    /// <para>
+    /// <b>It was 100 ms, and that was measured to be too tight.</b> A valid <c>email</c> value
+    /// (<c>retry@example.com</c>) was refused once in nine full-module runs — the pattern is linear and the
+    /// match is microseconds, so what expired was the <em>wall clock</em> while the thread waited on a loaded
+    /// machine. CI is exactly where that happens, and the symptom is an intermittently red suite, which is how
+    /// a real defect gets dismissed as a flake. One second is still a hard bound on how long one hostile value
+    /// can hold one thread, and 10× further from anything a legitimate value needs.
+    /// </para>
+    /// <para>
+    /// <b>A timeout on a valid input means the machine was loaded, not that the input was bad</b> — which is why
+    /// exceeding this bound has its own violation code (<see cref="PayloadViolations.FormatNotEvaluated"/>) and
+    /// never the value-is-invalid one.
+    /// </para>
     /// </remarks>
-    internal static TimeSpan MatchTimeout { get; } = TimeSpan.FromMilliseconds(100);
+    internal static TimeSpan MatchTimeout { get; } = TimeSpan.FromSeconds(1);
 
     /// <summary>
     /// <b>The one authority on the built-in formats</b> — which names they are and what each one means —
@@ -138,8 +153,28 @@ internal sealed class FormatCatalog
         return new FormatCatalog(formats);
     }
 
+    /// <summary>What matching one value against one field's declared format concluded.</summary>
+    /// <remarks>
+    /// Three outcomes and not two, because <b>"it did not match" and "I could not decide" are different things
+    /// to tell a caller</b>. Both refuse the request — an unevaluable check must fail closed — but only one of
+    /// them is about the value. Returning <see langword="false"/> for both, which is what this was, told a
+    /// caller to fix a value that was valid whenever the machine was loaded enough to lose the match timeout to
+    /// scheduling.
+    /// </remarks>
+    internal enum FormatVerdict
+    {
+        /// <summary>The value matches, or the field declares no format this catalogue knows.</summary>
+        Satisfied,
+
+        /// <summary>The value was matched against the pattern and does not match it.</summary>
+        Failed,
+
+        /// <summary>The match did not finish inside <see cref="MatchTimeout"/>, so nothing was concluded.</summary>
+        Undecided,
+    }
+
     /// <summary>
-    /// Whether <paramref name="value"/> satisfies <paramref name="field"/>'s declared format. A field with
+    /// What <paramref name="value"/> concluded against <paramref name="field"/>'s declared format. A field with
     /// no format, or one whose format this build does not know, is not constrained here.
     /// </summary>
     /// <remarks>
@@ -151,30 +186,31 @@ internal sealed class FormatCatalog
     /// </remarks>
     /// <param name="field">The declared field the value was supplied for.</param>
     /// <param name="value">The caller-supplied text.</param>
-    internal bool Satisfies(FieldSchema field, string value)
+    internal FormatVerdict Check(FieldSchema field, string value)
     {
         ArgumentNullException.ThrowIfNull(field);
         if (field.Format is not { } format || !_formats.TryGetValue(format, out var pattern))
         {
-            return true;
+            return FormatVerdict.Satisfied;
         }
 
         try
         {
-            return pattern.IsMatch(value);
+            return pattern.IsMatch(value) ? FormatVerdict.Satisfied : FormatVerdict.Failed;
         }
         catch (RegexMatchTimeoutException)
         {
-            // The backtracking fallback ran out of time on a caller-supplied value. Refusing is the only
-            // safe answer: "I could not decide" must not become "it passed", and it must not become a 500
-            // either — the request is refused with a violation naming the format, exactly as a value that
-            // provably did not match would be.
+            // The backtracking fallback ran out of time on a caller-supplied value. Refusing is the only safe
+            // answer — "I could not decide" must not become "it passed", and it must not become a 500 either —
+            // but it is a DIFFERENT refusal from "it did not match", and conflating the two was a measured
+            // defect rather than a nicety: a valid email address was refused as malformed once in nine runs
+            // because the wall clock, not the pattern, ran out. Telling a caller to fix a value that was fine
+            // is a fail-*wrong*, and it is also how an intermittent red suite gets written off as a flake.
             //
             // Reached only by a pattern NonBacktracking would not compile (a lookaround, a backreference, an
-            // atomic group) whose core is catastrophic. That shape is in the suite on purpose — see
-            // ValidationTests' 'lookahead-greedy' format — because for one round it was not, and this arm and
-            // the fallback that leads to it were both unreached.
-            return false;
+            // atomic group) whose core is catastrophic — see ValidationTests' 'lookahead-greedy' format — or by
+            // any pattern at all on a machine loaded enough to lose MatchTimeout to scheduling.
+            return FormatVerdict.Undecided;
         }
     }
 

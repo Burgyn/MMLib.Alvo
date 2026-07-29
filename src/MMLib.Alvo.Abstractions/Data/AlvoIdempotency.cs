@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Data;
+﻿using System.Text;
+
+namespace MMLib.Alvo.Data;
 
 /// <summary>
 /// A caller-supplied idempotency token: replaying the same key with the same request must return the
@@ -25,7 +27,7 @@
 /// record's identity rather than a column beside it</b> — see <see cref="IdentityOf"/>. It follows that an
 /// <b>anonymous caller cannot hold a key at all</b>: every anonymous caller carries the same reserved all-zero
 /// <see cref="UserId"/>, so there is no identity to scope by and a token from one is refused outright — see
-/// <see cref="EnsureIdentifiableCaller"/>.
+/// <see cref="EnsureUsableKey"/>.
 /// </para>
 /// <para>
 /// <b>An implementation stores the row's id, never a rendered response.</b> On replay the row is re-read
@@ -73,7 +75,7 @@ public readonly record struct AlvoIdempotency(string Key, string Fingerprint)
     /// "no identity" (see <see cref="AlvoContext.Anonymous"/>), so <em>every</em> anonymous caller in a tenant
     /// would produce the same scope and share one key space — the exact collision this member exists to remove,
     /// reintroduced for the one caller who cannot be told apart from the next.
-    /// <see cref="EnsureIdentifiableCaller"/> is what keeps this method's contract true rather than
+    /// <see cref="EnsureUsableKey"/> is what keeps this method's contract true rather than
     /// conditionally true, and it is stated here because a reader who takes this scope as unconditionally
     /// per-caller would build on a claim that is false in that one case.
     /// </para>
@@ -90,30 +92,42 @@ public readonly record struct AlvoIdempotency(string Key, string Fingerprint)
     public static string TenantlessScope => "global";
 
     /// <summary>
-    /// Throws when <paramref name="idempotency"/> is supplied for a caller who has no identity to scope it by.
+    /// The longest key any caller may hold, in <b>UTF-8 bytes</b> — 255.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Bytes, not characters, because the constraint it serves is a byte one.</b> The key is half of the
+    /// record's composite primary key, and PostgreSQL caps a btree index entry at roughly 2700 bytes — so a
+    /// bound counted in UTF-16 <c>string.Length</c> would let a key of multi-byte characters past it and hand
+    /// storage exactly the over-long index entry the bound exists to prevent. It was written that way once:
+    /// 4000 <em>characters</em> passed every check and could be 16 000 bytes.
+    /// </para>
+    /// <para>
+    /// <b>Here rather than in a request layer's options, because this is the layer that can be bypassed.</b> An
+    /// embedded host calls <c>CreateAsync</c> directly, with no HTTP in front of it, so a bound that lived only
+    /// there would guard the one caller who is least likely to send a hostile key. A request layer may narrow
+    /// it — <c>AlvoApiOptions.MaxIdempotencyKeyBytes</c> defaults to this number and is refused above it — but
+    /// nothing may widen it.
+    /// </para>
+    /// <para>
+    /// 255 is also what the <c>Idempotency-Key</c> header's field implementations conventionally allow, so a
+    /// client that already speaks the header fits inside it.
+    /// </para>
+    /// </remarks>
+    public const int MaxKeyBytes = 255;
+
+    /// <summary>
+    /// Throws when <paramref name="idempotency"/> carries a key this port cannot record, or one
+    /// <paramref name="context"/> has no identity to scope it by. The guard every implementation of
+    /// <c>IAlvoData.CreateAsync</c> calls.
     /// </summary>
     /// <param name="idempotency">The caller's token, or <see langword="null"/> when they sent none.</param>
     /// <param name="context">The caller the create is performed as.</param>
     /// <remarks>
     /// <para>
-    /// <b>Fail closed, because the alternatives are worse.</b> A record's identity is
-    /// <see cref="IdentityOf"/>'s scope, and every <see cref="AlvoContext.Anonymous"/> caller carries the same
-    /// reserved all-zero <see cref="UserId"/> — so on an entity whose policy permits anonymous creates, every
-    /// anonymous caller in a tenant would share one key space, and one caller's replay could reach another's
-    /// record. The only other options were a silently shared key space or an identity invented per request
-    /// (which is not an identity, and would make every replay a miss). Refusing says so out loud.
-    /// </para>
-    /// <para>
-    /// <b><see cref="AlvoContext.System"/> is unaffected</b>, and that is a checked property rather than a
-    /// hope: its user id is a distinct reserved value, not the all-zero one, so a system-context token scopes
-    /// like any other caller's. <c>An_idempotency_token_from_the_system_context_is_accepted</c> pins it.
-    /// </para>
-    /// <para>
-    /// <b>The malformed-request family, with a fix suggestion</b> — a request layer renders it 422. It is not a
-    /// denial: the caller is not being told they may not create, they are being told this <em>combination</em>
-    /// of an anonymous identity and an idempotency key cannot be served. Decided from the token and the context
-    /// alone, before any policy is resolved or any entity is looked up, so it discloses nothing about the
-    /// entity — the answer is identical for one that does not exist.
+    /// A token-shaped wrapper over <see cref="EnsureUsableKey"/> so an implementation writes one call rather
+    /// than one call plus a null test — <b>no token is always legal</b>, and forgetting that half is how a
+    /// plain create starts being refused.
     /// </para>
     /// <para>
     /// On the port, beside the other rules every implementation must obey
@@ -122,18 +136,98 @@ public readonly record struct AlvoIdempotency(string Key, string Fingerprint)
     /// writing a fourth copy — and so the inherited contract suite proves both shipped ones call it.
     /// </para>
     /// </remarks>
-    /// <exception cref="ArgumentException"><paramref name="context"/> is anonymous and a token was supplied.</exception>
-    public static void EnsureIdentifiableCaller(AlvoIdempotency? idempotency, AlvoContext context)
+    /// <exception cref="ArgumentException">The token cannot be recorded for this caller.</exception>
+    public static void EnsureUsableToken(AlvoIdempotency? idempotency, AlvoContext context)
+    {
+        if (idempotency is { } token)
+        {
+            EnsureUsableKey(token.Key, context);
+        }
+    }
+
+    /// <summary>
+    /// Throws unless <paramref name="key"/> is a key this port can record for <paramref name="context"/>:
+    /// present, non-blank, within <see cref="MaxKeyBytes"/>, and belonging to a caller with an identity.
+    /// </summary>
+    /// <param name="key">The caller's key.</param>
+    /// <param name="context">The caller the create is performed as.</param>
+    /// <remarks>
+    /// <para>
+    /// <b>Three rules in one guard, and all three are the port's rather than a request layer's.</b> This type is
+    /// a <c>readonly record struct</c>, so <c>default(AlvoIdempotency)</c> and
+    /// <c>new AlvoIdempotency(null!, null!)</c> both exist and no constructor can be made to run — a static
+    /// guard is therefore the only shape that can hold an invariant here at all. And every one of the three
+    /// rules is broken by an <em>embedded host</em>, not by an HTTP caller: the request layer already refuses
+    /// each of them before the port is reached, which is precisely why leaving them there was a mistake.
+    /// </para>
+    /// <para>
+    /// <b>A blank key is the worst of the three, and it was the one nothing checked.</b>
+    /// <c>new AlvoIdempotency("", …)</c> lands the empty string in
+    /// <c>PRIMARY KEY (idempotency_key, scope)</c>, so every caller in one scope who ever sends a blank key
+    /// shares one record — the shared key space <see cref="IdentityOf"/> exists to remove, restored silently
+    /// and per-caller. An over-long key at least fails loudly at storage; a blank one succeeds and starts
+    /// answering the wrong row.
+    /// </para>
+    /// <para>
+    /// <b>The length rule is in bytes</b> — see <see cref="MaxKeyBytes"/> for why counting characters was
+    /// wrong. It refuses rather than truncates: two keys differing only past the cut would become one, so the
+    /// second create would be answered with the first create's row.
+    /// </para>
+    /// <para>
+    /// <b>The identity rule fails closed, because the alternatives are worse.</b> A record's identity is
+    /// <see cref="IdentityOf"/>'s scope, and every <see cref="AlvoContext.Anonymous"/> caller carries the same
+    /// reserved all-zero <see cref="UserId"/> — so on an entity whose policy permits anonymous creates, every
+    /// anonymous caller in a tenant would share one key space, and one caller's replay could reach another's
+    /// record. The only other options were a silently shared key space or an identity invented per request
+    /// (which is not an identity, and would make every replay a miss). Refusing says so out loud.
+    /// <see cref="AlvoContext.System"/> is unaffected, and that is a checked property rather than a hope: its
+    /// user id is a distinct reserved value, not the all-zero one, so a system-context token scopes like any
+    /// other caller's. <c>An_idempotency_token_from_the_system_context_is_accepted</c> pins it.
+    /// </para>
+    /// <para>
+    /// <b>The malformed-request family, with a fix suggestion</b> — a request layer renders all three as 422.
+    /// None is a denial: the caller is not being told they may not create, they are being told this
+    /// <em>combination</em> cannot be served. Each is decided from the key and the context alone, before any
+    /// policy is resolved or any entity is looked up, so none discloses anything about the entity — the answer
+    /// is identical for one that does not exist.
+    /// </para>
+    /// <para>
+    /// <b>The caller's key is never echoed into the message.</b> It is caller-supplied text — a log-injection
+    /// vector like every other such string on this port — so the refusal names the rule and the bound, never
+    /// the value.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentException">The key cannot be recorded for this caller.</exception>
+    public static void EnsureUsableKey(string? key, AlvoContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
-        if (idempotency is not null && context.User.Value == default)
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            throw new ArgumentException(
+                "An idempotency key must not be blank: a record is filed under the key and the caller's scope, "
+                + "so every caller who sent a blank one would share a single record and one caller's retry "
+                + "could be answered with another's row. Send an opaque, unique key, or send this create "
+                + "without one.",
+                nameof(key));
+        }
+
+        if (Encoding.UTF8.GetByteCount(key) > MaxKeyBytes)
+        {
+            throw new ArgumentException(
+                $"An idempotency key must be at most {MaxKeyBytes} bytes when encoded as UTF-8. It is refused "
+                + "rather than shortened, because two keys that differ only past that length would become one "
+                + "key and the second create would be answered with the first create's row.",
+                nameof(key));
+        }
+
+        if (context.User.Value == default)
         {
             throw new ArgumentException(
                 "An idempotency key needs a caller it can be scoped to, and an anonymous caller has none: "
                 + "every anonymous caller shares one reserved identity, so their keys would share one space "
                 + "and one caller's retry could be answered with another's row. Authenticate the caller, or "
                 + "send this create without an idempotency key.",
-                nameof(idempotency));
+                nameof(key));
         }
     }
 

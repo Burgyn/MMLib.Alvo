@@ -1,6 +1,7 @@
 ﻿using Microsoft.OpenApi;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
+using System.Globalization;
 using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Api.Internal;
@@ -215,11 +216,21 @@ internal static class DataApiParameters
             "Makes this create retry-safe. The result is recorded against the key and the caller's own scope: "
             + "the same key with the same body replays the first result and writes no second row, and the same "
             + "key with a different body is 409. An anonymous caller's key is refused, because every anonymous "
-            + "caller shares one identity and their keys would share one space.",
+            + "caller shares one identity and their keys would share one space. The bound below is a **byte** "
+            + "bound — at most "
+            + $"{options.MaxIdempotencyKeyBytes.ToString(CultureInfo.InvariantCulture)} bytes once UTF-8 "
+            + "encoded — so a key of non-ASCII characters reaches it sooner than `maxLength` suggests; an "
+            + "over-long key is refused rather than shortened, because two keys differing only past the cut "
+            + "would become one.",
+
+        // maxLength counts characters and the rule counts UTF-8 bytes, so this is the tightest *sound*
+        // schema bound available: a key of N characters is at least N bytes, so "within N bytes" implies
+        // "within N characters". It therefore never advertises a key the API would refuse — it under-promises
+        // for a multi-byte key, which the description states in the one unit the rule is actually in.
         Schema = new OpenApiSchema
         {
             Type = JsonSchemaType.String,
-            MaxLength = options.MaxIdempotencyKeyLength,
+            MaxLength = options.MaxIdempotencyKeyBytes,
             MinLength = 1,
         },
     };

@@ -227,6 +227,38 @@ internal static class PayloadViolations
         + "and description.");
 
     /// <summary>
+    /// The refusal for a format check that <b>did not finish</b>: the value was never judged, so the caller is
+    /// not told it was wrong.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Its own code, because it is not the caller's mistake.</b> <c>FormatCatalog.MatchTimeout</c> bounds how
+    /// long one value may be matched, and exceeding it means the pattern could not be evaluated — which happens
+    /// for a catastrophic pattern driven by a hostile value <em>and</em> for a perfectly ordinary value on a
+    /// machine loaded enough to lose the bound to scheduling. Rendering both as <c>format</c> did the second
+    /// caller real harm: a valid <c>email</c> was refused as malformed once in nine suite runs, and the advice
+    /// was to correct a value that was already correct.
+    /// </para>
+    /// <para>
+    /// <b>Still a refusal, and that half is unchanged.</b> "I could not decide" must not become "it passed", and
+    /// it must not become a 500 either. The fix suggestion is therefore a retry rather than an edit — the one
+    /// action that can succeed when nothing about the value was wrong.
+    /// </para>
+    /// <para>
+    /// The pattern is not echoed, for the reason <see cref="Format"/> does not echo it.
+    /// </para>
+    /// </remarks>
+    /// <param name="field">The declared field whose format could not be evaluated.</param>
+    internal static AlvoViolation FormatNotEvaluated(FieldSchema field) => new(
+        PointerTo(field.Name),
+        "format-not-evaluated",
+        $"The '{field.Format}' format the field declares could not be evaluated in time, so this value was "
+        + "neither accepted nor found invalid.",
+        "Retry the request. If it keeps happening, the declared format's pattern is too expensive to evaluate "
+        + "for values of this length and the descriptor's author has to simplify it — the value itself may be "
+        + "perfectly valid.");
+
+    /// <summary>
     /// The refusal for a write to a field the caller's policy marks read-only — <b>422, not a silent
     /// drop</b>.
     /// </summary>

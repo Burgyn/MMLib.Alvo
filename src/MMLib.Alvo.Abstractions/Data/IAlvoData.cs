@@ -197,7 +197,7 @@ namespace MMLib.Alvo.Data;
 /// The record's identity is the caller's key plus a <b>scope of (tenant, acting user)</b> — see
 /// <see cref="AlvoIdempotency.IdentityOf"/> for why the user belongs in it and why that is identity rather
 /// than a column beside it. An anonymous caller has no identity to scope by, so a token from one is refused
-/// outright (<see cref="AlvoIdempotency.EnsureIdentifiableCaller"/>).
+/// outright (<see cref="AlvoIdempotency.EnsureUsableKey"/>).
 /// </para>
 /// <para>
 /// <b>The returned key set and CLR types are part of the contract, not an implementation detail.</b>
@@ -330,7 +330,7 @@ public interface IAlvoData
     /// <paramref name="idempotency"/> is supplied for an anonymous <paramref name="context"/>. Every anonymous
     /// caller carries the same reserved all-zero <see cref="UserId"/>, so their keys would share one space and
     /// one caller's replay could reach another's record — see
-    /// <see cref="AlvoIdempotency.EnsureIdentifiableCaller"/>. Decided from the token and the context alone,
+    /// <see cref="AlvoIdempotency.EnsureUsableKey"/>. Decided from the token and the context alone,
     /// before any policy is resolved, so it discloses nothing about the entity.
     /// </exception>
     Task<AlvoRecord> CreateAsync(string entity, IReadOnlyDictionary<string, object?> values, AlvoContext context, AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default);

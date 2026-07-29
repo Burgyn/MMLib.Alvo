@@ -78,12 +78,23 @@ internal static class JsonPayloadReader
     /// <param name="Document">
     /// The body exactly as it was parsed, or <see langword="null"/> when nothing parsed as an object.
     /// <para>
-    /// It is carried alongside <paramref name="Values"/> rather than reconstructed from them because the two
-    /// answer different questions. <paramref name="Values"/> is what the port is called with: bound to the
-    /// entity's declared CLR types, and missing every key that did not bind. The <em>document</em> is what the
-    /// caller sent, which is what <see cref="IdempotencyFingerprint"/> has to digest — a fingerprint over the
-    /// bound values would silently omit whatever the reader dropped, and the whole property that type exists
-    /// for is that nothing in the body is left out of it.
+    /// It is carried alongside <paramref name="Values"/> rather than reconstructed from them because
+    /// <see cref="IdempotencyFingerprint"/> cannot be built from a bound value bag. <b>It is <em>not</em>
+    /// because a key might be missing from <paramref name="Values"/></b> — an unbound key is a violation, and a
+    /// violation is answered before a fingerprint is ever computed, so that reason (which is what this remark
+    /// used to give) describes a request the digest never sees. The two operative reasons are:
+    /// </para>
+    /// <para>
+    /// <b>A JSON token is finer than the CLR value it binds to</b>, and the digest is the one place that
+    /// difference matters. Two bodies that bind to the same <see cref="decimal"/> or the same
+    /// <see cref="DateTimeOffset"/> can be different requests on the wire, and a digest over the bound values
+    /// would call them one — the failure direction that answers the second caller with the first caller's row.
+    /// Digesting what arrived keeps the imprecision on the safe side (a 409).
+    /// </para>
+    /// <para>
+    /// <b>A <see cref="Dictionary{TKey, TValue}"/> has no defined order</b>, so a digest over it would need a
+    /// canonicalization of its own — a second implementation of the thing
+    /// <see cref="IdempotencyFingerprint"/> exists to own, over values that no longer carry their JSON shape.
     /// </para>
     /// </param>
     internal sealed record Payload(

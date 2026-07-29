@@ -71,24 +71,31 @@ public sealed class AlvoApiOptions
     /// </remarks>
     public int MaxPayloadKeys { get; set; } = 512;
 
-    /// <summary>The longest <c>Idempotency-Key</c> a create will accept. Default 255.</summary>
+    /// <summary>
+    /// The longest <c>Idempotency-Key</c> a create will accept, in <b>UTF-8 bytes</b>. Defaults to
+    /// <see cref="Data.AlvoIdempotency.MaxKeyBytes"/>, and may only be lowered.
+    /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>A longer key is refused, never truncated</b>, and that is the whole reason the bound is an option
-    /// rather than an implementation detail: two keys that differ only past the cut would become one key, so
-    /// truncation turns two different requests into a replay of the first — silently, and in the direction
-    /// that loses the second caller's row. Refusing says so.
+    /// <b>Bytes, and the unit is load-bearing rather than pedantry.</b> The bound exists because the key is half
+    /// of the idempotency record's composite primary key and PostgreSQL caps a btree index entry at roughly 2700
+    /// bytes. Counted in UTF-16 <c>string.Length</c> — which is how this was first written — a key of multi-byte
+    /// characters passes a bound of 4000 "characters" while being up to 16 000 bytes, handing storage exactly
+    /// the over-long index entry the bound exists to prevent. A bound whose unit differs from its justification
+    /// is not a bound.
     /// </para>
     /// <para>
-    /// 255 is the number the record's own storage is sized for. The shipped DDL spells the column portably
-    /// (<c>TEXT</c> on both engines, because the table is never filtered, sorted or joined on), so the bound is
-    /// <em>not</em> enforced a second time by a column width — which makes it this layer's job. It matters
-    /// because the key is half of that table's composite primary key: PostgreSQL caps a btree index entry at
-    /// roughly 2700 bytes, so an unbounded key turns a caller-supplied header into a storage error the port can
-    /// only report as a broken invariant (a 500), and a T-SQL driver would need an explicit
-    /// <c>nvarchar(255)</c> anyway. 255 is also what the <c>Idempotency-Key</c> header's field implementations
-    /// conventionally allow, so a client that already speaks the header fits inside it.
+    /// <b>The number itself lives on the port</b> (<see cref="Data.AlvoIdempotency.MaxKeyBytes"/>), which is
+    /// where the rule is enforced for every caller including an embedded host that never goes through HTTP. This
+    /// option exists so a host can be <em>stricter</em> than the port; the startup validator refuses anything
+    /// above the port's number, because a request layer that claimed to accept a key the port will reject would
+    /// answer 201 to a request that cannot be recorded.
+    /// </para>
+    /// <para>
+    /// <b>A longer key is refused, never truncated:</b> two keys that differ only past the cut would become one
+    /// key, so truncation turns two different requests into a replay of the first — silently, and in the
+    /// direction that loses the second caller's row.
     /// </para>
     /// </remarks>
-    public int MaxIdempotencyKeyLength { get; set; } = 255;
+    public int MaxIdempotencyKeyBytes { get; set; } = Data.AlvoIdempotency.MaxKeyBytes;
 }

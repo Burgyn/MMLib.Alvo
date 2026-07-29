@@ -368,20 +368,30 @@ internal static class DataApiDocumentation
         + "deviation from RFC 9110 §13.1.2, which would let a non-matching `If-None-Match` simply succeed — "
         + "Alvo cannot evaluate the header at all, so a conforming success would be indistinguishable from a "
         + "precondition that was never checked.\n\n"
-        + "**`Idempotency-Key` is accepted and ignored here.** That is deliberate rather than an oversight, and "
-        + "it is not the same rule as the one above: an update assigns *absolute* values to named fields, so "
-        + "applying it twice leaves exactly the state applying it once leaves. An ignored key therefore costs "
-        + "nothing, where an ignored precondition would cost somebody their change. Refusing the header instead "
-        + "would break the widespread client habit of attaching it to every mutating request, for no protection "
-        + "gained. Retry safety on this verb comes from `If-Match`, not from a key.";
+        + "**`Idempotency-Key` is accepted and ignored here — a known limitation, and this is what it costs.** "
+        + "The row's end state is unaffected: an update assigns *absolute* values to named fields, so applying "
+        + "it twice leaves exactly the state applying it once leaves, and there is no duplicate row to prevent. "
+        + "The *outcome you observe* is another matter. If you send `PATCH … If-Match: \"v1\"`, the 200 is lost "
+        + "to a dropped connection, and you retry the identical request, the write has landed and the row is at "
+        + "`v2` — so the retry is **412, and you cannot tell it apart from someone else having changed the "
+        + "row**. Resolving that 412 the usual way (re-read, re-merge, re-apply) would clobber a genuinely "
+        + "concurrent change if it *was* someone else. A key would have told you it was your own write. So retry "
+        + "safety on this verb is `If-Match` plus a re-read, not a key: after a lost response, **read the row "
+        + "back and compare it with what you sent** before deciding the write did not land. Refusing the header "
+        + "instead would break the widespread client habit of attaching it to every mutating request and would "
+        + "reject requests that are otherwise fine, so it is accepted — and declared here rather than left to "
+        + "be discovered.";
 
     private const string Delete =
         "Deletes one row and returns no body. A row the caller's policy excludes is 404, exactly as an absent "
         + "one is.\n\n"
         + "**`If-Match` conditions the delete** on the row's current version, and `If-None-Match` is refused "
         + "with 412 — both exactly as on the update, including the wording of what cannot be compared.\n\n"
-        + "**`Idempotency-Key` is accepted and ignored here**, for the reason it is on the update: removing one "
-        + "row twice leaves the same state as removing it once, so an ignored key costs nothing.";
+        + "**`Idempotency-Key` is accepted and ignored here — the same known limitation as on the update.** "
+        + "Removing one row twice leaves the same state as removing it once, so nothing is duplicated; but a "
+        + "retry after a lost `204` is a **404 (or a 412) you cannot tell apart from somebody else's delete**, "
+        + "which is precisely the question a key would have answered. Read the row back rather than treating the "
+        + "second answer as evidence the first attempt did not land.";
 
     /// <summary>The document-level prose: what this API is, and the invariants that hold on every route.</summary>
     /// <remarks>

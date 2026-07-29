@@ -7,6 +7,7 @@ using MMLib.Alvo.Auth;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
+using System.Text;
 using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Api.Internal;
@@ -167,7 +168,7 @@ internal static class DataApiEndpoints
                         return ProblemResultFactory.Validation(violations);
                     }
 
-                    var token = Idempotency(key, http.Request.Method, pattern, entity, body.Document);
+                    var token = Idempotency(key, http.Request.Method, entity, body.Document);
                     var record = await data.CreateAsync(entity.Name, body.Values, context, token, ct)
                         .ConfigureAwait(false);
                     return Created($"{pattern}/{AssignedId(record)}", record, entity);
@@ -632,19 +633,33 @@ internal static class DataApiEndpoints
     /// name a second time.
     /// </para>
     /// <para>
-    /// <b>Read on the create only, and on the other two write verbs it is <em>ignored</em> — labelled, because
-    /// this file refuses every other unhonoured header on a write.</b> The rule it looks like an exception to
-    /// (<see cref="EnsureUnconditional"/>: "every write verb either evaluates a precondition header or refuses
-    /// it") is about <em>preconditions</em>, and the reason there is that ignoring one costs somebody their
-    /// change — the caller reads a 200 and believes a lost update was prevented. This header cannot cost
-    /// anything comparable on an update or a delete: <c>UpdateAsync</c> assigns absolute values to named fields
-    /// and <c>DeleteAsync</c> removes one row, so applying either twice leaves the same state as applying it
-    /// once, and the port has no channel to record a key against them anyway. Refusing it instead would break
-    /// the widespread client habit — Stripe's SDKs among them — of attaching the header to every mutating
-    /// request, for no protection gained. It is still <em>client-observable</em> that the header did nothing, so
-    /// like the read side's two precondition gaps it is published: <see cref="DataApiDocumentation"/>'s update
-    /// and delete prose both say the header is accepted and has no effect, and neither operation lists it as a
-    /// parameter — a parameter is an invitation to send something.
+    /// <b>Read on the create only. On the other two write verbs it is accepted and <em>ignored</em> — a known
+    /// limitation, not a claim that nothing is lost.</b> An earlier version of this remark said an ignored key
+    /// "costs nothing" there, and that overstates it in a way worth correcting precisely, because the
+    /// difference is the whole retry story:
+    /// </para>
+    /// <para>
+    /// <b>The row's end state is unaffected; the outcome the client observes is not.</b> <c>UpdateAsync</c>
+    /// assigns absolute values to named fields and <c>DeleteAsync</c> removes one row, so applying either twice
+    /// leaves exactly the state applying it once leaves — no duplicate row exists to prevent, which is why this
+    /// is not the lost-update rule <see cref="EnsureUnconditional"/> enforces for a precondition. But consider
+    /// the case §2.1 wants keys for: a caller sends <c>PATCH … If-Match: "v1"</c>, <b>the 200 is lost</b> (a
+    /// dropped connection, a timeout), and they retry the identical request. The write landed, so the row is at
+    /// <c>v2</c>, so the retry is <b>412 — and the caller cannot attribute it</b>: "my own write landed" and
+    /// "somebody else changed the row" are the same answer. The usual resolution for a 412 is to re-read,
+    /// re-merge and re-apply, which in the second case clobbers a genuinely concurrent change. A key would have
+    /// answered "this is your own write, here is its result". <c>DELETE</c> has the same shape (404 or 412 on
+    /// the retry, indistinguishable from someone else's delete). So what is lost is exactly retrying without
+    /// knowing whether the first attempt landed.
+    /// </para>
+    /// <para>
+    /// <b>Why it is still ignored rather than refused or honoured.</b> Honouring it needs a third widening of
+    /// <c>IAlvoData</c> plus a stored <em>replayable result</em> for an update, which is not this PR's shape.
+    /// Refusing it would break the widespread client habit — Stripe's SDKs among them — of attaching the header
+    /// to every mutating request, and would refuse requests that are perfectly serviceable. Ignoring is the
+    /// least-bad third option, and it is only defensible <em>declared</em>: it is published in
+    /// <see cref="DataApiDocumentation"/>'s update and delete prose, in these words, and neither operation
+    /// lists the header as a parameter — a parameter is an invitation to send something.
     /// </para>
     /// </remarks>
     internal const string IdempotencyKeyHeader = "Idempotency-Key";
@@ -662,15 +677,20 @@ internal static class DataApiEndpoints
     /// <see cref="AlvoApiOptions.MaxRequestBodyBytes"/> on a request that was already decided.
     /// </para>
     /// <para>
-    /// <b>An anonymous caller's key is refused by the port's own guard, called from here.</b>
-    /// <see cref="AlvoIdempotency.EnsureIdentifiableCaller"/> is the authority — a record's identity is the
-    /// key plus the caller's scope, and every anonymous caller shares one reserved user id, so their keys
-    /// would share one space. Calling the port's guard rather than restating its wording is what keeps
-    /// "refused before the body" from being distinguishable from "refused after it", exactly as
-    /// <see cref="EnsureOperationIsAllowed"/> raises the port's own exception. The token handed to it carries
-    /// no fingerprint, and cannot: the guard is decided from the presence of a token and the context alone
-    /// (its own remarks say so), while a fingerprint covers a body this method deliberately refuses before
-    /// reading.
+    /// <b>Every rule about the key itself is the port's, applied here by calling the port's own guard.</b>
+    /// <see cref="AlvoIdempotency.EnsureUsableKey"/> is the authority for all three of blank, over-long and
+    /// anonymous — it has to be, because an embedded host reaches <c>CreateAsync</c> with no HTTP in front of
+    /// it — and calling it rather than restating its wording is what keeps "refused before the body"
+    /// indistinguishable from "refused after it", exactly as <see cref="EnsureOperationIsAllowed"/> raises the
+    /// port's own exception. It takes the <em>key</em> and not a token, which is why nothing here has to invent
+    /// a fingerprint for a body it deliberately runs before reading.
+    /// </para>
+    /// <para>
+    /// <b>What is left for this layer is the part that is about HTTP</b>, and it is exactly two things: a
+    /// <em>repeated</em> header field, which the port cannot see because a token carries one key; and a bound
+    /// <em>narrower</em> than the port's, which a host may configure
+    /// (<see cref="AlvoApiOptions.MaxIdempotencyKeyBytes"/>) and which is counted in UTF-8 bytes for the reason
+    /// stated there.
     /// </para>
     /// <para>
     /// <b>A 422, not a 401.</b> Nothing failed authentication — no credential was presented and rejected —
@@ -680,21 +700,14 @@ internal static class DataApiEndpoints
     /// identity to scope by, which is the port's malformed-request family and this layer's 422.
     /// </para>
     /// <para>
-    /// <b>Two headers, or an empty one, are refused rather than resolved.</b> Two field values are two keys
-    /// and this create can only be recorded under one — picking either answers a question the caller did not
-    /// ask, the same reason a multi-tag <c>If-Match</c> is refused. A blank key is refused because it is not
-    /// an identity: every caller who sent one would share it, which is the shared key space the scoping
-    /// exists to remove.
-    /// </para>
-    /// <para>
-    /// <b>Too long is refused, never truncated</b> — see
-    /// <see cref="AlvoApiOptions.MaxIdempotencyKeyLength"/>, where the cost of the alternative is written
-    /// down: two keys differing past the cut would become one.
+    /// <b>A repeated header is refused rather than resolved.</b> Two field values are two keys and this create
+    /// can only be recorded under one — picking either answers a question the caller did not ask, the same
+    /// reason a multi-tag <c>If-Match</c> is refused.
     /// </para>
     /// </remarks>
     /// <param name="request">The request whose header to read.</param>
     /// <param name="context">The caller the create is performed as.</param>
-    /// <param name="options">The API options the key's length bound is read from.</param>
+    /// <param name="options">The API options the key's byte bound is read from.</param>
     /// <exception cref="ArgumentException">The header is one this API cannot honour for this caller.</exception>
     private static string? IdempotencyKey(HttpRequest request, AlvoContext context, AlvoApiOptions options)
     {
@@ -704,14 +717,40 @@ internal static class DataApiEndpoints
             return null;
         }
 
-        var key = header.Count == 1 ? header[0] : null;
-        if (string.IsNullOrWhiteSpace(key) || key.Length > options.MaxIdempotencyKeyLength)
+        if (header.Count > 1)
         {
-            throw new ArgumentException(UnusableIdempotencyKey(options.MaxIdempotencyKeyLength));
+            throw new ArgumentException(RepeatedIdempotencyKey);
         }
 
-        AlvoIdempotency.EnsureIdentifiableCaller(new AlvoIdempotency(key, Fingerprint: string.Empty), context);
+        var key = header[0];
+        AlvoIdempotency.EnsureUsableKey(key, context);
+        EnsureWithinConfiguredBound(key!, options);
         return key;
+    }
+
+    /// <summary>
+    /// Refuses a key past <see cref="AlvoApiOptions.MaxIdempotencyKeyBytes"/> — the bound a host narrowed
+    /// below the port's own.
+    /// </summary>
+    /// <remarks>
+    /// Runs <em>after</em> the port's guard, so a key that breaks a rule both layers hold is refused in the
+    /// port's wording rather than this layer's: the startup validator keeps this option at or below
+    /// <see cref="AlvoIdempotency.MaxKeyBytes"/>, so the only keys this method can refuse are the ones only the
+    /// host objects to. Bytes, matching the port, for the reason the option's own remarks give.
+    /// </remarks>
+    /// <param name="key">The caller's key, already known to be non-blank.</param>
+    /// <param name="options">The options carrying the host's bound.</param>
+    /// <exception cref="ArgumentException">The key is longer than this host allows.</exception>
+    private static void EnsureWithinConfiguredBound(string key, AlvoApiOptions options)
+    {
+        if (Encoding.UTF8.GetByteCount(key) > options.MaxIdempotencyKeyBytes)
+        {
+            throw new ArgumentException(
+                $"The '{IdempotencyKeyHeader}' header must be at most {options.MaxIdempotencyKeyBytes} bytes "
+                + "when encoded as UTF-8. It is refused rather than shortened, because two keys that differ "
+                + "only past that length would become one key and the second create would be answered with "
+                + "the first create's row.");
+        }
     }
 
     /// <summary>
@@ -725,11 +764,10 @@ internal static class DataApiEndpoints
     /// </remarks>
     /// <param name="key">The caller's key, or <see langword="null"/> when they sent none.</param>
     /// <param name="method">The request method, for the digest.</param>
-    /// <param name="routeTemplate">The route this endpoint was mapped as, for the digest.</param>
     /// <param name="entity">The entity being written.</param>
     /// <param name="document">The body as it was parsed.</param>
     private static AlvoIdempotency? Idempotency(
-        string? key, string method, string routeTemplate, EntitySchema entity, JsonObject? document)
+        string? key, string method, EntitySchema entity, JsonObject? document)
     {
         if (key is null)
         {
@@ -742,22 +780,18 @@ internal static class DataApiEndpoints
             "A create reached the port with no parsed body. JsonPayloadReader reports a body that is not an "
             + "object as a violation, and a violation is answered before this point.");
 
-        return new AlvoIdempotency(key, IdempotencyFingerprint.Of(method, routeTemplate, entity.Name, body));
+        return new AlvoIdempotency(key, IdempotencyFingerprint.Of(method, entity.Name, body));
     }
 
-    /// <summary>The refusal for an <c>Idempotency-Key</c> this API cannot record a create under.</summary>
+    /// <summary>The refusal for a request carrying the idempotency header more than once.</summary>
     /// <remarks>
-    /// One wording for every unusable spelling — blank, repeated, over-long. They have one fix (send one
-    /// non-blank key inside the bound), and the message names the bound so an agent can shorten its own key
-    /// rather than guess. The caller's key is never echoed back: it is caller-supplied text, and nothing here
-    /// reflects any.
+    /// The one rule about the header that is this layer's rather than the port's: a token carries one key, so
+    /// two field values are a question only HTTP can see. The caller's key is never echoed back — it is
+    /// caller-supplied text, and nothing here reflects any.
     /// </remarks>
-    /// <param name="maxLength">The bound the key must fit inside.</param>
-    private static string UnusableIdempotencyKey(int maxLength) =>
-        $"The '{IdempotencyKeyHeader}' header must be exactly one non-blank value of at most {maxLength} "
-        + "characters. It is refused rather than shortened or picked from, because two keys that differ only "
-        + "past that length would become one key and the second create would be answered with the first "
-        + "create's row.";
+    private static string RepeatedIdempotencyKey =>
+        $"The '{IdempotencyKeyHeader}' header must be sent at most once. Two values are two keys and a create "
+        + "is recorded under one, so picking either would answer a question the caller did not ask.";
 
     /// <summary>The refusal for an <c>If-Match</c> this API cannot turn into exactly one row version.</summary>
     private const string UnusableIfMatch =
