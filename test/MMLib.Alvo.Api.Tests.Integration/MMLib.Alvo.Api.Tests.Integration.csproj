@@ -11,6 +11,9 @@
   -->
   <PropertyGroup>
     <AlvoSharedArchTests>false</AlvoSharedArchTests>
+    <!-- Same reason as MMLib.Alvo.Api.Tests: it compiles the same test/_shared/api/AlvoApiWorld.cs, whose
+         own AddOpenApi call needs the generated interceptor namespace enabled in this compilation too. -->
+    <InterceptorsNamespaces>$(InterceptorsNamespaces);Microsoft.AspNetCore.OpenApi.Generated</InterceptorsNamespaces>
   </PropertyGroup>
 
   <ItemGroup>

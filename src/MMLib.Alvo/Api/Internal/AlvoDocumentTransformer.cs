@@ -69,11 +69,14 @@ internal sealed class AlvoDocumentTransformer(
             return Task.CompletedTask;
         }
 
+        var entities = Entities(generated);
+        var operations = Operations(generated, entities);
+
         Overview(document);
         ProblemComponents.AddTo(document);
         document.AddComponent(CredentialScheme, Credential());
-        Reusable(document);
-        foreach (var entity in Entities(generated))
+        Reusable(document, operations);
+        foreach (var entity in entities)
         {
             Describe(document, entity);
         }
@@ -110,6 +113,17 @@ internal sealed class AlvoDocumentTransformer(
             .Select(EntityOf)];
 
     /// <summary>
+    /// Every generated endpoint's operation, paired with the entity it serves — the exact scope
+    /// <see cref="Reusable"/> reads to decide which shared components are really referenced by something.
+    /// </summary>
+    private static IReadOnlyList<(DataOperation Operation, EntitySchema Entity)> Operations(
+        IEnumerable<Endpoint> generated, IReadOnlyList<EntitySchema> entities)
+    {
+        var byName = entities.ToDictionary(entity => entity.Name, StringComparer.Ordinal);
+        return [.. generated.Select(endpoint => (endpoint.Marker.Operation, byName[endpoint.Marker.Entity]))];
+    }
+
+    /// <summary>
     /// Adds the document-level prose, appending rather than replacing whatever the host already wrote.
     /// </summary>
     /// <remarks>
@@ -126,27 +140,47 @@ internal sealed class AlvoDocumentTransformer(
     }
 
     /// <summary>
-    /// Registers everything that is the same on every generated route: each refusal response, and each
-    /// request parameter whose meaning does not depend on the entity.
+    /// Registers everything that is the same on every generated route: each refusal response, each response
+    /// header, and each request parameter whose meaning does not depend on the entity.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <b>Not an optimization — it is what makes the document readable and a generated client sane.</b> Inlined,
     /// the six refusals and eleven shared parameters are repeated once per operation, which for a
     /// ten-entity descriptor is the same paragraph fifty times; a code generator reading it emits fifty
     /// identical response types. Publishing each once and referencing it is what OpenAPI's component maps are
     /// for, and it is why a reviewer reads each sentence of this contract exactly once.
+    /// </para>
+    /// <para>
+    /// <b>The six refusals are unconditional; the headers and the per-host parameters are not.</b> Every
+    /// generated endpoint can answer 401 and 403 at least, so the refusal components are never orphans. A
+    /// header or a parameter that depends on a trait not every descriptor has — <c>ETag</c>/<c>ifNoneMatch</c>
+    /// on an audited entity, <c>tenant</c> on a tenant-scoped one — is published only when
+    /// <paramref name="operations"/> actually contains one that references it, through
+    /// <see cref="DataApiHeaders.AddTo"/> and <see cref="DataApiParameters.UsedSharedIds"/>. A descriptor with
+    /// no audited or tenant-scoped entity used to ship both anyway — a component map is a library, but an
+    /// entry nothing in the document could ever point at is the same defect the <c>ProducesProblem</c>
+    /// deviation exists to avoid for a schema.
+    /// </para>
     /// </remarks>
-    private void Reusable(OpenApiDocument document)
+    /// <param name="document">The document being built.</param>
+    /// <param name="operations">Every generated endpoint's operation and the entity it serves.</param>
+    private void Reusable(
+        OpenApiDocument document, IReadOnlyList<(DataOperation Operation, EntitySchema Entity)> operations)
     {
-        DataApiHeaders.AddTo(document);
+        DataApiHeaders.AddTo(document, operations);
         foreach (var refusal in DataApiDocumentation.SharedRefusals)
         {
             document.AddComponent(refusal.SharedId!, Response(refusal, entity: null, document));
         }
 
+        var used = DataApiParameters.UsedSharedIds(operations);
         foreach (var (id, parameter) in DataApiParameters.Shared(options.Value, auth.Value.TenantHeaderName))
         {
-            document.AddComponent(id, parameter);
+            if (used.Contains(id))
+            {
+                document.AddComponent(id, parameter);
+            }
         }
     }
 
@@ -172,20 +206,21 @@ internal sealed class AlvoDocumentTransformer(
         Tag(document, entity.Name).Description = entity.Description;
     }
 
-    /// <summary>The document-level tag for one entity, created if the route metadata did not already.</summary>
-    private static OpenApiTag Tag(OpenApiDocument document, string entity)
-    {
-        document.Tags ??= new HashSet<OpenApiTag>();
-        if (document.Tags.FirstOrDefault(
-                tag => string.Equals(tag.Name, entity, StringComparison.Ordinal)) is { } existing)
-        {
-            return existing;
-        }
-
-        var tag = new OpenApiTag { Name = entity };
-        document.Tags.Add(tag);
-        return tag;
-    }
+    /// <summary>The document-level tag <c>DataApiEndpoints.Documenting</c>'s own <c>WithTags</c> already created.</summary>
+    /// <remarks>
+    /// Absence throws rather than falling back to creating one here. <c>Describe</c> only ever runs for an
+    /// entity with generated endpoints, and every one of them ran <c>WithTags(entity.Name)</c> before
+    /// ApiExplorer built this document — which is what seeds <see cref="OpenApiDocument.Tags"/> before any
+    /// transformer runs. A fallback that created a fresh tag here was accordingly a branch nothing could
+    /// reach: a real absence would mean the endpoint table and this document disagree about what was mapped,
+    /// which is the same framework invariant <see cref="Find"/> and <see cref="EntityOf"/> already fail loudly
+    /// on rather than paper over.
+    /// </remarks>
+    private static OpenApiTag Tag(OpenApiDocument document, string entity) =>
+        document.Tags?.FirstOrDefault(tag => string.Equals(tag.Name, entity, StringComparison.Ordinal))
+        ?? throw new InvalidOperationException(
+            $"The OpenAPI document carries no tag named '{entity}', although its endpoints were mapped with "
+            + "WithTags(entity.Name). The document and the endpoint table disagree about what was mapped.");
 
     /// <summary>Every field of one entity carrying a <c>hidden</c> or a <c>readOnly</c> flag.</summary>
     /// <remarks>

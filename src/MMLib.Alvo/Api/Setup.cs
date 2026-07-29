@@ -27,19 +27,19 @@ internal static class ApiSetup
     /// </remarks>
     /// <remarks>
     /// <para>
-    /// <b><c>AddOpenApi</c> is registration, not exposure, and belongs here for exactly that reason.</b> It
-    /// makes the default document (<c>v1</c>) carry <see cref="AlvoDocumentTransformer"/>. The document itself
-    /// is reachable only once a host calls <c>MapOpenApi()</c>, which this package deliberately does not do:
-    /// whether to serve a document, at what path, and which UI renders it are hosting decisions —
-    /// <c>MMLib.Alvo.Host</c> makes them for standalone mode, and an embedded host makes its own.
+    /// <b>It deliberately does not call <c>AddOpenApi</c>.</b> Whether there is an OpenAPI document at all, how
+    /// many, under what names, and whether any of them is served is entirely the host's decision — Alvo only
+    /// registers <see cref="AlvoOpenApiSetup"/>, which enriches whichever documents the host defines, in either
+    /// order. Calling <c>AddOpenApi</c> here would give a host that wants none a document service, an
+    /// ApiExplorer and a set of options it never asked for; and it ran <em>twice</em>, because this method is
+    /// called from both <c>AddAlvo</c> and <c>AddDataApi</c>.
     /// </para>
     /// <para>
-    /// <b>The consequence for an embedded host, stated rather than discovered.</b> The transformer is attached
-    /// to the document named <c>v1</c>. A host that serves only a differently named document still gets
-    /// Alvo's endpoints in it — with the right status codes, from the response metadata
-    /// <c>DataApiEndpoints</c> attaches — but not the enriched schemas, and it can have those by adding
-    /// <c>AlvoDocumentTransformer</c> to that document itself. Registering against every name a host might
-    /// later define is not possible, and guessing one would be worse than saying so here.
+    /// <b>It is deliberately not in <c>AddDataApi</c> either.</b> That seam is optional — a host may register
+    /// <c>AddAlvo</c> and call <c>MapAlvoDataApi</c> without ever configuring the feature — so putting the
+    /// registration there would make enrichment silently depend on a call a host had no reason to make. Here it
+    /// applies to every host that registers Alvo at all, and costs a host with no document nothing but one
+    /// options setup that is never resolved.
     /// </para>
     /// </remarks>
     /// <param name="services">The service collection to add the API services to.</param>
@@ -51,7 +51,6 @@ internal static class ApiSetup
             ServiceDescriptor.Singleton<IValidateOptions<AlvoApiOptions>, AlvoApiOptionsValidator>());
         services.TryAddSingleton<EntityRouteCatalog>();
         services.TryAddSingleton<AlvoContextFilterFactory>();
-        services.AddOpenApi();
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IConfigureOptions<OpenApiOptions>, AlvoOpenApiSetup>());
         return services;
@@ -68,7 +67,10 @@ internal static class ApiSetup
 /// <c>AddDataApi</c> — and <c>AddOpenApi(configure)</c> is additive, so passing the transformer that way
 /// registered it twice and the document was enriched twice: the overview paragraph appeared verbatim in
 /// <c>info.description</c> twice over. <c>TryAddEnumerable</c> deduplicates on the implementation type, which
-/// is exactly the shape every other registration in that method already uses.
+/// is exactly the shape every other registration in that method already uses, and
+/// <c>OpenApiDocumentTests.The_overview_is_appended_once_however_often_alvo_is_registered</c> is what keeps
+/// the duplication from coming back — the snapshot alone made drift reviewable without saying which of the two
+/// documents was right.
 /// </para>
 /// <para>
 /// <b><see cref="IConfigureNamedOptions{TOptions}"/> rather than <see cref="IConfigureOptions{TOptions}"/>,

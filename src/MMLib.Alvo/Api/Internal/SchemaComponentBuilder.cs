@@ -5,9 +5,10 @@ using System.Text.Json.Nodes;
 namespace MMLib.Alvo.Api.Internal;
 
 /// <summary>
-/// Turns one entity of the applied schema into the four JSON Schema components the generated OpenAPI
-/// document references: the row a read returns, the body a create accepts, the body a patch accepts, and the
-/// page envelope a list returns.
+/// Turns one entity of the applied schema into the five JSON Schema components the generated OpenAPI
+/// document references: the row a single read, a create or an update returns; the page item a list's rows
+/// are (the same fields, without the row's <c>required</c> list); the body a create accepts; and the body a
+/// patch accepts.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -18,34 +19,47 @@ namespace MMLib.Alvo.Api.Internal;
 /// substantive schema is the applied schema itself.
 /// </para>
 /// <para>
-/// <b>Three schemas per entity rather than one, because the three really differ.</b> A read returns every
-/// field the caller may see, including the ones the framework writes; a create accepts only what a caller may
-/// supply and states which of those are mandatory; a patch accepts the same set and mandates none of it,
-/// because <c>IAlvoData.UpdateAsync</c> is partial by contract. Collapsing them into one schema annotated
-/// with <c>readOnly</c> would leave a generated client unable to tell a required create field from an
-/// optional patch one — which is the single most useful thing the document can say about a write.
+/// <b>Two response schemas, not one, because <c>select</c> narrows only one of them.</b> <c>GetAsync</c>
+/// takes no projection and a single-row read therefore always carries every field, so <see cref="RowId"/>
+/// carries a real <c>required</c> list — every readable field is present, even when its value is
+/// <see langword="null"/>. A list's rows are the one shape <c>select</c> can narrow, so
+/// <see cref="PageItemId"/> repeats the same properties with no <c>required</c> list at all. Collapsing them
+/// into one schema would either lie about a projected page (a false <c>required</c>) or defeat the point of a
+/// generated client reading a single row (no <c>required</c> at all, not even <c>id</c>).
 /// </para>
 /// <para>
-/// <b>A <c>hidden</c> field appears in none of the three, and its name appears nowhere at all.</b> That is a
-/// confidentiality requirement rather than tidiness: the field masking is per-caller, the document is not, and
-/// a hidden field's <em>name</em> in a public document is exactly the schema oracle the query parser's
-/// refusals and the port's deny reasons are worded to avoid. A field is excluded when the descriptor carries
-/// <em>any</em> <c>hidden</c> flag for it — a static <c>true</c> or a per-role expression — because a name
-/// published for the callers who may read it is published to the callers who may not.
+/// <b>Two write schemas as well, because a create and a patch really differ.</b> A create accepts only what
+/// a caller may supply and states which of those are mandatory; a patch accepts the same set and mandates
+/// none of it, because <c>IAlvoData.UpdateAsync</c> is partial by contract. Collapsing them into one schema
+/// annotated with <c>readOnly</c> would leave a generated client unable to tell a required create field from
+/// an optional patch one — which is the single most useful thing the document can say about a write.
 /// </para>
 /// <para>
-/// <b>The cost of that, stated:</b> a field that is hidden but writable is absent from the request schemas
-/// while a write to it is still accepted, so the document understates what a create will take. The asymmetry
-/// is deliberate — <c>hidden</c> governs responses and <c>readOnly</c> governs writes — and the direction of
-/// the loss is the safe one: a caller who follows the document sends less than it may, never something that
-/// is refused.
+/// <b>A <c>hidden</c> field is excluded from both response schemas, and appears in a write schema if and
+/// only if the descriptor also marks it <c>required</c>.</b> That is a narrowed confidentiality rule, not the
+/// absolute one it might look like: excluding a hidden field from <em>every</em> schema — including a create
+/// a caller must actually be able to perform — would silently drop a mandatory field from the body a caller
+/// has to send, since a required field a caller cannot see cannot be supplied at all. The name of an
+/// <em>optional</em> hidden field never appears anywhere, which is the confidentiality guarantee the port's
+/// refusal wording is built on; the name of a <em>required</em> hidden field is published only where a
+/// caller must read it to use the create and the patch at all — never in a response. A field is excluded
+/// when the descriptor carries <em>any</em> <c>hidden</c> flag for it — a static <c>true</c> or a per-role
+/// expression — because a name published for the callers who may read it is published to the callers who may
+/// not.
 /// </para>
 /// <para>
-/// <b>Neither request schema sets <c>additionalProperties: false</c>,</b> even though an undeclared key really
-/// is refused with 422. It would be a lie for exactly the fields above: a hidden-but-writable field is
-/// accepted and is not in the schema, so a validator reading <c>additionalProperties: false</c> would reject a
-/// body the API takes. The refusal is stated in the operation's own description instead, where it costs no
-/// accuracy.
+/// <b>The cost of that, stated:</b> a field that is hidden, writable and optional is absent from the request
+/// schemas while a write to it is still accepted, so the document understates what a create will take. The
+/// asymmetry is deliberate — <c>hidden</c> governs responses and <c>readOnly</c> governs writes — and the
+/// direction of the loss is the safe one: a caller who follows the document sends less than it may, never
+/// something that is refused.
+/// </para>
+/// <para>
+/// <b>Neither write schema sets <c>additionalProperties: false</c>,</b> even though an undeclared key really
+/// is refused with 422. It would be a lie for exactly the fields above: a hidden, writable and optional field
+/// is accepted and is not in the schema, so a validator reading <c>additionalProperties: false</c> would
+/// reject a body the API takes. The refusal is stated in the operation's own description instead, where it
+/// costs no accuracy.
 /// </para>
 /// </remarks>
 /// <param name="entity">The entity as the applied schema declares it.</param>
@@ -57,7 +71,7 @@ namespace MMLib.Alvo.Api.Internal;
 internal sealed class SchemaComponentBuilder(
     EntitySchema entity, IReadOnlySet<string> hidden, IReadOnlySet<string> readOnly)
 {
-    /// <summary>The component id of the row a read returns.</summary>
+    /// <summary>The component id of the row a single read, a create or an update returns.</summary>
     /// <remarks>
     /// <para>
     /// The entity's own name, and the three siblings below suffix it with a capitalised word. That is
@@ -82,32 +96,39 @@ internal sealed class SchemaComponentBuilder(
     /// <param name="entity">The entity name.</param>
     internal static string PageId(string entity) => entity + "Page";
 
-    /// <summary>Registers this entity's four components on <paramref name="document"/>.</summary>
+    /// <summary>The component id of one item inside a list's page — the same fields as <see cref="RowId"/>, with no <c>required</c> list.</summary>
+    /// <param name="entity">The entity name.</param>
+    internal static string PageItemId(string entity) => entity + "PageItem";
+
+    /// <summary>Registers this entity's five components on <paramref name="document"/>.</summary>
     /// <param name="document">The document being built.</param>
     internal void AddTo(OpenApiDocument document)
     {
         ArgumentNullException.ThrowIfNull(document);
         document.AddComponent(RowId(entity.Name), Row());
+        document.AddComponent(PageItemId(entity.Name), PageItem());
         document.AddComponent(CreateId(entity.Name), Body(isUpdate: false));
         document.AddComponent(PatchId(entity.Name), Body(isUpdate: true));
         document.AddComponent(PageId(entity.Name), Page(document));
     }
 
     /// <summary>
-    /// The row a read returns: every field the caller may see, with the framework's own columns annotated
-    /// <c>readOnly</c>.
+    /// The row a single read, a create or an update returns: every field the caller may see, with the
+    /// framework's own columns annotated <c>readOnly</c> — and, because none of those three operations can
+    /// narrow the projection, a <c>required</c> list naming every one of them.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>No <c>required</c> list, deliberately.</b> A single-row read does carry every readable field, but a
-    /// list's rows are narrowed by <c>select</c> — so a schema that required anything would be violated by a
-    /// projected page, and the same component describes both. What a caller needs to know instead is which
-    /// fields can be <see langword="null"/>, and that is in each field's own type.
+    /// <b><c>required</c> lists every readable field, deliberately.</b> <c>GetAsync</c> takes no projection,
+    /// so this schema's row is never partial — a field with no value is present and <see langword="null"/>,
+    /// never absent. A generated client that read no <c>required</c> list here would have to treat <c>id</c>
+    /// itself as optional, which defeats the one thing a single-row read can promise that a page's row
+    /// cannot.
     /// </para>
     /// <para>
-    /// <b>Open to further properties, also deliberately.</b> A per-role <c>hidden</c> expression means a
-    /// response legitimately carries a field this document does not declare — for the callers the expression
-    /// does not mask. Closing the schema would make the document contradict a real response.
+    /// <b>Open to further properties, deliberately.</b> A per-role <c>hidden</c> expression means a response
+    /// legitimately carries a field this document does not declare — for the callers the expression does not
+    /// mask. Closing the schema would make the document contradict a real response.
     /// </para>
     /// </remarks>
     private OpenApiSchema Row() => new()
@@ -116,13 +137,48 @@ internal sealed class SchemaComponentBuilder(
         Title = entity.Name,
         Description = RowDescription(),
         Properties = Fields(readable: true, isUpdate: false),
+        Required = ReadableFieldNames(),
+    };
+
+    /// <summary>
+    /// One item inside a list's page: the same properties as <see cref="Row"/>, with no <c>required</c> list.
+    /// </summary>
+    /// <remarks>
+    /// <c>select</c> narrows exactly this shape — the only one of the three read-ish responses it can touch,
+    /// since a single-row read and a write's echo take no projection — so a schema that required anything
+    /// here would be violated by the very page it describes. What a caller needs to know instead is which
+    /// fields can be <see langword="null"/>, and that is in each field's own type.
+    /// </remarks>
+    private OpenApiSchema PageItem() => new()
+    {
+        Type = JsonSchemaType.Object,
+        Title = PageItemId(entity.Name),
+        Description = PageItemDescription(),
+        Properties = Fields(readable: true, isUpdate: false),
     };
 
     private string RowDescription() =>
         (entity.Description is { } declared ? declared + "\n\n" : string.Empty)
-        + "One row as a read returns it. Every field is present unless the request narrowed the projection "
+        + "One row as a single read, a create or an update returns it. Every field is present, even one with "
+        + "no value — that field is present and null. Fields marked read-only are written by the framework "
+        + "and refused in a request body.";
+
+    private string PageItemDescription() =>
+        (entity.Description is { } declared ? declared + "\n\n" : string.Empty)
+        + "One row inside a list's page. Every field is present unless the request narrowed the projection "
         + "with `select`; a field with no value is present and null. Fields marked read-only are written by "
         + "the framework and refused in a request body.";
+
+    /// <summary>Every field this schema's read side may show, in the schema's own order.</summary>
+    private HashSet<string>? ReadableFieldNames()
+    {
+        var names = entity.Fields
+            .Where(field => Belongs(field, readable: true, isUpdate: false))
+            .Select(field => field.Name)
+            .ToHashSet(StringComparer.Ordinal);
+
+        return names.Count == 0 ? null : names;
+    }
 
     /// <summary>
     /// The body a write accepts: the fields a caller may supply, and — on a create only — which of them are
@@ -168,7 +224,7 @@ internal sealed class SchemaComponentBuilder(
             {
                 Type = JsonSchemaType.Array,
                 Description = "The rows in this page, in the requested order.",
-                Items = new OpenApiSchemaReference(RowId(entity.Name), document),
+                Items = new OpenApiSchemaReference(PageItemId(entity.Name), document),
             },
             ["next"] = new OpenApiSchema
             {
@@ -182,8 +238,8 @@ internal sealed class SchemaComponentBuilder(
         Required = new HashSet<string>(StringComparer.Ordinal) { "items", "next" },
     };
 
-    /// <summary>Every field of the entity that belongs in one of the three schemas, in the schema's own order.</summary>
-    /// <param name="readable">Whether this is the read schema, which keeps the framework's columns.</param>
+    /// <summary>Every field of the entity that belongs in one of the four schemas, in the schema's own order.</summary>
+    /// <param name="readable">Whether this is a read schema, which keeps the framework's columns.</param>
     /// <param name="isUpdate">Whether a write schema is the patch one rather than the create one.</param>
     private Dictionary<string, IOpenApiSchema> Fields(bool readable, bool isUpdate)
     {
@@ -196,12 +252,31 @@ internal sealed class SchemaComponentBuilder(
         return properties;
     }
 
-    /// <summary>Whether one field belongs in the schema being built.</summary>
-    private bool Belongs(FieldSchema field, bool readable, bool isUpdate) =>
-        !hidden.Contains(field.Name)
-        && (readable
-            || (!readOnly.Contains(field.Name)
-                && (!_managed.Contains(field.Name) || AlvoManagedColumns.IsCallerWritable(field.Name, isUpdate))));
+    /// <summary>
+    /// Whether one field belongs in the schema being built.
+    /// </summary>
+    /// <remarks>
+    /// <b>A response never carries a hidden field, whatever its other flags.</b> A write schema is the one
+    /// exception, and only for a field the descriptor also marks <c>required</c>: excluding it there too
+    /// would document a create nobody could perform, since a caller cannot supply a mandatory field it was
+    /// never told exists. An <em>optional</em> hidden field stays excluded from a write schema exactly as
+    /// from a response — its name is never the price of documenting a create.
+    /// </remarks>
+    private bool Belongs(FieldSchema field, bool readable, bool isUpdate)
+    {
+        if (readable)
+        {
+            return !hidden.Contains(field.Name);
+        }
+
+        if (hidden.Contains(field.Name) && !field.Required)
+        {
+            return false;
+        }
+
+        return !readOnly.Contains(field.Name)
+            && (!_managed.Contains(field.Name) || AlvoManagedColumns.IsCallerWritable(field.Name, isUpdate));
+    }
 
     private readonly IReadOnlySet<string> _managed = AlvoManagedColumns.For(entity);
 

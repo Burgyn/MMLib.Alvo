@@ -1,9 +1,11 @@
 ﻿using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http.Metadata;
+using Microsoft.AspNetCore.OpenApi;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using Microsoft.OpenApi;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Auth.Internal;
 using MMLib.Alvo.Migrations;
@@ -178,6 +180,27 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
             builder.Services.ConfigureHttpJsonOptions(json => setup.ConfigureHostJson(json.SerializerOptions));
         }
 
+        if (setup.MapOpenApiDocument)
+        {
+            // Alvo deliberately does not call AddOpenApi itself (ApiSetup.AddAlvoApi says why) — serving a
+            // document, and therefore registering one at all, is a hosting decision. This is that decision,
+            // made the way an embedded host would make it, and made *before* AddAlvo below: registration order
+            // is document-transformer order, and the fixture's own Info has to be written before Alvo's
+            // transformer decides whether to append to it or start it from nothing.
+            builder.Services.AddOpenApi(options => options.AddDocumentTransformer((document, _, _) =>
+            {
+                document.Info ??= new OpenApiInfo();
+                document.Info.Title = FixtureDocumentTitle;
+                document.Info.Version = FixtureDocumentVersion;
+                if (setup.HostInfoDescription is { } description)
+                {
+                    document.Info.Description = description;
+                }
+
+                return Task.CompletedTask;
+            }));
+        }
+
         builder.Services.Configure<AlvoAuthOptions>(options =>
         {
             foreach (var key in keys)
@@ -197,6 +220,20 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
 
         return builder.Build();
     }
+
+    /// <summary>
+    /// The fixture host's own <c>info.title</c>, pinned rather than left to ASP.NET's default.
+    /// </summary>
+    /// <remarks>
+    /// The unconfigured default is the <em>host assembly's</em> name, which would move
+    /// <c>OpenApiDocumentTests.The_document_is_stable</c>'s baseline the moment the test project itself was
+    /// renamed — a change with nothing to do with the document this feature publishes. A literal here also
+    /// doubles as the fact that Alvo appends to a host's <c>info</c> rather than replacing it: the title
+    /// survives untouched, and only <c>description</c> gains Alvo's own paragraph.
+    /// </remarks>
+    private const string FixtureDocumentTitle = "Alvo API Tests Fixture";
+
+    private const string FixtureDocumentVersion = "v1";
 
     /// <summary>
     /// Runs the production code-first migration flow, which is also what primes the policy catalog and
@@ -501,11 +538,18 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
 /// seam deliberately does not map it, and a world that always did would add an endpoint to every fact in this
 /// suite that counts the route table.
 /// </param>
+/// <param name="HostInfoDescription">
+/// A description to write onto <c>info.description</c> before Alvo's own transformer runs — the fixture
+/// playing the part of a host that already documents itself. <see langword="null"/> leaves <c>info</c>
+/// exactly as <see cref="FixtureDocumentTitle"/>/<see cref="FixtureDocumentVersion"/> set it, which is what
+/// every fact except the append-not-overwrite one needs.
+/// </param>
 internal sealed record AlvoApiWorldSetup(
     Action<AlvoApiOptions>? ConfigureApi = null,
     string? RevokedKeyId = null,
     Action<System.Text.Json.JsonSerializerOptions>? ConfigureHostJson = null,
-    bool MapOpenApiDocument = false);
+    bool MapOpenApiDocument = false,
+    string? HostInfoDescription = null);
 
 /// <summary>One dev API key a world issues, in the shape a test reads best.</summary>
 /// <param name="KeyId">The key's public identifier.</param>

@@ -54,6 +54,27 @@ internal static class DataApiParameters
         ];
     }
 
+    /// <summary>
+    /// Every shared parameter id at least one of <paramref name="operations"/> references — the set
+    /// <see cref="AlvoDocumentTransformer.Reusable"/> publishes, so a parameter no mapped operation reads
+    /// (the tenant header on a descriptor with no tenant-scoped entity, <c>ifNoneMatch</c> on one with no
+    /// audited entity) is never an orphan component.
+    /// </summary>
+    /// <param name="operations">Every generated endpoint's operation and the entity it serves.</param>
+    internal static IReadOnlySet<string> UsedSharedIds(
+        IEnumerable<(DataOperation Operation, EntitySchema Entity)> operations)
+    {
+        ArgumentNullException.ThrowIfNull(operations);
+
+        var used = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (operation, entity) in operations)
+        {
+            used.UnionWith(Names(operation, entity));
+        }
+
+        return used;
+    }
+
     /// <summary>Which of the shared parameters this operation reads, in the order they are published.</summary>
     private static IEnumerable<string> Names(DataOperation operation, EntitySchema entity) =>
     [
@@ -76,6 +97,11 @@ internal static class DataApiParameters
     /// <b>The one place each is written.</b> Two of them carry a host-configured bound
     /// (<c>limit</c>'s maximum, the idempotency key's length) and one a host-configured header name, so they are
     /// per-host rather than per-entity — which is exactly the granularity a document-level component has.
+    /// <b>Every candidate, whether or not any mapped operation actually references it.</b>
+    /// <see cref="AlvoDocumentTransformer.Reusable"/> is the one place that decides which of these to
+    /// register as a document component, using <see cref="UsedSharedIds"/> — so a descriptor with no
+    /// tenant-scoped entity, or none that is audited, never ships an orphan <c>tenant</c> or
+    /// <c>ifNoneMatch</c> component that no response could ever reference.
     /// </remarks>
     /// <param name="options">The API options the paging and key bounds are published from.</param>
     /// <param name="tenantHeader">The header a tenant is requested in.</param>

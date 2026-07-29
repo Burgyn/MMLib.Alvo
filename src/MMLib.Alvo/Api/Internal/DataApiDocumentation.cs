@@ -307,7 +307,10 @@ internal static class DataApiDocumentation
         + "`not.or=(…)`).\n\n"
         + "**A field that is unavailable to the caller is refused exactly like one that does not exist**, in "
         + "`filter`, `order` and `select` alike — the refusal names the parameter's role and never the field, "
-        + "so it cannot be used to discover which fields an entity has.";
+        + "so filtering, ordering or selecting cannot be used to discover a hidden field's name. The one "
+        + "exception is a field the descriptor also marks `required`: its name is published in the write "
+        + "schemas below, because a mandatory field a caller cannot see could not be supplied — see the "
+        + "overview.";
 
     /// <summary>
     /// The single-row read's prose. The <c>If-None-Match</c> paragraph is conditional because a
@@ -401,8 +404,10 @@ internal static class DataApiDocumentation
     /// </remarks>
     internal const string Overview =
         "Every route here is generated from the applied Alvo descriptor: an entity declared in the descriptor "
-        + "is the explicit decision to expose it, and a field marked `hidden` is the per-field opt-out and "
-        + "appears nowhere in this document.\n\n"
+        + "is the explicit decision to expose it, and a field marked `hidden` is the per-field opt-out. It "
+        + "appears in no response schema, and in a request schema only when the descriptor also marks it "
+        + "`required` — a mandatory field a caller cannot see could not be supplied at all, so the name is "
+        + "published only where a caller must read it to perform the write.\n\n"
         + "**Default-deny.** Nothing is reachable without a policy that admits the caller for that entity and "
         + "operation. An operation the descriptor configures no rule for is refused for everybody.\n\n"
         + "**Refusals are RFC 9457 problem documents** (`application/problem+json`) whose `type` classifies the "

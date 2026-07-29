@@ -1,9 +1,9 @@
 {
   "openapi": "3.1.1",
   "info": {
-    "title": "MMLib.Alvo.Api.Tests | v1",
-    "description": "Every route here is generated from the applied Alvo descriptor: an entity declared in the descriptor is the explicit decision to expose it, and a field marked `hidden` is the per-field opt-out and appears nowhere in this document.\n\n**Default-deny.** Nothing is reachable without a policy that admits the caller for that entity and operation. An operation the descriptor configures no rule for is refused for everybody.\n\n**Refusals are RFC 9457 problem documents** (`application/problem+json`) whose `type` classifies the refusal under `https://alvo.dev/errors/`. Branch on `type`; `detail` is prose and, per RFC 9457 §3.1.1, ought not be parsed. A refusal carries every reason at once in `violations`, each with a JSON Pointer, a stable code and a fix suggestion.\n\n**Every response is `Cache-Control: no-store`**, refusals included. These representations are policy-masked per caller, and the `ETag` is minted over the row's *version* rather than over the response bytes — which is the only tag `If-Match`'s strong comparison could ever match, and the reason no intermediary may keep the body.\n\n**A 500 is not documented on any operation.** An invariant the implementation itself relies on propagates past Alvo untouched, so the response is composed by the host and Alvo cannot describe a body it does not write.",
-    "version": "1.0.0"
+    "title": "Alvo API Tests Fixture",
+    "description": "Every route here is generated from the applied Alvo descriptor: an entity declared in the descriptor is the explicit decision to expose it, and a field marked `hidden` is the per-field opt-out. It appears in no response schema, and in a request schema only when the descriptor also marks it `required` — a mandatory field a caller cannot see could not be supplied at all, so the name is published only where a caller must read it to perform the write.\n\n**Default-deny.** Nothing is reachable without a policy that admits the caller for that entity and operation. An operation the descriptor configures no rule for is refused for everybody.\n\n**Refusals are RFC 9457 problem documents** (`application/problem+json`) whose `type` classifies the refusal under `https://alvo.dev/errors/`. Branch on `type`; `detail` is prose and, per RFC 9457 §3.1.1, ought not be parsed. A refusal carries every reason at once in `violations`, each with a JSON Pointer, a stable code and a fix suggestion.\n\n**Every response is `Cache-Control: no-store`**, refusals included. These representations are policy-masked per caller, and the `ETag` is minted over the row's *version* rather than over the response bytes — which is the only tag `If-Match`'s strong comparison could ever match, and the reason no intermediary may keep the body.\n\n**A 500 is not documented on any operation.** An invariant the implementation itself relies on propagates past Alvo untouched, so the response is composed by the host and Alvo cannot describe a body it does not write.",
+    "version": "v1"
   },
   "servers": [
     {
@@ -17,7 +17,7 @@
           "categories"
         ],
         "summary": "List 'categories' rows",
-        "description": "Reads a page of rows the caller's policy admits.\n\n**Filtering** follows PostgREST's spelling: every query parameter that is not one of the reserved names (order, limit, offset, after, select, or, and, not) names a field, and its value is `<operator>.<operand>` — `?year=gte.2020`. The operators are eq, neq, gt, gte, lt, lte, like, ilike, in, is. `in` takes a bracketed candidate list (`in.(skoda,vw)`) and `is` takes exactly `null`, `true` or `false`; `like`/`ilike` take a pattern. An unrecognised operator is refused with 422, never quietly read as equality, and an ordering operator applied to a type this API defines no total order over is refused too — so one filter means the same thing on every engine.\n\nSeveral parameters are one **conjunction** (AND), which is the only reading that keeps a filter narrowing as terms are added. `or=(…)` and `and=(…)` group terms explicitly and may nest, and prefixing any parameter name or group keyword with `not.` negates it (`not.color=eq.red`, `not.or=(…)`).\n\n**A field that is unavailable to the caller is refused exactly like one that does not exist**, in `filter`, `order` and `select` alike — the refusal names the parameter's role and never the field, so it cannot be used to discover which fields an entity has.\n\nThe response is an envelope — `{ \"items\": [ … ], \"next\": <cursor or null> }` — and never a bare array. `next` is the cursor for the page after this one, and it is the *only* place that cursor appears: there is deliberately no `Link` or `Content-Range` header, so an agent reading the body never has to parse HTTP headers to keep paging.\n\n**A caller whose rule excludes every row is answered 200 with an empty page, not 403.** A rule compiles to a row-level `USING` predicate, so a caller who fails it receives an *allow* carrying a predicate that matches nothing. A 403 here means something else entirely: the operation is unconfigured for this entity, the entity is unknown to the applied descriptor, the caller has no tenant on a tenant-scoped entity, or the policy reads a caller value this caller does not carry.\n\n**Neither precondition header is honoured on a list.** A page has no version of its own to compare, so `If-Match` and `If-None-Match` are ignored here — not refused, as they would be on a write. Condition a single row's read or write instead.\n\n**A nullable field cannot be a sort key**, and since every list over HTTP is paged (`limit` always resolves, to a configured default when the request names none), that is every list: `order` over a nullable field is refused with 422. A keyset cursor is a chain of comparisons with no `IS NULL` arm, so paging over a nullable key silently drops rows — which is why it is refused rather than answered. The consequence for the two null-placement modifiers is that `nullsfirst` and `nullslast` parse, and their effect is currently unobservable: the only reads that could show it are the unpaged ones this endpoint does not offer.",
+        "description": "Reads a page of rows the caller's policy admits.\n\n**Filtering** follows PostgREST's spelling: every query parameter that is not one of the reserved names (order, limit, offset, after, select, or, and, not) names a field, and its value is `<operator>.<operand>` — `?year=gte.2020`. The operators are eq, neq, gt, gte, lt, lte, like, ilike, in, is. `in` takes a bracketed candidate list (`in.(skoda,vw)`) and `is` takes exactly `null`, `true` or `false`; `like`/`ilike` take a pattern. An unrecognised operator is refused with 422, never quietly read as equality, and an ordering operator applied to a type this API defines no total order over is refused too — so one filter means the same thing on every engine.\n\nSeveral parameters are one **conjunction** (AND), which is the only reading that keeps a filter narrowing as terms are added. `or=(…)` and `and=(…)` group terms explicitly and may nest, and prefixing any parameter name or group keyword with `not.` negates it (`not.color=eq.red`, `not.or=(…)`).\n\n**A field that is unavailable to the caller is refused exactly like one that does not exist**, in `filter`, `order` and `select` alike — the refusal names the parameter's role and never the field, so filtering, ordering or selecting cannot be used to discover a hidden field's name. The one exception is a field the descriptor also marks `required`: its name is published in the write schemas below, because a mandatory field a caller cannot see could not be supplied — see the overview.\n\nThe response is an envelope — `{ \"items\": [ … ], \"next\": <cursor or null> }` — and never a bare array. `next` is the cursor for the page after this one, and it is the *only* place that cursor appears: there is deliberately no `Link` or `Content-Range` header, so an agent reading the body never has to parse HTTP headers to keep paging.\n\n**A caller whose rule excludes every row is answered 200 with an empty page, not 403.** A rule compiles to a row-level `USING` predicate, so a caller who fails it receives an *allow* carrying a predicate that matches nothing. A 403 here means something else entirely: the operation is unconfigured for this entity, the entity is unknown to the applied descriptor, the caller has no tenant on a tenant-scoped entity, or the policy reads a caller value this caller does not carry.\n\n**Neither precondition header is honoured on a list.** A page has no version of its own to compare, so `If-Match` and `If-None-Match` are ignored here — not refused, as they would be on a write. Condition a single row's read or write instead.\n\n**A nullable field cannot be a sort key**, and since every list over HTTP is paged (`limit` always resolves, to a configured default when the request names none), that is every list: `order` over a nullable field is refused with 422. A keyset cursor is a chain of comparisons with no `IS NULL` arm, so paging over a nullable key silently drops rows — which is why it is refused rather than answered. The consequence for the two null-placement modifiers is that `nullsfirst` and `nullslast` parse, and their effect is currently unobservable: the only reads that could show it are the unpaged ones this endpoint does not offer.",
         "operationId": "categories.list",
         "parameters": [
           {
@@ -319,7 +319,7 @@
           "products"
         ],
         "summary": "List 'products' rows",
-        "description": "Reads a page of rows the caller's policy admits.\n\n**Filtering** follows PostgREST's spelling: every query parameter that is not one of the reserved names (order, limit, offset, after, select, or, and, not) names a field, and its value is `<operator>.<operand>` — `?year=gte.2020`. The operators are eq, neq, gt, gte, lt, lte, like, ilike, in, is. `in` takes a bracketed candidate list (`in.(skoda,vw)`) and `is` takes exactly `null`, `true` or `false`; `like`/`ilike` take a pattern. An unrecognised operator is refused with 422, never quietly read as equality, and an ordering operator applied to a type this API defines no total order over is refused too — so one filter means the same thing on every engine.\n\nSeveral parameters are one **conjunction** (AND), which is the only reading that keeps a filter narrowing as terms are added. `or=(…)` and `and=(…)` group terms explicitly and may nest, and prefixing any parameter name or group keyword with `not.` negates it (`not.color=eq.red`, `not.or=(…)`).\n\n**A field that is unavailable to the caller is refused exactly like one that does not exist**, in `filter`, `order` and `select` alike — the refusal names the parameter's role and never the field, so it cannot be used to discover which fields an entity has.\n\nThe response is an envelope — `{ \"items\": [ … ], \"next\": <cursor or null> }` — and never a bare array. `next` is the cursor for the page after this one, and it is the *only* place that cursor appears: there is deliberately no `Link` or `Content-Range` header, so an agent reading the body never has to parse HTTP headers to keep paging.\n\n**A caller whose rule excludes every row is answered 200 with an empty page, not 403.** A rule compiles to a row-level `USING` predicate, so a caller who fails it receives an *allow* carrying a predicate that matches nothing. A 403 here means something else entirely: the operation is unconfigured for this entity, the entity is unknown to the applied descriptor, the caller has no tenant on a tenant-scoped entity, or the policy reads a caller value this caller does not carry.\n\n**Neither precondition header is honoured on a list.** A page has no version of its own to compare, so `If-Match` and `If-None-Match` are ignored here — not refused, as they would be on a write. Condition a single row's read or write instead.\n\n**A nullable field cannot be a sort key**, and since every list over HTTP is paged (`limit` always resolves, to a configured default when the request names none), that is every list: `order` over a nullable field is refused with 422. A keyset cursor is a chain of comparisons with no `IS NULL` arm, so paging over a nullable key silently drops rows — which is why it is refused rather than answered. The consequence for the two null-placement modifiers is that `nullsfirst` and `nullslast` parse, and their effect is currently unobservable: the only reads that could show it are the unpaged ones this endpoint does not offer.",
+        "description": "Reads a page of rows the caller's policy admits.\n\n**Filtering** follows PostgREST's spelling: every query parameter that is not one of the reserved names (order, limit, offset, after, select, or, and, not) names a field, and its value is `<operator>.<operand>` — `?year=gte.2020`. The operators are eq, neq, gt, gte, lt, lte, like, ilike, in, is. `in` takes a bracketed candidate list (`in.(skoda,vw)`) and `is` takes exactly `null`, `true` or `false`; `like`/`ilike` take a pattern. An unrecognised operator is refused with 422, never quietly read as equality, and an ordering operator applied to a type this API defines no total order over is refused too — so one filter means the same thing on every engine.\n\nSeveral parameters are one **conjunction** (AND), which is the only reading that keeps a filter narrowing as terms are added. `or=(…)` and `and=(…)` group terms explicitly and may nest, and prefixing any parameter name or group keyword with `not.` negates it (`not.color=eq.red`, `not.or=(…)`).\n\n**A field that is unavailable to the caller is refused exactly like one that does not exist**, in `filter`, `order` and `select` alike — the refusal names the parameter's role and never the field, so filtering, ordering or selecting cannot be used to discover a hidden field's name. The one exception is a field the descriptor also marks `required`: its name is published in the write schemas below, because a mandatory field a caller cannot see could not be supplied — see the overview.\n\nThe response is an envelope — `{ \"items\": [ … ], \"next\": <cursor or null> }` — and never a bare array. `next` is the cursor for the page after this one, and it is the *only* place that cursor appears: there is deliberately no `Link` or `Content-Range` header, so an agent reading the body never has to parse HTTP headers to keep paging.\n\n**A caller whose rule excludes every row is answered 200 with an empty page, not 403.** A rule compiles to a row-level `USING` predicate, so a caller who fails it receives an *allow* carrying a predicate that matches nothing. A 403 here means something else entirely: the operation is unconfigured for this entity, the entity is unknown to the applied descriptor, the caller has no tenant on a tenant-scoped entity, or the policy reads a caller value this caller does not carry.\n\n**Neither precondition header is honoured on a list.** A page has no version of its own to compare, so `If-Match` and `If-None-Match` are ignored here — not refused, as they would be on a write. Condition a single row's read or write instead.\n\n**A nullable field cannot be a sort key**, and since every list over HTTP is paged (`limit` always resolves, to a configured default when the request names none), that is every list: `order` over a nullable field is refused with 422. A keyset cursor is a chain of comparisons with no `IS NULL` arm, so paging over a nullable key silently drops rows — which is why it is refused rather than answered. The consequence for the two null-placement modifiers is that `nullsfirst` and `nullslast` parse, and their effect is currently unobservable: the only reads that could show it are the unpaged ones this endpoint does not offer.",
         "operationId": "products.list",
         "parameters": [
           {
@@ -766,6 +766,10 @@
     "schemas": {
       "categories": {
         "title": "categories",
+        "required": [
+          "id",
+          "name"
+        ],
         "type": "object",
         "properties": {
           "id": {
@@ -780,7 +784,7 @@
             "description": "The category's display name."
           }
         },
-        "description": "A product category. Not audited, so its rows carry no version — no ETag is minted for them and no conditional read or write of one is possible.\n\nOne row as a read returns it. Every field is present unless the request narrowed the projection with `select`; a field with no value is present and null. Fields marked read-only are written by the framework and refused in a request body."
+        "description": "A product category. Not audited, so its rows carry no version — no ETag is minted for them and no conditional read or write of one is possible.\n\nOne row as a single read, a create or an update returns it. Every field is present, even one with no value — that field is present and null. Fields marked read-only are written by the framework and refused in a request body."
       },
       "categoriesCreate": {
         "title": "categoriesCreate",
@@ -808,7 +812,7 @@
           "items": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/categories"
+              "$ref": "#/components/schemas/categoriesPageItem"
             },
             "description": "The rows in this page, in the requested order."
           },
@@ -822,6 +826,24 @@
           }
         },
         "description": "One page of rows, plus the cursor that reads the page after it."
+      },
+      "categoriesPageItem": {
+        "title": "categoriesPageItem",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "readOnly": true,
+            "example": "3f8d6c1e-9b47-4a5f-8c21-0d7e5a2b6f04"
+          },
+          "name": {
+            "maxLength": 60,
+            "type": "string",
+            "description": "The category's display name."
+          }
+        },
+        "description": "A product category. Not audited, so its rows carry no version — no ETag is minted for them and no conditional read or write of one is possible.\n\nOne row inside a list's page. Every field is present unless the request narrowed the projection with `select`; a field with no value is present and null. Fields marked read-only are written by the framework and refused in a request body."
       },
       "categoriesPatch": {
         "title": "categoriesPatch",
@@ -918,6 +940,25 @@
       },
       "products": {
         "title": "products",
+        "required": [
+          "id",
+          "name",
+          "sku",
+          "contact",
+          "status",
+          "price",
+          "released_on",
+          "discontinued_at",
+          "in_stock",
+          "specs",
+          "notes",
+          "slug",
+          "category_id",
+          "created_at",
+          "created_by",
+          "updated_at",
+          "updated_by"
+        ],
         "type": "object",
         "properties": {
           "id": {
@@ -1054,13 +1095,14 @@
             "example": "3f8d6c1e-9b47-4a5f-8c21-0d7e5a2b6f04"
           }
         },
-        "description": "A product in the catalogue. Audited, so every row carries a version and every read and write of one can be made conditional.\n\nOne row as a read returns it. Every field is present unless the request narrowed the projection with `select`; a field with no value is present and null. Fields marked read-only are written by the framework and refused in a request body."
+        "description": "A product in the catalogue. Audited, so every row carries a version and every read and write of one can be made conditional.\n\nOne row as a single read, a create or an update returns it. Every field is present, even one with no value — that field is present and null. Fields marked read-only are written by the framework and refused in a request body."
       },
       "productsCreate": {
         "title": "productsCreate",
         "required": [
           "name",
           "status",
+          "activation_secret",
           "category_id"
         ],
         "type": "object",
@@ -1139,6 +1181,11 @@
             ],
             "description": "Free-form internal notes."
           },
+          "activation_secret": {
+            "maxLength": 64,
+            "type": "string",
+            "description": "A one-time activation token the caller must supply on create and can never read back."
+          },
           "category_id": {
             "type": "string",
             "description": "The category this product belongs to.",
@@ -1158,7 +1205,7 @@
           "items": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/products"
+              "$ref": "#/components/schemas/productsPageItem"
             },
             "description": "The rows in this page, in the requested order."
           },
@@ -1172,6 +1219,146 @@
           }
         },
         "description": "One page of rows, plus the cursor that reads the page after it."
+      },
+      "productsPageItem": {
+        "title": "productsPageItem",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "readOnly": true,
+            "example": "3f8d6c1e-9b47-4a5f-8c21-0d7e5a2b6f04"
+          },
+          "name": {
+            "maxLength": 120,
+            "type": "string",
+            "description": "The product's display name, as it appears on an invoice."
+          },
+          "sku": {
+            "maxLength": 40,
+            "pattern": "^(?:[A-Z]{3}-[0-9]{4})$",
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "The stock-keeping unit, unique across the catalogue."
+          },
+          "contact": {
+            "maxLength": 120,
+            "pattern": "^(?:[^@\\s]+@[^@\\s.]+(\\.[^@\\s.]+)+)$",
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "Who to ask about this product.",
+            "format": "email",
+            "example": "someone@example.com"
+          },
+          "status": {
+            "enum": [
+              "draft",
+              "active",
+              "retired"
+            ],
+            "type": "string",
+            "description": "Where the product is in its life cycle.",
+            "example": "draft"
+          },
+          "price": {
+            "type": [
+              "null",
+              "number"
+            ],
+            "description": "The list price, excluding tax. At most 9 digits in total, 2 of them after the decimal point.",
+            "format": "decimal"
+          },
+          "released_on": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "The day the product went on sale.",
+            "format": "date",
+            "example": "2026-01-31"
+          },
+          "discontinued_at": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "When the product was withdrawn, if it has been.",
+            "format": "date-time",
+            "example": "2026-01-31T09:30:00+00:00"
+          },
+          "in_stock": {
+            "type": [
+              "null",
+              "boolean"
+            ],
+            "description": "Whether any unit is currently on hand."
+          },
+          "specs": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "Whatever the supplier publishes about the product. Accepts any JSON value on a write, and reads back as a string carrying that value's JSON text."
+          },
+          "notes": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "Free-form internal notes."
+          },
+          "slug": {
+            "maxLength": 40,
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "The URL segment this product is published under. Maintained outside the API.",
+            "readOnly": true
+          },
+          "category_id": {
+            "type": "string",
+            "description": "The category this product belongs to.",
+            "format": "uuid",
+            "example": "3f8d6c1e-9b47-4a5f-8c21-0d7e5a2b6f04"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "readOnly": true,
+            "example": "2026-01-31T09:30:00+00:00"
+          },
+          "created_by": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid",
+            "readOnly": true,
+            "example": "3f8d6c1e-9b47-4a5f-8c21-0d7e5a2b6f04"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "readOnly": true,
+            "example": "2026-01-31T09:30:00+00:00"
+          },
+          "updated_by": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid",
+            "readOnly": true,
+            "example": "3f8d6c1e-9b47-4a5f-8c21-0d7e5a2b6f04"
+          }
+        },
+        "description": "A product in the catalogue. Audited, so every row carries a version and every read and write of one can be made conditional.\n\nOne row inside a list's page. Every field is present unless the request narrowed the projection with `select`; a field with no value is present and null. Fields marked read-only are written by the framework and refused in a request body."
       },
       "productsPatch": {
         "title": "productsPatch",
@@ -1250,6 +1437,11 @@
               "string"
             ],
             "description": "Free-form internal notes."
+          },
+          "activation_secret": {
+            "maxLength": 64,
+            "type": "string",
+            "description": "A one-time activation token the caller must supply on create and can never read back."
           },
           "category_id": {
             "type": "string",
@@ -1361,15 +1553,6 @@
         "in": "path",
         "description": "The row's key. A value routing cannot read as a GUID is a 404 from routing itself, before the endpoint runs; a well-formed key naming a row the caller may not see is also a 404, indistinguishable from one that does not exist.",
         "required": true,
-        "schema": {
-          "type": "string",
-          "format": "uuid"
-        }
-      },
-      "tenant": {
-        "name": "X-Alvo-Tenant",
-        "in": "header",
-        "description": "The tenant to act in. An operation on a tenant-scoped entity refuses a caller with no tenant (403) before any rule is consulted, and a key issued for one tenant may not request another. Only the operations of a tenant-scoped entity reference this parameter.",
         "schema": {
           "type": "string",
           "format": "uuid"

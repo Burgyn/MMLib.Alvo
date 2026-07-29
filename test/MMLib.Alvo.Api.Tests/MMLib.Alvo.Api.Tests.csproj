@@ -11,6 +11,11 @@
   -->
   <PropertyGroup>
     <AlvoSharedArchTests>false</AlvoSharedArchTests>
+    <!-- test/_shared/api/AlvoApiWorld.cs calls AddOpenApi itself, playing the host's part for
+         OpenApiDocumentTests (Alvo deliberately does not call it — ApiSetup.AddAlvoApi says why). That
+         call site is what makes ASP.NET's OpenApi XML-comment source generator emit an interceptor into
+         THIS compilation, which needs the generated namespace enabled here. -->
+    <InterceptorsNamespaces>$(InterceptorsNamespaces);Microsoft.AspNetCore.OpenApi.Generated</InterceptorsNamespaces>
   </PropertyGroup>
 
   <ItemGroup>

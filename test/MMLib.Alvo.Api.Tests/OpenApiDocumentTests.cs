@@ -24,6 +24,17 @@ namespace MMLib.Alvo.Api.Tests;
 /// document with no paths passes trivially; the expected sets here come from the mapped endpoint table, from
 /// the descriptor file, or from a literal, never from the same walk being measured.
 /// </para>
+/// <para>
+/// <b>Two limitations this suite knowingly does not close, stated rather than left silent.</b>
+/// <see cref="Every_documented_status_code_is_one_the_endpoint_can_actually_return"/>'s reverse direction —
+/// "no reachable status goes undocumented" — is bounded by <see cref="ProbesAsync"/>'s own hand-written probe
+/// list: a status the framework can reach but this suite never provokes (a 415, a 405) would be invisible to
+/// it, the same "pin the set from outside" gap this PR has hit before. And
+/// <see cref="The_filter_sort_and_paging_parameters_are_documented_per_list_route"/> validates the filter
+/// parameter set only against the document's own read schema, never against what
+/// <c>QueryStringParser</c> actually accepts per field type — so the document could in principle describe a
+/// filter the parser refuses. Closing either is a real improvement; it is not attempted here.
+/// </para>
 /// </remarks>
 public sealed class OpenApiDocumentTests
 {
@@ -198,14 +209,16 @@ public sealed class OpenApiDocumentTests
     }
 
     /// <summary>
-    /// A <c>hidden</c> field appears in no schema, no parameter and no prose — <b>a confidentiality fact, not a
-    /// tidiness one</b>.
+    /// An <b>optional</b> <c>hidden</c> field appears in no schema, no parameter and no prose — <b>a
+    /// confidentiality fact, not a tidiness one</b>.
     /// </summary>
     /// <remarks>
     /// <para>
     /// A hidden field's <em>name</em> in a public document is exactly the schema oracle the query parser's
     /// refusals and the port's deny reasons are worded to avoid: it answers "does this entity have a field
-    /// called X" for every caller at once, including the ones the mask exists to keep out.
+    /// called X" for every caller at once, including the ones the mask exists to keep out. That is the rule
+    /// for an <em>optional</em> hidden field without qualification; a <c>required</c> one is the narrow,
+    /// deliberate exception <see cref="A_required_hidden_field_is_published_in_write_schemas_only"/> covers.
     /// </para>
     /// <para>
     /// <b>It is asserted structurally, over the document's own property and parameter names, not as a substring
@@ -220,7 +233,7 @@ public sealed class OpenApiDocumentTests
     /// </para>
     /// </remarks>
     [Fact]
-    public async Task A_hidden_field_appears_in_no_schema_at_all()
+    public async Task An_optional_hidden_field_appears_in_no_schema_at_all()
     {
         var confidential = DescriptorFieldDescription("products", "cost");
         await using var world = await StoreAsync();
@@ -231,9 +244,49 @@ public sealed class OpenApiDocumentTests
         confidential.ShouldNotBeNullOrWhiteSpace(
             "the fixture's hidden field must carry a description, or the phrase check below asserts nothing");
         names.ShouldContain("price", "a visible decimal must be published, or this fact holds over an empty document");
-        names.ShouldNotContain("cost", "a hidden field's name must appear in no schema and no parameter");
+        names.ShouldNotContain("cost", "an optional hidden field's name must appear in no schema and no parameter");
         text.ShouldNotContain(
             confidential, Case.Sensitive, "the hidden field's own description must not reach the document either");
+    }
+
+    /// <summary>
+    /// A <c>hidden</c> field the descriptor also marks <c>required</c> is the one deliberate exception: its
+    /// name reaches the two write schemas — never a response, and never a filter parameter — because a
+    /// mandatory field a caller cannot see could not be supplied at all.
+    /// </summary>
+    /// <remarks>
+    /// This is the narrowed rule a reviewer's objection produced: excluding <em>every</em> hidden field from
+    /// every request schema would silently drop a field the caller is required to send, so the create becomes
+    /// unperformable by anyone reading only the document. The fixture's field is called
+    /// <c>activation_secret</c> — a mandatory activation token, exactly the "must be supplied, never returned"
+    /// shape the ruling is written for.
+    /// </remarks>
+    [Fact]
+    public async Task A_required_hidden_field_is_published_in_write_schemas_only()
+    {
+        var declared = DescriptorFieldDescription("products", "activation_secret");
+        await using var world = await StoreAsync();
+
+        var document = await world.OpenApiDocumentAsync();
+
+        declared.ShouldNotBeNullOrWhiteSpace(
+            "the fixture's required-and-hidden field must carry a description, or this fact proves nothing");
+        foreach (var schema in new[] { "productsCreate", "productsPatch" })
+        {
+            Property(document, schema, "activation_secret")["description"]!.GetValue<string>().ShouldBe(
+                declared, $"'{schema}' must publish the required hidden field, since a caller must know its "
+                + "name to supply it");
+        }
+
+        Component(document, "schemas", "productsCreate")["required"]!.AsArray()
+            .Select(value => value!.GetValue<string>()).ShouldContain(
+                "activation_secret", "a hidden field the descriptor requires must still be required to create");
+        Component(document, "schemas", "products")["properties"]!.AsObject()
+            .ContainsKey("activation_secret").ShouldBeFalse(
+                "a required hidden field must still carry no value in any response — 'required' governs a "
+                + "write, not what a read returns");
+        ListParameterNames(document, "products").ShouldNotContain(
+            "activation_secret", "a required hidden field must still contribute no filter parameter");
     }
 
     /// <summary>
@@ -309,6 +362,171 @@ public sealed class OpenApiDocumentTests
             .ShouldBe(new AlvoApiOptions().MaxPageSize, "the published maximum is the one the parser enforces");
         ListParameter(document, "products", ReservedQueryKeys.After)["schema"]!["maxLength"]!.GetValue<int>()
             .ShouldBe(QueryStringParser.MaxCursorLength, "the published cursor bound is the one the parser enforces");
+    }
+
+    /// <summary>
+    /// A shared parameter or header no mapped operation could ever reference is not published — an orphan
+    /// component is the same defect the <c>ProducesProblem</c> deviation avoids for a schema.
+    /// </summary>
+    /// <remarks>
+    /// This fixture has an audited entity (<c>products</c>) and no tenant-scoped one, so it proves one
+    /// direction of each pair: the <c>ifNoneMatch</c> parameter and the <c>ETag</c> header component must be
+    /// published (something references them), and the <c>tenant</c> parameter must not be (nothing does). The
+    /// other direction — a tenant-scoped entity publishing <c>tenant</c> and, having no audited entity,
+    /// publishing no <c>ifNoneMatch</c> — is <see cref="A_shared_parameter_reaches_the_entity_that_references_it_and_no_orphan_is_published"/>,
+    /// over the project's own <c>tenant-notes</c> fixture rather than a further-loaded copy of this one.
+    /// </remarks>
+    [Fact]
+    public async Task A_shared_parameter_or_header_unused_by_any_entity_is_not_published()
+    {
+        await using var world = await StoreAsync();
+        var document = await world.OpenApiDocumentAsync();
+
+        HasComponent(document, "parameters", "ifNoneMatch").ShouldBeTrue(
+            "'products' is audited, so the shared 'ifNoneMatch' parameter must be published");
+        HasComponent(document, "headers", "ETag").ShouldBeTrue(
+            "'products' is audited, so the shared 'ETag' header must be published");
+        HasComponent(document, "parameters", "tenant").ShouldBeFalse(
+            "no entity in this fixture is tenant-scoped, so the shared 'tenant' parameter must not be an orphan");
+    }
+
+    /// <summary>
+    /// The reciprocal of <see cref="A_shared_parameter_or_header_unused_by_any_entity_is_not_published"/>: a
+    /// shared parameter really is published once some operation references it.
+    /// </summary>
+    /// <remarks>
+    /// Over the project's own <c>tenant-notes</c> fixture — one tenant-scoped, non-audited entity — rather
+    /// than a tenant-scoped entity added to <c>documented-store</c>: that fixture and this test class's forty
+    /// pinned counts and one 1517-line snapshot are already load-bearing for six other facts, and
+    /// <c>tenant-notes</c> already exists, purpose-built, and is exercised elsewhere
+    /// (<c>DataApiAuthTests</c>). Reusing it proves the same production behaviour — <c>Reusable</c> publishing
+    /// a shared component if and only if something in the document references it — at a fraction of the risk
+    /// a bigger fixture would add for the same fact.
+    /// </remarks>
+    [Fact]
+    public async Task A_shared_parameter_reaches_the_entity_that_references_it_and_no_orphan_is_published()
+    {
+        await using var world = await AlvoApiWorld.FromDescriptorAsync(
+            "tenant-notes.alvo.json", [], new AlvoApiWorldSetup(MapOpenApiDocument: true));
+        var document = await world.OpenApiDocumentAsync();
+
+        HasComponent(document, "parameters", "tenant").ShouldBeTrue(
+            "'notes' is tenant-scoped, so the shared 'tenant' parameter must be published");
+        HasComponent(document, "parameters", "ifNoneMatch").ShouldBeFalse(
+            "'notes' carries no version, so the shared 'ifNoneMatch' parameter must not be an orphan");
+        HasComponent(document, "headers", "ETag").ShouldBeFalse(
+            "'notes' carries no version, so the shared 'ETag' header must not be an orphan");
+    }
+
+    /// <summary>
+    /// The row a single read, a create or an update returns requires every visible field; the page item a
+    /// list's rows are requires none — because <c>select</c> can narrow only the page.
+    /// </summary>
+    /// <remarks>
+    /// <c>GetAsync</c> takes no projection and <c>MapGet</c> parses no query for the other two operations, so
+    /// none of the three can return a partial row — which is what makes <c>required</c> a real claim on
+    /// <c>products</c> rather than a false one. <c>select</c> narrows only the page, so
+    /// <c>productsPageItem</c> keeping no <c>required</c> list is the honest reflection of that, not an
+    /// oversight the row schema happens to fix.
+    /// </remarks>
+    [Fact]
+    public async Task The_row_schema_requires_every_visible_field_while_the_page_item_schema_requires_none()
+    {
+        await using var world = await StoreAsync();
+        var document = await world.OpenApiDocumentAsync();
+
+        var row = Component(document, "schemas", "products");
+        var pageItem = Component(document, "schemas", "productsPageItem");
+        var required = row["required"]!.AsArray().Select(value => value!.GetValue<string>()).ToList();
+
+        required.ShouldContain("id", "a single read always carries the row's key, projection or not");
+        required.ShouldContain("name", "a single read always carries a declared field's value, even if null");
+        pageItem.ContainsKey("required").ShouldBeFalse(
+            "select narrows a page's rows, so nothing in the page item schema can be mandatory");
+        Component(document, "schemas", "productsPage")["properties"]!["items"]!["items"]!["$ref"]!
+            .GetValue<string>().ShouldBe(
+                "#/components/schemas/productsPageItem",
+                "the page's rows must reference the unconstrained item schema, not the row schema and its "
+                + "required list");
+    }
+
+    /// <summary>
+    /// However many times a host's own registration runs <c>AddAlvoApi</c> — <c>AddAlvo</c> and
+    /// <c>AddDataApi</c> both call it — the overview paragraph is appended to <c>info.description</c> exactly
+    /// once.
+    /// </summary>
+    /// <remarks>
+    /// This is the fact <c>ApiSetup.cs</c>'s own remarks on <see cref="AlvoOpenApiSetup"/> name: the
+    /// transformer used to be registered once per <c>AddAlvoApi</c> call, and since
+    /// <c>AddOpenApi(configure)</c> is additive, the same document got enriched twice — the overview paragraph
+    /// appeared verbatim in <c>info.description</c> twice over. <see cref="StoreAsync"/>'s own world already
+    /// calls <c>AddAlvo</c> and <c>AddDataApi</c> together, exactly as a real host does, so this needs no
+    /// fixture of its own — only counting how many times the paragraph's own text occurs.
+    /// </remarks>
+    [Fact]
+    public async Task The_overview_is_appended_once_however_often_alvo_is_registered()
+    {
+        await using var world = await StoreAsync();
+        var document = await world.OpenApiDocumentAsync();
+
+        var description = document["info"]!["description"]!.GetValue<string>();
+
+        Occurrences(description, DataApiDocumentation.Overview).ShouldBe(
+            1, "AddAlvoApi runs twice (AddAlvo and AddDataApi both call it), and neither run may enrich the "
+            + "document a second time");
+    }
+
+    /// <summary>
+    /// A host that already wrote its own <c>info.description</c> keeps it — Alvo appends its own overview
+    /// after it, rather than overwriting what the host said.
+    /// </summary>
+    /// <remarks>
+    /// The report that shipped this feature recorded this exact gap: replacing the append with a plain
+    /// overwrite of the host's <c>info.description</c> left every other fact and the snapshot green, because
+    /// the fixture host wrote no description of its own — so nothing before this fact could have caught it.
+    /// <see cref="AlvoApiWorldSetup.HostInfoDescription"/> is written by a document transformer the world
+    /// registers <em>before</em> <c>AddAlvo</c>, so it runs before Alvo's own and really stands in for a host
+    /// that documents itself first.
+    /// </remarks>
+    [Fact]
+    public async Task The_hosts_own_description_is_kept_and_the_overview_is_appended_after_it()
+    {
+        const string hostDescription = "This host's own words about its own API, written before Alvo's.";
+        await using var world = await AlvoApiWorld.FromDescriptorAsync(
+            "documented-store.alvo.json",
+            [_admin, _narrow],
+            new AlvoApiWorldSetup(MapOpenApiDocument: true, HostInfoDescription: hostDescription));
+        var document = await world.OpenApiDocumentAsync();
+
+        var description = document["info"]!["description"]!.GetValue<string>();
+
+        description.ShouldStartWith(hostDescription, Case.Sensitive, "the host's own text must survive, first");
+        description.ShouldContain(
+            DataApiDocumentation.Overview, Case.Sensitive, "Alvo's overview must still be appended after it");
+    }
+
+    /// <summary>
+    /// Every entity's document-level tag carries the descriptor's own description — not just the bare name
+    /// <c>DataApiEndpoints.WithTags</c> puts there before the transformer runs.
+    /// </summary>
+    /// <remarks>
+    /// The report that shipped this feature recorded the defect this guards: <c>OpenApiTag</c>'s equality is
+    /// by name, so a naive "add a second, described tag" was silently discarded by the <see cref="HashSet{T}"/>
+    /// that already held the bare one, and every tag published as name-only while the descriptor described
+    /// every entity.
+    /// </remarks>
+    [Fact]
+    public async Task Every_entity_tag_carries_the_descriptors_own_description()
+    {
+        await using var world = await StoreAsync();
+        var document = await world.OpenApiDocumentAsync();
+
+        foreach (var entity in _entities)
+        {
+            TagDescription(document, entity).ShouldBe(
+                DescriptorEntityDescription(entity),
+                $"'{entity}''s tag must carry the descriptor's own description, not a bare name");
+        }
     }
 
     /// <summary>
@@ -393,22 +611,58 @@ public sealed class OpenApiDocumentTests
         document["components"]![map]![id]?.AsObject()
         ?? throw new InvalidOperationException($"The document declares no '{map}/{id}' component.");
 
+    /// <summary>Whether the document declares a component under <c>components/&lt;map&gt;/&lt;id&gt;</c>.</summary>
+    /// <remarks>
+    /// Unlike <see cref="Component"/>, absence is the expected answer half the time this is called — an
+    /// orphan-avoidance fact needs to assert "not published" as much as "published" — so this reports rather
+    /// than throws.
+    /// </remarks>
+    private static bool HasComponent(JsonObject document, string map, string id) =>
+        document["components"]?[map]?.AsObject()?.ContainsKey(id) == true;
+
+    /// <summary>How many times <paramref name="needle"/> occurs in <paramref name="haystack"/>, non-overlapping.</summary>
+    private static int Occurrences(string haystack, string needle)
+    {
+        var count = 0;
+        var index = 0;
+        while ((index = haystack.IndexOf(needle, index, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            index += needle.Length;
+        }
+
+        return count;
+    }
+
+    /// <summary>One entity's document-level tag description, or <see langword="null"/> if it carries none.</summary>
+    private static string? TagDescription(JsonObject document, string entity) =>
+        document["tags"]!.AsArray()
+            .Select(tag => tag!.AsObject())
+            .FirstOrDefault(tag => string.Equals(tag["name"]!.GetValue<string>(), entity, StringComparison.Ordinal))
+            ?["description"]?.GetValue<string>();
+
     private static JsonObject Property(JsonObject document, string schema, string field) =>
         Component(document, "schemas", schema)["properties"]![field]?.AsObject()
         ?? throw new InvalidOperationException($"Schema '{schema}' declares no '{field}' property.");
 
     /// <summary>
-    /// Every name the document declares anywhere a field's name could surface: a schema property, a parameter,
-    /// or a response header.
+    /// Every name the document declares anywhere a field's name could surface: a schema property or a
+    /// parameter. A response header is not one of them — every header this document publishes
+    /// (<c>ETag</c>, <c>Location</c>, <c>Cache-Control</c>, <c>WWW-Authenticate</c>) is a fixed, non-field
+    /// name, so there is nothing for this walk to find there.
     /// </summary>
     /// <remarks>
     /// Structural rather than textual on purpose — see the confidentiality fact's own remarks for why a
-    /// substring search over this document is the wrong instrument.
+    /// substring search over this document is the wrong instrument. Absence of the schema map throws with an
+    /// explanation, exactly as <see cref="Component"/> does for one component inside it, rather than the bare
+    /// NRE a direct <c>document["components"]!["schemas"]!</c> would produce.
     /// </remarks>
     private static HashSet<string> EveryDeclaredName(JsonObject document)
     {
         var names = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var schema in document["components"]!["schemas"]!.AsObject())
+        var schemas = document["components"]?["schemas"]?.AsObject()
+            ?? throw new InvalidOperationException("The document declares no 'components/schemas' map.");
+        foreach (var schema in schemas)
         {
             foreach (var property in schema.Value!.AsObject()["properties"]?.AsObject() ?? [])
             {
@@ -466,6 +720,12 @@ public sealed class OpenApiDocumentTests
             Path.Combine(AppContext.BaseDirectory, "descriptors", "documented-store.alvo.json")))!
         ["entities"]![entity]!["fields"]![field]!.AsObject();
 
+    /// <summary>One entity's own <c>description</c> as the fixture descriptor declares it.</summary>
+    private static string? DescriptorEntityDescription(string entity) =>
+        JsonNode.Parse(File.ReadAllText(
+            Path.Combine(AppContext.BaseDirectory, "descriptors", "documented-store.alvo.json")))!
+        ["entities"]![entity]!["description"]?.GetValue<string>();
+
     private static JsonObject CategoryBody() => new() { ["name"] = "Hand tools" };
 
     private static JsonObject ProductBody(Guid categoryId) => new()
@@ -473,6 +733,7 @@ public sealed class OpenApiDocumentTests
         ["name"] = "Claw hammer",
         ["status"] = "draft",
         ["category_id"] = categoryId.ToString(),
+        ["activation_secret"] = "tok-abcdef0123456789",
     };
 
     private static JsonObject Body(string entity, Guid categoryId) =>

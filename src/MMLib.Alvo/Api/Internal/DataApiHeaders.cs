@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore.Http;
 using Microsoft.OpenApi;
+using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
 using System.Text.Json.Nodes;
 
@@ -69,8 +70,10 @@ internal static class DataApiHeaders
     }
 
     /// <summary>
-    /// Registers the four headers as document components, so each is described once rather than once per
-    /// response object.
+    /// Registers, as document components, every one of the four headers that at least one of
+    /// <paramref name="operations"/> can actually answer with — so each described header is described once
+    /// rather than once per response object, and a header no generated response ever carries (<c>ETag</c> on
+    /// a descriptor with no audited entity) is never an orphan component.
     /// </summary>
     /// <remarks>
     /// The component id is the header's own field name, which is what a reader looking for
@@ -78,13 +81,62 @@ internal static class DataApiHeaders
     /// cannot collide with a schema or a parameter component.
     /// </remarks>
     /// <param name="document">The document being built.</param>
-    internal static void AddTo(OpenApiDocument document)
+    /// <param name="operations">Every generated endpoint's operation and the entity it serves.</param>
+    internal static void AddTo(
+        OpenApiDocument document, IEnumerable<(DataOperation Operation, EntitySchema Entity)> operations)
     {
         ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(operations);
+
+        var used = UsedIds(operations);
         document.AddComponent(CacheControl, NoStore);
-        document.AddComponent(EntityTagHeader, EntityTag);
-        document.AddComponent(LocationHeader, Location);
-        document.AddComponent(ChallengeHeader, Challenge);
+        if (used.Contains(EntityTagHeader))
+        {
+            document.AddComponent(EntityTagHeader, EntityTag);
+        }
+
+        if (used.Contains(LocationHeader))
+        {
+            document.AddComponent(LocationHeader, Location);
+        }
+
+        if (used.Contains(ChallengeHeader))
+        {
+            document.AddComponent(ChallengeHeader, Challenge);
+        }
+    }
+
+    /// <summary>
+    /// Every header id at least one of <paramref name="operations"/> answers with. <c>Cache-Control</c> is
+    /// not among them — <see cref="AddTo"/> registers it unconditionally, since every generated response
+    /// carries it, refusals included.
+    /// </summary>
+    /// <param name="operations">Every generated endpoint's operation and the entity it serves.</param>
+    private static HashSet<string> UsedIds(IEnumerable<(DataOperation Operation, EntitySchema Entity)> operations)
+    {
+        var used = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (operation, entity) in operations)
+        {
+            foreach (var response in DataApiDocumentation.ResponsesFor(operation, entity))
+            {
+                if (CarriesEntityTag(response.Status) && AlvoManagedColumns.VersionColumn(entity) is not null)
+                {
+                    used.Add(EntityTagHeader);
+                }
+
+                if (response.Status == StatusCodes.Status201Created)
+                {
+                    used.Add(LocationHeader);
+                }
+
+                if (response.Status == StatusCodes.Status401Unauthorized)
+                {
+                    used.Add(ChallengeHeader);
+                }
+            }
+        }
+
+        return used;
     }
 
     private const string CacheControl = "Cache-Control";
