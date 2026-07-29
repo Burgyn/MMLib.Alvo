@@ -162,32 +162,44 @@ public sealed class IdempotencyTests
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Three outcomes are distinguishable here and only one is right. A digest that omitted the entity would
-    /// <em>match</em>, and the port would then re-read the recorded owner id under <c>vehicles</c>, find
-    /// nothing, and answer <b>404</b> — the fail-closed direction the port's remarks promise, and still wrong.
-    /// A digest that ignored the body entirely as well would answer the owner's row for a request about a
-    /// vehicle. And an implementation that scoped the record per entity would answer <b>201</b>, which is a
-    /// second row under one key.
+    /// <b>The two bodies are byte-identical, and the first version of this fact was worthless because they were
+    /// not.</b> Written over <c>owners</c> and <c>vehicles</c> — whose valid bodies necessarily differ — it
+    /// passed with the entity and the route <em>removed from the digest entirely</em>, because the bodies alone
+    /// still made the fingerprints differ. Measured, not reasoned: that mutant killed no fact in the file. Two
+    /// entities of the same declared shape are what make the entity axis the only thing under test.
     /// </para>
     /// <para>
-    /// The vehicle body is a valid one — it references the owner the first request created — so nothing but
-    /// the key can be what refuses it.
+    /// Three outcomes are distinguishable and only one is right. With the entity in the digest the fingerprints
+    /// differ and this is a <b>409</b>. With it out, they match, the port replays — re-reading the recorded
+    /// <c>notes</c> row id under <c>ledgers</c>, which answers a not-found or a policy refusal depending on the
+    /// second entity's own rules, never the row the caller asked about. That is the fail-closed direction the
+    /// port promises, and it is still the wrong answer. And an implementation that recorded the key per entity
+    /// would answer <b>201</b>, which is a second row under one key.
+    /// </para>
+    /// <para>
+    /// <c>masked-notes</c> is the descriptor because <c>notes</c> and <c>ledgers</c> declare the same fields, so
+    /// one body is valid for both.
     /// </para>
     /// </remarks>
     [Fact]
     public async Task The_same_key_on_a_different_entity_is_409_not_a_replay()
     {
-        await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin]);
+        var key = new TestApiKey(
+            "both-key", ["authenticated"], ["notes:read", "notes:write", "ledgers:read", "ledgers:write"]);
+        await using var world = await AlvoApiWorld.FromDescriptorAsync("masked-notes.alvo.json", [key]);
+        var body = new JsonObject { ["title"] = "Crossed" };
 
-        using var owner = await PostAsync(world, "owners", new JsonObject { ["name"] = "Fleet Ltd" }, "crossed-1");
-        owner.StatusCode.ShouldBe(HttpStatusCode.Created, await owner.ReadTextAsync());
-        using var vehicle = await PostAsync(world, "vehicles", Vehicle(await IdOfAsync(owner)), "crossed-1");
+        using var note = await world.SendAsync(
+            HttpMethod.Post, "/api/notes", key, body: body, headers: Key("crossed-1"));
+        using var ledger = await world.SendAsync(
+            HttpMethod.Post, "/api/ledgers", key, body: body, headers: Key("crossed-1"));
 
-        vehicle.StatusCode.ShouldBe(
+        note.StatusCode.ShouldBe(HttpStatusCode.Created, await note.ReadTextAsync());
+        ledger.StatusCode.ShouldBe(
             HttpStatusCode.Conflict,
-            $"the same key on another entity is a different request, not a replay: {await vehicle.ReadTextAsync()}");
-        (await vehicle.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.IdempotencyConflict);
-        (await world.CountRowsAsync("vehicles")).ShouldBe(0, "the refused create must not have written a vehicle");
+            $"the same key on another entity is a different request, not a replay: {await ledger.ReadTextAsync()}");
+        (await ledger.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.IdempotencyConflict);
+        (await world.CountRowsAsync("ledgers")).ShouldBe(0, "the refused create must not have written a ledger");
     }
 
     /// <summary>
