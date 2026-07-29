@@ -100,11 +100,17 @@ namespace MMLib.Alvo.Data;
 ///     </description>
 ///   </item>
 ///   <item>
-///     <term><see cref="InvalidOperationException"/></term>
+///     <term><see cref="InvalidOperationException"/>, and <see cref="ArgumentNullException"/></term>
 ///     <description>
 ///     <b>An invariant the implementation itself relies on is broken</b> — a schema this port cannot serve, a
 ///     field the read model does not map, a bound value with no known origin. Never caused by a
 ///     well-formed request from an authorized caller. Render 500.
+///     <para>
+///     <see cref="ArgumentNullException"/> belongs <em>here</em> rather than to the malformed-query family it
+///     derives from, because no request can express a null argument — the first row's own aside carries the
+///     full reasoning. It is named in both rows on purpose: an implementer arrives at this table from
+///     whichever family their exception is in, and the exclusion was findable from one direction only.
+///     </para>
 ///     </description>
 ///   </item>
 /// </list>

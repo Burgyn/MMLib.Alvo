@@ -174,6 +174,79 @@ public class DescriptorValidatorTests
     }
 
     /// <summary>
+    /// <b>The validator and the mapper agree, entity by entity, on whether <c>tenant_id</c> is a
+    /// framework-managed column</b> — across the whole project-tenancy × entity-tenancy matrix.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The two passes answer this question from different representations: the validator from raw JSON (it must,
+    /// because it runs before the descriptor is parseable) and the mapper from a typed
+    /// <c>EntityDescriptor</c>. They were a line-for-line duplicate with nothing tying them, and the two answers
+    /// are not independent — <b>the validator decides whether declaring <c>tenant_id</c> is refused, the mapper
+    /// decides whether <c>tenant_id</c> is injected</b>. A divergence is therefore not a cosmetic mismatch: in
+    /// one direction a descriptor is reported as wrong that would have applied; in the other — worse — the
+    /// validator says nothing and the mapper then throws, turning a structured error a dashboard can show into
+    /// an exception at apply.
+    /// </para>
+    /// <para>
+    /// The defaulting rule is now shared (<c>DescriptorToSchemaMapper.ResolveTenancy</c>), so what this fact
+    /// still protects is the pair of <em>parsings</em> and the threading Task 6 added: the project root's
+    /// <c>tenancy.enabled</c> read once and passed down to each entity. Drop that threading and the
+    /// <c>enabled + declares nothing</c> row fails, which is exactly the case a multi-tenant project is built
+    /// from.
+    /// </para>
+    /// <para>
+    /// Both halves are asserted from <em>observable behaviour</em> rather than by calling the two private
+    /// inferences: the entity declares its own <c>tenant_id</c>, so "is it managed" shows up as the validator
+    /// reporting an error at that field and the mapper throwing. A fact that compared the inferences directly
+    /// would still pass if one of them stopped being consulted.
+    /// </para>
+    /// </remarks>
+    /// <param name="projectTenancyEnabled">Whether the project's <c>tenancy.enabled</c> is on.</param>
+    /// <param name="entityTenancy">What the entity declares, or <see langword="null"/> for nothing.</param>
+    /// <param name="carriesTenantId">Whether the entity should therefore carry a managed <c>tenant_id</c>.</param>
+    [Theory]
+    [InlineData(true, null, true)]        // enabled + says nothing → scoped: the multi-tenant default
+    [InlineData(true, "scoped", true)]    // enabled + explicit scoped
+    [InlineData(true, "global", false)]   // enabled + explicit opt-out
+    [InlineData(false, null, false)]      // disabled + says nothing → no tenancy at all
+    [InlineData(false, "scoped", true)]   // disabled + entity opts in anyway
+    [InlineData(false, "global", false)]  // disabled + explicit global
+    public void The_validator_and_the_mapper_agree_on_which_entities_carry_a_tenant_id(
+        bool projectTenancyEnabled, string? entityTenancy, bool carriesTenantId)
+    {
+        var json = $$"""
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "tenancy": { "enabled": {{(projectTenancyEnabled ? "true" : "false")}} },
+          "entities": { "notes": {
+            {{DeclaredTenancy(entityTenancy)}}
+            "fields": {
+              "title": { "type": "string" },
+              "tenant_id": { "type": "uuid" } } } } }
+        """;
+
+        var reportedByTheValidator = _validator.Validate(json).Errors
+            .Any(error => error.Path == "/entities/notes/fields/tenant_id");
+        var refusedByTheMapper = Record.Exception(
+            () => DescriptorToSchemaMapper.Map(AlvoDescriptor.Parse(json))) is InvalidDataException;
+
+        reportedByTheValidator.ShouldBe(
+            carriesTenantId,
+            "the validator must treat 'tenant_id' as managed exactly when tenancy resolves to scoped "
+            + $"(project enabled={projectTenancyEnabled}, entity declares '{entityTenancy ?? "nothing"}')");
+        refusedByTheMapper.ShouldBe(
+            reportedByTheValidator,
+            "the two passes must agree: one decides whether declaring 'tenant_id' is reported, the other "
+            + "whether 'tenant_id' is injected, and a descriptor accepted by the first and thrown out by the "
+            + "second is a structured error nobody ever sees");
+    }
+
+    /// <summary>The entity's own <c>tenancy</c> declaration, or nothing at all.</summary>
+    /// <param name="entityTenancy">The declared value, or <see langword="null"/> to declare none.</param>
+    private static string DeclaredTenancy(string? entityTenancy) =>
+        entityTenancy is null ? string.Empty : $@"""tenancy"": ""{entityTenancy}"",";
+
+    /// <summary>
     /// <b>The table covers every hook point the frozen schema declares</b> — asserted against
     /// <c>schema/project.schema.json</c>, not against a copy of the list.
     /// </summary>

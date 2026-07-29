@@ -107,6 +107,15 @@ internal static class DescriptorToSchemaMapper
 
         var tenancy = ResolveTenancy(e.Tenancy, tenancyEnabled);
         bool audit = e.Audit == true;
+
+        // softDelete is hardcoded false, and it is NOT a shortcut to tidy away: 'softDelete' is an entry in
+        // UnhonouredFeatures.OnAnEntity, so EnsureEveryDeclaredFeatureIsHonoured above has already thrown for
+        // any entity that declares it. Reading e.SoftDelete here would be a second answer to a question the
+        // refusal has already closed — and one that could disagree with it.
+        //
+        // WHEN SOFT DELETE LANDS, both of these change together: delete the table entry, then thread
+        // `e.SoftDelete == true` through here and into EntitySchema.SoftDelete below. Until then 'deleted_at'
+        // is DOUBLY dead code — see AddManagedColumns' own remark, which is where the consequence bites.
         AddManagedColumns(fields, e, tenancy, audit, softDelete: false);
 
         var indexes = (e.Indexes ?? [])
@@ -118,6 +127,8 @@ internal static class DescriptorToSchemaMapper
             RenamedFrom = e.RenamedFrom,
             Storage = EntityStorage.Physical,
             Tenancy = tenancy,
+
+            // Same hardcode, same reason, same day it changes — see the comment above AddManagedColumns.
             SoftDelete = false,
             Audit = audit,
             Fields = fields,
@@ -125,6 +136,37 @@ internal static class DescriptorToSchemaMapper
         };
     }
 
+    /// <summary>Injects the managed columns an entity's traits earn.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b><c>deleted_at</c>'s branch is unreachable today, and doubly so.</b> <c>softDelete</c> is an entry in
+    /// <see cref="UnhonouredFeatures.OnAnEntity"/>, so <c>MapEntity</c> refuses any entity declaring it before
+    /// reaching here — <em>and</em> <c>MapEntity</c> passes <c>softDelete: false</c> unconditionally, so even
+    /// with the table entry gone this branch would still never run. Two independent reasons, either of which is
+    /// enough.
+    /// </para>
+    /// <para>
+    /// <b>Why that is worth a comment rather than a deletion.</b> The branch is the shape soft delete inherits,
+    /// exactly as PR2 kept the descriptor flag's shape while refusing the behaviour. But it means
+    /// <c>AddManagedColumn(…, DeletedAt, …)</c> — including the refusal it now performs when an entity declares
+    /// <c>deleted_at</c> itself — is covered by <b>no fact</b>, because no fact can drive it: every route to it
+    /// is closed. So the day soft delete lands, this refusal path goes live and the suite will not notice.
+    /// </para>
+    /// <para>
+    /// <b>What the implementer owes, then.</b> Removing the <c>softDelete</c> table entry and threading
+    /// <c>e.SoftDelete</c> is not the whole change — it also needs a fact that an entity declaring its own
+    /// <c>deleted_at</c> is refused, which is the fact <c>ManagedColumnNames</c>' per-name reason exists for and
+    /// which today has nothing to assert against. <c>AlvoManagedColumnsTests</c> asserts the <em>authority</em>
+    /// reports <c>deleted_at</c> for the trait; nothing asserts the mapper acts on it.
+    /// </para>
+    /// </remarks>
+    /// <param name="fields">The mapped field list being built.</param>
+    /// <param name="e">The entity descriptor.</param>
+    /// <param name="tenancy">The resolved tenancy mode.</param>
+    /// <param name="audit">Whether the entity declares <c>audit</c>.</param>
+    /// <param name="softDelete">
+    /// Whether the entity declares <c>softDelete</c> — always <see langword="false"/> today; see the remarks.
+    /// </param>
     private static void AddManagedColumns(
         List<FieldSchema> fields, EntityDescriptor e, TenancyMode? tenancy, bool audit, bool softDelete)
     {
@@ -207,12 +249,44 @@ internal static class DescriptorToSchemaMapper
     private static FieldSchema ActorColumn(string name) =>
         new() { Name = name, Type = SchemaFieldType.Uuid, Nullable = true };
 
-    private static TenancyMode? ResolveTenancy(EntityTenancy? entityTenancy, bool tenancyEnabled) => entityTenancy switch
-    {
-        EntityTenancy.Global => TenancyMode.Global,
-        EntityTenancy.Scoped => TenancyMode.Scoped,
-        _ => tenancyEnabled ? TenancyMode.Scoped : null,
-    };
+    private static TenancyMode? ResolveTenancy(EntityTenancy? entityTenancy, bool tenancyEnabled) =>
+        ResolveTenancy(
+            entityTenancy switch
+            {
+                EntityTenancy.Global => TenancyMode.Global,
+                EntityTenancy.Scoped => TenancyMode.Scoped,
+                _ => null,
+            },
+            tenancyEnabled);
+
+    /// <summary>
+    /// <b>The one rule for what an entity's tenancy resolves to</b>, given what it declared for itself and
+    /// whether the project turns tenancy on.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Shared with <c>DescriptorValidator</c> deliberately.</b> That pass answers the same question from raw
+    /// JSON — it must, because it runs before the descriptor is parseable — and for one commit it carried a
+    /// line-for-line copy of this rule. The two answers are not independent: the validator uses it to decide
+    /// whether an entity carries a framework-managed <c>tenant_id</c> and therefore whether declaring one is
+    /// refused, while this mapper uses it to decide whether to <em>inject</em> one. Let them drift and the
+    /// failure is a descriptor refused that would have been injected — or, worse, the reverse: accepted by the
+    /// validator and then refused by the mapper, which is a structured error the dashboard never shows becoming
+    /// an exception at apply.
+    /// </para>
+    /// <para>
+    /// <b>Only the defaulting is shared; each pass parses its own representation.</b> Turning
+    /// <see cref="EntityTenancy"/> or the JSON string <c>"scoped"</c> into a <see cref="TenancyMode"/> is
+    /// irreducibly per-pass, so that stays where it is and the fact
+    /// <c>DescriptorValidatorTests.The_validator_and_the_mapper_agree_on_which_entities_carry_a_tenant_id</c>
+    /// ties the two parsings end to end. This method is what stops the <em>rule</em> needing that fact to catch
+    /// it.
+    /// </para>
+    /// </remarks>
+    /// <param name="declared">The entity's own declared tenancy, or <see langword="null"/> when it declares none.</param>
+    /// <param name="projectTenancyEnabled">Whether the project's <c>tenancy.enabled</c> is on.</param>
+    internal static TenancyMode? ResolveTenancy(TenancyMode? declared, bool projectTenancyEnabled) =>
+        declared ?? (projectTenancyEnabled ? TenancyMode.Scoped : null);
 
     private static FieldSchema MapField(
         string name, FieldDescriptor f, IReadOnlyDictionary<string, string> formats)

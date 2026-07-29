@@ -240,7 +240,33 @@ internal sealed class DescriptorValidator : IDescriptorValidator
             audit: IsTrue(entity, "audit"),
             softDelete: IsTrue(entity, "softDelete"));
 
+    /// <summary>
+    /// The entity's resolved tenancy, parsed from raw JSON and then <b>defaulted by the mapper's own rule</b>
+    /// rather than by a copy of it.
+    /// </summary>
+    /// <remarks>
+    /// This pass and <c>DescriptorToSchemaMapper</c> must agree exactly: this one decides whether declaring
+    /// <c>tenant_id</c> is refused, that one decides whether <c>tenant_id</c> is injected. A copied defaulting
+    /// rule — which is what this was — makes a divergence produce a descriptor the validator accepts and the
+    /// mapper then refuses with an exception, i.e. a structured error a dashboard never gets to show. Only the
+    /// <em>parsing</em> is local, because raw JSON is why this pass exists.
+    /// </remarks>
+    /// <param name="entity">The entity object.</param>
+    /// <param name="tenancyEnabled">Whether the project turns tenancy on.</param>
     private static TenancyMode? TenancyOf(JsonElement entity, bool tenancyEnabled) =>
+        DescriptorToSchemaMapper.ResolveTenancy(DeclaredTenancyOf(entity), tenancyEnabled);
+
+    /// <summary>
+    /// The tenancy the entity declares for itself, or <see langword="null"/> when it declares none — the one
+    /// part of the question that is genuinely per-representation.
+    /// </summary>
+    /// <remarks>
+    /// An unrecognised string reads as "declares none" rather than throwing: the schema pass already refuses a
+    /// value outside the enum, and this pass runs even when that one has failed, so it must not turn a bad
+    /// value into a second, worse diagnosis.
+    /// </remarks>
+    /// <param name="entity">The entity object.</param>
+    private static TenancyMode? DeclaredTenancyOf(JsonElement entity) =>
         entity.TryGetProperty("tenancy", out var declared) && declared.ValueKind == JsonValueKind.String
             ? declared.GetString() switch
             {
@@ -248,7 +274,7 @@ internal sealed class DescriptorValidator : IDescriptorValidator
                 "global" => TenancyMode.Global,
                 _ => null,
             }
-            : tenancyEnabled ? TenancyMode.Scoped : null;
+            : null;
 
     private static bool IsTrue(JsonElement entity, string property) =>
         entity.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.True;
