@@ -2,6 +2,7 @@
   Entities: [
     {
       Name: countries,
+      Description: Shared reference data (číselník) visible to all tenants.,
       Tenancy: Global,
       SoftDelete: false,
       Audit: false,
@@ -43,6 +44,7 @@
     },
     {
       Name: companies,
+      Description: Customer companies, tenant-scoped.,
       Tenancy: Scoped,
       SoftDelete: false,
       Audit: true,
@@ -237,6 +239,7 @@
     },
     {
       Name: deals,
+      Description: Sales opportunities.,
       Tenancy: Scoped,
       SoftDelete: false,
       Audit: true,

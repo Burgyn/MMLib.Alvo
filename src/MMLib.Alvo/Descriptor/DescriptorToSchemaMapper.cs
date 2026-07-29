@@ -124,6 +124,11 @@ internal static class DescriptorToSchemaMapper
         return new EntitySchema
         {
             Name = name,
+
+            // Carried onto the applied schema because the OpenAPI transformer publishes it and cannot see the
+            // descriptor — see EntitySchema.Description. Dropping it here is what made the generated document
+            // describe every entity as nothing at all.
+            Description = e.Description,
             RenamedFrom = e.RenamedFrom,
             Storage = EntityStorage.Physical,
             Tenancy = tenancy,
@@ -297,6 +302,10 @@ internal static class DescriptorToSchemaMapper
         {
             Name = name,
             Type = MapType(f.Type),
+
+            // Same reason as the entity's, one level down: the published document's field descriptions come
+            // from here, and nothing else can reach them.
+            Description = f.Description,
             RenamedFrom = f.RenamedFrom,
             Required = f.Required == true,
             Unique = f.Unique == true,

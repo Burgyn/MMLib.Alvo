@@ -9,6 +9,26 @@ public sealed record FieldSchema
     /// <summary>Gets the field type.</summary>
     public required FieldType Type { get; init; }
 
+    /// <summary>
+    /// Gets the human-readable description of this field, or <see langword="null"/> when the descriptor
+    /// declares none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// On the applied schema rather than left in the descriptor for the reason <see cref="Format"/> is: the
+    /// layer that needs it cannot see the descriptor. The generated OpenAPI document <em>is</em> the contract
+    /// an agent reads (§0 principle 4), and a field described in the descriptor but undescribed in the
+    /// published document loses the one sentence saying what the field means — which no type, length or
+    /// format replaces.
+    /// </para>
+    /// <para>
+    /// It carries no behaviour: nothing validates against it, no column stores it, and the migration diff
+    /// (<c>SchemaDiff.IsUnchanged</c>) deliberately does not consult it — so rewording a description is not a
+    /// schema change and plans no migration.
+    /// </para>
+    /// </remarks>
+    public string? Description { get; init; }
+
     /// <summary>Gets the previous name of the field (for migrations).</summary>
     public string? RenamedFrom { get; init; }
 

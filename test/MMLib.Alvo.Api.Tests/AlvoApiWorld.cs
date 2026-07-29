@@ -130,6 +130,16 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
         await ApplyDescriptorAsync(app);
 
         app.MapAlvoDataApi();
+
+        // Opt-in, because MapAlvoDataApi deliberately does not map it — serving a document is a hosting
+        // decision (ApiSetup.AddAlvoApi says so) — and because every route-table fact in this suite counts
+        // the endpoints it finds. A world that always mapped one would silently add a sixteenth endpoint to
+        // facts asserting there are fifteen, which is the kind of drift those counts exist to catch.
+        if (setup.MapOpenApiDocument)
+        {
+            app.MapOpenApi();
+        }
+
         var capture = new SqlCapture(databaseName);
         await app.StartAsync(TestContext.Current.CancellationToken);
 
@@ -226,6 +236,31 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
 
     private static IEnumerable<string> Methods(RouteEndpoint endpoint) =>
         endpoint.Metadata.GetMetadata<IHttpMethodMetadata>()?.HttpMethods ?? ["*"];
+
+    /// <summary>
+    /// The OpenAPI document this world serves, as the exact bytes a client receives.
+    /// </summary>
+    /// <remarks>
+    /// Fetched over HTTP rather than composed from the container, because the document <em>is</em> the published
+    /// contract and a fact about it must measure what a caller gets. It requires
+    /// <see cref="AlvoApiWorldSetup.MapOpenApiDocument"/>, and says so rather than answering with a 404 body a
+    /// fact would then assert over.
+    /// </remarks>
+    internal async Task<string> OpenApiTextAsync()
+    {
+        using var response = await SendAsync(HttpMethod.Get, "/openapi/v1.json");
+        var text = await response.ReadTextAsync();
+        return response.StatusCode == System.Net.HttpStatusCode.OK
+            ? text
+            : throw new InvalidOperationException(
+                $"The world served {(int)response.StatusCode} for its OpenAPI document. Start it with "
+                + $"AlvoApiWorldSetup(MapOpenApiDocument: true). Body: {text}");
+    }
+
+    /// <summary>The same document, parsed — for the facts that assert on its structure rather than its bytes.</summary>
+    internal async Task<JsonObject> OpenApiDocumentAsync() =>
+        JsonNode.Parse(await OpenApiTextAsync()) as JsonObject
+        ?? throw new InvalidOperationException("The OpenAPI document is not a JSON object.");
 
     /// <summary>Every statement the engine has run against this world's database since the last <see cref="ClearStatements"/>.</summary>
     internal IReadOnlyList<string> Statements => _capture.Statements;
@@ -448,10 +483,16 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
 /// Configures the <em>host's</em> JSON options, for the facts that a host's serializer settings cannot
 /// move Alvo's wire contract.
 /// </param>
+/// <param name="MapOpenApiDocument">
+/// Whether the world serves the OpenAPI document at <c>/openapi/v1.json</c>. Off by default: Alvo's mapping
+/// seam deliberately does not map it, and a world that always did would add an endpoint to every fact in this
+/// suite that counts the route table.
+/// </param>
 internal sealed record AlvoApiWorldSetup(
     Action<AlvoApiOptions>? ConfigureApi = null,
     string? RevokedKeyId = null,
-    Action<System.Text.Json.JsonSerializerOptions>? ConfigureHostJson = null);
+    Action<System.Text.Json.JsonSerializerOptions>? ConfigureHostJson = null,
+    bool MapOpenApiDocument = false);
 
 /// <summary>One dev API key a world issues, in the shape a test reads best.</summary>
 /// <param name="KeyId">The key's public identifier.</param>

@@ -58,7 +58,12 @@ internal static class QueryStringParser
     /// at some kilobytes in practice, which is a property of the transport rather than a decision this layer made.
     /// A cursor past this is refused as malformed, exactly as an empty one is.
     /// </remarks>
-    private const int MaxCursorLength = 512;
+    /// <remarks>
+    /// <b>Internal rather than private</b> so the generated OpenAPI document publishes the bound this parser
+    /// enforces instead of a second copy of the number — a documented <c>maxLength</c> that drifted from the
+    /// enforced one would refuse a cursor a page had just minted, or promise room for one it would not accept.
+    /// </remarks>
+    internal const int MaxCursorLength = 512;
 
     /// <summary>Parses <paramref name="query"/> for a list request over <paramref name="entity"/>.</summary>
     /// <param name="query">The request's query string.</param>

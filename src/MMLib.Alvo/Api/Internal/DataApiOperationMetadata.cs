@@ -20,8 +20,9 @@ namespace MMLib.Alvo.Api.Internal;
 /// asserts the marker, and the marker's presence is what the filter's presence is inferred from.
 /// </para>
 /// <para>
-/// Internal, and deliberately not on the public surface: a host has no reason to read it, and Task 8's
-/// OpenAPI transformer lives inside this assembly.
+/// Internal, and deliberately not on the public surface: a host has no reason to read it, and the one
+/// consumer that does — <c>AlvoDocumentTransformer</c>, which uses it to tell Alvo's endpoints from a host's
+/// own when enriching the OpenAPI document — lives inside this assembly.
 /// </para>
 /// </remarks>
 /// <param name="Entity">The entity the endpoint serves, as the applied schema names it.</param>

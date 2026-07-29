@@ -194,8 +194,7 @@ internal sealed class FormatCatalog
             return;
         }
 
-        var pattern = field.FormatPattern ?? _builtIns.GetValueOrDefault(format);
-        if (pattern is not null)
+        if (PatternOf(field) is { } pattern)
         {
             formats[format] = Compile(format, pattern);
         }
@@ -231,6 +230,45 @@ internal sealed class FormatCatalog
         {
             throw NotARegularExpression(format, exception);
         }
+    }
+
+    /// <summary>
+    /// The same anchored pattern, spelled as the ECMA-262 regular expression JSON Schema draft 2020-12
+    /// defines <c>pattern</c> in terms of — for the generated OpenAPI document to publish.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Here, next to <see cref="Compile"/>, because the anchoring is one decision with two spellings.</b>
+    /// A published <c>pattern</c> that anchored differently from the pattern this catalogue matches with would
+    /// document a rule the API does not enforce — and the pair most likely to drift is exactly the one where
+    /// the same semantics need different syntax.
+    /// </para>
+    /// <para>
+    /// <c>^</c>/<c>$</c> rather than <c>\A</c>/<c>\z</c>: those two escapes are not ECMA-262 and would make
+    /// the published pattern refuse to compile in a JavaScript, Python or Go validator. The difference
+    /// <see cref="Compile"/>'s remarks warn about — <c>$</c> also matching before a trailing newline — is
+    /// unavoidable in that dialect, and it errs towards a client accepting a value Alvo will refuse with a
+    /// 422, which is the safe direction for a document: it never rejects a value the API would take.
+    /// </para>
+    /// </remarks>
+    /// <param name="pattern">The format's declared pattern, exactly as the schema carries it.</param>
+    internal static string AsJsonSchemaPattern(string pattern)
+    {
+        ArgumentNullException.ThrowIfNull(pattern);
+        return $"^(?:{pattern})$";
+    }
+
+    /// <summary>The pattern that enforces one field's format, or <see langword="null"/> when it has none.</summary>
+    /// <remarks>
+    /// The same resolution <see cref="AddFormatOf"/> performs — the field's own
+    /// <see cref="FieldSchema.FormatPattern"/> first, then a built-in of that name — so the document publishes
+    /// the pattern this catalogue actually compiled rather than a second guess at which one that was.
+    /// </remarks>
+    /// <param name="field">The declared field.</param>
+    internal static string? PatternOf(FieldSchema field)
+    {
+        ArgumentNullException.ThrowIfNull(field);
+        return field.Format is not { } format ? null : field.FormatPattern ?? _builtIns.GetValueOrDefault(format);
     }
 
     /// <summary>The backtracking fallback, kept separate so its own construction failure is named too.</summary>

@@ -257,7 +257,55 @@ internal static class DataApiEndpoints
             // strong entity tag minted over a row version rather than over the response bytes.
             .AddEndpointFilter(NoStoreResponseFilter.Instance)
             .AddEndpointFilter(filters.For(entity.Name, operation))
-            .WithMetadata(new DataApiOperationMetadata(entity.Name, operation));
+            .WithMetadata(new DataApiOperationMetadata(entity.Name, operation))
+            .Documenting(entity, operation);
+
+    /// <summary>
+    /// Declares, as endpoint metadata, exactly the statuses this endpoint can answer with — so ApiExplorer, and
+    /// therefore any OpenAPI document built over it, lists those and nothing else.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Read from <see cref="DataApiDocumentation.ResponsesFor"/>, which is the same table
+    /// <see cref="AlvoDocumentTransformer"/> reads.</b> One authority, two consumers: a second hand-written
+    /// list here is how the document comes to advertise a status no delegate produces, or to omit one it does.
+    /// </para>
+    /// <para>
+    /// <b>Why declare it at all, when the transformer rewrites <c>responses</c> anyway.</b> A host that serves a
+    /// document the transformer is not attached to (see <c>ApiSetup.AddAlvoApi</c>) still gets the right status
+    /// codes from this metadata, where ApiExplorer's own inference for an <c>IResult</c>-returning delegate is
+    /// a bare untyped 200.
+    /// </para>
+    /// <para>
+    /// <b>No response type is named, deliberately — not even <c>ProducesProblem</c>'s.</b> A generated endpoint
+    /// has no CLR payload type to name (its row is a dictionary), and <c>ProducesProblem</c> would have
+    /// ApiExplorer generate a <c>ProblemDetails</c> component that Alvo's own <see cref="ProblemComponents"/>
+    /// then supersedes — leaving an orphaned schema in the document that nothing references and that omits the
+    /// <c>violations</c> array Alvo's refusals actually carry.
+    /// </para>
+    /// </remarks>
+    /// <param name="builder">The route just mapped.</param>
+    /// <param name="entity">The entity the endpoint serves, which decides whether a 304 is reachable.</param>
+    /// <param name="operation">The operation the endpoint performs.</param>
+    private static RouteHandlerBuilder Documenting(
+        this RouteHandlerBuilder builder, EntitySchema entity, DataOperation operation)
+    {
+        builder.WithTags(entity.Name);
+        foreach (var response in DataApiDocumentation.ResponsesFor(operation, entity))
+        {
+            builder.Produces(response.Status, contentType: MediaTypeOf(response.Body));
+        }
+
+        return builder;
+    }
+
+    /// <summary>The media type a response of this kind is written with, or <see langword="null"/> for no body.</summary>
+    private static string? MediaTypeOf(DataApiDocumentation.ResponseBody body) => body switch
+    {
+        DataApiDocumentation.ResponseBody.Problem => AlvoDocumentTransformer.ProblemMediaType,
+        DataApiDocumentation.ResponseBody.None => null,
+        _ => AlvoDocumentTransformer.JsonMediaType,
+    };
 
     /// <summary>
     /// Refuses an operation whose policy decision is already a denial, <b>before</b> this delegate does any
@@ -579,8 +627,9 @@ internal static class DataApiEndpoints
     /// A literal rather than an option: unlike <see cref="Auth.AlvoAuthOptions.HeaderName"/>, which an
     /// embedded host may have to move out of the way of its own credential header, this one is a published
     /// convention an agent already knows from its training data. Making it configurable would buy a host
-    /// nothing and cost every client the ability to assume it. Internal because it is not yet advertised in
-    /// the OpenAPI document; the task that publishes one reads it from here rather than spelling it again.
+    /// nothing and cost every client the ability to assume it. Internal, and the generated OpenAPI document
+    /// advertises it by reading this constant (<see cref="DataApiParameters"/>) rather than spelling the header
+    /// name a second time.
     /// </para>
     /// <para>
     /// <b>Read on the create only, and on the other two write verbs it is <em>ignored</em> — labelled, because
@@ -593,8 +642,9 @@ internal static class DataApiEndpoints
     /// once, and the port has no channel to record a key against them anyway. Refusing it instead would break
     /// the widespread client habit — Stripe's SDKs among them — of attaching the header to every mutating
     /// request, for no protection gained. It is still <em>client-observable</em> that the header did nothing, so
-    /// like the read side's two precondition gaps it has to reach the OpenAPI description rather than living
-    /// only here.
+    /// like the read side's two precondition gaps it is published: <see cref="DataApiDocumentation"/>'s update
+    /// and delete prose both say the header is accepted and has no effect, and neither operation lists it as a
+    /// parameter — a parameter is an invitation to send something.
     /// </para>
     /// </remarks>
     internal const string IdempotencyKeyHeader = "Idempotency-Key";
@@ -745,9 +795,10 @@ internal static class DataApiEndpoints
     /// <para>
     /// That is also why the asymmetry with the write side is safe: an unhonoured header on a read costs a
     /// response body the caller said they already had, whereas an unhonoured one on a write costs somebody
-    /// their change. <b>Both gaps are client-observable, so a code remark is not where they belong</b> — they
-    /// have to reach the OpenAPI description Task 8 publishes, since a caller who cannot read this file has no
-    /// other way to learn that a header they sent was ignored.
+    /// their change. <b>Both gaps are client-observable, so a code remark is not where they belong</b> — and both
+    /// are now published: <see cref="DataApiDocumentation"/> states the ignored <c>If-Match</c> on the read
+    /// operation and the two ignored precondition headers on the list, because a caller who cannot read this
+    /// file has no other way to learn that a header they sent did nothing.
     /// </para>
     /// </remarks>
     /// <param name="request">The request whose <c>If-None-Match</c> to honour.</param>

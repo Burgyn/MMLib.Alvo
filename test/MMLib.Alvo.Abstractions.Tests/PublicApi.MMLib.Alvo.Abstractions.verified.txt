@@ -1058,6 +1058,7 @@ namespace MMLib.Alvo.Schema
     {
         public EntitySchema() { }
         public bool Audit { get; init; }
+        public string? Description { get; init; }
         public required System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Schema.FieldSchema> Fields { get; init; }
         public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Schema.IndexSchema> Indexes { get; init; }
         public required string Name { get; init; }
@@ -1080,6 +1081,7 @@ namespace MMLib.Alvo.Schema
     {
         public FieldSchema() { }
         public string? ComputedExpression { get; init; }
+        public string? Description { get; init; }
         public System.Collections.Generic.IReadOnlyList<string>? EnumValues { get; init; }
         public string? Format { get; init; }
         public string? FormatPattern { get; init; }

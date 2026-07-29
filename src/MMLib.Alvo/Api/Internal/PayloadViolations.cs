@@ -108,8 +108,8 @@ internal static class PayloadViolations
     /// <para>
     /// <b>The declared, non-hidden schema shape is public, and this wording is not trying to hide it.</b>
     /// Alvo maps route literals from the applied schema, so an undeclared entity already answers 404 where a
-    /// declared one answers 403 — entity existence is disclosed before authorization, by design — and Task 8
-    /// publishes the declared, non-hidden field list to anyone who can read the document. A framework cannot
+    /// declared one answers 403 — entity existence is disclosed before authorization, by design — and the
+    /// generated OpenAPI document publishes the declared, non-hidden field list to anyone who can read it. A framework cannot
     /// both publish its schema shape and treat that shape as confidential. What is confidential is
     /// <em>data</em>.
     /// </para>

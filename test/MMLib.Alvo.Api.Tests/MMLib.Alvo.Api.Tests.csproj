@@ -31,6 +31,11 @@
     <!-- The query-string parser is the framework's most attacker-exposed surface, so its facts include a
          property run over a generated corpus — §2.1's "adversarial/fuzz" acceptance criterion. -->
     <PackageReference Include="CsCheck" />
+    <!-- The OpenAPI document is a published contract, so its baseline is a golden snapshot (the design's
+         own testing table says so). This project opts out of the shared arch/public-API tests, which is
+         where Directory.Build.props would otherwise have brought Verify in — so it takes the reference
+         directly, exactly as MMLib.Alvo.Schema.Tests does for the same reason. -->
+    <PackageReference Include="Verify.XunitV3" />
   </ItemGroup>
 
   <!-- The statement recorder, linked rather than copied for the same reason the engine test projects
@@ -38,6 +43,10 @@
        recorder is how two suites come to disagree about what they are watching. -->
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/SqlCapture.cs" Link="_shared/SqlCapture.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="VerifyXunit" />
   </ItemGroup>
 
   <ItemGroup>
