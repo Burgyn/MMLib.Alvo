@@ -2,7 +2,6 @@
 using Microsoft.AspNetCore.Http.Metadata;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Auth;
@@ -17,7 +16,7 @@ namespace MMLib.Alvo.Api.Tests;
 
 /// <summary>
 /// One running Data API: a real <see cref="WebApplication"/> over
-/// <see cref="TestServer"/>, a real SQLite database, a real descriptor applied through the
+/// <see cref="TestServer"/>, a real database on a real engine, a real descriptor applied through the
 /// production migration flow, and real dev API keys.
 /// </summary>
 /// <remarks>
@@ -29,53 +28,50 @@ namespace MMLib.Alvo.Api.Tests;
 /// task actually ships.
 /// </para>
 /// <para>
-/// <b>The database is in-memory but <em>shared-cache</em>, not a bare <c>:memory:</c>.</b> A bare
-/// <c>Data Source=:memory:</c> gives every connection its own private, empty database, and Alvo's
-/// relational driver opens a fresh connection per unit of work by design
-/// (<c>RelationalConnectionFactory</c>) — so the migration would create tables one connection could
-/// see and no request ever could. A uniquely named <c>Mode=Memory;Cache=Shared</c> source, kept alive
-/// by one open connection for the world's lifetime, is the shape that actually behaves like one
-/// database while still needing no file and no container.
+/// <b>The engine is a parameter, defaulting to SQLite.</b> Everything engine-specific — provisioning the
+/// database, registering the provider, opening a connection for an out-of-band read — lives behind
+/// <see cref="AlvoApiEngine"/>, so the same world, the same requests and the same assertions run on
+/// PostgreSQL (<c>MMLib.Alvo.Api.Tests.Integration</c>) without a second copy of any of it. SQLite is the
+/// default because it needs no container and therefore keeps ring0 Docker-free.
 /// </para>
 /// <para>
-/// The unique database name doubles as <see cref="SqlCapture"/>'s marker, so
+/// The database's unique name doubles as <see cref="SqlCapture"/>'s marker, so
 /// <see cref="ClearStatements"/>/<see cref="Statements"/> report the statements of <em>this</em> world
 /// only and worlds stay safe to run in parallel.
 /// </para>
 /// </remarks>
 internal sealed class AlvoApiWorld : IAsyncDisposable
 {
-    private readonly SqliteConnection _keepAlive;
+    private readonly AlvoApiDatabase _database;
     private readonly WebApplication _app;
     private readonly SqlCapture _capture;
     private readonly HttpClient _client;
     private readonly AlvoAuthOptions _authOptions;
-    private readonly string _connectionString;
 
     private AlvoApiWorld(
-        SqliteConnection keepAlive,
+        AlvoApiDatabase database,
         WebApplication app,
         SqlCapture capture,
-        AlvoAuthOptions authOptions,
-        string connectionString)
+        AlvoAuthOptions authOptions)
     {
-        _keepAlive = keepAlive;
+        _database = database;
         _app = app;
         _capture = capture;
         _authOptions = authOptions;
-        _connectionString = connectionString;
         _client = app.GetTestClient();
     }
 
     /// <summary>Starts a world over the repository's <c>examples/vehicle-registry</c> descriptor.</summary>
     /// <param name="keys">The dev API keys the world issues.</param>
     /// <param name="setup">Anything the world's host is configured differently from the default.</param>
+    /// <param name="engine">The engine to run on; SQLite when none is named.</param>
     internal static Task<AlvoApiWorld> VehicleRegistryAsync(
-        IReadOnlyList<TestApiKey>? keys = null, AlvoApiWorldSetup? setup = null) =>
+        IReadOnlyList<TestApiKey>? keys = null, AlvoApiWorldSetup? setup = null, AlvoApiEngine? engine = null) =>
         StartAsync(
             Path.Combine(RepositoryRoot.Find(), "examples", "vehicle-registry", "vehicles.alvo.json"),
             keys ?? [],
-            setup ?? new AlvoApiWorldSetup());
+            setup ?? new AlvoApiWorldSetup(),
+            engine ?? SqliteApiEngine.Instance);
 
     /// <summary>Starts a world over the tenant-scoped <c>notes</c> descriptor this project ships.</summary>
     /// <param name="keys">The dev API keys the world issues.</param>
@@ -83,7 +79,8 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
         StartAsync(
             Path.Combine(AppContext.BaseDirectory, "descriptors", "tenant-notes.alvo.json"),
             keys,
-            new AlvoApiWorldSetup());
+            new AlvoApiWorldSetup(),
+            SqliteApiEngine.Instance);
 
     /// <summary>Starts a world over one of this project's own descriptor fixtures.</summary>
     /// <param name="fileName">The descriptor file's name under <c>descriptors/</c>.</param>
@@ -94,26 +91,24 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
         StartAsync(
             Path.Combine(AppContext.BaseDirectory, "descriptors", fileName),
             keys ?? [],
-            setup ?? new AlvoApiWorldSetup());
+            setup ?? new AlvoApiWorldSetup(),
+            SqliteApiEngine.Instance);
 
     private static async Task<AlvoApiWorld> StartAsync(
-        string descriptorPath, IReadOnlyList<TestApiKey> keys, AlvoApiWorldSetup setup)
+        string descriptorPath, IReadOnlyList<TestApiKey> keys, AlvoApiWorldSetup setup, AlvoApiEngine engine)
     {
-        var databaseName = $"alvo-api-{Guid.NewGuid():N}";
-        var connectionString = $"Data Source={databaseName};Mode=Memory;Cache=Shared";
-        var keepAlive = new SqliteConnection(connectionString);
-        await keepAlive.OpenAsync(TestContext.Current.CancellationToken);
+        var database = await engine.CreateDatabaseAsync();
 
         try
         {
-            return await StartAsync(descriptorPath, keys, setup, databaseName, connectionString, keepAlive);
+            return await StartAsync(descriptorPath, keys, setup, database);
         }
         catch
         {
-            // A world whose mapping is *meant* to fail is a fact of its own, so the keep-alive connection
-            // (and with it the in-memory database) has to be released on that path too — a leaked one holds a
-            // shared cache alive for the rest of the run.
-            await keepAlive.DisposeAsync();
+            // A world whose mapping is *meant* to fail is a fact of its own, so the database (and with it
+            // SQLite's keep-alive connection, or PostgreSQL's created database) has to be released on that
+            // path too — a leaked one holds a shared cache, or a container's disk, for the rest of the run.
+            await database.DisposeAsync();
             throw;
         }
     }
@@ -122,11 +117,9 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
         string descriptorPath,
         IReadOnlyList<TestApiKey> keys,
         AlvoApiWorldSetup setup,
-        string databaseName,
-        string connectionString,
-        SqliteConnection keepAlive)
+        AlvoApiDatabase database)
     {
-        var app = BuildApp(descriptorPath, connectionString, keys, setup);
+        var app = BuildApp(descriptorPath, database, keys, setup);
         await ApplyDescriptorAsync(app);
 
         app.MapAlvoDataApi();
@@ -140,11 +133,11 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
             app.MapOpenApi();
         }
 
-        var capture = new SqlCapture(databaseName);
+        var capture = new SqlCapture(database.Marker);
         await app.StartAsync(TestContext.Current.CancellationToken);
 
         var authOptions = app.Services.GetRequiredService<IOptions<AlvoAuthOptions>>().Value;
-        return new AlvoApiWorld(keepAlive, app, capture, authOptions, connectionString);
+        return new AlvoApiWorld(database, app, capture, authOptions);
     }
 
     /// <summary>
@@ -165,7 +158,7 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
     /// </remarks>
     private static WebApplication BuildApp(
         string descriptorPath,
-        string connectionString,
+        AlvoApiDatabase database,
         IReadOnlyList<TestApiKey> keys,
         AlvoApiWorldSetup setup)
     {
@@ -193,10 +186,14 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
             }
         });
 
-        builder.Services.AddAlvo(alvo => alvo
-            .UseSqlite(connectionString)
-            .FromDescriptor(descriptorPath)
-            .AddDataApi(setup.ConfigureApi ?? (_ => { })));
+        builder.Services.AddAlvo(alvo =>
+        {
+            // The provider registration is the engine's, through the same public extension a host calls
+            // (UseSqlite / UsePostgreSql) — never a DbContextOptions this fixture built itself, which is what
+            // would let a world pass while the production registration was broken.
+            database.Use(alvo);
+            alvo.FromDescriptor(descriptorPath).AddDataApi(setup.ConfigureApi ?? (_ => { }));
+        });
 
         return builder.Build();
     }
@@ -278,14 +275,30 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
     /// literal supplied by the fact, never by generated input.
     /// </remarks>
     /// <param name="table">The table to count.</param>
-    internal async Task<long> CountRowsAsync(string table)
+    /// <param name="where">
+    /// A <c>WHERE</c> predicate, without the keyword, or <see langword="null"/> to count every row. A literal
+    /// supplied by the fact, exactly as <paramref name="table"/> is — never caller or generated input.
+    /// </param>
+    internal async Task<long> CountRowsAsync(string table, string? where = null)
     {
-        await using var connection = new SqliteConnection(_connectionString);
+        await using var connection = _database.Connect();
         await connection.OpenAsync(TestContext.Current.CancellationToken);
         await using var count = connection.CreateCommand();
-        count.CommandText = $"SELECT COUNT(*) FROM \"{table}\"";
-        return (long)(await count.ExecuteScalarAsync(TestContext.Current.CancellationToken))!;
+        count.CommandText = $"SELECT COUNT(*) FROM \"{table}\"" + (where is null ? string.Empty : $" WHERE {where}");
+
+        // Both engines answer COUNT(*) as a 64-bit integer, but they do not agree on the CLR type they
+        // materialize it as (SQLite long, Npgsql long as well — but a cast would silently start failing if
+        // either changed), so it is converted rather than cast.
+        return Convert.ToInt64(await count.ExecuteScalarAsync(TestContext.Current.CancellationToken), Culture);
     }
+
+    /// <summary>
+    /// This world's database, for the facts that have to reach it directly — a bulk seed that would be the
+    /// test rather than the setup if it went through the API, request by request.
+    /// </summary>
+    internal AlvoApiDatabase Database => _database;
+
+    private static System.Globalization.CultureInfo Culture => System.Globalization.CultureInfo.InvariantCulture;
 
     /// <summary>
     /// Every principal this world's ambient accessor has been asked to publish, in order —
@@ -417,7 +430,7 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
         _client.Dispose();
         await _app.StopAsync(CancellationToken.None);
         await _app.DisposeAsync();
-        await _keepAlive.DisposeAsync();
+        await _database.DisposeAsync();
     }
 
     /// <summary>

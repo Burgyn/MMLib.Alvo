@@ -10,6 +10,7 @@
   </Folder>
   <Folder Name="/test/">
     <Project Path="test/MMLib.Alvo.Abstractions.Tests/MMLib.Alvo.Abstractions.Tests.csproj" />
+    <Project Path="test/MMLib.Alvo.Api.Tests.Integration/MMLib.Alvo.Api.Tests.Integration.csproj" />
     <Project Path="test/MMLib.Alvo.Api.Tests/MMLib.Alvo.Api.Tests.csproj" />
     <Project Path="test/MMLib.Alvo.Conventions.Tests/MMLib.Alvo.Conventions.Tests.csproj" />
     <Project Path="test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/MMLib.Alvo.Data.EntityFrameworkCore.Tests.csproj" />

@@ -54,19 +54,22 @@ jobs:
 
       # The PR is the gate for every layer but mutation (Stryker runs post-merge
       # on `main` — see mutation.yml): ring2 (= ring1 + affected integration,
-      # incl. the Testcontainers/PostgreSQL integration project + API-invariant/
-      # Vacuum placeholders) runs on both OSes. Windows GitHub runners run
-      # Docker in Windows-container mode and cannot run the Linux
-      # postgres:16-alpine image — the PostgreSQL Testcontainers integration
-      # tests self-skip there (see PostgresFixture / EnsureEngineAvailable)
-      # rather than the CI matrix branching around them. Same script the
-      # agent runs locally. bash is available on the Windows runner.
+      # incl. both Testcontainers/PostgreSQL integration projects — the
+      # port-level one and MMLib.Alvo.Api.Tests.Integration, which carries the
+      # HTTP suite's PostgreSQL leg and §2.1's two numeric paging criteria —
+      # plus the API-invariant/Vacuum placeholders) runs on both OSes. Windows
+      # GitHub runners run Docker in Windows-container mode and cannot run the
+      # Linux postgres:16-alpine image — the PostgreSQL Testcontainers
+      # integration tests self-skip there (see PostgresFixture /
+      # PostgresApiEngine) rather than the CI matrix branching around them.
+      # Same script the agent runs locally. bash is available on the Windows
+      # runner.
       - name: Test (rings)
         shell: bash
         env:
           ALVO_CONFIGURATION: Release
         # On Windows, Docker runs Windows containers, so the Testcontainers
-        # PostgreSQL integration tests self-skip — leaving that assembly with
+        # PostgreSQL integration tests self-skip — leaving those assemblies with
         # zero executed tests, which MTP reports as exit code 8 ("ran zero
         # tests"). Treat only code 8 as success on Windows; Linux stays strict
         # so a genuine zero-tests regression is still caught there.

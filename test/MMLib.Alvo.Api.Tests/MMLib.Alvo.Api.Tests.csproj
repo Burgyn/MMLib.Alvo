@@ -45,6 +45,16 @@
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/SqlCapture.cs" Link="_shared/SqlCapture.cs" />
   </ItemGroup>
 
+  <!-- The API test world, its response readers, its engine seam, and the one suite both engines run
+       (Task 9). They live in test/_shared/api rather than in this directory because
+       MMLib.Alvo.Api.Tests.Integration compiles the same sources against PostgreSQL: #19's DoD is "green
+       on SQLite + Postgres", and a second copy of the world is how the two legs come to exercise two
+       different APIs. Neither project owns them, which is the arrangement test/_shared/ef already has for
+       the two engine test projects. -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/api/*.cs" Link="_shared/%(Filename)%(Extension)" />
+  </ItemGroup>
+
   <ItemGroup>
     <Using Include="VerifyXunit" />
   </ItemGroup>

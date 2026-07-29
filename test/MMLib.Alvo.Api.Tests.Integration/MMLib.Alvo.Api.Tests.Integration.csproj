@@ -1,0 +1,51 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The HTTP Data API's suite on a real engine. Testcontainers-backed, so ".Tests.Integration" rather than
+    ".Tests": scripts/test-ring0 runs `*.Tests.dll` and excludes `*.Tests.Integration.dll` by that naming,
+    which is what keeps ring0 Docker-free. ring2 runs it, affected-scoped.
+
+    It opts out of the shared architecture + public-API approval gate for the same two reasons
+    MMLib.Alvo.Api.Tests does: there is no sibling "MMLib.Alvo.Api" assembly for TestTarget.Resolve() to
+    load, and MMLib.Alvo.Tests already owns the core's public-API baseline.
+  -->
+  <PropertyGroup>
+    <AlvoSharedArchTests>false</AlvoSharedArchTests>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The API endpoints are hosted in a real WebApplication here, exactly as in MMLib.Alvo.Api.Tests. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/MMLib.Alvo/MMLib.Alvo.csproj" />
+    <!-- The engine under test. -->
+    <ProjectReference Include="../../src/MMLib.Alvo.Data.PostgreSql/MMLib.Alvo.Data.PostgreSql.csproj" />
+    <!-- And SQLite, which this project never uses: the shared world's default engine is SqliteApiEngine
+         (test/_shared/api/AlvoApiEngine.cs), so the linked sources below do not compile without it. The
+         alternative — a second copy of the world with the default removed — is exactly the drift the shared
+         directory exists to prevent, and one unused reference is the cheaper half of that trade. -->
+    <ProjectReference Include="../../src/MMLib.Alvo.Data.Sqlite/MMLib.Alvo.Data.Sqlite.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" />
+    <PackageReference Include="Testcontainers.PostgreSql" />
+  </ItemGroup>
+
+  <!-- The statement recorder, linked exactly as MMLib.Alvo.Api.Tests and both engine test projects link it:
+       "no row was touched" is a claim about the SQL that ran, and a second copy is how two suites come to
+       disagree about what they are watching. -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/SqlCapture.cs" Link="_shared/SqlCapture.cs" />
+  </ItemGroup>
+
+  <!-- The API test world, its response readers, its engine seam, and DataApiEngineTests — the same sources
+       MMLib.Alvo.Api.Tests compiles. That is the whole mechanism by which "green on SQLite + Postgres" is a
+       statement about one suite rather than about two suites that have drifted apart. -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/api/*.cs" Link="_shared/%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>
