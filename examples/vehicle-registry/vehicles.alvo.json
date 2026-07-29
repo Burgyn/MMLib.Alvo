@@ -55,7 +55,8 @@
         "delete": "'admin' in @user.roles"
       },
       "indexes": [
-        { "fields": ["make", "model"] }
+        { "fields": ["make", "model"] },
+        { "fields": ["make", "id"] }
       ]
     },
     "inspections": {

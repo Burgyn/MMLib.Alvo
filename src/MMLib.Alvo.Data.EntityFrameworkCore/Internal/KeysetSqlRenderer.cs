@@ -17,10 +17,15 @@ internal sealed record KeysetAnchor(IReadOnlyList<AlvoSort> Sort, IReadOnlyList<
 /// </summary>
 /// <remarks>
 /// <para>
-/// The nested-OR form rather than SQL's <c>(a, b) &gt; (x, y)</c> row constructor, which has no portable
-/// LINQ or SQLite equivalent. The tie-breaking <c>id</c> comparison is always ascending: it exists to
-/// make the order deterministic, not to be sorted by, and flipping it with the last user key would make
-/// two pages of the same query disagree about where the boundary is.
+/// The nested-OR form rather than SQL's <c>(a, b) &gt; (x, y)</c> row constructor. The blocker is T-SQL /
+/// Azure SQL, which has no row-value constructor in a comparison predicate at all (only in <c>VALUES</c>) —
+/// the one dialect this form has to run on unmodified, and the divergence §0 principle 3 asks an engine seam
+/// to carry rather than the core. PostgreSQL and SQLite both support the row constructor and both turn it into
+/// an index range scan, where this nested-OR form costs an index scan plus a filter whose cost grows with
+/// cursor depth on a multi-term sort — see issue #100 for the measurement and the <c>IAlvoSqlDialect</c> seam
+/// that would let a per-engine renderer opt in. The tie-breaking <c>id</c> comparison is always ascending: it
+/// exists to make the order deterministic, not to be sorted by, and flipping it with the last user key would
+/// make two pages of the same query disagree about where the boundary is.
 /// </para>
 /// <para>
 /// Every comparison here renders both operands through

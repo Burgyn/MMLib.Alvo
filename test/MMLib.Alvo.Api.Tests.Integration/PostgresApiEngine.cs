@@ -1,6 +1,8 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using MMLib.Alvo.Api.Tests;
+using MMLib.Alvo.Tests.Data;
 using Npgsql;
+using NpgsqlTypes;
 using System.Data.Common;
 using Testcontainers.PostgreSql;
 using Xunit;
@@ -15,19 +17,30 @@ namespace MMLib.Alvo.Api.Tests.Integration;
 /// <para>
 /// A container per fact would be prohibitively slow; a shared database would break the suite's per-fact
 /// isolation, since several facts assert exact row counts over a whole table. That is the same trade
-/// <c>PostgreSqlAlvoDataFixture</c> makes for the port-level suites.
+/// <c>PostgreSqlAlvoDataFixture</c> makes for the port-level suites. The container-creation mechanics live in
+/// <see cref="PostgresTestContainer"/>, shared with <c>PostgresFixture</c> — a second copy here is exactly
+/// how the two would quietly drift apart.
 /// </para>
 /// <para>
 /// <b>The container is built inside <see cref="InitializeAsync"/>, never in a field initializer.</b>
-/// <see cref="PostgreSqlBuilder.Build"/> itself talks to the Docker daemon, so on a host with no reachable
-/// daemon it throws while the fixture is being <em>constructed</em> — which xUnit reports as every test in
-/// the sharing class failing, before any of them reaches its own skip. PR1 lost 28 tests to exactly that on a
-/// Windows runner. Do not reintroduce it.
+/// <see cref="PostgresTestContainer.BuildAndStartAsync"/> itself talks to the Docker daemon, so on a host
+/// with no reachable daemon it throws while the fixture is being <em>constructed</em> — which xUnit reports
+/// as every test in the sharing class failing, before any of them reaches its own skip. PR1 lost 28 tests to
+/// exactly that on a Windows runner. Do not reintroduce it.
+/// </para>
+/// <para>
+/// <b>Any failure to reach the daemon leaves this engine unavailable, not only Windows's.</b> Windows GitHub
+/// runners run Docker in Windows-container mode, which has no linux/amd64 manifest for
+/// <c>postgres:16-alpine</c> — but a Linux or macOS host can just as well have no daemon running at all, and
+/// both are the same condition from a caller's point of view: <see cref="Available"/> is false and every
+/// fact self-skips through <see cref="CreateDatabaseAsync"/>, instead of the class failing outright on the
+/// platform this used to check for by name.
 /// </para>
 /// </remarks>
 public sealed class PostgresApiEngine : AlvoApiEngine, IAsyncLifetime
 {
     private PostgreSqlContainer? _container;
+    private string? _unavailableReason;
     private readonly List<string> _connectionStrings = [];
     private readonly Lock _gate = new();
 
@@ -37,27 +50,22 @@ public sealed class PostgresApiEngine : AlvoApiEngine, IAsyncLifetime
     /// <inheritdoc/>
     public async ValueTask InitializeAsync()
     {
-        // Windows GitHub runners run Docker in Windows-container mode when they run it at all, and that mode
-        // has no linux/amd64 manifest for postgres:16-alpine. Every caller self-skips (see
-        // CreateDatabaseAsync), so there is nothing to start; Linux stays strict, because skipping there
-        // would silently drop the whole real-PostgreSQL leg of the API suite.
-        if (OperatingSystem.IsWindows())
+        try
         {
-            return;
+            _container = await PostgresTestContainer.BuildAndStartAsync();
         }
-
-        // Explicit tag: PostgreSqlBuilder's parameterless ctor and its PostgreSqlImage constant are both
-        // obsolete in Testcontainers.PostgreSql 4.13 in favour of an explicit image argument.
-        var container = new PostgreSqlBuilder("postgres:16-alpine").Build();
-        await container.StartAsync();
-        _container = container;
+        catch (Exception exception)
+        {
+            _unavailableReason = exception.Message;
+        }
     }
 
     /// <inheritdoc/>
     public override async Task<AlvoApiDatabase> CreateDatabaseAsync()
     {
         Assert.SkipUnless(
-            Available, "Docker is unavailable on this platform, so the PostgreSQL engine cannot be started.");
+            Available,
+            $"No reachable Docker daemon, so the PostgreSQL engine could not be started: {_unavailableReason}.");
 
         var admin = _container!.GetConnectionString();
         var name = $"alvo_api_{Guid.NewGuid():N}";
@@ -133,10 +141,75 @@ public sealed class PostgresApiDatabase(string connectionString, string name) : 
     public override DbConnection Connect() => new NpgsqlConnection(connectionString);
 
     /// <summary>
-    /// The same connection, typed — for the one caller that needs PostgreSQL's own bulk-load protocol
-    /// (<c>COPY</c>) rather than a portable <c>DbCommand</c>.
+    /// Bulk-loads <paramref name="rowCount"/> vehicles owned by <paramref name="owner"/> over Npgsql's binary
+    /// <c>COPY</c> protocol — the one place this suite's seeding speaks PostgreSQL directly rather than a
+    /// portable <c>DbCommand</c>.
     /// </summary>
-    public NpgsqlConnection ConnectToPostgres() => new(connectionString);
+    /// <remarks>
+    /// <para>
+    /// The raw connection <c>COPY</c> needs never leaves this method. Earlier this was a public
+    /// <c>ConnectToPostgres()</c> handing out a policy-free <see cref="NpgsqlConnection"/> to any fact in the
+    /// assembly; only the seeding operation itself is exposed now, so no future fact can reach a raw writer
+    /// for anything else.
+    /// </para>
+    /// <para>
+    /// Binary rather than text: every value crosses as its CLR type, so no <see cref="Guid"/>, timestamp or
+    /// integer is ever formatted into text and re-parsed — which is where a hand-rolled seed diverges from
+    /// what the production write path stores. The nullable managed columns (<c>created_by</c>,
+    /// <c>updated_by</c>) and the nullable <c>color</c> are left out of the column list rather than written
+    /// as null, so the table itself supplies them.
+    /// </para>
+    /// </remarks>
+    /// <param name="owner">The owner every seeded vehicle references.</param>
+    /// <param name="rowCount">How many vehicles to load.</param>
+    /// <param name="make">The <c>make</c> for a given row index.</param>
+    /// <param name="cancellationToken">Cancels the load.</param>
+    public async Task<List<Guid>> CopyVehiclesAsync(
+        Guid owner, int rowCount, Func<int, string> make, CancellationToken cancellationToken)
+    {
+        var ids = new List<Guid>(rowCount);
+        var stamped = DateTimeOffset.UtcNow;
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var writer = await connection.BeginBinaryImportAsync(
+            "COPY vehicles (id, created_at, updated_at, vin, plate, make, model, year, owner_id) "
+            + "FROM STDIN (FORMAT BINARY)",
+            cancellationToken);
+
+        foreach (var index in Enumerable.Range(0, rowCount))
+        {
+            var id = Guid.NewGuid();
+            ids.Add(id);
+            await WriteVehicleAsync(writer, id, owner, index, make(index), stamped, cancellationToken);
+        }
+
+        await writer.CompleteAsync(cancellationToken);
+        return ids;
+    }
+
+    private static async Task WriteVehicleAsync(
+        NpgsqlBinaryImporter writer,
+        Guid id,
+        Guid owner,
+        int index,
+        string make,
+        DateTimeOffset stamped,
+        CancellationToken cancellationToken)
+    {
+        await writer.StartRowAsync(cancellationToken);
+        await writer.WriteAsync(id, NpgsqlDbType.Uuid, cancellationToken);
+        await writer.WriteAsync(stamped, NpgsqlDbType.TimestampTz, cancellationToken);
+        await writer.WriteAsync(stamped, NpgsqlDbType.TimestampTz, cancellationToken);
+        await writer.WriteAsync($"VIN{index:D14}", NpgsqlDbType.Varchar, cancellationToken);
+        await writer.WriteAsync($"S-{index:D9}", NpgsqlDbType.Varchar, cancellationToken);
+        await writer.WriteAsync(make, NpgsqlDbType.Varchar, cancellationToken);
+        await writer.WriteAsync("model", NpgsqlDbType.Varchar, cancellationToken);
+
+        // An `integer` descriptor field maps to a PostgreSQL `bigint`, so the operand is a long — a mismatch
+        // here is a COPY-time failure rather than a silent conversion.
+        await writer.WriteAsync((long)(1990 + (index % 30)), NpgsqlDbType.Bigint, cancellationToken);
+        await writer.WriteAsync(owner, NpgsqlDbType.Uuid, cancellationToken);
+    }
 
     /// <inheritdoc/>
     /// <remarks>

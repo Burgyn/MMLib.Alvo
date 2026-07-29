@@ -40,4 +40,11 @@
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/PolicyPredicateParameters.cs" Link="_shared/PolicyPredicateParameters.cs" />
   </ItemGroup>
 
+  <!-- The container-creation mechanics every Testcontainers-backed PostgreSQL fixture in this repository
+       needs, shared with MMLib.Alvo.Api.Tests.Integration's PostgresApiEngine — a second copy of the image
+       tag and the lazy-build discipline is exactly how the two would quietly drift apart. -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/postgres/PostgresTestContainer.cs" Link="_shared/PostgresTestContainer.cs" />
+  </ItemGroup>
+
 </Project>

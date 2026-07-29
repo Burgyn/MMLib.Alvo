@@ -44,6 +44,13 @@
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/SqlCapture.cs" Link="_shared/SqlCapture.cs" />
   </ItemGroup>
 
+  <!-- The PostgreSQL container's own lazy-build, skip-rather-than-fail lifecycle, shared with
+       MMLib.Alvo.Data.PostgreSql.Tests.Integration's PostgresFixture — a second copy of it here is exactly
+       how the two fixtures would quietly drift apart. -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/postgres/PostgresTestContainer.cs" Link="_shared/PostgresTestContainer.cs" />
+  </ItemGroup>
+
   <!-- The API test world, its response readers, its engine seam, and DataApiEngineTests — the same sources
        MMLib.Alvo.Api.Tests compiles. That is the whole mechanism by which "green on SQLite + Postgres" is a
        statement about one suite rather than about two suites that have drifted apart. -->

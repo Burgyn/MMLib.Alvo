@@ -1,7 +1,4 @@
-﻿using MMLib.Alvo.Api.Tests;
-using Npgsql;
-using NpgsqlTypes;
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Text.Json.Nodes;
@@ -16,16 +13,18 @@ namespace MMLib.Alvo.Api.Tests.Integration;
 ///   <item>p95 of a filtered list over 100 000 rows on an indexed column under 50 ms locally.</item>
 ///   <item>Keyset pagination stable over 1 000 000 rows.</item>
 /// </list>
+/// A third fact measures a property neither number is about — see
+/// <see cref="A_sorted_keyset_walks_late_pages_do_not_cost_an_unbounded_multiple_of_its_early_pages"/>.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Both facts are written against the way a performance test usually fails to mean anything.</b> A latency
-/// assertion passes trivially on an empty or tiny table, so the seeded row count and the filter's own match
-/// count are asserted before a single measurement is taken. A threshold assertion whose failure message says
-/// only "false" cannot be acted on, so the measured p95 — with the median and the maximum beside it — is in the
-/// message. And a stability assertion over a <em>static</em> table proves nothing at all: it is satisfied by
-/// offset paging, which is precisely the scheme keyset paging exists to replace, so the walk below runs against
-/// a table a concurrent writer is inserting into and updating throughout.
+/// <b>Both §2.1 facts are written against the way a performance test usually fails to mean anything.</b> A
+/// latency assertion passes trivially on an empty or tiny table, so the seeded row count and the filter's own
+/// match count are asserted before a single measurement is taken. A threshold assertion whose failure message
+/// says only "false" cannot be acted on, so the measured p95 — with the median and the maximum beside it — is
+/// in the message. And a stability assertion over a <em>static</em> table proves nothing at all: it is
+/// satisfied by offset paging, which is precisely the scheme keyset paging exists to replace, so the walk
+/// below runs against a table a concurrent writer is inserting into and updating throughout.
 /// </para>
 /// <para>
 /// <b>The seed goes through <c>COPY</c>, not through the API.</b> Creating a million rows one request at a time
@@ -85,6 +84,35 @@ public sealed class PagingPerformanceTests : IAsyncLifetime
     /// </remarks>
     private const int PageSize = 2_000;
 
+    /// <summary>Rows seeded for the depth-cost ratio fact — enough to separate early pages from late ones.</summary>
+    private const int SortedWalkRowCount = 100_000;
+
+    /// <summary>
+    /// Distinct <c>make</c> values the ratio fact's seed carries, so the sort key has real cardinality — a
+    /// two-value <c>make</c> (as the p95 fact uses) would not exercise the same shape the measurement behind
+    /// issue #100 used.
+    /// </summary>
+    private const int SortedWalkDistinctMakes = 1_000;
+
+    /// <summary>The fixed page size the depth-cost ratio walk uses; small enough for enough pages to bucket.</summary>
+    private const int SortedWalkPageSize = 200;
+
+    /// <summary>
+    /// The bound the early/late page-cost ratio must stay under. <b>Not a target</b> — measured at 4.0x–6.9x
+    /// over six local runs against the current, unrewritten renderer, so 20x carries roughly 3–5x headroom.
+    /// See the fact's own remarks and issue #100, which records the rewrite that would tighten this.
+    /// </summary>
+    private const double SortedWalkRatioBound = 20d;
+
+#if DEBUG
+    private const string BuildConfiguration = "Debug";
+#else
+    private const string BuildConfiguration = "Release";
+#endif
+
+    /// <summary>The engine and build configuration a reported number was measured under.</summary>
+    private const string EngineDescription = "postgres:16-alpine, " + BuildConfiguration;
+
     private readonly PostgresApiEngine _engine = new();
 
     private static CancellationToken Cancellation => TestContext.Current.CancellationToken;
@@ -121,11 +149,13 @@ public sealed class PagingPerformanceTests : IAsyncLifetime
 
         (await world.CountRowsAsync("vehicles")).ShouldBe(
             FilteredRowCount, "the criterion is about 100 000 rows, and a latency budget is trivial on fewer");
-        (await world.CountRowsAsync("vehicles", $"make = '{RareMake}'")).ShouldBe(
+        (await world.CountRowsAsync("vehicles", "make", RareMake)).ShouldBe(
             FilteredRowCount / RareEvery, "the filter must match a real subset — neither nothing nor everything");
 
         var samples = await MeasureAsync(world, admin);
-        Report($"filtered list: {Describe(samples)}; seeding {FilteredRowCount} rows took {seed.Elapsed.TotalSeconds:F1}s");
+        await ReportAsync(
+            $"§2.1 filtered-list p95 (budget {P95BudgetMs:F0}ms, {FilteredRowCount} rows, indexed column, "
+            + $"{EngineDescription}): {Describe(samples)}; seeded in {seed.Elapsed.TotalSeconds:F1}s");
 
         P95(samples).ShouldBeLessThan(
             P95BudgetMs,
@@ -159,6 +189,14 @@ public sealed class PagingPerformanceTests : IAsyncLifetime
     /// keyset walk sees an inserted row exactly when its key sorts after the cursor. The claim is over the rows
     /// present for the whole run, which is the million that were there before the writer started.
     /// </para>
+    /// <para>
+    /// <b>The walk sorts by the default key (<c>id</c>) rather than by a declared column, deliberately.</b> A
+    /// v4 <see cref="Guid"/> key means concurrent inserts land uniformly, which is what makes the offset
+    /// substitution below actually lose rows rather than be theoretically worse. It also means the keyset
+    /// predicate collapses to a single-term <c>id &gt; @cursor</c>, so this fact says nothing about a
+    /// multi-term sort's cost — that is
+    /// <see cref="A_sorted_keyset_walks_late_pages_do_not_cost_an_unbounded_multiple_of_its_early_pages"/>'s job.
+    /// </para>
     /// </remarks>
     [Fact]
     public async Task Keyset_paging_stays_stable_over_a_million_rows()
@@ -169,25 +207,84 @@ public sealed class PagingPerformanceTests : IAsyncLifetime
         var seed = await SeedAsync(world, admin, KeysetRowCount, _ => CommonMake);
         (await world.CountRowsAsync("vehicles")).ShouldBe(KeysetRowCount, "the criterion is about a million rows");
 
-        var writer = new ConcurrentWriter(world, admin, seed);
-        var walk = await WalkWhileWritingAsync(world, admin, writer);
+        var walk = new Walk();
+        var writer = new ConcurrentWriter(world, admin, seed, () => walk.Pages);
+        await WalkWhileWritingAsync(world, admin, walk, writer);
 
-        Report($"keyset walk: {walk.Describe()}; seeding {KeysetRowCount} rows took {seed.Elapsed.TotalSeconds:F1}s");
-        walk.AssertStable(seed.Ids);
+        await ReportAsync(
+            $"§2.1 keyset stability ({KeysetRowCount} rows, page size {PageSize}, {EngineDescription}): "
+            + $"{walk.Describe()}; {writer.Describe()}; seeded in {seed.Elapsed.TotalSeconds:F1}s");
+        walk.AssertStable(seed.Ids, writer);
         (await world.CountRowsAsync("vehicles")).ShouldBeGreaterThan(
             KeysetRowCount, "the walk must have run against a table that was still growing");
     }
 
     /// <summary>
-    /// Pages the whole visible set at a fixed size while <paramref name="writer"/> writes, and stops the
-    /// writer as soon as the walk ends.
+    /// The depth-cost characteristic §2.1 does not name: on a keyset walk sorted by a declared column, a page
+    /// near the end of the walk must not cost an unbounded multiple of a page near the start.
     /// </summary>
-    private static async Task<Walk> WalkWhileWritingAsync(AlvoApiWorld world, TestApiKey admin, ConcurrentWriter writer)
+    /// <remarks>
+    /// <para>
+    /// Neither of §2.1's two numbers is about this. Its 50 ms budget is scoped to a filtered list over
+    /// 100 000 rows on an indexed column — <see cref="P95_of_a_filtered_list_over_100k_rows_on_an_indexed_column_is_under_50ms"/>
+    /// already measures exactly that, and this fact must not be read as moving that budget onto a different
+    /// shape. Its keyset criterion asks for stability over 1 000 000 rows, which
+    /// <see cref="Keyset_paging_stays_stable_over_a_million_rows"/> proves. This fact exists because
+    /// <c>KeysetSqlRenderer</c>'s nested-OR predicate is not sargable on a multi-term sort — PostgreSQL's
+    /// planner falls back to an index scan plus a filter whose cost grows with cursor depth, even though
+    /// neither §2.1 number is violated by it. It breaches keyset paging's own defining property (page N costs
+    /// what page 1 costs) rather than a spec criterion, which is exactly how issue #100 — the full
+    /// measurement, the <c>EXPLAIN</c> plans, the SQLite/T-SQL portability analysis and the fix shape — files
+    /// it. This fact only guards against the ratio getting worse than it is today.
+    /// </para>
+    /// <para>
+    /// <b>The bound is not a target.</b> It carries headroom over what the current, unrewritten renderer
+    /// measures, so this stays green until #100's rewrite lands — at which point, per #100's own acceptance
+    /// criteria, the bound tightens to become the assertion that proves the rewrite worked.
+    /// </para>
+    /// <para>
+    /// The seed's <c>make</c> carries 1 000 distinct values rather than the p95 fact's two, so the walk's sort
+    /// key has real cardinality — the shape issue #100's own measurement used — and the fixture's
+    /// <c>(make, id)</c> index is what lets the planner use the sort at all; the descriptor's other index,
+    /// <c>(make, model)</c>, does not cover <c>ORDER BY make, id</c>.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_sorted_keyset_walks_late_pages_do_not_cost_an_unbounded_multiple_of_its_early_pages()
+    {
+        var admin = Admin();
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync([admin], engine: _engine);
+        await SeedAsync(world, admin, SortedWalkRowCount, index => $"make-{index % SortedWalkDistinctMakes:D4}");
+
+        var pageLatenciesMs = await WalkTimingSortedByMakeAsync(world, admin);
+        var tenth = pageLatenciesMs.Length / 10;
+        var early = P95(pageLatenciesMs[..tenth]);
+        var late = P95(pageLatenciesMs[^tenth..]);
+        var ratio = late / early;
+        await ReportAsync(
+            $"depth-cost ratio (issue #100, not a §2.1 criterion — bound {SortedWalkRatioBound:F0}x, "
+            + $"{SortedWalkRowCount} rows, page size {SortedWalkPageSize}, {EngineDescription}): "
+            + $"early p95={early:F2}ms late p95={late:F2}ms ratio={ratio:F1}x over {pageLatenciesMs.Length} pages");
+
+        ratio.ShouldBeLessThan(
+            SortedWalkRatioBound,
+            $"a keyset page's cost must not scale unboundedly with cursor depth; early p95 {early:F2}ms, late "
+            + $"p95 {late:F2}ms, ratio {ratio:F1}x over {pageLatenciesMs.Length} pages. Issue #100 tracks the "
+            + "nested-OR predicate that makes this ratio non-trivial today — the bound here has headroom over "
+            + "the current measurement and is not a target to relax toward.");
+    }
+
+    /// <summary>
+    /// Pages the whole visible set at a fixed size while <paramref name="writer"/> writes into
+    /// <paramref name="walk"/>, and stops the writer as soon as the walk ends.
+    /// </summary>
+    private static async Task WalkWhileWritingAsync(
+        AlvoApiWorld world, TestApiKey admin, Walk walk, ConcurrentWriter writer)
     {
         var writing = writer.RunAsync();
         try
         {
-            return await WalkAsync(world, admin, writer);
+            await WalkAsync(world, admin, walk);
         }
         finally
         {
@@ -202,9 +299,8 @@ public sealed class PagingPerformanceTests : IAsyncLifetime
     /// the run in JSON rather than in paging. The projection does not weaken the fact: the cursor is anchored
     /// on the row key, which is exactly what is projected.
     /// </remarks>
-    private static async Task<Walk> WalkAsync(AlvoApiWorld world, TestApiKey admin, ConcurrentWriter writer)
+    private static async Task WalkAsync(AlvoApiWorld world, TestApiKey admin, Walk walk)
     {
-        var walk = new Walk(writer);
         string? cursor = null;
 
         do
@@ -217,8 +313,31 @@ public sealed class PagingPerformanceTests : IAsyncLifetime
             cursor = (await response.ReadJsonObjectAsync())["next"]?.GetValue<string>();
         }
         while (cursor is not null);
+    }
 
-        return walk;
+    /// <summary>
+    /// Pages the sorted set at a fixed size, timing each page — the raw material for the depth-cost ratio
+    /// fact. Sorted by <c>make</c>, so the cursor predicate carries the multi-term shape issue #100 measures.
+    /// </summary>
+    private static async Task<double[]> WalkTimingSortedByMakeAsync(AlvoApiWorld world, TestApiKey admin)
+    {
+        var latenciesMs = new List<double>();
+        string? cursor = null;
+
+        do
+        {
+            var path = $"/api/vehicles?select=id&order=make&limit={SortedWalkPageSize}"
+                + (cursor is null ? string.Empty : $"&after={Uri.EscapeDataString(cursor)}");
+            var stopwatch = Stopwatch.StartNew();
+            using var response = await world.SendAsync(HttpMethod.Get, path, admin);
+            latenciesMs.Add(stopwatch.Elapsed.TotalMilliseconds);
+
+            response.StatusCode.ShouldBe(HttpStatusCode.OK, await response.ReadTextAsync());
+            cursor = (await response.ReadJsonObjectAsync())["next"]?.GetValue<string>();
+        }
+        while (cursor is not null);
+
+        return [.. latenciesMs];
     }
 
     /// <summary>
@@ -273,7 +392,7 @@ public sealed class PagingPerformanceTests : IAsyncLifetime
     {
         var owner = await CreateOwnerAsync(world, admin);
         var stopwatch = Stopwatch.StartNew();
-        var ids = await CopyVehiclesAsync((PostgresApiDatabase)world.Database, owner, rowCount, make);
+        var ids = await ((PostgresApiDatabase)world.Database).CopyVehiclesAsync(owner, rowCount, make, Cancellation);
         var elapsed = stopwatch.Elapsed;
 
         await EnsureSeedIsReadableAsync(world, admin, ids[^1]);
@@ -299,58 +418,6 @@ public sealed class PagingPerformanceTests : IAsyncLifetime
         (await response.ReadJsonObjectAsync())["id"]!.GetValue<Guid>().ShouldBe(id);
     }
 
-    /// <summary>
-    /// Loads the vehicles over Npgsql's binary <c>COPY</c> — the one place this suite speaks PostgreSQL rather
-    /// than SQL a portable <c>DbCommand</c> could carry.
-    /// </summary>
-    /// <remarks>
-    /// Binary rather than text: every value crosses as its CLR type, so no <see cref="Guid"/>, timestamp or
-    /// integer is ever formatted into text and re-parsed — which is where a hand-rolled seed diverges from what
-    /// the production write path stores. The nullable managed columns (<c>created_by</c>, <c>updated_by</c>) and
-    /// the nullable <c>color</c> are left out of the column list rather than written as null, so the table
-    /// itself supplies them.
-    /// </remarks>
-    private static async Task<List<Guid>> CopyVehiclesAsync(
-        PostgresApiDatabase database, Guid owner, int rowCount, Func<int, string> make)
-    {
-        var ids = new List<Guid>(rowCount);
-        var stamped = DateTimeOffset.UtcNow;
-        await using var connection = database.ConnectToPostgres();
-        await connection.OpenAsync(Cancellation);
-        await using var writer = await connection.BeginBinaryImportAsync(
-            "COPY vehicles (id, created_at, updated_at, vin, plate, make, model, year, owner_id) "
-            + "FROM STDIN (FORMAT BINARY)",
-            Cancellation);
-
-        foreach (var index in Enumerable.Range(0, rowCount))
-        {
-            var id = Guid.NewGuid();
-            ids.Add(id);
-            await WriteVehicleAsync(writer, id, owner, index, make(index), stamped);
-        }
-
-        await writer.CompleteAsync(Cancellation);
-        return ids;
-    }
-
-    private static async Task WriteVehicleAsync(
-        NpgsqlBinaryImporter writer, Guid id, Guid owner, int index, string make, DateTimeOffset stamped)
-    {
-        await writer.StartRowAsync(Cancellation);
-        await writer.WriteAsync(id, NpgsqlDbType.Uuid, Cancellation);
-        await writer.WriteAsync(stamped, NpgsqlDbType.TimestampTz, Cancellation);
-        await writer.WriteAsync(stamped, NpgsqlDbType.TimestampTz, Cancellation);
-        await writer.WriteAsync($"VIN{index:D14}", NpgsqlDbType.Varchar, Cancellation);
-        await writer.WriteAsync($"S-{index:D9}", NpgsqlDbType.Varchar, Cancellation);
-        await writer.WriteAsync(make, NpgsqlDbType.Varchar, Cancellation);
-        await writer.WriteAsync("model", NpgsqlDbType.Varchar, Cancellation);
-
-        // An `integer` descriptor field maps to a PostgreSQL `bigint`, so the operand is a long — a mismatch
-        // here is a COPY-time failure rather than a silent conversion.
-        await writer.WriteAsync((long)(1990 + (index % 30)), NpgsqlDbType.Bigint, Cancellation);
-        await writer.WriteAsync(owner, NpgsqlDbType.Uuid, Cancellation);
-    }
-
     private static async Task<Guid> CreateOwnerAsync(AlvoApiWorld world, TestApiKey admin)
     {
         using var response = await world.SendAsync(
@@ -363,11 +430,18 @@ public sealed class PagingPerformanceTests : IAsyncLifetime
 
     private static TestApiKey Admin() => new("admin-key", ["admin", "authenticated"], ["*:read", "*:write"]);
 
-    /// <summary>The 95th percentile by nearest rank, which is what "p95 over 200 requests" names.</summary>
+    /// <summary>The 95th percentile by nearest rank, which is what "p95 over N requests" names.</summary>
     private static double P95(double[] samples)
     {
         var sorted = samples.Order().ToArray();
         return sorted[(int)Math.Ceiling(0.95 * sorted.Length) - 1];
+    }
+
+    /// <summary>The median: the middle sample, or the mean of the two middle samples when the count is even.</summary>
+    private static double Median(double[] sorted)
+    {
+        var middle = sorted.Length / 2;
+        return sorted.Length % 2 == 0 ? (sorted[middle - 1] + sorted[middle]) / 2d : sorted[middle];
     }
 
     /// <summary>Every number a reader needs to act on the result, not just the one that was compared.</summary>
@@ -376,14 +450,40 @@ public sealed class PagingPerformanceTests : IAsyncLifetime
         var sorted = samples.Order().ToArray();
         return string.Create(
             CultureInfo.InvariantCulture,
-            $"n={sorted.Length} p50={sorted[sorted.Length / 2]:F1}ms p95={P95(sorted):F1}ms max={sorted[^1]:F1}ms");
+            $"n={sorted.Length} p50={Median(sorted):F1}ms p95={P95(sorted):F1}ms max={sorted[^1]:F1}ms");
     }
 
     /// <summary>
-    /// Writes a measured number where a passing run can still be read, since a criterion's value is the point
-    /// of the fact and not only its verdict. The measured numbers are also in every failure message.
+    /// Writes a measured number three ways, since a criterion's value is the point of these facts and not
+    /// only their verdict — and, measured, only one of the three is visible on a passing run.
     /// </summary>
-    private static void Report(string line) => TestContext.Current.TestOutputHelper?.WriteLine(line);
+    /// <remarks>
+    /// <c>TestContext.Current.TestOutputHelper</c> output is not printed on a passing test under MTP, even
+    /// with <c>-- --output Detailed</c>, so it is kept only as the source every failure message also quotes.
+    /// <c>TestContext.Current.AddAttachment</c> <em>is</em> printed on a passing run, but the file lands in OS
+    /// temp, which <c>--results-directory</c> does not collect — a good local affordance and not a durable
+    /// one. The durable copy is the line <see cref="AppendCriterionAsync"/> appends to
+    /// <c>artifacts/criteria/paging.md</c>, which <c>ci.yml</c> reads into the PR's own checks summary and
+    /// uploads — the one copy a reader can compare across runs without re-running anything.
+    /// </remarks>
+    private static async Task ReportAsync(string line)
+    {
+        TestContext.Current.TestOutputHelper?.WriteLine(line);
+        TestContext.Current.AddAttachment("paging-criteria", line);
+        await AppendCriterionAsync(line);
+    }
+
+    /// <summary>
+    /// Appends one measured line, timestamped, to <c>artifacts/criteria/paging.md</c> — already gitignored,
+    /// and already the directory CI packs into — so §2.1's two numeric criteria, and the depth-cost ratio
+    /// beside them, stay trackable for drift instead of surfacing only when one of them is violated.
+    /// </summary>
+    private static async Task AppendCriterionAsync(string line)
+    {
+        var path = Path.Combine(RepositoryRoot.Find(), "artifacts", "criteria", "paging.md");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await File.AppendAllTextAsync(path, $"- {DateTimeOffset.UtcNow:O} {line}{Environment.NewLine}", Cancellation);
+    }
 
     /// <summary>What one bulk load produced.</summary>
     /// <param name="Ids">Every seeded row's id — the set present for the whole of a following walk.</param>
@@ -395,13 +495,19 @@ public sealed class PagingPerformanceTests : IAsyncLifetime
     /// The rows one walk visited, kept as a set so a repeat is caught as it happens rather than by a second
     /// pass over a million ids.
     /// </summary>
-    private sealed class Walk(ConcurrentWriter writer)
+    private sealed class Walk
     {
         private readonly HashSet<Guid> _visited = [];
         private int _total;
         private Guid? _repeated;
 
-        /// <summary>How many pages the walk took.</summary>
+        /// <summary>How many pages the walk has taken so far.</summary>
+        /// <remarks>
+        /// Read concurrently by <see cref="ConcurrentWriter"/> to record which page was in progress at each of
+        /// its writes — the walk and the writer run on the same thread pool with no lock between them, but an
+        /// <see langword="int"/> read/increment on one field is safe without one, and a stale-by-one read costs
+        /// this fact nothing.
+        /// </remarks>
         internal int Pages { get; private set; }
 
         internal void Add(IReadOnlyList<JsonObject> items)
@@ -417,19 +523,22 @@ public sealed class PagingPerformanceTests : IAsyncLifetime
             }
         }
 
-        internal string Describe() =>
-            $"pages={Pages} rows={_total} distinct={_visited.Count} {writer.Describe()}";
+        internal string Describe() => $"pages={Pages} rows={_total} distinct={_visited.Count}";
 
         /// <summary>
         /// The stability claim itself: no row twice, every row present for the whole run visited, and a writer
-        /// that actually wrote — because with an idle writer this is the static-table version that offset
+        /// that wrote <em>throughout</em> the walk rather than merely at some point during it — because a
+        /// writer that stopped after one insert and one update would satisfy a bare "greater than zero" guard
+        /// while the walk it ran against was, in every way that matters, the static-table version that offset
         /// paging also passes.
         /// </summary>
         /// <param name="seeded">Every id present before the writer started.</param>
-        internal void AssertStable(List<Guid> seeded)
+        /// <param name="writer">The writer that ran alongside this walk.</param>
+        internal void AssertStable(List<Guid> seeded, ConcurrentWriter writer)
         {
+            writer.Failure.ShouldBeNull($"the concurrent writer must not have failed; {writer.Describe()}");
+
             _repeated.ShouldBeNull($"a keyset walk must never return one row twice; {Describe()}");
-            _total.ShouldBe(_visited.Count, $"and the totals must agree; {Describe()}");
             Pages.ShouldBeGreaterThan(
                 seeded.Count / (PageSize + 1), $"the walk must really have paged rather than read it all; {Describe()}");
 
@@ -440,9 +549,22 @@ public sealed class PagingPerformanceTests : IAsyncLifetime
                 + "were missed. This is the assertion an 'offset' page fails under concurrent inserts. "
                 + Describe());
 
-            writer.Failure.ShouldBeNull($"the concurrent writer must not have failed; {Describe()}");
-            writer.Inserted.ShouldBeGreaterThan(0, "the walk must really have run against concurrent inserts");
-            writer.Updated.ShouldBeGreaterThan(0, "and against concurrent updates");
+            var minimumWrites = Pages / 4;
+            writer.Inserted.ShouldBeGreaterThan(
+                minimumWrites,
+                $"the writer must have inserted throughout the walk, not once at the start; {writer.Describe()}");
+            writer.Updated.ShouldBeGreaterThan(
+                minimumWrites, $"and updated throughout it; {writer.Describe()}");
+
+            var minimumLastWritePage = Pages / 2;
+            writer.LastInsertPage.ShouldBeGreaterThan(
+                minimumLastWritePage,
+                "the writer's last successful insert must have landed past the walk's midpoint, or every write "
+                + $"could have happened before page 2 while the count above still passed; {writer.Describe()}");
+            writer.LastUpdatePage.ShouldBeGreaterThan(
+                minimumLastWritePage,
+                "and likewise for its last update, or an idle writer after an early burst would satisfy the "
+                + $"count above too; {writer.Describe()}");
         }
     }
 
@@ -458,10 +580,15 @@ public sealed class PagingPerformanceTests : IAsyncLifetime
     /// <para>
     /// It records the <em>first</em> failure rather than swallowing errors, because a writer that silently
     /// stopped writing would turn this into the static-table version of the fact — the version that proves
-    /// nothing. <see cref="Walk.AssertStable"/> checks the failure and both counts.
+    /// nothing. <see cref="Walk.AssertStable"/> checks the failure and every count.
+    /// </para>
+    /// <para>
+    /// <paramref name="pagesSoFar"/> is how this writer records <em>when</em>, not only <em>whether</em>, it
+    /// wrote: <see cref="LastInsertPage"/> and <see cref="LastUpdatePage"/> let
+    /// <see cref="Walk.AssertStable"/> tell "884 writes spread over 501 pages" from "884 writes before page 2".
     /// </para>
     /// </remarks>
-    private sealed class ConcurrentWriter(AlvoApiWorld world, TestApiKey admin, Seed seed)
+    private sealed class ConcurrentWriter(AlvoApiWorld world, TestApiKey admin, Seed seed, Func<int> pagesSoFar)
     {
         private volatile bool _stopped;
         private int _serial;
@@ -471,6 +598,12 @@ public sealed class PagingPerformanceTests : IAsyncLifetime
 
         /// <summary>How many existing rows it updated.</summary>
         internal int Updated { get; private set; }
+
+        /// <summary>The walk's own page count at the writer's last successful insert.</summary>
+        internal int LastInsertPage { get; private set; }
+
+        /// <summary>The walk's own page count at the writer's last successful update.</summary>
+        internal int LastUpdatePage { get; private set; }
 
         /// <summary>The first failure it met, or <see langword="null"/> when it met none.</summary>
         internal string? Failure { get; private set; }
@@ -488,7 +621,9 @@ public sealed class PagingPerformanceTests : IAsyncLifetime
 
         internal void Stop() => _stopped = true;
 
-        internal string Describe() => $"inserted={Inserted} updated={Updated} failure={Failure ?? "none"}";
+        internal string Describe() =>
+            $"inserted={Inserted} (last at page {LastInsertPage}) updated={Updated} (last at page "
+            + $"{LastUpdatePage}) failure={Failure ?? "none"}";
 
         /// <summary>
         /// Creates a row at a uniformly distributed row key, which is what makes the insert land behind the
@@ -510,6 +645,7 @@ public sealed class PagingPerformanceTests : IAsyncLifetime
             if (response.StatusCode == HttpStatusCode.Created)
             {
                 Inserted++;
+                LastInsertPage = pagesSoFar();
                 return;
             }
 
@@ -530,6 +666,7 @@ public sealed class PagingPerformanceTests : IAsyncLifetime
             if (response.StatusCode == HttpStatusCode.OK)
             {
                 Updated++;
+                LastUpdatePage = pagesSoFar();
                 return;
             }
 

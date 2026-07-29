@@ -80,6 +80,33 @@ jobs:
             scripts/test-ring2
           fi
 
+      # §2.1's two numeric paging criteria are the milestone's only quantitative acceptance
+      # criteria, and a passing run prints neither of MTP's own output mechanisms for them
+      # (TestOutputHelper text is invisible on a green run, and an attachment's content lands
+      # in OS temp) — so PagingPerformanceTests writes artifacts/criteria/paging.md itself and
+      # this step is the only place the numbers become visible without re-running anything.
+      # Linux only: the PostgreSQL leg self-skips on Windows (Docker runs in Windows-container
+      # mode there) and would write nothing. if: always() so a failed Test step still surfaces
+      # whatever was measured before the failure.
+      - name: Publish paging criteria
+        if: always() && runner.os == 'Linux'
+        shell: bash
+        run: |
+          if [ -f artifacts/criteria/paging.md ]; then
+            {
+              echo '### Paging criteria (§2.1)'
+              cat artifacts/criteria/paging.md
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload paging criteria
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v7
+        with:
+          name: paging-criteria
+          path: artifacts/criteria/paging.md
+          if-no-files-found: ignore
+
       # Pack-only on the PR (issue #14): prove packaging works and publish the
       # .nupkg as an artifact. No feed publish — that lands with v0.1.
       - name: Pack

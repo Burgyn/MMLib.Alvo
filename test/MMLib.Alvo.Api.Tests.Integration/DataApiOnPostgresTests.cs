@@ -1,5 +1,4 @@
-﻿using MMLib.Alvo.Api.Tests;
-using Xunit;
+﻿using Xunit;
 
 namespace MMLib.Alvo.Api.Tests.Integration;
 

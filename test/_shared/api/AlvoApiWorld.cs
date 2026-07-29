@@ -10,6 +10,7 @@ using MMLib.Alvo.Auth;
 using MMLib.Alvo.Auth.Internal;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Tests.Data;
+using System.Data.Common;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
@@ -311,22 +312,52 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
     /// back empty proves nothing about the table. This goes around the API on purpose. The table name is a
     /// literal supplied by the fact, never by generated input.
     /// </remarks>
-    /// <param name="table">The table to count.</param>
-    /// <param name="where">
-    /// A <c>WHERE</c> predicate, without the keyword, or <see langword="null"/> to count every row. A literal
-    /// supplied by the fact, exactly as <paramref name="table"/> is — never caller or generated input.
-    /// </param>
-    internal async Task<long> CountRowsAsync(string table, string? where = null)
+    /// <param name="table">The table to count. A literal supplied by the fact, never caller or generated input.</param>
+    internal Task<long> CountRowsAsync(string table) => ExecuteCountAsync(BuildCountCommand(table));
+
+    /// <summary>
+    /// How many rows in <paramref name="table"/> have <paramref name="column"/> equal to <paramref name="value"/>,
+    /// read straight from this world's database.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="value"/> is bound as a parameter rather than interpolated into the command text. Every
+    /// call site today passes a literal the fact itself supplies, but a helper whose whole purpose is to be
+    /// trusted about row counts should not carry a string-interpolation seam even so.
+    /// </remarks>
+    /// <param name="table">The table to count. A literal supplied by the fact.</param>
+    /// <param name="column">The column to compare. A literal supplied by the fact.</param>
+    /// <param name="value">The value <paramref name="column"/> must equal.</param>
+    internal Task<long> CountRowsAsync(string table, string column, string value) =>
+        ExecuteCountAsync(BuildCountCommand(table, column, value));
+
+    private DbCommand BuildCountCommand(string table)
     {
-        await using var connection = _database.Connect();
+        var command = _database.Connect().CreateCommand();
+        command.CommandText = $"SELECT COUNT(*) FROM \"{table}\"";
+        return command;
+    }
+
+    private DbCommand BuildCountCommand(string table, string column, string value)
+    {
+        var command = _database.Connect().CreateCommand();
+        command.CommandText = $"SELECT COUNT(*) FROM \"{table}\" WHERE \"{column}\" = @value";
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = "@value";
+        parameter.Value = value;
+        command.Parameters.Add(parameter);
+        return command;
+    }
+
+    private static async Task<long> ExecuteCountAsync(DbCommand count)
+    {
+        await using var connection = count.Connection!;
+        using var command = count;
         await connection.OpenAsync(TestContext.Current.CancellationToken);
-        await using var count = connection.CreateCommand();
-        count.CommandText = $"SELECT COUNT(*) FROM \"{table}\"" + (where is null ? string.Empty : $" WHERE {where}");
 
         // Both engines answer COUNT(*) as a 64-bit integer, but they do not agree on the CLR type they
         // materialize it as (SQLite long, Npgsql long as well — but a cast would silently start failing if
         // either changed), so it is converted rather than cast.
-        return Convert.ToInt64(await count.ExecuteScalarAsync(TestContext.Current.CancellationToken), Culture);
+        return Convert.ToInt64(await command.ExecuteScalarAsync(TestContext.Current.CancellationToken), Culture);
     }
 
     /// <summary>
