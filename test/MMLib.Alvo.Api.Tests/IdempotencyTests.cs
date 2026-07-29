@@ -638,7 +638,7 @@ public sealed class IdempotencyTests
     /// <summary>A valid vehicle body, unique per <paramref name="ordinal"/> in the fields that demand it.</summary>
     /// <param name="owner">The owner the vehicle belongs to.</param>
     /// <param name="ordinal">Which vehicle this is, for the unique <c>vin</c> and <c>plate</c>.</param>
-    private static JsonObject Vehicle(Guid owner, int ordinal = 1) => new()
+    private static JsonObject Vehicle(Guid owner, int ordinal) => new()
     {
         ["vin"] = $"VIN0000000000000{ordinal}",
         ["plate"] = $"AA-11{ordinal}-BB",

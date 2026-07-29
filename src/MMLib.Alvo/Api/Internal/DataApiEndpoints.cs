@@ -575,11 +575,27 @@ internal static class DataApiEndpoints
     /// <c>httpapi-idempotency-key-header</c> draft, spelled as every BaaS and payment API spells it.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// A literal rather than an option: unlike <see cref="Auth.AlvoAuthOptions.HeaderName"/>, which an
     /// embedded host may have to move out of the way of its own credential header, this one is a published
     /// convention an agent already knows from its training data. Making it configurable would buy a host
     /// nothing and cost every client the ability to assume it. Internal because it is not yet advertised in
     /// the OpenAPI document; the task that publishes one reads it from here rather than spelling it again.
+    /// </para>
+    /// <para>
+    /// <b>Read on the create only, and on the other two write verbs it is <em>ignored</em> — labelled, because
+    /// this file refuses every other unhonoured header on a write.</b> The rule it looks like an exception to
+    /// (<see cref="EnsureUnconditional"/>: "every write verb either evaluates a precondition header or refuses
+    /// it") is about <em>preconditions</em>, and the reason there is that ignoring one costs somebody their
+    /// change — the caller reads a 200 and believes a lost update was prevented. This header cannot cost
+    /// anything comparable on an update or a delete: <c>UpdateAsync</c> assigns absolute values to named fields
+    /// and <c>DeleteAsync</c> removes one row, so applying either twice leaves the same state as applying it
+    /// once, and the port has no channel to record a key against them anyway. Refusing it instead would break
+    /// the widespread client habit — Stripe's SDKs among them — of attaching the header to every mutating
+    /// request, for no protection gained. It is still <em>client-observable</em> that the header did nothing, so
+    /// like the read side's two precondition gaps it has to reach the OpenAPI description rather than living
+    /// only here.
+    /// </para>
     /// </remarks>
     internal const string IdempotencyKeyHeader = "Idempotency-Key";
 
