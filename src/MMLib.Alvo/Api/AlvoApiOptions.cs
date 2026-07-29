@@ -70,4 +70,25 @@ public sealed class AlvoApiOptions
     /// approaches it.
     /// </remarks>
     public int MaxPayloadKeys { get; set; } = 512;
+
+    /// <summary>The longest <c>Idempotency-Key</c> a create will accept. Default 255.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A longer key is refused, never truncated</b>, and that is the whole reason the bound is an option
+    /// rather than an implementation detail: two keys that differ only past the cut would become one key, so
+    /// truncation turns two different requests into a replay of the first — silently, and in the direction
+    /// that loses the second caller's row. Refusing says so.
+    /// </para>
+    /// <para>
+    /// 255 is the number the record's own storage is sized for. The shipped DDL spells the column portably
+    /// (<c>TEXT</c> on both engines, because the table is never filtered, sorted or joined on), so the bound is
+    /// <em>not</em> enforced a second time by a column width — which makes it this layer's job. It matters
+    /// because the key is half of that table's composite primary key: PostgreSQL caps a btree index entry at
+    /// roughly 2700 bytes, so an unbounded key turns a caller-supplied header into a storage error the port can
+    /// only report as a broken invariant (a 500), and a T-SQL driver would need an explicit
+    /// <c>nvarchar(255)</c> anyway. 255 is also what the <c>Idempotency-Key</c> header's field implementations
+    /// conventionally allow, so a client that already speaks the header fits inside it.
+    /// </para>
+    /// </remarks>
+    public int MaxIdempotencyKeyLength { get; set; } = 255;
 }

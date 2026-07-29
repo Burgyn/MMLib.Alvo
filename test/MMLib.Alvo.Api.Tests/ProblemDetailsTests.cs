@@ -249,11 +249,11 @@ public sealed class ProblemDetailsTests
     /// </para>
     /// <para>
     /// The <see cref="ProblemResultFactory.GuardAsync"/> arms are driven by throwing each of the port's
-    /// failure families, which is how <c>precondition-failed</c> and <c>idempotency-conflict</c> are reached:
-    /// those two are not yet reachable over HTTP (Tasks 6 and 7 add the <c>If-Match</c> and
-    /// <c>Idempotency-Key</c> headers that let a caller cause them), and
-    /// <see cref="Only_the_slugs_awaiting_a_later_task_are_unreachable_over_http"/> pins exactly which ones
-    /// are still pending so finishing either task cannot quietly leave that list stale.
+    /// failure families, one per arm. Two of them — <c>precondition-failed</c> and
+    /// <c>idempotency-conflict</c> — were once reachable only this way, because the headers that cause them
+    /// were not honoured yet; Tasks 6 and 7 wired <c>If-Match</c> and <c>Idempotency-Key</c>, and
+    /// <see cref="Only_the_slugs_awaiting_a_later_task_are_unreachable_over_http"/> is what forced each of
+    /// them to arrive with a probe of its own rather than leaving the pending list stale.
     /// </para>
     /// </remarks>
     [Fact]
@@ -277,17 +277,18 @@ public sealed class ProblemDetailsTests
     /// <remarks>
     /// <para>
     /// The pending set is asserted in <em>both</em> directions: each pending slug must still be unreachable,
-    /// and every other slug must be reachable. Task 6 wiring <c>If-Match</c> failed this fact until
-    /// <c>precondition-failed</c> was moved out of the list and given the probe below — which was the point,
-    /// and Task 7's <c>Idempotency-Key</c> owes it the same visit.
+    /// and every other slug must be reachable. <b>It is empty now</b> — Task 6 wiring <c>If-Match</c> emptied
+    /// it of <c>precondition-failed</c> and Task 7's <c>Idempotency-Key</c> of <c>idempotency-conflict</c>,
+    /// each of which had to fail this fact to get out of the list. The member stays because the mechanism is
+    /// what matters: the next task that catalogues a slug ahead of the header, verb or endpoint that causes it
+    /// has somewhere honest to park it, and a probe it owes.
     /// </para>
     /// <para>
-    /// <b>The "still unreachable" direction is a request, not a list comparison.</b> It used to compare
-    /// <c>PendingUntilALaterTask</c> with its own literal, which could only fail on the cleanup edit — so
-    /// Task 6 landing did not fail it, and would not have failed it had the slug been left parked. The pending
-    /// slug is now driven by a request that <em>presents the header that causes it</em>
-    /// (<see cref="ADuplicateIdempotencyKeyIsStillIgnored"/>): today the header is inert and the second write
-    /// succeeds, so the day Task 7 honours it, that assertion fails and the list has to shrink.
+    /// <b>The "still unreachable" direction was a request, not a list comparison, and that is why the list
+    /// emptied.</b> It used to compare <c>PendingUntilALaterTask</c> with its own literal, which could only
+    /// fail on the cleanup edit — so Task 6 landing did not fail it, and would not have failed it had the slug
+    /// been left parked. Replacing that with a request that <em>presents the header that causes it</em> is what
+    /// made Task 7 fail this fact the moment the header stopped being inert.
     /// </para>
     /// <para>
     /// Reachability is measured by driving real requests, one per slug, against a real store — not by
@@ -298,6 +299,7 @@ public sealed class ProblemDetailsTests
     public async Task Only_the_slugs_awaiting_a_later_task_are_unreachable_over_http()
     {
         await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin, _narrow]);
+        await SeedTheReusedIdempotencyKeyAsync(world);
         var reached = new List<string>();
         foreach (var probe in EveryReachableSlugProbe())
         {
@@ -307,53 +309,18 @@ public sealed class ProblemDetailsTests
         reached.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ShouldBe(
             AlvoProblemTypes.All.Except(PendingUntilALaterTask, StringComparer.Ordinal).Order(StringComparer.Ordinal),
             "every slug not pending a later task must be reachable from an endpoint");
-
-        await ADuplicateIdempotencyKeyIsStillIgnored(world);
     }
 
     /// <summary>
-    /// Presents <c>Idempotency-Key</c> twice with two <em>different</em> bodies and asserts the header is
-    /// still inert — the one thing that makes <see cref="AlvoProblemTypes.IdempotencyConflict"/>'s place on
-    /// the pending list a fact rather than a note.
+    /// The slugs no request can yet produce, because whatever causes them is not honoured yet — empty today.
     /// </summary>
     /// <remarks>
-    /// A reused key with a different fingerprint is precisely what <c>IAlvoData</c> answers
-    /// <c>AlvoIdempotencyConflictException</c> for, so once Task 7 turns the header into an
-    /// <c>AlvoIdempotency</c> token the second request becomes a 409 and this assertion fails — forcing the
-    /// slug out of <see cref="PendingUntilALaterTask"/> and into a probe. Until then the two creates both
-    /// succeed and produce two distinct rows, which is the behaviour a caller sees today and the reason the
-    /// slug is unreachable.
+    /// A slug parked here owes a probe that <b>presents the thing that would cause it</b>, so that honouring it
+    /// fails this fact and forces the list to shrink. Both entries it has held so far left that way:
+    /// <c>precondition-failed</c> when Task 6 read <c>If-Match</c>, and <c>idempotency-conflict</c> when Task 7
+    /// turned <c>Idempotency-Key</c> into a token — the probe list below carries the request that now reaches it.
     /// </remarks>
-    /// <param name="world">The running API.</param>
-    private static async Task ADuplicateIdempotencyKeyIsStillIgnored(AlvoApiWorld world)
-    {
-        var key = new Dictionary<string, string>(StringComparer.Ordinal) { ["Idempotency-Key"] = "task-7-owes-this" };
-
-        using var first = await world.SendAsync(
-            HttpMethod.Post, "/api/owners", _admin, body: new JsonObject { ["name"] = "First Ltd" }, headers: key);
-        using var second = await world.SendAsync(
-            HttpMethod.Post, "/api/owners", _admin, body: new JsonObject { ["name"] = "Second Ltd" }, headers: key);
-
-        first.StatusCode.ShouldBe(HttpStatusCode.Created);
-        second.StatusCode.ShouldBe(
-            HttpStatusCode.Created,
-            "the same Idempotency-Key with a different body is still accepted, so 'idempotency-conflict' is "
-            + "genuinely unreachable — when Task 7 makes this a 409, move the slug out of the pending list");
-        (await second.ReadJsonObjectAsync())["id"]!.GetValue<Guid>().ShouldNotBe(
-            (await first.ReadJsonObjectAsync())["id"]!.GetValue<Guid>(),
-            "two rows, not a replay — the header is inert rather than half-honoured");
-    }
-
-    /// <summary>
-    /// The slugs no request can yet produce, because the header that causes them is not honoured yet.
-    /// </summary>
-    /// <remarks>
-    /// <c>ProblemResultFactory.GuardAsync</c> already maps the exception family — the mapping is
-    /// <c>IAlvoData</c>'s contract and was settled in Task 3 — so what is missing is a caller-facing way to
-    /// raise it, not the rendering. That "missing" is asserted by
-    /// <see cref="ADuplicateIdempotencyKeyIsStillIgnored"/> rather than described here.
-    /// </remarks>
-    private static string[] PendingUntilALaterTask => [AlvoProblemTypes.IdempotencyConflict];
+    private static string[] PendingUntilALaterTask => [];
 
     private static readonly TestApiKey _narrow = new("narrow-key", ["authenticated"], ["vehicles:read"]);
 
@@ -387,7 +354,42 @@ public sealed class ProblemDetailsTests
             _admin,
             new JsonObject { ["notes"] = "conditional" },
             new Dictionary<string, string>(StringComparer.Ordinal) { ["If-Match"] = "\"638000000000000000\"" }),
+
+        // An idempotency key this world has already used for a *different* body. The one probe here that is
+        // not self-contained, and unavoidably so: a conflict is a statement about a request that came before,
+        // so the fact seeds the first use before running the list. IdempotencyTests owns the behaviour; this
+        // owns the slug.
+        new(
+            HttpMethod.Post,
+            "/api/owners",
+            _admin,
+            new JsonObject { ["name"] = "Reused Ltd" },
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["Idempotency-Key"] = ReusedIdempotencyKey }),
     ];
+
+    /// <summary>The key the probe above reuses, first used by <see cref="SeedTheReusedIdempotencyKeyAsync"/>.</summary>
+    private const string ReusedIdempotencyKey = "already-used-for-another-body";
+
+    /// <summary>
+    /// Uses <see cref="ReusedIdempotencyKey"/> once, for a body the probe above deliberately does not send.
+    /// </summary>
+    /// <param name="world">The running API.</param>
+    private static async Task SeedTheReusedIdempotencyKeyAsync(AlvoApiWorld world)
+    {
+        using var response = await world.SendAsync(
+            HttpMethod.Post,
+            "/api/owners",
+            _admin,
+            body: new JsonObject { ["name"] = "Original Ltd" },
+            headers: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["Idempotency-Key"] = ReusedIdempotencyKey,
+            });
+
+        response.StatusCode.ShouldBe(
+            HttpStatusCode.Created,
+            "the key must really be recorded, or the probe that reuses it is answered 201 and measures nothing");
+    }
 
     /// <summary>Every problem the factory can render, one per entry point and per <c>GuardAsync</c> arm.</summary>
     /// <remarks>

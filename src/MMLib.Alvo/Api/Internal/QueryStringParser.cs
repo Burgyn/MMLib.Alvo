@@ -381,32 +381,12 @@ internal static class QueryStringParser
             }
             catch (ArgumentException exception)
             {
-                Add(asViolation(WithoutArgumentDetail(exception.Message)));
+                // Sanitized by ProblemResultFactory, which is the one authority on what a caller is shown:
+                // the same stripping is owed to every other ArgumentException the port can raise, and a second
+                // copy here is how the two come to disagree about what an internal detail is.
+                Add(asViolation(ProblemResultFactory.WithoutArgumentDetail(exception.Message)));
             }
         }
-
-        /// <summary>
-        /// <see cref="ArgumentException.Message"/> with everything <see cref="ArgumentException"/> itself appends
-        /// removed — the <c>(Parameter '…')</c> suffix and, for a range exception, the <c>Actual value was …</c>
-        /// line after it.
-        /// </summary>
-        /// <remarks>
-        /// The suffix is appended on the <b>same line</b>, separated by a space, so an earlier version of this
-        /// that only cut at the first newline stripped nothing at all and shipped <c>(Parameter 'query')</c> in
-        /// 422 bodies. An internal argument name is an implementation detail of the guard, not part of the
-        /// contract an agent reads; <c>AlvoApiWorld</c> now screens every response in the suite for it, so the
-        /// claim is asserted rather than described.
-        /// </remarks>
-        private static string WithoutArgumentDetail(string message)
-        {
-            var appended = message.IndexOf(ArgumentNameSuffix, StringComparison.Ordinal);
-            var text = appended < 0 ? message : message[..appended];
-            var newline = text.IndexOf('\n');
-            return (newline < 0 ? text : text[..newline]).TrimEnd();
-        }
-
-        /// <summary>How <see cref="ArgumentException"/> introduces the argument name it appends to a message.</summary>
-        private const string ArgumentNameSuffix = " (Parameter '";
 
         /// <summary>
         /// Records one refusal — <b>once per distinct <c>(code, pointer)</c></b>.

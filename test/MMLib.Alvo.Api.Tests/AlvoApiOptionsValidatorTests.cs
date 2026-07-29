@@ -72,6 +72,15 @@ public class AlvoApiOptionsValidatorTests
         => ShouldFail(api => api.MaxPayloadKeys = -3, nameof(AlvoApiOptions.MaxPayloadKeys));
 
     /// <summary>
+    /// A bound of zero on the idempotency key would refuse <em>every</em> key, which is not a configured limit
+    /// but a silently disabled facility — and the caller would be told their key was too long for any length.
+    /// </summary>
+    [Fact]
+    public void A_non_positive_idempotency_key_bound_is_refused_naming_the_option()
+        => ShouldFail(
+            api => api.MaxIdempotencyKeyLength = 0, nameof(AlvoApiOptions.MaxIdempotencyKeyLength));
+
+    /// <summary>
     /// The validation must run at <b>startup</b>, not at the first request: that is the whole difference
     /// between an operator seeing the message above while deploying and a caller seeing a 500 in
     /// production. Driven through <see cref="IStartupValidator"/>, which is what

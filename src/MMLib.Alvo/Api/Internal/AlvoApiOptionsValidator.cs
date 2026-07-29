@@ -92,6 +92,8 @@ internal sealed class AlvoApiOptionsValidator : IValidateOptions<AlvoApiOptions>
         RequirePositive(options.MaxRequestBodyBytes, nameof(AlvoApiOptions.MaxRequestBodyBytes), failures);
         RequirePositive(options.MaxPayloadDepth, nameof(AlvoApiOptions.MaxPayloadDepth), failures);
         RequirePositive(options.MaxPayloadKeys, nameof(AlvoApiOptions.MaxPayloadKeys), failures);
+        RequirePositive(
+            options.MaxIdempotencyKeyLength, nameof(AlvoApiOptions.MaxIdempotencyKeyLength), failures);
     }
 
     /// <summary>

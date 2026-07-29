@@ -75,8 +75,22 @@ internal static class JsonPayloadReader
     /// </param>
     /// <param name="Violations">Every reason the body was refused; empty when it bound completely.</param>
     /// <param name="BoundAsAnObject">Whether the body was a JSON object this entity's fields could be read out of at all.</param>
+    /// <param name="Document">
+    /// The body exactly as it was parsed, or <see langword="null"/> when nothing parsed as an object.
+    /// <para>
+    /// It is carried alongside <paramref name="Values"/> rather than reconstructed from them because the two
+    /// answer different questions. <paramref name="Values"/> is what the port is called with: bound to the
+    /// entity's declared CLR types, and missing every key that did not bind. The <em>document</em> is what the
+    /// caller sent, which is what <see cref="IdempotencyFingerprint"/> has to digest — a fingerprint over the
+    /// bound values would silently omit whatever the reader dropped, and the whole property that type exists
+    /// for is that nothing in the body is left out of it.
+    /// </para>
+    /// </param>
     internal sealed record Payload(
-        Dictionary<string, object?> Values, IReadOnlyList<AlvoViolation> Violations, bool BoundAsAnObject);
+        Dictionary<string, object?> Values,
+        IReadOnlyList<AlvoViolation> Violations,
+        bool BoundAsAnObject,
+        JsonObject? Document);
 
     /// <summary>Reads and binds the request body, or reports why it could not be.</summary>
     /// <param name="request">The request whose body to read.</param>
@@ -104,7 +118,8 @@ internal static class JsonPayloadReader
     }
 
     /// <summary>A body that bound nothing at all, carrying the one violation that stopped it.</summary>
-    private static Payload Refused(AlvoViolation violation) => new([], [violation], BoundAsAnObject: false);
+    private static Payload Refused(AlvoViolation violation) =>
+        new([], [violation], BoundAsAnObject: false, Document: null);
 
     /// <summary>
     /// Copies the body into <paramref name="destination"/>, refusing at the first chunk that would cross
@@ -235,7 +250,7 @@ internal static class JsonPayloadReader
             BindOne(key, value, declared, values, violations);
         }
 
-        return new Payload(values, violations, BoundAsAnObject: true);
+        return new Payload(values, violations, BoundAsAnObject: true, payload);
     }
 
     /// <summary>Binds one key, or records why it could not be bound.</summary>

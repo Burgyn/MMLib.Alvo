@@ -272,7 +272,7 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
         TestApiKey? key = null,
         string? tenant = null,
         JsonObject? body = null,
-        IReadOnlyDictionary<string, string>? headers = null) =>
+        IEnumerable<KeyValuePair<string, string>>? headers = null) =>
         SendRawAsync(
             method, path, key, tenant, body is null ? null : JsonContent.Create(body, JsonMediaType), headers);
 
@@ -289,6 +289,12 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
     /// Any further request headers to present, by name — added <em>without validation</em>, which is the
     /// whole point: a fact about a malformed <c>If-Match</c> cannot be written through a client that refuses
     /// to send one.
+    /// <para>
+    /// A sequence of pairs rather than a dictionary, so a fact can present <b>the same header twice</b>: two
+    /// field lines is a distinct request from one line carrying a comma, and for a header that names one thing
+    /// (an idempotency key) the duplicate is an ambiguity the API has to refuse. A dictionary cannot express it
+    /// at all, and a branch no fact can reach is a branch nothing holds.
+    /// </para>
     /// </param>
     internal async Task<HttpResponseMessage> SendRawAsync(
         HttpMethod method,
@@ -296,7 +302,7 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
         TestApiKey? key = null,
         string? tenant = null,
         HttpContent? content = null,
-        IReadOnlyDictionary<string, string>? headers = null)
+        IEnumerable<KeyValuePair<string, string>>? headers = null)
     {
         using var request = new HttpRequestMessage(method, path);
         if (key is not null)
@@ -309,7 +315,7 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
             request.Headers.TryAddWithoutValidation(_authOptions.TenantHeaderName, tenant);
         }
 
-        foreach (var (name, value) in headers ?? new Dictionary<string, string>(StringComparer.Ordinal))
+        foreach (var (name, value) in headers ?? [])
         {
             request.Headers.TryAddWithoutValidation(name, value).ShouldBeTrue(
                 $"the world must really present '{name}', or the fact below measures a request it never sent");
@@ -461,7 +467,14 @@ internal sealed record TestApiKey(
     internal string Presented => $"{KeyId}.{Secret}";
 
     /// <summary>The user this key authenticates as; stable per key id so an audit column is predictable.</summary>
-    internal Guid User { get; } = Guid.NewGuid();
+    /// <remarks>
+    /// Settable, for the one fact that needs <b>one user in two tenants</b>: an idempotency record's identity is
+    /// the tenant <em>and</em> the acting user, so two keys with two users prove nothing about the tenant half —
+    /// dropping the tenant from that scope leaves two distinct scopes anyway and
+    /// <c>IdempotencyTests.Two_tenants_may_use_the_same_key_without_colliding</c> would pass while the tenant
+    /// was ignored. Sharing the user is what makes the tenant the only thing keeping the two keys apart.
+    /// </remarks>
+    internal Guid User { get; init; } = Guid.NewGuid();
 
     internal AlvoDevApiKey ToDevKey()
     {

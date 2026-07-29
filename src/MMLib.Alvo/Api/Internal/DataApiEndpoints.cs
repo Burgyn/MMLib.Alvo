@@ -7,6 +7,7 @@ using MMLib.Alvo.Auth;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
+using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Api.Internal;
 
@@ -156,8 +157,9 @@ internal static class DataApiEndpoints
                     var context = Caller(caller);
                     var decision = EnsureOperationIsAllowed(policies, entity.Name, DataOperation.Create, context);
                     EnsureUnconditional(http.Request);
+                    var key = IdempotencyKey(http.Request, context, options);
 
-                    var (values, violations) = await ReadAndValidateAsync(
+                    var (body, violations) = await ReadAndValidateAsync(
                         http, entity, options, decision, isCreate: true, formats, data, context, ct)
                         .ConfigureAwait(false);
                     if (violations.Count > 0)
@@ -165,8 +167,9 @@ internal static class DataApiEndpoints
                         return ProblemResultFactory.Validation(violations);
                     }
 
-                    // Task 7: the Idempotency-Key header becomes the AlvoIdempotency token.
-                    var record = await data.CreateAsync(entity.Name, values, context, null, ct).ConfigureAwait(false);
+                    var token = Idempotency(key, http.Request.Method, pattern, entity, body.Document);
+                    var record = await data.CreateAsync(entity.Name, body.Values, context, token, ct)
+                        .ConfigureAwait(false);
                     return Created($"{pattern}/{AssignedId(record)}", record, entity);
                 }))
             .Protect(entity, DataOperation.Create, filters);
@@ -191,7 +194,7 @@ internal static class DataApiEndpoints
                     var decision = EnsureOperationIsAllowed(policies, entity.Name, DataOperation.Update, context);
                     var precondition = Precondition(http.Request);
 
-                    var (values, violations) = await ReadAndValidateAsync(
+                    var (body, violations) = await ReadAndValidateAsync(
                         http, entity, options, decision, isCreate: false, formats, data, context, ct)
                         .ConfigureAwait(false);
                     if (violations.Count > 0)
@@ -200,7 +203,7 @@ internal static class DataApiEndpoints
                     }
 
                     var record = await data
-                        .UpdateAsync(entity.Name, id, values, context, precondition, ct).ConfigureAwait(false);
+                        .UpdateAsync(entity.Name, id, body.Values, context, precondition, ct).ConfigureAwait(false);
                     return Row(record, entity);
                 }))
             .Protect(entity, DataOperation.Update, filters);
@@ -331,8 +334,8 @@ internal static class DataApiEndpoints
     }
 
     /// <summary>
-    /// Reads the request body and validates it against the entity's declared shape, returning the values the
-    /// port would be called with plus <b>every</b> reason it must not be.
+    /// Reads the request body and validates it against the entity's declared shape, returning what the port
+    /// would be called with plus <b>every</b> reason it must not be.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -349,7 +352,7 @@ internal static class DataApiEndpoints
     /// answers with advice about a request the caller never sent.
     /// </para>
     /// </remarks>
-    private static async Task<(Dictionary<string, object?> Values, IReadOnlyList<AlvoViolation> Violations)>
+    private static async Task<(JsonPayloadReader.Payload Body, IReadOnlyList<AlvoViolation> Violations)>
         ReadAndValidateAsync(
             HttpContext http,
             EntitySchema entity,
@@ -365,7 +368,7 @@ internal static class DataApiEndpoints
             .ReadAsync(http.Request, entity, options, ct).ConfigureAwait(false);
         if (!payload.BoundAsAnObject)
         {
-            return (payload.Values, payload.Violations);
+            return (payload, payload.Violations);
         }
 
         var validated = await RecordValidator.ValidateAsync(
@@ -380,7 +383,7 @@ internal static class DataApiEndpoints
                 context),
             ct).ConfigureAwait(false);
 
-        return (payload.Values, [.. payload.Violations, .. validated]);
+        return (payload, [.. payload.Violations, .. validated]);
     }
 
     /// <summary>The field names the body reader already refused, read back off its own violations' pointers.</summary>
@@ -566,6 +569,129 @@ internal static class DataApiEndpoints
                 + "'If-None-Match' from the create, and send 'If-Match' on the update that follows it.");
         }
     }
+
+    /// <summary>
+    /// The header a caller makes a create retry-safe with — the one from the IETF
+    /// <c>httpapi-idempotency-key-header</c> draft, spelled as every BaaS and payment API spells it.
+    /// </summary>
+    /// <remarks>
+    /// A literal rather than an option: unlike <see cref="Auth.AlvoAuthOptions.HeaderName"/>, which an
+    /// embedded host may have to move out of the way of its own credential header, this one is a published
+    /// convention an agent already knows from its training data. Making it configurable would buy a host
+    /// nothing and cost every client the ability to assume it. Internal because it is not yet advertised in
+    /// the OpenAPI document; the task that publishes one reads it from here rather than spelling it again.
+    /// </remarks>
+    internal const string IdempotencyKeyHeader = "Idempotency-Key";
+
+    /// <summary>
+    /// The caller's idempotency key, or <see langword="null"/> when they sent no such header — refusing, up
+    /// front, every header this API could not honour.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Called before the body is read</b>, for the reason <see cref="EnsureUnconditional"/> and
+    /// <see cref="Precondition"/> are: a request carrying a key this API cannot serve cannot succeed whatever
+    /// its body says, so it must not be answered with advice about a field — an agent told to fix its payload
+    /// will fix the payload, resend, and be refused again. It also spends none of
+    /// <see cref="AlvoApiOptions.MaxRequestBodyBytes"/> on a request that was already decided.
+    /// </para>
+    /// <para>
+    /// <b>An anonymous caller's key is refused by the port's own guard, called from here.</b>
+    /// <see cref="AlvoIdempotency.EnsureIdentifiableCaller"/> is the authority — a record's identity is the
+    /// key plus the caller's scope, and every anonymous caller shares one reserved user id, so their keys
+    /// would share one space. Calling the port's guard rather than restating its wording is what keeps
+    /// "refused before the body" from being distinguishable from "refused after it", exactly as
+    /// <see cref="EnsureOperationIsAllowed"/> raises the port's own exception. The token handed to it carries
+    /// no fingerprint, and cannot: the guard is decided from the presence of a token and the context alone
+    /// (its own remarks say so), while a fingerprint covers a body this method deliberately refuses before
+    /// reading.
+    /// </para>
+    /// <para>
+    /// <b>A 422, not a 401.</b> Nothing failed authentication — no credential was presented and rejected —
+    /// so a 401 would owe a <c>WWW-Authenticate</c> challenge for a request that never attempted to
+    /// authenticate, and would blur the anonymous-versus-unusable-credential line the auth filter keeps
+    /// disjoint. What the caller sent is a well-formed request asking for a facility that needs a stable
+    /// identity to scope by, which is the port's malformed-request family and this layer's 422.
+    /// </para>
+    /// <para>
+    /// <b>Two headers, or an empty one, are refused rather than resolved.</b> Two field values are two keys
+    /// and this create can only be recorded under one — picking either answers a question the caller did not
+    /// ask, the same reason a multi-tag <c>If-Match</c> is refused. A blank key is refused because it is not
+    /// an identity: every caller who sent one would share it, which is the shared key space the scoping
+    /// exists to remove.
+    /// </para>
+    /// <para>
+    /// <b>Too long is refused, never truncated</b> — see
+    /// <see cref="AlvoApiOptions.MaxIdempotencyKeyLength"/>, where the cost of the alternative is written
+    /// down: two keys differing past the cut would become one.
+    /// </para>
+    /// </remarks>
+    /// <param name="request">The request whose header to read.</param>
+    /// <param name="context">The caller the create is performed as.</param>
+    /// <param name="options">The API options the key's length bound is read from.</param>
+    /// <exception cref="ArgumentException">The header is one this API cannot honour for this caller.</exception>
+    private static string? IdempotencyKey(HttpRequest request, AlvoContext context, AlvoApiOptions options)
+    {
+        var header = request.Headers[IdempotencyKeyHeader];
+        if (header.Count == 0)
+        {
+            return null;
+        }
+
+        var key = header.Count == 1 ? header[0] : null;
+        if (string.IsNullOrWhiteSpace(key) || key.Length > options.MaxIdempotencyKeyLength)
+        {
+            throw new ArgumentException(UnusableIdempotencyKey(options.MaxIdempotencyKeyLength));
+        }
+
+        AlvoIdempotency.EnsureIdentifiableCaller(new AlvoIdempotency(key, Fingerprint: string.Empty), context);
+        return key;
+    }
+
+    /// <summary>
+    /// The token the create is performed under: the caller's key plus the fingerprint of the request it
+    /// belongs to.
+    /// </summary>
+    /// <remarks>
+    /// Built <b>after</b> validation, because the fingerprint covers the body and a body that was refused
+    /// never reaches the port at all — so a fingerprint over it would digest a request that was never
+    /// performed and reserve the key against it.
+    /// </remarks>
+    /// <param name="key">The caller's key, or <see langword="null"/> when they sent none.</param>
+    /// <param name="method">The request method, for the digest.</param>
+    /// <param name="routeTemplate">The route this endpoint was mapped as, for the digest.</param>
+    /// <param name="entity">The entity being written.</param>
+    /// <param name="document">The body as it was parsed.</param>
+    private static AlvoIdempotency? Idempotency(
+        string? key, string method, string routeTemplate, EntitySchema entity, JsonObject? document)
+    {
+        if (key is null)
+        {
+            return null;
+        }
+
+        // A create with no violations bound as an object by construction, so this is an invariant of this
+        // file rather than a caller error (family 5, rendered 500) — the same reasoning as AssignedId.
+        var body = document ?? throw new InvalidOperationException(
+            "A create reached the port with no parsed body. JsonPayloadReader reports a body that is not an "
+            + "object as a violation, and a violation is answered before this point.");
+
+        return new AlvoIdempotency(key, IdempotencyFingerprint.Of(method, routeTemplate, entity.Name, body));
+    }
+
+    /// <summary>The refusal for an <c>Idempotency-Key</c> this API cannot record a create under.</summary>
+    /// <remarks>
+    /// One wording for every unusable spelling — blank, repeated, over-long. They have one fix (send one
+    /// non-blank key inside the bound), and the message names the bound so an agent can shorten its own key
+    /// rather than guess. The caller's key is never echoed back: it is caller-supplied text, and nothing here
+    /// reflects any.
+    /// </remarks>
+    /// <param name="maxLength">The bound the key must fit inside.</param>
+    private static string UnusableIdempotencyKey(int maxLength) =>
+        $"The '{IdempotencyKeyHeader}' header must be exactly one non-blank value of at most {maxLength} "
+        + "characters. It is refused rather than shortened or picked from, because two keys that differ only "
+        + "past that length would become one key and the second create would be answered with the first "
+        + "create's row.";
 
     /// <summary>The refusal for an <c>If-Match</c> this API cannot turn into exactly one row version.</summary>
     private const string UnusableIfMatch =
