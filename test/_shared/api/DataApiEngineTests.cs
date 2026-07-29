@@ -145,11 +145,20 @@ public abstract class DataApiEngineTests
     /// returns nothing at all. That is not hypothetical for SQLite, whose storage is dynamically typed.
     /// </para>
     /// <para>
-    /// The matched years are compared as a <b>set</b>, not as a sequence. Its ancestor in the SQLite-only suite
-    /// sends <c>order=year</c> and asserts a sequence, which makes an ordering claim load-bearing inside a
-    /// filtering fact — and with two matched rows that claim is a coin flip if the sort is ever dropped, so the
-    /// fact would pass half the time for the wrong reason. Ordering is
+    /// The matched years are compared as a <b>set</b>, not as a sequence. An earlier SQLite-only version sent
+    /// <c>order=year</c> and asserted a sequence, which made an ordering claim load-bearing inside a filtering
+    /// fact — and with two matched rows that claim is a coin flip if the sort is ever dropped, so the fact
+    /// would pass half the time for the wrong reason. Ordering is
     /// <see cref="An_order_parameter_orders_the_page_and_the_direction_is_honoured"/>'s job.
+    /// </para>
+    /// <para>
+    /// <b>Honest about what this does and does not discriminate.</b> The port's own <c>ColumnValue</c> converts
+    /// a caller value through the column's CLR type, so it would repair a string operand the parser wrongly
+    /// emitted — which means this fact does not currently fail if the parser stops typing its operands (the
+    /// SQLite-only <c>QueryStringParserTests.An_accepted_operand_reaches_the_port_as_the_type_the_field_is_carried_as</c>
+    /// is the fact that does). It is here because the behaviour is the contract a caller reads, and because it
+    /// fails if that repair is ever removed — the two layers each defending it is deliberate, and neither is
+    /// evidence for the other.
     /// </para>
     /// </remarks>
     [Fact]

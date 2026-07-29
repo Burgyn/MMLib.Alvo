@@ -24,18 +24,6 @@ public sealed class DataApiQueryTests
     private static readonly TestApiKey _admin = new("admin-key", ["admin", "authenticated"], ["*:read", "*:write"]);
 
     [Fact]
-    public async Task A_filter_narrows_the_rows_the_store_returns()
-    {
-        await using var world = await SeededAsync();
-
-        using var filtered = await world.SendAsync(HttpMethod.Get, "/api/vehicles?make=eq.vw", _admin);
-        using var everything = await world.SendAsync(HttpMethod.Get, "/api/vehicles", _admin);
-
-        (await filtered.ReadFieldAsync("make")).ShouldBe(["vw"]);
-        (await everything.ReadFieldAsync("make")).Count.ShouldBe(3, "or the filtered read proves nothing");
-    }
-
-    [Fact]
     public async Task A_group_filter_narrows_to_the_union_of_its_terms()
     {
         await using var world = await SeededAsync();
@@ -55,41 +43,6 @@ public sealed class DataApiQueryTests
             HttpMethod.Get, "/api/vehicles?not.make=eq.vw&order=make", _admin);
 
         (await response.ReadFieldAsync("make")).ShouldBe(["audi", "skoda"]);
-    }
-
-    [Fact]
-    public async Task An_order_parameter_orders_the_page_and_the_direction_is_honoured()
-    {
-        await using var world = await SeededAsync();
-
-        using var ascending = await world.SendAsync(HttpMethod.Get, "/api/vehicles?order=make", _admin);
-        using var descending = await world.SendAsync(HttpMethod.Get, "/api/vehicles?order=make.desc", _admin);
-
-        (await ascending.ReadFieldAsync("make")).ShouldBe(["audi", "skoda", "vw"]);
-        (await descending.ReadFieldAsync("make")).ShouldBe(["vw", "skoda", "audi"]);
-    }
-
-    /// <summary>
-    /// A filter over a numeric field is compared as a number, end to end.
-    /// </summary>
-    /// <remarks>
-    /// <b>Honest about what this does and does not discriminate.</b> The port's own <c>ColumnValue</c> converts a
-    /// caller value through the column's CLR type, so it would repair a string operand this parser wrongly
-    /// emitted — which means this fact does not currently fail if the parser stops typing its operands
-    /// (<c>QueryStringParserTests.An_accepted_operand_reaches_the_port_as_the_type_the_field_is_carried_as</c> is
-    /// the fact that does). It is here because the behaviour is the contract a caller reads, and because it fails
-    /// if that repair is ever removed — the two layers each defending it is deliberate, and neither is evidence
-    /// for the other.
-    /// </remarks>
-    [Fact]
-    public async Task A_numeric_filter_compares_numerically_rather_than_lexically()
-    {
-        await using var world = await SeededAsync();
-
-        using var response = await world.SendAsync(HttpMethod.Get, "/api/vehicles?year=gt.500&order=year", _admin);
-
-        var years = (await response.ReadItemsAsync()).Select(row => row["year"]!.GetValue<int>());
-        years.ShouldBe([1999, 2020], "as text every seeded year sorts below '500', so a lexical comparison returns none");
     }
 
     /// <summary>
@@ -359,10 +312,10 @@ public sealed class DataApiQueryTests
     /// Three vehicles behind one owner, created through the API so every row is one the port wrote.
     /// </summary>
     /// <remarks>
-    /// The years are chosen so that <b>lexical and numeric ordering disagree</b>: as text, every one of
-    /// <c>300</c>, <c>1999</c> and <c>2020</c> sorts below <c>500</c>, so a filter compared as <c>TEXT</c>
-    /// answers <c>year=gt.500</c> with nothing while a numeric comparison answers with two rows. Uniform years
-    /// would make <see cref="A_numeric_filter_compares_numerically_rather_than_lexically"/> unable to fail.
+    /// The years happen to disagree under lexical and numeric ordering (<c>300</c>, <c>1999</c> and
+    /// <c>2020</c> all sort below <c>500</c> as text). That property mattered to a numeric-filter fact that
+    /// used to live in this file; it now lives in <see cref="DataApiEngineTests"/>, over its own seed, so
+    /// nothing left here depends on it.
     /// </remarks>
     private static readonly (string Make, int Year)[] _fleet = [("skoda", 300), ("vw", 1999), ("audi", 2020)];
 

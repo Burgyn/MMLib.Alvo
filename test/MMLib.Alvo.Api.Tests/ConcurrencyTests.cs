@@ -12,16 +12,17 @@ namespace MMLib.Alvo.Api.Tests;
 /// <remarks>
 /// <para>
 /// §2.1 of the domain analysis is blunt about why this exists — without it "clients overwrite each other's
-/// data" — and a lost update is invisible to every test that does not deliberately look for one. So the
-/// load-bearing fact here is <see cref="A_lost_update_is_prevented_when_two_callers_read_then_both_write"/>:
-/// every other fact in this file can pass while the mechanism is present and inert.
+/// data" — and a lost update is invisible to every test that does not deliberately look for one. The two
+/// facts that actually prove the mechanism live in <see cref="DataApiEngineTests"/> and run on both engines,
+/// because they depend on what the engine does to a stored value: the race itself
+/// (<see cref="DataApiEngineTests.A_lost_update_is_prevented_when_two_callers_read_then_both_write"/>) and the
+/// round trip a tag has to survive
+/// (<see cref="DataApiEngineTests.An_etag_from_a_get_is_accepted_verbatim_by_a_following_update"/>).
 /// </para>
 /// <para>
-/// Every fact drives real HTTP against a real store. The tag has to survive a round trip through SQLite's
-/// rendered text, which is the failure mode with no diagnosis — a tag minted from a clock rather than from a
-/// stored value refuses every <c>If-Match</c> the caller sends back, and says nothing about why — so
-/// <see cref="An_etag_from_a_get_is_accepted_verbatim_by_a_following_update"/> feeds a tag back exactly as it
-/// came off the wire rather than reconstructing one.
+/// Everything here is the request-layer half: a fact about preconditions that never reaches a comparison the
+/// engine performs — a malformed header, a precedence rule, a refusal's wording — is engine-insensitive, so
+/// running it a second time on PostgreSQL would cost a container and prove nothing new.
 /// </para>
 /// <para>
 /// <c>owners</c> is the audited entity throughout and <c>inspections</c> the non-audited one; that split is
@@ -32,70 +33,6 @@ namespace MMLib.Alvo.Api.Tests;
 public sealed class ConcurrencyTests
 {
     private static readonly TestApiKey _admin = new("admin-key", ["admin", "authenticated"], ["*:read", "*:write"]);
-
-    private static readonly TestApiKey _other = new("other-admin-key", ["admin", "authenticated"], ["*:read", "*:write"]);
-
-    /// <summary>
-    /// A read of an audited row hands out a strong entity tag. Strong is the load-bearing half: RFC 9110
-    /// §13.1.1 compares <c>If-Match</c> with the strong comparison function, so a <c>W/</c> tag would never
-    /// match and the header would protect nothing while looking like it did.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// The tag's <em>shape</em> is asserted as well as its presence, because "over the row version" is what
-    /// makes it comparable at all: it is the stored <c>updated_at</c> instant's tick count, so a tag that
-    /// stopped tracking the version — a hash of the body, say — would still be strong and still be present.
-    /// </para>
-    /// <para>
-    /// The row is <b>written twice</b> before it is read, and that is what makes the comparison able to fail.
-    /// On a freshly created row <c>created_at</c> and <c>updated_at</c> are the same instant, so a tag minted
-    /// from the wrong audit column satisfies this fact exactly as well as the right one — measured, not
-    /// supposed. The second write separates them, and the assertion below says so out loud rather than
-    /// trusting it.
-    /// </para>
-    /// </remarks>
-    [Fact]
-    public async Task A_get_of_an_audited_entity_carries_a_strong_etag()
-    {
-        await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin]);
-        var owner = await SeedOwnerAsync(world, "Ada Ltd");
-        await AdvanceAsync(world, owner.Id, "Ada Ltd, renamed");
-
-        using var response = await world.SendAsync(HttpMethod.Get, Owner(owner.Id), _admin);
-
-        response.StatusCode.ShouldBe(HttpStatusCode.OK);
-        var body = await response.ReadJsonObjectAsync();
-        body["created_at"]!.GetValue<DateTimeOffset>().ShouldNotBe(
-            body["updated_at"]!.GetValue<DateTimeOffset>(),
-            "the two audit instants must differ, or a tag over the wrong one passes this fact too");
-        response.Headers.ETag!.IsWeak.ShouldBeFalse("a weak tag can never satisfy a strong If-Match comparison");
-        response.ETagOf().ShouldBe(
-            TagOf(body["updated_at"]!.GetValue<DateTimeOffset>()),
-            "the tag must denote the row's stored version, not the bytes of this representation");
-    }
-
-    /// <summary>
-    /// A non-audited entity has no <c>updated_at</c>, so it cannot answer "has this row changed" — and the
-    /// response therefore carries no <c>ETag</c> at all rather than a tag no write could compare.
-    /// </summary>
-    /// <remarks>
-    /// Asserted on the raw header, not on <c>Headers.ETag</c>: the typed property is also
-    /// <see langword="null"/> for a header that is present and unparsable, so it cannot tell "no tag" from
-    /// "a broken tag". A tag minted from <c>created_at</c>, or from any column other than the one
-    /// <c>AlvoManagedColumns.VersionColumn</c> names, fails here.
-    /// </remarks>
-    [Fact]
-    public async Task A_get_of_a_non_audited_entity_carries_no_etag_at_all()
-    {
-        await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin]);
-        var inspection = await SeedInspectionAsync(world);
-
-        using var response = await world.SendAsync(HttpMethod.Get, $"/api/inspections/{inspection}", _admin);
-
-        response.StatusCode.ShouldBe(HttpStatusCode.OK);
-        response.Headers.Contains("ETag").ShouldBeFalse(
-            "an entity with no version column must advertise no tag, rather than one it cannot compare");
-    }
 
     /// <summary>
     /// A create answers 201 with the new row's <c>Location</c> <b>and</b> its entity tag, so the caller's
@@ -368,72 +305,6 @@ public sealed class ConcurrencyTests
         held.ETagOf().ShouldBe(owner.ETag, "RFC 9110 §15.4.5: a 304 carries the tag it was generated from");
         stale.StatusCode.ShouldBe(
             HttpStatusCode.OK, "a tag the row does not have must produce the representation, not a 304");
-    }
-
-    /// <summary>
-    /// The round trip, end to end and byte for byte: the tag a GET wrote onto the wire, fed straight back as
-    /// <c>If-Match</c>, is accepted.
-    /// </summary>
-    /// <remarks>
-    /// This is the fact that catches the failure mode with no diagnosis. A tag minted from
-    /// <c>TimeProvider</c> rather than from the stored value, or rendered as a timestamp that a re-parse
-    /// rounds, refuses every <c>If-Match</c> a caller ever sends back — and answers 412, which reads exactly
-    /// like a genuine concurrent write. Nothing is reconstructed here: the string that went out is the string
-    /// that comes back.
-    /// </remarks>
-    [Fact]
-    public async Task An_etag_from_a_get_is_accepted_verbatim_by_a_following_update()
-    {
-        await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin]);
-        var owner = await SeedOwnerAsync(world, "Round trip");
-
-        using var read = await world.SendAsync(HttpMethod.Get, Owner(owner.Id), _admin);
-        var verbatim = read.ETagOf();
-        using var written = await world.SendAsync(
-            HttpMethod.Patch, Owner(owner.Id), _admin, body: Rename("Round tripped"), headers: IfMatch(verbatim));
-
-        read.StatusCode.ShouldBe(HttpStatusCode.OK);
-        written.StatusCode.ShouldBe(
-            HttpStatusCode.OK,
-            $"the tag '{verbatim}' this API minted must be one it accepts: {await written.ReadTextAsync()}");
-        (await NameOfAsync(world, owner.Id)).ShouldBe("Round tripped");
-    }
-
-    /// <summary>
-    /// The fact §2.1 actually asks for. Two callers read the same row, both write with the tag they read,
-    /// and the second is refused — so the first caller's change is not silently overwritten.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Everything else in this file can pass while the mechanism is present and inert: an <c>ETag</c> that is
-    /// minted and never compared, or a precondition parsed and then not passed to the port, breaks nothing a
-    /// single-caller fact measures. This is the one that fails if the precondition is dropped anywhere along
-    /// the path — the header, the parse, the port argument, or the in-transaction comparison.
-    /// </para>
-    /// <para>
-    /// Two <em>different</em> keys, so the two callers are distinguishable in the audit columns and neither
-    /// write can be the other's; and the row's final value is asserted, because "the second call was refused"
-    /// and "the first caller's change survived" are two claims and only the second one is the lost update.
-    /// </para>
-    /// </remarks>
-    [Fact]
-    public async Task A_lost_update_is_prevented_when_two_callers_read_then_both_write()
-    {
-        await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin, _other]);
-        var owner = await SeedOwnerAsync(world, "Contested");
-        var mine = await ETagOfAsync(world, owner.Id, _admin);
-        var yours = await ETagOfAsync(world, owner.Id, _other);
-        mine.ShouldBe(yours, "both callers read the same row version, or they are not racing at all");
-
-        using var first = await world.SendAsync(
-            HttpMethod.Patch, Owner(owner.Id), _admin, body: Rename("Mine"), headers: IfMatch(mine));
-        using var second = await world.SendAsync(
-            HttpMethod.Patch, Owner(owner.Id), _other, body: Rename("Yours"), headers: IfMatch(yours));
-
-        first.StatusCode.ShouldBe(HttpStatusCode.OK, await first.ReadTextAsync());
-        second.StatusCode.ShouldBe(
-            HttpStatusCode.PreconditionFailed, "the second writer read a version the row no longer has");
-        (await NameOfAsync(world, owner.Id)).ShouldBe("Mine", "the first caller's change must survive");
     }
 
     /// <summary>
@@ -769,13 +640,6 @@ public sealed class ConcurrencyTests
         using var response = await world.SendAsync(HttpMethod.Get, Owner(id), _admin);
         response.StatusCode.ShouldBe(HttpStatusCode.OK, await response.ReadTextAsync());
         return (await response.ReadJsonObjectAsync())["updated_at"]!.GetValue<DateTimeOffset>();
-    }
-
-    private static async Task<string> ETagOfAsync(AlvoApiWorld world, Guid id, TestApiKey key)
-    {
-        using var response = await world.SendAsync(HttpMethod.Get, Owner(id), key);
-        response.StatusCode.ShouldBe(HttpStatusCode.OK, await response.ReadTextAsync());
-        return response.ETagOf();
     }
 
     private static async Task<string?> NameOfAsync(AlvoApiWorld world, Guid id)
