@@ -190,8 +190,15 @@ namespace MMLib.Alvo.Data;
 /// (<see cref="PolicyDecision.Using"/> is <see langword="null"/> — there is no stored row to filter when the
 /// decision is made), and a null <c>USING</c> renders as a constant true, so a create decision must never be
 /// used to read a stored row. Reading under <c>get</c> is what makes a replay unable to hand back a row the
-/// caller could not read directly, or a projection their own <c>hidden</c> set would not produce. A caller who
-/// may create but not read therefore has a replay refused rather than answered.
+/// caller could not read directly, or a projection their own <c>hidden</c> set would not produce.
+/// </para>
+/// <para>
+/// <b>A caller whose <c>get</c> is denied outright is not refused a replay — the answer is <c>id</c> alone,
+/// with no row read performed</b>: see <see cref="CreateAsync"/>'s <c>idempotency</c> parameter and return
+/// value for the safety argument. The
+/// case that still refuses is narrower — a <em>configured</em> <c>get</c> whose own predicate excludes this
+/// specific row — and it answers <see cref="AlvoRecordNotFoundException"/>, indistinguishable from a row
+/// that was genuinely deleted, exactly as any other excluded read does.
 /// </para>
 /// <para>
 /// The record's identity is the caller's key plus a <b>scope of (tenant, acting user)</b> — see
