@@ -159,6 +159,16 @@ public sealed class PostgresApiDatabase(string connectionString, string name) : 
     /// <c>updated_by</c>) and the nullable <c>color</c> are left out of the column list rather than written
     /// as null, so the table itself supplies them.
     /// </para>
+    /// <para>
+    /// <b>It stays reachable from every fact in this assembly, and that is a decision rather than an
+    /// oversight.</b> A review round asked for the reach to be narrowed to the seeding type alone; C# cannot
+    /// express that inside one assembly (<c>internal</c> is this assembly), and the one move that would —
+    /// lifting the seeder into its own type — needs <c>connectionString</c> exposed, which re-creates exactly
+    /// the raw policy-free writer the same round removed. Trading a bounded seeder for an unbounded connection
+    /// is the worse half of that trade. What is actually bounded is the <em>capability</em>: this is a
+    /// <c>COPY</c> into one fixed column list of one table, not a route around a policy predicate, and it must
+    /// not grow into one — a general-purpose writer here would be a way to stage rows no rule ever judged.
+    /// </para>
     /// </remarks>
     /// <param name="owner">The owner every seeded vehicle references.</param>
     /// <param name="rowCount">How many vehicles to load.</param>

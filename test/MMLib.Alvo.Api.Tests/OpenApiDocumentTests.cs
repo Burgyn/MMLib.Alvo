@@ -679,8 +679,17 @@ public sealed class OpenApiDocumentTests
     }
 
     /// <summary>Every parameter the document declares, whether shared or inlined on an operation.</summary>
+    /// <remarks>
+    /// Absence of the parameter map throws with an explanation rather than the bare NRE a
+    /// <c>document["components"]!["parameters"]!</c> would produce — the same reason, and the same shape, as
+    /// <see cref="EveryDeclaredName"/>. Unreachable while every generated document declares the shared paging
+    /// parameters; a walk over this document is a confidentiality control, and a control that fails as an NRE
+    /// tells its reader nothing about which invariant broke.
+    /// </remarks>
     private static IEnumerable<JsonObject> AllParameters(JsonObject document) =>
-        document["components"]!["parameters"]!.AsObject().Select(parameter => parameter.Value!.AsObject())
+        (document["components"]?["parameters"]?.AsObject()
+            ?? throw new InvalidOperationException("The document declares no 'components/parameters' map."))
+        .Select(parameter => parameter.Value!.AsObject())
             .Concat(Operations(document)
                 .SelectMany(operation => operation["parameters"]?.AsArray() ?? [])
                 .Select(parameter => parameter!.AsObject())

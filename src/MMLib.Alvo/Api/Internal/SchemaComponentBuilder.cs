@@ -170,15 +170,20 @@ internal sealed class SchemaComponentBuilder(
         + "the framework and refused in a request body.";
 
     /// <summary>Every field this schema's read side may show, in the schema's own order.</summary>
-    private HashSet<string>? ReadableFieldNames()
-    {
-        var names = entity.Fields
+    /// <remarks>
+    /// <b>Never empty, and by construction rather than by luck</b>: <c>id</c> is a framework-managed column the
+    /// mapper always injects, and <c>hidden</c> is a per-field <em>descriptor</em> flag — which a descriptor
+    /// cannot attach to <c>id</c>, because declaring a framework-managed column name is refused at apply. So
+    /// the read side always shows at least one field, and this never has to answer what an empty
+    /// <c>required</c> would mean (OpenAPI 3.1 forbids the empty array, so the honest answer would have been to
+    /// omit the keyword). A guard for that case was here and is deleted: an unreachable branch is one a reader
+    /// has to reason about and no test can pin.
+    /// </remarks>
+    private HashSet<string> ReadableFieldNames()
+        => entity.Fields
             .Where(field => Belongs(field, readable: true, isUpdate: false))
             .Select(field => field.Name)
             .ToHashSet(StringComparer.Ordinal);
-
-        return names.Count == 0 ? null : names;
-    }
 
     /// <summary>
     /// The body a write accepts: the fields a caller may supply, and — on a create only — which of them are
