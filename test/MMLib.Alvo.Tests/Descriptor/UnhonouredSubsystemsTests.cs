@@ -28,9 +28,16 @@ namespace MMLib.Alvo.Tests.Descriptor;
 /// <para>
 /// <b><c>examples/complex-crm</c> is the fixture, and it is deliberately not applied here.</b> Applying it
 /// fails on purpose (<c>NOT-RUNNABLE.md</c>) because it also declares four refused <em>features</em> — so
-/// the warning is driven from the parsed descriptor directly. That is the honest reach for this behaviour
-/// anyway: the warning is a pure function of the descriptor, and the apply path's job is only to call it,
-/// which <c>SchemaMigrationRunner</c> does at the last point the descriptor is known to be appliable.
+/// the warning is driven from the parsed descriptor directly.
+/// </para>
+/// <para>
+/// <b>Every fact here therefore proves the warning is <em>correct</em>, and none of them proves it is
+/// <em>reached</em>.</b> They all call <see cref="UnhonouredSubsystems.Warn"/> themselves, so deleting the
+/// call from <c>SchemaMigrationRunner.RunAsync</c> left this file — and the whole suite — green while the
+/// user-visible deliverable did nothing. That half is pinned by
+/// <c>Migrations.SchemaMigrationRunnerTests.Applying_a_descriptor_that_declares_an_unhonoured_block_warns_naming_it</c>,
+/// over a purpose-built appliable descriptor and a capturing logger provider. Read the two together; neither
+/// is sufficient alone, and this file used to be presented as if it were.
 /// </para>
 /// </remarks>
 public class UnhonouredSubsystemsTests
@@ -55,7 +62,7 @@ public class UnhonouredSubsystemsTests
     public void The_warning_names_every_unhonoured_block_the_showcase_declares()
     {
         var descriptor = AlvoDescriptor.Parse(File.ReadAllText(ComplexCrm()));
-        var logger = new RecordingLogger();
+        var logger = new CapturingLogger();
 
         UnhonouredSubsystems.Warn(logger, descriptor);
 
@@ -110,7 +117,7 @@ public class UnhonouredSubsystemsTests
     {
         var path = Path.Combine(Examples(), "simple-tasks", "tasks.alvo.json");
         var descriptor = AlvoDescriptor.Parse(File.ReadAllText(path));
-        var logger = new RecordingLogger();
+        var logger = new CapturingLogger();
 
         UnhonouredSubsystems.Warn(logger, descriptor);
 
@@ -158,39 +165,4 @@ public class UnhonouredSubsystemsTests
     /// <summary>The format showcase's descriptor, which exercises the whole schema surface.</summary>
     private static string ComplexCrm() =>
         Path.Combine(Examples(), "complex-crm", "crm.alvo.json");
-
-    /// <summary>
-    /// The narrowest <see cref="ILogger"/> that can answer "which blocks did the line name" — it keeps the
-    /// formatted message of every warning and drops everything else.
-    /// </summary>
-    /// <remarks>
-    /// Hand-written rather than substituted. <see cref="ILogger.Log{TState}"/> is generic over the state and
-    /// takes the formatter as a delegate, so a mocking framework can record the call but not the rendered
-    /// message without re-implementing exactly this — and the rendered message is the whole assertion.
-    /// </remarks>
-    private sealed class RecordingLogger : ILogger
-    {
-        private readonly List<string> _warnings = [];
-
-        /// <summary>The formatted message of every warning written through this logger, in order.</summary>
-        internal IReadOnlyList<string> Warnings => _warnings;
-
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-
-        public bool IsEnabled(LogLevel logLevel) => true;
-
-        public void Log<TState>(
-            LogLevel logLevel,
-            EventId eventId,
-            TState state,
-            Exception? exception,
-            Func<TState, Exception?, string> formatter)
-        {
-            ArgumentNullException.ThrowIfNull(formatter);
-            if (logLevel == LogLevel.Warning)
-            {
-                _warnings.Add(formatter(state, exception));
-            }
-        }
-    }
 }
