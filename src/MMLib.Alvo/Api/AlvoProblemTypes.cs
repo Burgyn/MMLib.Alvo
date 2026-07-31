@@ -89,14 +89,25 @@ public static class AlvoProblemTypes
     ];
 
     /// <summary>The full problem <c>type</c> URI for one slug.</summary>
+    /// <remarks>
+    /// <b>An unknown slug is family 5, not a malformed request.</b> Every call site passes a constant from this
+    /// catalogue, so reaching the throw means a framework author minted a <c>type</c> the catalogue does not
+    /// declare — an invariant this implementation relies on, which <c>ProblemResultFactory.GuardAsync</c> lets
+    /// propagate to the host as a 500 with its stack trace. An <see cref="ArgumentException"/> here would land
+    /// on that guard's widest arm instead and be rendered to the caller as <em>"the request is malformed"</em>,
+    /// which is the exact defect <c>JsonPayloadReader.TryBind</c> narrowed its own catch to avoid: telling a
+    /// caller to fix a request that was fine.
+    /// </remarks>
     /// <param name="slug">One of this type's slugs.</param>
-    /// <exception cref="ArgumentException"><paramref name="slug"/> is not a slug this catalogue declares.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="slug"/> is not a slug this catalogue declares.
+    /// </exception>
     public static string UriOf(string slug)
     {
         if (!All.Contains(slug, StringComparer.Ordinal))
         {
-            throw new ArgumentException(
-                $"'{slug}' is not an Alvo problem type. Use one of: {string.Join(", ", All)}.", nameof(slug));
+            throw new InvalidOperationException(
+                $"'{slug}' is not an Alvo problem type. Use one of: {string.Join(", ", All)}.");
         }
 
         return BaseUri + slug;

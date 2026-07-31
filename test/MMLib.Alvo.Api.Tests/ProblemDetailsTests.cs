@@ -217,6 +217,13 @@ public sealed class ProblemDetailsTests
     /// framework author reading an exception message, and "invalid slug" without the list is a trip to the
     /// source.
     /// </para>
+    /// <para>
+    /// <b>The family is asserted, not merely the fact that it throws.</b> An
+    /// <see cref="ArgumentException"/> here would be caught by <see cref="ProblemResultFactory.GuardAsync"/>'s
+    /// widest arm and rendered to the caller as a 422 — an implementation misuse dressed up as "your request is
+    /// malformed". <see cref="InvalidOperationException"/> is family 5, which that guard lets propagate to the
+    /// host, so the exclusion below is the load-bearing half of this fact.
+    /// </para>
     /// </remarks>
     [Fact]
     public void UriOf_mints_a_uri_only_for_a_declared_slug()
@@ -226,12 +233,14 @@ public sealed class ProblemDetailsTests
             AlvoProblemTypes.UriOf(slug).ShouldBe(AlvoProblemTypes.BaseUri + slug);
         }
 
-        var refused = Should.Throw<ArgumentException>(() => AlvoProblemTypes.UriOf("quota-exceeded"));
+        var refused = Should.Throw<InvalidOperationException>(() => AlvoProblemTypes.UriOf("quota-exceeded"));
 
+        refused.ShouldNotBeAssignableTo<ArgumentException>(
+            "an ArgumentException lands on the malformed-request arm and reaches the caller as a 422");
         refused.Message.ShouldContain("quota-exceeded");
         refused.Message.ShouldContain(
             AlvoProblemTypes.NotFound, Case.Sensitive, "the refusal lists the declared slugs, or it sends the reader to the source");
-        Should.Throw<ArgumentException>(() => AlvoProblemTypes.UriOf(AlvoProblemTypes.NotFound.ToUpperInvariant()))
+        Should.Throw<InvalidOperationException>(() => AlvoProblemTypes.UriOf(AlvoProblemTypes.NotFound.ToUpperInvariant()))
             .ShouldNotBeNull("the comparison is ordinal — a slug is a wire token, not a word");
     }
 
