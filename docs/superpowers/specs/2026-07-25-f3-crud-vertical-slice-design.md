@@ -917,6 +917,135 @@ tell a decision from an oversight without reading that file.
    deliberately, so it works in a project that cannot see EF — and therefore says nothing about
    who *can*.
 
+### Deviations added by PR3
+
+PR3's own Superpowers plan is discarded once merged, so anything it decided that outlives it is
+recorded here. The implementation-level *why* for each lives in `docs/architecture/data-api.md`,
+which is the surviving detailed record for the HTTP layer (`data-path.md` remains it for the port);
+these entries exist so a reader of this design can tell a decision from an oversight without reading
+either file.
+
+19. **`QueryAsync` returns an `AlvoPage`, not a list, and `AlvoQuery` gains `Offset`.** Two of the
+   three port widenings PR3 took, and both are cheaper before an HTTP layer exists than after —
+   nothing is released, so a signature change costs a recompile of in-repo callers and nothing else.
+   (a) The next-page cursor **cannot** be produced above the port: `KeysetCursor` is `internal` to
+   the EF package on purpose, and only the provider can answer "is there another page" without a
+   second round trip (it over-fetches by one row). A layer that re-encoded the cursor would be the
+   second copy of one fact, which is the defect class PR2's review closed four times. (b) §2.1
+   requires *both* paging modes, and `AlvoQuery`'s own remarks license exactly this — "a new optional
+   member … can be added here without breaking an existing caller". Cost: `AlvoPage` adds a
+   `TotalCount` that is always `null` in F3, which is a modelled member no shipped code fills;
+   modelling it now is what keeps `Prefer: count=` additive later (#110).
+20. **Two new exception families join the "three families" contract PR2 called settled.**
+   `AlvoPreconditionFailedException` (412) and `AlvoIdempotencyConflictException` (409), and
+   `IAlvoData`'s remarks table grows to five rows. Deviation 16(a) fixed the count at three
+   deliberately, so growing it is a departure and not a footnote. The reason is that a request layer
+   has nothing but the exception *type* to map a status from: folding either into `ArgumentException`
+   would render 422 for a condition that is neither malformed nor the caller's mistake, and folding
+   them together would lose the difference between "the row moved" and "you reused a key". Cost: a
+   third-party `IAlvoData` implementation must now raise five families rather than three, and the
+   port's contract suite is what tells it so.
+21. **The precondition and the idempotency token enter the port rather than living above it** (#90).
+   The third port widening. Both must be evaluated *inside* the write transaction — the precondition
+   against PR2's row-locked pre-image, the idempotency record in the same commit as the row — so
+   neither can live in the HTTP layer. Doing it from above would be a lost update and a duplicate row
+   respectively, each invisible to a test that does not look for it. Cost, and it is a real one: the
+   port now carries two concepts whose *names* come from HTTP (`If-Match`, `Idempotency-Key`), so
+   `AlvoPrecondition` and `AlvoIdempotency` are deliberately spelled in the port's own vocabulary — a
+   row version and a key plus a fingerprint — and the HTTP spellings are mapped at the edge.
+22. **A write to a `readOnly` field is 422 from validation and 403 from the port — one behaviour per
+   layer, not one behaviour.** The API's validator refuses it as a malformed request naming the field;
+   the port refuses it as an authorization failure. Both are correct for where they stand: the
+   validator holds the caller's resolved `readOnly` mask and can say *which* field, which is the
+   answer an agent can act on, while the port cannot assume any layer ran first and must fail closed.
+   Cost: the same descriptor mistake has two status codes depending on whether it arrived over HTTP,
+   and a host calling `IAlvoData` directly gets the 403 form. Recorded rather than unified, because
+   unifying would mean either the port trusting a caller's word or the API discarding the field name.
+23. **An anonymous caller is a *context*, not a 401.** `AlvoContext.Anonymous` is what the endpoints
+   see when the auth filter published no principal, and it is judged by the same default-deny policy
+   as any other caller — so an anonymous request to an entity whose rules admit `anon` succeeds, and
+   one to any other entity is refused by policy. 401 is reserved for a credential that **was**
+   presented and cannot be used. It follows that `Idempotency-Key` from an anonymous caller is a
+   **422, not a 401**: nothing failed authentication, so a 401 would owe a `WWW-Authenticate`
+   challenge (RFC 7235 §3.1) for a request that never attempted it, and would blur the line this
+   deviation keeps disjoint. Rationale under §2.1's default-deny reading; the anonymous fallback is
+   also the fail-*closed* direction if an endpoint were ever mapped without the filter.
+24. **PATCH-only partial update; no `PUT`.** `UpdateAsync` is partial by contract — "a field this
+   dictionary does not mention keeps its stored value" — so a `PUT` would advertise whole-resource
+   replacement the port does not perform. Cost: no upsert, and no create-with-a-caller-supplied-id,
+   which is the shape a GitOps-style caller reaches for. Both need a port that can create-or-replace
+   with `WITH CHECK` evaluated on the candidate row in both branches, and are deferred with a stated
+   reason (#105) rather than approximated.
+25. **A JSON envelope (`items` / `next`) rather than PostgREST's bare array plus `Content-Range`.**
+   PostgREST is the syntax Alvo adopts for the *query string*, and this is the one place the response
+   shape departs from it. The reason is that the alternatives put the cursor in a header, which gives
+   it two homes and forces an agent reading a JSON body to parse HTTP headers to keep paging. `next`
+   has exactly one home. Cost: a client written against PostgREST's response shape does not read
+   Alvo's, and a `Link: rel="next"` header is deliberately not shipped (#104) so the two cannot
+   disagree.
+26. **`FieldClrType` is a new public type in `Abstractions`.** Deviation 12's precedent, one layer
+   over: two layers must map a declared `FieldType` to the CLR type a value is carried as through
+   `IAlvoData`, and neither can see the other's copy — a storage driver builds its read model and its
+   bind parameters from it, and the HTTP layer binds a JSON request body with it. The
+   "collapse onto `FieldClrTypeMap`" alternative was **impossible**, not merely unattractive: that
+   type is `internal` to the EF package, and the core cannot reference it at all
+   (`SharedArchitectureRules.Core_depends_only_on_Abstractions`). It belongs in the ports because it
+   is not one backend's opinion — it is the contract `IAlvoData` publishes. PR3's first pass had two
+   copies and **they already disagreed on failure mode**: the driver threw `NotSupportedException`
+   for an unmapped type while the HTTP copy laundered the same condition into a client 422, telling a
+   caller to fix a request that was fine.
+27. **Position A: the declared, non-hidden schema shape is public; what is confidential is data and
+   the *name* of a `hidden` field.** Not a new mechanism but a position that had never been written
+   down, and it has to be, because the design already commits to it twice — route literals disclose
+   entity existence *before* authorization, and the OpenAPI document publishes every entity's
+   non-hidden field list. A framework cannot publish its schema shape and treat that shape as
+   confidential. Stated so the third anti-enumeration claim does not get written; the full statement
+   is `data-api.md`'s first section.
+28. **A `hidden` field appears in a *request* schema if and only if it is `required`** —
+   **this one needs the maintainer's ratification.** It is a deliberate, bounded confidentiality
+   trade, on the same footing as PR2's two collation rulings. Excluding a hidden field from *every*
+   schema would drop a mandatory field from the body a caller must send, since a required field a
+   caller cannot see cannot be supplied at all; the rejected alternative — refuse `required` +
+   `hidden` at apply — forecloses a real pattern, because a mandatory secret (a password, an API
+   token the caller supplies and can never read back) is exactly that combination, and the frozen
+   schema defines `hidden` as response-side. An **optional** hidden field's name still appears
+   nowhere. Cost: a hidden, writable, optional field is absent from the request schemas while a write
+   to it is accepted, so the document understates what a create will take — the safe direction, but a
+   documented inaccuracy.
+29. **Four decisions in the OpenAPI emission, none of which the brief covered.** (a) **Six files, not
+   two** — the ~25-line method ceiling makes one transformer impossible, and `DataApiDocumentation` in
+   particular earns its keep twice, being read by both the endpoint metadata and the transformer,
+   which is what stops the document advertising a status no delegate emits. (b)
+   **`.Produces(status, contentType)` rather than `.ProducesProblem(status)`**, because ApiExplorer's
+   own `ProblemDetails` component omits the `violations` array every Alvo refusal carries, and an
+   orphan schema missing it is strictly worse than none. (c) **`EntitySchema.Description` is carried
+   onto the applied schema**, because the transformer cannot see the descriptor and a document
+   describing every entity as nothing is a real loss; verified behaviour-free — `SchemaDiff.IsUnchanged`
+   compares types and facets only, and `IsUnchangedReapply` compares serialized descriptor JSON, so
+   the added record member plans no migration. (d) **An API-key security scheme plus reusable
+   `responses`/`parameters`/`headers`**, since a documented 401 with nowhere to put a credential
+   defeats §6; `security: [{}, {alvoApiKey: []}]` is correct rather than a hedge, because a descriptor
+   may admit `anon` while the 401 is for a credential that was presented.
+30. **A keyed-`POST` replay by a caller who may `create` but not `get` answers `201` with an id-only
+   body, never 403.** When the replaying caller's `get` is denied outright, the retry must not be
+   worse than the create it replays — so the answer is the original `Location` and a body carrying
+   only `id`, taken from the idempotency record's own `row_id` with no row read performed. The safety
+   argument is the record's identity: it is keyed on the key, the tenant *and* the acting user, so a
+   match proves this caller created that row, and the id disclosed is the one their own original 201
+   already gave them. Cost: `CreateAsync` now has one return shape that is not a full row, stated in
+   its contract; and the sibling case — a *configured* `get` whose predicate excludes the row — stays
+   a 404 (#101), because telling "invisible to me" from "deleted since" would need a policy-free
+   existence probe.
+31. **The core takes an ASP.NET Core dependency, so `package-boundary.md`'s "the core depends only on
+   `Abstractions`" is now true only of project references.** §0 principle 8 makes every generated
+   endpoint a minimal-API delegate, so `MMLib.Alvo` carries `FrameworkReference
+   Microsoft.AspNetCore.App` plus `Microsoft.AspNetCore.OpenApi`. `Abstractions` deliberately stays
+   free of both, and an arch test holds that line — the ports must stay implementable by a host that
+   is not an ASP.NET application at all. Cost: an embedded consumer of the core is now an ASP.NET
+   consumer whether or not it maps the Data API, and the framework reference silently supplies
+   `Microsoft.Extensions.Options`, whose explicit `PackageReference`s had to be **removed** because
+   NuGet's `NU1510` (raised as an error here) objects to a reference it will not prune.
+
 ## Assumptions (veto candidates)
 
 1. Own outbox in the core with an `IEventDispatcher` port. **Decided with the

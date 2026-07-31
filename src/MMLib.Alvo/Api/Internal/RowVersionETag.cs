@@ -56,14 +56,20 @@ internal static class RowVersionETag
     /// two copies are how the request layer comes to advertise a tag the port refuses to compare.
     /// </para>
     /// <para>
-    /// <b>The value has to be a <see cref="DateTimeOffset"/>, and that is a real second condition rather than a
-    /// cast written defensively.</b> An entity may declare its own field called <c>updated_at</c> — the schema
-    /// mapper injects a managed column only when the entity does <em>not</em> declare a field of that name
-    /// (<c>DescriptorToSchemaMapper.AddManagedColumn</c>) — so an author's declaration wins and an audited
-    /// entity can carry a version column of some other type. Refusing to tag it matches what the port does
-    /// with it: <see cref="AlvoPrecondition.EnsureMatches"/> refuses any precondition against a stored value
-    /// that is not a <see cref="DateTimeOffset"/>, so a tag minted from such a column would advertise a
-    /// precondition that can never be satisfied.
+    /// <b>The value has to be a <see cref="DateTimeOffset"/>, and that condition is no longer reachable
+    /// through a declaration — which is worth saying, because it used to be the whole reason for it.</b> An
+    /// audited entity could once declare its own <c>updated_at</c> of another type and win: the mapper
+    /// injected a managed column only when the entity did not already declare that name, so apply accepted it
+    /// and every create then failed. <c>DescriptorToSchemaMapper.AddManagedColumn</c> now <em>refuses</em> the
+    /// declaration outright (see <c>Descriptor.Internal.ManagedColumnNames</c>), and
+    /// <see cref="AlvoManagedColumns.VersionColumn"/> answers a column only for an entity that declares
+    /// <c>audit</c> — so for a physical entity the two conditions here cannot disagree today.
+    /// <b>It stays, and not as a defensive cast.</b> It is what keeps this type honest for a version column
+    /// this layer did not mint the schema for — F7's dynamic driver builds an entity's fields at runtime, and
+    /// no apply-time refusal covers it yet. Refusing to tag also matches what the port does:
+    /// <see cref="AlvoPrecondition.EnsureMatches"/> refuses any precondition against a stored value that is
+    /// not a <see cref="DateTimeOffset"/>, so a tag minted from such a column would advertise a precondition
+    /// that can never be satisfied.
     /// </para>
     /// <para>
     /// <b>A <em>masked</em> version column was a different case, and it is why this branch no longer has to

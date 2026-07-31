@@ -16,8 +16,11 @@
   `Microsoft.Extensions.DependencyInjection.Abstractions` (the one exception —
   see Hard dependency rules).
 - `src/MMLib.Alvo` — the core: descriptor parse/map, schema registry, the
-  migration orchestration (`SchemaMigrationRunner`) + guardrail, and the
-  `AddAlvo()` builder. EF-free (enforced by an arch test).
+  migration orchestration (`SchemaMigrationRunner`) + guardrail, the rule engine
+  and CEL compiler, caller context/auth, and the `AddAlvo()` builder — plus, from
+  PR3, the generated **HTTP Data API** and its OpenAPI enrichment. EF-free
+  (enforced by an arch test), but **an ASP.NET Core library** — see Hard
+  dependency rules.
 - `src/MMLib.Alvo.Data.EntityFrameworkCore` — shared EF-based host (the
   descriptor→`IModel` builder, the EF-differ migrator, the introspector, the
   applied-schema store); drags `Microsoft.EntityFrameworkCore.Relational`.
@@ -26,10 +29,15 @@
   is a real swap point.
 - `src/MMLib.Alvo.Testing` — test-support library (`ArchTargetAttribute`,
   `RepositoryRoot`, the `ISchemaMigrator` contract suite + in-memory fake);
-  `IsPackable=false` until external provider authors need it.
+  Abstractions-only, `IsPackable=false` until external provider authors need it.
+- `src/MMLib.Alvo.Testing.EntityFrameworkCore` — the relational half of the
+  test-support library, split out in PR2 so an EF dependency is not handed to
+  every consumer of the adversarial and differential suites. An **earned** split
+  by the rule below: a real dependency boundary appeared.
 - `test/` — one `*.Tests` per shipped project (arch + public-API approval
-  auto-linked), `MMLib.Alvo.Conventions.Tests` (solution-structure checks), and
-  `MMLib.Alvo.Data.PostgreSql.Tests.Integration` (Testcontainers).
+  auto-linked), `MMLib.Alvo.Conventions.Tests` (solution-structure checks),
+  `MMLib.Alvo.Api.Tests`, and the `*.Tests.Integration` projects
+  (Testcontainers).
 
 Keep this list current — update it whenever a project is added or removed.
 
@@ -79,6 +87,24 @@ is a breaking change.
   clean `Data.* → Abstractions` graph (the alternative — moving the builder into
   the core — would force every provider to reference the whole core). No other
   external dependency may be added to `Abstractions`.
-- The core depends only on `Abstractions`.
+- The core depends only on `Abstractions` **among `MMLib.Alvo.*` packages**, and
+  in particular never on a provider (`SharedArchitectureRules.Core_depends_only_on_Abstractions`
+  asserts both). Its permitted external dependencies are named here, on the same
+  precedent as the `Abstractions` exception above:
+  - `FrameworkReference Microsoft.AspNetCore.App`. §0 principle 8 makes every
+    generated endpoint a minimal-API delegate, so the core **is** an ASP.NET Core
+    library from PR3 on. `Abstractions` deliberately stays free of it — the ports
+    must stay implementable by a host that is not an ASP.NET application at all,
+    and an arch test holds that line.
+  - `Microsoft.AspNetCore.OpenApi`. First-party tooling for a product promise: the
+    OpenAPI document *is* the contract an agent reads (§0 principle 4). A docs
+    **UI** is a hosting decision, so Scalar sits in `MMLib.Alvo.Host` instead.
+  - `Corvus.Json.SourceGenerator` (build-time only, `PrivateAssets=all`) and its
+    `Corvus.Json.ExtendedTypes` runtime support.
+
+  The cost, stated: an embedded consumer of the core is an ASP.NET consumer
+  whether or not it maps the Data API. That is the price of principle 8, and it is
+  why the *ports* were kept free of it — a non-ASP.NET host implements
+  `IAlvoData` against `Abstractions` alone.
 - **No package depends on another port's provider.**
 - Lockstep SemVer: everything is versioned and released together as one version.

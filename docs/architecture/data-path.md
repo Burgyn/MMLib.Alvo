@@ -3,9 +3,16 @@
 How an Alvo read or write becomes one SQL statement, and the decisions that shape it. Written during F3 PR2
 (#20).
 
-> **Status: complete for PR2.** Everything below describes what the code does today, on the branch that
-> closes #20. Where a decision was deliberately deferred it says so and names the phase that owns it — see
-> *What later work inherits* at the end, which is the one place a PR3, PR5 or F7 author should start.
+> **Status: complete for PR2**, with the PR3 port widenings folded in where they closed a deferral.
+> Everything below describes what the code does today. Where a decision was deliberately deferred it says
+> so and names the phase that owns it — see *What later work inherits* at the end, which is the one place a
+> PR3, PR5 or F7 author should start.
+>
+> **Sibling record:** this file owns the **port and the SQL**. `docs/architecture/data-api.md` owns the
+> **HTTP layer** PR3 added — the URL grammar and its allow-lists, the status/`type`-slug catalogue, the
+> `ETag` spelling, and Position A (what the framework publishes and what it treats as confidential). The
+> two are deliberately split along the port boundary, so a decision about a wire format lives there and a
+> decision about a statement lives here.
 
 ## One statement, one `WHERE`
 
@@ -1365,9 +1372,10 @@ as long as every row carries the same offset — which the framework's own clock
 writes UTC. Deleting a record for a key a client is *still* retrying costs that client one duplicate row on
 its next retry rather than a replay, so the window has to outlast the longest retry any client performs.
 
-**Filed, not built:** a configurable retention window plus a background sweep. It is scheduler-shaped work —
-Alvo has no hosted-service seam yet — and it belongs with whatever ships the first one rather than bolted onto
-a request path.
+**Filed as #115, not built:** a configurable retention window plus a background sweep. It is scheduler-shaped
+work — Alvo has no hosted-service seam yet — and it belongs with whatever ships the first one rather than
+bolted onto a request path. `docs/product/baas-analyza.md` puts cron and retention in the scheduling
+component, which is where the issue is filed.
 
 ### PR5 — outbox, events and hooks (#22)
 
