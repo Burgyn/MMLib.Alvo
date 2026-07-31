@@ -36,6 +36,12 @@ public static class AlvoServiceCollectionExtensions
 
         var builder = new AlvoBuilder(services);
 
+        // Alvo writes at least one warning of its own (the declared-but-unhonoured descriptor blocks), so it
+        // resolves ILogger<T> — and it must not require the host to have arranged that. AddLogging is
+        // idempotent (TryAdd throughout), so a host that already called it, or any ASP.NET host, is unaffected;
+        // a plain console host embedding Alvo would otherwise fail to activate SchemaMigrationRunner at all.
+        services.AddLogging();
+
         services.AddOptions<AlvoOptions>()
             .ValidateDataAnnotations()
             .ValidateOnStart();

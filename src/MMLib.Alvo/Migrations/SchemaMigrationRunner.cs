@@ -1,4 +1,6 @@
-﻿using MMLib.Alvo.Descriptor;
+﻿using Microsoft.Extensions.Logging;
+using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Descriptor.Internal;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Rules.Internal;
@@ -32,6 +34,7 @@ internal sealed class SchemaMigrationRunner
     private readonly IAppliedSchemaStore _store;
     private readonly ICelCompiler _compiler;
     private readonly IPolicyCatalogProvider _policyCatalogProvider;
+    private readonly ILogger<SchemaMigrationRunner> _logger;
 
     public SchemaMigrationRunner(
         IDescriptorSource source,
@@ -40,7 +43,8 @@ internal sealed class SchemaMigrationRunner
         ISchemaIntrospector introspector,
         IAppliedSchemaStore store,
         ICelCompiler compiler,
-        IPolicyCatalogProvider policyCatalogProvider)
+        IPolicyCatalogProvider policyCatalogProvider,
+        ILogger<SchemaMigrationRunner> logger)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(validator);
@@ -49,6 +53,7 @@ internal sealed class SchemaMigrationRunner
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(compiler);
         ArgumentNullException.ThrowIfNull(policyCatalogProvider);
+        ArgumentNullException.ThrowIfNull(logger);
 
         _source = source;
         _validator = validator;
@@ -57,6 +62,7 @@ internal sealed class SchemaMigrationRunner
         _store = store;
         _compiler = compiler;
         _policyCatalogProvider = policyCatalogProvider;
+        _logger = logger;
     }
 
     /// <summary>Runs the code-first migration flow described in the type's remarks.</summary>
@@ -85,6 +91,13 @@ internal sealed class SchemaMigrationRunner
 
         var descriptor = AlvoDescriptor.Parse(descriptorJson);
         var desired = DescriptorToSchemaMapper.Map(descriptor);
+
+        // Emitted here rather than on the branches that write something: this is the last point at which the
+        // descriptor is known to be appliable (the mapper refuses every unhonoured *feature* above), and every
+        // branch below runs through it — including the empty-plan no-op, which is the ordinary case on a
+        // restart. Warning only on a genuine apply would tell an author about their unhonoured blocks exactly
+        // once, on the deploy where they are least surprised by them, and never again.
+        UnhonouredSubsystems.Warn(_logger, descriptor);
 
         var appliedSnapshot = await _store.GetCurrentAsync(descriptor.Name, ct).ConfigureAwait(false);
         var current = appliedSnapshot?.Schema

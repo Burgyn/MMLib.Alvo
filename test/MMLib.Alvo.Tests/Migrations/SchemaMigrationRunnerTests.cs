@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Descriptor;
+﻿using Microsoft.Extensions.Logging.Abstractions;
+using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Descriptor.Internal;
 using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Migrations;
@@ -39,7 +40,7 @@ public sealed class SchemaMigrationRunnerTests
     public SchemaMigrationRunnerTests()
     {
         _source.LoadAsync(Arg.Any<CancellationToken>()).Returns(FleetDescriptorJson);
-        _runner = new SchemaMigrationRunner(_source, new DescriptorValidator(), _migrator, _introspector, _store, new CelCompiler(), new PolicyCatalogProvider());
+        _runner = new SchemaMigrationRunner(_source, new DescriptorValidator(), _migrator, _introspector, _store, new CelCompiler(), new PolicyCatalogProvider(), NullLogger<SchemaMigrationRunner>.Instance);
     }
 
     [Fact]
@@ -139,7 +140,7 @@ public sealed class SchemaMigrationRunnerTests
         };
         migrator.PlanAsync(Arg.Any<SchemaModel>(), Arg.Any<SchemaModel>(), Arg.Any<MigrationOptions>(), Arg.Any<CancellationToken>())
             .Returns(nonEmptyPlan);
-        var runner = new SchemaMigrationRunner(_source, new DescriptorValidator(), migrator, _introspector, _store, new CelCompiler(), new PolicyCatalogProvider());
+        var runner = new SchemaMigrationRunner(_source, new DescriptorValidator(), migrator, _introspector, _store, new CelCompiler(), new PolicyCatalogProvider(), NullLogger<SchemaMigrationRunner>.Instance);
         _store.GetCurrentAsync("fleet", Arg.Any<CancellationToken>()).Returns((AppliedSchema?)null);
         _introspector.IntrospectAsync(Arg.Any<CancellationToken>()).Returns(new SchemaModel([]));
 
