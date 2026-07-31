@@ -40,9 +40,17 @@ internal sealed class AlvoApiOptionsValidator : IValidateOptions<AlvoApiOptions>
     /// repaired and is what produces the opaque <c>RoutePatternException</c> this check exists to pre-empt.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// <b>It validates <see cref="RoutePrefix.Normalize"/>'s own output</b>, which is the same reduction
+    /// <c>MapAlvoDataApi</c> mounts. Re-deriving it here is what let the two disagree: the mapper's copy
+    /// answered <c>"/"</c> where this one answered <c>""</c>, and routing threw on <c>//owners</c> after this
+    /// method had reported Success.
+    /// </para>
+    /// <para>
     /// Accepting a value here is a claim that it <em>mounts</em>, not merely that it parses as a string,
     /// which is why <c>DataApiRoutingTests.The_route_prefix_can_mount_at_the_root</c> serves a request over
     /// the normalized form instead of asserting that this method returned success.
+    /// </para>
     /// </remarks>
     private static void ValidateRoutePrefix(string prefix, List<string> failures)
     {
@@ -52,12 +60,16 @@ internal sealed class AlvoApiOptionsValidator : IValidateOptions<AlvoApiOptions>
             return;
         }
 
-        var trimmed = prefix.Trim().Trim('/');
-        if (trimmed.Length == 0)
+        var normalized = RoutePrefix.Normalize(prefix);
+        if (normalized.Length == 0)
         {
             return;
         }
 
+        // Normalize answers either the empty string or one leading slash followed by the path text, so the
+        // segments are everything after that slash. Splitting the normalized form whole would report its own
+        // leading slash as an empty first segment and refuse every prefix there is.
+        var trimmed = normalized[1..];
         if (trimmed.Split('/').Any(string.IsNullOrWhiteSpace))
         {
             failures.Add(
