@@ -206,19 +206,51 @@ internal static class JsonPayloadReader
 
     /// <summary>
     /// Walks every token of the body, refusing as soon as the property-name count or the nesting depth
-    /// crosses its bound.
+    /// crosses its bound — or as soon as one object uses a name twice.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <b>Property names are counted at every depth, not just the top level.</b> Counting only depth 1 was a
     /// bound that did not bound: <c>{"name":{…150 000 keys…}}</c> satisfied it, satisfied the depth cap at
     /// depth 2, fitted inside <see cref="AlvoApiOptions.MaxRequestBodyBytes"/>, and was then materialised in
     /// full — a ~20–40× memory amplification per request, refused only afterwards. The scan already visits
     /// every token (it no longer <c>Skip</c>s a property's value), so this is a counter placement rather
     /// than a second pass.
+    /// </para>
+    /// <para>
+    /// <b>The duplicate-name check is here for the same reason, and it is the one bound whose absence was a
+    /// leak rather than a cost.</b> A repeated name passed this scan (both names counted, neither compared) and
+    /// passed <c>JsonNode.Parse</c> too, because a <see cref="JsonObject"/>'s backing dictionary materialises
+    /// lazily — so the <c>foreach</c> in <see cref="Bind"/> was the first thing to touch it and threw
+    /// <see cref="ArgumentException"/> with a .NET dictionary message that
+    /// <see cref="ProblemResultFactory.GuardAsync"/> then rendered to the caller as the malformed-request 422.
+    /// Deciding it here refuses the body <em>before</em> the node tree exists, which is this type's rule for
+    /// every other bound.
+    /// </para>
+    /// <para>
+    /// <b>It is checked at every depth, which is wider than the throw was.</b> Only the top-level object is
+    /// enumerated, so a duplicate nested inside a <c>json</c> field's value never threw — it was accepted and
+    /// stored verbatim, leaving a document in the database that <see cref="JsonObject"/> itself cannot
+    /// enumerate. One rule for the whole body is also the simpler code: the scan is depth-agnostic, so
+    /// restricting the check to depth 1 would mean <em>adding</em> a condition whose only justification is
+    /// "that is the depth that happens to crash today".
+    /// </para>
+    /// <para>
+    /// The comparison matches <see cref="JsonObject"/>'s own exactly, which is what makes this a pre-emption
+    /// rather than a second opinion: the name is read through <see cref="Utf8JsonReader.GetString"/>, so
+    /// <c>"a"</c> and <c>"a"</c> are one name as the parser would also see them, and it is
+    /// <see cref="StringComparer.Ordinal"/>, so <c>a</c> and <c>A</c> are two.
+    /// </para>
     /// </remarks>
     private static AlvoViolation? ScanShape(ref Utf8JsonReader reader, AlvoApiOptions options)
     {
         var names = 0;
+        var seen = new NamesByDepth();
+
+        // The caller has already read the body's opening brace, so the root object's own property names are
+        // one level below the depth the reader is sitting at. Every nested object enters below.
+        seen.Enter(reader.CurrentDepth + 1);
+
         while (reader.Read())
         {
             if (reader.CurrentDepth > options.MaxPayloadDepth)
@@ -226,13 +258,70 @@ internal static class JsonPayloadReader
                 return PayloadViolations.TooDeep(options.MaxPayloadDepth);
             }
 
-            if (reader.TokenType == JsonTokenType.PropertyName && ++names > options.MaxPayloadKeys)
+            if (reader.TokenType == JsonTokenType.StartObject)
             {
-                return PayloadViolations.TooManyKeys(options.MaxPayloadKeys);
+                seen.Enter(reader.CurrentDepth + 1);
+            }
+            else if (reader.TokenType == JsonTokenType.PropertyName)
+            {
+                if (++names > options.MaxPayloadKeys)
+                {
+                    return PayloadViolations.TooManyKeys(options.MaxPayloadKeys);
+                }
+
+                if (!seen.Add(reader.CurrentDepth, reader.GetString()!))
+                {
+                    return PayloadViolations.DuplicateField();
+                }
             }
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// The property names seen so far in the object currently open at each depth — enough to decide "this
+    /// object already has that name" from a forward-only scan that keeps no node tree.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Keyed by depth and cleared on entry, which is what makes sibling objects independent.</b> In
+    /// <c>{"a":{"x":1},"b":{"x":2}}</c> both <c>x</c> sit at the same depth and are <em>not</em> duplicates, so
+    /// a single set for the whole body would refuse a perfectly ordinary payload. Clearing the depth's set
+    /// every time an object opens is what scopes it to one object rather than to one level.
+    /// </para>
+    /// <para>
+    /// The sets are reused rather than allocated per object, because a wide array of small objects would
+    /// otherwise allocate one <see cref="HashSet{T}"/> per element on a path that already refuses to build a
+    /// node tree. Both the number of sets and their total contents are bounded by
+    /// <see cref="AlvoApiOptions.MaxPayloadDepth"/> and <see cref="AlvoApiOptions.MaxPayloadKeys"/>, which the
+    /// same loop enforces.
+    /// </para>
+    /// </remarks>
+    private sealed class NamesByDepth
+    {
+        private readonly List<HashSet<string>> _byDepth = [];
+
+        /// <summary>Opens a fresh object whose own property names will be reported at <paramref name="depth"/>.</summary>
+        internal void Enter(int depth)
+        {
+            while (_byDepth.Count <= depth)
+            {
+                _byDepth.Add(new HashSet<string>(StringComparer.Ordinal));
+            }
+
+            _byDepth[depth].Clear();
+        }
+
+        /// <summary>
+        /// Records one property name, answering <see langword="false"/> when the object open at
+        /// <paramref name="depth"/> already carried it.
+        /// </summary>
+        /// <remarks>
+        /// The depth is always one <see cref="Enter"/> has seen: a property name is only ever reported inside an
+        /// object, and every object's opening brace — the root's included — enters before its names arrive.
+        /// </remarks>
+        internal bool Add(int depth, string name) => _byDepth[depth].Add(name);
     }
 
     /// <summary>Parses the already-bounded body into a node tree and binds every key to its declared type.</summary>

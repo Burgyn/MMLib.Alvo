@@ -103,6 +103,37 @@ internal static class PayloadViolations
             $"The request body carries more than {maxKeys} fields, the configured maximum."),
         "Send only the fields you are changing; the bound counts property names at every depth.");
 
+    /// <summary>The refusal for a body that uses one property name twice inside the same object.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Alvo's own wording, because the alternative was System.Text.Json's.</b> A duplicate name survives
+    /// <c>JsonNode.Parse</c> — a <c>JsonObject</c>'s backing dictionary materialises lazily — and threw
+    /// <c>ArgumentException("An item with the same key has already been added. Key: …")</c> at the first
+    /// enumeration, which <see cref="ProblemResultFactory.GuardAsync"/> rendered as this same 422 with a .NET
+    /// dictionary message as its <c>detail</c>. Worse, that message ends in the caller's own key, so it broke
+    /// this catalogue's one rule about what a message may carry — and
+    /// <see cref="ProblemResultFactory.WithoutArgumentDetail"/> stripped the <c>(Parameter '…')</c> marker the
+    /// suite screens for, so nothing caught it.
+    /// </para>
+    /// <para>
+    /// <b>Refused rather than resolved.</b> RFC 8259 §4 says names SHOULD be unique and leaves behaviour
+    /// undefined when they are not, so first-wins and last-wins are both a guess about what the caller meant —
+    /// and a guess that silently discards a value the caller sent is the silent-drop this API refuses
+    /// everywhere else (see <see cref="ReadOnly"/>).
+    /// </para>
+    /// <para>
+    /// <b>Body-level, so it names no key.</b> It is decided by the same forward-only scan that enforces the
+    /// depth and key bounds, at every depth — so there is no single top-level field to point at, and the
+    /// pointer is <see cref="BodyPointer"/> exactly as the other structural refusals' are.
+    /// </para>
+    /// </remarks>
+    internal static AlvoViolation DuplicateField() => new(
+        BodyPointer,
+        "duplicate-field",
+        "The request body uses the same property name twice inside one object.",
+        "Send each property once. A repeated name has no defined meaning, so it is refused rather than "
+        + "resolved to the first or the last value — at every depth, not only the top level.");
+
     /// <summary>The refusal for a key the entity does not declare.</summary>
     /// <remarks>
     /// <para>

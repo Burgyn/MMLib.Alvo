@@ -148,6 +148,118 @@ public sealed class PayloadBindingTests
     }
 
     /// <summary>
+    /// <b>A body repeating a property name is refused in Alvo's own words</b>, at the top level and at every
+    /// depth below it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This was a .NET dictionary message reaching a caller inside a 422.</b> <c>ScanShape</c> counted both
+    /// names against <see cref="AlvoApiOptions.MaxPayloadKeys"/> and passed them; <c>JsonNode.Parse</c> then
+    /// accepted the body, because a <c>JsonObject</c>'s backing dictionary materialises lazily — and the
+    /// <c>foreach</c> in <c>Bind</c> that first touched it threw
+    /// <c>ArgumentException("An item with the same key has already been added. Key: name")</c>, which
+    /// <c>ProblemResultFactory.GuardAsync</c>'s widest arm renders as the malformed-request 422. Measured on
+    /// System.Text.Json 10.0.0, not assumed: <c>Parse</c> succeeds and the enumeration, <c>Count</c> and the
+    /// indexer all throw.
+    /// </para>
+    /// <para>
+    /// <b>The existing leak screens could not see it, which is why the assertions here are on the wording
+    /// rather than on the status.</b> <c>ProblemResultFactory.WithoutArgumentDetail</c> strips the
+    /// <c>(Parameter 'key')</c> suffix, so <c>AlvoApiWorld</c>'s screen for that marker passed — and what
+    /// survived was an implementation sentence that <em>echoes the caller's own key</em>, which
+    /// <see cref="PayloadViolations"/>' rule forbids in a message precisely because it puts
+    /// attacker-controlled bytes into every log that records the response.
+    /// </para>
+    /// <para>
+    /// <b>The nested case is refused too, and that is a deliberate widening of the reachable defect.</b> Only
+    /// the top-level object is enumerated, so a duplicate inside a <c>json</c> field's value never threw — it
+    /// was accepted and stored verbatim, leaving a document in the database that System.Text.Json's own
+    /// <c>JsonObject</c> cannot enumerate. RFC 8259 §4 makes behaviour with repeated names unpredictable, so
+    /// refusing is the same choice this API makes everywhere else it cannot guess.
+    /// </para>
+    /// </remarks>
+    /// <remarks>
+    /// The repeated key is <c>phone</c> rather than <c>name</c> on purpose: the leaked message ends in
+    /// "Key: &lt;the caller's key&gt;", so the assertion that the refusal does not echo it needs a key that is
+    /// not also an ordinary English word in Alvo's own wording.
+    /// </remarks>
+    /// <param name="body">A create body carrying the <c>phone</c> property name twice.</param>
+    /// <param name="where">Where the repetition sits, for the failure message.</param>
+    [Theory]
+    [InlineData(@"{""name"":""Acme Ltd"",""phone"":""111"",""phone"":""222""}", "at the top level")]
+    [InlineData(@"{""name"":""Acme Ltd"",""phone"":{""a"":1,""a"":2}}", "below the top level")]
+    public async Task A_body_repeating_a_property_name_is_refused_in_alvos_own_words(string body, string where)
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin]);
+
+        using var response = await world.SendRawAsync(
+            HttpMethod.Post, "/api/owners", _admin, content: AlvoApiWorld.RawJson(body));
+
+        response.StatusCode.ShouldBe(
+            HttpStatusCode.UnprocessableEntity, $"a name repeated {where} is a body this API will not guess at");
+        var detail = await response.ReadProblemDetailAsync();
+        detail.ShouldNotContain(
+            "same key",
+            Case.Insensitive,
+            "that is System.Text.Json's dictionary message; an implementation sentence must not be a caller's "
+            + "422 detail");
+        detail.ShouldNotContain(
+            "phone", Case.Sensitive, "and it must not echo the caller's own key, which the leaked message did");
+        (await response.ReadViolationsAsync()).ShouldBe(
+            [("", "duplicate-field")],
+            "one body-level violation naming the repetition itself. The nested case would otherwise come back "
+            + "as '/phone invalid-value' — true, since a string field cannot hold an object, but a consequence "
+            + "rather than the reason; and on a 'json' field the same body is accepted outright.");
+    }
+
+    /// <summary>
+    /// The control for the fact above: the same body with each name once is <b>accepted</b>, so "422" there is
+    /// about the repetition rather than about this endpoint refusing everything.
+    /// </summary>
+    [Fact]
+    public async Task A_body_naming_each_field_once_is_still_accepted()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin]);
+
+        using var response = await world.SendRawAsync(
+            HttpMethod.Post, "/api/owners", _admin, content: AlvoApiWorld.RawJson(@"{""name"":""Acme Ltd""}"));
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Created);
+    }
+
+    /// <summary>
+    /// <b>Two sibling objects may each carry the same property name</b> — they are two objects, not one, and a
+    /// duplicate check scoped to a <em>level</em> rather than to an <em>object</em> would refuse an entirely
+    /// ordinary payload.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the control for the only non-obvious part of the scan: the seen-names set is keyed by depth, and
+    /// what stops that from meaning "one set per level" is that entering an object clears its depth's set. Drop
+    /// the clear and this body is refused; both <c>x</c> keys sit at the same depth.
+    /// </para>
+    /// <para>
+    /// The refusal that remains is the right one — <c>owners</c> declares <c>phone</c> and <c>email</c> as
+    /// strings, so an object is a value neither can hold — and the assertion is on the violation
+    /// <em>codes</em>, because the status alone is 422 whichever refusal fired and would prove nothing.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task Two_sibling_objects_may_each_carry_the_same_property_name()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin]);
+
+        using var response = await world.SendRawAsync(
+            HttpMethod.Post, "/api/owners", _admin,
+            content: AlvoApiWorld.RawJson(@"{""name"":""Acme Ltd"",""phone"":{""x"":1},""email"":{""x"":2}}"));
+
+        (await response.ReadViolationsAsync()).ShouldBe(
+            [("/phone", "invalid-value"), ("/email", "invalid-value")],
+            "the two 'x' keys are in different objects, so the body is not a duplicate-name body at all — it "
+            + "is refused only because a string field cannot hold an object");
+    }
+
+    /// <summary>
     /// A value the field's declared type cannot hold is the caller's mistake — 422 — and the refusal must
     /// name the field so the caller can fix it. The control is a valid create of the same field: without
     /// it, "422" could be this endpoint refusing everything.
