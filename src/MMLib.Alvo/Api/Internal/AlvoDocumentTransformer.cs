@@ -440,12 +440,38 @@ internal sealed class AlvoDocumentTransformer(
         foreach (var response in DataApiDocumentation.ResponsesFor(marker.Operation, entity))
         {
             responses[Text(response.Status)] = response.SharedId is { } shared
-                ? new OpenApiResponseReference(shared, document)
+                ? Referenced(response, shared, document)
                 : Response(response, entity, document);
         }
 
         return responses;
     }
+
+    /// <summary>
+    /// A reference to one shared refusal component, carrying this operation's own narrowing of it when the
+    /// catalogue supplied one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The sibling <c>description</c> is OpenAPI 3.1's own mechanism, not a workaround.</b> The Reference
+    /// Object takes <c>description</c> beside <c>$ref</c> and it "SHOULD override that of the referenced
+    /// component" — so one operation can say what the status means <em>there</em> while the shape, the body and
+    /// the wording every other route shares stay in the single component. Inlining the whole response for the
+    /// entities that need a narrower sentence would give up
+    /// <c>DataApiDocumentation.Response.SharedId</c>'s bargain for a sentence, and a reader comparing two
+    /// routes' 412 would have to diff two paragraphs to find the one clause that differs.
+    /// </para>
+    /// <para>
+    /// Left <see langword="null"/> the reference serialises as a bare <c>$ref</c>, which is what all but the
+    /// version-less writes' 412 do.
+    /// </para>
+    /// </remarks>
+    /// <param name="response">The catalogue entry being published.</param>
+    /// <param name="shared">The <c>components.responses</c> id it is published under.</param>
+    /// <param name="document">The document the component lives in.</param>
+    private static OpenApiResponseReference Referenced(
+        DataApiDocumentation.Response response, string shared, OpenApiDocument document) =>
+        new(shared, document) { Description = response.SharedNarrowing };
 
     /// <summary>
     /// One response object: its description, its body, and the headers it carries.

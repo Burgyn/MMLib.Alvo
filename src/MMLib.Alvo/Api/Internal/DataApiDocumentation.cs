@@ -69,7 +69,24 @@ internal static class DataApiDocumentation
     /// difference between a baseline a reviewer reads and one they scroll past.
     /// </para>
     /// </param>
-    internal sealed record Response(int Status, ResponseBody Body, string Description, string? SharedId = null);
+    /// <param name="SharedNarrowing">
+    /// Prose that replaces <paramref name="Description"/> on <em>this</em> operation only, while the response
+    /// stays the one shared component — or <see langword="null"/> when the shared wording is the whole truth.
+    /// <para>
+    /// It exists for one case: a version-less entity's 412 can only ever mean "a precondition was supplied that
+    /// this entity cannot answer", never "the version did not match", and a caller who is told both is told to
+    /// consider a comparison that cannot happen. OpenAPI 3.1's Reference Object takes a sibling
+    /// <c>description</c> that "SHOULD override that of the referenced component", so the narrowing costs one
+    /// line beside the <c>$ref</c> rather than an inlined copy of the whole response — which is what keeps
+    /// <paramref name="SharedId"/>'s bargain intact for the other thirty-nine refusals.
+    /// </para>
+    /// </param>
+    internal sealed record Response(
+        int Status,
+        ResponseBody Body,
+        string Description,
+        string? SharedId = null,
+        string? SharedNarrowing = null);
 
     /// <summary>
     /// Every status <paramref name="operation"/> on <paramref name="entity"/> can actually answer with.
@@ -117,9 +134,10 @@ internal static class DataApiDocumentation
             DataOperation.Create =>
                 [Created(), .. Refusals(Malformed, Precondition, Conflict)],
             DataOperation.Update =>
-                [Ok(ResponseBody.Row, "The row as it now stands."), .. Refusals(Malformed, Absent, Precondition)],
+                [Ok(ResponseBody.Row, "The row as it now stands."),
+                 .. Refusals(Malformed, Absent, PreconditionOn(entity))],
             DataOperation.Delete =>
-                [NoContent(), .. Refusals(Absent, Precondition)],
+                [NoContent(), .. Refusals(Absent, PreconditionOn(entity))],
             _ => throw new InvalidOperationException($"No response catalogue for operation '{operation}'."),
         };
     }
@@ -202,6 +220,38 @@ internal static class DataApiDocumentation
         + "and the caller would read the success as proof it did not happen.",
         SharedId: "preconditionFailed");
 
+    /// <summary>
+    /// The 412 as a write of <paramref name="entity"/> can actually mean it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The status stays on a version-less entity; only the sentence narrows.</b> It really is reachable
+    /// there — an <c>If-Match</c> naming a version and any <c>If-None-Match</c> are both refused — so removing
+    /// the entry would document a behaviour the endpoint has. But of the shared wording's two arms only the
+    /// first can fire: there is no stored version, so "one that did not hold" describes a comparison this
+    /// entity cannot perform, and a caller resolving a 412 the usual way (re-read the <c>ETag</c>, retry) would
+    /// be chasing a tag no response ever carries.
+    /// </para>
+    /// <para>
+    /// The read side needs no such narrowing: <see cref="ResponsesFor"/> lists no 412 on a read at all, because
+    /// the read side ignores <c>If-Match</c> rather than refusing it.
+    /// </para>
+    /// </remarks>
+    /// <param name="entity">The entity, consulted for whether a row of it can be versioned.</param>
+    private static Response PreconditionOn(EntitySchema entity) =>
+        AlvoManagedColumns.VersionColumn(entity) is null
+            ? Precondition with
+            {
+                SharedNarrowing =
+                    "A precondition was supplied that this entity cannot answer. Its rows carry no version — "
+                    + "'audit: true' is what mints one — so an 'If-Match' naming a version, and any "
+                    + "'If-None-Match', are refused here rather than ignored: there is nothing stored for "
+                    + "either to be compared against. On this entity the status never means 'the version did "
+                    + "not match', because no comparison is possible. 'If-Match: *' is accepted and is not "
+                    + "this refusal.",
+            }
+            : Precondition;
+
     private static Response Conflict => new(
         StatusCodes.Status409Conflict,
         ResponseBody.Problem,
@@ -250,8 +300,8 @@ internal static class DataApiDocumentation
             DataOperation.List => List,
             DataOperation.Get => ReadOne(entity),
             DataOperation.Create => Create,
-            DataOperation.Update => Update,
-            DataOperation.Delete => Delete,
+            DataOperation.Update => Update(entity),
+            DataOperation.Delete => Delete(entity),
             _ => throw new InvalidOperationException($"No description for operation '{operation}'."),
         };
     }
@@ -359,46 +409,142 @@ internal static class DataApiDocumentation
         + "several SDKs do: it will be refused here. There is no `PUT`, so create-if-absent was never on offer "
         + "in the first place. Send the create unconditionally, and `If-Match` on the update that follows it.";
 
-    private const string Update =
+    /// <summary>
+    /// The partial update's prose. The precondition paragraph is conditional for the reason
+    /// <see cref="ReadOne"/>'s is: a <em>version-less</em> entity mints no <c>ETag</c>, so telling a caller to
+    /// send one back as <c>If-Match</c> would be an instruction into a permanent 412.
+    /// </summary>
+    /// <param name="entity">The entity, consulted for whether a row of it can be versioned.</param>
+    private static string Update(EntitySchema entity) =>
         "Partially updates one row and returns it. A field the body does not mention keeps its stored value — "
         + "which is why this is a `PATCH` and there is no `PUT`: the underlying update is partial by contract, "
         + "so a `PUT` would advertise whole-resource replacement that never happens.\n\n"
         + "A write to a read-only field is refused with 422 rather than silently dropped, and so is a key the "
         + "entity does not declare. `id` and the framework-managed columns can never be rewritten, `tenant_id` "
         + "included: a row does not move between tenants.\n\n"
-        + "**`If-Match` conditions the write on the row's current version**, compared with RFC 9110 §13.1.1's "
-        + "*strong* comparison. Send back one `ETag` exactly as a previous response returned it, or `*` to "
-        + "require only that the row still exist. Anything this API cannot turn into exactly one version it "
-        + "minted — several tags, a weak `W/` tag, an opaque value it never issued — is 412, never ignored. "
-        + "`If-None-Match` is refused with 412 as well: this API compares a row against the version a caller "
-        + "*holds*, and has no channel for \"act only if the row is not at this version\". That is a labelled "
-        + "deviation from RFC 9110 §13.1.2, which would let a non-matching `If-None-Match` simply succeed — "
-        + "Alvo cannot evaluate the header at all, so a conforming success would be indistinguishable from a "
-        + "precondition that was never checked.\n\n"
+        + UpdateConditioning(entity)
         + "**`Idempotency-Key` is accepted and ignored here — a known limitation, and this is what it costs.** "
         + "The row's end state is unaffected: an update assigns *absolute* values to named fields, so applying "
         + "it twice leaves exactly the state applying it once leaves, and there is no duplicate row to prevent. "
-        + "The *outcome you observe* is another matter. If you send `PATCH … If-Match: \"v1\"`, the 200 is lost "
-        + "to a dropped connection, and you retry the identical request, the write has landed and the row is at "
-        + "`v2` — so the retry is **412, and you cannot tell it apart from someone else having changed the "
-        + "row**. Resolving that 412 the usual way (re-read, re-merge, re-apply) would clobber a genuinely "
-        + "concurrent change if it *was* someone else. A key would have told you it was your own write. So retry "
-        + "safety on this verb is `If-Match` plus a re-read, not a key: after a lost response, **read the row "
-        + "back and compare it with what you sent** before deciding the write did not land. Refusing the header "
-        + "instead would break the widespread client habit of attaching it to every mutating request and would "
-        + "reject requests that are otherwise fine, so it is accepted — and declared here rather than left to "
-        + "be discovered.";
+        + "The *outcome you observe* is another matter. "
+        + UpdateRetry(entity)
+        + " Refusing the header instead would break the widespread client habit of attaching it to every "
+        + "mutating request and would reject requests that are otherwise fine, so it is accepted — and declared "
+        + "here rather than left to be discovered.";
 
-    private const string Delete =
+    /// <summary>
+    /// The delete's prose, conditional on the same trait <see cref="Update"/> is and for the same reason.
+    /// </summary>
+    /// <param name="entity">The entity, consulted for whether a row of it can be versioned.</param>
+    private static string Delete(EntitySchema entity) =>
         "Deletes one row and returns no body. A row the caller's policy excludes is 404, exactly as an absent "
         + "one is.\n\n"
-        + "**`If-Match` conditions the delete** on the row's current version, and `If-None-Match` is refused "
-        + "with 412 — both exactly as on the update, including the wording of what cannot be compared.\n\n"
+        + DeleteConditioning(entity)
         + "**`Idempotency-Key` is accepted and ignored here — the same known limitation as on the update.** "
         + "Removing one row twice leaves the same state as removing it once, so nothing is duplicated; but a "
-        + "retry after a lost `204` is a **404 (or a 412) you cannot tell apart from somebody else's delete**, "
+        + "retry after a lost `204` is a "
+        + (AlvoManagedColumns.VersionColumn(entity) is null
+            ? "**404 you cannot tell apart from somebody else's delete**, "
+            : "**404 (or a 412) you cannot tell apart from somebody else's delete**, ")
         + "which is precisely the question a key would have answered. Read the row back rather than treating the "
         + "second answer as evidence the first attempt did not land.";
+
+    /// <summary>
+    /// How an update of this entity can be conditioned — or that it cannot be.
+    /// </summary>
+    /// <remarks>
+    /// This is the paragraph the <c>ifMatch</c> parameter's absence has to be explained by. A version-less
+    /// entity publishes no such parameter (see <c>DataApiParameters.HeaderNames</c>), and a document that
+    /// simply omitted it without saying so would leave a caller to conclude the header was overlooked.
+    /// </remarks>
+    /// <param name="entity">The entity, consulted for whether a row of it can be versioned.</param>
+    private static string UpdateConditioning(EntitySchema entity) =>
+        AlvoManagedColumns.VersionColumn(entity) is null
+            ? Unconditionable
+            : "**`If-Match` conditions the write on the row's current version**, compared with RFC 9110 "
+            + "§13.1.1's *strong* comparison. Send back one `ETag` exactly as a previous response returned it, "
+            + "or `*` to require only that the row still exist. Anything this API cannot turn into exactly one "
+            + "version it minted — several tags, a weak `W/` tag, an opaque value it never issued — is 412, "
+            + "never ignored. `If-None-Match` is refused with 412 as well: this API compares a row against the "
+            + "version a caller *holds*, and has no channel for \"act only if the row is not at this version\". "
+            + "That is a labelled deviation from RFC 9110 §13.1.2, which would let a non-matching "
+            + "`If-None-Match` simply succeed — Alvo cannot evaluate the header at all, so a conforming success "
+            + "would be indistinguishable from a precondition that was never checked.\n\n";
+
+    /// <summary>How a delete of this entity can be conditioned — or that it cannot be.</summary>
+    /// <param name="entity">The entity, consulted for whether a row of it can be versioned.</param>
+    private static string DeleteConditioning(EntitySchema entity) =>
+        AlvoManagedColumns.VersionColumn(entity) is null
+            ? Unconditionable
+            : "**`If-Match` conditions the delete** on the row's current version, and `If-None-Match` is "
+            + "refused with 412 — both exactly as on the update, including the wording of what cannot be "
+            + "compared.\n\n";
+
+    /// <summary>
+    /// The version-less arm of both writes: this entity cannot be conditioned at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>It states exactly which headers are refused and which one is not, because the difference is real.</b>
+    /// <c>DataApiEndpoints.IfMatch</c> reads <c>*</c> as "no version named" and hands the port
+    /// <see langword="null"/>, which <c>AlvoPrecondition.EnsureSupported</c> lets through — so <c>*</c> is
+    /// accepted on a version-less entity, and it buys nothing there or anywhere else, because "the row still
+    /// exists" is what a 404 already answers. Claiming every precondition is refused would have been the
+    /// mirror image of the defect this text exists to fix: a document stating a refusal that does not happen.
+    /// </para>
+    /// <para>
+    /// The fix is named. An author reading "cannot be conditioned" needs to know the cause is one missing
+    /// descriptor flag, or they will look for the header they sent wrong.
+    /// </para>
+    /// </remarks>
+    private const string Unconditionable =
+        "**This entity's rows carry no version, so this write cannot be conditioned.** A row version comes from "
+        + "`audit: true` in the descriptor; without it there is no column the framework writes on every change, "
+        + "and a version a caller can rewrite is not a version. No `ETag` is ever returned for a row of this "
+        + "entity, so there is no tag a caller could ever send back — and an `If-Match` naming a version is "
+        + "therefore **refused with 412**, never ignored, because a success would tell a caller their condition "
+        + "held when nothing was compared. `If-None-Match` is refused with 412 here as it is on every write. "
+        + "The one precondition that is accepted is `If-Match: *`, and it changes nothing: it asks only that "
+        + "the row still exist, which an absent row already answers with 404. Neither header is offered as a "
+        + "parameter on this operation for that reason — a parameter is an invitation to send a value, and "
+        + "there is no value to send. Note what this means for a client that blanket-attaches `If-Match` to "
+        + "every mutating request, as several SDKs do: unless it sends `*`, it is refused here. Add "
+        + "`audit: true` to the entity to make a conditional write possible.\n\n";
+
+    /// <summary>
+    /// What a retried update after a lost response actually looks like — which depends on whether the entity
+    /// has a version, because the whole scenario is about a stale one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The versioned arm's advice is "`If-Match` plus a re-read", and on a version-less entity that would be
+    /// the same instruction into a permanent 412 the parameter guard removed one paragraph above. The
+    /// version-less arm keeps the actionable half — read the row back — and names what the entity forfeits.
+    /// </para>
+    /// <para>
+    /// Each arm is one sentence run of the surrounding paragraph rather than a paragraph of its own, so an
+    /// audited entity's published prose is byte-for-byte what it was before this became conditional. A
+    /// baseline that also moved for <c>products</c> would make a reviewer diff two paragraphs to find out that
+    /// only <c>categories</c> changed.
+    /// </para>
+    /// </remarks>
+    /// <param name="entity">The entity, consulted for whether a row of it can be versioned.</param>
+    private static string UpdateRetry(EntitySchema entity) =>
+        AlvoManagedColumns.VersionColumn(entity) is null
+            ? "If the 200 is lost to a dropped connection and you retry the identical request, the retry "
+            + "assigns the same absolute values again and is answered 200 — so unlike an audited entity, there "
+            + "is no 412 to misread. What you cannot learn is whether anybody changed the row between your two "
+            + "attempts: this entity keeps no version, so the retry overwrites a concurrent change exactly as "
+            + "the first attempt would have, and silently. **Read the row back and compare it with what you "
+            + "sent** before treating the write as settled. That is the whole of retry safety on this verb "
+            + "here; `audit: true` on the entity is what buys the rest."
+            : "If you send `PATCH … If-Match: \"v1\"`, the 200 is lost to a dropped connection, and you retry "
+            + "the identical request, the write has landed and the row is at `v2` — so the retry is **412, and "
+            + "you cannot tell it apart from someone else having changed the row**. Resolving that 412 the "
+            + "usual way (re-read, re-merge, re-apply) would clobber a genuinely concurrent change if it *was* "
+            + "someone else. A key would have told you it was your own write. So retry safety on this verb is "
+            + "`If-Match` plus a re-read, not a key: after a lost response, **read the row back and compare it "
+            + "with what you sent** before deciding the write did not land.";
 
     /// <summary>The document-level prose: what this API is, and the invariants that hold on every route.</summary>
     /// <remarks>

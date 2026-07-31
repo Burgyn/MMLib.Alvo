@@ -419,6 +419,68 @@ public sealed class OpenApiDocumentTests
     }
 
     /// <summary>
+    /// <b>A write is offered <c>If-Match</c> only on an entity that can issue an <c>ETag</c></b> — and is
+    /// offered it on one that can.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The one-directional version of this fact is worthless, which is why both directions are here.</b>
+    /// "<c>categories</c> declares no <c>ifMatch</c>" passes just as well on a document that advertises the
+    /// parameter nowhere at all — including on one where the whole precondition surface was accidentally
+    /// dropped. The <c>products</c> half is what makes the <c>categories</c> half mean "conditional on the
+    /// entity" rather than "absent".
+    /// </para>
+    /// <para>
+    /// <b>What it refuses.</b> The version conditionality was applied on the read side and on the write side
+    /// nowhere: <c>ifNoneMatch</c> was entity-conditional from the start, while <c>Update</c>/<c>Delete</c>
+    /// published <c>ifMatch</c> unconditionally. So the shipped document told a <c>categories</c> client to
+    /// "send back one <c>ETag</c> exactly as a previous response returned it" while that entity's 200 declares
+    /// no <c>ETag</c> header — correctly, since <c>RowVersionETag.For</c> mints none — and
+    /// <c>AlvoPrecondition.EnsureSupported</c> refuses any version precondition on it. Every tag such a client
+    /// could invent is 412 forever. §0 principle 4 makes this document the contract an agent reads, and a
+    /// contract that instructs a client into a permanent refusal is worse than one that stays silent.
+    /// </para>
+    /// <para>
+    /// <b>The 412 itself stays on both, and that is deliberate rather than an oversight this fact tolerates.</b>
+    /// It is reachable on a version-less write — an <c>If-Match</c> naming a version is refused, and so is any
+    /// <c>If-None-Match</c> — so removing the status would document a behaviour the endpoint has. What narrows
+    /// is the sentence: the operation's own 412 entry carries a description saying the status can only mean "a
+    /// precondition this entity cannot answer" there, never "the version did not match". Asserted below,
+    /// because a narrowing nothing reads is a narrowing that silently stops being emitted.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_write_offers_If_Match_only_on_an_entity_whose_rows_carry_a_version()
+    {
+        await using var world = await StoreAsync();
+        var document = await world.OpenApiDocumentAsync();
+
+        foreach (var method in _writeMethodsOnOneRow)
+        {
+            RowParameterNames(document, "categories", method).ShouldNotContain(
+                "If-Match",
+                $"'categories' mints no ETag, so its {method} must not invite a header whose every value is 412");
+            RowParameterNames(document, "products", method).ShouldContain(
+                "If-Match",
+                $"'products' is audited, so its {method} must offer the precondition — or the assertion above "
+                + "passes on a document that advertises 'If-Match' nowhere");
+        }
+
+        foreach (var method in _writeMethodsOnOneRow)
+        {
+            RowOperation(document, "categories", method)["responses"]!["412"]!["description"]!.GetValue<string>()
+                .ShouldContain(
+                    "never means",
+                    Case.Sensitive,
+                    $"'categories' {method}'s 412 must narrow the shared wording — only one of its two arms "
+                    + "can fire on an entity with no version to compare");
+            RowOperation(document, "products", method)["responses"]!["412"]!.AsObject()
+                .ContainsKey("description").ShouldBeFalse(
+                    $"'products' {method} can mean either arm, so it takes the shared wording unchanged");
+        }
+    }
+
+    /// <summary>
     /// The row a single read, a create or an update returns requires every visible field; the page item a
     /// list's rows are requires none — because <c>select</c> can narrow only the page.
     /// </summary>
@@ -707,6 +769,32 @@ public sealed class OpenApiDocumentTests
     private static IEnumerable<JsonObject> ListParameters(JsonObject document, string entity) =>
         (document["paths"]![$"/api/{entity}"]!["get"]!["parameters"]?.AsArray() ?? [])
         .Select(parameter => Dereference(document, parameter!.AsObject()));
+
+    /// <summary>The two verbs that write one addressed row, and so the two that can be conditioned.</summary>
+    /// <remarks>
+    /// A create is deliberately not one of them: it addresses a collection and refuses <em>both</em>
+    /// precondition headers on every entity, audited or not, because there is no stored record for a version to
+    /// be compared against — so its 412 needs no per-entity narrowing.
+    /// </remarks>
+    private static readonly string[] _writeMethodsOnOneRow = ["patch", "delete"];
+
+    /// <summary>
+    /// The header and path parameter <em>names</em> one single-row operation documents, with every
+    /// <c>$ref</c> followed.
+    /// </summary>
+    /// <remarks>
+    /// The names rather than the component ids, because a name is what a caller puts on the wire — and the two
+    /// differ (<c>ifMatch</c> publishes <c>If-Match</c>), so asserting the id would let a component keep its id
+    /// while publishing a different header.
+    /// </remarks>
+    private static IEnumerable<string> RowParameterNames(JsonObject document, string entity, string method) =>
+        (RowOperation(document, entity, method)["parameters"]?.AsArray() ?? [])
+        .Select(parameter => Dereference(document, parameter!.AsObject())["name"]!.GetValue<string>());
+
+    /// <summary>One operation on the <c>/api/&lt;entity&gt;/{id}</c> path.</summary>
+    private static JsonObject RowOperation(JsonObject document, string entity, string method) =>
+        document["paths"]![$"/api/{entity}/{{id}}"]![method]?.AsObject()
+        ?? throw new InvalidOperationException($"The document declares no '{method} /api/{entity}/{{id}}'.");
 
     private static JsonObject Dereference(JsonObject document, JsonObject parameter) =>
         parameter["$ref"] is { } reference

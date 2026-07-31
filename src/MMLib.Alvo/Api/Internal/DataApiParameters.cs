@@ -194,17 +194,31 @@ internal static class DataApiParameters
 
     /// <summary>The request headers this operation honours — and only the ones it does.</summary>
     /// <remarks>
+    /// <para>
     /// A header the operation <em>ignores</em> is deliberately not listed as a parameter, because a parameter is
     /// an invitation to send it. The two gaps that matter — <c>If-Match</c> on a read, and
     /// <c>Idempotency-Key</c> on an update or a delete — are stated in the operation's own description instead,
     /// where the text can say that sending them has no effect.
+    /// </para>
+    /// <para>
+    /// <b>A header the operation <em>refuses</em> is not listed either, which is why the write arm carries the
+    /// same version guard as the read arm.</b> <see cref="AlvoManagedColumns.VersionColumn"/> answering
+    /// <see langword="null"/> means <see cref="RowVersionETag.For"/> mints no <c>ETag</c> for any row of this
+    /// entity, and <c>AlvoPrecondition.EnsureSupported</c> refuses <em>any</em> precondition on it — so
+    /// publishing <c>ifMatch</c> here would invite a client to send a header whose value it has no way to
+    /// obtain, and every value it invented would be 412 forever. That is worse than staying silent: §0
+    /// principle 4 makes this document the contract an agent reads, and it was reading an instruction into a
+    /// permanent refusal. Without the guard the arm structurally could not be conditional, which is how the
+    /// asymmetry survived — the read arm was entity-conditional from the start.
+    /// </para>
     /// </remarks>
     private static IEnumerable<string> HeaderNames(DataOperation operation, EntitySchema entity) =>
         operation switch
         {
             DataOperation.Get when AlvoManagedColumns.VersionColumn(entity) is not null => [IfNoneMatchId],
             DataOperation.Create => [IdempotencyKeyId],
-            DataOperation.Update or DataOperation.Delete => [IfMatchId],
+            DataOperation.Update or DataOperation.Delete
+                when AlvoManagedColumns.VersionColumn(entity) is not null => [IfMatchId],
             _ => [],
         };
 
