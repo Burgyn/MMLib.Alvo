@@ -20,6 +20,16 @@ namespace MMLib.Alvo.Data;
 /// wrong row: the replay re-reads the recorded row id under the entity of the request being served, finds
 /// nothing there, and raises <see cref="AlvoRecordNotFoundException"/> — fail-closed, never cross-entity.
 /// </para>
+/// <para>
+/// <b>That last guarantee is conditional, and the condition is new</b>: it holds only where the replaying
+/// caller may <c>get</c>. When <c>get</c> is denied outright the replay answers from the record without
+/// reading any row at all (see <see cref="IAlvoData.CreateAsync"/>), so there is no read to come back empty —
+/// an entity-blind fingerprint would then hand back an id belonging to a row of the entity the original write
+/// went to. Nothing crosses a tenant or user boundary either way, because the record is scoped to
+/// <b>(key, tenant, acting user)</b>, so the id is always one this caller's own write produced. Alvo's own
+/// HTTP layer digests the entity name, so the case is unreachable there; a provider computing its own
+/// fingerprint is the one that must not omit the entity.
+/// </para>
 /// </param>
 /// <remarks>
 /// <para>

@@ -1001,7 +1001,10 @@ either file.
    non-hidden field list. A framework cannot publish its schema shape and treat that shape as
    confidential. Stated so the third anti-enumeration claim does not get written; the full statement
    is `data-api.md`'s first section.
-28. **A `hidden` field appears in a *request* schema if and only if it is `required`** —
+28. **A `hidden` field appears in a *request* schema only if it is `required`** — necessary, not
+   sufficient: `Belongs` also excludes a `readOnly` field and a managed name the caller cannot write, so
+   `required + hidden + readOnly` (legal today, and a create nobody can satisfy — issue #124) appears
+   nowhere. The extra conditions only ever withhold more —
    **this one needs the maintainer's ratification.** It is a deliberate, bounded confidentiality
    trade, on the same footing as PR2's two collation rulings. Excluding a hidden field from *every*
    schema would drop a mandatory field from the body a caller must send, since a required field a

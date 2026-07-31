@@ -83,10 +83,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Structured refusals.** Every error is an RFC 9457 problem document with an Alvo `type` slug
     (`https://alvo.dev/errors/…`) and a `violations` array carrying a JSON pointer, a machine-readable
     code, a message and a fix suggestion for *every* problem with the request — not just the first.
-  - **Optimistic concurrency.** Reads and writes return a strong `ETag` over the row version;
-    `If-Match` on a `PATCH`/`DELETE` is evaluated inside the write transaction against a row-locked
-    pre-image. A precondition this API cannot evaluate is refused rather than ignored, because
-    ignoring one is the lost update the header exists to prevent.
+  - **Optimistic concurrency, on an entity that keeps a row version.** A single-row read and a write
+    return a strong `ETag` over that version — **only where the entity declares `audit: true`**, which
+    is what mints the version column; an entity without it gets no `ETag`, and a *list* never carries
+    one. `If-Match` on a `PATCH`/`DELETE` is evaluated inside the write transaction against a
+    row-locked pre-image. A precondition this API cannot evaluate is refused rather than ignored,
+    because ignoring one is the lost update the header exists to prevent — and on a version-less
+    entity the generated document does not offer `If-Match` at all, rather than inviting a header
+    whose every value would be 412.
   - **`Idempotency-Key` on create.** A retried create returns the first one's result and never
     duplicates a row. The record stores the created row's id — never a rendered response — so a
     replay re-reads through the caller's *current* policy and can never hand back a representation

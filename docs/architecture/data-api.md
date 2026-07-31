@@ -13,8 +13,18 @@ This is the framework's confidentiality position, and it has to be stated somewh
 two anti-enumeration claims have already been written in this repository and only a locatable statement
 prevents a third.
 
-**What Alvo treats as confidential:** row data, and **the name of a field the descriptor marks
-`hidden`**, which must stay indistinguishable from the name of a field that does not exist.
+**What Alvo treats as confidential:** row data, and — **on the read surface and in the published
+document** — the name of a field the descriptor marks `hidden`, which there stays indistinguishable from
+the name of a field that does not exist.
+
+**That boundary stops at the write surface, and the scope is deliberate rather than an oversight.** A
+caller who may write can tell a hidden field from an undeclared one: writing to a hidden field is accepted
+(201/200) while an undeclared key is refused 422 `unknown-field`, so two requests answer "does this entity
+have a field called X". Closing it would mean refusing the hidden write, which contradicts the bounded
+exception below — a `required` hidden field must be writable or its create is impossible — so the
+behaviour stays and the guarantee is scoped honestly instead. What a write-capable caller can learn is a
+**name**, never a value: the read surface returns one `null` for hidden and undeclared alike, and no
+response ever carries the field.
 
 **What Alvo publishes:** the declared, non-hidden schema shape — which entities exist, and what
 non-hidden fields each declares. Two shipped behaviours make that a design rather than a leak to be
@@ -32,8 +42,11 @@ over a hidden field is refused **exactly** as one over an undeclared field is (`
 returns one `null` for both), and `IPolicyEngine`'s deny reasons name neither the entity nor the row.
 
 **The one bounded exception**, which is deliberate and **needs the maintainer's ratification**: a
-`hidden` field appears in a *request* schema if and only if the descriptor also marks it `required`
-(`SchemaComponentBuilder.Belongs`). Excluding it there too would document a create nobody could perform,
+`hidden` field appears in a *request* schema only if the descriptor also marks it `required` **and the
+caller may write it** (`SchemaComponentBuilder.Belongs`). Not an *if and only if*: `required` is necessary,
+not sufficient — `Belongs` also excludes a `readOnly` field and a framework-managed name the caller cannot
+write, so a field declared `required + hidden + readOnly` (a legal descriptor today, and one no create can
+satisfy — issue **#124**) appears in no schema at all. The extra conditions only ever withhold more. Excluding it there too would document a create nobody could perform,
 since a caller cannot supply a mandatory field it was never told exists. An **optional** hidden field's
 name never appears anywhere. The cost, stated: a field that is hidden, writable and optional is absent
 from the request schemas while a write to it is still accepted, so the document understates what a create
@@ -43,10 +56,18 @@ will take — the safe direction, since a caller following the document sends le
 
 `hidden` restricts **reading**; `readOnly` restricts **writing**. A write to a hidden field is accepted.
 
-Validation that "helpfully" refused it would do two wrong things at once: silently change
-`IAlvoData`'s contract, and **disclose that the field exists** — the one thing the hidden-field set exists
-to withhold. This is why the asymmetry is load-bearing rather than an oversight, and why the note above
-about the OpenAPI request schema understating a create is the cost that buys it.
+Validation that "helpfully" refused it would silently change `IAlvoData`'s contract, and — because a
+`required` hidden field must be writable or its create is impossible — would make a legal descriptor
+unusable over HTTP.
+
+**What it would *not* buy is confidentiality, and an earlier version of this section claimed it would.**
+That argument said refusing the write would "disclose that the field exists". It is backwards: refusing a
+hidden write with its own error and refusing an undeclared key with 422 `unknown-field` are two
+*distinguishable* answers, and so are accepting the one and refusing the other. Either way a write-capable
+caller learns the field exists; only a refusal that was byte-identical to `unknown-field` would not
+disclose it, and that would silently drop a write this API refuses to drop anywhere else. So the asymmetry
+is load-bearing for the **contract**, not for the hidden-field set — see the scope stated at the top of
+this document, which is where the guarantee's real boundary lives.
 
 ## The RLS surprise: a *configured* rule that excludes you is 200 with an empty page, not 403
 
@@ -78,15 +99,25 @@ Confirmed from `Rules.Internal.PolicyEngine.Resolve`, in the order it checks the
 So: **if you wrote a rule and the caller is refused, it is one of these four, and it is not your
 predicate.** If you wrote a rule and the caller gets an empty page, it *is* your predicate.
 
-(A list request resolves this decision twice above the port and the port resolves it once more. That is
-shaping, not a second authority — the cost is **#118**.)
+(A list request resolves this decision **once** above the port — `DataApiEndpoints.EnsureOperationIsAllowed`,
+which refuses before the query string is parsed *and* hands the parser this caller's `hidden` mask — and the
+port resolves it again as the authority. Both compile the per-caller mask expressions, so one request pays
+that twice; the cost is **#118**. The `ScopeGate` that runs earlier is **not** a third resolution of this
+decision: it tests the key's own scopes and never consults `IPolicyEngine`, and it is the *only* authority
+for `out-of-scope`, because the port never sees scopes.)
 
 Two notes on the boundaries of that table:
 
-- `Resolve` has a fifth deny branch — no descriptor has been applied yet, so no policy is configured.
-  It is **not reachable over HTTP**: routes are generated from the applied schema at mapping time
-  (see below), so a process with no applied descriptor has no routes to answer with, and the router's
-  404 arrives first. It is listed here so a reader of `PolicyEngine` does not think the table is wrong.
+- `Resolve` has a fifth deny branch — no descriptor has been applied yet, so no policy is configured. It is
+  the **first** check it makes, not the last; it is fifth only in this document's numbering, and
+  `PolicyEngine`'s own summary calls it step 1 of five.
+  **Not reachable over HTTP in the default wiring**, and the reason is worth stating precisely, because the
+  obvious one is not sufficient: it is not merely that routes come from the applied schema, but that
+  `ISchemaRegistry` *is* the `PolicyCatalogProvider` by default (`Rules/Setup.cs`), so an unprimed catalog
+  reads as an empty model — zero entities, therefore zero routes, and the router's 404 arrives first. A host
+  that registers its **own** `ISchemaRegistry` (an escape hatch `IPolicyCatalogProvider`'s remarks
+  document) can map real route literals over an unprimed catalog, and then this branch does answer. It is
+  listed here so a reader of `PolicyEngine` does not think the table is wrong.
 - A row-level `USING` exclusion on `get`/`update`/`delete` is a **404**, not a 403 and not an empty page
   — one row, and "invisible to me" is deliberately indistinguishable from "not there"
   (`AlvoProblemTypes.NotFound` is one slug for both).
@@ -135,7 +166,9 @@ one of the two defences against injection through a filter.
 
 ### Allow-list 2: which operators apply to which field type
 
-Enforced in `FilterTermParser.IsApplicable`, against `CelFieldType.Of(field)`:
+Enforced against `CelFieldType.Of(field)`, in three places rather than one — `FilterTermParser.IsApplicable`
+carries the `like`/`ilike` and ordering rows, `TryReadIdentity` carries the `is` row, and `in`
+short-circuits before `IsApplicable` is reached:
 
 | Operators | Allowed on |
 |---|---|
@@ -281,8 +314,15 @@ An entity with no version column gets **no `ETag` at all**, rather than one that
 lost update `If-Match` exists to prevent, and the caller would read the `200` as proof it did not happen.
 So: a multi-tag `If-Match` is 412 (the port carries one version, so the RFC's *any-of* disjunction cannot
 be expressed); a weak tag is 412; `If-None-Match` on a **write** is 412; any precondition header on a
-**create** is 412. `*` yields no precondition, since it asks only that the row exist, which every write
-already answers.
+**create** is 412; and an `If-Match` naming a version on an entity with **no version column** is 412, since
+there is nothing stored to compare it against. `*` yields no precondition, since it asks only that the row
+exist, which every write already answers — so `If-Match: *` is accepted even on a version-less entity, and
+is the one precondition that is.
+
+Because a version-less write can never answer a named version, the generated document does **not** offer
+`If-Match` as a parameter on that entity's update and delete at all: a parameter is an invitation to send a
+value, and there is no value to send. That was a real defect until late in this PR — the document advertised
+the header on every entity, so a client of a non-audited entity was being instructed into a permanent 412.
 
 **Labelled deviation from RFC 9110 §13.1.2:** a non-matching `If-None-Match` on a write should simply
 succeed, and only a matching one answer 412. Alvo refuses the header outright, matching or not, because it
@@ -500,15 +540,15 @@ a field flag — the synthesized tenant scope's `WITH CHECK` is already evaluate
 a `create` rule is where "which tenant may this row be placed in" belongs, and is the only place that can
 answer it per caller.
 
-## Two PR2 records that still need a human's eye
+## Two records that still need a human's eye
 
-Both live in `docs/architecture/data-path.md` and are repeated here so a reader finds them without editing
-that file.
-
-1. **The two collation decisions** (`data-path.md`, "Collation belongs to the host — two rulings that need
-   the maintainer's sign-off"). Still awaiting sign-off.
-2. **Ordering narrowed to String/Int/Decimal/Timestamp** — issue **#95**, and the expiry note above. #95
-   also covers `like`/`ilike` refused on a `json` field, for the same underlying reason.
+1. **The two collation decisions — from PR2**, and the one of the two that lives in
+   `docs/architecture/data-path.md` ("Collation belongs to the host — two rulings that need the maintainer's
+   sign-off"). Repeated here so a reader finds them without editing that file. Still awaiting sign-off.
+2. **Ordering narrowed to String/Int/Decimal/Timestamp — from this PR, not PR2**, and it lives in
+   `FilterOperators.cs`'s `_orderable` set plus `FilterTermParser.IsApplicable`, **not** in `data-path.md`.
+   Issue **#95**, and the expiry note above. #95 also covers `like`/`ilike` refused on a `json` field, for
+   the same underlying reason.
 
 ## Alternatives rejected
 

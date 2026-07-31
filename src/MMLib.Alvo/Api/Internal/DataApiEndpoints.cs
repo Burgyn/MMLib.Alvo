@@ -468,7 +468,7 @@ internal static class DataApiEndpoints
     /// <summary>
     /// The id the store assigned. Asserted rather than interpolated: <c>IAlvoData</c>'s contract is that
     /// a returned record carries every framework-managed column, <c>id</c> included, so a missing one is
-    /// a broken invariant (family 3, rendered 500) — not a reason to emit a <c>Location</c> header ending
+    /// a broken invariant (family 5, rendered 500) — not a reason to emit a <c>Location</c> header ending
     /// in a slash and call the create a success.
     /// </summary>
     private static Guid AssignedId(AlvoRecord record) =>
