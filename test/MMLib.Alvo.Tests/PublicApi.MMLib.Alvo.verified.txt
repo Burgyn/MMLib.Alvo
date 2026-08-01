@@ -115,6 +115,10 @@ namespace Microsoft.Extensions.DependencyInjection
     {
         public static MMLib.Alvo.IAlvoBuilder AddDataApi(this MMLib.Alvo.IAlvoBuilder builder, System.Action<MMLib.Alvo.Api.AlvoApiOptions>? configure = null) { }
     }
+    public static class AlvoDescriptorApplyExtensions
+    {
+        public static System.Threading.Tasks.Task<MMLib.Alvo.Migrations.MigrationResult> ApplyAlvoDescriptorAsync(this System.IServiceProvider services, MMLib.Alvo.Migrations.MigrationOptions? options = null, System.Threading.CancellationToken ct = default) { }
+    }
     public static class AlvoServiceCollectionExtensions
     {
         public static MMLib.Alvo.IAlvoBuilder AddAlvo(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<MMLib.Alvo.IAlvoBuilder>? configure = null) { }
