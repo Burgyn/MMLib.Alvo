@@ -3000,3 +3000,214 @@ git add tests/teapie scripts/test-e2e scripts/test-ring2 .github/workflows/ci.ym
         docs/architecture/host.md
 git commit -m "test(e2e): drive the compose stack with TeaPie from CI (#19)"
 ```
+
+---
+
+### Task 8: Close #19 and #75, record what PR4 decided, and hand over
+
+**Files:**
+- Modify: `docs/superpowers/specs/2026-07-25-f3-crud-vertical-slice-design.md` (a new *Deviations added by PR4* subsection, numbered 35–45)
+- Modify: `docs/PLAN.md`
+- Modify: `docs/architecture/host.md` (a closing "What is left of #24" section)
+
+**Interfaces:**
+- Consumes: every decision recorded in *Deviations anticipated* below, and the issue number Task 4 Step 9 created.
+- Produces: nothing code-facing. This is the record PR4's own plan is discarded in favour of.
+
+- [ ] **Step 1: Write the design doc's PR4 deviations**
+
+In `docs/superpowers/specs/2026-07-25-f3-crud-vertical-slice-design.md`, after the last entry of *Deviations added by PR3* (item 34), add:
+
+```markdown
+### Deviations added by PR4
+
+PR4's own Superpowers plan is discarded once merged, so anything it decided that outlives it is recorded
+here. The implementation-level *why* lives in `docs/architecture/host.md`, which is the surviving detailed
+record for the standalone host.
+
+35. **The core gained a public apply seam, and `extensibility.md`'s verb taxonomy gained a verb.**
+   `SchemaMigrationRunner` is `internal` and no public surface exposed it, so `MMLib.Alvo.Host` — a separate
+   assembly with no `InternalsVisibleTo` grant, and none is safe to give an unsigned assembly — could not
+   bring a descriptor up at all. `IServiceProvider.ApplyAlvoDescriptorAsync(MigrationOptions?, CancellationToken)`
+   is that seam, and `Apply{Thing}` is a new verb because the operation acts on a *built* container rather
+   than registering anything, so `Use`/`Add`/`Enable`/`From` all mis-describe it. Cost: one more public member
+   forever, and the orchestrator's six-collaborator constructor stays private, which is the trade.
+36. **#119's exception handler lives in the core, opt-in — not in the Host, as the issue said.**
+   `ProblemResultFactory` is `internal`, so a Host-side handler would be a second hand-written copy of Alvo's
+   problem-document shape, which is the defect class PR2's and PR3's reviews closed repeatedly. The issue's
+   *premise* is preserved exactly: `AddAlvo` does not register it, so an embedded host still owns its own
+   error rendering and Alvo still does not steal the exception. Cost: one more public extension
+   (`AddAlvoProblemDetails`), and the `internal` slug is emitted by a component only some hosts register — so
+   `ProblemDetailsTests` had to grow a second, faulting world to keep its catalogue facts set-equal.
+37. **`MMLib.Alvo.Host` is `IsPackable=false`, and it is the one project allowed two providers.**
+   Earned by `package-boundary.md` rule (c) — a different distribution: it ships as the `mmlib/alvo` image,
+   so a nupkg of an entry point would publish a surface nobody references. Rule (a) applies to Scalar
+   alongside it. It references both `Data.Sqlite` and `Data.PostgreSql` because the deployment criterion is a
+   working backend with *no* configuration (SQLite) while compose runs PostgreSQL; exactly one is
+   *registered*, chosen by `Alvo:Database:Provider`, and an unknown name is refused by name.
+38. **Health is liveness only.** §2.12 asks for readiness with database, cache and message-bus reachability;
+   no port answers "can you reach the database" cheaply, and adding one is a port widening PR4 has no mandate
+   for. What PR4 has instead is stronger than it looks: the host applies the descriptor **before** it listens,
+   so answering `/health/live` at all proves the descriptor applied, and a host whose apply failed exits
+   non-zero rather than reporting healthy with no schema. Readiness is F4's, with #24's remainder.
+39. **Container configuration uses .NET's standard `Section__Key` environment spelling, not §X.1's
+   `ALVO_*` names.** The spec sketches `ALVO_ADMIN_EMAIL`, `ALVO_ADMIN__PATH`, `ALVO_SCRIPTS_ALLOW_UI_EDIT`;
+   PR4 uses `Alvo__DescriptorPath`, `Alvo__Database__Provider`, `ConnectionStrings__Alvo`. Reason: those
+   `ALVO_*` names belong to subsystems that do not exist yet (the admin UI, the script host), and inventing a
+   second naming convention now would mean either two spellings per setting or a translation layer nobody
+   asked for. The mount point (`/alvo/descriptor.json`) and the port (8080) *are* the spec's. Revisit with
+   #24's CLI, which is where an operator-facing env vocabulary earns its keep.
+40. **The compose stack is `alvo` + `postgres` only.** §X.1's stack is
+   `alvo + postgres + minio + mailhog`; object storage and email do not exist in F3, and a service nothing
+   talks to makes the stack prove less rather than more. The two missing services arrive with the
+   subsystems that use them.
+41. **#121 is fixed for the `Location` header; the OpenAPI document's `servers` is deferred.** The header is
+   built in one place and now carries `HttpRequest.PathBase`, with a matrix (no base / a configured base / a
+   trusted proxy's `X-Forwarded-Prefix`) that follows the header rather than comparing it. The document half
+   is a different problem: `OpenApiDocumentTransformerContext` carries no `HttpContext` and the document is
+   cached per document name, so a request-derived `servers` entry is a decision about whether Alvo's document
+   is per-request at all — which also cuts against the golden snapshot whose value is determinism. Filed as
+   its own issue rather than approximated.
+42. **Forwarded headers are off by default, and turning them on clears `KnownNetworks`/`KnownProxies`.**
+   `X-Forwarded-Prefix` decides the URL a 201 advertises, so honouring it from an untrusted caller lets that
+   caller choose where a client is sent next. A container also cannot know its proxy's address, so the
+   allow-list has to be cleared for the feature to work at all — which is precisely why the switch is
+   explicit rather than inferred: only an operator knows something in front strips those headers.
+43. **The compose + TeaPie e2e is in no ring.** `scripts/test-e2e` is run by a new CI job (`e2e`), folded
+   into the existing `Build & test` aggregate so it is a required check with no branch-ruleset change. ring0
+   must stay Docker-free by its own comment, and ring2's Docker use is one self-skipping Testcontainers image
+   rather than an image build plus a multi-service stack — the design's testing table already placed the full
+   e2e at "CI on the PR, never locally". Cost, stated: an agent's pre-PR gate does not run the e2e, so a
+   compose-only breakage is first seen on the PR.
+44. **#83 is not PR4's, and PR4 closed the half of deviation 34 that was reachable.** The Host is
+   code-first, so it never enters runtime-apply mode and nothing PR4 ships can reach #83's failure — there is
+   no Management API to apply through until F4, and closing it needs `ILogger` on `RuntimeSchemaService`'s
+   **public** constructor, a baseline move for a subsystem PR4 does not host. What PR4 *did* close is
+   deviation 34's other stated cost — "with no logging provider configured the warning is dropped silently" —
+   because the standalone host configures providers and a fact now proves the unhonoured-subsystem warning
+   actually arrives. #83's remaining gap is exactly and only the dashboard-first mode.
+45. **The docs UI is on by default.** `Alvo:Docs:Enabled` defaults to `true`, so a container serves
+   `/openapi/v1.json` and `/scalar` unless told not to. Consistent with deviation 27 (the declared,
+   non-hidden schema shape is public) and with §0 principle 4 (the document *is* the contract an agent
+   reads); a deployment that disagrees turns it off with one setting.
+```
+
+- [ ] **Step 2: Move the plan marker and tick what closed**
+
+`docs/PLAN.md` keeps `← YOU ARE HERE` on **F3** — PR4 is the fourth of six PRs and F3 is not finished (PR5 and PR6 remain). Do **not** move the marker. If `docs/PLAN.md` carries a per-issue checklist for F3, tick `[15]`/#19 and `[15b]`/#75 there and leave `[20]`/#24 unticked; if it does not, change nothing in that file and say so in the commit message rather than inventing a structure.
+
+- [ ] **Step 3: Write down what is left of #24**
+
+Add to the end of `docs/architecture/host.md`:
+
+```markdown
+## What is left of #24
+
+PR4 starts `[20] Standalone run (Docker) + embedded run`; F4 finishes it. Still owed:
+
+- the **published multi-arch image** (`mmlib/alvo`, amd64 + arm64) and the release pipeline that pushes it;
+- the **dashboard** and the **Management API**, and with them the dashboard-first source of truth;
+- the **`alvo` CLI** (`alvo apply vehicles.alvo.json`), which is the third of the descriptor's four paths;
+- **readiness** with database / cache / message-bus reachability (§2.12), and the rest of §2.12 —
+  OpenTelemetry, rate limiting, usage metering;
+- the **full compose stack** (MinIO, MailHog) once storage and email exist;
+- an operator-facing **`ALVO_*` environment vocabulary**, if the CLI work shows it earns its keep.
+```
+
+- [ ] **Step 4: Comment on #83 so the next reader is not misled**
+
+```bash
+gh issue comment 83 --body "**PR4 closed the reachable half of this, and narrowed what is left.**
+
+PR4's \`MMLib.Alvo.Host\` is code-first (\`FromDescriptor\`), so it never enters runtime-apply mode — nothing it ships can reach the gap this issue describes, and there is no Management API to apply through until F4. It was therefore deliberately not fixed here.
+
+What PR4 *did* close is deviation 34's other stated cost: a standalone host configures logging providers, and \`AlvoHostLoggingTests.The_unhonoured_subsystem_warning_reaches_the_hosts_logging_provider\` now proves the declared-but-unhonoured warning actually arrives rather than being dropped silently. So the code-first half is proven, and this issue's remaining scope is exactly and only **dashboard-first / runtime apply**: priming the policy catalog from the stored descriptor at startup, and emitting the same warning on that path — which still needs \`ILogger\` on \`RuntimeSchemaService\`'s public constructor and therefore still moves the public-API baseline."
+```
+
+- [ ] **Step 5: Run the full gate**
+
+```bash
+dotnet build MMLib.Alvo.slnx -c Release
+dotnet format --verify-no-changes
+scripts/test-ring2
+scripts/test-e2e
+```
+
+All four green. `dotnet format` after everything, because it is a CI gate and the new project is the most likely place to fail it.
+
+- [ ] **Step 6: Review before the PR, in this order**
+
+1. `/code-review medium` — the whole diff. Fix findings *before* the PR.
+2. `alvo-plan-guard` — the mandated last check; read-only, advisory.
+3. `/security-review` **is** warranted despite PR4 not being a listed security-core PR: Task 4 decides which URL the host advertises and clears a forwarded-headers allow-list, and Task 3 changes what a 500 discloses. Run it with the `alvo-security-core-review` checklist for those two files.
+
+- [ ] **Step 7: Commit and open the PR**
+
+```bash
+git add docs/superpowers/specs/2026-07-25-f3-crud-vertical-slice-design.md docs/PLAN.md \
+        docs/architecture/host.md
+git commit -m "docs(f3): record PR4's deviations and what is left of #24"
+git push -u origin f3/pr4-host
+```
+
+The PR body must state: **closes #19, closes #75**; starts but does **not** close #24; fixes #119 and #121 (partially — link the new document-`servers` issue); explicitly does **not** close #83, with deviation 44's reason; and asks the maintainer to confirm the two things only they can decide — whether the `e2e` job should be its own required check in the branch ruleset rather than folded into `Build & test`, and whether they accept `Alvo__*` env names for now (deviation 39).
+
+---
+
+## Deviations anticipated
+
+Decided, with the reason, so an implementer knows what is settled and what to escalate. Task 8 writes each of these into the design doc as items 35–45.
+
+| # | Decision | Reason |
+|---|---|---|
+| **D1** | #119's `IExceptionHandler` lives in the **core**, opt-in via `AddAlvoProblemDetails()`, not in the Host as the issue's text says. | `ProblemResultFactory` is `internal`; a Host-side handler would be a second copy of Alvo's problem-document shape. The issue's premise — an embedded host keeps its own rendering — is preserved because `AddAlvo` does not register it. |
+| **D2** | #121 is fixed for the `Location` header only; the OpenAPI document's `servers`/path keys are deferred to a filed issue. | `OpenApiDocumentTransformerContext` carries no `HttpContext` and the document is cached per name, so a request-derived `servers` is a separate decision about whether the document is per-request — and it cuts against the golden snapshot's determinism. |
+| **D3** | The core gains one public member, `ApplyAlvoDescriptorAsync`, and `extensibility.md`'s verb taxonomy gains `Apply{Thing}`. | Without it PR4 cannot exist: the migration orchestrator is `internal` and no `InternalsVisibleTo` grant to a shipped assembly is safe. |
+| **D4** | The compose stack is `alvo` + `postgres` only, not §X.1's `alvo + postgres + minio + mailhog`. | Object storage and email do not exist in F3; a service nothing talks to makes the stack prove less. |
+| **D5** | `MMLib.Alvo.Host` is `IsPackable=false`, earned by package-boundary rule (c), and is the only project referencing two `Data.*` providers. | It is distributed as an image. Both drivers ship because zero-config SQLite and compose PostgreSQL are both required; exactly one is registered. |
+| **D6** | Health is **liveness only**; §2.12's readiness (DB / cache / bus reachability) is F4's. | No port answers a cheap reachability probe, and adding one is a port widening PR4 has no mandate for. Answering liveness already proves the descriptor applied, because the host applies before it listens. |
+| **D7** | Container configuration uses .NET's `Section__Key` env spelling (`Alvo__Database__Provider`), not §X.1's `ALVO_*` names. | The `ALVO_*` names belong to subsystems that do not exist yet; a second convention now means two spellings per setting or a translation layer. The mount point and the port *are* the spec's. |
+| **D8** | Forwarded headers are **off** by default, and enabling them clears `KnownNetworks`/`KnownProxies`. | `X-Forwarded-Prefix` chooses the URL a 201 advertises. A container cannot know its proxy's address, so the allow-list must be cleared for the feature to work — which is why the trust is explicit. |
+| **D9** | The compose + TeaPie e2e is in **no ring**; it is `scripts/test-e2e` run by a new `e2e` CI job, folded into the existing `Build & test` aggregate. | ring0 must stay Docker-free; ring2's Docker is one self-skipping container, not an image build plus a stack; the design's table places the full e2e at "CI on the PR, never locally". Folding it into the aggregate makes it required without a ruleset change the maintainer owns. |
+| **D10** | **#83 is not PR4's.** | The Host is code-first and never enters runtime-apply mode, so nothing PR4 ships can reach the gap; closing it moves `RuntimeSchemaService`'s public constructor for a subsystem PR4 does not host. PR4 does close deviation 34's *silent-drop* half, and comments on #83 to narrow it. |
+| **D11** | `Alvo:Docs:Enabled` defaults to **true**. | Deviation 27 already makes the declared, non-hidden schema shape public, and §0 principle 4 makes the document the contract an agent reads. One setting turns it off. |
+
+**Escalate rather than decide:**
+
+- Any change to the **branch ruleset's** required checks (the maintainer owns it; the classic branch-protection API answers a misleading 404 here).
+- Publishing an **image** to any registry — that is F4 and #24's remainder, and PR4 must not do it.
+- Adding a **port** to `Abstractions` (e.g. a database-reachability probe for readiness). If a task seems to need one, stop: D6 says it is deferred.
+- Making `AddAlvoProblemDetails()` part of `AddAlvo` — that would break D1's premise and #119's own reasoning.
+- Any **`ALVO_*`** environment name, until D7 is revisited with #24's CLI.
+
+---
+
+## Self-review
+
+**1. Spec coverage.** Each PR4 requirement, and the task that carries it:
+
+| Requirement | Task |
+|---|---|
+| `docker compose up` yields a working backend from the descriptor alone (design *Verification*) | 6, standing on 1, 2 |
+| `teapie test` is green against it (design *Verification*, #19's DoD) | 7 |
+| Scalar renders the document (design *Verification*, #75's DoD) | 5 |
+| One new project, `MMLib.Alvo.Host` (design *Package layout*) | 2 |
+| `package-boundary.md` updated when PR4 lands (design *Package layout*) | 2 |
+| Scalar in the Host, not the core (design *OpenAPI and Scalar*, #75) | 5 |
+| `Abstractions` gains no ASP.NET dependency; arch test green (#75's DoD) | 2 (the shared arch facts run against the Host from its own test project) |
+| Starts #24, does not close it | 8 (the "What is left of #24" section) |
+| #119 — an Alvo `type` on a standalone 500, with a test | 3 |
+| #121 — judged, and fixed for `Location` | 4 |
+| #83 — ruled on, with the reason recorded | 8 (D10) |
+| Deviation 34 — the dropped warning becomes observable | 2 (`AlvoHostLoggingTests`) |
+| Which ring the e2e is in, explicitly | 7 (D9) |
+| TeaPie in the pipeline, exercised fully, JUnit report (spec line 418) | 7 |
+| No default credential in the image (§2.14) | 2 (in-process), 6 (compose `:?`), 7 (anonymous is refused through the port) |
+| 60-second startup budget (§2.14) | 6, 7 (`--wait-timeout 60`) |
+| Port 8080, mount `/alvo/descriptor.json` (§X.1) | 6 |
+
+No requirement is unassigned.
+
+**2. Placeholder scan.** No "TBD", no "add appropriate error handling", no "similar to Task N", no code step without code. Three steps deliberately tell the implementer to **read a specific file** rather than showing content this plan cannot know: the `webhooks` block's member names in `schema/project.schema.json` (Task 2 Step 4), the exact warning substring the core writes (Task 2 Step 4), and `Scalar.AspNetCore` 2.16.17's overload set if the two-argument `MapScalarApiReference` disagrees (Task 5 Step 4). Each names the file and the reason, and each is followed by a fact that fails if the reading was wrong. Task 8 Step 2 similarly refuses to invent a `docs/PLAN.md` structure that may not exist.
+
+**3. Type consistency.** Checked across tasks: `ApplyAlvoDescriptorAsync(this IServiceProvider, MigrationOptions?, CancellationToken)` is defined in Task 1 and called in Task 2's `BuildAsync` with the same argument shape (`ct:` named, options defaulted). `AlvoHost.CreateBuilder(string[], Action<IConfigurationBuilder>?)` and `BuildAsync(WebApplicationBuilder, CancellationToken)` keep one spelling in Tasks 2, 3, 4, 5 and in the Global Constraints list; Task 5 restates both methods in full so no task is left holding a stale body. `AlvoHostOptions` grows exactly one member per task (`ForwardedHeaders` in Task 4) and the option type names — `AlvoHostDatabaseOptions`, `AlvoHostDocsOptions`, `AlvoHostForwardedHeadersOptions` — appear identically wherever referenced. `AlvoApiWorldSetup`'s positional parameters are appended, never reordered: `MapAlvoProblemDetails` and `FaultingData` in Task 3, `PathBase` in Task 4. `AlvoHostWorld.SendAsync` gains its `headers` parameter in Task 4 with a default, so Tasks 2, 3 and 5's call sites still compile. `AlvoProblemTypes.Internal = "internal"` is the one spelling of the new slug, and `ProblemResultFactory.Internal()` its one producer. `AlvoHost.LivenessPath`, `OpenApiDocumentName`, `OpenApiDocumentPath` and `ScalarPath` are the constants Tasks 6 and 7's compose healthcheck and TeaPie collection are written against.
