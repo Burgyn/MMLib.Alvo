@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Http;
+﻿using Microsoft.AspNetCore.Diagnostics;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using MMLib.Alvo.Api.Internal;
 using MMLib.Alvo.Data;
@@ -202,6 +203,73 @@ public sealed class ProblemDetailsTests
     }
 
     /// <summary>
+    /// #119: in a host that registered Alvo's problem details, an unhandled failure from the port's fifth
+    /// family answers with Alvo's own <c>type</c> — not the framework's RFC 9110 status-code URI, which would
+    /// put a foreign classification in the one member an agent branches on.
+    /// </summary>
+    /// <remarks>
+    /// The exception's own message must not reach the caller. It is logged, which is the whole reason the API
+    /// layer does not catch this family, and a 500 body carrying it would hand an attacker the shape of the
+    /// implementation.
+    /// </remarks>
+    [Fact]
+    public async Task An_unhandled_failure_is_rendered_with_alvos_own_internal_type()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync(
+            [_admin], new AlvoApiWorldSetup(MapAlvoProblemDetails: true, FaultingData: true));
+
+        using var response = await world.SendAsync(HttpMethod.Get, "/api/owners", _admin);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
+        response.Content.Headers.ContentType!.MediaType.ShouldBe("application/problem+json");
+
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        var document = JsonNode.Parse(body)!;
+        document["type"]!.GetValue<string>().ShouldBe("https://alvo.dev/errors/internal");
+        body.ShouldNotContain(
+            FaultingAlvoData.FailureMessage,
+            Case.Sensitive,
+            "the exception's message is for the log, never for the caller");
+    }
+
+    /// <summary>
+    /// The control for the fact above, and the reason #119 was filed rather than assumed: a host that did not
+    /// ask gets no handler and no document — the failure leaves the pipeline exactly as it did before, so the
+    /// two hosting modes really do differ and an embedded host keeps owning its own rendering.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Both halves are needed and neither implies the other. <b>The container half</b> — <c>AddAlvo</c> leaves
+    /// no <see cref="IExceptionHandler"/> behind — is the one that fails if the registration is ever moved
+    /// into <c>AddAlvo</c>, which is exactly the change #119 says must not happen. <b>The wire half</b> is
+    /// what that buys: nothing is written, so whatever hosts Alvo still decides what a 500 looks like.
+    /// </para>
+    /// <para>
+    /// The wire half is asserted as a <em>propagating exception</em> rather than as a 500 body, because that
+    /// is what an un-opted-in pipeline really does: <c>TestServer</c> hands an unhandled failure to its
+    /// client, and a real server answers a bodiless 500. A fact written against a 500 response here would
+    /// never run its assertions at all — the call throws first — and would therefore pass for the wrong
+    /// reason if the handler were later registered unconditionally.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task Without_the_registration_alvo_neither_handles_nor_renders_a_500()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync(
+            [_admin], new AlvoApiWorldSetup(FaultingData: true));
+
+        world.Services.GetServices<IExceptionHandler>().ShouldBeEmpty(
+            "AddAlvo must not register Alvo's exception handler — an embedded host owns its own rendering (#119)");
+
+        var propagated = await Should.ThrowAsync<InvalidOperationException>(
+            () => world.SendAsync(HttpMethod.Get, "/api/owners", _admin));
+
+        propagated.Message.ShouldBe(
+            FaultingAlvoData.FailureMessage,
+            "the failure must reach the host with its stack trace, not be turned into a document Alvo wrote");
+    }
+
+    /// <summary>
     /// <see cref="AlvoProblemTypes.UriOf"/> mints a URI only for a slug the catalogue declares, and refuses
     /// anything else — so a call site cannot invent a <c>type</c> that no documentation exists for.
     /// </summary>
@@ -315,9 +383,24 @@ public sealed class ProblemDetailsTests
             reached.Add(await SlugAnsweredByAsync(world, probe));
         }
 
+        reached.Add(await InternalSlugAnsweredByAFaultingStoreAsync());
+
         reached.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ShouldBe(
             AlvoProblemTypes.All.Except(PendingUntilALaterTask, StringComparer.Ordinal).Order(StringComparer.Ordinal),
             "every slug not pending a later task must be reachable from an endpoint");
+    }
+
+    /// <summary>
+    /// The <c>internal</c> slug's probe. It needs a <em>second</em> world, because the store it drives faults
+    /// for every entity and would answer 500 to every other probe in the list — so the two worlds' answers are
+    /// unioned rather than one world being made to do both.
+    /// </summary>
+    private static async Task<string> InternalSlugAnsweredByAFaultingStoreAsync()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync(
+            [_admin], new AlvoApiWorldSetup(MapAlvoProblemDetails: true, FaultingData: true));
+
+        return await SlugAnsweredByAsync(world, new Probe(HttpMethod.Get, "/api/owners", _admin, null));
     }
 
     /// <summary>
@@ -414,6 +497,7 @@ public sealed class ProblemDetailsTests
         ProblemResultFactory.NotFound(),
         ProblemResultFactory.ScopeRefused(),
         ProblemResultFactory.Unauthenticated("X-Alvo-Api-Key"),
+        ProblemResultFactory.Internal(),
         Guarded(new AlvoAuthorizationException("refused")),
         Guarded(new AlvoRecordNotFoundException()),
         Guarded(new AlvoPreconditionFailedException("stale")),

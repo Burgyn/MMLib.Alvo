@@ -22,6 +22,7 @@ namespace MMLib.Alvo.Api
         public const string BaseUri = "https://alvo.dev/errors/";
         public const string Forbidden = "forbidden";
         public const string IdempotencyConflict = "idempotency-conflict";
+        public const string Internal = "internal";
         public const string MalformedQuery = "malformed-query";
         public const string NotFound = "not-found";
         public const string OutOfScope = "out-of-scope";
@@ -118,6 +119,10 @@ namespace Microsoft.Extensions.DependencyInjection
     public static class AlvoDescriptorApplyExtensions
     {
         public static System.Threading.Tasks.Task<MMLib.Alvo.Migrations.MigrationResult> ApplyAlvoDescriptorAsync(this System.IServiceProvider services, MMLib.Alvo.Migrations.MigrationOptions? options = null, System.Threading.CancellationToken ct = default) { }
+    }
+    public static class AlvoProblemDetailsExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddAlvoProblemDetails(this Microsoft.Extensions.DependencyInjection.IServiceCollection services) { }
     }
     public static class AlvoServiceCollectionExtensions
     {

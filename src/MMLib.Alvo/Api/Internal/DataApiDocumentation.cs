@@ -568,7 +568,10 @@ internal static class DataApiDocumentation
         + "policy-masked per caller, and the `ETag` is minted over the row's *version* rather than over the "
         + "response bytes — which is the only tag `If-Match`'s strong comparison could ever match, and the "
         + "reason no intermediary may keep the body.\n\n"
-        + "**A 500 is not documented on any operation.** An invariant the implementation itself relies on "
-        + "propagates past Alvo untouched, so the response is composed by the host and Alvo cannot describe a "
-        + "body it does not write.";
+        + "**A 500 is not documented on any operation, and its body depends on the host.** An invariant the "
+        + "implementation itself relies on propagates past Alvo's endpoints untouched, so what a 500 looks "
+        + "like is the host's decision and not a promise this document can make. A host that opted in "
+        + "(`AddAlvoProblemDetails()`) answers with the same problem document as every other refusal, under "
+        + "`" + AlvoProblemTypes.BaseUri + AlvoProblemTypes.Internal + "` — which is why that value is in "
+        + "`type`'s list. A host that did not composes its own.";
 }

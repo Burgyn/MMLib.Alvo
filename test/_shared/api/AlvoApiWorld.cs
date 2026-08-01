@@ -8,6 +8,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.OpenApi;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Auth.Internal;
+using MMLib.Alvo.Data;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Tests.Data;
 using System.Data.Common;
@@ -123,6 +124,15 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
         AlvoApiDatabase database)
     {
         var app = BuildApp(descriptorPath, database, keys, setup);
+
+        // Middleware ordering the compiler cannot check: UseExceptionHandler has to be added before any
+        // endpoint runs, and WebApplication auto-terminates the pipeline with routing — so registering it
+        // here, before MapAlvoDataApi below, is what puts it upstream of the endpoints.
+        if (setup.MapAlvoProblemDetails)
+        {
+            app.UseExceptionHandler();
+        }
+
         await ApplyDescriptorAsync(app);
 
         app.MapAlvoDataApi();
@@ -210,6 +220,16 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
             }
         });
 
+        if (setup.FaultingData)
+        {
+            builder.Services.AddSingleton<IAlvoData>(new FaultingAlvoData());
+        }
+
+        if (setup.MapAlvoProblemDetails)
+        {
+            builder.Services.AddAlvoProblemDetails();
+        }
+
         builder.Services.AddAlvo(alvo =>
         {
             // The provider registration is the engine's, through the same public extension a host calls
@@ -296,6 +316,12 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
     internal async Task<JsonObject> OpenApiDocumentAsync() =>
         JsonNode.Parse(await OpenApiTextAsync()) as JsonObject
         ?? throw new InvalidOperationException("The OpenAPI document is not a JSON object.");
+
+    /// <summary>
+    /// This world's container, for the facts whose claim is about what a host's <em>registrations</em> are
+    /// rather than about a response — "<c>AddAlvo</c> registered no exception handler" is invisible on the wire.
+    /// </summary>
+    internal IServiceProvider Services => _app.Services;
 
     /// <summary>Every statement the engine has run against this world's database since the last <see cref="ClearStatements"/>.</summary>
     internal IReadOnlyList<string> Statements => _capture.Statements;
@@ -575,12 +601,24 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
 /// exactly as <see cref="FixtureDocumentTitle"/>/<see cref="FixtureDocumentVersion"/> set it, which is what
 /// every fact except the append-not-overwrite one needs.
 /// </param>
+/// <param name="MapAlvoProblemDetails">
+/// Whether the world calls <c>AddAlvoProblemDetails()</c> and <c>UseExceptionHandler()</c> — the standalone
+/// host's decision, which <c>AddAlvo</c> deliberately does not make for an embedded one (#119). Off by
+/// default, so the suite's ordinary worlds still let a broken invariant propagate the way an embedded host
+/// sees it.
+/// </param>
+/// <param name="FaultingData">
+/// Whether <see cref="MMLib.Alvo.Data.IAlvoData"/> is <see cref="FaultingAlvoData"/> instead of the engine's
+/// own store — the only way to reach the port's fifth failure family, which no well-formed request can.
+/// </param>
 internal sealed record AlvoApiWorldSetup(
     Action<AlvoApiOptions>? ConfigureApi = null,
     string? RevokedKeyId = null,
     Action<System.Text.Json.JsonSerializerOptions>? ConfigureHostJson = null,
     bool MapOpenApiDocument = false,
-    string? HostInfoDescription = null);
+    string? HostInfoDescription = null,
+    bool MapAlvoProblemDetails = false,
+    bool FaultingData = false);
 
 /// <summary>One dev API key a world issues, in the shape a test reads best.</summary>
 /// <param name="KeyId">The key's public identifier.</param>

@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
@@ -116,6 +117,14 @@ internal sealed class AlvoHostWorld : IAsyncDisposable
     internal static string DescriptorPath(string fileName) =>
         Path.Combine(AppContext.BaseDirectory, "descriptors", fileName);
 
+    /// <summary>
+    /// The simple names of every <c>IExceptionHandler</c> the host registered, read off the container rather
+    /// than off the composition's source — a fact about the source would pass by restating the code.
+    /// </summary>
+    internal IReadOnlyList<string> ExceptionHandlerTypeNames() =>
+        [.. _app.Services.GetServices<Microsoft.AspNetCore.Diagnostics.IExceptionHandler>()
+            .Select(handler => handler.GetType().Name)];
+
     internal Task<HttpResponseMessage> GetAsync(string path) => SendAsync(HttpMethod.Get, path, body: null);
 
     internal async Task<HttpResponseMessage> SendAsync(HttpMethod method, string path, JsonNode? body)
@@ -169,9 +178,17 @@ internal sealed class AlvoHostWorld : IAsyncDisposable
 /// </remarks>
 internal sealed class CapturingLoggerProvider : ILoggerProvider
 {
-    private readonly List<string> _records = [];
+    private readonly List<LoggedRecord> _records = [];
 
-    internal IReadOnlyList<string> Records
+    /// <summary>Every record as <c>Level: message</c> — the form a fact about a warning's text reads best.</summary>
+    internal IReadOnlyList<string> Records => [.. Entries.Select(entry => $"{entry.Level}: {entry.Message}")];
+
+    /// <summary>
+    /// The same records with the <see cref="Exception"/> each one carried, for the one claim the formatted
+    /// message cannot express: that a failure was logged <em>as</em> a failure, stack trace and all, rather
+    /// than flattened into prose.
+    /// </summary>
+    internal IReadOnlyList<LoggedRecord> Entries
     {
         get
         {
@@ -188,11 +205,11 @@ internal sealed class CapturingLoggerProvider : ILoggerProvider
     {
     }
 
-    private void Record(LogLevel level, string message)
+    private void Record(LogLevel level, string message, Exception? exception)
     {
         lock (_records)
         {
-            _records.Add($"{level}: {message}");
+            _records.Add(new LoggedRecord(level, message, exception));
         }
     }
 
@@ -210,7 +227,13 @@ internal sealed class CapturingLoggerProvider : ILoggerProvider
             Func<TState, Exception?, string> formatter)
         {
             ArgumentNullException.ThrowIfNull(formatter);
-            owner.Record(logLevel, formatter(state, exception));
+            owner.Record(logLevel, formatter(state, exception), exception);
         }
     }
 }
+
+/// <summary>One log record the host wrote.</summary>
+/// <param name="Level">The level it was written at.</param>
+/// <param name="Message">The formatted message.</param>
+/// <param name="Exception">The failure it carried, or <see langword="null"/> for an ordinary record.</param>
+internal sealed record LoggedRecord(LogLevel Level, string Message, Exception? Exception);

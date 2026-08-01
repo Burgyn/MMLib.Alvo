@@ -429,7 +429,7 @@ that are perfectly serviceable. Honouring it needs a third widening of `IAlvoDat
 ## The status and `type`-slug catalogue
 
 Problem documents are RFC 9457, media type `application/problem+json`, with an Alvo `violations` array.
-Every `type` is `https://alvo.dev/errors/<slug>`; the eight slugs are `AlvoProblemTypes.All`.
+Every `type` is `https://alvo.dev/errors/<slug>`; the nine slugs are `AlvoProblemTypes.All`.
 
 | Status | Slug | Means |
 |---|---|---|
@@ -445,6 +445,7 @@ Every `type` is `https://alvo.dev/errors/<slug>`; the eight slugs are `AlvoProbl
 | 412 | `precondition-failed` | a precondition this API cannot evaluate, or a version that does not match |
 | 422 | `validation` | schema-derived validation refused the body |
 | 422 | `malformed-query` | the query string or the body is malformed — the shape is wrong, nothing is hidden |
+| 500 | `internal` | an invariant Alvo relies on is broken — **only** in a host that called `AddAlvoProblemDetails()`; no endpoint produces it and no operation documents it |
 
 Which operation can answer what is one table, `DataApiDocumentation.ResponsesFor`, read both by the
 endpoint metadata and by the OpenAPI transformer — so the document cannot advertise a status no delegate
@@ -456,17 +457,33 @@ policy refused would become the schema-and-data oracle every deny reason in the 
 avoid — `IPolicyEngine`'s reasons are deliberately free of the entity, the row, and whether it exists, and
 a parseable classification beside them would hand back what the prose withholds.
 
-**There is no slug for a 500, deliberately.** `IAlvoData`'s `InvalidOperationException` family — an
-invariant the implementation itself relies on is broken — is never caught by this layer: swallowing it into
-a hand-made problem document would lose the stack trace the host's own logging exists to record. It
-propagates and the host answers. Cataloguing a slug Alvo never emits would document a behaviour that does
-not exist.
+**The endpoint layer still never catches a 500, and the slug for one is opt-in.** `IAlvoData`'s
+`InvalidOperationException` family — an invariant the implementation itself relies on is broken — is never
+caught here: swallowing it into a hand-made problem document would lose the stack trace the host's own
+logging exists to record. It propagates, and what happens next is the *host's* decision, which is what #119
+turned out to be about.
 
-> **Known gap, for PR4.** That reasoning is correct for **embedded** mode. In **standalone** mode Alvo *is*
-> the pipeline, and ASP.NET's `AddProblemDetails()` writes a document whose `type` is an RFC 9110
-> status-code URI — a foreign type in the one member an agent is told to branch on. `MMLib.Alvo.Host` owes
-> an `IExceptionHandler` that logs *and* renders `alvo.dev/errors/internal`, landing together with the
-> slug. Tracked in **#119**.
+| Mode | What the host registers | What a 500 carries |
+|---|---|---|
+| embedded, declined (the default) | nothing — `AddAlvo` does **not** register the handler | whatever the host renders; Alvo writes no bytes and the exception reaches the host's own logging |
+| standalone, or embedded opted in | `AddAlvoProblemDetails()` + `app.UseExceptionHandler()` | `type: alvo.dev/errors/internal`, `application/problem+json`, and a **constant** `detail` |
+
+`AddAlvoProblemDetails()` registers `AlvoExceptionHandler`, which does both halves of #119's wording: it
+logs the exception (as an exception, so the stack trace survives) and *then* renders
+`ProblemResultFactory.Internal()`. The `detail` is a constant — not the exception's type, not its message,
+not a frame — because a caller can act on none of it and an attacker can act on all of it. It is
+deliberately **not** part of `AddAlvo`: an embedded host owns its own error rendering, and Alvo stealing the
+exception is the defect #119 was filed to prevent, not the one it was filed to fix.
+
+The handler lives in the core rather than in `MMLib.Alvo.Host`, which #119's letter asked for, because
+`ProblemResultFactory` is `internal`: a Host-side handler would be a second hand-written copy of the
+problem-document shape (`type`, `title`, `status`, `detail`, `violations`, the media type). Recorded as
+deviation D1 of PR4.
+
+**No operation documents a 500**, and that has not changed — `ResponsesFor` describes what a *delegate*
+produces, and no delegate produces this one. The slug is in the published `problemDetails` schema's `type`
+enum, because that enum is the catalogue a client branches on and `internal` is a value an Alvo pipeline can
+really send.
 
 **One 500 *is* caller-reachable, and it costs ten write transactions to get there.** A **keyed** create
 whose row violates one of the *caller's own* unique constraints is retried by

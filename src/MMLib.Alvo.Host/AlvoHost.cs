@@ -49,6 +49,7 @@ public static class AlvoHost
         builder.Services.Configure<AlvoHostOptions>(builder.Configuration.GetSection(ConfigurationSection));
         builder.Services.Configure<AlvoAuthOptions>(builder.Configuration.GetSection(AuthSection));
         builder.Services.AddHealthChecks();
+        builder.Services.AddAlvoProblemDetails();
         builder.Services.AddAlvo(alvo => Configure(alvo, builder.Configuration));
 
         return builder;
@@ -57,6 +58,11 @@ public static class AlvoHost
     /// <summary>
     /// Builds the application, applies the mounted descriptor, and maps the generated Data API.
     /// </summary>
+    /// <remarks>
+    /// <c>UseExceptionHandler</c> is first because a middleware only sees what runs after it: in standalone
+    /// mode Alvo <em>is</em> the pipeline, so an unhandled failure that got past this line would be answered
+    /// by the framework with an RFC 9110 status-code URI in <c>type</c> (#119).
+    /// </remarks>
     /// <param name="builder">The builder <see cref="CreateBuilder"/> returned.</param>
     /// <param name="ct">Cancels the descriptor apply.</param>
     /// <returns>The started-but-not-yet-running application.</returns>
@@ -67,6 +73,7 @@ public static class AlvoHost
         ArgumentNullException.ThrowIfNull(builder);
 
         var app = builder.Build();
+        app.UseExceptionHandler();
         app.MapAlvoLiveness();
 
         await app.Services.ApplyAlvoDescriptorAsync(ct: ct).ConfigureAwait(false);

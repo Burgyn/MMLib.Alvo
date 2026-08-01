@@ -23,8 +23,10 @@ namespace MMLib.Alvo.Api.Internal;
 /// <see cref="ArgumentNullException"/>.</b> Both mean "an invariant the implementation itself relies on is
 /// broken" — <c>IAlvoData</c>'s fifth family — which is never a well-formed request from an authorized
 /// caller; swallowing either into a hand-made 500 would lose the stack trace the host's own logging is there
-/// to record. They propagate, and the host answers 500 — see <see cref="AlvoProblemTypes"/> for why the
-/// catalogue therefore has no slug for it.
+/// to record. They propagate, and the host answers 500. A host that asked Alvo to answer for it
+/// (<c>AddAlvoProblemDetails()</c>) renders that 500 through <see cref="Internal"/> from an exception
+/// handler, <em>after</em> logging the exception — which is why the entry point below exists and why no
+/// endpoint calls it.
 /// </para>
 /// </remarks>
 internal static class ProblemResultFactory
@@ -84,6 +86,21 @@ internal static class ProblemResultFactory
     /// </summary>
     internal static IResult NotFound() => Problem(
         StatusCodes.Status404NotFound, AlvoProblemTypes.NotFound, new AlvoRecordNotFoundException().Message);
+
+    /// <summary>
+    /// The 500 for a broken invariant, in a host that asked Alvo to answer for it.
+    /// </summary>
+    /// <remarks>
+    /// The detail is a constant. Nothing about the failure is reflected — not the exception type, not its
+    /// message, not a stack frame — because the caller cannot act on any of it and an attacker can. The
+    /// exception itself is logged by <c>AlvoExceptionHandler</c>, which is the trade #119 describes: log
+    /// everything, disclose the classification and nothing else.
+    /// </remarks>
+    internal static IResult Internal() => Problem(
+        StatusCodes.Status500InternalServerError,
+        AlvoProblemTypes.Internal,
+        "The request could not be completed because of an internal error. It has been logged; retry, and if it "
+        + "persists, report it to whoever operates this instance.");
 
     /// <summary>
     /// The 422 for a request whose shape is wrong, carrying every reason rather than the first.

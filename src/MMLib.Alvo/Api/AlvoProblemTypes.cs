@@ -22,13 +22,14 @@
 /// caller who cannot tell them apart re-issues the wrong one.
 /// </para>
 /// <para>
-/// <b>There is no slug for a 500, and that is deliberate.</b> <c>IAlvoData</c>'s fifth failure family
-/// (<see cref="InvalidOperationException"/> — "an invariant the implementation itself relies on is broken")
-/// is never caught by this layer: swallowing it into a hand-made problem document would lose the stack
-/// trace the host's own logging exists to record, so it propagates and the host answers. Cataloguing a slug
-/// Alvo never emits would document a behaviour that does not exist — which is the same defect as an
-/// unreachable entry anywhere else — so the catalogue stops at what Alvo actually produces, and
-/// <c>ProblemDetailsTests</c> holds it to that.
+/// <b>The 500's slug exists, and only a host that asked for it emits one.</b> <c>IAlvoData</c>'s fifth
+/// failure family (<see cref="InvalidOperationException"/> — "an invariant the implementation itself relies on
+/// is broken") is still never caught by the endpoint layer: swallowing it there would lose the stack trace the
+/// host's own logging exists to record, so it propagates. What changed in PR4 is that a host may now ask Alvo
+/// to answer for it — <c>AddAlvoProblemDetails()</c> plus <c>UseExceptionHandler()</c> — and when it does, the
+/// answer carries <see cref="Internal"/> rather than the framework's RFC 9110 status-code URI, which would
+/// classify a refusal by the status the response line already carried. An embedded host that registers
+/// neither keeps rendering its own 500, which is the point (#119).
 /// </para>
 /// <para>
 /// Public because it <em>is</em> the contract: an agent or an embedded host branching on a refusal needs the
@@ -72,6 +73,14 @@ public static class AlvoProblemTypes
     /// <summary>A credential was presented and cannot be used (401).</summary>
     public const string Unauthenticated = "unauthenticated";
 
+    /// <summary>An invariant Alvo itself relies on is broken (500).</summary>
+    /// <remarks>
+    /// Emitted only by <c>AlvoExceptionHandler</c>, and therefore only in a host that registered it. The slug
+    /// carries no reason at all — not the exception's type, not its message — because a 500 is the one refusal
+    /// whose cause is by definition not the caller's business, and its text is the log's.
+    /// </remarks>
+    public const string Internal = "internal";
+
     /// <summary>
     /// Every slug this catalogue declares. Enumerated rather than discovered by reflection so a fact can
     /// assert the catalogue and the code agree without the assertion being satisfied by its own subject.
@@ -86,6 +95,7 @@ public static class AlvoProblemTypes
         PreconditionFailed,
         IdempotencyConflict,
         Unauthenticated,
+        Internal,
     ];
 
     /// <summary>The full problem <c>type</c> URI for one slug.</summary>

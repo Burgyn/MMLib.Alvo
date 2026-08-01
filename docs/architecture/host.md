@@ -60,3 +60,18 @@ Liveness only (`/health/live`). §2.12 asks for readiness with database, cache a
 reachability; none of those probes exists as a port today, and inventing one is a port
 widening PR4 has no mandate for. Recorded as a deviation with an issue rather than
 approximated.
+
+## A 500 is Alvo's own refusal here (#119)
+
+The host calls `AddAlvoProblemDetails()` and `UseExceptionHandler()`, so an unhandled failure is logged with
+its stack trace and answered with `type: https://alvo.dev/errors/internal` and a **constant** detail. Nothing
+about the exception reaches the caller. Embedded hosts register neither and keep answering their own way,
+which is why the registration is opt-in rather than part of `AddAlvo`.
+
+`UseExceptionHandler` is the **first** middleware in `BuildAsync`, before liveness and before the Data API: a
+middleware only sees what runs after it, and a failure that got past that line would be rendered by the
+framework with an RFC 9110 status-code URI in `type`.
+
+The handler itself lives in the core, not here — `ProblemResultFactory` is `internal`, so a Host-side one
+would be a second hand-written copy of the problem-document shape. Recorded as deviation D1; `data-api.md`
+carries the mode-by-mode table.
