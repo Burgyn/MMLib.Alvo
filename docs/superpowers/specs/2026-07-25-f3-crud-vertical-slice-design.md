@@ -487,6 +487,14 @@ ordering.
 - **Idempotency:** an `alvo.idempotency` table keyed `(key, endpoint, request
   hash)` storing status and response body, written in the same transaction as the
   operation. The same key with a different body is a 409, not a silent replay.
+  > **Superseded by PR3 — see deviations 21 and 30.** The shipped table is keyed
+  > `(idempotency_key, scope)` where scope is tenant + acting user, and stores the
+  > **`row_id`, never a status or a response body**: a stored body would be a second
+  > copy of a row the caller's own `get` decision must re-filter, and replaying it
+  > would hand back a projection the replaying caller is not entitled to. The
+  > reasoning is in `IdempotencyTable` and `docs/architecture/data-api.md`. This
+  > paragraph is left in place because the design is a record of what was decided
+  > when, not a live specification.
 
 ### Exposure and field-level behaviour
 
@@ -1048,6 +1056,34 @@ either file.
    consumer whether or not it maps the Data API, and the framework reference silently supplies
    `Microsoft.Extensions.Options`, whose explicit `PackageReference`s had to be **removed** because
    NuGet's `NU1510` (raised as an error here) objects to a reference it will not prune.
+
+32. **The apply step refuses six more things, and warns about five others.** Refused, because ignoring one
+   silently produces wrong data: `field.default`, `field.computed`, `field.rollup`, `field.validation`,
+   `entity.softDelete`, the six `entity.hooks.*` points, and **declaring a framework-managed column name at
+   all**, whatever attributes the declaration carries. Warned but honoured nowhere, because the absence is
+   observable: `webhooks`, `automation`, `templates`, `functions`, `dynamicEntities` — an author notices that
+   no webhook ever fires, whereas an ignored `default` stores NULL where a value was expected. **This is a
+   descriptor-level breaking change**, and it cost two shipped examples: `examples/simple-tasks` lost its
+   defaults, its rollup and a `beforeUpdate`, and `examples/complex-crm` gained a `NOT-RUNNABLE.md`. The one
+   capability the strict managed-column rule removes is `readOnly` on `tenant_id` as a narrowing; that intent
+   belongs in a policy rule, since the tenant scope's `WITH CHECK` already guards the candidate row.
+
+33. **The frozen `schema/project.schema.json` gained prose, not structure.** The `fields` description now
+   declares the eight reserved field names the apply step refuses for every host. §0 principle 7 is *one
+   schema, one parser, one truth*, and a schema advertising a name the apply step rejects is two. Recorded as
+   a deviation on **deviation 3's precedent from PR1** — a prose edit to the frozen schema is a deviation even
+   when the structure is untouched. The machine-checkable constraint is issue **#96**; a JSON Schema pattern
+   cannot express the exclusion.
+
+34. **`AddAlvo()` now calls `AddLogging()`.** The core writes at least one warning of its own (deviation 32's
+   unhonoured-blocks line), so it resolves `ILogger<T>` — and it must not require the host to have arranged
+   that. `AddLogging` is idempotent (`TryAdd` throughout), so an ASP.NET host or one that already called it is
+   unaffected, and `Microsoft.Extensions.Logging` arrives via the framework reference deviation 31 already
+   takes rather than as a new dependency. Without it, a plain console host embedding Alvo fails to activate
+   the migration runner at all. The rejected alternative — an optional `ILoggerFactory` with a `NullLogger`
+   fallback — would silently swallow a real registration mistake. Cost, stated: with no logging *provider*
+   configured the warning is dropped silently, so a crash was traded for a silent drop; and a dashboard-first
+   apply emits no warning at all (issue **#83**).
 
 ## Assumptions (veto candidates)
 

@@ -57,6 +57,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead — the synthesized tenant scope's `WITH CHECK` is already evaluated over the candidate row,
   so a rule can answer "which tenant may this row be placed in" per caller and a field flag cannot.
 
+- **`MMLib.Alvo` is now an ASP.NET Core library.** §0 principle 8 makes every generated endpoint a
+  minimal-API delegate, so the core carries `FrameworkReference Microsoft.AspNetCore.App` plus
+  `Microsoft.AspNetCore.OpenApi`. **An embedded consumer of the core is therefore an ASP.NET consumer
+  whether or not it maps the Data API** — that is the most consumer-visible change in this release for an
+  embedded host. `MMLib.Alvo.Abstractions` deliberately stays free of both, and an architecture test holds
+  that line, so the ports remain implementable by a host that is not an ASP.NET application at all.
+  Side effect: the framework reference supplies `Microsoft.Extensions.Options`, whose explicit
+  `PackageReference`s had to be removed, because NuGet's `NU1510` (an error in this repo) objects to a
+  reference it will not prune.
+
+- **`AddAlvo()` now calls `AddLogging()`.** The core writes at least one warning of its own, so it resolves
+  `ILogger<T>` and must not require the host to have arranged that. It is idempotent (`TryAdd` throughout),
+  so an ASP.NET host or one that already called it is unaffected; a plain console host embedding Alvo would
+  otherwise fail to activate the migration runner at all. Note that with **no logging provider configured**
+  the warning is dropped silently — a startup crash traded for a silent drop.
+
 ### Changed
 
 - **A format check that times out is now its own violation code, `format-not-evaluated`, and no

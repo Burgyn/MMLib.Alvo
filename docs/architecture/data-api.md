@@ -46,11 +46,13 @@ returns one `null` for both), and `IPolicyEngine`'s deny reasons name neither th
 caller may write it** (`SchemaComponentBuilder.Belongs`). Not an *if and only if*: `required` is necessary,
 not sufficient — `Belongs` also excludes a `readOnly` field and a framework-managed name the caller cannot
 write, so a field declared `required + hidden + readOnly` (a legal descriptor today, and one no create can
-satisfy — issue **#124**) appears in no schema at all. The extra conditions only ever withhold more. Excluding it there too would document a create nobody could perform,
-since a caller cannot supply a mandatory field it was never told exists. An **optional** hidden field's
-name never appears anywhere. The cost, stated: a field that is hidden, writable and optional is absent
-from the request schemas while a write to it is still accepted, so the document understates what a create
-will take — the safe direction, since a caller following the document sends less than it may.
+satisfy — issue **#124**) appears in no schema at all. The extra conditions only ever withhold more.
+
+Excluding a `required` hidden field from the request schema too would document a create nobody could
+perform, since a caller cannot supply a mandatory field it was never told exists. An **optional** hidden
+field's name still appears nowhere. The cost, stated: a field that is hidden, writable and optional is
+absent from the request schemas while a write to it is still accepted, so the document understates what a
+create will take — the safe direction, since a caller following the document sends less than it may.
 
 ## A `hidden` field is writable, by design
 
@@ -269,8 +271,11 @@ The API layer *cannot* mint one, and this is why `QueryAsync` returns an `AlvoPa
 
 ### The cost, stated honestly: per-page cost grows with cursor depth (issue #100)
 
-On a **multi-term sort**, the keyset predicate is a nested disjunction, and the per-page cost is linear in
-cursor depth rather than flat. What keyset paging buys here is **stability**, and that is what §2.1 asks
+On a **multi-term sort**, the keyset predicate is a nested disjunction, and the per-page cost **grows with**
+cursor depth rather than staying flat. Not *linear* in it, on the evidence: #100 measured rows-removed-by-filter
+growing one-for-one with depth (280 001 at depth 280 000) while wall-clock grew 107× across a 28 000× depth
+increase — so the row count is linear and the latency is sublinear but unbounded. "Grows with" is what the
+measurement supports; say that rather than the tidier claim. What keyset paging buys here is **stability**, and that is what §2.1 asks
 for and what is proven: correct and non-duplicating under concurrent writes, measured over 1 000 000 rows.
 
 Two things this is **not**:
@@ -463,6 +468,15 @@ not exist.
 > an `IExceptionHandler` that logs *and* renders `alvo.dev/errors/internal`, landing together with the
 > slug. Tracked in **#119**.
 
+**One 500 *is* caller-reachable, and it costs ten write transactions to get there.** A **keyed** create
+whose row violates one of the *caller's own* unique constraints is retried by
+`EfAlvoData.ReplayableCreateAsync` — it cannot distinguish that violation from the idempotency table's own
+insert race, which is exactly what the retry exists to absorb — so ten full write transactions run with a
+linear backoff (~450 ms total) before the exception surfaces as the family-5 500 above. Not a regression:
+an *unkeyed* create with the same violation also answers 500, just immediately. Worth knowing because it is
+a caller-triggerable amplification of a caller's own mistake, and because the fix (asking the dialect
+whether a constraint name is Alvo's own) belongs with the retry logic rather than here. Tracked in **#127**.
+
 ## Route generation happens at mapping time — an unresolved F7 fork, not a chore
 
 `EntityRouteCatalog` reads the applied schema from `ISchemaRegistry`, and `MapAlvoDataApi` runs **once**,
@@ -540,12 +554,20 @@ a field flag — the synthesized tenant scope's `WITH CHECK` is already evaluate
 a `create` rule is where "which tenant may this row be placed in" belongs, and is the only place that can
 answer it per caller.
 
-## Two records that still need a human's eye
+## Three records that still need a human's eye
 
-1. **The two collation decisions — from PR2**, and the one of the two that lives in
+1. **A `hidden` field appears in a request schema when it is `required` and the caller may write it** —
+   deviation **28**, and the ruling this PR most wants made. It trades a confidentiality property this same
+   document asserts against documenting a create a caller can satisfy, and both alternatives foreclose
+   something real, which is what makes it a product position rather than an implementation detail.
+   **The fact a maintainer needs in order to rule:** what the document publishes is the field's **declared**
+   `hidden` flag, not a per-caller mask — so a name's exposure depends on how the host serves the document,
+   and in the common Scalar setup that is unauthenticated. Sibling hole: `required + hidden + readOnly` is
+   legal and no create can satisfy it (**#124**).
+2. **The two collation decisions — from PR2**, and the one of the two that lives in
    `docs/architecture/data-path.md` ("Collation belongs to the host — two rulings that need the maintainer's
    sign-off"). Repeated here so a reader finds them without editing that file. Still awaiting sign-off.
-2. **Ordering narrowed to String/Int/Decimal/Timestamp — from this PR, not PR2**, and it lives in
+3. **Ordering narrowed to String/Int/Decimal/Timestamp — from this PR, not PR2**, and it lives in
    `FilterOperators.cs`'s `_orderable` set plus `FilterTermParser.IsApplicable`, **not** in `data-path.md`.
    Issue **#95**, and the expiry note above. #95 also covers `like`/`ilike` refused on a `json` field, for
    the same underlying reason.
