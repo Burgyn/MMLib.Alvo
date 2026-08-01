@@ -68,3 +68,251 @@ Every test must be able to fail for the reason its name claims. PR3 rejected thi
 - "compose came up" is **not** a test that the descriptor drove it — assert an entity that exists **only** in the mounted descriptor is reachable, and that a name absent from it 404s.
 
 ---
+
+## File Structure
+
+Locked before the tasks, because the decomposition decisions live here.
+
+**New — the Host (`src/MMLib.Alvo.Host/`)**
+
+| File | Responsibility |
+|---|---|
+| `MMLib.Alvo.Host.csproj` | Web SDK, `IsPackable=false`, references the core + both providers, `Scalar.AspNetCore`. |
+| `Program.cs` | Three lines. `AlvoHost.CreateBuilder(args)` → `AlvoHost.Build(...)` → `RunAsync()`. Nothing testable lives here. |
+| `AlvoHost.cs` | The public composition seam: `CreateBuilder` (configuration + options + `AddAlvo` + provider selection) and `Build` (apply, path base, exception handler, `MapAlvoDataApi`, health, Scalar). Two short methods, everything else extracted. |
+| `AlvoHostOptions.cs` | The `Alvo` configuration section as typed, validated options: `DescriptorPath`, `Database`, `PathBase`, `Docs`. |
+| `Internal/AlvoDatabaseSelector.cs` | `sqlite` / `postgresql` → the matching `Use*` call, and a structured refusal for anything else. |
+| `Internal/AlvoHostEndpoints.cs` | `MapAlvoLiveness` — the one endpoint the Host owns. |
+| `appsettings.json` | The container defaults: descriptor path `/alvo/descriptor.json`, provider `sqlite`, docs on. |
+
+**New — the Host's tests (`test/MMLib.Alvo.Host.Tests/`)**
+
+| File | Responsibility |
+|---|---|
+| `MMLib.Alvo.Host.Tests.csproj` | References the Host, `Microsoft.AspNetCore.TestHost`; keeps the shared arch + public-API gate **on**. |
+| `AlvoHostWorld.cs` | One running Host over `TestServer`, built through `AlvoHost.CreateBuilder`/`Build` — never a hand-rolled `WebApplication`. |
+| `AlvoHostBootTests.cs` | Boot facts: a mounted descriptor becomes reachable routes; an unknown entity 404s; a broken descriptor refuses to start; no default credential exists. |
+| `AlvoHostLoggingTests.cs` | Deviation 34's cost, made observable: the unhonoured-subsystem warning reaches a configured provider. |
+| `AlvoHostProblemDetailsTests.cs` | #119 in the standalone pipeline. |
+| `AlvoHostPathBaseTests.cs` | #121 in the standalone pipeline. |
+| `AlvoHostDocsTests.cs` | Scalar + the document, served by the Host. |
+| `PublicApi.MMLib.Alvo.Host.verified.txt` | The Host's public surface, under approval like every other assembly's. |
+| `descriptors/host-boot.alvo.json` | A descriptor with exactly one entity, whose name appears nowhere else in the repo — so "the descriptor drove it" is falsifiable. |
+
+**New — the container and the e2e (repo root and `deploy/`, `tests/teapie/`)**
+
+| File | Responsibility |
+|---|---|
+| `src/MMLib.Alvo.Host/Dockerfile` | Multi-stage SDK → `aspnet:10.0-alpine` runtime, non-root, port 8080. |
+| `.dockerignore` | Keeps `bin`/`obj`/`.git` out of the build context. |
+| `docker-compose.yml` | `alvo` + `postgres:16-alpine`, descriptor mounted at `/alvo/descriptor.json`, healthcheck on `/health/live`. |
+| `tests/teapie/env.json` | The `compose` environment (base URL, the dev key). |
+| `tests/teapie/**/*.http`, `*-test.csx` | The black-box suite over the running stack. |
+| `scripts/test-e2e` | Bring the stack up, run `teapie test`, tear down, always dump logs on failure. |
+| `.github/workflows/ci.yml` | The new `e2e` job, wired into the existing `Build & test` required gate. |
+
+**Modified — the core (`src/MMLib.Alvo/`)**
+
+| File | Change |
+|---|---|
+| `Migrations/AlvoDescriptorApplyExtensions.cs` (new) | The public code-first apply seam a host outside the assembly can call. |
+| `Api/AlvoProblemTypes.cs` | `Internal` slug + `All` entry (#119). |
+| `Api/AlvoProblemDetailsExtensions.cs` (new) | `AddAlvoProblemDetails()` — the opt-in registration of the handler (#119). |
+| `Api/Internal/AlvoExceptionHandler.cs` (new) | Logs, then renders `alvo.dev/errors/internal` (#119). |
+| `Api/Internal/ProblemResultFactory.cs` | `Internal(string detail)` entry point (#119). |
+| `Api/Internal/DataApiEndpoints.cs:905-924` | `RecordResult` prefixes `HttpRequest.PathBase` onto `Location` (#121). |
+| `Api/Internal/AlvoDocumentTransformer.cs` | A `servers` entry carrying the request's path base (#121). |
+
+**Modified — docs**
+
+`docs/architecture/package-boundary.md` (Task 2) · `docs/architecture/host.md` (new, Task 2, extended by 3–7) · `docs/architecture/data-api.md` (Tasks 3, 4 — retire the "known gap, for PR4" notes) · the design doc's *Deviations added by PR4* + `docs/PLAN.md` (Task 8).
+
+---
+
+### Task 1: The core gains the one public seam a host outside its assembly needs to apply a descriptor
+
+`SchemaMigrationRunner` is `internal sealed` and no public surface exposes it — `src/MMLib.Alvo/Properties/AssemblyInfo.cs` says so in as many words: *"it needs two internals that no public surface exposes: SchemaMigrationRunner (the code-first apply…)"*. `MMLib.Alvo.Host` is a **separate assembly** with no `InternalsVisibleTo` grant and must never get one (`AlvoDataSeed`'s remarks explain why an unsigned grant is forgeable). So without this task PR4 cannot exist at all: the Host can register Alvo and map routes, but `MapAlvoDataApi` reads route literals off the *applied* schema and would map nothing.
+
+**Files:**
+- Create: `src/MMLib.Alvo/Migrations/AlvoDescriptorApplyExtensions.cs`
+- Modify: `test/MMLib.Alvo.Data.Sqlite.Tests/AddAlvoIntegrationTests.cs` (add two facts; leave the existing three untouched)
+- Modify: `test/MMLib.Alvo.Tests/PublicApi.MMLib.Alvo.verified.txt` (baseline moves — the snapshot-judge gate will fire)
+- Modify: `docs/architecture/extensibility.md` (rule 4's verb taxonomy gains `Apply{Thing}`)
+
+**Interfaces:**
+- Consumes: `internal sealed class MMLib.Alvo.Migrations.SchemaMigrationRunner` with `public async Task<MigrationResult> RunAsync(MigrationOptions options, CancellationToken ct = default)`; registered by `AddAlvo` as `services.TryAddSingleton<SchemaMigrationRunner>()`. `public sealed record MigrationOptions { bool AllowDestructive; bool DryRun; string? Author; string? Reason; }` and `public sealed record MigrationResult(bool Applied, MigrationPlan Plan, bool WasDryRun)`, both in namespace `MMLib.Alvo.Migrations` (declared in `Abstractions`).
+- Produces: `public static Task<MigrationResult> Microsoft.Extensions.DependencyInjection.AlvoDescriptorApplyExtensions.ApplyAlvoDescriptorAsync(this IServiceProvider services, MigrationOptions? options = null, CancellationToken ct = default)`. Task 2's `AlvoHost.Build` is its only in-repo production caller.
+
+- [ ] **Step 1: Write the failing facts**
+
+Append to `test/MMLib.Alvo.Data.Sqlite.Tests/AddAlvoIntegrationTests.cs`, inside the existing class:
+
+```csharp
+    /// <summary>
+    /// The apply seam a host in another assembly actually has. <c>SchemaMigrationRunner</c> is
+    /// <see langword="internal"/> to the core, so <c>MMLib.Alvo.Host</c> cannot resolve it — this extension is
+    /// the whole reason a standalone host can bring a descriptor up, and it is asserted through the physical
+    /// tables it produced rather than through the result flag alone.
+    /// </summary>
+    [Fact]
+    public async Task The_public_apply_extension_creates_the_descriptors_tables()
+    {
+        var services = new ServiceCollection();
+        services.AddAlvo(alvo => alvo
+            .UseSqlite($"Data Source={_databasePath}")
+            .FromDescriptor(VehicleRegistryDescriptorPath()));
+
+        using var sp = services.BuildServiceProvider();
+
+        var result = await sp.ApplyAlvoDescriptorAsync(ct: TestContext.Current.CancellationToken);
+
+        result.Applied.ShouldBeTrue("a host that cannot apply maps no route at all");
+        result.WasDryRun.ShouldBeFalse();
+
+        var introspected = await sp.GetRequiredService<ISchemaIntrospector>()
+            .IntrospectAsync(TestContext.Current.CancellationToken);
+        introspected.Entities.Select(entity => entity.Name)
+            .ShouldContain("vehicles", "the descriptor's entities must exist as real tables, not merely validate");
+    }
+
+    /// <summary>
+    /// The options argument reaches the runner. Without this the parameter could be dropped and every
+    /// existing fact would stay green, because they all pass the default.
+    /// </summary>
+    [Fact]
+    public async Task The_public_apply_extension_honours_a_dry_run()
+    {
+        var services = new ServiceCollection();
+        services.AddAlvo(alvo => alvo
+            .UseSqlite($"Data Source={_databasePath}")
+            .FromDescriptor(VehicleRegistryDescriptorPath()));
+
+        using var sp = services.BuildServiceProvider();
+
+        var result = await sp.ApplyAlvoDescriptorAsync(
+            new MigrationOptions { DryRun = true }, TestContext.Current.CancellationToken);
+
+        result.WasDryRun.ShouldBeTrue();
+
+        var introspected = await sp.GetRequiredService<ISchemaIntrospector>()
+            .IntrospectAsync(TestContext.Current.CancellationToken);
+        introspected.Entities.ShouldBeEmpty("a dry run must plan and write nothing");
+    }
+```
+
+Add the path helper beside the file's existing `DescriptorPath()` helper (read that method first and mirror its `RepositoryRoot.Find()` usage exactly):
+
+```csharp
+    private static string VehicleRegistryDescriptorPath() =>
+        Path.Combine(RepositoryRoot.Find(), "examples", "vehicle-registry", "vehicles.alvo.json");
+```
+
+> If `AddAlvoIntegrationTests` already resolves the vehicle-registry path in its third fact, reuse that helper instead of adding a second one — two spellings of one path is the duplication this repo's reviews reject.
+
+*Discrimination:* `The_public_apply_extension_creates_the_descriptors_tables` fails if the extension returns `MigrationResult(false, …)`, swallows the call, or resolves a different runner — the introspection assertion cannot be satisfied without real DDL. `The_public_apply_extension_honours_a_dry_run` fails if the `options` parameter is ignored.
+
+- [ ] **Step 2: Run the facts and watch them fail to compile**
+
+```bash
+dotnet build MMLib.Alvo.slnx
+```
+
+Expected: `CS1061 'IServiceProvider' does not contain a definition for 'ApplyAlvoDescriptorAsync'`.
+
+- [ ] **Step 3: Write the extension**
+
+Create `src/MMLib.Alvo/Migrations/AlvoDescriptorApplyExtensions.cs`:
+
+```csharp
+using MMLib.Alvo.Migrations;
+
+namespace Microsoft.Extensions.DependencyInjection;
+
+/// <summary>
+/// The code-first apply, as the one public operation a host performs on a built container.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The orchestrator itself (<c>SchemaMigrationRunner</c>) is deliberately <see langword="internal"/>: it
+/// takes six collaborators, and publishing it would freeze that constructor as a contract. What a host
+/// genuinely needs is one verb — <em>bring the configured descriptor up</em> — so that is what is public.
+/// </para>
+/// <para>
+/// <b>Call it before mapping endpoints.</b> <c>MapAlvoDataApi</c> reads entity-name literals off the applied
+/// schema, so a host that maps first maps nothing at all. It is also what primes the policy catalog, and an
+/// unprimed catalog denies every operation (fail-closed) — see <c>RuntimeSchemaService</c>'s remarks.
+/// </para>
+/// <para>
+/// A new verb in <c>docs/architecture/extensibility.md</c>'s taxonomy: <c>Apply{Thing}</c> is a runtime
+/// operation on a built provider, not a registration, so none of <c>Use</c>/<c>Add</c>/<c>Enable</c>/<c>From</c>
+/// fits it. It takes <see cref="IServiceProvider"/> rather than <c>IHost</c> so a plain console host, a
+/// scope and a <c>WebApplication</c> all reach it through the same member.
+/// </para>
+/// </remarks>
+public static class AlvoDescriptorApplyExtensions
+{
+    /// <summary>Applies the configured project descriptor, creating or migrating the schema it declares.</summary>
+    /// <param name="services">A built service provider Alvo was registered in.</param>
+    /// <param name="options">How to apply — destructive changes, dry run, audit provenance. Defaults to <see cref="MigrationOptions"/>'s own defaults.</param>
+    /// <param name="ct">Cancels the apply.</param>
+    /// <returns>What was planned and whether it was applied.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="services"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">Alvo is not registered in <paramref name="services"/>.</exception>
+    public static Task<MigrationResult> ApplyAlvoDescriptorAsync(
+        this IServiceProvider services,
+        MigrationOptions? options = null,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        return services.GetRequiredService<SchemaMigrationRunner>()
+            .RunAsync(options ?? new MigrationOptions(), ct);
+    }
+}
+```
+
+- [ ] **Step 4: Run the two new facts and watch them pass**
+
+```bash
+dotnet test --project test/MMLib.Alvo.Data.Sqlite.Tests/MMLib.Alvo.Data.Sqlite.Tests.csproj --filter-method '*The_public_apply_extension*'
+```
+
+Expected: PASS, 2 tests.
+
+- [ ] **Step 5: Accept the public-API baseline move**
+
+```bash
+scripts/test-ring0
+```
+
+Expected: `PublicApiApprovalTests.Public_api_has_not_changed` FAILS for `MMLib.Alvo` with a diff adding
+
+```text
+    public static class AlvoDescriptorApplyExtensions
+    {
+        public static System.Threading.Tasks.Task<MMLib.Alvo.Migrations.MigrationResult> ApplyAlvoDescriptorAsync(this System.IServiceProvider services, MMLib.Alvo.Migrations.MigrationOptions? options = null, System.Threading.CancellationToken ct = default) { }
+    }
+```
+
+Copy `test/MMLib.Alvo.Tests/PublicApi.MMLib.Alvo.received.txt` over `PublicApi.MMLib.Alvo.verified.txt`, then re-run `scripts/test-ring0` — green. The Stop hook will require `alvo-snapshot-judge`; the justification to give it is *"the plan's Task 1 adds one deliberate public member; the Host cannot apply a descriptor without it."*
+
+- [ ] **Step 6: Record the new verb**
+
+In `docs/architecture/extensibility.md`, rule 4's list, after the `From{Source}` bullet:
+
+```markdown
+   - `Apply{Thing}` — a runtime operation on a built container, not a registration
+     (`ApplyAlvoDescriptorAsync` on `IServiceProvider`). Added in PR4 because a host
+     outside the core assembly cannot reach the `internal` migration orchestrator, and
+     the operation is not a registration so no existing verb fits it.
+```
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src/MMLib.Alvo/Migrations/AlvoDescriptorApplyExtensions.cs \
+        test/MMLib.Alvo.Data.Sqlite.Tests/AddAlvoIntegrationTests.cs \
+        test/MMLib.Alvo.Tests/PublicApi.MMLib.Alvo.verified.txt \
+        docs/architecture/extensibility.md
+git commit -m "feat(core): let a host outside the assembly apply the descriptor"
+```
