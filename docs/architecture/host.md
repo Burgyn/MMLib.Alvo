@@ -211,11 +211,11 @@ container never reports healthy, and `docker compose up --wait` exits non-zero. 
 and stays; what an operator sees is not — an unhandled `FileNotFoundException` and a 139 exit, filed as
 **#132** against #24, because a mis-typed mount is the likeliest way a first `docker run` goes wrong.
 
-Two things the mutations turned up that are not about the stack. Mounting `simple-tasks` answers **401** on
-`/api/tasks` with the same dev key that works against `vehicle-registry`: the key names `admin` and
-`inspector`, that descriptor declares no `auth.roles`, and one undeclared role name fails the whole
-credential — **#131**. And a suite of only 201/200 assertions would pass under the SQLite mutation, which is
-why the row count exists at all.
+One thing the mutations turned up that is not about the stack at all: mounting `simple-tasks` answers **401**
+on `/api/tasks` with the same dev key that works against `vehicle-registry`. The key names `admin` and
+`inspector`, that descriptor declares no `auth.roles`, and `ApiKeyContextResolver` fails the **whole**
+credential as soon as one role name is undeclared — with no diagnostic anywhere. Filed as **#131**; it is a
+framework DX gap the compose stack merely happened to expose.
 
 These are now run unattended rather than by hand — see *The e2e, and which ring it is in*.
 
