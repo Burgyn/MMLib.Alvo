@@ -27,7 +27,8 @@ one that fails to start.
 
 The framework's options (`AlvoOptions`, `AlvoApiOptions`, `AlvoAuthOptions`) are bound from
 `Alvo:*`, `Alvo:Api:*` and `Alvo:Auth:*`; the host's own decisions live in
-`AlvoHostOptions` (`Alvo:DescriptorPath`, `Alvo:Database:*`, `Alvo:PathBase`, `Alvo:Docs:*`).
+`AlvoHostOptions` (`Alvo:DescriptorPath`, `Alvo:Database:*`, `Alvo:PathBase`,
+`Alvo:ForwardedHeaders:Enabled`, `Alvo:Docs:*`).
 The container form is the standard .NET double-underscore spelling
 (`Alvo__Database__Provider`), not the `ALVO_*` names spec §X.1 sketches — see the design's
 *Deviations added by PR4*.
@@ -53,6 +54,30 @@ default-deny policy as any other (deviation 23). Two facts hold that line: an an
 and the host's own `appsettings.json` is asserted to declare no `Alvo:Auth` section — the
 realistic way a preset login reaches an operator is a dev key added there for convenience,
 which no runtime fact can tell apart from one the deployment configured.
+
+## Behind a reverse proxy
+
+`Alvo:PathBase` calls `UsePathBase`; `Alvo:ForwardedHeaders:Enabled` calls `UseForwardedHeaders` with
+`XForwardedFor|Proto|Host|Prefix` and cleared `KnownIPNetworks`/`KnownProxies`. Both run after
+`UseExceptionHandler` and before the mapping, because both decide the request's `PathBase` and that is the URL
+a 201's `Location` advertises (#121). `KnownIPNetworks`, not the obsolete `KnownNetworks` — the latter is
+`ASPDEPR005` on .NET 10 and this repository builds warnings as errors. Both lists are cleared because a
+container cannot know its proxy's address, and their IPv6-loopback defaults would drop every header an ingress
+or a sidecar sends. Both `Clear()` calls are individually measured: leaving either one in place fails
+`A_trusted_proxys_forwarded_prefix_becomes_the_path_base`, which is why the host's test world stamps a routable
+`RemoteIpAddress` onto the connection — TestServer leaves it unset, and `ForwardedHeadersMiddleware` skips its
+known-address check entirely for a remote address it does not know.
+
+**Forwarded headers are off by default**, and that is a security decision rather than a conservative one:
+`X-Forwarded-Prefix` chooses the URL a 201 advertises, so an untrusted caller honoured by default would choose
+where the next client is sent. `An_untrusted_forwarded_prefix_is_ignored` is the fact that holds it.
+
+**There is deliberately no explicit `UseRouting()`.** The widely cited rule — Microsoft Learn still states it —
+that `WebApplication` needs `UseRouting` *after* `UsePathBase`, or routes match before the path is rewritten,
+no longer holds: `UsePathBaseMiddleware` re-runs matching over the rewritten path itself. Measured under this
+runtime, not assumed: a probe answers 200 for `UsePathBase` and 404 for the same rewrite performed by hand, and
+removing the call from the pipeline leaves every path-base fact green. `UseForwardedHeaders` does not touch
+`Path` at all, so it never raised the question.
 
 ## Health
 

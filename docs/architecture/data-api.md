@@ -426,6 +426,26 @@ not a nicety**. It is ignored rather than refused because refusing would break t
 that are perfectly serviceable. Honouring it needs a third widening of `IAlvoData` plus a stored
 *replayable result* for an update. Tracked in **#102**.
 
+## A 201's `Location` carries the request's path base (#121)
+
+A `Location` is the request's `PathBase` plus the mapped route, written in one place
+(`RecordResult.ExecuteAsync`) — which is also the only place any `Location` is written, so the ordinary 201
+and the idempotent replay (deviation 30) are fixed by the same line. The template a route was mapped with
+carries no path base, so a create behind `app.UsePathBase(...)`, or behind a proxy that sets
+`X-Forwarded-Prefix` and a host told to trust it, used to answer a URL that 404s **at that proxy**.
+
+Where the 404 happens is worth stating, because it shapes what a test of this can claim. In-process the host
+answers both URLs: `UsePathBase` *strips* a prefix when the request carries one rather than requiring one, so
+following a prefix-less `Location` against the host itself still reaches the row. The failure is at the edge,
+which the host never sees. `PathBaseTests` therefore pins the header **whole** rather than by prefix, and
+`AlvoHostPathBaseTests` follows the forwarded-prefix case through a model of the proxy that produced it.
+
+The **OpenAPI document's path keys still have the original shape** — a document served under a path base
+declares no `servers` entry, so a client resolving its paths against `/` is wrong by the same prefix. That is
+deliberately not fixed here: `OpenApiDocumentTransformerContext` carries no `HttpContext` and the document is
+cached per document name, so a request-derived `servers` entry is a decision about whether Alvo's document is
+per-request at all. Filed as **#130**.
+
 ## The status and `type`-slug catalogue
 
 Problem documents are RFC 9457, media type `application/problem+json`, with an Alvo `violations` array.
@@ -434,7 +454,7 @@ Every `type` is `https://alvo.dev/errors/<slug>`; the nine slugs are `AlvoProble
 | Status | Slug | Means |
 |---|---|---|
 | 200 | — | the row, the page, or the row as it now stands |
-| 201 | — | created; `Location` and the row |
+| 201 | — | created; `Location` (see below) and the row |
 | 204 | — | deleted, no body |
 | 304 | — | `If-None-Match` covers the current version (read-one of an audited entity only) |
 | 401 | `unauthenticated` | a credential **was** presented and cannot be used |
