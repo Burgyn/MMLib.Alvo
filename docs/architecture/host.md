@@ -206,7 +206,7 @@ These are now run unattended rather than by hand — see *The e2e, and which rin
 ## The e2e, and which ring it is in
 
 **None.** `scripts/test-e2e` tears any previous stack down, builds the image, brings the compose stack up
-with a 60-second budget, runs `teapie test tests/teapie -e compose`, asserts the row TeaPie created is in
+with a 60-second budget, runs `teapie test test/teapie -e compose`, asserts the row TeaPie created is in
 PostgreSQL, writes a JUnit report to `artifacts/teapie/report.xml`, dumps container logs on failure and always
 tears down. CI runs it as the `e2e` job, which the `Build & test` aggregate depends on — so it is a required
 check without touching the branch ruleset.
@@ -218,7 +218,7 @@ design's testing table already places the full e2e at "CI on the PR, never local
 
 The credential is generated per run (`openssl rand -hex 16`) into `ALVO_DEMO_KEY_SECRET` and into the
 generated `artifacts/teapie/env.json`, so the stack's secret and TeaPie's have one source and neither is
-committed. `tests/teapie/env.example.json` is the secret-free shape a human copies to run the suite by hand.
+committed. `test/teapie/env.example.json` is the secret-free shape a human copies to run the suite by hand.
 
 ### What the suite proves, and what it cannot
 

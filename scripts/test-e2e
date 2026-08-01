@@ -61,11 +61,11 @@ start_the_stack() {
 }
 
 run_the_suite() {
-  echo "[e2e] teapie test tests/teapie -e compose"
+  echo "[e2e] teapie test test/teapie -e compose"
   dotnet tool restore
   # --no-cache-vars: TeaPie caches collection variables between runs, so a stale OwnerId from an
   # earlier run would let 002-follow-location pass on a stack that never answered a 201.
-  dotnet tool run teapie -- test tests/teapie \
+  dotnet tool run teapie -- test test/teapie \
     -e compose \
     --env-file "$ENV_FILE" \
     -r "$REPORT_FILE" \

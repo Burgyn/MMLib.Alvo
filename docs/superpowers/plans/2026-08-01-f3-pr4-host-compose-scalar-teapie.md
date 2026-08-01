@@ -99,15 +99,15 @@ Locked before the tasks, because the decomposition decisions live here.
 | `PublicApi.MMLib.Alvo.Host.verified.txt` | The Host's public surface, under approval like every other assembly's. |
 | `descriptors/host-boot.alvo.json` | A descriptor with exactly one entity, whose name appears nowhere else in the repo — so "the descriptor drove it" is falsifiable. |
 
-**New — the container and the e2e (repository root, `src/MMLib.Alvo.Host/`, `tests/teapie/`)**
+**New — the container and the e2e (repository root, `src/MMLib.Alvo.Host/`, `test/teapie/`)**
 
 | File | Responsibility |
 |---|---|
 | `src/MMLib.Alvo.Host/Dockerfile` | Multi-stage SDK → `aspnet:10.0-alpine` runtime, non-root, port 8080. |
 | `.dockerignore` | Keeps `bin`/`obj`/`.git` out of the build context. |
 | `docker-compose.yml` | `alvo` + `postgres:16-alpine`, descriptor mounted at `/alvo/descriptor.json`, healthcheck on `/health/live`. |
-| `tests/teapie/env.example.json` | The environment's shape, secret-free, for a human running the suite by hand. The real one is generated per run into `artifacts/teapie/env.json` (gitignored) so the stack's credential and TeaPie's have exactly one source. |
-| `tests/teapie/**/*.http`, `*-test.csx` | The black-box suite over the running stack. |
+| `test/teapie/env.example.json` | The environment's shape, secret-free, for a human running the suite by hand. The real one is generated per run into `artifacts/teapie/env.json` (gitignored) so the stack's credential and TeaPie's have exactly one source. |
+| `test/teapie/**/*.http`, `*-test.csx` | The black-box suite over the running stack. |
 | `scripts/test-e2e` | Bring the stack up, run `teapie test`, tear down, always dump logs on failure. In **no ring** — see Task 7. |
 | `.github/workflows/ci.yml` | The new `e2e` job, wired into the existing `Build & test` required gate. |
 
@@ -2615,7 +2615,7 @@ The second half of PR4's DoD, and #19's last clause. The maintainer's standing i
 **Ring decision, stated explicitly: the compose/TeaPie e2e is in NO ring.** It gets `scripts/test-e2e`, invoked by a new CI job, and is wired into the existing required check. Reasons: the design's own testing table puts "full (+ e2e)" at *"CI on the PR"* and *"never run locally"*; `scripts/test-ring2`'s Docker use is Testcontainers — one image, self-skipping when there is no daemon — whereas this needs an **image build** plus a multi-service stack, which would take ring2 from ~2 minutes to many and make the pre-PR gate something an agent works around; and ring0 must stay Docker-free by its own script comment. `scripts/test-e2e` exists so a human *can* run it deliberately, not because a ring does.
 
 **Files:**
-- Create: `tests/teapie/env.example.json`, `tests/teapie/001-Health/001-liveness-req.http`, `tests/teapie/002-Owners/001-create-owner-req.http`, `002-Owners/001-create-owner-test.csx`, `002-Owners/002-follow-location-req.http`, `002-Owners/002-follow-location-test.csx`, `002-Owners/003-list-owners-req.http`, `002-Owners/003-list-owners-test.csx`, `003-Descriptor/001-undeclared-entity-req.http`, `003-Descriptor/002-validation-req.http`, `003-Descriptor/002-validation-test.csx`, `004-Docs/001-openapi-document-req.http`, `004-Docs/001-openapi-document-test.csx`, `004-Docs/002-scalar-req.http`, `005-Auth/001-anonymous-is-refused-req.http`
+- Create: `test/teapie/env.example.json`, `test/teapie/001-Health/001-liveness-req.http`, `test/teapie/002-Owners/001-create-owner-req.http`, `002-Owners/001-create-owner-test.csx`, `002-Owners/002-follow-location-req.http`, `002-Owners/002-follow-location-test.csx`, `002-Owners/003-list-owners-req.http`, `002-Owners/003-list-owners-test.csx`, `003-Descriptor/001-undeclared-entity-req.http`, `003-Descriptor/002-validation-req.http`, `003-Descriptor/002-validation-test.csx`, `004-Docs/001-openapi-document-req.http`, `004-Docs/001-openapi-document-test.csx`, `004-Docs/002-scalar-req.http`, `005-Auth/001-anonymous-is-refused-req.http`
 - Create: `scripts/test-e2e`
 - Modify: `.github/workflows/ci.yml`, `scripts/test-ring2` (a comment only), `docs/architecture/host.md`
 
@@ -2625,7 +2625,7 @@ The second half of PR4's DoD, and #19's last clause. The maintainer's standing i
 
 - [ ] **Step 1: Write the TeaPie collection**
 
-`tests/teapie/env.example.json` — the shape a human copies to `env.json` to run the suite by hand. The committed file carries **no secret**, and `scripts/test-e2e` generates the real one per run:
+`test/teapie/env.example.json` — the shape a human copies to `env.json` to run the suite by hand. The committed file carries **no secret**, and `scripts/test-e2e` generates the real one per run:
 
 ```json
 {
@@ -2639,7 +2639,7 @@ The second half of PR4's DoD, and #19's last clause. The maintainer's standing i
 }
 ```
 
-`tests/teapie/001-Health/001-liveness-req.http`:
+`test/teapie/001-Health/001-liveness-req.http`:
 
 ```http
 ### Liveness answers without a credential, and answering proves the descriptor applied
@@ -2648,7 +2648,7 @@ The second half of PR4's DoD, and #19's last clause. The maintainer's standing i
 GET {{baseUrl}}/health/live
 ```
 
-`tests/teapie/002-Owners/001-create-owner-req.http`:
+`test/teapie/002-Owners/001-create-owner-req.http`:
 
 ```http
 ### Create an owner in the entity only the mounted descriptor declares
@@ -2665,7 +2665,7 @@ Content-Type: application/json
 }
 ```
 
-`tests/teapie/002-Owners/001-create-owner-test.csx`:
+`test/teapie/002-Owners/001-create-owner-test.csx`:
 
 ```csharp
 await tp.Test("The created owner carries a server-assigned id and the name we sent.", async () =>
@@ -2685,7 +2685,7 @@ tp.Test("The 201 carries an ETag, so a conditional write is possible without a r
 });
 ```
 
-`tests/teapie/002-Owners/002-follow-location-req.http` — #121's acceptance as a black-box step:
+`test/teapie/002-Owners/002-follow-location-req.http` — #121's acceptance as a black-box step:
 
 ```http
 ### Following the 201's Location reaches the row
@@ -2695,7 +2695,7 @@ GET {{baseUrl}}{{OwnerLocation}}
 X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
 ```
 
-`tests/teapie/002-Owners/002-follow-location-test.csx`:
+`test/teapie/002-Owners/002-follow-location-test.csx`:
 
 ```csharp
 await tp.Test("The row Location points at is the row we created.", async () =>
@@ -2706,7 +2706,7 @@ await tp.Test("The row Location points at is the row we created.", async () =>
 });
 ```
 
-`tests/teapie/002-Owners/003-list-owners-req.http`:
+`test/teapie/002-Owners/003-list-owners-req.http`:
 
 ```http
 ### The list is a paged envelope, and it contains what we created
@@ -2716,7 +2716,7 @@ GET {{baseUrl}}/api/owners?limit=50&order=name.asc
 X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
 ```
 
-`tests/teapie/002-Owners/003-list-owners-test.csx`:
+`test/teapie/002-Owners/003-list-owners-test.csx`:
 
 ```csharp
 await tp.Test("The list answers Alvo's envelope, not a bare array.", async () =>
@@ -2730,7 +2730,7 @@ await tp.Test("The list answers Alvo's envelope, not a bare array.", async () =>
 
 > `order=name.asc` and `limit=` are PostgREST-shaped, which is what PR3 implemented. If a step 400s or 422s, read the real spelling out of `docs/architecture/data-api.md`'s query section rather than guessing — the document at `/openapi/v1.json` also lists every parameter the endpoint accepts.
 
-`tests/teapie/003-Descriptor/001-undeclared-entity-req.http` — the fact that separates "compose came up" from "the descriptor drove it":
+`test/teapie/003-Descriptor/001-undeclared-entity-req.http` — the fact that separates "compose came up" from "the descriptor drove it":
 
 ```http
 ### An entity the mounted descriptor does not declare has no route
@@ -2740,7 +2740,7 @@ GET {{baseUrl}}/api/warehouses
 X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
 ```
 
-`tests/teapie/003-Descriptor/002-validation-req.http`:
+`test/teapie/003-Descriptor/002-validation-req.http`:
 
 ```http
 ### Validation comes from the descriptor's own maxLength, and reports every violation
@@ -2756,7 +2756,7 @@ Content-Type: application/json
 }
 ```
 
-`tests/teapie/003-Descriptor/002-validation-test.csx`:
+`test/teapie/003-Descriptor/002-validation-test.csx`:
 
 ```csharp
 await tp.Test("The refusal is an Alvo problem document naming every field at fault.", async () =>
@@ -2771,7 +2771,7 @@ await tp.Test("The refusal is an Alvo problem document naming every field at fau
 });
 ```
 
-`tests/teapie/004-Docs/001-openapi-document-req.http`:
+`test/teapie/004-Docs/001-openapi-document-req.http`:
 
 ```http
 ### The document describes the routes the mounted descriptor generated
@@ -2780,7 +2780,7 @@ await tp.Test("The refusal is an Alvo problem document naming every field at fau
 GET {{baseUrl}}/openapi/v1.json
 ```
 
-`tests/teapie/004-Docs/001-openapi-document-test.csx`:
+`test/teapie/004-Docs/001-openapi-document-test.csx`:
 
 ```csharp
 await tp.Test("The document is OpenAPI 3.1 and describes this descriptor's entities.", async () =>
@@ -2795,7 +2795,7 @@ await tp.Test("The document is OpenAPI 3.1 and describes this descriptor's entit
 });
 ```
 
-`tests/teapie/004-Docs/002-scalar-req.http`:
+`test/teapie/004-Docs/002-scalar-req.http`:
 
 ```http
 ### Scalar renders the document
@@ -2805,7 +2805,7 @@ await tp.Test("The document is OpenAPI 3.1 and describes this descriptor's entit
 GET {{baseUrl}}/scalar
 ```
 
-`tests/teapie/005-Auth/001-anonymous-is-refused-req.http`:
+`test/teapie/005-Auth/001-anonymous-is-refused-req.http`:
 
 ```http
 ### An anonymous caller is judged by the descriptor's default-deny, not waved through
@@ -2866,9 +2866,9 @@ trap teardown EXIT
 echo "[e2e] docker compose up --build --wait (60s budget, from baas-analyza.md §2.14)"
 docker compose up --build --detach --wait --wait-timeout 60
 
-echo "[e2e] teapie test tests/teapie -e compose"
+echo "[e2e] teapie test test/teapie -e compose"
 dotnet tool restore
-dotnet tool run teapie -- test tests/teapie \
+dotnet tool run teapie -- test test/teapie \
   -e compose \
   --env-file "$ENV_FILE" \
   -r "$REPORT_DIR/report.xml" \
@@ -2898,10 +2898,10 @@ Expected: `[e2e] OK`, and `artifacts/teapie/report.xml` exists with every test c
 
 ```bash
 docker compose build alvo >/dev/null
-sed -i.bak 's|/api/warehouses|/api/owners|' tests/teapie/003-Descriptor/001-undeclared-entity-req.http
+sed -i.bak 's|/api/warehouses|/api/owners|' test/teapie/003-Descriptor/001-undeclared-entity-req.http
 scripts/test-e2e; echo "exit=$?"
-mv tests/teapie/003-Descriptor/001-undeclared-entity-req.http.bak \
-   tests/teapie/003-Descriptor/001-undeclared-entity-req.http
+mv test/teapie/003-Descriptor/001-undeclared-entity-req.http.bak \
+   test/teapie/003-Descriptor/001-undeclared-entity-req.http
 ```
 
 Expected: a **non-zero** exit (TeaPie answers `2` for "some tests failed"), the container logs dumped, and the stack torn down. If the exit code is `0`, the script is not a gate — fix it before continuing, because CI would inherit the same blindness.
@@ -2978,7 +2978,7 @@ Add to `docs/architecture/host.md`:
 ## The e2e, and which ring it is in
 
 **None.** `scripts/test-e2e` builds the image, brings the compose stack up with a 60-second budget, runs
-`teapie test tests/teapie -e compose`, writes a JUnit report to `artifacts/teapie/report.xml`, dumps container
+`teapie test test/teapie -e compose`, writes a JUnit report to `artifacts/teapie/report.xml`, dumps container
 logs on failure and always tears down. CI runs it as the `e2e` job, which the `Build & test` aggregate depends
 on — so it is a required check without touching the branch ruleset.
 
@@ -2996,7 +2996,7 @@ project's descriptor) 404s, in the API and in the document.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add tests/teapie scripts/test-e2e scripts/test-ring2 .github/workflows/ci.yml \
+git add test/teapie scripts/test-e2e scripts/test-ring2 .github/workflows/ci.yml \
         docs/architecture/host.md
 git commit -m "test(e2e): drive the compose stack with TeaPie from CI (#19)"
 ```
