@@ -34,7 +34,7 @@ public sealed class AlvoHostForwardedHeadersOptions
     /// <b>Off by default, and that is a security decision rather than a conservative default.</b>
     /// <c>X-Forwarded-Prefix</c> decides the URL the host advertises in a 201's <c>Location</c>, so honouring it
     /// from an untrusted caller lets that caller choose where a client is sent next. Turning it on also clears
-    /// <c>KnownNetworks</c> and <c>KnownProxies</c>, because a container cannot know its proxy's address — which
+    /// <c>KnownIPNetworks</c> and <c>KnownProxies</c>, because a container cannot know its proxy's address — which
     /// is exactly why the switch is explicit: it says "something in front of me strips these", and only an
     /// operator knows that.
     /// </remarks>
