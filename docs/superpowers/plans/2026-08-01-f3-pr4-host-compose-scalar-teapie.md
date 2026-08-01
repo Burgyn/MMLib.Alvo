@@ -99,16 +99,16 @@ Locked before the tasks, because the decomposition decisions live here.
 | `PublicApi.MMLib.Alvo.Host.verified.txt` | The Host's public surface, under approval like every other assembly's. |
 | `descriptors/host-boot.alvo.json` | A descriptor with exactly one entity, whose name appears nowhere else in the repo — so "the descriptor drove it" is falsifiable. |
 
-**New — the container and the e2e (repo root and `deploy/`, `tests/teapie/`)**
+**New — the container and the e2e (repository root, `src/MMLib.Alvo.Host/`, `tests/teapie/`)**
 
 | File | Responsibility |
 |---|---|
 | `src/MMLib.Alvo.Host/Dockerfile` | Multi-stage SDK → `aspnet:10.0-alpine` runtime, non-root, port 8080. |
 | `.dockerignore` | Keeps `bin`/`obj`/`.git` out of the build context. |
 | `docker-compose.yml` | `alvo` + `postgres:16-alpine`, descriptor mounted at `/alvo/descriptor.json`, healthcheck on `/health/live`. |
-| `tests/teapie/env.json` | The `compose` environment (base URL, the dev key). |
+| `tests/teapie/env.example.json` | The environment's shape, secret-free, for a human running the suite by hand. The real one is generated per run into `artifacts/teapie/env.json` (gitignored) so the stack's credential and TeaPie's have exactly one source. |
 | `tests/teapie/**/*.http`, `*-test.csx` | The black-box suite over the running stack. |
-| `scripts/test-e2e` | Bring the stack up, run `teapie test`, tear down, always dump logs on failure. |
+| `scripts/test-e2e` | Bring the stack up, run `teapie test`, tear down, always dump logs on failure. In **no ring** — see Task 7. |
 | `.github/workflows/ci.yml` | The new `e2e` job, wired into the existing `Build & test` required gate. |
 
 **Modified — the core (`src/MMLib.Alvo/`)**
