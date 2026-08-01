@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    The standalone host (spec §2.14 mode 1, §X.1). Not packable: it is distributed as the
+    `mmlib/alvo` container image, not as a NuGet package, so a .nupkg of an entry point would
+    publish a surface no consumer references. package-boundary.md records the project and the
+    rule that earns it.
+  -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <UserSecretsId>mmlib-alvo-host</UserSecretsId>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../MMLib.Alvo/MMLib.Alvo.csproj" />
+    <!-- Both drivers ship in the image: SQLite is the zero-configuration default the deployment
+         acceptance criterion names, PostgreSQL is what docker-compose runs. Exactly one is
+         *registered*, chosen by configuration in AlvoDatabaseSelector. -->
+    <ProjectReference Include="../MMLib.Alvo.Data.Sqlite/MMLib.Alvo.Data.Sqlite.csproj" />
+    <ProjectReference Include="../MMLib.Alvo.Data.PostgreSql/MMLib.Alvo.Data.PostgreSql.csproj" />
+  </ItemGroup>
+
+</Project>
