@@ -305,7 +305,7 @@ public abstract class AlvoSqlDialectContractTests
     /// keyword from the parameter name it is followed by.
     /// </summary>
     private static int CountOffsetKeywords(string text) =>
-        Regex.Matches(text, @"\bOFFSET\b", RegexOptions.IgnoreCase).Count;
+        Regex.Count(text, @"\bOFFSET\b", RegexOptions.IgnoreCase);
 
     /// <summary>
     /// Every <see cref="CelValueType"/> is answered rather than refused. The renderer is asked for
