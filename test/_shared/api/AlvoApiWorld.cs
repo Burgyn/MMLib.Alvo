@@ -133,6 +133,17 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
             app.UseExceptionHandler();
         }
 
+        // UsePathBase with no explicit UseRouting after it, which is the whole shape an embedded host writes
+        // (#121 quotes it verbatim) and therefore the only shape worth measuring. The widely cited rule that
+        // WebApplication needs UseRouting *after* UsePathBase — Microsoft Learn still states it — no longer
+        // holds: UsePathBaseMiddleware re-runs matching itself, so routing observes the rewritten path.
+        // Measured, not assumed: a probe under this runtime answers 200 for UsePathBase and 404 for the same
+        // rewrite performed by hand, and adding UseRouting here leaves every fact in this suite unchanged.
+        if (setup.PathBase is { } pathBase)
+        {
+            app.UsePathBase(pathBase);
+        }
+
         await ApplyDescriptorAsync(app);
 
         app.MapAlvoDataApi();
@@ -611,6 +622,10 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
 /// Whether <see cref="MMLib.Alvo.Data.IAlvoData"/> is <see cref="FaultingAlvoData"/> instead of the engine's
 /// own store — the only way to reach the port's fifth failure family, which no well-formed request can.
 /// </param>
+/// <param name="PathBase">
+/// The path base the world is served under — <c>app.UsePathBase(...)</c>, the embedded shape #121 names —
+/// or <see langword="null"/> for a host mounted at the root, which is every other fact here.
+/// </param>
 internal sealed record AlvoApiWorldSetup(
     Action<AlvoApiOptions>? ConfigureApi = null,
     string? RevokedKeyId = null,
@@ -618,7 +633,8 @@ internal sealed record AlvoApiWorldSetup(
     bool MapOpenApiDocument = false,
     string? HostInfoDescription = null,
     bool MapAlvoProblemDetails = false,
-    bool FaultingData = false);
+    bool FaultingData = false,
+    string? PathBase = null);
 
 /// <summary>One dev API key a world issues, in the shape a test reads best.</summary>
 /// <param name="KeyId">The key's public identifier.</param>

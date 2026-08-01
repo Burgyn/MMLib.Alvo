@@ -880,7 +880,10 @@ internal static class DataApiEndpoints
     /// created row's field names under a host's <c>DictionaryKeyPolicy</c> while every other path kept
     /// them verbatim.
     /// </remarks>
-    /// <param name="location">The path of the created row.</param>
+    /// <param name="location">
+    /// The created row's path <em>relative to the application</em>. The request's <c>PathBase</c> is prefixed
+    /// where the header is written (<see cref="RecordResult"/>), not here.
+    /// </param>
     /// <param name="record">The created row.</param>
     /// <param name="entity">The entity as the applied schema declares it.</param>
     private static RecordResult Created(string location, AlvoRecord record, EntitySchema entity) =>
@@ -901,7 +904,12 @@ internal static class DataApiEndpoints
     /// <param name="record">The row to write.</param>
     /// <param name="entityTag">The row's entity tag, or <see langword="null"/> when it has no version.</param>
     /// <param name="statusCode">The status to answer with.</param>
-    /// <param name="location">The created row's path, on a 201; <see langword="null"/> otherwise.</param>
+    /// <param name="location">
+    /// The created row's path <em>relative to the application</em>, on a 201; <see langword="null"/> otherwise.
+    /// The request's <c>PathBase</c> is prefixed when the header is written, not here — the route template the
+    /// caller site builds this from does not carry one, so a create behind <c>UsePathBase</c> or behind a proxy
+    /// that sets <c>X-Forwarded-Prefix</c> would otherwise answer a URL that 404s at that proxy (#121).
+    /// </param>
     private sealed class RecordResult(
         AlvoRecord record, string? entityTag, int statusCode, string? location) : IResult
     {
@@ -910,7 +918,7 @@ internal static class DataApiEndpoints
             ArgumentNullException.ThrowIfNull(httpContext);
             if (location is not null)
             {
-                httpContext.Response.Headers.Location = location;
+                httpContext.Response.Headers.Location = httpContext.Request.PathBase.Add(location).Value;
             }
 
             if (entityTag is not null)

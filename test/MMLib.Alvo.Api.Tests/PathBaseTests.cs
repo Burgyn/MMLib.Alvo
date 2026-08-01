@@ -1,0 +1,69 @@
+﻿using System.Net;
+using System.Text.Json.Nodes;
+
+namespace MMLib.Alvo.Api.Tests;
+
+/// <summary>
+/// #121: the created row's <c>Location</c> is built from the mapped route template, which does not carry the
+/// request's <c>PathBase</c> — so behind a path base a client that follows the header gets a 404.
+/// </summary>
+/// <remarks>
+/// Both facts <b>follow the header with a real request</b> rather than comparing it to a string, because that
+/// is what #121's acceptance asks for and because a string comparison passes for a URL that resolves nowhere.
+/// The follow-up runs <em>first</em>, so it is the assertion that fails when the header is wrong; the equality
+/// after it is the shape check a resolving URL can still get wrong — a header carrying the base <em>twice</em>
+/// would 404 and be caught, but one carrying <c>http://localhost/alvo/…</c> would resolve and is not what the
+/// route advertises.
+/// </remarks>
+public class PathBaseTests
+{
+    private static readonly TestApiKey _admin = new("admin-key", ["admin", "authenticated"], ["*:read", "*:write"]);
+
+    /// <summary>The no-path-base leg: the header keeps its current shape, so the fix is additive.</summary>
+    [Fact]
+    public async Task With_no_path_base_a_created_rows_location_is_the_route_itself()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin]);
+
+        var location = await CreateAndReadLocationAsync(world);
+
+        await FollowingItAnswersOkAsync(world, location);
+        location.ShouldBe($"/api/owners/{IdIn(location)}");
+    }
+
+    /// <summary>
+    /// The embedded shape #121 names: <c>app.UsePathBase("/alvo")</c> then <c>app.MapAlvoDataApi()</c>. The row
+    /// really lives under the base, so the header has to say so.
+    /// </summary>
+    [Fact]
+    public async Task Behind_a_path_base_a_created_rows_location_resolves()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync(
+            [_admin], new AlvoApiWorldSetup(PathBase: "/alvo"));
+
+        var location = await CreateAndReadLocationAsync(world, "/alvo/api/owners");
+
+        await FollowingItAnswersOkAsync(world, location);
+        location.ShouldBe($"/alvo/api/owners/{IdIn(location)}");
+    }
+
+    private static async Task<string> CreateAndReadLocationAsync(AlvoApiWorld world, string path = "/api/owners")
+    {
+        using var response = await world.SendAsync(
+            HttpMethod.Post, path, _admin, body: new JsonObject { ["name"] = "Followed Ltd" });
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Created, await response.ReadTextAsync());
+        return response.Headers.Location!.ToString();
+    }
+
+    private static async Task FollowingItAnswersOkAsync(AlvoApiWorld world, string location)
+    {
+        using var followed = await world.SendAsync(HttpMethod.Get, location, _admin);
+
+        followed.StatusCode.ShouldBe(
+            HttpStatusCode.OK,
+            $"a client that follows Location must reach the row; '{location}' did not");
+    }
+
+    private static string IdIn(string location) => location[(location.LastIndexOf('/') + 1)..];
+}
