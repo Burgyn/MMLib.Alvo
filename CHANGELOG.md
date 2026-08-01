@@ -86,7 +86,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   difference is that the new code's fix suggestion is **retry the request**, which is the one action
   that can succeed when nothing about the value was wrong.
 
+- **A 201's `Location` header now honours `HttpRequest.PathBase`** (#121). A host mounted under a
+  path base — `UsePathBase("/alvo")`, or a reverse proxy sending `X-Forwarded-Prefix` — used to
+  advertise `/api/owners/<id>`, which 404s at the proxy edge; it now advertises
+  `/alvo/api/owners/<id>`. This is a behaviour change for anyone already deploying under a path
+  base, and the direction is that URLs which used to be wrong are now right: following the header
+  works where it previously did not. No released version is affected — both the header and the fix
+  land in this same unreleased cycle. A host with no path base is unaffected, byte for byte. The
+  **OpenAPI document** still declares no `servers` entry, so its paths remain root-relative behind
+  a path base (#130), and the Scalar UI's own behaviour there is unmeasured (#134).
+
 ### Added
+
+- **A standalone host you can run without writing any code.** `docker compose up` brings up a
+  working backend defined entirely by a JSON descriptor mounted at `/alvo/descriptor.json` — no
+  project, no migrations, no scaffolding. What you get:
+  - **The descriptor is the whole backend.** Entities, fields, validation and per-operation rules
+    from the mounted file become tables and a REST API. Edit the file and restart, and an
+    **additive** change (a new entity, a new field) migrates on the way up. A **destructive** one
+    does not: the host applies with `AllowDestructive: false` and has no setting to change that, so
+    a descriptor that would drop a column or a table is refused and the container fails to start
+    rather than losing data on a restart. An entity the file does not declare 404s, which is the
+    point: nothing is baked in.
+  - **Interactive documentation at `/scalar`**, rendering the OpenAPI document the host serves at
+    `/openapi/v1.json`. It works with **no outbound network access** — the assets ship inside the
+    image. `Alvo__Docs__Enabled=false` removes both routes.
+  - **Liveness at `/health/live`**, and it means something: the host applies the descriptor
+    *before* it listens, so an answer proves the schema is up. A host whose apply fails exits
+    non-zero rather than reporting healthy with no schema. There is **no** readiness probe yet —
+    that needs a database-reachability port (#133).
+  - **Configuration is standard .NET environment binding** — `Alvo__DescriptorPath`,
+    `Alvo__Database__Provider` (`sqlite` | `postgresql`), `ConnectionStrings__Alvo`,
+    `Alvo__PathBase`, `Alvo__Docs__Enabled`, `Alvo__Auth__DevKeys__0__*`. SQLite is the
+    zero-configuration default; an unknown provider name is refused rather than defaulted, and a
+    PostgreSQL host with no connection string fails rather than quietly writing to a
+    container-local file.
+  - **Behind a reverse proxy**, `Alvo__PathBase` and — opt-in, off by default —
+    `Alvo__ForwardedHeaders__Enabled` for `X-Forwarded-*`. Off by default deliberately:
+    `X-Forwarded-Prefix` decides the URL a 201 advertises, so an untrusted caller honoured by
+    default would choose where the next client is sent.
+  - **No default credential, ever.** The image ships no API key and seeds none; the demo stack
+    refuses to start until you supply one. A host with no key configured still starts and still
+    refuses every write.
+  - **An end-to-end suite** (`scripts/test-e2e`) that builds the image, brings the stack up
+    against PostgreSQL, runs TeaPie against the published port and asserts the created row is in
+    the database. It runs in CI on every pull request.
+
+  Known limits, so this is honest: the image is **not published yet** — you build it from this
+  repository — and there is no dashboard, no Management API and no CLI (#24, all F4). A mis-typed
+  descriptor mount currently ends in a stack trace rather than a readable refusal (#132), and the
+  docs UI's behaviour behind a path base is unmeasured (#134). `docs/architecture/host.md` records
+  what the host is and what it deliberately is not.
+
+- **`IServiceProvider.ApplyAlvoDescriptorAsync()`** — new public API in the core. The one verb a
+  host performs on a built container: bring the configured descriptor up, creating or migrating the
+  schema it declares. Call it *before* mapping endpoints — `MapAlvoDataApi()` reads entity names off
+  the applied schema, and the apply is also what primes the policy catalog (an unprimed catalog
+  denies everything). Previously the orchestrator behind it was `internal`, so only code inside the
+  core assembly could apply a descriptor at all.
+
+- **`AddAlvoProblemDetails()`** — new public API in the core, and **opt-in**: `AddAlvo()` does not
+  register it, so nothing changes for an existing host. Registering it, together with
+  `UseExceptionHandler()`, makes an unhandled exception come back as Alvo's own problem document
+  (`type: https://alvo.dev/errors/internal`) with a constant detail and nothing about the exception
+  in the body, logged with its stack trace server-side. It is opt-in because an embedded host owns
+  its own error rendering, and Alvo silently swallowing your exceptions would be the wrong default.
+  It also calls `AddProblemDetails()` for you, because `UseExceptionHandler()` refuses to configure
+  itself with neither a handler path nor a problem-details fallback. The `internal` slug joins
+  `AlvoProblemTypes.All` and the published `problemDetails` schema's `type` enum.
 
 - **The HTTP Data API.** A host that calls `MapAlvoDataApi()` gets a REST API generated from its
   descriptor: five routes per declared entity (`GET` collection, `GET {id}`, `POST`, `PATCH`,
