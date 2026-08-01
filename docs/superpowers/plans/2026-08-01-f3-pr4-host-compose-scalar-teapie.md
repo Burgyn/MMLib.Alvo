@@ -2376,3 +2376,232 @@ rule (a) alongside rule (c) for this project.
 git add Directory.Packages.props src/MMLib.Alvo.Host test/MMLib.Alvo.Host.Tests docs/architecture/host.md
 git commit -m "feat(host): serve the OpenAPI document and render it with Scalar (#75)"
 ```
+
+---
+
+### Task 6: `docker compose up` yields a working backend from the descriptor alone
+
+The first half of PR4's DoD, verbatim. The stack is **`alvo` + `postgres:16-alpine` only** — the spec's full compose (`alvo + postgres + minio + mailhog`) is #24's remainder in F4, and MinIO and MailHog would serve nothing in F3 because storage and email do not exist yet (*Deviations anticipated*, D4).
+
+**Files:**
+- Create: `src/MMLib.Alvo.Host/Dockerfile`, `.dockerignore`, `docker-compose.yml`
+- Modify: `docs/architecture/host.md`, `README.md`
+
+**Interfaces:**
+- Consumes: `AlvoHost`'s configuration keys from Tasks 2, 4 and 5 (`Alvo__DescriptorPath`, `Alvo__Database__Provider`, `ConnectionStrings__Alvo`, `Alvo__Auth__DevKeys__0__*`) and `AlvoHost.LivenessPath` (`/health/live`).
+- Produces: the compose service names **`alvo`** and **`postgres`**, the published port **8080**, and the environment variable **`ALVO_DEMO_KEY_SECRET`** — all three consumed by Task 7's `scripts/test-e2e` and its TeaPie environment.
+
+- [ ] **Step 1: Write the Dockerfile**
+
+`src/MMLib.Alvo.Host/Dockerfile` — the build context is the **repository root**, because Central Package Management and `Directory.Build.props` live there:
+
+```dockerfile
+# syntax=docker/dockerfile:1
+FROM mcr.microsoft.com/dotnet/sdk:10.0-alpine AS build
+WORKDIR /source
+
+COPY global.json Directory.Build.props Directory.Packages.props MMLib.Alvo.slnx ./
+COPY src/ src/
+RUN dotnet restore src/MMLib.Alvo.Host/MMLib.Alvo.Host.csproj
+RUN dotnet publish src/MMLib.Alvo.Host/MMLib.Alvo.Host.csproj \
+    --configuration Release --no-restore --output /app
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-alpine AS final
+WORKDIR /app
+COPY --from=build /app .
+
+RUN mkdir -p /alvo/data && chown -R $APP_UID:$APP_UID /alvo
+USER $APP_UID
+
+EXPOSE 8080
+ENTRYPOINT ["dotnet", "MMLib.Alvo.Host.dll"]
+```
+
+> `MMLib.Alvo.slnx` is copied because `Directory.Build.props`' Husky target and MinVer both look upward from the project; `HUSKY=0` is not needed since `ContinuousIntegrationBuild`/`TF_BUILD` are unset here but the target is `ContinueOnError`. `dotnet restore` on the Host project alone pulls only its graph — the core, the two providers and `Abstractions` — so `test/` never enters the image, which is why only `src/` is copied.
+>
+> **MinVer will warn that there are no tags in the build context** (no `.git`). That is fine and intended: the image's assembly version is not a release artifact in PR4 — publishing is F4's. If it *errors*, add `-p:MinVerSkip=true` to the `publish` line rather than copying `.git` into the context.
+
+`.dockerignore` at the repository root:
+
+```gitignore
+**/bin/
+**/obj/
+**/artifacts/
+**/.vs/
+**/.idea/
+.git/
+.github/
+.husky/
+docs/
+test/
+StrykerOutput/
+*.md
+```
+
+- [ ] **Step 2: Write the compose file**
+
+`docker-compose.yml` at the repository root:
+
+```yaml
+# The local stack the F3 demo runs on: the standalone host over real PostgreSQL, driven by the
+# vehicle-registry descriptor and nothing else. MinIO and MailHog are deliberately absent — object
+# storage and email do not exist in F3, and the full stack is #24's remainder in F4.
+name: alvo
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: alvo
+      POSTGRES_USER: alvo
+      POSTGRES_PASSWORD: alvo
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alvo -d alvo"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  alvo:
+    build:
+      context: .
+      dockerfile: src/MMLib.Alvo.Host/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      Alvo__DescriptorPath: /alvo/descriptor.json
+      Alvo__Database__Provider: postgresql
+      ConnectionStrings__Alvo: Host=postgres;Port=5432;Database=alvo;Username=alvo;Password=alvo
+      # The image ships no credential of its own (§2.14: "image nikdy nedodáva prednastavené
+      # prihlásenie"), and the `:?` form makes compose refuse to start rather than invent one.
+      Alvo__Auth__DevKeys__0__KeyId: demo
+      Alvo__Auth__DevKeys__0__Secret: ${ALVO_DEMO_KEY_SECRET:?set ALVO_DEMO_KEY_SECRET before starting the stack}
+      Alvo__Auth__DevKeys__0__User: 6f9619ff-8b86-d011-b42d-00c04fc964ff
+      Alvo__Auth__DevKeys__0__Roles__0: admin
+      Alvo__Auth__DevKeys__0__Roles__1: authenticated
+      Alvo__Auth__DevKeys__0__Roles__2: inspector
+      Alvo__Auth__DevKeys__0__Scopes__0: "*:read"
+      Alvo__Auth__DevKeys__0__Scopes__1: "*:write"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./examples/vehicle-registry/vehicles.alvo.json:/alvo/descriptor.json:ro
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health/live"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+```
+
+- [ ] **Step 3: Verify the stack by hand, and record the output in the commit message**
+
+```bash
+export ALVO_DEMO_KEY_SECRET="$(openssl rand -hex 16)"
+docker compose up --build --wait --wait-timeout 60
+```
+
+Expected: both services report healthy, inside the 60 s budget `baas-analyza.md` §2.14 sets.
+
+Then the four checks that make it a *backend* rather than a running process:
+
+```bash
+# 1. The descriptor's entity is reachable and writable.
+curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' \
+  -X POST http://localhost:8080/api/owners \
+  -H "X-Alvo-Api-Key: demo.$ALVO_DEMO_KEY_SECRET" \
+  -H 'Content-Type: application/json' \
+  -D - -d '{"name":"Compose Ltd"}' | head -1
+```
+
+Expected: `201`, with a `Location:` header of the form `/api/owners/<guid>`.
+
+```bash
+# 2. Following Location reaches the row (#121's own acceptance).
+LOCATION=$(curl -sS -D - -o /dev/null -X POST http://localhost:8080/api/owners \
+  -H "X-Alvo-Api-Key: demo.$ALVO_DEMO_KEY_SECRET" -H 'Content-Type: application/json' \
+  -d '{"name":"Followed Ltd"}' | tr -d '\r' | awk '/^[Ll]ocation:/ {print $2}')
+curl -sS -o /dev/null -w '%{http_code}\n' "http://localhost:8080$LOCATION" \
+  -H "X-Alvo-Api-Key: demo.$ALVO_DEMO_KEY_SECRET"
+```
+
+Expected: `200`.
+
+```bash
+# 3. The routes came from the MOUNTED descriptor, not from anything baked in: `vehicles` exists,
+#    and `warehouses` (which only the Host test project's descriptor declares) does not.
+curl -sS -o /dev/null -w 'vehicles=%{http_code}\n' http://localhost:8080/api/vehicles \
+  -H "X-Alvo-Api-Key: demo.$ALVO_DEMO_KEY_SECRET"
+curl -sS -o /dev/null -w 'warehouses=%{http_code}\n' http://localhost:8080/api/warehouses \
+  -H "X-Alvo-Api-Key: demo.$ALVO_DEMO_KEY_SECRET"
+```
+
+Expected: `vehicles=200`, `warehouses=404`.
+
+```bash
+# 4. The row is in PostgreSQL, not in a container-local SQLite file.
+docker compose exec -T postgres psql -U alvo -d alvo -c 'select count(*) from owners;'
+```
+
+Expected: a count of at least 2.
+
+```bash
+# 5. The credential really is required — compose refuses without it.
+env -u ALVO_DEMO_KEY_SECRET docker compose config >/dev/null
+```
+
+Expected: a **non-zero** exit and the message `set ALVO_DEMO_KEY_SECRET before starting the stack`.
+
+Tear down:
+
+```bash
+docker compose down --volumes
+```
+
+*Discrimination:* check 3 is what separates "compose came up" from "the descriptor drove it" — a host with a baked-in schema answers `200` for `warehouses` or `404` for `vehicles`, and either fails. Check 4 separates "the app answered" from "the app used the database compose gave it": a silent fallback to SQLite passes checks 1–3 and fails this one. Check 5 is §2.14's no-default-credentials criterion, and it fails the moment anyone puts a literal secret in the compose file.
+
+- [ ] **Step 4: Document the stack**
+
+Add to `docs/architecture/host.md`:
+
+```markdown
+## The compose stack
+
+`docker-compose.yml` runs the host against `postgres:16-alpine`, with
+`examples/vehicle-registry/vehicles.alvo.json` mounted at `/alvo/descriptor.json:ro` and port 8080
+published. The image ships **no** credential: `ALVO_DEMO_KEY_SECRET` is required with compose's `:?`
+form, so the stack refuses to start rather than inventing one. `docker compose up --wait
+--wait-timeout 60` is the acceptance form of §2.14's "working backend within 60 s", and it means
+something because the host does not listen until the descriptor has applied.
+
+MinIO and MailHog are absent on purpose: object storage and email do not exist in F3, and a service
+nothing talks to is a stack that proves less, not more. The published image, the dashboard, the
+Management API and the CLI are #24's remainder in F4.
+```
+
+And a short section in `README.md`, after whatever the current getting-started material is:
+
+```markdown
+## Run the demo backend (standalone)
+
+```bash
+export ALVO_DEMO_KEY_SECRET="$(openssl rand -hex 16)"
+docker compose up --build --wait --wait-timeout 60
+curl -sS http://localhost:8080/api/owners -H "X-Alvo-Api-Key: demo.$ALVO_DEMO_KEY_SECRET"
+```
+
+The backend is defined entirely by `examples/vehicle-registry/vehicles.alvo.json`, mounted into the
+container — no code, no migrations, no clicking. Interactive docs: <http://localhost:8080/scalar>.
+```
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/MMLib.Alvo.Host/Dockerfile .dockerignore docker-compose.yml \
+        docs/architecture/host.md README.md
+git commit -m "feat(host): a compose stack that boots the demo backend from the descriptor
+
+Verified by hand: compose up --wait healthy in <60s; POST /api/owners 201 and
+following Location 200; /api/vehicles 200 while /api/warehouses 404 (the routes
+come from the mount); rows visible in PostgreSQL; compose config fails without
+ALVO_DEMO_KEY_SECRET."
+```
