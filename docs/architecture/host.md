@@ -107,15 +107,23 @@ and `MapOpenApi` cannot drift apart.
 **Behind a path base this is unverified.** Scalar emits the document URL *relative* and resolves it in the
 browser against `window.location.pathname` minus the prefix it was initialised with — so under `Alvo:PathBase`
 the resolution happens in JavaScript this suite does not run. The compose stack is therefore deliberately
-path-base-free, and the gap is filed as an issue rather than guessed at with a test that could not fail for
-its stated reason.
+path-base-free, and the gap is filed as **#134** rather than guessed at with a test that could not fail for
+its stated reason. The issue records the resolution rule and says plainly that its outcome is *unmeasured* —
+not working, and not known-broken. It is the third of the path-base family: #121 (`Location`, fixed here),
+#130 (the document's `servers`, open), #134 (this).
 
 ## Health
 
 Liveness only (`/health/live`). §2.12 asks for readiness with database, cache and message-bus
 reachability; none of those probes exists as a port today, and inventing one is a port
-widening PR4 has no mandate for. Recorded as a deviation with an issue rather than
-approximated.
+widening PR4 has no mandate for. Recorded as deviation 38 and filed as **#133** rather than
+approximated — the core may not touch a provider directly (§0 principle 2), so "can you reach the
+database" is a port to design, not a health check to write.
+
+What liveness already proves is more than its name suggests, and what it does not is the point of
+#133: the descriptor applies *before* the server listens, so an answer here means the schema is up
+and the database was reachable **at startup** — but a database that goes away afterwards is
+invisible to it.
 
 ## A 500 is Alvo's own refusal here (#119)
 
@@ -129,8 +137,8 @@ middleware only sees what runs after it, and a failure that got past that line w
 framework with an RFC 9110 status-code URI in `type`.
 
 The handler itself lives in the core, not here — `ProblemResultFactory` is `internal`, so a Host-side one
-would be a second hand-written copy of the problem-document shape. Recorded as deviation D1; `data-api.md`
-carries the mode-by-mode table.
+would be a second hand-written copy of the problem-document shape. Recorded as **deviation 36**;
+`data-api.md` carries the mode-by-mode table.
 
 ## The image
 
@@ -199,7 +207,15 @@ each of which has been observed to fail under a mutation of the stack:
 
 Removing the volume mount altogether is the sixth, and it is the one that proves the descriptor is load-bearing
 rather than decorative: the host refuses to start with `Could not find file '/alvo/descriptor.json'`, the
-container never reports healthy, and `docker compose up --wait` exits non-zero.
+container never reports healthy, and `docker compose up --wait` exits non-zero. The *contract* there is right
+and stays; what an operator sees is not — an unhandled `FileNotFoundException` and a 139 exit, filed as
+**#132** against #24, because a mis-typed mount is the likeliest way a first `docker run` goes wrong.
+
+Two things the mutations turned up that are not about the stack. Mounting `simple-tasks` answers **401** on
+`/api/tasks` with the same dev key that works against `vehicle-registry`: the key names `admin` and
+`inspector`, that descriptor declares no `auth.roles`, and one undeclared role name fails the whole
+credential — **#131**. And a suite of only 201/200 assertions would pass under the SQLite mutation, which is
+why the row count exists at all.
 
 These are now run unattended rather than by hand — see *The e2e, and which ring it is in*.
 
@@ -246,3 +262,28 @@ operation-level gate (`data-api.md`, *The RLS surprise*) — and `005-Auth/002` 
 One honest limit: TeaPie halts the run when a request needs a variable an earlier failing test never set, so
 the descriptor-swap mutation reports four failures and stops rather than reporting every fact that would have
 failed. The gate is still correct (non-zero either way); the report is just less complete on a red run.
+
+The suite lives at `test/teapie`, not the TeaPie skill's default `tests/teapie`: `CLAUDE.md`'s repo map
+documents `test/` as this repository's test root, the skill permits a custom path, and `test/` beside `tests/`
+is a navigation hazard for exactly the agent-first reader this project optimises for.
+
+## What is left of #24
+
+PR4 starts `[20] Standalone run (Docker) + embedded run`; F4 finishes it. Still owed:
+
+- the **published multi-arch image** (`mmlib/alvo`, amd64 + arm64) and the release pipeline that pushes it —
+  the Dockerfile's `ARG VERSION` is where that pipeline hands in the real MinVer version;
+- the **dashboard** and the **Management API**, and with them the dashboard-first source of truth;
+- the **`alvo` CLI** (`alvo apply vehicles.alvo.json`) — one of the descriptor's doors that PR4 does not open
+  (`PLAN.md` §2: Docker mount = CLI apply = Management API = `FromDescriptor()` = admin UI export);
+- **readiness** with database / cache / message-bus reachability (§2.12, **#133**), and the rest of §2.12 —
+  OpenTelemetry, rate limiting (**#112**), usage metering;
+- the **full compose stack** (MinIO, MailHog) once storage and email exist;
+- an operator-facing **`ALVO_*` environment vocabulary**, if the CLI work shows it earns its keep — and it
+  has to be settled **before the image is published**, because after that the env names are a breaking
+  change (deviation 39);
+- a first-run experience worth the name: **#132** (a mis-typed descriptor mount) is the first thing an
+  operator hits, and it is currently a stack trace.
+
+Not #24's, but on the same deployment path: **#130** (the document's `servers`) and **#134** (Scalar behind a
+path base) both have to be answered before "run it behind your ingress" is a claim this project can make.

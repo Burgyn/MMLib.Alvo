@@ -498,7 +498,7 @@ exception is the defect #119 was filed to prevent, not the one it was filed to f
 The handler lives in the core rather than in `MMLib.Alvo.Host`, which #119's letter asked for, because
 `ProblemResultFactory` is `internal`: a Host-side handler would be a second hand-written copy of the
 problem-document shape (`type`, `title`, `status`, `detail`, `violations`, the media type). Recorded as
-deviation D1 of PR4.
+**deviation 36** in the F3 design's *Deviations added by PR4*.
 
 **No operation documents a 500**, and that has not changed — `ResponsesFor` describes what a *delegate*
 produces, and no delegate produces this one. The slug is in the published `problemDetails` schema's `type`
