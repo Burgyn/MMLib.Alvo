@@ -201,5 +201,48 @@ Removing the volume mount altogether is the sixth, and it is the one that proves
 rather than decorative: the host refuses to start with `Could not find file '/alvo/descriptor.json'`, the
 container never reports healthy, and `docker compose up --wait` exits non-zero.
 
-Task 7 turns these into `teapie test` against the same stack, run by `scripts/test-e2e` in CI. They are
-deliberately **not** in ring0–ring2: ring0 must stay Docker-free.
+These are now run unattended rather than by hand — see *The e2e, and which ring it is in*.
+
+## The e2e, and which ring it is in
+
+**None.** `scripts/test-e2e` tears any previous stack down, builds the image, brings the compose stack up
+with a 60-second budget, runs `teapie test tests/teapie -e compose`, asserts the row TeaPie created is in
+PostgreSQL, writes a JUnit report to `artifacts/teapie/report.xml`, dumps container logs on failure and always
+tears down. CI runs it as the `e2e` job, which the `Build & test` aggregate depends on — so it is a required
+check without touching the branch ruleset.
+
+It is deliberately outside every ring: ring0 must stay Docker-free (its own comment says so), ring2's Docker
+use is one self-skipping Testcontainers image rather than an image build plus a multi-service stack, and the F3
+design's testing table already places the full e2e at "CI on the PR, never locally". A human runs
+`scripts/test-e2e` on purpose; nothing runs it by accident.
+
+The credential is generated per run (`openssl rand -hex 16`) into `ALVO_DEMO_KEY_SECRET` and into the
+generated `artifacts/teapie/env.json`, so the stack's secret and TeaPie's have one source and neither is
+committed. `tests/teapie/env.example.json` is the secret-free shape a human copies to run the suite by hand.
+
+### What the suite proves, and what it cannot
+
+Liveness alone would pass against any container, so it is not the gate. Three facts are:
+
+| Fact | Where | Mutation it fails under |
+| --- | --- | --- |
+| A real row created over the published port and re-read through the `Location` the server advertised | `002-Owners` | Mount `simple-tasks`: `/api/owners` 404s and the suite fails at the create. |
+| `/api/warehouses` 404s, in the API **and** absent from the document's `paths` | `003-Descriptor/001`, `004-Docs/001` | Point the request at `/api/owners` instead: 200, and the suite fails. |
+| Exactly one `owners` row named `TeaPie Ltd` in **PostgreSQL** | `scripts/test-e2e` | Set `Alvo__Database__Provider: sqlite`: **all 20 TeaPie tests still pass** and only this fails. |
+
+The third one is why it is a shell assertion rather than a TeaPie test: PostgreSQL publishes no host port, so
+it is `docker compose exec postgres psql`, not HTTP. **A suite without it is decorative** — the SQLite mutation
+is invisible to every HTTP check, and "the app answered" is not "the app used the database compose gave it".
+It asserts *exactly* one, not at least one, because the script starts from a torn-down stack and the suite
+performs exactly one successful create: any other count means the row is missing or the database is not the one
+this run started.
+
+`005-Auth` asserts the deployment form of default-deny that `AlvoHostBootTests` asserts in-process: an
+anonymous **write** is 403 with Alvo's own problem document, naming neither the entity nor a row. It has to be
+a write. An anonymous *read* is `200 {"items":[]}` — a configured rule is a row-level filter, not an
+operation-level gate (`data-api.md`, *The RLS surprise*) — and `005-Auth/002` pins that too, so nobody later
+"fixes" the 200 into a 403.
+
+One honest limit: TeaPie halts the run when a request needs a variable an earlier failing test never set, so
+the descriptor-swap mutation reports four failures and stops rather than reporting every fact that would have
+failed. The gate is still correct (non-zero either way); the report is just less complete on a red run.

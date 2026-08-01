@@ -121,23 +121,60 @@ jobs:
           path: artifacts/*.nupkg
           if-no-files-found: error
 
+  e2e:
+    name: E2E (compose + TeaPie)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      # The spec's standing instruction (§X.1): after building and starting the demo image, run
+      # `teapie test` against the running container and publish a JUnit report. Linux only —
+      # Windows GitHub runners run Docker in Windows-container mode and cannot run either image.
+      # The script owns the whole stack (build, up --wait, teapie, the PostgreSQL row assertion,
+      # logs on failure, teardown) so a human runs exactly what CI runs.
+      - name: Compose up + teapie test
+        run: scripts/test-e2e
+
+      - name: Publish the TeaPie report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: teapie-report
+          path: artifacts/teapie/report.xml
+          if-no-files-found: error
+
   # Stable required status check: the branch ruleset requires "Build & test",
   # which must not change when matrix legs are added/removed. This gate passes
-  # only if every matrix leg succeeded.
+  # only if every matrix leg AND the e2e job succeeded — folding e2e in here
+  # rather than adding a fifth required check keeps the ruleset untouched (only
+  # the maintainer can edit it), and an e2e nothing requires is an e2e that rots.
   build-and-test:
     name: Build & test
-    needs: build-test
+    needs: [build-test, e2e]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Require all matrix legs to pass
+      - name: Require all matrix legs and the e2e to pass
         run: |
           if [ "${{ needs.build-test.result }}" != "success" ]; then
             echo "One or more Build & test matrix legs failed."
             exit 1
           fi
-          echo "All Build & test matrix legs passed."
+          if [ "${{ needs.e2e.result }}" != "success" ]; then
+            echo "The compose + TeaPie e2e failed."
+            exit 1
+          fi
+          echo "All Build & test matrix legs and the e2e passed."
 
   brief-freshness:
     name: Brief freshness

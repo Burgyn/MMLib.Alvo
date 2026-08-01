@@ -1,0 +1,12 @@
+### Create an owner in the entity only the mounted descriptor declares
+# @name CreateOwner
+## TEST-EXPECT-STATUS: [201]
+## TEST-HAS-HEADER: Location
+POST {{baseUrl}}/api/owners
+X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+Content-Type: application/json
+
+{
+  "name": "TeaPie Ltd",
+  "email": "teapie-{{$guid}}@example.test"
+}

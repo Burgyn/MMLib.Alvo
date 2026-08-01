@@ -1,0 +1,11 @@
+### An anonymous WRITE is judged by the descriptor's default-deny, not waved through.
+### It has to be a write: a read is filtered row-by-row and answers an honest 200 (see 002).
+# @name AnonymousCreate
+## TEST-EXPECT-STATUS: [403]
+POST {{baseUrl}}/api/owners
+Content-Type: application/json
+
+{
+  "name": "Anonymous Ltd",
+  "email": "anonymous-{{$guid}}@example.test"
+}

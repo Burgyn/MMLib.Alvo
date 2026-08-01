@@ -1,0 +1,4 @@
+### Liveness answers without a credential, and answering proves the descriptor applied
+# @name Liveness
+## TEST-EXPECT-STATUS: [200]
+GET {{baseUrl}}/health/live

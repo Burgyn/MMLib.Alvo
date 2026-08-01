@@ -3,6 +3,8 @@
 # invariant + Vacuum). None of those exist yet — add them here when they land.
 # Full run (+ e2e) stays in CI on the PR; mutation runs post-merge on `main`.
 # Do not run either locally.
+# The compose + TeaPie e2e is NOT here: see scripts/test-e2e for why (it needs an image build and a
+# multi-service stack, and the design places the full e2e in CI on the PR).
 set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$DIR/.." && pwd)"
