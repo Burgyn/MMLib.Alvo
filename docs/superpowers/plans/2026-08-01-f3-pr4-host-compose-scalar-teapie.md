@@ -41,7 +41,7 @@ Every task's requirements implicitly include this section. Values are copied ver
 **Exact identifiers this plan introduces or moves** (use these spellings, nothing else)
 
 - `Microsoft.Extensions.DependencyInjection.AlvoDescriptorApplyExtensions.ApplyAlvoDescriptorAsync(this IServiceProvider services, MigrationOptions? options = null, CancellationToken ct = default) → Task<MigrationResult>` (core, **public**).
-- `MMLib.Alvo.Host.AlvoHost.CreateBuilder(string[] args) → WebApplicationBuilder` and `MMLib.Alvo.Host.AlvoHost.BuildAsync(WebApplicationBuilder builder, CancellationToken ct = default) → Task<WebApplication>` (Host, **public**).
+- `MMLib.Alvo.Host.AlvoHost.CreateBuilder(string[] args, Action<IConfigurationBuilder>? configureConfiguration = null) → WebApplicationBuilder` and `MMLib.Alvo.Host.AlvoHost.BuildAsync(WebApplicationBuilder builder, CancellationToken ct = default) → Task<WebApplication>` (Host, **public**).
 - `MMLib.Alvo.Host.AlvoHostOptions` with `DescriptorPath`, `Database`, `PathBase`, `Docs`; `MMLib.Alvo.Host.AlvoHostDatabaseOptions` with `Provider`, `SqliteConnectionString`; `MMLib.Alvo.Host.AlvoHostDocsOptions` with `Enabled` (Host, **public**, bound from configuration section `Alvo`).
 - `MMLib.Alvo.Api.AlvoProblemTypes.Internal = "internal"` (core, **public**, added to `All`).
 - `Microsoft.Extensions.DependencyInjection.AlvoProblemDetailsExtensions.AddAlvoProblemDetails(this IServiceCollection services) → IServiceCollection` (core, **public**, opt-in).
@@ -331,7 +331,7 @@ The project is **earned** under `package-boundary.md` rule (c) — a different d
 
 **Interfaces:**
 - Consumes: `IServiceCollection.AddAlvo(Action<IAlvoBuilder>?) → IAlvoBuilder`; `IAlvoBuilder.UseSqlite(string connectionString)`, `IAlvoBuilder.UsePostgreSql(string connectionString)`, `IAlvoBuilder.FromDescriptor(string path)`, `IAlvoBuilder.AddDataApi(Action<AlvoApiOptions>?)`; `IEndpointRouteBuilder.MapAlvoDataApi() → IEndpointRouteBuilder`; `IServiceProvider.ApplyAlvoDescriptorAsync(MigrationOptions?, CancellationToken)` from Task 1; `MMLib.Alvo.Auth.AlvoAuthOptions` (`HeaderName` default `"X-Alvo-Api-Key"`, `TenantHeaderName` default `"X-Alvo-Tenant"`, `IList<AlvoDevApiKey> DevKeys`); `MMLib.Alvo.Api.AlvoApiOptions` (`RoutePrefix` default `"/api"`).
-- Produces: `AlvoHost.CreateBuilder(string[] args) → WebApplicationBuilder`, `AlvoHost.BuildAsync(WebApplicationBuilder builder, CancellationToken ct = default) → Task<WebApplication>`, `AlvoHost.ConfigurationSection = "Alvo"`, `AlvoHost.LivenessPath = "/health/live"`; `AlvoHostOptions { string DescriptorPath; AlvoHostDatabaseOptions Database; string? PathBase; AlvoHostDocsOptions Docs }`; `AlvoHostDatabaseOptions { string Provider; string SqliteConnectionString }`; `AlvoHostDocsOptions { bool Enabled }`. Tasks 3, 4 and 5 each add exactly one call inside `BuildAsync`. The test-side `AlvoHostWorld` (`internal sealed class`, `StartAsync(...)`, `HttpClient Client`, `IReadOnlyList<string> Warnings`) is what Tasks 3–5's facts drive.
+- Produces: `AlvoHost.CreateBuilder(string[] args, Action<IConfigurationBuilder>? configureConfiguration = null) → WebApplicationBuilder`, `AlvoHost.BuildAsync(WebApplicationBuilder builder, CancellationToken ct = default) → Task<WebApplication>`, `AlvoHost.ConfigurationSection = "Alvo"`, `AlvoHost.LivenessPath = "/health/live"`; `AlvoHostOptions { string DescriptorPath; AlvoHostDatabaseOptions Database; string? PathBase; AlvoHostDocsOptions Docs }`; `AlvoHostDatabaseOptions { string Provider; string SqliteConnectionString }`; `AlvoHostDocsOptions { bool Enabled }`. Tasks 3, 4 and 5 each add exactly one call inside `BuildAsync`. The test-side `AlvoHostWorld` (`internal sealed class`, `StartAsync(...)`, `HttpClient Client`, `IReadOnlyList<string> Warnings`) is what Tasks 3–5's facts drive.
 
 - [ ] **Step 1: Create the two projects and register them**
 
@@ -489,8 +489,10 @@ internal sealed class AlvoHostWorld : IAsyncDisposable
     {
         var databasePath = Path.Combine(Path.GetTempPath(), $"alvo-host-tests-{Guid.NewGuid():N}.db");
         var logs = new CapturingLoggerProvider();
-        var builder = AlvoHost.CreateBuilder([]);
-        builder.Configuration.AddInMemoryCollection(Settings(descriptorPath, databasePath, overrides));
+        var settings = Settings(descriptorPath, databasePath, overrides);
+
+        var builder = AlvoHost.CreateBuilder(
+            [], configuration => configuration.AddInMemoryCollection(settings));
         builder.Logging.ClearProviders();
         builder.Logging.AddProvider(logs);
         builder.WebHost.UseTestServer();
@@ -501,7 +503,7 @@ internal sealed class AlvoHostWorld : IAsyncDisposable
     }
 ```
 
-> **The configuration source must be added to `builder.Configuration` *after* `CreateBuilder` returns, which means `CreateBuilder` must not read the `Alvo` section itself.** That is why `AlvoHostOptions` is resolved in `BuildAsync` (from the built container) and the provider selection is deferred to a `IConfigureOptions`-free callback — see Step 5. If a step tempts you to read configuration eagerly inside `CreateBuilder`, this world stops being able to override anything and every fact below becomes untestable.
+> **Why the callback exists at all.** `AddAlvo`'s `configure` delegate runs **eagerly**, inside `CreateBuilder` — the descriptor path and the driver are therefore read from configuration *there*, before any caller could add a source to `builder.Configuration`. The callback is the seam that lets a container's environment, a test's in-memory collection and a future `alvo` CLI all reach the same composition. It is applied to `builder.Configuration` before `AddAlvo`, and nowhere else.
 
 ```csharp
     private static Dictionary<string, string?> Settings(
@@ -987,14 +989,22 @@ public static class AlvoHost
     private const string ApiSection = $"{ConfigurationSection}:Api";
 
     /// <summary>
-    /// Registers everything the standalone host needs, without reading the <c>Alvo</c> section — so a caller
-    /// may still add configuration sources to the returned builder.
+    /// Registers everything the standalone host needs.
     /// </summary>
+    /// <remarks>
+    /// <paramref name="configureConfiguration"/> runs <em>before</em> Alvo is registered, because
+    /// <c>AddAlvo</c>'s callback is eager: the descriptor path and the driver are read here, so a caller with
+    /// its own configuration source has to contribute it before that read. A container passes nothing (the
+    /// environment is already a source); a test passes its own collection.
+    /// </remarks>
     /// <param name="args">The process arguments, bound as a configuration source by ASP.NET Core.</param>
-    /// <returns>The builder, for a caller that wants to add configuration, logging or a test server.</returns>
-    public static WebApplicationBuilder CreateBuilder(string[] args)
+    /// <param name="configureConfiguration">Adds configuration sources before Alvo is registered.</param>
+    /// <returns>The builder, for a caller that wants to add logging or a test server.</returns>
+    public static WebApplicationBuilder CreateBuilder(
+        string[] args, Action<IConfigurationBuilder>? configureConfiguration = null)
     {
         var builder = WebApplication.CreateBuilder(args);
+        configureConfiguration?.Invoke(builder.Configuration);
 
         builder.Services.Configure<AlvoHostOptions>(builder.Configuration.GetSection(ConfigurationSection));
         builder.Services.Configure<AlvoAuthOptions>(builder.Configuration.GetSection(AuthSection));
@@ -1038,11 +1048,7 @@ public static class AlvoHost
 }
 ```
 
-> **Read this before you write it.** `AddAlvo`'s `configure` callback runs **eagerly**, inside `CreateBuilder` — so `Configure(...)` does read the `Alvo` section there, and `AlvoHostWorld` therefore adds its in-memory source **before** calling `AlvoHost.CreateBuilder`… which it cannot, because the builder does not exist yet. Resolve it the way the world above expects: give `CreateBuilder` an optional second parameter, `Action<IConfigurationBuilder>? configureConfiguration = null`, applied to `builder.Configuration` **before** `AddAlvo`, and have `AlvoHostWorld` pass its in-memory collection through it. Update the world's `StartAsync` to
-> `var builder = AlvoHost.CreateBuilder([], configuration => configuration.AddInMemoryCollection(Settings(...)));`
-> and add the parameter to this plan's `Produces` signature when you commit:
-> `AlvoHost.CreateBuilder(string[] args, Action<IConfigurationBuilder>? configureConfiguration = null) → WebApplicationBuilder`.
-> Tasks 3–5 depend on that spelling.
+> `HostOptions` reads the section a second time, beside the `Configure<AlvoHostOptions>` registration, and that is deliberate rather than an oversight: the driver has to be chosen while the container is still being *built*, and `IOptions<T>` is only resolvable after. The registration exists for `BuildAsync` and for Tasks 4–5, which read the same options from the built container. One binder, one section, two moments — not two spellings.
 
 `src/MMLib.Alvo.Host/Program.cs` (replace the template's contents entirely):
 
