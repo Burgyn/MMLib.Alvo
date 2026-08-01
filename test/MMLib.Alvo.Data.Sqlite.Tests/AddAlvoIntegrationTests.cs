@@ -161,6 +161,36 @@ public sealed class AddAlvoIntegrationTests : IDisposable
         introspected.Entities.ShouldBeEmpty("a dry run must plan and write nothing");
     }
 
+    /// <summary>
+    /// A host that never registered Alvo is told to call <c>AddAlvo</c> — not to register
+    /// <c>SchemaMigrationRunner</c>, which is <see langword="internal"/> and which they cannot reference.
+    /// </summary>
+    /// <remarks>
+    /// <b>This is the only reachable path to that message</b>, which is why the fact builds a provider
+    /// deliberately without <c>AddAlvo</c>: every other caller in this repository registers Alvo first, so a
+    /// regression here is invisible to all of them. Asserting on the wording is deliberate and follows
+    /// <c>UseSqlite</c>'s precedent in this same file — the fix suggestion *is* the contract (§0 principle 4),
+    /// and a message nothing pins is one an edit can quietly turn back into a type name.
+    /// </remarks>
+    [Fact]
+    public async Task Applying_without_AddAlvo_names_AddAlvo_and_never_the_internal_runner()
+    {
+        var services = new ServiceCollection();
+        using var sp = services.BuildServiceProvider();
+
+        var exception = await Should.ThrowAsync<InvalidOperationException>(
+            () => sp.ApplyAlvoDescriptorAsync(ct: TestContext.Current.CancellationToken));
+
+        exception.Message.ShouldContain(
+            "services.AddAlvo",
+            Shouldly.Case.Sensitive,
+            "the message has to name the call the host author can actually make");
+        exception.Message.ShouldNotContain(
+            nameof(SchemaMigrationRunner),
+            Shouldly.Case.Sensitive,
+            "naming an internal type tells a host author to register something they cannot reference");
+    }
+
     [Fact]
     public async Task AddAlvo_UseSqlite_options_only_migrates_the_real_tasks_descriptor()
     {

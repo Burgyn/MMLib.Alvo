@@ -39,7 +39,25 @@ public static class AlvoDescriptorApplyExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        return services.GetRequiredService<SchemaMigrationRunner>()
-            .RunAsync(options ?? new MigrationOptions(), ct);
+        var runner = services.GetService<SchemaMigrationRunner>()
+            ?? throw new InvalidOperationException(NotRegistered);
+
+        return runner.RunAsync(options ?? new MigrationOptions(), ct);
     }
+
+    /// <summary>
+    /// Why this message is crafted rather than left to <c>GetRequiredService</c>: the default names
+    /// <c>SchemaMigrationRunner</c>, which is <see langword="internal"/>. A host author reading it is told to
+    /// register a type they cannot reference, which is the opposite of the structured-error-with-a-fix rule
+    /// (§0 principle 4) and of the fail-fast wording <c>UseSqlite</c> already sets a precedent for.
+    /// </summary>
+    /// <remarks>
+    /// Unreachable from inside this repository — every in-repo caller registers Alvo first — so the fact that
+    /// pins it constructs a provider deliberately without <c>AddAlvo</c>. That is the only way this message is
+    /// reachable at all, and an unpinned message is one an edit can silently make useless.
+    /// </remarks>
+    private const string NotRegistered =
+        "Alvo is not registered in this service provider, so there is no descriptor to apply. Call " +
+        "services.AddAlvo(...) — with a database provider and a descriptor source — before building the " +
+        "provider you pass here.";
 }
