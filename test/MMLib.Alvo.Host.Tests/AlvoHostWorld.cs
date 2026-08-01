@@ -1,8 +1,10 @@
 ﻿using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
 
@@ -61,6 +63,7 @@ internal sealed class AlvoHostWorld : IAsyncDisposable
         builder.Logging.ClearProviders();
         builder.Logging.AddProvider(logs);
         builder.WebHost.UseTestServer();
+        builder.Services.AddSingleton<IStartupFilter>(new RemoteAddressStartupFilter(_remoteAddress));
 
         var app = await AlvoHost.BuildAsync(builder, TestContext.Current.CancellationToken);
         await app.StartAsync(TestContext.Current.CancellationToken);
@@ -114,6 +117,44 @@ internal sealed class AlvoHostWorld : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// The address every request appears to arrive from — a routable one, the way a container behind an
+    /// ingress sees its proxy, rather than the loopback a single-machine test would suggest.
+    /// </summary>
+    private static readonly IPAddress _remoteAddress = IPAddress.Parse("10.42.0.7");
+
+    /// <summary>Stamps <see cref="_remoteAddress"/> onto the connection before any of the host's own middleware.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Without this the suite cannot see half of the forwarded-headers configuration.</b> TestServer leaves
+    /// <c>Connection.RemoteIpAddress</c> unset, and <c>ForwardedHeadersMiddleware</c> skips its known-address
+    /// check entirely for a request whose remote address it does not know — so a host that cleared
+    /// <c>KnownIPNetworks</c>/<c>KnownProxies</c> and one that left them at their IPv6-loopback defaults are
+    /// indistinguishable, while in a container the difference is the whole feature working or silently doing
+    /// nothing.
+    /// </para>
+    /// <para>
+    /// An <see cref="IStartupFilter"/> rather than an <c>app.Use</c>, because <see cref="AlvoHost.BuildAsync"/>
+    /// owns the pipeline and <c>UseForwardedHeaders</c> sits near the front of it; a filter's middleware is
+    /// added ahead of everything the composition itself registers. Applied to every world, so no fact runs on
+    /// a connection shape no other fact runs on.
+    /// </para>
+    /// </remarks>
+    private sealed class RemoteAddressStartupFilter(IPAddress address) : IStartupFilter
+    {
+        public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) =>
+            app =>
+            {
+                app.Use(async (context, proceed) =>
+                {
+                    context.Connection.RemoteIpAddress = address;
+                    await proceed(context);
+                });
+
+                next(app);
+            };
+    }
+
     internal static string DescriptorPath(string fileName) =>
         Path.Combine(AppContext.BaseDirectory, "descriptors", fileName);
 
@@ -127,10 +168,28 @@ internal sealed class AlvoHostWorld : IAsyncDisposable
 
     internal Task<HttpResponseMessage> GetAsync(string path) => SendAsync(HttpMethod.Get, path, body: null);
 
-    internal async Task<HttpResponseMessage> SendAsync(HttpMethod method, string path, JsonNode? body)
+    /// <summary>Sends an authenticated request, presenting <paramref name="headers"/> the way a proxy would.</summary>
+    /// <param name="method">The HTTP method.</param>
+    /// <param name="path">The request path, as it reaches the host.</param>
+    /// <param name="body">A JSON body to send, or <see langword="null"/> for none.</param>
+    /// <param name="headers">
+    /// Any further request headers, added <em>without validation</em> — a fact about a forwarded
+    /// <c>X-Forwarded-Prefix</c> cannot be written through a client that refuses to send one.
+    /// </param>
+    internal async Task<HttpResponseMessage> SendAsync(
+        HttpMethod method,
+        string path,
+        JsonNode? body,
+        IReadOnlyDictionary<string, string>? headers = null)
     {
         using var request = new HttpRequestMessage(method, path);
         request.Headers.TryAddWithoutValidation(ApiKeyHeader, $"{AdminKeyId}.{AdminSecret}");
+        foreach (var (name, value) in headers ?? new Dictionary<string, string>(StringComparer.Ordinal))
+        {
+            request.Headers.TryAddWithoutValidation(name, value).ShouldBeTrue(
+                $"the world must really present '{name}', or the fact below measures a request it never sent");
+        }
+
         if (body is not null)
         {
             request.Content = JsonContent.Create(body);

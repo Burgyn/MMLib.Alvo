@@ -19,8 +19,26 @@ public sealed class AlvoHostOptions
     /// <summary>Gets or sets the path base the host is served under, for a deployment behind a reverse proxy that does not rewrite (default none).</summary>
     public string? PathBase { get; set; }
 
+    /// <summary>Gets or sets whether a reverse proxy's <c>X-Forwarded-*</c> headers are trusted.</summary>
+    public AlvoHostForwardedHeadersOptions ForwardedHeaders { get; set; } = new();
+
     /// <summary>Gets or sets whether the interactive API documentation is served.</summary>
     public AlvoHostDocsOptions Docs { get; set; } = new();
+}
+
+/// <summary>Whether the standalone host trusts a reverse proxy's forwarded headers.</summary>
+public sealed class AlvoHostForwardedHeadersOptions
+{
+    /// <summary>Gets or sets whether <c>X-Forwarded-For</c>, <c>-Proto</c>, <c>-Host</c> and <c>-Prefix</c> are honoured (default <see langword="false"/>).</summary>
+    /// <remarks>
+    /// <b>Off by default, and that is a security decision rather than a conservative default.</b>
+    /// <c>X-Forwarded-Prefix</c> decides the URL the host advertises in a 201's <c>Location</c>, so honouring it
+    /// from an untrusted caller lets that caller choose where a client is sent next. Turning it on also clears
+    /// <c>KnownNetworks</c> and <c>KnownProxies</c>, because a container cannot know its proxy's address — which
+    /// is exactly why the switch is explicit: it says "something in front of me strips these", and only an
+    /// operator knows that.
+    /// </remarks>
+    public bool Enabled { get; set; }
 }
 
 /// <summary>Which database the standalone host registers, and how to reach it.</summary>

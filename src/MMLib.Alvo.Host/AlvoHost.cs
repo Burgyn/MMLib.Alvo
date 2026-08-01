@@ -1,6 +1,8 @@
 ﻿using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Host.Internal;
 
@@ -48,6 +50,7 @@ public static class AlvoHost
 
         builder.Services.Configure<AlvoHostOptions>(builder.Configuration.GetSection(ConfigurationSection));
         builder.Services.Configure<AlvoAuthOptions>(builder.Configuration.GetSection(AuthSection));
+        builder.Services.Configure<ForwardedHeadersOptions>(ConfigureForwardedHeaders);
         builder.Services.AddHealthChecks();
         builder.Services.AddAlvoProblemDetails();
         builder.Services.AddAlvo(alvo => Configure(alvo, builder.Configuration));
@@ -59,9 +62,17 @@ public static class AlvoHost
     /// Builds the application, applies the mounted descriptor, and maps the generated Data API.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <c>UseExceptionHandler</c> is first because a middleware only sees what runs after it: in standalone
     /// mode Alvo <em>is</em> the pipeline, so an unhandled failure that got past this line would be answered
     /// by the framework with an RFC 9110 status-code URI in <c>type</c> (#119).
+    /// </para>
+    /// <para>
+    /// The two that follow both decide the request's <c>PathBase</c>, which is the URL a 201's <c>Location</c>
+    /// advertises (#121). Neither is followed by an explicit <c>UseRouting</c>: <c>UsePathBaseMiddleware</c>
+    /// re-runs matching over the rewritten path itself, and <c>UseForwardedHeaders</c> leaves <c>Path</c>
+    /// alone. See <c>docs/architecture/host.md</c>, "Behind a reverse proxy".
+    /// </para>
     /// </remarks>
     /// <param name="builder">The builder <see cref="CreateBuilder"/> returned.</param>
     /// <param name="ct">Cancels the descriptor apply.</param>
@@ -73,13 +84,47 @@ public static class AlvoHost
         ArgumentNullException.ThrowIfNull(builder);
 
         var app = builder.Build();
+        var options = app.Services.GetRequiredService<IOptions<AlvoHostOptions>>().Value;
+
         app.UseExceptionHandler();
+
+        if (options.ForwardedHeaders.Enabled)
+        {
+            app.UseForwardedHeaders();
+        }
+
+        if (options.PathBase is { Length: > 0 } pathBase)
+        {
+            app.UsePathBase(pathBase);
+        }
+
         app.MapAlvoLiveness();
 
         await app.Services.ApplyAlvoDescriptorAsync(ct: ct).ConfigureAwait(false);
 
         app.MapAlvoDataApi();
         return app;
+    }
+
+    /// <summary>
+    /// The flags the host honours when — and only when — <see cref="AlvoHostForwardedHeadersOptions.Enabled"/>
+    /// says something in front of it sets them.
+    /// </summary>
+    /// <remarks>
+    /// Always configured and only conditionally used, so the flags live in one place whether or not they are
+    /// switched on. The known-address lists are cleared because a container cannot know its proxy's address,
+    /// and their defaults (IPv6 loopback) would drop every header a sidecar or an ingress sends.
+    /// <c>KnownIPNetworks</c> rather than <c>KnownNetworks</c>: the latter is obsolete as of .NET 10
+    /// (<c>ASPDEPR005</c>), and this repository builds warnings as errors.
+    /// </remarks>
+    private static void ConfigureForwardedHeaders(ForwardedHeadersOptions options)
+    {
+        options.ForwardedHeaders = ForwardedHeaders.XForwardedFor
+            | ForwardedHeaders.XForwardedProto
+            | ForwardedHeaders.XForwardedHost
+            | ForwardedHeaders.XForwardedPrefix;
+        options.KnownIPNetworks.Clear();
+        options.KnownProxies.Clear();
     }
 
     private static void Configure(IAlvoBuilder alvo, ConfigurationManager configuration)

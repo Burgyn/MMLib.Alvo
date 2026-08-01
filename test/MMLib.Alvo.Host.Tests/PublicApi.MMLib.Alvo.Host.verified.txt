@@ -25,12 +25,18 @@ namespace MMLib.Alvo.Host
         public AlvoHostDocsOptions() { }
         public bool Enabled { get; set; }
     }
+    public sealed class AlvoHostForwardedHeadersOptions
+    {
+        public AlvoHostForwardedHeadersOptions() { }
+        public bool Enabled { get; set; }
+    }
     public sealed class AlvoHostOptions
     {
         public AlvoHostOptions() { }
         public MMLib.Alvo.Host.AlvoHostDatabaseOptions Database { get; set; }
         public string DescriptorPath { get; set; }
         public MMLib.Alvo.Host.AlvoHostDocsOptions Docs { get; set; }
+        public MMLib.Alvo.Host.AlvoHostForwardedHeadersOptions ForwardedHeaders { get; set; }
         public string? PathBase { get; set; }
     }
 }
