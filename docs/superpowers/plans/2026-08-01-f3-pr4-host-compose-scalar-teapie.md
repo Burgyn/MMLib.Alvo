@@ -2048,3 +2048,331 @@ git add src/MMLib.Alvo/Api/Internal/DataApiEndpoints.cs src/MMLib.Alvo.Host \
         test/MMLib.Alvo.Host.Tests docs/architecture/data-api.md docs/architecture/host.md
 git commit -m "fix(api): resolve a 201's Location behind a path base or proxy (#121)"
 ```
+
+---
+
+### Task 5: Scalar renders the document the host actually serves (#75's remaining clause)
+
+PR3 delivered the document and the transformer; #75's last two clauses are "**Scalar renders it** from `MMLib.Alvo.Host`, reachable in the docker-compose demo" and "`Abstractions` gains no ASP.NET dependency; the arch test stays green". Scalar is a **Host** dependency by the design's explicit ruling: *"a foreign dependency most embedded consumers do not want, and choosing a docs UI (Scalar, Swagger UI, Redoc) is a hosting decision an embedded host makes for itself"* — package-boundary rule (a).
+
+The core deliberately does **not** call `AddOpenApi()` (`ApiSetup.AddAlvoApi` says why: serving a document is a hosting decision). The Host is that decision, and it must be made **before** `AddAlvo`, because registration order is document-transformer order and Alvo's transformer appends to a host's `info.description` rather than replacing it.
+
+**Files:**
+- Modify: `Directory.Packages.props`, `src/MMLib.Alvo.Host/MMLib.Alvo.Host.csproj`, `src/MMLib.Alvo.Host/AlvoHost.cs`
+- Create: `src/MMLib.Alvo.Host/Internal/AlvoHostDocs.cs`, `test/MMLib.Alvo.Host.Tests/AlvoHostDocsTests.cs`
+- Modify: `docs/architecture/host.md`
+
+**Interfaces:**
+- Consumes: `IServiceCollection.AddOpenApi(Action<OpenApiOptions>?)` and `IEndpointRouteBuilder.MapOpenApi()` from `Microsoft.AspNetCore.OpenApi`; `OpenApiOptions.AddDocumentTransformer(Func<OpenApiDocument, OpenApiDocumentTransformerContext, CancellationToken, Task>)`; `Scalar.AspNetCore`'s `IEndpointRouteBuilder.MapScalarApiReference(string endpointPrefix)` and `MapScalarApiReference(Action<ScalarOptions>)` with `ScalarOptions.AddDocument(string documentName, string? title = null, string? routePattern = null)`; `AlvoHostDocsOptions.Enabled` from Task 2.
+- Produces: `AlvoHost.OpenApiDocumentName = "v1"`, `AlvoHost.OpenApiDocumentPath = "/openapi/v1.json"`, `AlvoHost.ScalarPath = "/scalar"` (all `public const string`); `internal static void AlvoHostDocs.AddAlvoHostDocs(this IServiceCollection services)` and `internal static void AlvoHostDocs.MapAlvoHostDocs(this IEndpointRouteBuilder endpoints)`.
+
+- [ ] **Step 1: Add the dependency, licence checked**
+
+```bash
+dotnet package search Scalar.AspNetCore --exact-match --format json
+```
+
+Confirm `2.16.17` is the newest and that <https://www.nuget.org/packages/Scalar.AspNetCore/2.16.17> shows **MIT**. In `Directory.Packages.props`, after the `Microsoft.OpenApi` entry:
+
+```xml
+    <!-- The docs UI MMLib.Alvo.Host renders the OpenAPI document with. MIT. Host-only by the
+         package-boundary rule: a docs UI is a hosting decision (the F3 design's OpenAPI and Scalar
+         section), so the core stays on Microsoft.AspNetCore.OpenApi alone and an embedded consumer
+         picks its own UI or none. -->
+    <PackageVersion Include="Scalar.AspNetCore" Version="2.16.17" />
+```
+
+In `src/MMLib.Alvo.Host/MMLib.Alvo.Host.csproj`, add:
+
+```xml
+  <ItemGroup>
+    <PackageReference Include="Scalar.AspNetCore" />
+  </ItemGroup>
+```
+
+- [ ] **Step 2: Write the failing facts**
+
+`test/MMLib.Alvo.Host.Tests/AlvoHostDocsTests.cs`:
+
+```csharp
+using System.Net;
+using System.Text.Json.Nodes;
+
+namespace MMLib.Alvo.Host.Tests;
+
+/// <summary>
+/// #75's last clause: the host serves the document and Scalar renders it.
+/// </summary>
+public class AlvoHostDocsTests
+{
+    /// <summary>
+    /// The document describes the routes this host mapped from the mounted descriptor — so the assertion is on
+    /// a path key only that descriptor could have produced, not on the response being 200.
+    /// </summary>
+    [Fact]
+    public async Task The_document_describes_the_mounted_descriptors_routes()
+    {
+        await using var world = await AlvoHostWorld.StartAsync();
+
+        using var response = await world.SendAnonymouslyAsync(HttpMethod.Get, "/openapi/v1.json");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var document = JsonNode.Parse(
+            await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken))!;
+
+        document["openapi"]!.GetValue<string>().ShouldStartWith("3.1");
+        document["paths"]!.AsObject().Select(path => path.Key)
+            .ShouldContain("/api/warehouses", "the document must describe the routes the descriptor generated");
+    }
+
+    /// <summary>
+    /// Scalar renders <em>the document</em>. A 200 with an HTML page proves a static asset was served; the
+    /// assertion that the page names the document's URL is what proves the two are wired together.
+    /// </summary>
+    [Fact]
+    public async Task Scalar_renders_the_document()
+    {
+        await using var world = await AlvoHostWorld.StartAsync();
+
+        using var response = await world.SendAnonymouslyAsync(HttpMethod.Get, "/scalar");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.Content.Headers.ContentType!.MediaType.ShouldBe("text/html");
+
+        var page = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        page.ShouldContain(
+            "/openapi/v1.json",
+            Case.Sensitive,
+            "a docs page that does not reference the document renders nothing of Alvo's");
+    }
+
+    /// <summary>
+    /// The control: docs are one setting, and turning them off really removes both routes. Without this, the
+    /// option could be ignored and every fact above would still pass.
+    /// </summary>
+    [Fact]
+    public async Task Turning_docs_off_removes_both_routes()
+    {
+        var overrides = new Dictionary<string, string?>(StringComparer.Ordinal)
+        {
+            ["Alvo:Docs:Enabled"] = "false",
+        };
+
+        await using var world = await AlvoHostWorld.StartAsync(overrides: overrides);
+
+        using var document = await world.SendAnonymouslyAsync(HttpMethod.Get, "/openapi/v1.json");
+        using var scalar = await world.SendAnonymouslyAsync(HttpMethod.Get, "/scalar");
+
+        document.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        scalar.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+    }
+
+    /// <summary>
+    /// Alvo's transformer appends to the host's <c>info.description</c> rather than replacing it — which only
+    /// holds if <c>AddOpenApi</c> runs before <c>AddAlvo</c>. This is the fact that catches a reordering.
+    /// </summary>
+    [Fact]
+    public async Task The_hosts_own_info_survives_alvos_transformer()
+    {
+        await using var world = await AlvoHostWorld.StartAsync();
+
+        using var response = await world.SendAnonymouslyAsync(HttpMethod.Get, "/openapi/v1.json");
+        var document = JsonNode.Parse(
+            await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken))!;
+
+        document["info"]!["title"]!.GetValue<string>().ShouldBe("Alvo");
+        document["info"]!["description"]!.GetValue<string>().ShouldNotBeNullOrWhiteSpace();
+    }
+}
+```
+
+*Discrimination:* `The_document_describes_the_mounted_descriptors_routes` fails if `MapOpenApi()` is not called (404) or if the document is emitted from anything but the mapped routes (`/api/warehouses` absent). `Scalar_renders_the_document` fails if `MapScalarApiReference` is not called, or if it is pointed at a document route that does not exist. `Turning_docs_off_…` fails if `Docs.Enabled` is ignored. `The_hosts_own_info_survives_alvos_transformer` fails if `AddOpenApi()` moves after `AddAlvo` — the exact ordering trap PR3's fixture already documented.
+
+- [ ] **Step 3: Run them and watch them fail**
+
+```bash
+dotnet test --project test/MMLib.Alvo.Host.Tests/MMLib.Alvo.Host.Tests.csproj --filter-method '*Docs*'
+```
+
+Expected: FAIL — 404 on both routes.
+
+- [ ] **Step 4: Write the docs wiring**
+
+`src/MMLib.Alvo.Host/Internal/AlvoHostDocs.cs`:
+
+```csharp
+using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.OpenApi.Models;
+using Scalar.AspNetCore;
+
+namespace MMLib.Alvo.Host.Internal;
+
+/// <summary>The host's docs decision: which document to emit, and what renders it.</summary>
+/// <remarks>
+/// <b>Registration order is transformer order.</b> Alvo's own document transformer appends its overview to
+/// <c>info.description</c> rather than replacing it, so the host's <c>info</c> has to be written first — which
+/// means <see cref="AddAlvoHostDocs"/> must be called before <c>AddAlvo</c>. The core deliberately never calls
+/// <c>AddOpenApi</c> itself, because serving a document is a hosting decision.
+/// </remarks>
+internal static class AlvoHostDocs
+{
+    private const string DocumentTitle = "Alvo";
+
+    internal static void AddAlvoHostDocs(this IServiceCollection services) =>
+        services.AddOpenApi(AlvoHost.OpenApiDocumentName, options => options.AddDocumentTransformer(Describe));
+
+    internal static void MapAlvoHostDocs(this IEndpointRouteBuilder endpoints)
+    {
+        endpoints.MapOpenApi();
+        endpoints.MapScalarApiReference(
+            AlvoHost.ScalarPath,
+            options => options.AddDocument(AlvoHost.OpenApiDocumentName, DocumentTitle));
+    }
+
+    private static Task Describe(
+        OpenApiDocument document, OpenApiDocumentTransformerContext context, CancellationToken ct)
+    {
+        document.Info ??= new OpenApiInfo();
+        document.Info.Title = DocumentTitle;
+        document.Info.Version = AlvoHost.OpenApiDocumentName;
+        return Task.CompletedTask;
+    }
+}
+```
+
+> `MapScalarApiReference`'s first argument pins the route rather than relying on its default, so the fact asserting `/scalar` is asserting a decision this repo made. If the overload set in 2.16.17 disagrees with the signature above, read it off the package (`dotnet build` will say) and use the pair that takes both a prefix and an options callback; the `AddDocument(documentName, title)` shape is documented in Scalar's ASP.NET Core integration guide.
+
+- [ ] **Step 5: Rewrite the two composition methods to their final form**
+
+Replace `CreateBuilder` and `BuildAsync` in `src/MMLib.Alvo.Host/AlvoHost.cs` with:
+
+```csharp
+    /// <summary>The OpenAPI document's name, and therefore its version segment.</summary>
+    public const string OpenApiDocumentName = "v1";
+
+    /// <summary>Where the OpenAPI document is served.</summary>
+    public const string OpenApiDocumentPath = "/openapi/v1.json";
+
+    /// <summary>Where the interactive documentation is served.</summary>
+    public const string ScalarPath = "/scalar";
+
+    /// <summary>
+    /// Registers everything the standalone host needs.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="configureConfiguration"/> runs <em>before</em> Alvo is registered, because
+    /// <c>AddAlvo</c>'s callback is eager: the descriptor path and the driver are read here, so a caller with
+    /// its own configuration source has to contribute it before that read.
+    /// </remarks>
+    /// <param name="args">The process arguments, bound as a configuration source by ASP.NET Core.</param>
+    /// <param name="configureConfiguration">Adds configuration sources before Alvo is registered.</param>
+    /// <returns>The builder, for a caller that wants to add logging or a test server.</returns>
+    public static WebApplicationBuilder CreateBuilder(
+        string[] args, Action<IConfigurationBuilder>? configureConfiguration = null)
+    {
+        var builder = WebApplication.CreateBuilder(args);
+        configureConfiguration?.Invoke(builder.Configuration);
+
+        var options = HostOptions(builder.Configuration);
+
+        builder.Services.Configure<AlvoHostOptions>(builder.Configuration.GetSection(ConfigurationSection));
+        builder.Services.Configure<AlvoAuthOptions>(builder.Configuration.GetSection(AuthSection));
+        builder.Services.Configure<ForwardedHeadersOptions>(ConfigureForwardedHeaders);
+        builder.Services.AddHealthChecks();
+        builder.Services.AddAlvoProblemDetails();
+
+        if (options.Docs.Enabled)
+        {
+            builder.Services.AddAlvoHostDocs();
+        }
+
+        builder.Services.AddAlvo(alvo => Configure(alvo, options, builder.Configuration));
+
+        return builder;
+    }
+
+    /// <summary>
+    /// Builds the application, applies the mounted descriptor, and maps the generated Data API.
+    /// </summary>
+    /// <param name="builder">The builder <see cref="CreateBuilder"/> returned.</param>
+    /// <param name="ct">Cancels the descriptor apply.</param>
+    /// <returns>The built, not-yet-running application.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
+    public static async Task<WebApplication> BuildAsync(
+        WebApplicationBuilder builder, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        var app = builder.Build();
+        var options = app.Services.GetRequiredService<IOptions<AlvoHostOptions>>().Value;
+
+        app.UseExceptionHandler();
+
+        if (options.ForwardedHeaders.Enabled)
+        {
+            app.UseForwardedHeaders();
+        }
+
+        if (options.PathBase is { Length: > 0 } pathBase)
+        {
+            app.UsePathBase(pathBase);
+        }
+
+        app.UseRouting();
+        app.MapAlvoLiveness();
+
+        await app.Services.ApplyAlvoDescriptorAsync(ct: ct).ConfigureAwait(false);
+
+        app.MapAlvoDataApi();
+
+        if (options.Docs.Enabled)
+        {
+            app.MapAlvoHostDocs();
+        }
+
+        return app;
+    }
+
+    private static void Configure(IAlvoBuilder alvo, AlvoHostOptions options, IConfiguration configuration)
+    {
+        AlvoDatabaseSelector.Select(alvo, options.Database, configuration);
+        alvo.FromDescriptor(options.DescriptorPath)
+            .AddDataApi(api => configuration.GetSection(ApiSection).Bind(api));
+    }
+```
+
+> `MapAlvoHostDocs` comes **after** `MapAlvoDataApi` because the document is generated from the endpoints actually mapped: a document route registered before the Data API's would describe an empty API. `AddAlvoHostDocs` comes **before** `AddAlvo` for the transformer-order reason above. The two orderings are opposite and both are deliberate.
+
+- [ ] **Step 6: Run them and watch them pass**
+
+```bash
+dotnet test --project test/MMLib.Alvo.Host.Tests/MMLib.Alvo.Host.Tests.csproj
+```
+
+Expected: PASS. The Host's public-API baseline moves by three constants — accept it.
+
+- [ ] **Step 7: Record it**
+
+Add to `docs/architecture/host.md`:
+
+```markdown
+## Docs
+
+`AddOpenApi` is called by the **host**, never by the core (`ApiSetup.AddAlvoApi` says why: serving a document
+is a hosting decision), and `Scalar.AspNetCore` renders it at `/scalar` from `/openapi/v1.json`. Two orderings
+are load-bearing and opposite: the host's document transformer registers **before** `AddAlvo`, because
+registration order is transformer order and Alvo appends to `info.description` rather than replacing it; the
+docs **routes** map **after** `MapAlvoDataApi`, because the document is generated from the endpoints actually
+mapped. `Alvo:Docs:Enabled=false` removes both routes.
+
+Scalar is the only reason the Host carries a third-party package, and it is why `package-boundary.md` records
+rule (a) alongside rule (c) for this project.
+```
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add Directory.Packages.props src/MMLib.Alvo.Host test/MMLib.Alvo.Host.Tests docs/architecture/host.md
+git commit -m "feat(host): serve the OpenAPI document and render it with Scalar (#75)"
+```
