@@ -21,4 +21,16 @@
     <ProjectReference Include="../MMLib.Alvo.Data.PostgreSql/MMLib.Alvo.Data.PostgreSql.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Direct rather than inherited from the core's ProjectReference, because the host calls
+         AddOpenApi/MapOpenApi itself. A build target only travels with a direct PackageReference,
+         and this package's target is what sets InterceptorsNamespaces for the XML-comment source
+         generator AddOpenApi switches on: without the direct reference the generated file is
+         emitted and then refused with CS9137. -->
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <!-- The only third-party package the host carries: the docs UI that renders the OpenAPI
+         document the core emits. Host-only on purpose — see docs/architecture/host.md, "Docs". -->
+    <PackageReference Include="Scalar.AspNetCore" />
+  </ItemGroup>
+
 </Project>

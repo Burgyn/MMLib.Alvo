@@ -9,6 +9,9 @@ namespace MMLib.Alvo.Host
     {
         public const string ConfigurationSection = "Alvo";
         public const string LivenessPath = "/health/live";
+        public const string OpenApiDocumentName = "v1";
+        public const string OpenApiDocumentPath = "/openapi/v1.json";
+        public const string ScalarPath = "/scalar";
         public static System.Threading.Tasks.Task<Microsoft.AspNetCore.Builder.WebApplication> BuildAsync(Microsoft.AspNetCore.Builder.WebApplicationBuilder builder, System.Threading.CancellationToken ct = default) { }
         public static Microsoft.AspNetCore.Builder.WebApplicationBuilder CreateBuilder(string[] args, System.Action<Microsoft.Extensions.Configuration.IConfigurationBuilder>? configureConfiguration = null) { }
     }

@@ -79,6 +79,37 @@ runtime, not assumed: a probe answers 200 for `UsePathBase` and 404 for the same
 removing the call from the pipeline leaves every path-base fact green. `UseForwardedHeaders` does not touch
 `Path` at all, so it never raised the question.
 
+## Docs
+
+`AddOpenApi` is called by the **host**, never by the core (`ApiSetup.AddAlvoApi` says why: serving a document
+is a hosting decision), and `Scalar.AspNetCore` renders it at `/scalar` from `/openapi/v1.json`. Two orderings
+are load-bearing and opposite: the host's document transformer registers **before** `AddAlvo`, because
+registration order is transformer order and Alvo appends to `info.description` rather than replacing it; the
+docs **routes** map **after** `MapAlvoDataApi`, because the document is generated from the endpoints actually
+mapped. `Alvo:Docs:Enabled=false` removes both routes — the UI *and* the document, because the switch is about
+publishing the API's shape at all, and a page without its document renders an error.
+
+Scalar is the only reason the Host carries a third-party package, and it is why `package-boundary.md` records
+rule (a) alongside rule (c) for this project. `Microsoft.AspNetCore.OpenApi` is referenced **directly** here
+even though the core already brings it: a package's build targets do not travel through a `ProjectReference`,
+and that package's target is what sets `InterceptorsNamespaces` for the XML-comment source generator
+`AddOpenApi` switches on. Without the direct reference the generated file is emitted and then refused with
+`CS9137`.
+
+**What "Scalar renders it" is asserted as.** Not a 200 with HTML: Scalar's page is a static shell that fetches
+the document in the browser, so a page aimed at a route nothing serves still answers 200 and fails only in
+front of the reader. `Scalar_renders_the_document_the_host_serves` therefore reads the document URL *out of*
+the rendered page, resolves it the way `scalar.aspnetcore.js` does, requires it to be the route this host
+mapped, and follows it to a document containing the descriptor's own routes. The route Scalar fetches is also
+pinned explicitly (`AddDocument(..., routePattern)`) rather than left to Scalar's default pattern, so the page
+and `MapOpenApi` cannot drift apart.
+
+**Behind a path base this is unverified.** Scalar emits the document URL *relative* and resolves it in the
+browser against `window.location.pathname` minus the prefix it was initialised with — so under `Alvo:PathBase`
+the resolution happens in JavaScript this suite does not run. The compose stack is therefore deliberately
+path-base-free, and the gap is filed as an issue rather than guessed at with a test that could not fail for
+its stated reason.
+
 ## Health
 
 Liveness only (`/health/live`). §2.12 asks for readiness with database, cache and message-bus

@@ -26,6 +26,15 @@ public static class AlvoHost
     /// <summary>The route a container's liveness probe calls.</summary>
     public const string LivenessPath = "/health/live";
 
+    /// <summary>The OpenAPI document's name, and therefore its version segment.</summary>
+    public const string OpenApiDocumentName = "v1";
+
+    /// <summary>Where the OpenAPI document is served.</summary>
+    public const string OpenApiDocumentPath = "/openapi/v1.json";
+
+    /// <summary>Where the interactive documentation is served.</summary>
+    public const string ScalarPath = "/scalar";
+
     private const string AuthSection = $"{ConfigurationSection}:Auth";
     private const string ApiSection = $"{ConfigurationSection}:Api";
     private const string ConnectionName = "Alvo";
@@ -34,10 +43,18 @@ public static class AlvoHost
     /// Registers everything the standalone host needs.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <paramref name="configureConfiguration"/> runs <em>before</em> Alvo is registered, because
     /// <c>AddAlvo</c>'s callback is eager: the descriptor path and the driver are read here, so a caller with
     /// its own configuration source has to contribute it before that read. A container passes nothing (the
     /// environment is already a source); a test passes its own collection.
+    /// </para>
+    /// <para>
+    /// The docs registration comes <em>before</em> <c>AddAlvo</c> for a different reason: registration order is
+    /// document-transformer order, and Alvo's transformer appends to <c>info.description</c> rather than
+    /// replacing it, so the host's own <c>info</c> has to be written first. The docs <em>routes</em> map after
+    /// the Data API's — see <see cref="BuildAsync"/>. The two orderings are opposite and both deliberate.
+    /// </para>
     /// </remarks>
     /// <param name="args">The process arguments, bound as a configuration source by ASP.NET Core.</param>
     /// <param name="configureConfiguration">Adds configuration sources before Alvo is registered.</param>
@@ -48,12 +65,20 @@ public static class AlvoHost
         var builder = WebApplication.CreateBuilder(args);
         configureConfiguration?.Invoke(builder.Configuration);
 
+        var options = HostOptions(builder.Configuration);
+
         builder.Services.Configure<AlvoHostOptions>(builder.Configuration.GetSection(ConfigurationSection));
         builder.Services.Configure<AlvoAuthOptions>(builder.Configuration.GetSection(AuthSection));
         builder.Services.Configure<ForwardedHeadersOptions>(ConfigureForwardedHeaders);
         builder.Services.AddHealthChecks();
         builder.Services.AddAlvoProblemDetails();
-        builder.Services.AddAlvo(alvo => Configure(alvo, builder.Configuration));
+
+        if (options.Docs.Enabled)
+        {
+            builder.Services.AddAlvoHostDocs();
+        }
+
+        builder.Services.AddAlvo(alvo => Configure(alvo, options, builder.Configuration));
 
         return builder;
     }
@@ -72,6 +97,11 @@ public static class AlvoHost
     /// advertises (#121). Neither is followed by an explicit <c>UseRouting</c>: <c>UsePathBaseMiddleware</c>
     /// re-runs matching over the rewritten path itself, and <c>UseForwardedHeaders</c> leaves <c>Path</c>
     /// alone. See <c>docs/architecture/host.md</c>, "Behind a reverse proxy".
+    /// </para>
+    /// <para>
+    /// The docs routes map <em>last</em>, after <c>MapAlvoDataApi</c>: the document is generated from the
+    /// endpoints actually mapped, so a document route registered before the Data API's would describe an empty
+    /// API.
     /// </para>
     /// </remarks>
     /// <param name="builder">The builder <see cref="CreateBuilder"/> returned.</param>
@@ -103,6 +133,12 @@ public static class AlvoHost
         await app.Services.ApplyAlvoDescriptorAsync(ct: ct).ConfigureAwait(false);
 
         app.MapAlvoDataApi();
+
+        if (options.Docs.Enabled)
+        {
+            app.MapAlvoHostDocs();
+        }
+
         return app;
     }
 
@@ -127,9 +163,9 @@ public static class AlvoHost
         options.KnownProxies.Clear();
     }
 
-    private static void Configure(IAlvoBuilder alvo, ConfigurationManager configuration)
+    private static void Configure(
+        IAlvoBuilder alvo, AlvoHostOptions options, ConfigurationManager configuration)
     {
-        var options = HostOptions(configuration);
         AlvoDatabaseSelector.Select(alvo, options.Database, ConnectionString(configuration));
         alvo.FromDescriptor(options.DescriptorPath)
             .AddDataApi(api => configuration.GetSection(ApiSection).Bind(api));
