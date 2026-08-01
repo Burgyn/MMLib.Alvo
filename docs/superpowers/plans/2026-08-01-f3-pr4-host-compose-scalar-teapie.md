@@ -41,8 +41,8 @@ Every task's requirements implicitly include this section. Values are copied ver
 **Exact identifiers this plan introduces or moves** (use these spellings, nothing else)
 
 - `Microsoft.Extensions.DependencyInjection.AlvoDescriptorApplyExtensions.ApplyAlvoDescriptorAsync(this IServiceProvider services, MigrationOptions? options = null, CancellationToken ct = default) → Task<MigrationResult>` (core, **public**).
-- `MMLib.Alvo.Host.AlvoHost.CreateBuilder(string[] args) → WebApplicationBuilder` and `MMLib.Alvo.Host.AlvoHost.Build(WebApplicationBuilder builder) → WebApplication` (Host, **public**).
-- `MMLib.Alvo.Host.AlvoHostOptions` with `DescriptorPath`, `Database`, `PathBase`, `Docs` (Host, **public**, bound from configuration section `Alvo`).
+- `MMLib.Alvo.Host.AlvoHost.CreateBuilder(string[] args) → WebApplicationBuilder` and `MMLib.Alvo.Host.AlvoHost.BuildAsync(WebApplicationBuilder builder, CancellationToken ct = default) → Task<WebApplication>` (Host, **public**).
+- `MMLib.Alvo.Host.AlvoHostOptions` with `DescriptorPath`, `Database`, `PathBase`, `Docs`; `MMLib.Alvo.Host.AlvoHostDatabaseOptions` with `Provider`, `SqliteConnectionString`; `MMLib.Alvo.Host.AlvoHostDocsOptions` with `Enabled` (Host, **public**, bound from configuration section `Alvo`).
 - `MMLib.Alvo.Api.AlvoProblemTypes.Internal = "internal"` (core, **public**, added to `All`).
 - `Microsoft.Extensions.DependencyInjection.AlvoProblemDetailsExtensions.AddAlvoProblemDetails(this IServiceCollection services) → IServiceCollection` (core, **public**, opt-in).
 - Configuration keys (standard .NET `Section__Key` env binding): `Alvo__DescriptorPath`, `Alvo__Database__Provider` (`sqlite` | `postgresql`), `Alvo__PathBase`, `Alvo__Docs__Enabled`, `ConnectionStrings__Alvo`, `Alvo__Auth__DevKeys__0__*`, `Alvo__Api__*`.
@@ -315,4 +315,853 @@ git add src/MMLib.Alvo/Migrations/AlvoDescriptorApplyExtensions.cs \
         test/MMLib.Alvo.Tests/PublicApi.MMLib.Alvo.verified.txt \
         docs/architecture/extensibility.md
 git commit -m "feat(core): let a host outside the assembly apply the descriptor"
+```
+
+---
+
+### Task 2: `MMLib.Alvo.Host` boots a working backend from a mounted descriptor, and refuses to boot without one
+
+The project is **earned** under `package-boundary.md` rule (c) — a different distribution: it is a container image, not a library, and rule (a) applies too once Scalar lands in Task 5. It is **`IsPackable=false`**: it ships as an image (spec §X.1, F4), and packing an entry-point host as a nupkg would publish a surface nobody consumes.
+
+**Files:**
+- Create: `src/MMLib.Alvo.Host/MMLib.Alvo.Host.csproj`, `Program.cs`, `AlvoHost.cs`, `AlvoHostOptions.cs`, `Internal/AlvoDatabaseSelector.cs`, `Internal/AlvoHostEndpoints.cs`, `appsettings.json`
+- Create: `test/MMLib.Alvo.Host.Tests/MMLib.Alvo.Host.Tests.csproj`, `AlvoHostWorld.cs`, `AlvoHostBootTests.cs`, `AlvoHostLoggingTests.cs`, `descriptors/host-boot.alvo.json`, `PublicApi.MMLib.Alvo.Host.verified.txt`
+- Create: `docs/architecture/host.md`
+- Modify: `MMLib.Alvo.slnx`, `docs/architecture/package-boundary.md`
+
+**Interfaces:**
+- Consumes: `IServiceCollection.AddAlvo(Action<IAlvoBuilder>?) → IAlvoBuilder`; `IAlvoBuilder.UseSqlite(string connectionString)`, `IAlvoBuilder.UsePostgreSql(string connectionString)`, `IAlvoBuilder.FromDescriptor(string path)`, `IAlvoBuilder.AddDataApi(Action<AlvoApiOptions>?)`; `IEndpointRouteBuilder.MapAlvoDataApi() → IEndpointRouteBuilder`; `IServiceProvider.ApplyAlvoDescriptorAsync(MigrationOptions?, CancellationToken)` from Task 1; `MMLib.Alvo.Auth.AlvoAuthOptions` (`HeaderName` default `"X-Alvo-Api-Key"`, `TenantHeaderName` default `"X-Alvo-Tenant"`, `IList<AlvoDevApiKey> DevKeys`); `MMLib.Alvo.Api.AlvoApiOptions` (`RoutePrefix` default `"/api"`).
+- Produces: `AlvoHost.CreateBuilder(string[] args) → WebApplicationBuilder`, `AlvoHost.BuildAsync(WebApplicationBuilder builder, CancellationToken ct = default) → Task<WebApplication>`, `AlvoHost.ConfigurationSection = "Alvo"`, `AlvoHost.LivenessPath = "/health/live"`; `AlvoHostOptions { string DescriptorPath; AlvoHostDatabaseOptions Database; string? PathBase; AlvoHostDocsOptions Docs }`; `AlvoHostDatabaseOptions { string Provider; string SqliteConnectionString }`; `AlvoHostDocsOptions { bool Enabled }`. Tasks 3, 4 and 5 each add exactly one call inside `BuildAsync`. The test-side `AlvoHostWorld` (`internal sealed class`, `StartAsync(...)`, `HttpClient Client`, `IReadOnlyList<string> Warnings`) is what Tasks 3–5's facts drive.
+
+- [ ] **Step 1: Create the two projects and register them**
+
+```bash
+dotnet new web -o src/MMLib.Alvo.Host -n MMLib.Alvo.Host --no-https
+dotnet new classlib -o test/MMLib.Alvo.Host.Tests -n MMLib.Alvo.Host.Tests
+rm -f test/MMLib.Alvo.Host.Tests/Class1.cs src/MMLib.Alvo.Host/Properties/launchSettings.json
+dotnet sln MMLib.Alvo.slnx add src/MMLib.Alvo.Host/MMLib.Alvo.Host.csproj --solution-folder src
+dotnet sln MMLib.Alvo.slnx add test/MMLib.Alvo.Host.Tests/MMLib.Alvo.Host.Tests.csproj --solution-folder test
+```
+
+Then **replace** both generated `.csproj` files wholesale (the templates emit inherited properties, which `SolutionConventionTests.No_project_redeclares_an_inherited_msbuild_property` rejects).
+
+`src/MMLib.Alvo.Host/MMLib.Alvo.Host.csproj`:
+
+```xml
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    The standalone host (spec §2.14 mode 1, §X.1). Not packable: it is distributed as the
+    `mmlib/alvo` container image, not as a NuGet package, so a .nupkg of an entry point would
+    publish a surface no consumer references. package-boundary.md records the project and the
+    rule that earns it.
+  -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <UserSecretsId>mmlib-alvo-host</UserSecretsId>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../MMLib.Alvo/MMLib.Alvo.csproj" />
+    <!-- Both drivers ship in the image: SQLite is the zero-configuration default the deployment
+         acceptance criterion names, PostgreSQL is what docker-compose runs. Exactly one is
+         *registered*, chosen by configuration in AlvoDatabaseSelector. -->
+    <ProjectReference Include="../MMLib.Alvo.Data.Sqlite/MMLib.Alvo.Data.Sqlite.csproj" />
+    <ProjectReference Include="../MMLib.Alvo.Data.PostgreSql/MMLib.Alvo.Data.PostgreSql.csproj" />
+  </ItemGroup>
+
+</Project>
+```
+
+`test/MMLib.Alvo.Host.Tests/MMLib.Alvo.Host.Tests.csproj`:
+
+```xml
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/MMLib.Alvo.Host/MMLib.Alvo.Host.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="descriptors/*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
+```
+
+> The shared architecture + public-API tests stay **on** here (no `AlvoSharedArchTests=false`): the Host is a real sibling assembly, so `TestTarget.Resolve()` finds it and its small public surface becomes a reviewed baseline — which is the point, since Tasks 3–5 drive it.
+
+- [ ] **Step 2: Write the descriptor the boot facts stand on**
+
+`test/MMLib.Alvo.Host.Tests/descriptors/host-boot.alvo.json` — one entity whose name appears **nowhere else in the repo**, so "the mounted descriptor drove the routes" is falsifiable:
+
+```json
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "host-boot",
+  "description": "One entity, used only to prove the standalone host maps what the mounted descriptor declares.",
+  "auth": {
+    "providers": ["local"],
+    "roles": ["admin"]
+  },
+  "entities": {
+    "warehouses": {
+      "description": "A storage location.",
+      "fields": {
+        "code": { "type": "string", "required": true, "unique": true, "maxLength": 20 },
+        "city": { "type": "string", "maxLength": 60 }
+      },
+      "rules": {
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+        "create": "'admin' in @user.roles",
+        "update": "'admin' in @user.roles",
+        "delete": "'admin' in @user.roles"
+      }
+    }
+  }
+}
+```
+
+- [ ] **Step 3: Write the test world**
+
+`test/MMLib.Alvo.Host.Tests/AlvoHostWorld.cs`:
+
+```csharp
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Logging;
+using System.Net.Http.Json;
+using System.Text.Json.Nodes;
+
+namespace MMLib.Alvo.Host.Tests;
+
+/// <summary>
+/// One running standalone host, started through <see cref="AlvoHost"/>'s own two methods over
+/// <see cref="TestServer"/> — never a hand-rolled <c>WebApplication</c>.
+/// </summary>
+/// <remarks>
+/// The composition <em>is</em> the thing under test: a fixture that assembled its own pipeline would go on
+/// passing after <see cref="AlvoHost.BuildAsync"/> stopped applying the descriptor, stopped mapping the Data
+/// API, or stopped registering the exception handler. Configuration arrives as an in-memory source keyed
+/// exactly as the container's environment variables are, so a fact about <c>Alvo:Database:Provider</c> is a
+/// fact about <c>Alvo__Database__Provider</c>.
+/// </remarks>
+internal sealed class AlvoHostWorld : IAsyncDisposable
+{
+    internal const string AdminKeyId = "host-admin";
+    internal const string AdminSecret = "host-admin-secret";
+    internal const string ApiKeyHeader = "X-Alvo-Api-Key";
+
+    private readonly WebApplication _app;
+    private readonly string _databasePath;
+
+    private AlvoHostWorld(WebApplication app, string databasePath, CapturingLoggerProvider logs)
+    {
+        _app = app;
+        _databasePath = databasePath;
+        Logs = logs;
+        Client = app.GetTestClient();
+    }
+
+    internal HttpClient Client { get; }
+
+    internal CapturingLoggerProvider Logs { get; }
+
+    internal static Task<AlvoHostWorld> StartAsync(
+        string descriptorFileName = "host-boot.alvo.json",
+        IReadOnlyDictionary<string, string?>? overrides = null) =>
+        StartAsync(DescriptorPath(descriptorFileName), overrides);
+
+    internal static async Task<AlvoHostWorld> StartAsync(
+        string descriptorPath,
+        IReadOnlyDictionary<string, string?>? overrides)
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"alvo-host-tests-{Guid.NewGuid():N}.db");
+        var logs = new CapturingLoggerProvider();
+        var builder = AlvoHost.CreateBuilder([]);
+        builder.Configuration.AddInMemoryCollection(Settings(descriptorPath, databasePath, overrides));
+        builder.Logging.ClearProviders();
+        builder.Logging.AddProvider(logs);
+        builder.WebHost.UseTestServer();
+
+        var app = await AlvoHost.BuildAsync(builder, TestContext.Current.CancellationToken);
+        await app.StartAsync(TestContext.Current.CancellationToken);
+        return new AlvoHostWorld(app, databasePath, logs);
+    }
+```
+
+> **The configuration source must be added to `builder.Configuration` *after* `CreateBuilder` returns, which means `CreateBuilder` must not read the `Alvo` section itself.** That is why `AlvoHostOptions` is resolved in `BuildAsync` (from the built container) and the provider selection is deferred to a `IConfigureOptions`-free callback — see Step 5. If a step tempts you to read configuration eagerly inside `CreateBuilder`, this world stops being able to override anything and every fact below becomes untestable.
+
+```csharp
+    private static Dictionary<string, string?> Settings(
+        string descriptorPath,
+        string databasePath,
+        IReadOnlyDictionary<string, string?>? overrides)
+    {
+        var settings = new Dictionary<string, string?>(StringComparer.Ordinal)
+        {
+            ["Alvo:DescriptorPath"] = descriptorPath,
+            ["Alvo:Database:Provider"] = "sqlite",
+            ["Alvo:Database:SqliteConnectionString"] = $"Data Source={databasePath}",
+            ["Alvo:Auth:DevKeys:0:KeyId"] = AdminKeyId,
+            ["Alvo:Auth:DevKeys:0:Secret"] = AdminSecret,
+            ["Alvo:Auth:DevKeys:0:User"] = "6f9619ff-8b86-d011-b42d-00c04fc964ff",
+            ["Alvo:Auth:DevKeys:0:Roles:0"] = "admin",
+            ["Alvo:Auth:DevKeys:0:Roles:1"] = "authenticated",
+            ["Alvo:Auth:DevKeys:0:Scopes:0"] = "*:read",
+            ["Alvo:Auth:DevKeys:0:Scopes:1"] = "*:write",
+        };
+
+        foreach (var (key, value) in overrides ?? new Dictionary<string, string?>(StringComparer.Ordinal))
+        {
+            settings[key] = value;
+        }
+
+        return settings;
+    }
+
+    internal static string DescriptorPath(string fileName) =>
+        Path.Combine(AppContext.BaseDirectory, "descriptors", fileName);
+
+    internal Task<HttpResponseMessage> GetAsync(string path) => SendAsync(HttpMethod.Get, path, body: null);
+
+    internal async Task<HttpResponseMessage> SendAsync(HttpMethod method, string path, JsonNode? body)
+    {
+        using var request = new HttpRequestMessage(method, path);
+        request.Headers.TryAddWithoutValidation(ApiKeyHeader, $"{AdminKeyId}.{AdminSecret}");
+        if (body is not null)
+        {
+            request.Content = JsonContent.Create(body);
+        }
+
+        return await Client.SendAsync(request, TestContext.Current.CancellationToken);
+    }
+
+    internal Task<HttpResponseMessage> SendAnonymouslyAsync(HttpMethod method, string path)
+    {
+        using var request = new HttpRequestMessage(method, path);
+        return Client.SendAsync(request, TestContext.Current.CancellationToken);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await _app.StopAsync(TestContext.Current.CancellationToken);
+        await _app.DisposeAsync();
+        TryDeleteDatabase();
+    }
+
+    private void TryDeleteDatabase()
+    {
+        try
+        {
+            File.Delete(_databasePath);
+        }
+        catch (IOException)
+        {
+        }
+    }
+}
+
+/// <summary>Every log record the host wrote, so a fact can assert a warning was actually delivered.</summary>
+/// <remarks>
+/// Deviation 34's stated cost is that "with no logging <em>provider</em> configured the warning is dropped
+/// silently". A standalone host configures providers, so that cost is observable here and nowhere else —
+/// which is why this is a provider rather than an assertion on <c>ILogger</c> being resolvable.
+/// </remarks>
+internal sealed class CapturingLoggerProvider : ILoggerProvider
+{
+    private readonly List<string> _records = [];
+
+    internal IReadOnlyList<string> Records
+    {
+        get
+        {
+            lock (_records)
+            {
+                return [.. _records];
+            }
+        }
+    }
+
+    public ILogger CreateLogger(string categoryName) => new CapturingLogger(this);
+
+    public void Dispose()
+    {
+    }
+
+    private void Record(LogLevel level, string message)
+    {
+        lock (_records)
+        {
+            _records.Add($"{level}: {message}");
+        }
+    }
+
+    private sealed class CapturingLogger(CapturingLoggerProvider owner) : ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            ArgumentNullException.ThrowIfNull(formatter);
+            owner.Record(logLevel, formatter(state, exception));
+        }
+    }
+}
+```
+
+- [ ] **Step 4: Write the failing boot facts**
+
+`test/MMLib.Alvo.Host.Tests/AlvoHostBootTests.cs`:
+
+```csharp
+using System.Net;
+using System.Text.Json.Nodes;
+
+namespace MMLib.Alvo.Host.Tests;
+
+/// <summary>
+/// The standalone host's own definition of done: a mounted descriptor, and nothing else, becomes a
+/// working backend.
+/// </summary>
+public class AlvoHostBootTests
+{
+    /// <summary>
+    /// A row round-trips through the routes the mounted descriptor declared. "The host started" is not this
+    /// fact — the create and the read-back are.
+    /// </summary>
+    [Fact]
+    public async Task A_row_round_trips_through_the_entity_the_mounted_descriptor_declares()
+    {
+        await using var world = await AlvoHostWorld.StartAsync();
+
+        using var created = await world.SendAsync(
+            HttpMethod.Post, "/api/warehouses", new JsonObject { ["code"] = "W-1", ["city"] = "Košice" });
+
+        created.StatusCode.ShouldBe(HttpStatusCode.Created);
+        var location = created.Headers.Location!.ToString();
+
+        using var read = await world.GetAsync(location);
+
+        read.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var body = JsonNode.Parse(await read.Content.ReadAsStringAsync(TestContext.Current.CancellationToken))!;
+        body["code"]!.GetValue<string>().ShouldBe("W-1");
+    }
+
+    /// <summary>
+    /// The non-vacuity control for the fact above: the host maps the descriptor's entities and only those, so
+    /// a name it does not declare has no route. Without this, a host that mapped a catch-all would pass.
+    /// </summary>
+    [Fact]
+    public async Task An_entity_the_descriptor_does_not_declare_has_no_route()
+    {
+        await using var world = await AlvoHostWorld.StartAsync();
+
+        using var response = await world.GetAsync("/api/pallets");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+    }
+
+    /// <summary>
+    /// The host does not listen until the descriptor applied, so a bad descriptor is a failed start rather
+    /// than a running backend with no tables. This is also what makes the container's liveness probe
+    /// meaningful: answering at all proves the apply succeeded.
+    /// </summary>
+    [Fact]
+    public async Task A_descriptor_that_cannot_apply_stops_the_host_from_starting()
+    {
+        var missing = AlvoHostWorld.DescriptorPath("no-such-descriptor.alvo.json");
+
+        var failure = await Should.ThrowAsync<Exception>(
+            () => AlvoHostWorld.StartAsync(missing, overrides: null));
+
+        failure.ShouldNotBeOfType<ShouldAssertException>();
+    }
+
+    /// <summary>
+    /// §2.14's acceptance criterion — "image nikdy nedodáva prednastavené prihlásenie" — as a fact: a host
+    /// with no configured credential exposes no way in. An anonymous caller is a context, not a 401
+    /// (deviation 23), so the descriptor's own default-deny answers 403.
+    /// </summary>
+    [Fact]
+    public async Task A_host_with_no_configured_key_grants_nobody_anything()
+    {
+        await using var world = await AlvoHostWorld.StartAsync(overrides: NoDevKeys());
+
+        using var response = await world.SendAnonymouslyAsync(HttpMethod.Get, "/api/warehouses");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+    }
+
+    /// <summary>Liveness answers without a credential — a probe cannot present one.</summary>
+    [Fact]
+    public async Task Liveness_answers_an_unauthenticated_probe()
+    {
+        await using var world = await AlvoHostWorld.StartAsync();
+
+        using var response = await world.SendAnonymouslyAsync(HttpMethod.Get, "/health/live");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
+    /// <summary>An unknown provider name is refused by name, with the two that exist listed.</summary>
+    [Fact]
+    public async Task An_unknown_database_provider_is_refused_with_the_choices_named()
+    {
+        var overrides = new Dictionary<string, string?>(StringComparer.Ordinal)
+        {
+            ["Alvo:Database:Provider"] = "cosmos",
+        };
+
+        var failure = await Should.ThrowAsync<InvalidOperationException>(
+            () => AlvoHostWorld.StartAsync(overrides: overrides));
+
+        failure.Message.ShouldContain("cosmos");
+        failure.Message.ShouldContain("sqlite");
+        failure.Message.ShouldContain("postgresql");
+    }
+
+    private static Dictionary<string, string?> NoDevKeys() =>
+        new(StringComparer.Ordinal)
+        {
+            ["Alvo:Auth:DevKeys:0:KeyId"] = null,
+            ["Alvo:Auth:DevKeys:0:Secret"] = null,
+            ["Alvo:Auth:DevKeys:0:User"] = null,
+            ["Alvo:Auth:DevKeys:0:Roles:0"] = null,
+            ["Alvo:Auth:DevKeys:0:Roles:1"] = null,
+            ["Alvo:Auth:DevKeys:0:Scopes:0"] = null,
+            ["Alvo:Auth:DevKeys:0:Scopes:1"] = null,
+        };
+}
+```
+
+`test/MMLib.Alvo.Host.Tests/AlvoHostLoggingTests.cs`:
+
+```csharp
+namespace MMLib.Alvo.Host.Tests;
+
+/// <summary>
+/// Deviation 34's cost, made observable. <c>AddAlvo()</c> calls <c>AddLogging()</c> so the core can write its
+/// declared-but-unhonoured-subsystems warning, and the deviation states plainly that "with no logging
+/// <em>provider</em> configured the warning is dropped silently". A standalone host configures providers, so
+/// this is the first place the warning can be shown to actually arrive.
+/// </summary>
+public class AlvoHostLoggingTests
+{
+    [Fact]
+    public async Task The_unhonoured_subsystem_warning_reaches_the_hosts_logging_provider()
+    {
+        var descriptor = AlvoHostWorld.DescriptorPath("host-boot-with-webhooks.alvo.json");
+
+        await using var world = await AlvoHostWorld.StartAsync(descriptor, overrides: null);
+
+        world.Logs.Records.ShouldContain(
+            record => record.StartsWith("Warning: ", StringComparison.Ordinal)
+                && record.Contains("webhooks", StringComparison.Ordinal),
+            "an operator who declares a subsystem Alvo does not honour must be told, and a dropped warning "
+            + "is indistinguishable from an honoured subsystem");
+    }
+}
+```
+
+Add the second descriptor, `test/MMLib.Alvo.Host.Tests/descriptors/host-boot-with-webhooks.alvo.json`: a byte-for-byte copy of `host-boot.alvo.json` with `"name": "host-boot-webhooks"` and one extra top-level block, whose exact shape you must copy from `schema/project.schema.json`'s `webhooks` definition (read it — do not guess the member names). Before writing it, confirm the warning's wording:
+
+```bash
+grep -rn "UnhonouredSubsystems\|unhonoured" src/MMLib.Alvo/ | head
+```
+
+and match `record.Contains(...)` to the substring that code actually writes.
+
+*Discrimination, fact by fact:*
+- `A_row_round_trips_…` fails if `BuildAsync` skips `ApplyAlvoDescriptorAsync` (no table → 500/404), skips `MapAlvoDataApi` (404), or if auth is misbound (403). Mutation: delete either call.
+- `An_entity_the_descriptor_does_not_declare_has_no_route` fails if a future change maps a catch-all route. Mutation: map `/api/{entity}` generically.
+- `A_descriptor_that_cannot_apply_stops_the_host_from_starting` fails if the apply is wrapped in a `try`/`catch` that logs and continues — which is the tempting "resilient startup" mistake, and the one that would make the container report healthy with no schema.
+- `A_host_with_no_configured_key_grants_nobody_anything` fails if the Host ever seeds a default key, or if a missing credential were treated as an implicit admin.
+- `An_unknown_database_provider_is_refused_…` fails if the selector silently falls back to SQLite — the failure mode that would have a compose stack quietly ignore PostgreSQL and write to a container-local file.
+- `The_unhonoured_subsystem_warning_reaches_…` fails if the Host clears providers without adding one, or if the core's warning is emitted before any provider is attached.
+
+- [ ] **Step 5: Run the facts and watch them fail**
+
+```bash
+dotnet build MMLib.Alvo.slnx
+```
+
+Expected: `CS0103 The name 'AlvoHost' does not exist` (and friends) — nothing in `src/MMLib.Alvo.Host` exists yet beyond the template's `Program.cs`.
+
+- [ ] **Step 6: Write the options**
+
+`src/MMLib.Alvo.Host/AlvoHostOptions.cs`:
+
+```csharp
+namespace MMLib.Alvo.Host;
+
+/// <summary>The standalone host's own configuration, bound from the <c>Alvo</c> section.</summary>
+/// <remarks>
+/// Distinct from <c>AlvoOptions</c> and <c>AlvoApiOptions</c> on purpose: those are the framework's options,
+/// which an embedded host configures too. These are decisions only a <em>container</em> makes — where the
+/// mounted descriptor is, which driver to register, what path base it is served under, whether to serve a
+/// docs UI. Bound from <c>Alvo:*</c>, so the container's environment form is the standard .NET
+/// <c>Alvo__DescriptorPath</c> / <c>Alvo__Database__Provider</c>.
+/// </remarks>
+public sealed class AlvoHostOptions
+{
+    /// <summary>Gets or sets the project descriptor's path (default <c>/alvo/descriptor.json</c>, the image's mount point).</summary>
+    public string DescriptorPath { get; set; } = "/alvo/descriptor.json";
+
+    /// <summary>Gets or sets which database driver to register and how to reach it.</summary>
+    public AlvoHostDatabaseOptions Database { get; set; } = new();
+
+    /// <summary>Gets or sets the path base the host is served under, for a deployment behind a reverse proxy that does not rewrite (default none).</summary>
+    public string? PathBase { get; set; }
+
+    /// <summary>Gets or sets whether the interactive API documentation is served.</summary>
+    public AlvoHostDocsOptions Docs { get; set; } = new();
+}
+
+/// <summary>Which database the standalone host registers, and how to reach it.</summary>
+public sealed class AlvoHostDatabaseOptions
+{
+    /// <summary>The SQLite driver's configuration value.</summary>
+    public const string Sqlite = "sqlite";
+
+    /// <summary>The PostgreSQL driver's configuration value.</summary>
+    public const string PostgreSql = "postgresql";
+
+    /// <summary>Gets or sets the driver to register — <see cref="Sqlite"/> or <see cref="PostgreSql"/>.</summary>
+    /// <remarks>
+    /// SQLite is the default because the deployment acceptance criterion is a working backend with
+    /// <em>no</em> configuration at all; PostgreSQL is what <c>docker-compose.yml</c> selects.
+    /// </remarks>
+    public string Provider { get; set; } = Sqlite;
+
+    /// <summary>
+    /// Gets or sets the connection string used when <see cref="Provider"/> is <see cref="Sqlite"/> and
+    /// <c>ConnectionStrings:Alvo</c> is not set.
+    /// </summary>
+    /// <remarks>
+    /// The one place a database location is defaulted, and only for SQLite: a PostgreSQL host with no
+    /// connection string must fail rather than silently write to a container-local file that vanishes with
+    /// the container.
+    /// </remarks>
+    public string SqliteConnectionString { get; set; } = "Data Source=/alvo/data/alvo.db";
+}
+
+/// <summary>Whether the standalone host serves interactive API documentation.</summary>
+public sealed class AlvoHostDocsOptions
+{
+    /// <summary>Gets or sets whether the docs UI and the OpenAPI document are served (default <see langword="true"/>).</summary>
+    /// <remarks>
+    /// On by default because the document <em>is</em> the contract an agent reads (§0 principle 4), and
+    /// because the design already commits to the declared, non-hidden schema shape being public
+    /// (deviation 27). A deployment that disagrees turns it off with one setting.
+    /// </remarks>
+    public bool Enabled { get; set; } = true;
+}
+```
+
+- [ ] **Step 7: Write the driver selection**
+
+`src/MMLib.Alvo.Host/Internal/AlvoDatabaseSelector.cs`:
+
+```csharp
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace MMLib.Alvo.Host.Internal;
+
+/// <summary>Registers exactly one database driver, named by configuration.</summary>
+internal static class AlvoDatabaseSelector
+{
+    private const string ConnectionName = "Alvo";
+
+    internal static void Select(IAlvoBuilder builder, AlvoHostDatabaseOptions database, IConfiguration configuration)
+    {
+        if (Is(database.Provider, AlvoHostDatabaseOptions.Sqlite))
+        {
+            builder.UseSqlite(ConnectionString(configuration) ?? database.SqliteConnectionString);
+            return;
+        }
+
+        if (Is(database.Provider, AlvoHostDatabaseOptions.PostgreSql))
+        {
+            builder.UsePostgreSql(configuration);
+            return;
+        }
+
+        throw new InvalidOperationException(UnknownProviderMessage(database.Provider));
+    }
+
+    private static bool Is(string configured, string known) =>
+        string.Equals(configured, known, StringComparison.OrdinalIgnoreCase);
+
+    private static string? ConnectionString(IConfiguration configuration) =>
+        configuration.GetConnectionString(ConnectionName) is { Length: > 0 } configured ? configured : null;
+
+    private static string UnknownProviderMessage(string configured) =>
+        $"'{configured}' is not a database provider this host can register. Set Alvo:Database:Provider "
+        + $"(env Alvo__Database__Provider) to '{AlvoHostDatabaseOptions.Sqlite}' or "
+        + $"'{AlvoHostDatabaseOptions.PostgreSql}'.";
+}
+```
+
+- [ ] **Step 8: Write the liveness endpoint**
+
+`src/MMLib.Alvo.Host/Internal/AlvoHostEndpoints.cs`:
+
+```csharp
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Routing;
+
+namespace MMLib.Alvo.Host.Internal;
+
+/// <summary>The endpoints the host itself owns, as opposed to the ones the descriptor generates.</summary>
+internal static class AlvoHostEndpoints
+{
+    /// <summary>
+    /// Maps liveness. Unauthenticated by construction — a container probe presents no credential, and only
+    /// <c>MapAlvoDataApi</c>'s endpoints carry the API-key filter.
+    /// </summary>
+    /// <remarks>
+    /// <b>Answering at all proves the descriptor applied</b>, because <see cref="AlvoHost.BuildAsync"/>
+    /// applies before the server ever listens: a host whose apply failed never reaches this route. That is
+    /// what lets <c>docker compose up --wait</c> mean "the backend is up", not "a process is running".
+    /// Readiness with database / cache / bus reachability (§2.12) is F4's — see <c>docs/architecture/host.md</c>.
+    /// </remarks>
+    internal static void MapAlvoLiveness(this IEndpointRouteBuilder endpoints) =>
+        endpoints.MapHealthChecks(AlvoHost.LivenessPath);
+}
+```
+
+- [ ] **Step 9: Write the composition**
+
+`src/MMLib.Alvo.Host/AlvoHost.cs`:
+
+```csharp
+using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using MMLib.Alvo.Api;
+using MMLib.Alvo.Auth;
+using MMLib.Alvo.Host.Internal;
+
+namespace MMLib.Alvo.Host;
+
+/// <summary>
+/// The standalone host's composition, as two methods so a test can start the real pipeline over a
+/// <c>TestServer</c> instead of re-assembling an approximation of it.
+/// </summary>
+/// <remarks>
+/// <c>Program.cs</c> is deliberately three lines: everything worth a test lives here.
+/// <see cref="CreateBuilder"/> registers, <see cref="BuildAsync"/> applies and maps — the two seams
+/// <c>docs/architecture/extensibility.md</c> rule 10 keeps orthogonal, in the one order that works
+/// (<c>MapAlvoDataApi</c> reads route literals off the applied schema).
+/// </remarks>
+public static class AlvoHost
+{
+    /// <summary>The configuration section the host's own options are bound from.</summary>
+    public const string ConfigurationSection = "Alvo";
+
+    /// <summary>The route a container's liveness probe calls.</summary>
+    public const string LivenessPath = "/health/live";
+
+    private const string AuthSection = $"{ConfigurationSection}:Auth";
+    private const string ApiSection = $"{ConfigurationSection}:Api";
+
+    /// <summary>
+    /// Registers everything the standalone host needs, without reading the <c>Alvo</c> section — so a caller
+    /// may still add configuration sources to the returned builder.
+    /// </summary>
+    /// <param name="args">The process arguments, bound as a configuration source by ASP.NET Core.</param>
+    /// <returns>The builder, for a caller that wants to add configuration, logging or a test server.</returns>
+    public static WebApplicationBuilder CreateBuilder(string[] args)
+    {
+        var builder = WebApplication.CreateBuilder(args);
+
+        builder.Services.Configure<AlvoHostOptions>(builder.Configuration.GetSection(ConfigurationSection));
+        builder.Services.Configure<AlvoAuthOptions>(builder.Configuration.GetSection(AuthSection));
+        builder.Services.AddHealthChecks();
+        builder.Services.AddAlvo(alvo => Configure(alvo, builder.Configuration));
+
+        return builder;
+    }
+
+    /// <summary>
+    /// Builds the application, applies the mounted descriptor, and maps the generated Data API.
+    /// </summary>
+    /// <param name="builder">The builder <see cref="CreateBuilder"/> returned.</param>
+    /// <param name="ct">Cancels the descriptor apply.</param>
+    /// <returns>The started-but-not-yet-running application.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
+    public static async Task<WebApplication> BuildAsync(
+        WebApplicationBuilder builder, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        var app = builder.Build();
+        app.MapAlvoLiveness();
+
+        await app.Services.ApplyAlvoDescriptorAsync(ct: ct).ConfigureAwait(false);
+
+        app.MapAlvoDataApi();
+        return app;
+    }
+
+    private static void Configure(IAlvoBuilder alvo, IConfiguration configuration)
+    {
+        var options = HostOptions(configuration);
+        AlvoDatabaseSelector.Select(alvo, options.Database, configuration);
+        alvo.FromDescriptor(options.DescriptorPath)
+            .AddDataApi(api => configuration.GetSection(ApiSection).Bind(api));
+    }
+
+    private static AlvoHostOptions HostOptions(IConfiguration configuration) =>
+        configuration.GetSection(ConfigurationSection).Get<AlvoHostOptions>() ?? new AlvoHostOptions();
+}
+```
+
+> **Read this before you write it.** `AddAlvo`'s `configure` callback runs **eagerly**, inside `CreateBuilder` — so `Configure(...)` does read the `Alvo` section there, and `AlvoHostWorld` therefore adds its in-memory source **before** calling `AlvoHost.CreateBuilder`… which it cannot, because the builder does not exist yet. Resolve it the way the world above expects: give `CreateBuilder` an optional second parameter, `Action<IConfigurationBuilder>? configureConfiguration = null`, applied to `builder.Configuration` **before** `AddAlvo`, and have `AlvoHostWorld` pass its in-memory collection through it. Update the world's `StartAsync` to
+> `var builder = AlvoHost.CreateBuilder([], configuration => configuration.AddInMemoryCollection(Settings(...)));`
+> and add the parameter to this plan's `Produces` signature when you commit:
+> `AlvoHost.CreateBuilder(string[] args, Action<IConfigurationBuilder>? configureConfiguration = null) → WebApplicationBuilder`.
+> Tasks 3–5 depend on that spelling.
+
+`src/MMLib.Alvo.Host/Program.cs` (replace the template's contents entirely):
+
+```csharp
+using MMLib.Alvo.Host;
+
+var app = await AlvoHost.BuildAsync(AlvoHost.CreateBuilder(args));
+await app.RunAsync();
+```
+
+`src/MMLib.Alvo.Host/appsettings.json`:
+
+```json
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  },
+  "Alvo": {
+    "DescriptorPath": "/alvo/descriptor.json",
+    "Database": {
+      "Provider": "sqlite",
+      "SqliteConnectionString": "Data Source=/alvo/data/alvo.db"
+    },
+    "Docs": {
+      "Enabled": true
+    }
+  }
+}
+```
+
+- [ ] **Step 10: Run the facts and watch them pass**
+
+```bash
+dotnet test --project test/MMLib.Alvo.Host.Tests/MMLib.Alvo.Host.Tests.csproj
+```
+
+Expected: PASS. `PublicApiApprovalTests.Public_api_has_not_changed` fails first with a `received` file — copy it to `test/MMLib.Alvo.Host.Tests/PublicApi.MMLib.Alvo.Host.verified.txt` and re-run. The Stop hook will ask for `alvo-snapshot-judge`; the justification is *"Task 2 introduces the Host's public composition surface; this is its first baseline."*
+
+- [ ] **Step 11: Run ring1**
+
+```bash
+scripts/test-ring1
+```
+
+Expected: green. If ring0 reports a module-count mismatch, `MMLib.Alvo.Host.Tests` is missing from `MMLib.Alvo.slnx` — fix that, not the script.
+
+- [ ] **Step 12: Record the project and start the host's architecture note**
+
+In `docs/architecture/package-boundary.md`, under *Current projects*, after the `MMLib.Alvo.Testing.EntityFrameworkCore` bullet:
+
+```markdown
+- `src/MMLib.Alvo.Host` — the standalone host (spec §2.14 mode 1): a `WebApplication`
+  that turns a mounted project descriptor into a running backend, plus Scalar as its
+  docs UI. **Earned by rule (c)** — a different distribution: it ships as the
+  `mmlib/alvo` container image, not as a NuGet package, so it is
+  `IsPackable=false`. Rule (a) applies to its Scalar dependency as well: a docs UI is
+  a hosting decision, and most embedded consumers do not want the package. It is the
+  only project allowed to reference more than one `MMLib.Alvo.Data.*` provider — it
+  ships both drivers and registers exactly one, chosen by configuration. Details in
+  [`host.md`](./host.md).
+```
+
+Create `docs/architecture/host.md` with the sections Tasks 3–7 will extend:
+
+```markdown
+# The standalone host
+
+> The surviving detailed record for `MMLib.Alvo.Host`, in the same role
+> `data-path.md` plays for the port and `data-api.md` for the HTTP layer. PR4's
+> Superpowers plan is discarded once merged; what outlives it is here, and the
+> deviations it introduced are in the F3 design doc's *Deviations added by PR4*.
+
+## What the host is, and is not
+
+It is a `WebApplication` over the core's public seams and nothing more: configuration
+binding, one driver registration, the code-first apply, `MapAlvoDataApi`, liveness, and
+a docs UI. It is **not** the full standalone story — the dashboard, the Management API,
+the CLI and the published image are #24's remainder, in F4.
+
+## The order in `BuildAsync` is load-bearing
+
+`MapAlvoDataApi` reads entity-name **literals** off the applied schema, so the apply must
+precede the mapping or the host maps nothing at all. The apply also primes the policy
+catalog, and an unprimed catalog denies every operation. Liveness is mapped before the
+apply so the route exists on the endpoint table either way, but the server does not listen
+until `RunAsync`, which is *after* `BuildAsync` returned — so **answering liveness proves
+the descriptor applied**. A host whose apply throws never listens, and the container exits
+non-zero. That is deliberate: a container reporting healthy with no schema is worse than
+one that fails to start.
+
+## Configuration
+
+The framework's options (`AlvoOptions`, `AlvoApiOptions`, `AlvoAuthOptions`) are bound from
+`Alvo:*`, `Alvo:Api:*` and `Alvo:Auth:*`; the host's own decisions live in
+`AlvoHostOptions` (`Alvo:DescriptorPath`, `Alvo:Database:*`, `Alvo:PathBase`, `Alvo:Docs:*`).
+The container form is the standard .NET double-underscore spelling
+(`Alvo__Database__Provider`), not the `ALVO_*` names spec §X.1 sketches — see the design's
+*Deviations added by PR4*.
+
+**No default credential.** §2.14's acceptance criterion is that the image never ships a
+preset login, so the host seeds no API key. A host with none configured still starts and
+still refuses every operation, because an anonymous caller is judged by the same
+default-deny policy as any other (deviation 23).
+
+## Health
+
+Liveness only (`/health/live`). §2.12 asks for readiness with database, cache and message-bus
+reachability; none of those probes exists as a port today, and inventing one is a port
+widening PR4 has no mandate for. Recorded as a deviation with an issue rather than
+approximated.
+```
+
+- [ ] **Step 13: Commit**
+
+```bash
+git add src/MMLib.Alvo.Host test/MMLib.Alvo.Host.Tests MMLib.Alvo.slnx \
+        docs/architecture/package-boundary.md docs/architecture/host.md
+git commit -m "feat(host): boot a backend from a mounted descriptor, or refuse to start"
 ```
