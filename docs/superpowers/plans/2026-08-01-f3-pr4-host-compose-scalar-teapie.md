@@ -1620,3 +1620,431 @@ git add src/MMLib.Alvo/Api src/MMLib.Alvo.Host/AlvoHost.cs test/_shared/api \
         docs/architecture/data-api.md docs/architecture/host.md
 git commit -m "fix(api): answer a standalone 500 with Alvo's own problem type (#119)"
 ```
+
+---
+
+### Task 4: A 201's `Location` resolves behind a path base and behind a forwarding proxy (#121)
+
+**Ruling: PR4 fixes it, because PR4 is the PR that ships the thing that breaks.** #121's own words: "The same applies behind a reverse proxy that sets `PathBase` from forwarded headers, **which is the ordinary standalone shape too**." Shipping a host whose every create returns a `Location` that 404s behind a proxy would be a defect introduced *by this PR's deliverable*, and the fix is four lines plus a matrix — well inside PR4's budget, and cheaper now than after an image is published in F4.
+
+**Scope, deliberately bounded.** The `Location` header is fixed; the **OpenAPI document's `servers`/path keys are not** — see *Deviations anticipated*, D2, for the concrete reason (`OpenApiDocumentTransformerContext` carries no `HttpContext`, and the document is cached per document name, so a request-derived `servers` entry is a separate design decision about whether Alvo's document is per-request at all).
+
+**Files:**
+- Modify: `src/MMLib.Alvo/Api/Internal/DataApiEndpoints.cs` (the `RecordResult` nested class, around line 905–924)
+- Modify: `src/MMLib.Alvo.Host/AlvoHost.cs`, `src/MMLib.Alvo.Host/AlvoHostOptions.cs`
+- Modify: `test/_shared/api/AlvoApiWorld.cs` (`AlvoApiWorldSetup` gains `PathBase`)
+- Create: `test/MMLib.Alvo.Api.Tests/PathBaseTests.cs`, `test/MMLib.Alvo.Host.Tests/AlvoHostPathBaseTests.cs`
+- Modify: `test/MMLib.Alvo.Host.Tests/PublicApi.MMLib.Alvo.Host.verified.txt`, `docs/architecture/data-api.md`, `docs/architecture/host.md`
+
+**Interfaces:**
+- Consumes: `HttpRequest.PathBase` (`PathString`, with `PathString.Add(PathString)` and an implicit conversion from `string`); `IApplicationBuilder.UsePathBase(PathString)`; `IApplicationBuilder.UseForwardedHeaders()`; `Microsoft.AspNetCore.HttpOverrides.ForwardedHeadersOptions` with `ForwardedHeaders`, `KnownNetworks`, `KnownProxies`, and the `ForwardedHeaders.XForwardedPrefix` flag; `IApplicationBuilder.UseRouting()`.
+- Produces: `AlvoHostOptions.ForwardedHeaders` of the new type `public sealed class AlvoHostForwardedHeadersOptions { public bool Enabled { get; set; } }`; `AlvoApiWorldSetup` gains `string? PathBase = null`.
+
+- [ ] **Step 1: Write the failing core matrix**
+
+`test/MMLib.Alvo.Api.Tests/PathBaseTests.cs`:
+
+```csharp
+using System.Net;
+using System.Text.Json.Nodes;
+
+namespace MMLib.Alvo.Api.Tests;
+
+/// <summary>
+/// #121: the created row's <c>Location</c> is built from the mapped route template, which does not carry the
+/// request's <c>PathBase</c> — so behind a path base or a forwarding proxy a client that follows the header
+/// gets a 404.
+/// </summary>
+/// <remarks>
+/// Every fact here <b>follows the header</b> rather than comparing it to a string, because that is what #121's
+/// acceptance asks for and because a string comparison passes for a URL that resolves nowhere. A prefix
+/// assertion sits beside the follow-up only to name the failure when it happens.
+/// </remarks>
+public class PathBaseTests
+{
+    private static readonly TestApiKey _admin = new("admin-key", ["admin", "authenticated"], ["*:read", "*:write"]);
+
+    /// <summary>The no-path-base leg: the header keeps its current shape, so the fix is additive.</summary>
+    [Fact]
+    public async Task With_no_path_base_a_created_rows_location_is_the_route_itself()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin]);
+
+        var location = await CreateAndReadLocationAsync(world);
+
+        location.ShouldBe($"/api/owners/{IdIn(location)}");
+        await FollowingItAnswersOkAsync(world, location);
+    }
+
+    /// <summary>
+    /// The embedded shape #121 names: <c>app.UsePathBase("/alvo")</c> then <c>app.MapAlvoDataApi()</c>. The row
+    /// really lives under the base, so the header has to say so.
+    /// </summary>
+    [Fact]
+    public async Task Behind_a_path_base_a_created_rows_location_resolves()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync(
+            [_admin], new AlvoApiWorldSetup(PathBase: "/alvo"));
+
+        var location = await CreateAndReadLocationAsync(world, "/alvo/api/owners");
+
+        location.ShouldStartWith("/alvo/api/owners/");
+        await FollowingItAnswersOkAsync(world, location);
+    }
+
+    private static async Task<string> CreateAndReadLocationAsync(
+        AlvoApiWorld world, string path = "/api/owners")
+    {
+        using var response = await world.SendAsync(
+            HttpMethod.Post, path, _admin, new JsonObject { ["name"] = "Followed Ltd" });
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Created);
+        return response.Headers.Location!.ToString();
+    }
+
+    private static async Task FollowingItAnswersOkAsync(AlvoApiWorld world, string location)
+    {
+        using var followed = await world.SendAsync(HttpMethod.Get, location, _admin);
+
+        followed.StatusCode.ShouldBe(
+            HttpStatusCode.OK,
+            $"a client that follows Location must reach the row; '{location}' did not");
+    }
+
+    private static string IdIn(string location) => location[(location.LastIndexOf('/') + 1)..];
+}
+```
+
+In `test/_shared/api/AlvoApiWorld.cs`, extend the setup record with `string? PathBase = null` (append it to the positional parameter list, after `FaultingData`), and in `StartAsync`, replace
+
+```csharp
+        var app = BuildApp(descriptorPath, database, keys, setup);
+        await ApplyDescriptorAsync(app);
+
+        app.MapAlvoDataApi();
+```
+
+with
+
+```csharp
+        var app = BuildApp(descriptorPath, database, keys, setup);
+
+        if (setup.MapAlvoProblemDetails)
+        {
+            app.UseExceptionHandler();
+        }
+
+        if (setup.PathBase is { } pathBase)
+        {
+            app.UsePathBase(pathBase);
+        }
+
+        app.UseRouting();
+
+        await ApplyDescriptorAsync(app);
+
+        app.MapAlvoDataApi();
+```
+
+> **`UseRouting()` is explicit and it is load-bearing.** ASP.NET's own guidance: *"When using `WebApplication`, `app.UseRouting` must be called **after** `UsePathBase` so that the routing middleware can observe the modified path before matching routes. Otherwise, routes are matched before the path is rewritten."* `WebApplication` otherwise inserts routing ahead of user middleware, and `/alvo/api/owners` would match nothing at all. `UseEndpoints` still does not need to be called — `WebApplication` adds it at the end either way.
+>
+> Adding `UseRouting()` unconditionally (not only in the path-base case) keeps one pipeline shape for every world, so a fact cannot pass on a pipeline no other fact runs on. Re-run the whole `MMLib.Alvo.Api.Tests` suite after this edit: the route-table facts count endpoints, and a pipeline change is exactly the kind of thing they exist to notice.
+
+- [ ] **Step 2: Run the matrix and watch the path-base leg fail**
+
+```bash
+dotnet test --project test/MMLib.Alvo.Api.Tests/MMLib.Alvo.Api.Tests.csproj --filter-method '*path_base*'
+```
+
+Expected: `With_no_path_base_…` PASSES, `Behind_a_path_base_…` FAILS — the follow-up GET answers `404` against `/api/owners/<id>` while the row lives at `/alvo/api/owners/<id>`. That asymmetry is the bug, reproduced.
+
+- [ ] **Step 3: Fix it in the one place a `Location` is written**
+
+In `src/MMLib.Alvo/Api/Internal/DataApiEndpoints.cs`, in `RecordResult.ExecuteAsync`, replace
+
+```csharp
+            if (location is not null)
+            {
+                httpContext.Response.Headers.Location = location;
+            }
+```
+
+with
+
+```csharp
+            if (location is not null)
+            {
+                httpContext.Response.Headers.Location = httpContext.Request.PathBase.Add(location).Value;
+            }
+```
+
+and extend the `location` parameter's doc on `RecordResult` and on the `Created` factory:
+
+```csharp
+    /// <param name="location">
+    /// The created row's path <em>relative to the application</em>, on a 201; <see langword="null"/> otherwise.
+    /// The request's <c>PathBase</c> is prefixed when the header is written, not here — the route template the
+    /// caller site builds this from does not carry one, so a create behind <c>UsePathBase</c> or behind a proxy
+    /// that sets <c>X-Forwarded-Prefix</c> would otherwise answer a URL that 404s (#121).
+    /// </param>
+```
+
+> One place, because there is one place: `grep -n 'Headers.Location' src/MMLib.Alvo` returns exactly this line. The idempotent-replay 201 (deviation 30) and the ordinary 201 both go through `Created(...)` into this type, so both are fixed by it — confirm with
+> `grep -n 'Created(' src/MMLib.Alvo/Api/Internal/DataApiEndpoints.cs`.
+
+- [ ] **Step 4: Run the matrix and watch it pass**
+
+```bash
+dotnet test --project test/MMLib.Alvo.Api.Tests/MMLib.Alvo.Api.Tests.csproj
+```
+
+Expected: PASS, whole suite. If `OpenApiDocumentTests.The_document_is_stable` moved, **stop and read the diff** — nothing in this task should touch the document, and a moved baseline here means the pipeline edit changed the mapped route set.
+
+- [ ] **Step 5: Write the failing Host facts**
+
+`test/MMLib.Alvo.Host.Tests/AlvoHostPathBaseTests.cs`:
+
+```csharp
+using System.Net;
+using System.Text.Json.Nodes;
+
+namespace MMLib.Alvo.Host.Tests;
+
+/// <summary>
+/// The standalone half of #121: a container behind a reverse proxy. The core's matrix proves the header honours
+/// <c>PathBase</c>; these prove the host is the thing that <em>sets</em> one — from configuration, and from a
+/// proxy's <c>X-Forwarded-Prefix</c> when it has been told to trust it.
+/// </summary>
+public class AlvoHostPathBaseTests
+{
+    [Fact]
+    public async Task A_configured_path_base_is_honoured_end_to_end()
+    {
+        await using var world = await AlvoHostWorld.StartAsync(overrides: PathBase("/alvo"));
+
+        using var created = await world.SendAsync(
+            HttpMethod.Post, "/alvo/api/warehouses", new JsonObject { ["code"] = "W-2" });
+
+        created.StatusCode.ShouldBe(HttpStatusCode.Created);
+        var location = created.Headers.Location!.ToString();
+        location.ShouldStartWith("/alvo/api/warehouses/");
+
+        using var followed = await world.SendAsync(HttpMethod.Get, location, body: null);
+
+        followed.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
+    /// <summary>
+    /// A proxy-set prefix, once the host has been told to trust forwarded headers. The trust is explicit
+    /// because honouring a client-supplied <c>X-Forwarded-Prefix</c> unconditionally lets any caller choose the
+    /// URL the host advertises.
+    /// </summary>
+    [Fact]
+    public async Task A_trusted_proxys_forwarded_prefix_becomes_the_path_base()
+    {
+        await using var world = await AlvoHostWorld.StartAsync(overrides: ForwardedHeadersEnabled());
+
+        using var created = await world.SendAsync(
+            HttpMethod.Post,
+            "/api/warehouses",
+            new JsonObject { ["code"] = "W-3" },
+            headers: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["X-Forwarded-Prefix"] = "/gateway",
+            });
+
+        created.StatusCode.ShouldBe(HttpStatusCode.Created);
+        created.Headers.Location!.ToString().ShouldStartWith("/gateway/api/warehouses/");
+    }
+
+    /// <summary>
+    /// The control, and the security half: with forwarded headers off — the default — a caller cannot talk the
+    /// host into advertising a prefix of their choosing.
+    /// </summary>
+    [Fact]
+    public async Task An_untrusted_forwarded_prefix_is_ignored()
+    {
+        await using var world = await AlvoHostWorld.StartAsync();
+
+        using var created = await world.SendAsync(
+            HttpMethod.Post,
+            "/api/warehouses",
+            new JsonObject { ["code"] = "W-4" },
+            headers: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["X-Forwarded-Prefix"] = "/attacker",
+            });
+
+        created.StatusCode.ShouldBe(HttpStatusCode.Created);
+        created.Headers.Location!.ToString().ShouldStartWith("/api/warehouses/");
+    }
+
+    private static Dictionary<string, string?> PathBase(string value) =>
+        new(StringComparer.Ordinal) { ["Alvo:PathBase"] = value };
+
+    private static Dictionary<string, string?> ForwardedHeadersEnabled() =>
+        new(StringComparer.Ordinal) { ["Alvo:ForwardedHeaders:Enabled"] = "true" };
+}
+```
+
+Extend `AlvoHostWorld.SendAsync` with an optional `headers` parameter:
+
+```csharp
+    internal async Task<HttpResponseMessage> SendAsync(
+        HttpMethod method,
+        string path,
+        JsonNode? body,
+        IReadOnlyDictionary<string, string>? headers = null)
+    {
+        using var request = new HttpRequestMessage(method, path);
+        request.Headers.TryAddWithoutValidation(ApiKeyHeader, $"{AdminKeyId}.{AdminSecret}");
+        foreach (var (name, value) in headers ?? new Dictionary<string, string>(StringComparer.Ordinal))
+        {
+            request.Headers.TryAddWithoutValidation(name, value).ShouldBeTrue(
+                $"the fixture must be able to send '{name}'");
+        }
+
+        if (body is not null)
+        {
+            request.Content = JsonContent.Create(body);
+        }
+
+        return await Client.SendAsync(request, TestContext.Current.CancellationToken);
+    }
+```
+
+*Discrimination:* `A_configured_path_base_is_honoured_end_to_end` fails if the Host stops calling `UsePathBase`, or calls it after `UseRouting` (the create itself 404s). `A_trusted_proxys_forwarded_prefix_becomes_the_path_base` fails if `UseForwardedHeaders` is not called, if `XForwardedPrefix` is not in the flags, or if `KnownNetworks`/`KnownProxies` are left at their loopback defaults while the request arrives from the test server. `An_untrusted_forwarded_prefix_is_ignored` fails if forwarded headers are ever honoured by default — a header-spoofing hole, and the reason the option exists.
+
+- [ ] **Step 6: Add the option and the middleware**
+
+In `src/MMLib.Alvo.Host/AlvoHostOptions.cs`, add the property to `AlvoHostOptions`:
+
+```csharp
+    /// <summary>Gets or sets whether a reverse proxy's <c>X-Forwarded-*</c> headers are trusted.</summary>
+    public AlvoHostForwardedHeadersOptions ForwardedHeaders { get; set; } = new();
+```
+
+and the new type:
+
+```csharp
+/// <summary>Whether the standalone host trusts a reverse proxy's forwarded headers.</summary>
+public sealed class AlvoHostForwardedHeadersOptions
+{
+    /// <summary>Gets or sets whether <c>X-Forwarded-For</c>, <c>-Proto</c>, <c>-Host</c> and <c>-Prefix</c> are honoured (default <see langword="false"/>).</summary>
+    /// <remarks>
+    /// <b>Off by default, and that is a security decision rather than a conservative default.</b>
+    /// <c>X-Forwarded-Prefix</c> decides the URL the host advertises in a 201's <c>Location</c>, so honouring it
+    /// from an untrusted caller lets that caller choose where a client is sent next. Turning it on also clears
+    /// <c>KnownNetworks</c> and <c>KnownProxies</c>, because a container cannot know its proxy's address — which
+    /// is exactly why the switch is explicit: it says "something in front of me strips these", and only an
+    /// operator knows that.
+    /// </remarks>
+    public bool Enabled { get; set; }
+}
+```
+
+In `src/MMLib.Alvo.Host/AlvoHost.cs`, register the options in `CreateBuilder` (before `AddAlvo`):
+
+```csharp
+        builder.Services.Configure<ForwardedHeadersOptions>(ConfigureForwardedHeaders);
+```
+
+with
+
+```csharp
+    private static void ConfigureForwardedHeaders(ForwardedHeadersOptions options)
+    {
+        options.ForwardedHeaders = ForwardedHeaders.XForwardedFor
+            | ForwardedHeaders.XForwardedProto
+            | ForwardedHeaders.XForwardedHost
+            | ForwardedHeaders.XForwardedPrefix;
+        options.KnownNetworks.Clear();
+        options.KnownProxies.Clear();
+    }
+```
+
+and replace `BuildAsync`'s body between `builder.Build()` and `MapAlvoLiveness` with:
+
+```csharp
+        var app = builder.Build();
+        var options = app.Services.GetRequiredService<IOptions<AlvoHostOptions>>().Value;
+
+        app.UseExceptionHandler();
+
+        if (options.ForwardedHeaders.Enabled)
+        {
+            app.UseForwardedHeaders();
+        }
+
+        if (options.PathBase is { Length: > 0 } pathBase)
+        {
+            app.UsePathBase(pathBase);
+        }
+
+        app.UseRouting();
+        app.MapAlvoLiveness();
+```
+
+> `UseRouting()` is explicit here for the same reason as in the world, and the two middlewares above it are precisely the ones that must be observed by route matching. `ForwardedHeadersOptions` is always *configured* and only conditionally *used*, so the flags live in one place whether or not they are switched on.
+
+Add the usings `Microsoft.AspNetCore.HttpOverrides;` to `AlvoHost.cs`.
+
+- [ ] **Step 7: Run ring1**
+
+```bash
+scripts/test-ring1
+```
+
+Expected: green, with the Host's public-API baseline moved by `AlvoHostForwardedHeadersOptions` and `AlvoHostOptions.ForwardedHeaders`. Accept it and answer the snapshot judge with *"Task 4 adds one option type for #121's proxy leg."*
+
+- [ ] **Step 8: Record what was fixed and what was not**
+
+In `docs/architecture/data-api.md`, in the section that describes the 201, add:
+
+```markdown
+A `Location` is the request's `PathBase` plus the mapped route, written in one place
+(`RecordResult.ExecuteAsync`). The template a route was mapped with carries no path base, so a create
+behind `app.UsePathBase(...)` or behind a proxy setting `X-Forwarded-Prefix` used to answer a URL that
+404s (#121). The **OpenAPI document's path keys still have the original shape** — a document served
+under a path base declares no `servers` entry, so a client resolving its paths against `/` is wrong by
+the same prefix. That is deliberately not fixed here: `OpenApiDocumentTransformerContext` carries no
+`HttpContext` and the document is cached per document name, so a request-derived `servers` entry is a
+decision about whether Alvo's document is per-request at all. Filed separately.
+```
+
+Add to `docs/architecture/host.md`:
+
+```markdown
+## Behind a reverse proxy
+
+`Alvo:PathBase` calls `UsePathBase`; `Alvo:ForwardedHeaders:Enabled` calls `UseForwardedHeaders` with
+`XForwardedFor|Proto|Host|Prefix` and cleared `KnownNetworks`/`KnownProxies`. Both run **before** an explicit
+`UseRouting()`, which is required: `WebApplication` otherwise matches routes before the path is rewritten.
+Forwarded headers are off by default because `X-Forwarded-Prefix` chooses the URL a 201 advertises, and an
+untrusted caller must not.
+```
+
+- [ ] **Step 9: File the deferred half**
+
+```bash
+gh issue create \
+  --title "[F3 follow-up] The OpenAPI document declares no servers entry, so its paths are wrong behind a path base" \
+  --body "Split out of #121 by PR4, which fixed the \`Location\` header only.
+
+A document served under \`app.UsePathBase(\"/alvo\")\` still lists \`/api/owners\` as a path key with no \`servers\` entry, so OpenAPI's default server of \`/\` makes every path in it wrong by the prefix — the same origin and the same gap #121 described for \`Location\`.
+
+**Why PR4 fixed only the header.** \`OpenApiDocumentTransformerContext\` carries no \`HttpContext\`, and \`Microsoft.AspNetCore.OpenApi\` caches the document per document name — so a request-derived \`servers\` entry is not a transformer edit, it is a decision about whether Alvo's document is per-request at all. That also interacts with \`OpenApiDocumentTests.The_document_is_stable\`, whose whole value is that the document is deterministic.
+
+**Acceptance:** a fact that requests the document under a non-empty \`PathBase\` and asserts a client can resolve a path key from it and reach the endpoint — the same shape as #121's own acceptance, not a string comparison."
+```
+
+Then reference the returned number in place of "Filed separately." in `data-api.md`.
+
+- [ ] **Step 10: Commit**
+
+```bash
+git add src/MMLib.Alvo/Api/Internal/DataApiEndpoints.cs src/MMLib.Alvo.Host \
+        test/_shared/api/AlvoApiWorld.cs test/MMLib.Alvo.Api.Tests/PathBaseTests.cs \
+        test/MMLib.Alvo.Host.Tests docs/architecture/data-api.md docs/architecture/host.md
+git commit -m "fix(api): resolve a 201's Location behind a path base or proxy (#121)"
+```
