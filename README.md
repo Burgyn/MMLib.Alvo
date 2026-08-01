@@ -10,6 +10,23 @@ The full delivery strategy and technical spec live in
 [`docs/product/alvo-specifikacia.md`](docs/product/alvo-specifikacia.md); the domain analysis
 behind it is in [`docs/product/baas-analyza.md`](docs/product/baas-analyza.md).
 
+## Run the demo backend (standalone)
+
+```bash
+export ALVO_DEMO_KEY_SECRET="$(openssl rand -hex 16)"
+docker compose up --build --wait --wait-timeout 60
+curl -sS http://localhost:8080/api/owners -H "X-Alvo-Api-Key: demo.$ALVO_DEMO_KEY_SECRET"
+```
+
+The backend is defined entirely by [`examples/vehicle-registry/vehicles.alvo.json`](examples/vehicle-registry/vehicles.alvo.json),
+mounted into the container — no code, no migrations, no clicking. Interactive docs:
+<http://localhost:8080/scalar>.
+
+The image ships no credential, so `ALVO_DEMO_KEY_SECRET` is required rather than defaulted: the stack refuses
+to start without it. Every compose command interpolates the file, `docker compose down` included, so keep the
+variable exported (or put it in a root `.env`) for the whole session. Tear down with
+`docker compose down --volumes`.
+
 ## Building & testing
 
 Requires the .NET SDK pinned in [`global.json`](global.json) (`10.0.100`).

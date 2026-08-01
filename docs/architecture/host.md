@@ -131,3 +131,75 @@ framework with an RFC 9110 status-code URI in `type`.
 The handler itself lives in the core, not here — `ProblemResultFactory` is `internal`, so a Host-side one
 would be a second hand-written copy of the problem-document shape. Recorded as deviation D1; `data-api.md`
 carries the mode-by-mode table.
+
+## The image
+
+`src/MMLib.Alvo.Host/Dockerfile` builds from the **repository root**, not from its own directory: Central
+Package Management, `Directory.Build.props` and `.editorconfig` all live there, and a project compiled without
+them is a different build from the one CI gates. It therefore copies the four root build files, `.editorconfig`,
+`schema/` and `src/`, and nothing else. `schema/` is not documentation in that list — `MMLib.Alvo` compiles
+`project.schema.json` as an `AdditionalFile` and generates the descriptor validator's types from it, so a
+context without it fails to compile. `test/` is never copied, because restoring the Host project alone pulls
+only its own graph.
+
+The image runs as the non-root `$APP_UID` the .NET base images define, owns `/alvo` so the mounted descriptor
+and the SQLite default path are readable and writable, exposes **8080** and ends at `dotnet
+MMLib.Alvo.Host.dll`. Alpine costs nothing here because `InvariantGlobalization` is already on.
+
+**The image builds under the repository's own bar, and with no warnings at all.** `TreatWarningsAsErrors` is
+inherited unchanged — nothing in the Dockerfile relaxes it. Three things the build would otherwise go looking
+for outside the context are *told* rather than discovered, as environment properties so they reach restore and
+every referenced project:
+
+| Property | Why |
+| --- | --- |
+| `MinVerVersionOverride=$VERSION` (`ARG VERSION=0.0.0-docker`) | The context carries no `.git`, so MinVer has no tags to read. |
+| `EnableSourceControlManagerQueries=false` | Same reason: `Microsoft.Build.Tasks.Git` cannot locate a repository. |
+| `EnableSourceLink=false` | Source-link metadata serves symbol servers for published packages; this image publishes none. |
+
+Measured rather than assumed. Without them the build **succeeds** but emits 17 warnings (5× `MINVER1001`, 6×
+`Microsoft.Build.Tasks.Git`, 6× `Microsoft.SourceLink.Common`): none is promoted by `TreatWarningsAsErrors`,
+because that property governs the C# compiler and these are MSBuild *task* warnings. `-p:MinVerSkip=true` also
+builds clean and warns about nothing — but it leaves every assembly stamped `1.0.0`, a version this pre-1.0
+project has never released, so the version is stated instead of skipped. The `ARG` is how F4's publish
+pipeline hands in the real MinVer version once #24 ships an image.
+
+## The compose stack
+
+`docker-compose.yml` runs the host against `postgres:16-alpine`, with
+`examples/vehicle-registry/vehicles.alvo.json` mounted at `/alvo/descriptor.json:ro` and port 8080 published.
+The image ships **no** credential: `ALVO_DEMO_KEY_SECRET` is required with compose's `:?` form, so the stack
+refuses to start rather than inventing one. `docker compose up --wait --wait-timeout 60` is the acceptance form
+of §2.14's "working backend within 60 s", and it means something because the host does not listen until the
+descriptor has applied.
+
+The cost of `:?` is that **every** compose command interpolates the file, `down` included: tearing the stack
+down in a shell that has forgotten the variable fails the same way starting it does. Keep it exported, or put
+it in a root `.env` (already git-ignored) — the point of the `:?` is that the secret is somewhere an operator
+chose, never inside the image.
+
+MinIO and MailHog are absent on purpose: object storage and email do not exist in F3, and a service nothing
+talks to is a stack that proves less, not more. The published image, the dashboard, the Management API and the
+CLI are #24's remainder in F4. The stack is also deliberately **path-base-free** — Scalar's behaviour behind a
+path base is unverified (see *Docs* above), and a demo that quietly exercised it would be advertising something
+nobody measured.
+
+### What "a working backend from the descriptor alone" is checked as
+
+A container that starts is not the claim, and neither is a health check that answers. Five checks make it one,
+each of which has been observed to fail under a mutation of the stack:
+
+| Check | Mutation that breaks it |
+| --- | --- |
+| `POST /api/owners` → 201 with `Location: /api/owners/<guid>`, and following it → 200 | Mount `simple-tasks` instead: `owners` 404s. |
+| `/api/vehicles` and `/api/inspections` → 200 | Mount `simple-tasks` instead: both 404. |
+| `/api/warehouses` → 404 | Only the Host test project's descriptor declares it; a host with a baked-in schema, or a catch-all route, answers otherwise. |
+| `select count(*) from owners` in PostgreSQL ≥ 2 | Set `Alvo__Database__Provider: sqlite`: the first three checks still pass, and this one reports `relation "owners" does not exist`. |
+| `docker compose config` fails without `ALVO_DEMO_KEY_SECRET` | Put a literal secret in the file: it exits 0. |
+
+Removing the volume mount altogether is the sixth, and it is the one that proves the descriptor is load-bearing
+rather than decorative: the host refuses to start with `Could not find file '/alvo/descriptor.json'`, the
+container never reports healthy, and `docker compose up --wait` exits non-zero.
+
+Task 7 turns these into `teapie test` against the same stack, run by `scripts/test-e2e` in CI. They are
+deliberately **not** in ring0–ring2: ring0 must stay Docker-free.
