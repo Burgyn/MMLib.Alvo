@@ -1171,3 +1171,452 @@ git add src/MMLib.Alvo.Host test/MMLib.Alvo.Host.Tests MMLib.Alvo.slnx \
         docs/architecture/package-boundary.md docs/architecture/host.md
 git commit -m "feat(host): boot a backend from a mounted descriptor, or refuse to start"
 ```
+
+---
+
+### Task 3: A 500 in the standalone pipeline carries `alvo.dev/errors/internal`, not an RFC 9110 status-code URI (#119)
+
+`data-api.md` records this as "a known gap, for PR4". `AlvoProblemTypes` has no slug for a 500 on purpose — the port's `InvalidOperationException` family propagates so the host's logging keeps the stack trace — and **that is right for embedded mode and must not change**. In standalone mode Alvo *is* the pipeline, so the framework's own writer stamps `https://tools.ietf.org/html/rfc9110#section-15.6.1` into the one member an agent is told to branch on.
+
+**The handler lives in the core, not in the Host** — a deliberate departure from #119's letter, for the reason recorded in *Deviations anticipated*, D1: `ProblemResultFactory` is `internal`, so a Host-side handler would be a second hand-written copy of Alvo's problem-document shape (`type`, `title`, `status`, `detail`, `violations`, `application/problem+json`), and a second copy is the defect class PR2's and PR3's reviews closed repeatedly. It is **opt-in** — `AddAlvo` does not register it — so #119's premise holds: an embedded host still owns its own error rendering, and Alvo still does not steal the exception.
+
+**Files:**
+- Create: `src/MMLib.Alvo/Api/AlvoProblemDetailsExtensions.cs`, `src/MMLib.Alvo/Api/Internal/AlvoExceptionHandler.cs`
+- Modify: `src/MMLib.Alvo/Api/AlvoProblemTypes.cs`, `src/MMLib.Alvo/Api/Internal/ProblemResultFactory.cs`
+- Modify: `src/MMLib.Alvo.Host/AlvoHost.cs` (two lines)
+- Modify: `test/_shared/api/AlvoApiWorld.cs` (`AlvoApiWorldSetup` gains two members; `BuildApp`/`StartAsync` honour them), `test/MMLib.Alvo.Api.Tests/ProblemDetailsTests.cs`
+- Create: `test/_shared/api/FaultingAlvoData.cs`, `test/MMLib.Alvo.Host.Tests/AlvoHostProblemDetailsTests.cs`
+- Modify: `test/MMLib.Alvo.Tests/PublicApi.MMLib.Alvo.verified.txt`, `test/MMLib.Alvo.Host.Tests/PublicApi.MMLib.Alvo.Host.verified.txt` (baselines move)
+- Modify: `docs/architecture/data-api.md` (retire the "#119 known gap" note), `docs/architecture/host.md`
+
+**Interfaces:**
+- Consumes: `Microsoft.AspNetCore.Diagnostics.IExceptionHandler` with `ValueTask<bool> TryHandleAsync(HttpContext httpContext, Exception exception, CancellationToken cancellationToken)`; `IServiceCollection.AddExceptionHandler<T>()` and `IServiceCollection.AddProblemDetails()` (both in `Microsoft.Extensions.DependencyInjection`, assembly `Microsoft.AspNetCore.Diagnostics`, part of `Microsoft.AspNetCore.App`); `IApplicationBuilder.UseExceptionHandler()`; `AlvoHost.CreateBuilder`/`BuildAsync` and `AlvoHostWorld` from Task 2.
+- Produces: `public const string AlvoProblemTypes.Internal = "internal"` (and its entry in `All`); `internal static IResult ProblemResultFactory.Internal()`; `public static IServiceCollection AddAlvoProblemDetails(this IServiceCollection services)`; `AlvoApiWorldSetup` gains `bool MapAlvoProblemDetails = false, bool FaultingData = false`; `internal sealed class FaultingAlvoData : IAlvoData`.
+
+- [ ] **Step 1: Write the failing core facts**
+
+In `test/MMLib.Alvo.Api.Tests/ProblemDetailsTests.cs`, add `ProblemResultFactory.Internal()` to `EveryFactoryResult()` (after the `Unauthenticated` line):
+
+```csharp
+        ProblemResultFactory.Internal(),
+```
+
+and add the new fact:
+
+```csharp
+    /// <summary>
+    /// #119: in a host that registered Alvo's problem details, an unhandled failure from the port's fifth
+    /// family answers with Alvo's own <c>type</c> — not the framework's RFC 9110 status-code URI, which would
+    /// put a foreign classification in the one member an agent branches on.
+    /// </summary>
+    /// <remarks>
+    /// The exception's own message must not reach the caller. It is logged, which is the whole reason the API
+    /// layer does not catch this family, and a 500 body carrying it would hand an attacker the shape of the
+    /// implementation.
+    /// </remarks>
+    [Fact]
+    public async Task An_unhandled_failure_is_rendered_with_alvos_own_internal_type()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync(
+            [_admin], new AlvoApiWorldSetup(MapAlvoProblemDetails: true, FaultingData: true));
+
+        using var response = await world.SendAsync(HttpMethod.Get, "/api/owners", _admin);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
+        response.Content.Headers.ContentType!.MediaType.ShouldBe("application/problem+json");
+
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        var document = JsonNode.Parse(body)!;
+        document["type"]!.GetValue<string>().ShouldBe("https://alvo.dev/errors/internal");
+        body.ShouldNotContain(
+            FaultingAlvoData.FailureMessage,
+            Case.Sensitive,
+            "the exception's message is for the log, never for the caller");
+    }
+
+    /// <summary>
+    /// The control for the fact above, and the reason #119 was filed rather than assumed: without the
+    /// registration, the framework answers — so the two hosting modes really do differ, and an embedded host
+    /// keeps owning its own rendering.
+    /// </summary>
+    [Fact]
+    public async Task Without_the_registration_the_framework_still_answers_a_500_its_own_way()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync(
+            [_admin], new AlvoApiWorldSetup(FaultingData: true));
+
+        using var response = await world.SendAsync(HttpMethod.Get, "/api/owners", _admin);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        body.ShouldNotContain("alvo.dev/errors/internal");
+    }
+```
+
+Extend `Only_the_slugs_awaiting_a_later_task_are_unreachable_over_http` so the union of both worlds is compared — replace its body with:
+
+```csharp
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin, _narrow]);
+        await SeedTheReusedIdempotencyKeyAsync(world);
+        var reached = new List<string>();
+        foreach (var probe in EveryReachableSlugProbe())
+        {
+            reached.Add(await SlugAnsweredByAsync(world, probe));
+        }
+
+        reached.Add(await InternalSlugAnsweredByAFaultingStoreAsync());
+
+        reached.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ShouldBe(
+            AlvoProblemTypes.All.Except(PendingUntilALaterTask, StringComparer.Ordinal).Order(StringComparer.Ordinal),
+            "every slug not pending a later task must be reachable from an endpoint");
+```
+
+and add the helper it needs:
+
+```csharp
+    /// <summary>
+    /// The <c>internal</c> slug's probe. It needs a <em>second</em> world, because the store it drives faults
+    /// for every entity and would answer 500 to every other probe in the list — so the two worlds' answers are
+    /// unioned rather than one world being made to do both.
+    /// </summary>
+    private static async Task<string> InternalSlugAnsweredByAFaultingStoreAsync()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync(
+            [_admin], new AlvoApiWorldSetup(MapAlvoProblemDetails: true, FaultingData: true));
+
+        return await SlugAnsweredByAsync(world, new Probe(HttpMethod.Get, "/api/owners", _admin, null));
+    }
+```
+
+*Discrimination:* `An_unhandled_failure_is_rendered_with_alvos_own_internal_type` fails if the handler is not registered, returns `false`, or writes the framework's document; it also fails if the handler echoes the exception message. `Without_the_registration_…` fails if the registration were made unconditional in `AddAlvo` — which is exactly the change #119 says must not happen. `Every_problem_type_slug_is_one_the_factory_actually_emits` fails if `Internal` is added to `All` without a producer, and `Only_the_slugs_…` fails if the slug is catalogued but no request can reach it.
+
+- [ ] **Step 2: Write the faulting store and the two world members**
+
+`test/_shared/api/FaultingAlvoData.cs`:
+
+```csharp
+using MMLib.Alvo.Data;
+using MMLib.Alvo.Identity;
+
+namespace MMLib.Alvo.Api.Tests;
+
+/// <summary>
+/// An <see cref="IAlvoData"/> whose every member raises the port's fifth failure family — "an invariant the
+/// implementation itself relies on is broken".
+/// </summary>
+/// <remarks>
+/// It exists because that family is, by design, <b>unreachable from a well-formed request</b>: the port's
+/// contract says so, which is precisely why #119's hole could sit unnoticed. Registered <em>before</em>
+/// <c>AddAlvo</c>, so the provider's own <c>TryAddSingleton&lt;IAlvoData&gt;</c> leaves it in place — no
+/// decoration, no reflection over service descriptors.
+/// </remarks>
+internal sealed class FaultingAlvoData : IAlvoData
+{
+    internal const string FailureMessage = "The faulting store's own invariant is broken.";
+
+    public Task<AlvoPage> QueryAsync(AlvoQuery query, AlvoContext context, CancellationToken cancellationToken = default) =>
+        throw new InvalidOperationException(FailureMessage);
+
+    public Task<AlvoRecord?> GetAsync(string entity, Guid id, AlvoContext context, CancellationToken cancellationToken = default) =>
+        throw new InvalidOperationException(FailureMessage);
+
+    public Task<AlvoRecord> CreateAsync(string entity, IReadOnlyDictionary<string, object?> values, AlvoContext context, AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default) =>
+        throw new InvalidOperationException(FailureMessage);
+
+    public Task<AlvoRecord> UpdateAsync(string entity, Guid id, IReadOnlyDictionary<string, object?> values, AlvoContext context, AlvoPrecondition? precondition = null, CancellationToken cancellationToken = default) =>
+        throw new InvalidOperationException(FailureMessage);
+
+    public Task DeleteAsync(string entity, Guid id, AlvoContext context, AlvoPrecondition? precondition = null, CancellationToken cancellationToken = default) =>
+        throw new InvalidOperationException(FailureMessage);
+}
+```
+
+> Copy the five signatures from `src/MMLib.Alvo.Abstractions/Data/IAlvoData.cs` rather than from here if the compiler disagrees — that file is the contract.
+
+In `test/_shared/api/AlvoApiWorld.cs`, extend the setup record:
+
+```csharp
+internal sealed record AlvoApiWorldSetup(
+    Action<AlvoApiOptions>? ConfigureApi = null,
+    string? RevokedKeyId = null,
+    Action<System.Text.Json.JsonSerializerOptions>? ConfigureHostJson = null,
+    bool MapOpenApiDocument = false,
+    string? HostInfoDescription = null,
+    bool MapAlvoProblemDetails = false,
+    bool FaultingData = false);
+```
+
+In `BuildApp`, before the `builder.Services.AddAlvo(...)` call:
+
+```csharp
+        if (setup.FaultingData)
+        {
+            builder.Services.AddSingleton<IAlvoData>(new FaultingAlvoData());
+        }
+
+        if (setup.MapAlvoProblemDetails)
+        {
+            builder.Services.AddAlvoProblemDetails();
+        }
+```
+
+and in `StartAsync`, immediately after `var app = BuildApp(...)` and **before** `ApplyDescriptorAsync(app)`:
+
+```csharp
+        if (setup.MapAlvoProblemDetails)
+        {
+            app.UseExceptionHandler();
+        }
+```
+
+> Middleware ordering matters and the compiler will not tell you: `UseExceptionHandler` must be added before any endpoint runs, and `WebApplication` auto-terminates the pipeline with routing, so registering it here — before `MapAlvoDataApi` in `StartAsync` — is what puts it upstream of the endpoints.
+>
+> The faulting store also makes `ApplyDescriptorAsync` the only remaining live path to the database, and it still works: the migration runner reaches `ISchemaMigrator`, never `IAlvoData`. If a fact ever needs both a faulting store *and* seeded rows, seed through `database.Connect()`.
+
+- [ ] **Step 3: Run the core facts and watch them fail**
+
+```bash
+dotnet test --project test/MMLib.Alvo.Api.Tests/MMLib.Alvo.Api.Tests.csproj --filter-method '*unhandled_failure*'
+```
+
+Expected: FAIL to compile — `AddAlvoProblemDetails` and `ProblemResultFactory.Internal` do not exist.
+
+- [ ] **Step 4: Add the slug and the factory entry point**
+
+In `src/MMLib.Alvo/Api/AlvoProblemTypes.cs`, replace the `<para>` beginning "**There is no slug for a 500, and that is deliberate.**" with:
+
+```csharp
+/// <para>
+/// <b>The 500's slug exists, and only a host that asked for it emits one.</b> <c>IAlvoData</c>'s fifth
+/// failure family (<see cref="InvalidOperationException"/> — "an invariant the implementation itself relies on
+/// is broken") is still never caught by the endpoint layer: swallowing it there would lose the stack trace the
+/// host's own logging exists to record, so it propagates. What changed in PR4 is that a host may now ask Alvo
+/// to answer for it — <c>AddAlvoProblemDetails()</c> plus <c>UseExceptionHandler()</c> — and when it does, the
+/// answer carries <see cref="Internal"/> rather than the framework's RFC 9110 status-code URI, which would
+/// classify a refusal by the status the response line already carried. An embedded host that registers
+/// neither keeps rendering its own 500, which is the point (#119).
+/// </para>
+```
+
+Add the member after `Unauthenticated`:
+
+```csharp
+    /// <summary>An invariant Alvo itself relies on is broken (500).</summary>
+    /// <remarks>
+    /// Emitted only by <c>AlvoExceptionHandler</c>, and therefore only in a host that registered it. The slug
+    /// carries no reason at all — not the exception's type, not its message — because a 500 is the one refusal
+    /// whose cause is by definition not the caller's business, and its text is the log's.
+    /// </remarks>
+    public const string Internal = "internal";
+```
+
+and add `Internal,` as the last entry of the `All` collection expression.
+
+In `src/MMLib.Alvo/Api/Internal/ProblemResultFactory.cs`, add beside `NotFound()`:
+
+```csharp
+    /// <summary>
+    /// The 500 for a broken invariant, in a host that asked Alvo to answer for it.
+    /// </summary>
+    /// <remarks>
+    /// The detail is a constant. Nothing about the failure is reflected — not the exception type, not its
+    /// message, not a stack frame — because the caller cannot act on any of it and an attacker can. The
+    /// exception itself is logged by <c>AlvoExceptionHandler</c>, which is the trade #119 describes: log
+    /// everything, disclose the classification and nothing else.
+    /// </remarks>
+    internal static IResult Internal() => Problem(
+        StatusCodes.Status500InternalServerError,
+        AlvoProblemTypes.Internal,
+        "The request could not be completed because of an internal error. It has been logged; retry, and if it "
+        + "persists, report it to whoever operates this instance.");
+```
+
+- [ ] **Step 5: Write the handler and its registration**
+
+`src/MMLib.Alvo/Api/Internal/AlvoExceptionHandler.cs`:
+
+```csharp
+using Microsoft.AspNetCore.Diagnostics;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
+
+namespace MMLib.Alvo.Api.Internal;
+
+/// <summary>
+/// Logs an unhandled failure and answers it with Alvo's own problem document.
+/// </summary>
+/// <remarks>
+/// Both halves matter and neither is sufficient. The <b>log</b> is why the endpoint layer deliberately does not
+/// catch this family — a hand-made problem document built at the call site would lose the stack trace. The
+/// <b>document</b> is #119: with only <c>AddProblemDetails()</c> the framework writes an RFC 9110 status-code
+/// URI into <c>type</c>, so the one member an agent branches on stops being an Alvo classification.
+/// </remarks>
+internal sealed class AlvoExceptionHandler(ILogger<AlvoExceptionHandler> logger) : IExceptionHandler
+{
+    /// <inheritdoc/>
+    public async ValueTask<bool> TryHandleAsync(
+        HttpContext httpContext, Exception exception, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(httpContext);
+
+        logger.LogError(
+            exception,
+            "Alvo failed to handle {Method} {Path}.",
+            httpContext.Request.Method,
+            httpContext.Request.Path.Value);
+
+        await ProblemResultFactory.Internal().ExecuteAsync(httpContext).ConfigureAwait(false);
+        return true;
+    }
+}
+```
+
+`src/MMLib.Alvo/Api/AlvoProblemDetailsExtensions.cs`:
+
+```csharp
+using MMLib.Alvo.Api.Internal;
+
+namespace Microsoft.Extensions.DependencyInjection;
+
+/// <summary>
+/// Lets a host hand Alvo the rendering of an unhandled failure — the standalone host's decision, and an
+/// embedded host's to decline.
+/// </summary>
+public static class AlvoProblemDetailsExtensions
+{
+    /// <summary>
+    /// Registers the exception handler that logs an unhandled failure and answers it with
+    /// <c>https://alvo.dev/errors/internal</c>. Pair it with <c>app.UseExceptionHandler()</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Opt-in, and deliberately not part of <c>AddAlvo</c>.</b> In embedded mode the host owns its error
+    /// rendering and Alvo not stealing the exception is the point; in standalone mode Alvo <em>is</em> the
+    /// pipeline and nothing else can answer. One registration, two correct behaviours (#119).
+    /// </para>
+    /// <para>
+    /// <c>AddProblemDetails()</c> is registered alongside because <c>UseExceptionHandler()</c> refuses to
+    /// configure a middleware with neither a handler path nor a problem-details service to fall back to. The
+    /// fallback is unreachable while this handler is registered — it answers every exception and returns
+    /// <see langword="true"/> — so the framework's own writer never renders an Alvo response.
+    /// </para>
+    /// </remarks>
+    /// <param name="services">The service collection.</param>
+    /// <returns>The same collection, for chaining.</returns>
+    public static IServiceCollection AddAlvoProblemDetails(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.AddProblemDetails();
+        services.AddExceptionHandler<AlvoExceptionHandler>();
+        return services;
+    }
+}
+```
+
+- [ ] **Step 6: Run the core facts and watch them pass**
+
+```bash
+dotnet test --project test/MMLib.Alvo.Api.Tests/MMLib.Alvo.Api.Tests.csproj
+```
+
+Expected: PASS, including both catalogue facts. Accept the `PublicApi.MMLib.Alvo` baseline move (two members) and dispatch `alvo-snapshot-judge` when the Stop hook asks.
+
+- [ ] **Step 7: Wire the Host and write its fact**
+
+In `src/MMLib.Alvo.Host/AlvoHost.cs`, add to `CreateBuilder`, immediately before `builder.Services.AddAlvo(...)`:
+
+```csharp
+        builder.Services.AddAlvoProblemDetails();
+```
+
+and to `BuildAsync`, immediately after `var app = builder.Build();`:
+
+```csharp
+        app.UseExceptionHandler();
+```
+
+`test/MMLib.Alvo.Host.Tests/AlvoHostProblemDetailsTests.cs`:
+
+```csharp
+using System.Net;
+
+namespace MMLib.Alvo.Host.Tests;
+
+/// <summary>
+/// #119 in the pipeline it was filed about. The core's own suite proves the handler renders Alvo's
+/// <c>type</c>; this proves the <em>standalone host</em> registered it — which is the half a fact over an
+/// embedded fixture cannot see, and the reason #119 said the product could be wrong while the fact stayed
+/// green.
+/// </summary>
+public class AlvoHostProblemDetailsTests
+{
+    [Fact]
+    public async Task The_host_registers_alvos_exception_handler()
+    {
+        await using var world = await AlvoHostWorld.StartAsync();
+
+        var handlers = world.ExceptionHandlerTypeNames();
+
+        handlers.ShouldContain(
+            "AlvoExceptionHandler",
+            "without it a 500 from this host carries an RFC 9110 status-code URI in `type` (#119)");
+    }
+
+    [Fact]
+    public async Task An_unhandled_failure_from_the_host_is_still_a_problem_document()
+    {
+        await using var world = await AlvoHostWorld.StartAsync();
+
+        using var response = await world.SendAsync(HttpMethod.Get, "/api/warehouses?limit=0", body: null);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
+        response.Content.Headers.ContentType!.MediaType.ShouldBe("application/problem+json");
+    }
+}
+```
+
+Add to `AlvoHostWorld`:
+
+```csharp
+    /// <summary>
+    /// The simple names of every <c>IExceptionHandler</c> the host registered, read off the container rather
+    /// than off the composition's source — a fact about the source would pass by restating the code.
+    /// </summary>
+    internal IReadOnlyList<string> ExceptionHandlerTypeNames() =>
+        [.. _app.Services.GetServices<Microsoft.AspNetCore.Diagnostics.IExceptionHandler>()
+            .Select(handler => handler.GetType().Name)];
+```
+
+*Discrimination:* `The_host_registers_alvos_exception_handler` fails the moment `AddAlvoProblemDetails()` is dropped from `CreateBuilder` — which is the only way #119 regresses. `An_unhandled_failure_from_the_host_is_still_a_problem_document` is the guard that adding the handler did not break the *ordinary* refusal path: registering `AddProblemDetails()` in a host is exactly the change that could start rewriting bodies that already had content, and a 422 with a `text/plain` body would fail it.
+
+- [ ] **Step 8: Run ring1 and accept the Host's baseline move**
+
+```bash
+scripts/test-ring1
+```
+
+Expected: green after copying `test/MMLib.Alvo.Host.Tests/PublicApi.MMLib.Alvo.Host.received.txt` over its `verified` sibling (no public Host surface changed here, so if it *did* move, read the diff before accepting it).
+
+- [ ] **Step 9: Retire the recorded gap**
+
+In `docs/architecture/data-api.md`, find the note that says the Host owes an `IExceptionHandler` and that it is "a known gap, for PR4 … Tracked in **#119**", and replace it with a statement of what now exists: the slug, the opt-in registration, the handler, the constant detail, and the fact that an embedded host that declines still renders its own 500. Add to `docs/architecture/host.md`, after the *Health* section:
+
+```markdown
+## A 500 is Alvo's own refusal here (#119)
+
+The host calls `AddAlvoProblemDetails()` and `UseExceptionHandler()`, so an unhandled failure is logged with
+its stack trace and answered with `type: https://alvo.dev/errors/internal` and a **constant** detail. Nothing
+about the exception reaches the caller. Embedded hosts register neither and keep answering their own way,
+which is why the registration is opt-in rather than part of `AddAlvo`.
+```
+
+- [ ] **Step 10: Commit**
+
+```bash
+git add src/MMLib.Alvo/Api src/MMLib.Alvo.Host/AlvoHost.cs test/_shared/api \
+        test/MMLib.Alvo.Api.Tests/ProblemDetailsTests.cs \
+        test/MMLib.Alvo.Host.Tests test/MMLib.Alvo.Tests/PublicApi.MMLib.Alvo.verified.txt \
+        docs/architecture/data-api.md docs/architecture/host.md
+git commit -m "fix(api): answer a standalone 500 with Alvo's own problem type (#119)"
+```
