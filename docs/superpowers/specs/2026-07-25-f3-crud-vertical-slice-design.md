@@ -1198,6 +1198,27 @@ root, and `test/` beside `tests/` — one letter apart — is a navigation hazar
 reader this project optimises for. The TeaPie skill explicitly permits a custom path, so nothing is being
 worked around.
 
+48. **`AlvoHostOptions` is bound with a bare `Configure<T>`, not validated at startup — a deviation from
+   PR4's own plan and from `extensibility.md` rule 5.** The plan's locked File Structure row promised "the
+   `Alvo` configuration section as typed, **validated** options", and rule 5 requires
+   `ValidateDataAnnotations().ValidateOnStart()` or an `IValidateOptions<T>` producing a structured
+   fail-fast error with a fix suggestion (§0 principle 4). Neither is present: the option classes carry no
+   annotations and nothing validates them on start. The two settings that *are* fail-fast got there by hand
+   — `AlvoDatabaseSelector`'s crafted refusal, and the PostgreSQL driver's own refusal for a null
+   connection string — while `DescriptorPath` got nothing. **Its visible cost is issue #132**: a mis-typed
+   descriptor mount ends in an unhandled `FileNotFoundException` and exit 139, which is precisely the
+   failure an `IValidateOptions<AlvoHostOptions>` would have rendered as a structured refusal naming the
+   path it could not find. Recorded here rather than fixed, because the fix belongs with #132 in F4 — but
+   recorded, so a later reader can tell a deferred decision from an oversight.
+
+49. **`ProblemResultFactory.Internal()` takes no argument, where the plan specified
+   `Internal(string detail)`.** The detail is a baked-in constant instead, and the reasoning is in the
+   member's own XML docs, in `data-api.md`'s mode table and in the changelog: a 500's detail must not vary
+   with the exception, or it becomes the disclosure channel the whole family-5 contract exists to close.
+   The behaviour is right and the surface is `internal`, so the cost is nil — it is recorded only because
+   deviation 46 was recorded on exactly the standard that a surface-neutral departure from the written plan
+   still earns a line.
+
 ## Assumptions (veto candidates)
 
 1. Own outbox in the core with an `IEventDispatcher` port. **Decided with the

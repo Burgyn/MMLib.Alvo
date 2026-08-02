@@ -152,7 +152,11 @@ only its own graph.
 
 The image runs as the non-root `$APP_UID` the .NET base images define, owns `/alvo` so the mounted descriptor
 and the SQLite default path are readable and writable, exposes **8080** and ends at `dotnet
-MMLib.Alvo.Host.dll`. Alpine costs nothing here because `InvariantGlobalization` is already on.
+MMLib.Alvo.Host.dll`. Alpine costs nothing here because `InvariantGlobalization` is already on — and it is
+on because **this csproj turns it on**; nothing else in the repo sets it. So the standalone image runs
+**without ICU**: culture-sensitive comparison and formatting fall back to the invariant culture. That is
+the right default for an API surface that speaks JSON and ordinals, but it is a property of the image a
+reader should not have to infer from a build flag.
 
 **The image builds under the repository's own bar, and with no warnings at all.** `TreatWarningsAsErrors` is
 inherited unchanged — nothing in the Dockerfile relaxes it. Three things the build would otherwise go looking
