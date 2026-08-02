@@ -47,6 +47,37 @@ public class PathBaseTests
         location.ShouldBe($"/alvo/api/owners/{IdIn(location)}");
     }
 
+    /// <summary>
+    /// A non-ASCII path base: the header is the <em>encoded</em> URI reference, and following it still reaches
+    /// the row.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>PathString.Value</c> is the decoded form, and a response header is not the place for one. Over
+    /// Kestrel this is a 500 on a create that <b>already committed the row</b> — response header values are
+    /// encoded as Latin-1, and <c>ú</c> is not in it — and behind a proxy that sets
+    /// <c>X-Forwarded-Prefix: /my%20app</c> it is a header no client can parse as a URI reference.
+    /// </para>
+    /// <para>
+    /// The ASCII assertion is what makes this a fact about encoding rather than about routing:
+    /// <c>TestServer</c> has no Latin-1 header writer, so it carries the decoded value happily and the
+    /// follow-up alone would pass either way. The equality after it pins the exact encoded shape, so a
+    /// double-encoded header — which would also resolve, <c>%25C3%25BA</c> and all — is caught too.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task Behind_a_non_ascii_path_base_a_created_rows_location_is_percent_encoded()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync(
+            [_admin], new AlvoApiWorldSetup(PathBase: "/účty"));
+
+        var location = await CreateAndReadLocationAsync(world, "/účty/api/owners");
+
+        await FollowingItAnswersOkAsync(world, location);
+        location.ShouldAllBe(character => char.IsAscii(character), $"'{location}' is not a usable header value");
+        location.ShouldBe($"/%C3%BA%C4%8Dty/api/owners/{IdIn(location)}");
+    }
+
     private static async Task<string> CreateAndReadLocationAsync(AlvoApiWorld world, string path = "/api/owners")
     {
         using var response = await world.SendAsync(

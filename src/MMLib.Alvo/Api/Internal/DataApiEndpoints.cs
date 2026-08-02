@@ -894,12 +894,23 @@ internal static class DataApiEndpoints
     /// <see cref="DataApiJson"/>'s options.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <b>The <c>ETag</c> is set here rather than at each call site</b>, so a row cannot be written without
     /// one: every 200 and 201 of a row goes through this type, and the only way to omit the header is for
     /// <see cref="RowVersionETag.For"/> to answer that the row has no version to tag. A create is included
     /// because the write already re-read the row, so a 201 has a stored version exactly like a 200 does —
     /// and a caller who had to issue a GET before their first conditional write would race the very window
     /// the tag closes.
+    /// </para>
+    /// <para>
+    /// <b>The <c>Location</c> is written with <c>ToUriComponent()</c>, never <c>PathString.Value</c>.</b>
+    /// <c>Value</c> is the decoded form and a header field is not the place for one. Two reachable failures,
+    /// neither hypothetical: a non-ASCII path base — <c>/účty</c>, and this repository's own fixtures put rows
+    /// in "Košice" — makes Kestrel throw while encoding the response header as Latin-1, so a create that
+    /// <em>already committed the row</em> answers 500; and a proxy-set <c>X-Forwarded-Prefix: /my%20app</c>
+    /// comes back decoded, as a value no client can parse as a URI reference. RFC 9110 §10.2.2 asks for the
+    /// encoded form either way.
+    /// </para>
     /// </remarks>
     /// <param name="record">The row to write.</param>
     /// <param name="entityTag">The row's entity tag, or <see langword="null"/> when it has no version.</param>
@@ -918,7 +929,8 @@ internal static class DataApiEndpoints
             ArgumentNullException.ThrowIfNull(httpContext);
             if (location is not null)
             {
-                httpContext.Response.Headers.Location = httpContext.Request.PathBase.Add(location).Value;
+                httpContext.Response.Headers.Location =
+                    httpContext.Request.PathBase.Add(location).ToUriComponent();
             }
 
             if (entityTag is not null)
