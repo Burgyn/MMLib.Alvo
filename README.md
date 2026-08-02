@@ -27,6 +27,16 @@ to start without it. Every compose command interpolates the file, `docker compos
 variable exported (or put it in a root `.env`) for the whole session. Tear down with
 `docker compose down --volumes`.
 
+### The complex demo
+
+`vehicle-registry` is deliberately small — three entities, no tenancy, no `audit`, no hidden fields.
+For the one that exercises the whole feature surface, see
+[`examples/field-service`](examples/field-service/README.md): two tenants, five keys differing only
+in role and tenant, an audited entity beside an unaudited one, hidden and `readOnly` fields, and
+rules that differ by role. It runs on `:8081` from its own compose file, and
+[`test/teapie-field-service`](test/teapie-field-service/README.md) drives it end to end.
+`scripts/test-e2e` runs both stacks and both suites — the same thing CI runs.
+
 ## Building & testing
 
 Requires the .NET SDK pinned in [`global.json`](global.json) (`10.0.100`).

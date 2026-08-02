@@ -135,6 +135,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     against PostgreSQL, runs TeaPie against the published port and asserts the created row is in
     the database. It runs in CI on every pull request.
 
+- **A runnable complex demo, and an end-to-end suite that measures what F3 claims.**
+  `examples/field-service` is a multi-tenant field-service backend — global reference data beside
+  two tenant-scoped entities, one audited and one not, an optional hidden field, a required hidden
+  field, a `readOnly` field, an unconfigured operation, both a caller-level and a row-level rule,
+  every field type, both kinds of `format`, and indexes over the fields the tests filter and order
+  on. Its README states, per construct, which behaviour it exists to let a test measure.
+  `docker-compose.field-service.yml` runs it on `:8081` with five dev keys differing only in role
+  and tenant; the repo-root `docker compose up` is unchanged.
+
+  `test/teapie-field-service` drives 327 assertions against that container: the PostgREST query
+  grammar including keyset paging over four pages, RFC 9457 problem documents carrying every
+  violation at once, `ETag`/`If-Match` in both directions of the `audit` pair, `Idempotency-Key`
+  measured by row count, field confidentiality compared as a whole refusal document, all three
+  authorization shapes in one system state, tenant isolation, the published OpenAPI document, and
+  six multi-step CRUD journeys that end by asserting the state of the world. `scripts/test-e2e`
+  runs both stacks and adds two PostgreSQL assertions no HTTP check can make — that a hidden
+  field's value really is stored, and that the two tenants' rows really are partitioned.
+
+  Two defects it found are recorded rather than fixed here, each pinned by a labelled case that
+  turns red when the defect is: **a duplicate value on a `unique` field, and a delete blocked by an
+  `onDelete: restrict` reference, are both answered `500` rather than `409`.** Every other declared
+  facet is validated and answered with a per-field 422; a database constraint is not mapped onto
+  `IAlvoData`'s refusal families at all, so an agent gets no violation, no pointer and no field
+  name. On a tenant-scoped entity the first also makes a globally-unique field a cross-tenant
+  existence oracle — `500` versus `201` tells tenant B whether tenant A holds a value.
+
   Known limits, so this is honest: the image is **not published yet** — you build it from this
   repository — and there is no dashboard, no Management API and no CLI (#24, all F4). A mis-typed
   descriptor mount currently ends in a stack trace rather than a readable refusal (#132), and the
