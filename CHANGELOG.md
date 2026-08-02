@@ -127,7 +127,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     default would choose where the next client is sent.
   - **No default credential, ever.** The image ships no API key and seeds none; the demo stack
     refuses to start until you supply one. A host with no key configured still starts and still
-    refuses every write.
+    refuses every write. The stack publishes its port on **`127.0.0.1` only**, so following the
+    quickstart on a cloud VM does not put a read/write backend on the internet — Docker's
+    `DOCKER-USER` chain sits ahead of a host firewall, so a `0.0.0.0` bind here would not be
+    stopped by one.
   - **An end-to-end suite** (`scripts/test-e2e`) that builds the image, brings the stack up
     against PostgreSQL, runs TeaPie against the published port and asserts the created row is in
     the database. It runs in CI on every pull request.
@@ -143,13 +146,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   schema it declares. Call it *before* mapping endpoints — `MapAlvoDataApi()` reads entity names off
   the applied schema, and the apply is also what primes the policy catalog (an unprimed catalog
   denies everything). Previously the orchestrator behind it was `internal`, so only code inside the
-  core assembly could apply a descriptor at all.
+  core assembly could apply a descriptor at all. A **refusal is a return value, not an exception** —
+  a caller doing a dry run wants to read the plan — so a host that wants a running backend calls
+  **`MigrationResult.EnsureApplied()`** on the result, also new. It throws only on a plan that was
+  neither applied, empty, nor a dry run, naming the destructive steps that were refused; an
+  unchanged descriptor (empty plan) and a dry run pass through untouched.
 
 - **`AddAlvoProblemDetails()`** — new public API in the core, and **opt-in**: `AddAlvo()` does not
   register it, so nothing changes for an existing host. Registering it, together with
   `UseExceptionHandler()`, makes an unhandled exception come back as Alvo's own problem document
   (`type: https://alvo.dev/errors/internal`) with a constant detail and nothing about the exception
-  in the body, logged with its stack trace server-side. It is opt-in because an embedded host owns
+  in the body, logged with its stack trace server-side — except when the caller simply hung up
+  (an `OperationCanceledException` on an aborted request), which is not an error and is not logged
+  as one. It is opt-in because an embedded host owns
   its own error rendering, and Alvo silently swallowing your exceptions would be the wrong default.
   It also calls `AddProblemDetails()` for you, because `UseExceptionHandler()` refuses to configure
   itself with neither a handler path nor a problem-details fallback. The `internal` slug joins
