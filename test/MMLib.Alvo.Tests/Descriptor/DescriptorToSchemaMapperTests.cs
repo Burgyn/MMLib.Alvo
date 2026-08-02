@@ -30,9 +30,8 @@ public class DescriptorToSchemaMapperTests
     }
 
     [Fact]
-    public void Soft_delete_column_is_nullable_and_audit_timestamps_are_required()
+    public void Audit_timestamps_are_required_and_actors_are_nullable()
     {
-        // simple-tasks' "projects" entity declares both audit:true and softDelete:true.
         var m = Map("simple-tasks/tasks.alvo.json");
         var projects = m.Entities.Single(e => e.Name == "projects");
 
@@ -43,10 +42,45 @@ public class DescriptorToSchemaMapperTests
         var createdBy = projects.Fields.Single(f => f.Name == "created_by");
         createdBy.Required.ShouldBeFalse();
         createdBy.Nullable.ShouldBeTrue();
+    }
 
-        var deletedAt = projects.Fields.Single(f => f.Name == "deleted_at");
-        deletedAt.Required.ShouldBeFalse();
-        deletedAt.Nullable.ShouldBeTrue();
+    /// <summary>
+    /// <c>softDelete</c> is declared in the frozen descriptor schema and not implemented: the delete path
+    /// hard-deletes the row and reads do not exclude it, which is silent data loss where the schema promises
+    /// recoverability. Refused at apply time, exactly as <c>computed</c> is, rather than honoured half-way.
+    /// </summary>
+    [Fact]
+    public void Map_rejects_soft_delete_until_it_is_implemented()
+    {
+        var json = """
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "archives": { "softDelete": true, "fields": {
+            "title": { "type": "string" } } } } }
+        """;
+
+        var ex = Should.Throw<InvalidDataException>(() => MapInline(json));
+
+        ex.Message.ShouldContain("softDelete");
+        ex.Message.ShouldContain("archives");
+    }
+
+    /// <summary>
+    /// The negative leg: the flag written as <c>false</c> is not a declaration, so it must map normally —
+    /// otherwise the refusal would be "any entity mentioning softDelete".
+    /// </summary>
+    [Fact]
+    public void Soft_delete_written_as_false_maps_normally()
+    {
+        var json = """
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "archives": { "softDelete": false, "fields": {
+            "title": { "type": "string" } } } } }
+        """;
+
+        var archives = MapInline(json).Entities.Single(e => e.Name == "archives");
+
+        archives.SoftDelete.ShouldBeFalse();
+        archives.Fields.ShouldNotContain(field => field.Name == "deleted_at");
     }
 
     // complex-crm's gross_total/line_total legitimately use 'computed' (a gross total SHOULD be
@@ -88,6 +122,90 @@ public class DescriptorToSchemaMapperTests
         var m = DescriptorToSchemaMapper.Map(descriptor);
 
         await Verify(m);
+    }
+
+    /// <summary>
+    /// A descriptor that declares a field the mapper also injects used to produce <b>two</b>
+    /// <see cref="FieldSchema"/> entries with one name, and every later operation on that entity died
+    /// with <c>ArgumentException: An item with the same key has already been added</c> out of the data
+    /// path — so declaring <c>readOnly</c> on a managed column, the documented way to protect one, broke
+    /// the entity instead. Only <c>id</c> had a de-duplication guard.
+    /// </summary>
+    [Theory]
+    [InlineData("created_by")]
+    [InlineData("created_at")]
+    [InlineData("updated_by")]
+    [InlineData("updated_at")]
+    public void A_declared_managed_column_is_not_injected_a_second_time(string column)
+    {
+        var json = $$"""
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "notes": { "audit": true, "fields": {
+            "title": { "type": "string" },
+            "{{column}}": { "type": "uuid", "readOnly": true } } } } }
+        """;
+
+        var notes = MapInline(json).Entities.Single(e => e.Name == "notes");
+
+        notes.Fields.Count(field => field.Name == column).ShouldBe(1);
+        notes.Fields.Select(field => field.Name).ShouldBeUnique();
+    }
+
+    /// <summary>
+    /// The tenant discriminator has the same shape, and a scoped entity is the ordinary case rather
+    /// than the audited one.
+    /// </summary>
+    [Fact]
+    public void A_declared_tenant_id_is_not_injected_a_second_time()
+    {
+        var json = """
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "notes": { "tenancy": "scoped", "fields": {
+            "tenant_id": { "type": "uuid", "required": true } } } } }
+        """;
+
+        var notes = MapInline(json).Entities.Single(e => e.Name == "notes");
+
+        notes.Fields.Select(field => field.Name).ShouldBeUnique();
+        notes.Fields.Count(field => field.Name == "tenant_id").ShouldBe(1);
+    }
+
+    /// <summary>
+    /// The agreement fact between the two sides of one decision: whatever this mapper injects beyond the
+    /// declared fields is exactly what <see cref="AlvoManagedColumns"/> reports for the mapped entity — the
+    /// set the write guard in each driver package refuses a caller from supplying. Deleting the authority's
+    /// answer, or growing the mapper past it, fails here by name rather than becoming a caller-writable
+    /// audit column nobody notices.
+    /// </summary>
+    /// <param name="tenancy">The entity's declared tenancy.</param>
+    /// <param name="audit">Whether the entity declares <c>audit</c>.</param>
+    /// <param name="softDelete">Whether the entity declares <c>softDelete</c>.</param>
+    /// <remarks>
+    /// <c>softDelete</c> is absent from the matrix because the mapper refuses it outright until soft delete
+    /// is implemented; that the authority reports <c>deleted_at</c> for it is asserted on the authority
+    /// itself (<c>AlvoManagedColumnsTests</c>), so the two do not drift while the flag is unusable.
+    /// </remarks>
+    [Theory]
+    [InlineData("global", false, false)]
+    [InlineData("scoped", false, false)]
+    [InlineData("global", true, false)]
+    [InlineData("scoped", true, false)]
+    public void The_injected_columns_are_exactly_the_ones_AlvoManagedColumns_reports(
+        string tenancy, bool audit, bool softDelete)
+    {
+        var json = $$"""
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "notes": {
+            "tenancy": "{{tenancy}}",
+            "audit": {{(audit ? "true" : "false")}},
+            "softDelete": {{(softDelete ? "true" : "false")}},
+            "fields": { "title": { "type": "string" } } } } }
+        """;
+
+        var notes = MapInline(json).Entities.Single(e => e.Name == "notes");
+
+        var injected = notes.Fields.Select(field => field.Name).Where(name => name != "title");
+        injected.ToHashSet(StringComparer.Ordinal).ShouldBe(AlvoManagedColumns.For(notes), ignoreOrder: true);
     }
 
     private const string WithComputed = """

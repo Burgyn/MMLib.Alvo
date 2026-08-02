@@ -1,6 +1,4 @@
 ﻿using PublicApiGenerator;
-using System.Reflection;
-using System.Text.RegularExpressions;
 
 namespace MMLib.Alvo.Tests.Api;
 
@@ -33,27 +31,7 @@ public class TestingLibraryPublicApiTests
     public Task Public_api_has_not_changed()
     {
         var assembly = typeof(TestFieldSqlRenderer).Assembly;
-        var publicApi = RemoveVerifyBuildMetadata(assembly.GeneratePublicApi(_options));
+        var publicApi = VerifyBuildMetadata.RemoveFrom(assembly.GeneratePublicApi(_options));
         return Verify(publicApi).UseFileName("PublicApi.MMLib.Alvo.Testing");
     }
-
-    /// <summary>
-    /// This assembly references <c>Verify.XunitV3</c> directly (for <c>SchemaSqlSnapshotTests</c>), and
-    /// Verify's build targets stamp an <c>[assembly: AssemblyMetadata("Verify.&lt;key&gt;", ...)]</c> entry
-    /// per build-time fact it wants to recover at runtime — directories, the solution name, the target
-    /// frameworks. **None of them are Alvo's public API**, and every one of them is derived from how
-    /// and where the build ran, so each is a way for this baseline to fail for a reason that has
-    /// nothing to do with the public surface: the directories carry an absolute checkout path
-    /// (different on every machine and in CI), and the rest vary with the build driver — a Stryker
-    /// mutation run builds the solution itself and this test errored there while passing under
-    /// <c>dotnet test</c>. Verify 31.27.0 also *added* one (<c>Verify.IntermediateDirectory</c>) to the
-    /// two that existed when this filter was first written, so a patch bump alone was enough to break
-    /// the gate. The whole family therefore goes. Every non-Verify <c>AssemblyMetadata</c> entry
-    /// (<c>RepositoryUrl</c>) is genuine metadata and stays.
-    /// </summary>
-    private static string RemoveVerifyBuildMetadata(string publicApi) => Regex.Replace(
-        publicApi,
-        "\\[assembly: System\\.Reflection\\.AssemblyMetadata\\(\"Verify\\.\\w+\", .*?\\)\\]\r?\n",
-        string.Empty,
-        RegexOptions.Singleline);
 }

@@ -20,10 +20,11 @@ public static class AlvoServiceCollectionExtensions
     /// or by calling the returned builder's extension methods directly.
     /// </summary>
     /// <remarks>
-    /// <see cref="MMLib.Alvo.Schema.ISchemaRegistry"/> is deliberately <b>not</b> registered yet: it
-    /// would have to be seeded from the applied model that migration itself produces, and nothing
-    /// consumes it until the Data API does. Resolve it and you get "no service registered", not an
-    /// empty registry — a host that needs one today must register its own.
+    /// <see cref="MMLib.Alvo.Schema.ISchemaRegistry"/> arrives with the policy catalog provider, which
+    /// implements it: the applied schema a data port validates a caller's field names against is then
+    /// always the one the rules judging the same request were compiled against. It reads an empty model
+    /// until a descriptor is applied — no entity declared, so every entity and field name is refused —
+    /// and a host with its own schema source registers its own and takes it over.
     /// </remarks>
     /// <param name="services">The service collection.</param>
     /// <param name="configure">Optional callback to attach providers and features to the builder.</param>
@@ -46,8 +47,6 @@ public static class AlvoServiceCollectionExtensions
         services.AddAlvoAuth();
         services.AddAlvoExpressions();
         services.AddAlvoRules();
-
-        // TODO(#19): register ISchemaRegistry once the Data API needs it (see this method's remarks).
 
         configure?.Invoke(builder);
 

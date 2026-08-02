@@ -31,12 +31,28 @@ namespace MMLib.Alvo.Testing
     {
         public static string Find() { }
     }
+    public sealed class TSqlFieldSqlRenderer : MMLib.Alvo.Expressions.IFieldSqlRenderer
+    {
+        public TSqlFieldSqlRenderer() { }
+        public string FalseLiteral { get; }
+        public string TrueLiteral { get; }
+        public string RenderBooleanFieldAsPredicate(string booleanValue) { }
+        public string RenderBooleanPredicate(bool value) { }
+        public string RenderCaseInsensitiveLike(string left, string right) { }
+        public string RenderField(MMLib.Alvo.Schema.EntitySchema entity, string fieldName) { }
+        public string RenderParameter(string parameterName) { }
+        public string RenderTwoValued(string predicate) { }
+    }
     public sealed class TestFieldSqlRenderer : MMLib.Alvo.Expressions.IFieldSqlRenderer
     {
         public TestFieldSqlRenderer() { }
         public string FalseLiteral { get; }
         public string TrueLiteral { get; }
         public string RenderCaseInsensitiveLike(string left, string right) { }
+        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
+                "Left",
+                "Right"})]
+        public System.ValueTuple<string, string> RenderComparableOperands(string left, string right, MMLib.Alvo.Expressions.CelValueType type) { }
         public string RenderField(MMLib.Alvo.Schema.EntitySchema entity, string fieldName) { }
         public string RenderParameter(string parameterName) { }
     }
@@ -46,23 +62,42 @@ namespace MMLib.Alvo.Testing.Data
     public abstract class AlvoDataAdversarialTests
     {
         protected AlvoDataAdversarialTests() { }
+        public System.Threading.Tasks.Task A_delete_on_a_soft_delete_entity_is_refused_rather_than_hard_deleting() { }
+        public System.Threading.Tasks.Task A_delete_on_an_ordinary_entity_still_removes_the_row() { }
         public System.Threading.Tasks.Task A_filter_naming_a_hidden_field_is_rejected_rather_than_answered() { }
         public System.Threading.Tasks.Task A_filter_or_sort_naming_a_field_the_schema_does_not_declare_is_rejected() { }
         public System.Threading.Tasks.Task A_filter_tree_deeper_than_the_cap_is_rejected_rather_than_walked() { }
+        public System.Threading.Tasks.Task A_filter_wider_than_the_term_cap_is_rejected_rather_than_composed() { }
         public System.Threading.Tasks.Task A_global_entity_whose_negated_rule_references_the_tenant_denies_a_tenantless_caller() { }
         public System.Threading.Tasks.Task A_global_entity_whose_rule_references_the_user_denies_the_anonymous_caller() { }
         public System.Threading.Tasks.Task A_hidden_expression_that_cannot_resolve_still_masks_the_field() { }
         public System.Threading.Tasks.Task A_hidden_field_never_appears_in_a_returned_record() { }
+        [Xunit.MemberData("MalformedFilters", new object[0])]
+        public System.Threading.Tasks.Task A_malformed_filter_is_refused_on_the_malformed_query_channel(MMLib.Alvo.Data.AlvoFilter malformed) { }
+        [Xunit.InlineData(new object[] {
+                "café"})]
+        [Xunit.InlineData(new object[] {
+                "😀 grinning face"})]
+        public System.Threading.Tasks.Task A_non_ascii_value_survives_a_create_and_get_round_trip_unchanged(string value) { }
         public System.Threading.Tasks.Task A_nullable_boolean_field_used_bare_in_a_rule_works_end_to_end() { }
+        public System.Threading.Tasks.Task A_paged_read_sorted_by_a_nullable_field_is_refused_rather_than_dropping_rows() { }
+        public System.Threading.Tasks.Task A_paged_read_sorted_by_a_required_field_still_answers() { }
+        public System.Threading.Tasks.Task A_payload_can_never_write_a_framework_managed_audit_column() { }
         public System.Threading.Tasks.Task A_query_limit_is_applied_after_the_policy_predicate_not_before() { }
+        public System.Threading.Tasks.Task A_query_with_no_context_at_all_throws_rather_than_defaulting_to_anyone() { }
         public System.Threading.Tasks.Task A_query_with_no_tenant_context_fails_rather_than_returning_every_tenants_rows() { }
         public System.Threading.Tasks.Task A_sort_naming_a_hidden_field_is_rejected_rather_than_leaking_its_ordering() { }
         public System.Threading.Tasks.Task A_tenant_scoped_entity_never_returns_another_tenants_rows() { }
         public System.Threading.Tasks.Task A_tenantless_context_cannot_create_into_a_scoped_entity() { }
         public System.Threading.Tasks.Task A_user_filter_cannot_widen_the_policy_predicate() { }
+        public System.Threading.Tasks.Task A_uuid_rule_over_a_dynamic_entity_matches_rows_on_every_engine() { }
+        public System.Threading.Tasks.Task A_well_formed_filter_over_the_same_fields_still_answers() { }
         public System.Threading.Tasks.Task A_write_to_a_read_only_field_is_rejected_rather_than_silently_dropped() { }
         public System.Threading.Tasks.Task An_admin_rule_over_the_role_set_matches_a_multi_role_caller() { }
+        public System.Threading.Tasks.Task An_audited_create_stamps_the_caller_and_the_implementations_clock() { }
+        public System.Threading.Tasks.Task An_audited_update_stamps_the_updater_and_never_rewrites_the_creator() { }
         public System.Threading.Tasks.Task An_entity_with_no_rule_denies_every_operation() { }
+        public System.Threading.Tasks.Task An_in_list_longer_than_the_candidate_cap_is_rejected_rather_than_bound() { }
         public System.Threading.Tasks.Task An_operation_with_no_rule_denies_while_its_siblings_work() { }
         protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Data.IAlvoData> CreateAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, System.Collections.Generic.IReadOnlyDictionary<string, System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRecord>> seed);
         public System.Threading.Tasks.Task Create_into_another_tenant_is_denied() { }
@@ -72,15 +107,144 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task Delete_of_another_users_row_reports_not_found_and_does_not_delete() { }
         public System.Threading.Tasks.Task Get_of_another_users_row_is_indistinguishable_from_absent() { }
         public System.Threading.Tasks.Task List_returns_only_the_callers_own_rows() { }
+        public System.Threading.Tasks.Task Same_suite_passes_over_a_dynamic_entity() { }
         public System.Threading.Tasks.Task Update_cannot_move_a_row_into_another_tenant() { }
         public System.Threading.Tasks.Task Update_cannot_move_a_row_out_of_the_callers_scope() { }
         public System.Threading.Tasks.Task Update_cannot_rewrite_the_row_id() { }
         public System.Threading.Tasks.Task Update_of_an_unrelated_field_succeeds_when_the_post_image_still_satisfies_the_rule() { }
         public System.Threading.Tasks.Task Update_of_another_users_row_reports_not_found() { }
+        public static Xunit.TheoryData<MMLib.Alvo.Data.AlvoFilter> MalformedFilters() { }
+    }
+    public abstract class AlvoDataComparisonTests
+    {
+        protected AlvoDataComparisonTests() { }
+        [Xunit.InlineData(new object[] {
+                "price < 100",
+                1})]
+        [Xunit.InlineData(new object[] {
+                "price <= 2",
+                0})]
+        [Xunit.InlineData(new object[] {
+                "price > 100",
+                0})]
+        [Xunit.InlineData(new object[] {
+                "price > 12.34",
+                0})]
+        [Xunit.InlineData(new object[] {
+                "price > 2",
+                1})]
+        [Xunit.InlineData(new object[] {
+                "price >= 12.34",
+                1})]
+        public System.Threading.Tasks.Task A_decimal_comparison_answers_numerically_not_lexicographically(string rule, int expected) { }
+        [Xunit.InlineData(new object[] {
+                "!(price > 1)",
+                1})]
+        [Xunit.InlineData(new object[] {
+                "has(price)",
+                0})]
+        [Xunit.InlineData(new object[] {
+                "price > 1",
+                0})]
+        public System.Threading.Tasks.Task A_null_decimal_keeps_its_three_valued_answer(string rule, int expected) { }
+        [Xunit.InlineData(new object[] {
+                "price < 3",
+                1})]
+        [Xunit.InlineData(new object[] {
+                "price > 3",
+                0})]
+        public System.Threading.Tasks.Task A_whole_number_literal_against_a_decimal_column_answers_numerically(string rule, int expected) { }
+        [Xunit.InlineData(new object[] {
+                "mileage > 100",
+                1})]
+        [Xunit.InlineData(new object[] {
+                "mileage > 100000",
+                0})]
+        public System.Threading.Tasks.Task An_integer_comparison_answers_the_same_on_every_engine(string rule, int expected) { }
+        [Xunit.InlineData(new object[] {
+                "price != 100",
+                0})]
+        [Xunit.InlineData(new object[] {
+                "price == 100",
+                1})]
+        public System.Threading.Tasks.Task Equality_against_a_decimal_column_answers_numerically(string rule, int expected) { }
+        protected abstract System.Threading.Tasks.Task<int> MatchesAsync(string rule, decimal? price, long? mileage);
+    }
+    public abstract class AlvoDataDifferentialTests
+    {
+        protected AlvoDataDifferentialTests() { }
+        protected abstract MMLib.Alvo.Expressions.ICelCompiler Compiler { get; }
+        protected abstract MMLib.Alvo.Expressions.IPredicateEvaluator Evaluator { get; }
+        protected abstract MMLib.Alvo.Expressions.IFieldSqlRenderer Fields { get; }
+        protected abstract MMLib.Alvo.Expressions.IPredicateRenderer Renderer { get; }
+        public static MMLib.Alvo.Schema.EntitySchema DifferentialEntity { get; }
+        protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Testing.Data.IDifferentialProbe> CreateProbeAsync(MMLib.Alvo.Schema.EntitySchema entity);
+        public System.Threading.Tasks.Task This_engine_and_the_in_memory_backend_agree_on_every_case() { }
+    }
+    public static class AlvoDataFixtures
+    {
+        public static MMLib.Alvo.AlvoContext Caller { get; }
+        public static MMLib.Alvo.Schema.EntitySchema Vehicle { get; }
+    }
+    public abstract class AlvoDataOrderingTests
+    {
+        protected AlvoDataOrderingTests() { }
+        public System.Threading.Tasks.Task A_created_row_stores_the_instant_however_the_caller_spelled_its_offset() { }
+        public System.Threading.Tasks.Task A_decimal_filter_answers_numerically_not_lexicographically() { }
+        public System.Threading.Tasks.Task A_decimal_filter_equality_answers_numerically() { }
+        public System.Threading.Tasks.Task A_decimal_sort_orders_by_value_not_by_its_text_form() { }
+        public System.Threading.Tasks.Task A_like_filter_is_case_sensitive_on_every_engine() { }
+        public System.Threading.Tasks.Task A_timestamp_filter_and_a_stored_row_at_different_offsets_still_agree() { }
+        public System.Threading.Tasks.Task A_timestamp_filter_bound_at_a_non_utc_offset_answers_by_instant() { }
+        public System.Threading.Tasks.Task A_timestamp_filter_over_utc_values_answers_by_instant() { }
+        public System.Threading.Tasks.Task A_timestamp_sort_over_utc_values_orders_by_instant() { }
+        public System.Threading.Tasks.Task A_timestamp_written_at_a_non_utc_offset_behaves_the_same_on_every_engine() { }
+        public System.Threading.Tasks.Task A_write_accepts_every_value_the_read_path_converts() { }
+        public System.Threading.Tasks.Task An_ilike_filter_folds_ascii_case_on_every_engine() { }
+        public System.Threading.Tasks.Task An_updated_row_stores_the_instant_however_the_caller_spelled_its_offset() { }
+        protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Data.IAlvoData> CreateAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, System.Collections.Generic.IReadOnlyDictionary<string, System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRecord>> seed);
+        protected abstract string CursorFor(MMLib.Alvo.Data.AlvoRecord row);
+        public System.Threading.Tasks.Task Paging_over_a_decimal_key_neither_skips_nor_repeats_a_row() { }
+        public System.Threading.Tasks.Task Paging_over_a_utc_timestamp_key_neither_skips_nor_repeats_a_row() { }
+        public System.Threading.Tasks.Task Paging_over_sub_second_timestamps_keeps_instant_order() { }
+    }
+    public abstract class AlvoDataSqlSnapshotTests
+    {
+        protected AlvoDataSqlSnapshotTests() { }
+        protected abstract MMLib.Alvo.Expressions.ICelCompiler Compiler { get; }
+        protected abstract string EngineName { get; }
+        protected abstract MMLib.Alvo.Expressions.IFieldSqlRenderer Fields { get; }
+        protected abstract MMLib.Alvo.Expressions.IPredicateRenderer Renderer { get; }
+        protected virtual System.Collections.Generic.IEnumerable<string> Rules { get; }
+        protected static MMLib.Alvo.AlvoContext SnapshotCaller { get; }
+        protected static MMLib.Alvo.Schema.EntitySchema SnapshotEntity { get; }
+        public System.Threading.Tasks.Task Cel_renders_to_this_engines_sql() { }
+    }
+    public abstract class AlvoDataStatementTests
+    {
+        protected AlvoDataStatementTests() { }
+        public System.Threading.Tasks.Task A_rule_with_no_operands_binds_no_policy_parameter() { }
+        public System.Threading.Tasks.Task A_rule_with_no_operands_binds_no_policy_parameter_on_the_write_path() { }
+        public System.Threading.Tasks.Task A_single_row_read_carries_the_predicate_rather_than_checking_after_the_fetch() { }
+        protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Testing.Data.IStatementProbe> CreateAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, System.Collections.Generic.IReadOnlyDictionary<string, System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRecord>> seed);
+        public System.Threading.Tasks.Task The_delete_statement_itself_carries_the_policy_predicate() { }
+        public System.Threading.Tasks.Task The_policy_predicate_is_bound_inside_the_where_clause_of_one_statement() { }
+        public System.Threading.Tasks.Task The_tenant_scope_is_bound_inside_the_same_where_clause() { }
+        public System.Threading.Tasks.Task The_update_statement_itself_carries_the_policy_predicate() { }
+    }
+    public interface IDifferentialProbe : System.IAsyncDisposable
+    {
+        System.Threading.Tasks.Task<bool> MatchesAsync(MMLib.Alvo.Data.AlvoRecord row, MMLib.Alvo.Expressions.SqlPredicate predicate);
+    }
+    public interface IStatementProbe
+    {
+        MMLib.Alvo.Data.IAlvoData Data { get; }
+        System.Collections.Generic.IReadOnlyList<string> Statements { get; }
+        void ClearStatements();
     }
     public sealed class InMemoryAlvoData : MMLib.Alvo.Data.IAlvoData
     {
-        public InMemoryAlvoData(MMLib.Alvo.Rules.IPolicyEngine policy, MMLib.Alvo.Expressions.IPredicateEvaluator evaluator, MMLib.Alvo.Schema.SchemaModel schema) { }
+        public InMemoryAlvoData(MMLib.Alvo.Rules.IPolicyEngine policy, MMLib.Alvo.Expressions.IPredicateEvaluator evaluator, MMLib.Alvo.Schema.SchemaModel schema, System.TimeProvider? time = null) { }
         public System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord> CreateAsync(string entity, System.Collections.Generic.IReadOnlyDictionary<string, object?> values, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default) { }
         public System.Threading.Tasks.Task DeleteAsync(string entity, System.Guid id, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default) { }
         public System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord?> GetAsync(string entity, System.Guid id, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default) { }

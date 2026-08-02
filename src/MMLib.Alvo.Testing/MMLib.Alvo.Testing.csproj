@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <!--
     Internal test-support library (fakes, fixtures, and the port contract-suite
@@ -21,6 +21,25 @@
   <ItemGroup>
     <ProjectReference Include="../MMLib.Alvo.Abstractions/MMLib.Alvo.Abstractions.csproj" />
   </ItemGroup>
+
+  <!--
+    Abstractions-only, and that is a constraint rather than a coincidence. This library earns a
+    package when EXTERNAL PROVIDER AUTHORS need the contract suites, so whatever it references,
+    every one of those authors inherits — including one whose store is not EF-backed at all
+    (§0's provider model is precisely about not making a consumer adopt one infrastructure
+    choice). It also reaches further than it looks: test/Directory.Build.props references this
+    project from EVERY test project, so a dependency added here lands in projects that
+    deliberately have none — MMLib.Alvo.Abstractions.Tests, MMLib.Alvo.Schema.Tests.
+
+    So a contract suite for a port that does NOT live in Abstractions does not belong here.
+    IAlvoSqlDialect is the case in point: statement shape is a relational concern, the port lives
+    in MMLib.Alvo.Data.EntityFrameworkCore, and its contract suite plus its T-SQL fake live in the
+    companion project MMLib.Alvo.Testing.EntityFrameworkCore — in this library's own namespace, so
+    a consumer who adds that package finds them beside the data suites and nothing they already
+    wrote moves. The boundary is asserted by
+    EfDependencyBoundaryTests.The_shared_test_support_library_does_not_reach_ef_core, because the
+    family-wide arch fact matches EF's types by NAME and would never notice.
+  -->
 
   <!--
     InMemoryAlvoData (Task 12) enforces the resolved policy predicate per row through

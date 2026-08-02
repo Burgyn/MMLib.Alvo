@@ -91,4 +91,89 @@ public interface IFieldSqlRenderer
     /// <param name="left">The already-rendered left operand.</param>
     /// <param name="right">The already-rendered right operand.</param>
     string RenderCaseInsensitiveLike(string left, string right);
+
+    /// <summary>
+    /// Wraps <b>both</b> already-rendered operands of one comparison so this dialect compares them by
+    /// <b>value</b>. A dialect whose storage for <paramref name="type"/> does not order the way the type
+    /// does repairs the comparison here, in one place. The default returns the pair unchanged, which is
+    /// right for any engine with a real storage type per Alvo field type.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// SQLite is why this exists. It has no decimal storage class, so EF maps a
+    /// <see cref="CelValueType.Decimal"/> field to a <c>TEXT</c> column and an unguarded
+    /// <c>price &gt; 100</c> becomes a <em>string</em> comparison: it matches a row whose price is
+    /// <c>12.34</c>, and <c>price != 100</c> matches a row whose price <em>is</em> 100. On PostgreSQL's
+    /// <c>numeric</c> the same rule answers correctly — so a rule gating access on an amount admits
+    /// different rows per engine, which is a fail-open authorization outcome on one of them and exactly
+    /// what §0's engine-agnostic core principle forbids. SQLite's driver therefore casts both operands of a
+    /// decimal comparison to <c>REAL</c>.
+    /// </para>
+    /// <para>
+    /// <b>The pair is the signature, not a convention.</b> Repairing one side only does not merely leave the
+    /// comparison suboptimal — it produces a <em>new</em> wrong answer, because SQLite orders every
+    /// <c>TEXT</c> value above every <c>REAL</c> one, so a cast column against an uncast parameter inverts
+    /// rather than approximates. Taking and returning both operands together makes that mistake
+    /// unrepresentable at every call site, which a per-operand member left to each caller's memory. The
+    /// operator itself stays with the caller: which comparison this is, is Alvo's semantics, not a driver's.
+    /// </para>
+    /// <para>
+    /// <paramref name="type"/> is the type the comparison is <em>evaluated</em> at, after CEL's numeric
+    /// promotion, so a whole-number literal compared against a decimal column arrives as
+    /// <see cref="CelValueType.Decimal"/> rather than <see cref="CelValueType.Int"/>. It is deliberately a
+    /// CEL type and not a store type: a store type is resolved by the provider's own type mapping from the
+    /// column, so naming one here would add a second authority for it. This asks a driver only the question
+    /// it alone can answer — "does my storage for this type order the way the type does?".
+    /// </para>
+    /// <para>
+    /// <b>What an implementation must expect.</b> It is called for <em>every</em> comparison and therefore
+    /// for every <see cref="CelValueType"/>, so a dialect must return the operands unchanged for the types
+    /// it has no repair for. Either operand may be a <em>bind-parameter marker</em> (<c>@alvo_f0</c>) rather
+    /// than a quoted column, so an implementation must not assume it can qualify or introspect what it is
+    /// handed. It is <b>not</b> called for a <c>LIKE</c> or case-insensitive-<c>LIKE</c> pattern match (a
+    /// string operation by definition), for <c>has(...)</c> (an <c>IS NOT NULL</c> test), or for CEL role
+    /// membership (decided against the caller's own role set, never compared in SQL) — and it <b>is</b>
+    /// called once per candidate of a value-membership <c>IN (…)</c> list, which is a set of equality
+    /// comparisons sharing one left operand.
+    /// </para>
+    /// <para>
+    /// <b>This member also renders <c>ORDER BY</c>, so the repair must be order-preserving and not merely
+    /// comparison-consistent.</b> A storage driver asks it with the <em>same</em> operand on both sides and
+    /// uses either result as an ordering key, so whatever it returns decides how rows sort as well as how they
+    /// compare. That is deliberate: a keyset page is correct only while its <c>ORDER BY</c> and its cursor
+    /// boundary describe the <em>same</em> total order, and rendering both from one member is what makes them
+    /// unable to drift. The consequence for an implementation is a real constraint — a repair that is a valid
+    /// equivalence but not a valid ordering breaks paging while looking perfectly reasonable in isolation.
+    /// <c>LOWER(x)</c> for a case-insensitive string comparison is the trap: it is a sound comparison repair
+    /// and a wrong ordering key, and a page built on it silently skips or repeats rows. A dialect needing that
+    /// kind of repair must express it in the <em>operator</em> instead (see
+    /// <see cref="RenderCaseInsensitiveLike"/>, which is why case-insensitive matching has a member of its
+    /// own), and return the operands unchanged here. Formally: for all <c>a</c>, <c>b</c> of
+    /// <paramref name="type"/>, <c>a &lt; b</c> must imply <c>repair(a) &lt; repair(b)</c>. A repair that
+    /// merges values the type distinguishes (SQLite's <c>REAL</c> cast beyond 53 bits of mantissa) is
+    /// acceptable, because both sides then agree the two are tied and the row key breaks the tie; a repair that
+    /// <em>reorders</em> them is not.
+    /// </para>
+    /// <para>
+    /// An implementation must return expressions rather than predicates, and must preserve
+    /// <see langword="null"/>: a wrapper that turned a <c>NULL</c> operand into a value would break the
+    /// three-valued fold every comparison goes through. A cast that costs an index scan is an accepted
+    /// price for a correct answer; a dialect with a cheaper repair should prefer it.
+    /// </para>
+    /// <para>
+    /// <b>A repair wraps its operand; it never substitutes one</b>, and it is a function of its inputs alone.
+    /// Both follow from what a caller does with the result — the <c>ORDER BY</c> and the keyset boundary are
+    /// two separate calls whose answers have to describe one total order — and both, together with the
+    /// symmetry above, are asserted generically by
+    /// <c>MMLib.Alvo.Testing.Data.AlvoSqlDialectContractTests</c>, which pairs a driver's renderer with its
+    /// dialect. The formal <c>a &lt; b ⇒ repair(a) &lt; repair(b)</c> obligation is a statement about an
+    /// engine's ordering, so that suite asserts only its structural half; the engine half is proved per
+    /// driver against a real engine.
+    /// </para>
+    /// </remarks>
+    /// <param name="left">The already-rendered left operand.</param>
+    /// <param name="right">The already-rendered right operand.</param>
+    /// <param name="type">The type the comparison is evaluated at.</param>
+    (string Left, string Right) RenderComparableOperands(string left, string right, CelValueType type) =>
+        (left, right);
 }

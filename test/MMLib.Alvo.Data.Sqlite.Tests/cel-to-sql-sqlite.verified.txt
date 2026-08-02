@@ -1,0 +1,101 @@
+﻿[
+  {
+    Rule: true,
+    Sql: 1
+  },
+  {
+    Rule: owner_id == @user.id,
+    Sql: COALESCE("owner_id" = @alvo_u0, 0),
+    Parameters: [
+      alvo_u0:Guid
+    ]
+  },
+  {
+    Rule: owner_id != @user.id,
+    Sql: COALESCE("owner_id" <> @alvo_u0, 0),
+    Parameters: [
+      alvo_u0:Guid
+    ]
+  },
+  {
+    Rule: !(owner_id == @user.id),
+    Sql: (NOT COALESCE("owner_id" = @alvo_u0, 0)),
+    Parameters: [
+      alvo_u0:Guid
+    ]
+  },
+  {
+    Rule: tenant_id == @tenant.id,
+    Sql: COALESCE("tenant_id" = @alvo_u0, 0),
+    Parameters: [
+      alvo_u0:Guid
+    ]
+  },
+  {
+    Rule: has(owner_id),
+    Sql: ("owner_id" IS NOT NULL)
+  },
+  {
+    Rule: !has(owner_id),
+    Sql: (NOT ("owner_id" IS NOT NULL))
+  },
+  {
+    Rule: is_public,
+    Sql: COALESCE("is_public", 0)
+  },
+  {
+    Rule: is_public || owner_id == @user.id,
+    Sql: (COALESCE("is_public", 0) OR COALESCE("owner_id" = @alvo_u0, 0)),
+    Parameters: [
+      alvo_u0:Guid
+    ]
+  },
+  {
+    Rule: 'admin' in @user.roles,
+    Sql: 1
+  },
+  {
+    Rule: status == 'approved',
+    Sql: COALESCE("status" = @alvo_u0, 0),
+    Parameters: [
+      alvo_u0:String
+    ]
+  },
+  {
+    Rule: status in @user.roles,
+    Sql: COALESCE("status" IN (@alvo_u0, @alvo_u1), 0),
+    Parameters: [
+      alvo_u0:String,
+      alvo_u1:String
+    ]
+  },
+  {
+    Rule: (owner_id == @user.id || status == 'approved') && !is_public,
+    Sql: ((COALESCE("owner_id" = @alvo_u0, 0) OR COALESCE("status" = @alvo_u1, 0)) AND (NOT COALESCE("is_public", 0))),
+    Parameters: [
+      alvo_u0:Guid,
+      alvo_u1:String
+    ]
+  },
+  {
+    Rule: price > 100,
+    Sql: COALESCE(CAST("price" AS REAL) > CAST(@alvo_u0 AS REAL), 0),
+    Parameters: [
+      alvo_u0:Int64
+    ]
+  },
+  {
+    Rule: price != 100,
+    Sql: COALESCE(CAST("price" AS REAL) <> CAST(@alvo_u0 AS REAL), 0),
+    Parameters: [
+      alvo_u0:Int64
+    ]
+  },
+  {
+    Rule: mileage > 100,
+    Sql: COALESCE("mileage" > @alvo_u0, 0),
+    Parameters: [
+      alvo_u0:Int64
+    ]
+  }
+]

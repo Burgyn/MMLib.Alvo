@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Data;
+﻿using MMLib.Alvo.Schema;
+
+namespace MMLib.Alvo.Data;
 
 /// <summary>
 /// A request to list an entity's rows through <see cref="IAlvoData.QueryAsync"/>: which entity,
@@ -39,12 +41,89 @@ public sealed record AlvoQuery
     public AlvoFilter? Filter { get; init; }
 
     /// <summary>
-    /// Gets the sort order to apply, outermost first; empty means implementation-defined (but stable)
-    /// order. A sort key is subject to the same confidentiality rule as <see cref="Filter"/>: ordering
+    /// Gets the sort order to apply, outermost first; empty means <b>implementation-defined and unstable</b>
+    /// order — two identical calls may return the same rows in a different sequence, because neither engine
+    /// promises otherwise for a query with no <c>ORDER BY</c> (a PostgreSQL heap <c>UPDATE</c> relocates a row
+    /// and changes the sequence). A caller that cares about order, or that pages, must name a key.
+    /// A sort key is subject to the same confidentiality rule as <see cref="Filter"/>: ordering
     /// by a hidden field discloses that field's ordering across the whole page, so an implementation
     /// rejects it.
     /// </summary>
+    /// <remarks>
+    /// A key naming a <b>nullable</b> field is only usable on an <em>unpaged</em> read: a keyset cursor's
+    /// boundary is a chain of comparisons that cannot express where nulls sort, so an implementation refuses a
+    /// paged read (<see cref="Limit"/> or <see cref="After"/> set) sorted by one rather than silently losing
+    /// the null-keyed rows. <see cref="EnsureSortKeysCanBePaged"/> is that refusal, and every implementation
+    /// calls it rather than writing its own.
+    /// </remarks>
     public IReadOnlyList<AlvoSort> Sort { get; init; } = [];
+
+    /// <summary>
+    /// Throws when <paramref name="query"/> is <b>paged</b> and sorts by a nullable field. Every
+    /// <see cref="IAlvoData"/> implementation must call this before composing a page.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A keyset boundary is a chain of comparisons with no <c>IS NULL</c> arm, so a <see langword="null"/> on
+    /// either side makes the term <see langword="null"/> and a <c>WHERE</c> treats that as false: the page
+    /// stops early and <b>silently</b>, losing every null-keyed row under <c>nullslast</c> and every row but
+    /// the first under <c>nullsfirst</c>. The design's ruling is that a nullable sort column must declare its
+    /// null placement <em>or be rejected</em>; the third option — accept the query and lose rows — is what this
+    /// refuses.
+    /// </para>
+    /// <para>
+    /// <b>It lives here because it is a rule of the port, not of one backend</b>, and it was written twice —
+    /// verbatim, message included — in two shipped assemblies before it lived anywhere. This codebase's own
+    /// precedent is <see cref="AlvoFilter.EnsureWithinLimits"/>: a public static guard in the ports, called by
+    /// every implementation, so a third one (F7's dynamic driver) inherits the rule instead of making a third
+    /// copy of it. The reference implementation calls it too, although it compares rows in memory and could
+    /// page over a null key correctly — a reference that answered where the shipped backends refuse would give
+    /// this port two contracts.
+    /// </para>
+    /// <para>
+    /// Scoped to a paged read deliberately: an <b>unpaged</b> sorted read has no boundary, so its ordering over
+    /// nulls is already correct and refusing it would break whole-set reads for no gain.
+    /// </para>
+    /// </remarks>
+    /// <param name="query">The query about to be served.</param>
+    /// <param name="entity">
+    /// The entity as the implementation's own applied schema declares it, or <see langword="null"/> when it
+    /// declares none — in which case there is no nullability to read and the check does not apply. An entity
+    /// the implementation does not know is refused elsewhere, before any row is touched.
+    /// </param>
+    /// <exception cref="ArgumentException"><paramref name="query"/> is paged and a sort key names a nullable field.</exception>
+    public static void EnsureSortKeysCanBePaged(AlvoQuery query, EntitySchema? entity)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        if (entity is null || !query.IsPaged)
+        {
+            return;
+        }
+
+        foreach (var key in query.Sort.Where(key => IsNullable(entity, key.Field)))
+        {
+            throw new ArgumentException(
+                $"Sorting a paged read by '{key.Field}' is not supported, because that field is nullable and a "
+                + "keyset cursor cannot express where its null values sort. Page by a required field, or read the "
+                + "whole set without a limit or a cursor.",
+                nameof(query));
+        }
+    }
+
+    /// <summary>
+    /// Whether this query asks for a page rather than the whole visible set — either bound of the keyset
+    /// window is enough, because both make the boundary observable.
+    /// </summary>
+    private bool IsPaged => Limit is not null || After is not null;
+
+    /// <summary>
+    /// Whether <paramref name="entity"/> declares <paramref name="field"/> nullable. A field the entity does
+    /// not declare is not this check's business: an undeclared filter or sort key is refused, by name, before
+    /// this runs.
+    /// </summary>
+    private static bool IsNullable(EntitySchema entity, string field) =>
+        entity.Fields.FirstOrDefault(candidate => string.Equals(candidate.Name, field, StringComparison.Ordinal))
+            is { Nullable: true };
 
     /// <summary>Gets the maximum number of rows to return, or <see langword="null"/> for no explicit limit.</summary>
     public int? Limit { get; init; }

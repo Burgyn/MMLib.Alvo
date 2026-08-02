@@ -1,7 +1,7 @@
 ﻿using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Schema;
 
-namespace MMLib.Alvo.Tests.Expressions;
+namespace MMLib.Alvo.Testing;
 
 /// <summary>
 /// A T-SQL-shaped <see cref="IFieldSqlRenderer"/>, standing in for the SQL Server / Azure SQL driver
@@ -12,7 +12,12 @@ namespace MMLib.Alvo.Tests.Expressions;
 /// sufficient: it implements <b>only</b> <see cref="IFieldSqlRenderer"/>, overriding the two-valued
 /// members, and needs no change to the structural renderer.
 /// </summary>
-internal sealed class TSqlFieldSqlRenderer : IFieldSqlRenderer
+/// <remarks>
+/// Public and shipped here rather than declared per test project: the seam it proves sufficient is now used
+/// by the core's predicate renderer <em>and</em> by a storage driver's caller-filter renderer, and two copies
+/// of the fake are how the two would come to be proved against different T-SQL.
+/// </remarks>
+public sealed class TSqlFieldSqlRenderer : IFieldSqlRenderer
 {
     /// <inheritdoc />
     public string TrueLiteral => "1";

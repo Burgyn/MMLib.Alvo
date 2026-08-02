@@ -5,7 +5,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
+using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Migrations;
+using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore;
@@ -44,6 +46,15 @@ public static class AlvoEfCoreProvider
     /// provider-build time (when a service is first materialized), never eagerly at call time, so
     /// an options-bound connection string is honored.
     /// </remarks>
+    /// <remarks>
+    /// The data path attaches here too: the driver's own <see cref="RelationalProviderRegistration.Fields"/>
+    /// and <see cref="RelationalProviderRegistration.Dialect"/> become resolvable services, and
+    /// <see cref="Data.IAlvoData"/> is composed from them plus the engine-agnostic core's policy engine,
+    /// evaluator and predicate renderer. It is a <b>singleton</b> deliberately: it holds no per-request
+    /// state, it creates one <see cref="DbContext"/> per operation and disposes it, and every member takes
+    /// the caller's <c>AlvoContext</c> as a parameter precisely so no ambient scope decides who is asking.
+    /// A scoped registration would imply the opposite and invite an accessor to be read instead.
+    /// </remarks>
     public static IAlvoBuilder AddRelationalProvider(this IAlvoBuilder builder, RelationalProviderRegistration registration)
     {
         ArgumentNullException.ThrowIfNull(builder);
@@ -61,9 +72,25 @@ public static class AlvoEfCoreProvider
         builder.Services.TryAddSingleton<IDescriptorVersionStore>(sp => sp.GetRequiredService<EfCoreDescriptorVersionStore>());
         builder.Services.TryAddSingleton<IAppliedSchemaStore>(sp => sp.GetRequiredService<EfCoreDescriptorVersionStore>());
         builder.Services.TryAddSingleton<IRuntimeSchemaWriter>(CreateRuntimeSchemaWriter);
+        builder.Services.TryAddSingleton(services => new AlvoDataContextFactory(
+            services.GetRequiredService<ISchemaRegistry>(),
+            options => registration.ConfigureProvider(options, registration.ConnectionString(services))));
+        builder.Services.TryAddSingleton(TimeProvider.System);
+        builder.Services.TryAddSingleton(registration.Fields);
+        builder.Services.TryAddSingleton(registration.Dialect);
+        builder.Services.TryAddSingleton<IAlvoData>(CreateData);
 
         return builder;
     }
+
+    private static EfAlvoData CreateData(IServiceProvider services) => new(
+        services.GetRequiredService<IPolicyEngine>(),
+        services.GetRequiredService<IPredicateEvaluator>(),
+        services.GetRequiredService<IPredicateRenderer>(),
+        services.GetRequiredService<IFieldSqlRenderer>(),
+        services.GetRequiredService<IAlvoSqlDialect>(),
+        services.GetRequiredService<AlvoDataContextFactory>(),
+        services.GetRequiredService<TimeProvider>());
 
     private static RelationalConnectionFactory CreateConnectionFactory(IServiceProvider services, RelationalProviderRegistration registration)
     {

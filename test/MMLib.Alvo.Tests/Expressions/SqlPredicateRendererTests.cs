@@ -184,6 +184,79 @@ public class SqlPredicateRendererTests
             CelFixtures.CompileRule("owner_id == @user.id"), CelFixtures.Alice, _fields, prefix));
     }
 
+    /// <summary>
+    /// Every comparison renders both operands through the dialect's value repair. Pinned in the core's own
+    /// suite, against a renderer whose repair is <em>visible</em>: with an identity repair, deleting the call
+    /// would leave every assertion here and the golden baseline byte-identical while a decimal rule silently
+    /// became a lexical comparison on SQLite — a fail-open for any rule gating on an amount.
+    /// </summary>
+    [Fact]
+    public void A_decimal_comparisons_operands_are_both_repaired_by_the_dialect()
+        => Render("total > 100", CelFixtures.Alice).Sql
+            .ShouldBe("COALESCE(CAST(\"total\" AS numeric) > CAST(@p0 AS numeric), FALSE)");
+
+    /// <summary>
+    /// Equality too, not only the relational operators: under a lexical comparison <c>total != 100</c> matches
+    /// a row whose total <em>is</em> 100, so a rule that excludes the row admits it.
+    /// </summary>
+    [Fact]
+    public void An_equality_comparisons_operands_are_repaired_as_well()
+        => Render("total != 100", CelFixtures.Alice).Sql
+            .ShouldBe("COALESCE(CAST(\"total\" AS numeric) <> CAST(@p0 AS numeric), FALSE)");
+
+    /// <summary>
+    /// The promotion the repair depends on: a whole-number literal against a decimal column makes a
+    /// <c>Decimal</c> comparison, on either side of the operator. Without it the literal — the operand most
+    /// likely to be an <c>Int64</c> in a <c>TEXT</c> column's comparison — is the one that escapes the repair.
+    /// </summary>
+    [Theory]
+    [InlineData("total > 100", "CAST(\"total\" AS numeric) > CAST(@p0 AS numeric)")]
+    [InlineData("100 < total", "CAST(@p0 AS numeric) < CAST(\"total\" AS numeric)")]
+    [InlineData("total > 100.5", "CAST(\"total\" AS numeric) > CAST(@p0 AS numeric)")]
+    public void A_mixed_numeric_comparison_is_promoted_to_decimal_on_either_side(string rule, string expected)
+        => Render(rule, CelFixtures.Alice).Sql.ShouldBe($"COALESCE({expected}, FALSE)");
+
+    /// <summary>
+    /// A comparison over two non-numeric operands is left alone — the repair costs an index, and is only
+    /// correct where the storage does not order the way the type does.
+    /// </summary>
+    [Theory]
+    [InlineData("status == 'approved'", "COALESCE(\"status\" = @p0, FALSE)")]
+    [InlineData("owner_id == @user.id", "COALESCE(\"owner_id\" = @p0, FALSE)")]
+    [InlineData("created_at == approved_at", "COALESCE(\"created_at\" = \"approved_at\", FALSE)")]
+    public void A_comparison_of_another_type_is_left_unrepaired(string rule, string expected)
+        => Render(rule, CelFixtures.Alice).Sql.ShouldBe(expected);
+
+    /// <summary>
+    /// The <c>Computed</c> profile's own comparison rendering is a second call site of the same repair, and it
+    /// has to be pinned separately — deleting the repair there would leave every predicate-path fact green.
+    /// </summary>
+    [Fact]
+    public void The_scalar_paths_comparison_repairs_its_operands_too()
+        => RenderScalar("total > 100 ? 1 : 0").Sql.ShouldStartWith(
+            "(CASE WHEN COALESCE(CAST(\"total\" AS numeric) > CAST(@p0 AS numeric), FALSE) THEN ");
+
+    /// <summary>
+    /// The promotion walks into an operator or conditional node, which is what would make
+    /// <c>(price + 1) &gt; 100</c> a decimal comparison — but no comparison operand can <em>be</em> one:
+    /// both operand renderers accept a literal, a field reference and (on the predicate path) a context
+    /// value, and refuse anything else. So those arms of the promotion are unreachable defence-in-depth
+    /// rather than untested logic, and this fact says so instead of leaving it to be rediscovered.
+    /// </summary>
+    [Theory]
+    [InlineData("total + 1 > 100 ? 1 : 0")]
+    [InlineData("-total > 100 ? 1 : 0")]
+    public void An_operator_node_cannot_be_a_comparison_operand_at_all(string rule)
+        => Should.Throw<NotSupportedException>(() => RenderScalar(rule));
+
+    /// <summary>
+    /// A conditional operand is refused one layer earlier still, by the type checker, so the promotion's
+    /// conditional arm is unreachable from two directions.
+    /// </summary>
+    [Fact]
+    public void A_conditional_cannot_be_a_comparison_operand_either()
+        => Should.Throw<InvalidOperationException>(() => RenderScalar("(total > 0 ? total : 0) > 100 ? 1 : 0"));
+
     [Fact]
     public void An_int_literal_binds_as_a_clr_long()
     {
@@ -294,7 +367,8 @@ public class SqlPredicateRendererTests
         var scalar = RenderScalar("(total > 5 && total < 10) ? 1 : 2");
 
         scalar.Sql.ShouldBe(
-            "(CASE WHEN (COALESCE(\"total\" > @p0, FALSE) AND COALESCE(\"total\" < @p1, FALSE)) THEN @p2 ELSE @p3 END)");
+            "(CASE WHEN (COALESCE(CAST(\"total\" AS numeric) > CAST(@p0 AS numeric), FALSE) AND "
+            + "COALESCE(CAST(\"total\" AS numeric) < CAST(@p1 AS numeric), FALSE)) THEN @p2 ELSE @p3 END)");
     }
 
     [Fact]
@@ -302,7 +376,8 @@ public class SqlPredicateRendererTests
     {
         var scalar = RenderScalar("total > 5 ? 1 : 2");
 
-        scalar.Sql.ShouldBe("(CASE WHEN COALESCE(\"total\" > @p0, FALSE) THEN @p1 ELSE @p2 END)");
+        scalar.Sql.ShouldBe(
+            "(CASE WHEN COALESCE(CAST(\"total\" AS numeric) > CAST(@p0 AS numeric), FALSE) THEN @p1 ELSE @p2 END)");
     }
 
     /// <summary>
@@ -317,6 +392,7 @@ public class SqlPredicateRendererTests
     {
         var scalar = RenderScalar("!(total > 5) ? 1 : 2");
 
-        scalar.Sql.ShouldBe("(CASE WHEN (NOT COALESCE(\"total\" > @p0, FALSE)) THEN @p1 ELSE @p2 END)");
+        scalar.Sql.ShouldBe(
+            "(CASE WHEN (NOT COALESCE(CAST(\"total\" AS numeric) > CAST(@p0 AS numeric), FALSE)) THEN @p1 ELSE @p2 END)");
     }
 }

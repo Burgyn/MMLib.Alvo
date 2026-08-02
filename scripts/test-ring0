@@ -1,9 +1,42 @@
 #!/usr/bin/env bash
 # ring0 — run after every small step (unit + fast contract tests, seconds).
-# Today runs the whole suite (it is fast because it is small). When slow
-# tests appear, add a fast-only filter here — grow by adding, not rewriting.
+#
+# ring0 must need NO Docker. The original `dotnet test` over the whole solution
+# stopped satisfying that the moment a Testcontainers-backed project joined it: it
+# ran MMLib.Alvo.Data.PostgreSql.Tests.Integration too, which pulls a
+# postgres:16-alpine container and costs ~85s on its own — five times the rest of
+# the suite put together, in the gate CLAUDE.md's ring table places "after every
+# small step". A ring0 that costs minutes is a ring0 someone reaches for
+# `--no-verify` around, and that switches off `dotnet format` and this gate together.
+#
+# So ring0 builds the solution once (every project, so a compile error in the
+# integration project still fails here) and then runs only the FAST test modules:
+# every `*.Tests.dll`, which by naming excludes `*.Tests.Integration.dll`. ring2
+# runs the integration projects, affected-scoped, which is where the ring table
+# already put them. This is the "fast-only filter" the previous version of this
+# script said to add when slow tests appeared.
 set -euo pipefail
+DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$DIR/.." && pwd)"
 CONFIG="${ALVO_CONFIGURATION:-Debug}"
-echo "[ring0] dotnet test (-c $CONFIG)"
-dotnet test -c "$CONFIG"
+
+echo "[ring0] dotnet build (-c $CONFIG)"
+dotnet build "$ROOT/MMLib.Alvo.slnx" -c "$CONFIG"
+
+# A module glob runs whatever is on disk, so a renamed or deleted project leaves a
+# stale DLL that keeps passing, and a project whose output moved silently stops
+# being tested. Neither is visible in a green run, so the modules found are counted
+# against the fast test projects the solution actually registers.
+expected="$(grep -c 'Project Path="test/[^"]*\.Tests\.csproj"' "$ROOT/MMLib.Alvo.slnx")"
+modules="$(find "$ROOT/test" -path "*/bin/$CONFIG/*" -name '*.Tests.dll' -not -path '*/ref/*')"
+matched="$(printf '%s\n' "$modules" | grep -c . || true)"
+if [ "$matched" != "$expected" ]; then
+  echo "[ring0] FAIL: $matched fast test modules on disk, $expected registered in MMLib.Alvo.slnx." >&2
+  echo "[ring0] Likely a stale DLL from a renamed/deleted project, or one whose output moved." >&2
+  printf '%s\n' "$modules" >&2
+  exit 1
+fi
+
+echo "[ring0] dotnet test — $matched fast modules, no Docker (-c $CONFIG)"
+dotnet test --test-modules "test/**/bin/$CONFIG/*/*.Tests.dll" --root-directory "$ROOT"
 echo "[ring0] OK"

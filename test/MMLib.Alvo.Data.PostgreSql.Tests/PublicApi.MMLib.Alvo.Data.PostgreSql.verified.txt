@@ -2,10 +2,27 @@
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace MMLib.Alvo.Data.PostgreSql
 {
+    public sealed class PostgreSqlFieldSqlRenderer : MMLib.Alvo.Expressions.IFieldSqlRenderer
+    {
+        public PostgreSqlFieldSqlRenderer() { }
+        public string FalseLiteral { get; }
+        public string TrueLiteral { get; }
+        public string RenderCaseInsensitiveLike(string left, string right) { }
+        public string RenderField(MMLib.Alvo.Schema.EntitySchema entity, string fieldName) { }
+        public string RenderParameter(string parameterName) { }
+    }
     public sealed class PostgreSqlProviderOptions
     {
         public PostgreSqlProviderOptions() { }
         public string? ConnectionString { get; set; }
+    }
+    public sealed class PostgreSqlSqlDialect : MMLib.Alvo.Data.EntityFrameworkCore.IAlvoSqlDialect
+    {
+        public PostgreSqlSqlDialect() { }
+        public string RenderColumn(string columnName) { }
+        public string RenderNullProjection(string storeType) { }
+        public string RenderTable(MMLib.Alvo.Schema.EntitySchema entity, MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation? lockedPreImageFor) { }
+        public string RowLockClause(MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation mutation) { }
     }
 }
 namespace Microsoft.Extensions.DependencyInjection

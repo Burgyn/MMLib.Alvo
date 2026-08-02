@@ -10,7 +10,6 @@
     "projects": {
       "description": "A container the signed-in user owns.",
       "audit": true,
-      "softDelete": true,
       "fields": {
         "name": { "type": "string", "required": true, "maxLength": 120 },
         "color": { "type": "string", "maxLength": 7, "default": "#4f46e5" },

@@ -131,14 +131,25 @@ public static class AlvoPostgreSqlBuilderExtensions
         return AddPostgreSqlProvider(builder);
     }
 
+    /// <summary>
+    /// The registration this driver contributes. <c>UseRelationalNulls()</c> is a deliberate cost, recorded in
+    /// <c>docs/architecture/data-path.md</c>: it makes EF translate comparisons with <b>SQL's</b> three-valued
+    /// semantics instead of C#'s, which is what keeps a residual LINQ predicate agreeing with the rendered
+    /// policy predicate — and what makes a future LINQ query in this package a query that must be written
+    /// against SQL semantics. EF's own docs put it plainly: "your LINQ queries no longer have the same meaning
+    /// as they do in C#".
+    /// </summary>
     private static IAlvoBuilder AddPostgreSqlProvider(IAlvoBuilder builder) =>
         builder.AddRelationalProvider(new RelationalProviderRegistration
         {
             ConnectionString = ResolveConnectionString,
-            ConfigureProvider = static (options, connectionString) => options.UseNpgsql(connectionString),
+            ConfigureProvider = static (options, connectionString) =>
+                options.UseNpgsql(connectionString, static npgsql => npgsql.UseRelationalNulls()),
             CreateModelBuilder = static () => new ModelBuilder(NpgsqlConventionSetBuilder.Build()),
             CreateDatabaseModelFactory = CreateDatabaseModelFactory,
             CreateConnection = static connectionString => new NpgsqlConnection(connectionString),
+            Fields = new PostgreSqlFieldSqlRenderer(),
+            Dialect = new PostgreSqlSqlDialect(),
         });
 
     private static string ResolveConnectionString(IServiceProvider services)

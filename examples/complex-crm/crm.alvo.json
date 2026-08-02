@@ -72,7 +72,6 @@
     "companies": {
       "description": "Customer companies, tenant-scoped.",
       "audit": true,
-      "softDelete": true,
       "fields": {
         "name": { "type": "string", "required": true },
         "ico": { "type": "string", "unique": true, "maxLength": 8, "format": "sk-ico" },
@@ -116,7 +115,6 @@
     "deals": {
       "description": "Sales opportunities.",
       "audit": true,
-      "softDelete": true,
       "fields": {
         "company_id": { "type": "ref", "entity": "companies", "required": true },
         "title": { "type": "string", "required": true },

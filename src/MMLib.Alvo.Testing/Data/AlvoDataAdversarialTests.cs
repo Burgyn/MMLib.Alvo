@@ -217,6 +217,27 @@ public abstract class AlvoDataAdversarialTests
         thirdResult.Count.ShouldBe(1);
     }
 
+    /// <summary>
+    /// Design <em>Verification</em> §4: a query issued with <see langword="null"/> for
+    /// <see cref="AlvoContext"/> throws, rather than defaulting to anonymous or to every tenant's rows
+    /// — a caller identity is required before any policy can even be resolved. Distinct from
+    /// <see cref="A_query_with_no_tenant_context_fails_rather_than_returning_every_tenants_rows"/>: that
+    /// fact is a caller who <b>has</b> an identity but no tenant, denied by the tenant guard; this one
+    /// has no <see cref="AlvoContext"/> at all, caught by <c>ArgumentNullException.ThrowIfNull(context)</c>
+    /// at the top of every <c>EfAlvoData</c> member — one piece of shared code both EF drivers call
+    /// through, so there is no engine-specific path that could diverge.
+    /// </summary>
+    [Fact]
+    public async Task A_query_with_no_context_at_all_throws_rather_than_defaulting_to_anyone()
+    {
+        var fixture = await NotesFixtureAsync();
+
+        await Should.ThrowAsync<ArgumentNullException>(
+            () => fixture.Data.QueryAsync(new AlvoQuery { Entity = "notes" }, null!));
+        await Should.ThrowAsync<ArgumentNullException>(
+            () => fixture.Data.GetAsync("notes", fixture.AliceRow1Id, null!));
+    }
+
     /// <summary>A tenantless context cannot create into a scoped entity, even with a permissive <c>"true"</c> rule.</summary>
     [Fact]
     public async Task A_tenantless_context_cannot_create_into_a_scoped_entity()
@@ -517,6 +538,38 @@ public abstract class AlvoDataAdversarialTests
     }
 
     /// <summary>
+    /// DoD #5's storage half: the CsCheck property suites (<c>NoInterpolationPropertyTests</c>,
+    /// <c>FilterSqlRendererPropertyTests</c>) prove unicode never breaks out of a bound parameter at
+    /// the <em>renderer</em> level, but that says nothing about whether the <em>value</em> survives a
+    /// real column's storage and retrieval. A code point outside the Basic Multilingual Plane (a
+    /// UTF-16 surrogate pair, a four-byte UTF-8 sequence) and a base letter followed by a combining
+    /// mark rather than its precomposed form are exactly where a naive <c>TEXT</c>/<c>varchar</c>
+    /// round trip silently truncates or normalizes — a column that only ever saw ASCII would still
+    /// look correct.
+    /// </summary>
+    /// <param name="value">The non-ASCII value written and expected to read back unchanged.</param>
+    [Theory]
+    [InlineData("\U0001F600 grinning face")] // outside the BMP: a UTF-16 surrogate pair, 4-byte UTF-8
+    [InlineData("café")] // 'e' + COMBINING ACUTE ACCENT (U+0301), not the precomposed 'é' (U+00E9)
+    public async Task A_non_ascii_value_survives_a_create_and_get_round_trip_unchanged(string value)
+    {
+        var fixture = await NotesFixtureAsync();
+        var payload = new Dictionary<string, object?>
+        {
+            ["owner_id"] = fixture.Alice.User.Value,
+            ["tenant_id"] = fixture.Tenant.Value,
+            ["title"] = value,
+        };
+
+        var created = await fixture.Data.CreateAsync("notes", payload, fixture.Alice);
+        created["title"].ShouldBe(value);
+
+        var reread = await fixture.Data.GetAsync("notes", (Guid)created["id"]!, fixture.Alice);
+        reread.ShouldNotBeNull();
+        reread!["title"].ShouldBe(value);
+    }
+
+    /// <summary>
     /// <c>Limit</c> must be applied after the policy predicate (and the tenant scope), never
     /// before — a <c>Limit</c> that truncated the pre-filter row set could return another tenant's
     /// row from the head of the table just because the caller's own row landed later, entirely
@@ -654,6 +707,228 @@ public abstract class AlvoDataAdversarialTests
             QueryFilteredBy(NestedFilter(50_000)), member));
     }
 
+    /// <summary>
+    /// <c>softDelete</c> is declared in the frozen descriptor schema — "DELETE becomes a soft delete, and
+    /// reads/list/get/rollup auto-exclude soft-deleted rows" — and is <b>not implemented</b>. Measured on real
+    /// PostgreSQL: <see cref="IAlvoData.DeleteAsync"/> removed the row outright, and a row whose
+    /// <c>deleted_at</c> was set was still listed. So a delete on such an entity is refused, loudly, rather
+    /// than silently destroying data the contract promises is recoverable.
+    /// </summary>
+    /// <remarks>
+    /// A rule of the port, so it is here: a reference implementation that quietly hard-deleted where a shipped
+    /// backend refuses would give the port two contracts. The refusal is
+    /// <see cref="InvalidOperationException"/> — not a denial and not a malformed query, but a schema this
+    /// port cannot serve. The counterweight is in the same act: an ordinary entity's delete still works, so
+    /// the refusal cannot be satisfied by refusing every delete.
+    /// </remarks>
+    [Fact]
+    public async Task A_delete_on_a_soft_delete_entity_is_refused_rather_than_hard_deleting()
+    {
+        var fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
+        {
+            ["title"] = new() { Type = DescField.String },
+        };
+        var rules = new AccessRules { List = "true", Get = "true", Delete = "true" };
+        var (descriptor, schema) = BuildFixture("archives", fields, EntityTenancy.Global, rules, softDelete: true);
+        var rowId = Guid.NewGuid();
+        var data = await CreateAsync(schema, descriptor, SeedOf("archives", Row(rowId, ("title", "Kept"))));
+        var caller = NewContext(tenant: null);
+
+        await Should.ThrowAsync<InvalidOperationException>(() => data.DeleteAsync("archives", rowId, caller));
+
+        var survived = await data.GetAsync("archives", rowId, caller);
+        survived.ShouldNotBeNull();
+    }
+
+    /// <summary>
+    /// The counterweight: an entity that does not declare <c>softDelete</c> still deletes, so the refusal
+    /// above cannot be implemented as "refuse every delete".
+    /// </summary>
+    [Fact]
+    public async Task A_delete_on_an_ordinary_entity_still_removes_the_row()
+    {
+        var fixture = await NotesFixtureAsync();
+
+        await fixture.Data.DeleteAsync("notes", fixture.AliceRow1Id, fixture.Alice);
+
+        (await fixture.Data.GetAsync("notes", fixture.AliceRow1Id, fixture.Alice)).ShouldBeNull();
+    }
+
+    /// <summary>
+    /// The four malformed-filter inputs on which the two shipped implementations of this port used to give
+    /// <b>four different answers</b>, so PR3 could not map 422 from 403 from 500 by exception type. Settled:
+    /// a malformed query is the <see cref="ArgumentException"/> family, a denial is
+    /// <see cref="AlvoAuthorizationException"/>, and an internal invariant violation stays
+    /// <see cref="InvalidOperationException"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Before this, <c>is</c> with a non-bool and <c>in</c> with a scalar were <c>AlvoAuthorizationException</c>
+    /// on a real engine — so <c>status=is.hello</c>, an ordinary agent typo, read as "not authorized" — and
+    /// excluded-but-answered in the reference; an unconvertible value and a fractional bound against an
+    /// integral field were <c>InvalidOperationException</c>, the same type the binder uses for genuine internal
+    /// invariant violations, and answered in the reference.
+    /// </para>
+    /// <para>
+    /// It is one fact over all four because the point is that they share a channel. The counterweight is the
+    /// following fact: a well-formed filter over the same fields still answers, so this cannot be satisfied by
+    /// refusing every filter.
+    /// </para>
+    /// </remarks>
+    /// <param name="malformed">A filter whose shape or value this port cannot serve.</param>
+    [Theory]
+    [MemberData(nameof(MalformedFilters))]
+    public async Task A_malformed_filter_is_refused_on_the_malformed_query_channel(AlvoFilter malformed)
+    {
+        var fixture = await NotesFixtureAsync();
+
+        await Should.ThrowAsync<ArgumentException>(() => fixture.Data.QueryAsync(
+            new AlvoQuery { Entity = "notes", Filter = malformed }, fixture.Alice));
+    }
+
+    /// <summary>
+    /// The four inputs, each named for the shape it is: an <c>is</c> operand SQL's own <c>IS</c> does not
+    /// accept, an <c>in</c> operand that is not a list, a value the field's type cannot hold, and a fractional
+    /// bound against a field whose type has no fraction.
+    /// </summary>
+    public static TheoryData<AlvoFilter> MalformedFilters() =>
+    [
+        new AlvoComparison("title", AlvoFilterOperator.Is, "maybe"),
+        new AlvoComparison("title", AlvoFilterOperator.In, "not-a-list"),
+        new AlvoComparison("owner_id", AlvoFilterOperator.Eq, "not-a-uuid"),
+        new AlvoComparison("owner_id", AlvoFilterOperator.In, Guid.NewGuid()),
+    ];
+
+    /// <summary>
+    /// The counterweight to the refusals above: the same fields, well-formed, still answer — so the contract
+    /// cannot be met by refusing everything.
+    /// </summary>
+    [Fact]
+    public async Task A_well_formed_filter_over_the_same_fields_still_answers()
+    {
+        var fixture = await NotesFixtureAsync();
+
+        var byTitle = await fixture.Data.QueryAsync(
+            new AlvoQuery
+            {
+                Entity = "notes",
+                Filter = new AlvoComparison("title", AlvoFilterOperator.Is, null),
+            },
+            fixture.Alice);
+        byTitle.ShouldBeEmpty();
+
+        var byOwner = await fixture.Data.QueryAsync(
+            new AlvoQuery
+            {
+                Entity = "notes",
+                Filter = new AlvoComparison(
+                    "owner_id", AlvoFilterOperator.In, new object?[] { fixture.Alice.User.Value }),
+            },
+            fixture.Alice);
+        byOwner.Count.ShouldBe(2);
+    }
+
+    /// <summary>
+    /// The depth cap does not see <b>breadth</b>, and breadth is the same denial-of-service and the same
+    /// engine divergence one level out: 900 <c>AND</c> terms answered on both engines and <b>1000 threw a
+    /// raw <c>SqliteException</c></b> out of <see cref="IAlvoData.QueryAsync"/> while PostgreSQL answered,
+    /// and 40 000 <c>in</c> candidates threw <c>too many SQL variables</c> after 3.5 s on SQLite where
+    /// PostgreSQL answered in 0.27 s. Capped at the port so no backend can be the one that differs, on the
+    /// same malformed-query channel as the depth cap.
+    /// </summary>
+    [Fact]
+    public async Task A_filter_wider_than_the_term_cap_is_rejected_rather_than_composed()
+    {
+        var fixture = await AccountsFixtureAsync();
+        var member = NewContext(tenant: null);
+
+        var atCap = await fixture.Data.QueryAsync(QueryFilteredBy(WideFilter(AlvoFilter.MaxTerms)), member);
+        atCap.ShouldNotBeNull();
+
+        await Should.ThrowAsync<ArgumentException>(() => fixture.Data.QueryAsync(
+            QueryFilteredBy(WideFilter(AlvoFilter.MaxTerms + 1)), member));
+    }
+
+    /// <summary>
+    /// The <c>in</c> candidate cap, which is a limit on the <em>statement</em> rather than on the tree:
+    /// every candidate becomes its own bind parameter.
+    /// </summary>
+    [Fact]
+    public async Task An_in_list_longer_than_the_candidate_cap_is_rejected_rather_than_bound()
+    {
+        var fixture = await AccountsFixtureAsync();
+        var member = NewContext(tenant: null);
+
+        var atCap = await fixture.Data.QueryAsync(QueryFilteredBy(InFilter(AlvoFilter.MaxInCandidates)), member);
+        atCap.ShouldBeEmpty();
+
+        await Should.ThrowAsync<ArgumentException>(() => fixture.Data.QueryAsync(
+            QueryFilteredBy(InFilter(AlvoFilter.MaxInCandidates + 1)), member));
+    }
+
+    /// <summary>A conjunction of <paramref name="terms"/><c> - 1</c> comparisons, so the tree is exactly <paramref name="terms"/> nodes.</summary>
+    /// <param name="terms">The total node count the tree must have.</param>
+    private static AlvoAnd WideFilter(int terms) =>
+        new([.. Enumerable.Range(0, terms - 1).Select(index => new AlvoComparison(
+            "title", AlvoFilterOperator.Neq, $"absent-{index}"))]);
+
+    private static AlvoComparison InFilter(int candidates) => new(
+        "title",
+        AlvoFilterOperator.In,
+        Enumerable.Range(0, candidates).Select(index => $"absent-{index}").ToList());
+
+    /// <summary>
+    /// A keyset cursor's boundary is a chain of comparisons with no <c>IS NULL</c> arm, so a <see langword="null"/>
+    /// on either side makes the whole term <see langword="null"/> and a <c>WHERE</c> treats that as false —
+    /// paging over a nullable sort key stops at the first null-keyed row and <b>silently drops the rest</b>.
+    /// Measured under <c>nullslast</c> three visible rows walked out as two; under <c>nullsfirst</c>, as one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The design's ruling is that a nullable sort column must declare its null placement <b>or be rejected</b>,
+    /// and <see cref="AlvoSort.Nulls"/> cannot deliver the first half while only the <c>ORDER BY</c> honours it.
+    /// So a <em>paged</em> read over one is refused. This is the port's malformed-query channel, not an
+    /// authorization refusal: the field is one the caller may read, nothing is hidden, and a request layer above
+    /// turns it into a 422 with a fix suggestion.
+    /// </para>
+    /// <para>
+    /// It is a fact here, on the inherited suite, because it is a property of the <em>port</em> — every
+    /// implementation pages, and one that answered instead of refusing would drop rows exactly as the first one
+    /// did. An <b>unpaged</b> sorted read has no boundary, so it stays legal, and this fact asserts that too:
+    /// without it the refusal could be implemented as "reject a nullable sort key", which would break sorting.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_paged_read_sorted_by_a_nullable_field_is_refused_rather_than_dropping_rows()
+    {
+        var fixture = await NotesFixtureAsync();
+        var sort = new[] { new AlvoSort("title") };
+
+        await Should.ThrowAsync<ArgumentException>(() => fixture.Data.QueryAsync(
+            new AlvoQuery { Entity = "notes", Sort = sort, Limit = 1 }, fixture.Alice));
+        await Should.ThrowAsync<ArgumentException>(() => fixture.Data.QueryAsync(
+            new AlvoQuery { Entity = "notes", Sort = sort, After = "any-cursor" }, fixture.Alice));
+
+        var unpaged = await fixture.Data.QueryAsync(
+            new AlvoQuery { Entity = "notes", Sort = sort }, fixture.Alice);
+        unpaged.Count.ShouldBe(2);
+    }
+
+    /// <summary>
+    /// The counterweight: paging by a <b>required</b> key is the supported shape and must keep working, so the
+    /// refusal above cannot be satisfied by refusing every paged sorted read.
+    /// </summary>
+    [Fact]
+    public async Task A_paged_read_sorted_by_a_required_field_still_answers()
+    {
+        var fixture = await NotesFixtureAsync();
+
+        var page = await fixture.Data.QueryAsync(
+            new AlvoQuery { Entity = "notes", Sort = [new AlvoSort("owner_id")], Limit = 1 }, fixture.Alice);
+
+        page.Count.ShouldBe(1);
+    }
+
     private static AlvoQuery QueryFilteredBy(AlvoFilter filter) => new() { Entity = "accounts", Filter = filter };
 
     /// <summary>Builds a filter nesting <paramref name="depth"/> levels of <see cref="AlvoNot"/> over one comparison.</summary>
@@ -726,12 +1001,155 @@ public abstract class AlvoDataAdversarialTests
         await Should.ThrowAsync<AlvoAuthorizationException>(() => data.GetAsync("journals", rowId, AlvoContext.Anonymous));
     }
 
+    /// <summary>
+    /// The audit trail is the framework's to write, on every managed column and on both write paths.
+    /// A caller that could supply <c>created_by</c> could create a row asserting a victim authored it —
+    /// and on <c>create</c> there is no <c>USING</c> predicate to contradict the claim, only
+    /// <c>WITH CHECK</c>, so a create rule that is anything other than a <c>created_by</c> comparison
+    /// admits it. A caller that could supply <c>created_at</c>/<c>updated_at</c> could back-date the
+    /// record. Both were live on both engines: the guard knew <c>id</c> and <c>tenant_id</c> while the
+    /// schema mapper injected six columns.
+    /// </summary>
+    /// <remarks>
+    /// The refusal is <see cref="AlvoAuthorizationException"/> like every other unwritable-field refusal,
+    /// and it is decided from the payload alone, before any row is looked up — so it can never answer
+    /// "does this row exist". The ordinary field is written in the same act, so the refusal cannot be
+    /// satisfied by refusing the whole payload.
+    /// </remarks>
+    [Fact]
+    public async Task A_payload_can_never_write_a_framework_managed_audit_column()
+    {
+        var fixture = await InvoicesFixtureAsync();
+        var caller = fixture.Caller;
+
+        foreach (var column in AlvoManagedColumns.Audit)
+        {
+            await Should.ThrowAsync<AlvoAuthorizationException>(() => fixture.Data.CreateAsync(
+                "invoices", Payload(("title", "forged"), (column, ForgedValue(column))), caller));
+            await Should.ThrowAsync<AlvoAuthorizationException>(() => fixture.Data.UpdateAsync(
+                "invoices", fixture.RowId, Payload((column, ForgedValue(column))), caller));
+        }
+
+        var updated = await fixture.Data.UpdateAsync("invoices", fixture.RowId, Payload(("title", "renamed")), caller);
+        updated["title"].ShouldBe("renamed");
+    }
+
+    /// <summary>
+    /// And the columns are actually populated, by the framework, from the caller's own identity and the
+    /// implementation's clock. This is the half that makes the refusal above usable rather than merely
+    /// safe: <c>created_at</c>/<c>updated_at</c> are <c>required</c>, so before this an audited create
+    /// <b>failed</b> unless the caller supplied the very columns they may not write.
+    /// </summary>
+    [Fact]
+    public async Task An_audited_create_stamps_the_caller_and_the_implementations_clock()
+    {
+        var fixture = await InvoicesFixtureAsync();
+        var before = DateTimeOffset.UtcNow.AddSeconds(-5);
+
+        var created = await fixture.Data.CreateAsync("invoices", Payload(("title", "new")), fixture.Caller);
+        var after = DateTimeOffset.UtcNow.AddSeconds(5);
+
+        created[AlvoManagedColumns.CreatedBy].ShouldBe(fixture.Caller.User.Value);
+        created[AlvoManagedColumns.UpdatedBy].ShouldBe(fixture.Caller.User.Value);
+        Stamp(created, AlvoManagedColumns.CreatedAt).ShouldBeInRange(before, after);
+        Stamp(created, AlvoManagedColumns.UpdatedAt).ShouldBe(Stamp(created, AlvoManagedColumns.CreatedAt));
+
+        var reread = await fixture.Data.GetAsync("invoices", (Guid)created["id"]!, fixture.Caller);
+        reread.ShouldNotBeNull();
+        reread![AlvoManagedColumns.CreatedBy].ShouldBe(fixture.Caller.User.Value);
+    }
+
+    /// <summary>
+    /// An update stamps who wrote it and when, and leaves the creation record alone — an implementation
+    /// that stamped all four on every write would erase the authorship the audit trail exists to record.
+    /// </summary>
+    [Fact]
+    public async Task An_audited_update_stamps_the_updater_and_never_rewrites_the_creator()
+    {
+        var fixture = await InvoicesFixtureAsync();
+        var created = await fixture.Data.CreateAsync("invoices", Payload(("title", "new")), fixture.Caller);
+        var second = NewContext(tenant: null);
+
+        var updated = await fixture.Data.UpdateAsync(
+            "invoices", (Guid)created["id"]!, Payload(("title", "renamed")), second);
+
+        updated[AlvoManagedColumns.UpdatedBy].ShouldBe(second.User.Value);
+        updated[AlvoManagedColumns.CreatedBy].ShouldBe(fixture.Caller.User.Value);
+        Stamp(updated, AlvoManagedColumns.CreatedAt).ShouldBe(Stamp(created, AlvoManagedColumns.CreatedAt));
+        Stamp(updated, AlvoManagedColumns.UpdatedAt).ShouldBeGreaterThanOrEqualTo(Stamp(created, AlvoManagedColumns.UpdatedAt));
+    }
+
+    private static DateTimeOffset Stamp(AlvoRecord row, string column) =>
+        ((DateTimeOffset)row[column]!).ToUniversalTime();
+
+    /// <summary>A value of the column's own type, so the refusal cannot be a type failure in disguise.</summary>
+    private static object ForgedValue(string column) => column == AlvoManagedColumns.CreatedBy
+        || column == AlvoManagedColumns.UpdatedBy
+            ? Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd")
+            : new DateTimeOffset(1989, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+    private static Dictionary<string, object?> Payload(params (string Field, object? Value)[] fields) =>
+        fields.ToDictionary(pair => pair.Field, pair => pair.Value, StringComparer.Ordinal);
+
+    /// <summary>
+    /// Reserved parity leg: analysis §2.1 requires this whole suite to pass identically over a dynamic
+    /// (metadata-driven) entity, and PR2's obligation was only to leave the mechanism capable of it —
+    /// which it does by making the storage shape an <c>IAlvoSqlDialect</c> + <c>IFieldSqlRenderer</c>
+    /// pair rather than a branch in the data path. Enabling this member is F7's, and it is declared
+    /// here so the obligation is a named test rather than a paragraph in a design note.
+    /// </summary>
+    [Fact(Skip = "Dynamic driver lands in F7 — parity leg reserved (analysis §2.1).")]
+    public Task Same_suite_passes_over_a_dynamic_entity() => Task.CompletedTask;
+
+    /// <summary>
+    /// Reserved F7 leg for one trap the de-risking spike (probe <c>X2</c>) already walked into, so it is a
+    /// discovery already made rather than one waiting to happen. EF stores a <see cref="Guid"/> as
+    /// <b>upper-case</b> <c>TEXT</c> on SQLite, while <c>json_extract</c> returns whatever case the stored
+    /// payload holds — so a <c>uuid</c>-typed JSON path compares upper against lower and matches
+    /// <b>nothing</b>, with no error from either side. Every row-ownership rule Alvo writes is a
+    /// <c>uuid</c> comparison (<c>owner_id == @user.id</c>, <c>tenant_id == @tenant.id</c>), so on the
+    /// dynamic driver this reads as an over-strict policy rather than as a bug. The dynamic driver must
+    /// normalise the case of a <c>uuid</c>-typed JSON path per engine; this member is what says so.
+    /// </summary>
+    [Fact(Skip = "Dynamic driver lands in F7 — uuid JSON-path normalisation reserved (spike X2).")]
+    public Task A_uuid_rule_over_a_dynamic_entity_matches_rows_on_every_engine() => Task.CompletedTask;
+
     private sealed record NotesFixture(IAlvoData Data, AlvoContext Alice, AlvoContext Bob, TenantId Tenant, Guid AliceRow1Id, Guid AliceRow2Id, Guid BobRowId);
 
     private sealed record DocumentsFixture(
         IAlvoData Data, TenantId Acme, TenantId Globex, TenantId Third, Guid AcmeRowId, Guid GlobexRowId, Guid ThirdRowId);
 
     private sealed record AccountsFixture(IAlvoData Data, Guid RowId, Guid SecondRowId);
+
+    private sealed record InvoicesFixture(IAlvoData Data, AlvoContext Caller, Guid RowId);
+
+    /// <summary>
+    /// A global entity declaring <c>audit</c>, so the framework injects and owns the audit quartet. The
+    /// seeded row carries its own audit values, because seeding bypasses policy by design and the two
+    /// timestamp columns are <c>required</c>.
+    /// </summary>
+    private async Task<InvoicesFixture> InvoicesFixtureAsync()
+    {
+        var fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
+        {
+            ["title"] = new() { Type = DescField.String },
+        };
+        var rules = new AccessRules { List = "true", Get = "true", Create = "true", Update = "true", Delete = "true" };
+        var (descriptor, schema) = BuildFixture("invoices", fields, EntityTenancy.Global, rules, audit: true);
+
+        var seeded = new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var rowId = Guid.NewGuid();
+        var seed = SeedOf(
+            "invoices",
+            Row(
+                rowId,
+                ("title", "Seeded"),
+                (AlvoManagedColumns.CreatedAt, seeded),
+                (AlvoManagedColumns.UpdatedAt, seeded)));
+
+        var data = await CreateAsync(schema, descriptor, seed);
+        return new InvoicesFixture(data, NewContext(tenant: null), rowId);
+    }
 
     private async Task<NotesFixture> NotesFixtureAsync()
     {
@@ -773,9 +1191,14 @@ public abstract class AlvoDataAdversarialTests
         var globex = TenantId.New();
         var third = TenantId.New();
 
+        // title is required because A_query_limit_is_applied_after_the_policy_predicate_not_before pages by
+        // it, and a keyset cursor cannot express where a nullable key's nulls sort — an implementation is
+        // entitled to refuse a paged read over one rather than silently drop rows at the first null-keyed
+        // row. Required-ness is incidental to every fact this fixture serves (every seeded row carries a
+        // title, and every create supplies one), so declaring it costs the suite nothing.
         var fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
         {
-            ["title"] = new() { Type = DescField.String },
+            ["title"] = new() { Type = DescField.String, Required = true },
         };
         var rules = new AccessRules { List = "true", Get = "true", Create = "true" };
         var (descriptor, schema) = BuildFixture("documents", fields, EntityTenancy.Scoped, rules);
@@ -845,15 +1268,35 @@ public abstract class AlvoDataAdversarialTests
     }
 
     /// <summary>
-    /// Builds a matching (descriptor, schema) pair for one entity, by hand mirroring the id/tenant_id
-    /// column injection <c>DescriptorToSchemaMapper</c> performs in the core — that mapper is
+    /// Builds a matching (descriptor, schema) pair for one entity, by hand mirroring the managed-column
+    /// injection <c>DescriptorToSchemaMapper</c> performs in the core — that mapper is
     /// <see langword="internal"/>, unreachable from this project, so this local mirror keeps the two
-    /// in sync manually. Limited to the F3 subset this suite needs (no audit/soft-delete columns).
+    /// in sync manually. <em>Which</em> columns are managed is not mirrored: that comes from
+    /// <see cref="AlvoManagedColumns"/>, the same authority the mapper and every driver's write guard read,
+    /// so only each column's shape is restated here.
     /// </summary>
+    /// <param name="entity">The entity name.</param>
+    /// <param name="fields">The entity's declared fields.</param>
+    /// <param name="tenancy">The entity's tenancy.</param>
+    /// <param name="rules">The entity's access rules, or <see langword="null"/> for none.</param>
+    /// <param name="audit">Whether the entity declares <c>audit</c>, and therefore carries the audit quartet.</param>
+    /// <param name="softDelete">Whether the entity declares <c>softDelete</c>, and therefore carries <c>deleted_at</c>.</param>
     private static (AlvoDescriptor Descriptor, SchemaModel Schema) BuildFixture(
-        string entity, Dictionary<string, FieldDescriptor> fields, EntityTenancy tenancy, AccessRules? rules)
+        string entity,
+        Dictionary<string, FieldDescriptor> fields,
+        EntityTenancy tenancy,
+        AccessRules? rules,
+        bool audit = false,
+        bool softDelete = false)
     {
-        var entityDescriptor = new EntityDescriptor { Fields = fields, Tenancy = tenancy, Rules = rules };
+        var entityDescriptor = new EntityDescriptor
+        {
+            Fields = fields,
+            Tenancy = tenancy,
+            Rules = rules,
+            Audit = audit,
+            SoftDelete = softDelete,
+        };
         var descriptor = new AlvoDescriptor
         {
             ApiVersion = "alvo.dev/v1",
@@ -861,25 +1304,58 @@ public abstract class AlvoDataAdversarialTests
             Entities = new Dictionary<string, EntityDescriptor>(StringComparer.Ordinal) { [entity] = entityDescriptor },
         };
 
+        var tenancyMode = tenancy == EntityTenancy.Scoped ? TenancyMode.Scoped : TenancyMode.Global;
         var schemaFields = new List<FieldSchema>();
-        if (!fields.ContainsKey("id"))
-        {
-            schemaFields.Add(new FieldSchema { Name = "id", Type = SchemaField.Uuid, Required = true });
-        }
-
         foreach (var (name, field) in fields)
         {
             schemaFields.Add(ToFieldSchema(name, field));
         }
 
-        var tenancyMode = tenancy == EntityTenancy.Scoped ? TenancyMode.Scoped : TenancyMode.Global;
-        if (tenancyMode == TenancyMode.Scoped)
+        var managedColumns = AlvoManagedColumns.For(tenancyMode, audit, softDelete);
+        foreach (var managed in managedColumns.Where(column => !fields.ContainsKey(column)))
         {
-            schemaFields.Add(new FieldSchema { Name = "tenant_id", Type = SchemaField.Uuid, Required = true, Indexed = true });
+            schemaFields.Add(ManagedFieldSchema(managed));
         }
 
-        var schema = new SchemaModel([new EntitySchema { Name = entity, Tenancy = tenancyMode, Fields = schemaFields }]);
+        var schema = new SchemaModel([
+            new EntitySchema
+            {
+                Name = entity,
+                Tenancy = tenancyMode,
+                Audit = audit,
+                SoftDelete = softDelete,
+                Fields = schemaFields,
+            },
+        ]);
         return (descriptor, schema);
+    }
+
+    /// <summary>One managed column's shape, as the core's own mapper declares it.</summary>
+    private static FieldSchema ManagedFieldSchema(string column)
+    {
+        if (column == AlvoManagedColumns.Id)
+        {
+            return new() { Name = column, Type = SchemaField.Uuid, Required = true };
+        }
+
+        if (column == AlvoManagedColumns.TenantId)
+        {
+            return new() { Name = column, Type = SchemaField.Uuid, Required = true, Indexed = true };
+        }
+
+        if (column == AlvoManagedColumns.CreatedAt || column == AlvoManagedColumns.UpdatedAt)
+        {
+            return new() { Name = column, Type = SchemaField.DateTime, Required = true };
+        }
+
+        if (column == AlvoManagedColumns.DeletedAt)
+        {
+            return new() { Name = column, Type = SchemaField.DateTime, Nullable = true };
+        }
+
+        return column == AlvoManagedColumns.CreatedBy || column == AlvoManagedColumns.UpdatedBy
+            ? new FieldSchema { Name = column, Type = SchemaField.Uuid, Nullable = true }
+            : throw new ArgumentOutOfRangeException(nameof(column), column, "Unmirrored managed column.");
     }
 
     private static FieldSchema ToFieldSchema(string name, FieldDescriptor field) => new()

@@ -153,7 +153,9 @@ namespace MMLib.Alvo.Data
     public abstract class AlvoFilter : System.IEquatable<MMLib.Alvo.Data.AlvoFilter>
     {
         public static int MaxDepth { get; }
-        public static void EnsureWithinDepthLimit(MMLib.Alvo.Data.AlvoFilter? filter) { }
+        public static int MaxInCandidates { get; }
+        public static int MaxTerms { get; }
+        public static void EnsureWithinLimits(MMLib.Alvo.Data.AlvoFilter? filter) { }
         public static System.Collections.Generic.IEnumerable<string> ReferencedFields(MMLib.Alvo.Data.AlvoFilter? filter) { }
     }
     public enum AlvoFilterOperator
@@ -192,6 +194,7 @@ namespace MMLib.Alvo.Data
         public MMLib.Alvo.Data.AlvoFilter? Filter { get; init; }
         public int? Limit { get; init; }
         public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoSort> Sort { get; init; }
+        public static void EnsureSortKeysCanBePaged(MMLib.Alvo.Data.AlvoQuery query, MMLib.Alvo.Schema.EntitySchema? entity) { }
     }
     public sealed class AlvoRecord : System.IEquatable<MMLib.Alvo.Data.AlvoRecord>
     {
@@ -729,6 +732,11 @@ namespace MMLib.Alvo.Expressions
         public MMLib.Alvo.Expressions.CelRecordState State { get; init; }
         public MMLib.Alvo.Expressions.CelValueType Type { get; init; }
     }
+    public static class CelFieldType
+    {
+        public static MMLib.Alvo.Expressions.CelValueType Of(MMLib.Alvo.Schema.FieldSchema field) { }
+        public static MMLib.Alvo.Expressions.CelValueType Of(MMLib.Alvo.Schema.FieldType type) { }
+    }
     public sealed class CelHas : MMLib.Alvo.Expressions.CelNode, System.IEquatable<MMLib.Alvo.Expressions.CelHas>
     {
         public CelHas(MMLib.Alvo.Expressions.CelFieldRef Field) { }
@@ -807,6 +815,10 @@ namespace MMLib.Alvo.Expressions
         string RenderBooleanFieldAsPredicate(string booleanValue);
         string RenderBooleanPredicate(bool value);
         string RenderCaseInsensitiveLike(string left, string right);
+        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
+                "Left",
+                "Right"})]
+        System.ValueTuple<string, string> RenderComparableOperands(string left, string right, MMLib.Alvo.Expressions.CelValueType type);
         string RenderField(MMLib.Alvo.Schema.EntitySchema entity, string fieldName);
         string RenderParameter(string parameterName);
         string RenderTwoValued(string predicate);
@@ -981,6 +993,25 @@ namespace MMLib.Alvo.Rules
 }
 namespace MMLib.Alvo.Schema
 {
+    public static class AlvoAuditStamp
+    {
+        public static System.Collections.Generic.IReadOnlyDictionary<string, object?> Applied(MMLib.Alvo.Schema.EntitySchema entity, System.Collections.Generic.IReadOnlyDictionary<string, object?> values, MMLib.Alvo.AlvoContext context, System.TimeProvider time, bool isUpdate) { }
+    }
+    public static class AlvoManagedColumns
+    {
+        public static System.Collections.Generic.IReadOnlyList<string> Audit { get; }
+        public static string CreatedAt { get; }
+        public static string CreatedBy { get; }
+        public static string DeletedAt { get; }
+        public static string Id { get; }
+        public static string TenantId { get; }
+        public static string UpdatedAt { get; }
+        public static string UpdatedBy { get; }
+        public static System.Collections.Generic.IReadOnlySet<string> For(MMLib.Alvo.Schema.EntitySchema entity) { }
+        public static System.Collections.Generic.IReadOnlySet<string> For(MMLib.Alvo.Schema.TenancyMode? tenancy, bool audit, bool softDelete) { }
+        public static bool IsCallerWritable(string column, bool isUpdate) { }
+        public static string RefusalReason(string column, bool isUpdate) { }
+    }
     public sealed class EntitySchema : System.IEquatable<MMLib.Alvo.Schema.EntitySchema>
     {
         public EntitySchema() { }

@@ -1,11 +1,17 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/Burgyn/MMLib.Alvo")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Data.EntityFrameworkCore.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Data.PostgreSql.Tests.Integration")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Data.Sqlite.Tests")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace MMLib.Alvo.Data.EntityFrameworkCore
 {
     public static class AlvoEfCoreProvider
     {
         public static MMLib.Alvo.IAlvoBuilder AddRelationalProvider(this MMLib.Alvo.IAlvoBuilder builder, MMLib.Alvo.Data.EntityFrameworkCore.RelationalProviderRegistration registration) { }
+    }
+    public static class AlvoSqlIdentifier
+    {
+        public static string Quote(string identifier) { }
     }
     public sealed class EfCoreSchemaIntrospector : MMLib.Alvo.Schema.ISchemaIntrospector
     {
@@ -16,6 +22,19 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore
         public System.Threading.Tasks.Task<MMLib.Alvo.Migrations.MigrationResult> ApplyAsync(MMLib.Alvo.Migrations.MigrationPlan plan, MMLib.Alvo.Migrations.MigrationOptions options, System.Threading.CancellationToken ct = default) { }
         public System.Threading.Tasks.Task<MMLib.Alvo.Migrations.MigrationPlan> PlanAsync(MMLib.Alvo.Schema.SchemaModel current, MMLib.Alvo.Schema.SchemaModel desired, MMLib.Alvo.Migrations.MigrationOptions options, System.Threading.CancellationToken ct = default) { }
     }
+    public interface IAlvoSqlDialect
+    {
+        string RenderColumn(string columnName);
+        string RenderNullProjection(string storeType);
+        string RenderTable(MMLib.Alvo.Schema.EntitySchema entity, MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation? lockedPreImageFor);
+        string RowLimitClause(string rowCountParameterMarker);
+        string RowLockClause(MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation mutation);
+    }
+    public enum PreImageMutation
+    {
+        Update = 0,
+        Delete = 1,
+    }
     public sealed class RelationalProviderRegistration
     {
         public RelationalProviderRegistration() { }
@@ -24,5 +43,7 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore
         public required System.Func<string, System.Data.Common.DbConnection> CreateConnection { get; init; }
         public required System.Func<System.IServiceProvider, Microsoft.EntityFrameworkCore.Scaffolding.IDatabaseModelFactory> CreateDatabaseModelFactory { get; init; }
         public required System.Func<Microsoft.EntityFrameworkCore.ModelBuilder> CreateModelBuilder { get; init; }
+        public required MMLib.Alvo.Data.EntityFrameworkCore.IAlvoSqlDialect Dialect { get; init; }
+        public required MMLib.Alvo.Expressions.IFieldSqlRenderer Fields { get; init; }
     }
 }

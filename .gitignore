@@ -157,6 +157,12 @@ coverage*.info
 *.coverage
 *.coveragexml
 
+# Stryker.NET — the mutation report directory and the build sandbox it copies the
+# solution into. Both are produced by any local `dotnet-stryker` invocation
+# (including a discovery-only probe of a config) and neither belongs in a commit.
+StrykerOutput/
+.stryker-tmp/
+
 # NCrunch
 _NCrunch_*
 .*crunch*.local.xml
@@ -491,3 +497,8 @@ affected.proj
 
 # dotnet pack output (CI artifact; not committed)
 /artifacts/
+
+# Superpowers SDD scratch — per-plan ledgers, briefs, reports and review packages.
+# Recovery state for an in-flight plan, not a deliverable: the durable record is the
+# commit history plus the docs the plan tells you to write.
+.superpowers/

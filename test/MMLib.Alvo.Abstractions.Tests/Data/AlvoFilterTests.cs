@@ -14,19 +14,19 @@ public class AlvoFilterTests
     [Fact]
     public void A_tree_exactly_at_the_depth_cap_is_accepted()
     {
-        Should.NotThrow(() => AlvoFilter.EnsureWithinDepthLimit(Nest(AlvoFilter.MaxDepth)));
+        Should.NotThrow(() => AlvoFilter.EnsureWithinLimits(Nest(AlvoFilter.MaxDepth)));
     }
 
     [Fact]
     public void A_tree_one_level_past_the_depth_cap_is_rejected()
     {
-        Should.Throw<ArgumentException>(() => AlvoFilter.EnsureWithinDepthLimit(Nest(AlvoFilter.MaxDepth + 1)));
+        Should.Throw<ArgumentException>(() => AlvoFilter.EnsureWithinLimits(Nest(AlvoFilter.MaxDepth + 1)));
     }
 
     [Fact]
     public void No_filter_at_all_is_within_the_cap()
     {
-        Should.NotThrow(() => AlvoFilter.EnsureWithinDepthLimit(null));
+        Should.NotThrow(() => AlvoFilter.EnsureWithinLimits(null));
     }
 
     /// <summary>
@@ -36,7 +36,7 @@ public class AlvoFilterTests
     [Fact]
     public void A_pathologically_deep_tree_is_rejected_rather_than_exhausting_the_stack()
     {
-        Should.Throw<ArgumentException>(() => AlvoFilter.EnsureWithinDepthLimit(Nest(50_000)));
+        Should.Throw<ArgumentException>(() => AlvoFilter.EnsureWithinLimits(Nest(50_000)));
     }
 
     /// <summary>
@@ -49,8 +49,83 @@ public class AlvoFilterTests
     {
         var wide = new AlvoAnd([.. Enumerable.Range(0, 100).Select(index => Comparison($"field_{index}"))]);
 
-        Should.NotThrow(() => AlvoFilter.EnsureWithinDepthLimit(wide));
+        Should.NotThrow(() => AlvoFilter.EnsureWithinLimits(wide));
     }
+
+    /// <summary>
+    /// Breadth has its own cap, because the depth cap does not see it at all: 900 <c>AND</c> terms answered
+    /// on both engines and <b>1000 threw a raw <c>SqliteException</c></b> while PostgreSQL answered — the
+    /// engine divergence the per-value guards each closed once and this channel escaped.
+    /// </summary>
+    [Fact]
+    public void A_tree_exactly_at_the_term_cap_is_accepted_and_one_term_past_it_is_rejected()
+    {
+        Should.NotThrow(() => AlvoFilter.EnsureWithinLimits(Wide(AlvoFilter.MaxTerms)));
+        Should.Throw<ArgumentException>(() => AlvoFilter.EnsureWithinLimits(Wide(AlvoFilter.MaxTerms + 1)));
+    }
+
+    /// <summary>
+    /// The connective counts too: a tree of exactly <see cref="AlvoFilter.MaxTerms"/> comparisons under one
+    /// <see cref="AlvoAnd"/> is <see cref="AlvoFilter.MaxTerms"/><c> + 1</c> nodes and must be refused, or the
+    /// cap is really "the cap plus however many connectives you nest".
+    /// </summary>
+    [Fact]
+    public void The_term_count_includes_the_connectives()
+    {
+        var atCap = new AlvoAnd([.. Enumerable.Range(0, AlvoFilter.MaxTerms).Select(i => Comparison($"f{i}"))]);
+
+        Should.Throw<ArgumentException>(() => AlvoFilter.EnsureWithinLimits(atCap));
+    }
+
+    /// <summary>
+    /// Every <c>in</c> candidate becomes its own bind parameter, so a list is a limit on the statement rather
+    /// than on the tree. Measured on SQLite: 32 000 candidates took 4.8 s to compose before answering and
+    /// 40 000 threw <c>too many SQL variables</c>, where PostgreSQL answered 40 000 in 0.27 s.
+    /// </summary>
+    [Fact]
+    public void An_in_list_exactly_at_the_candidate_cap_is_accepted_and_one_past_it_is_rejected()
+    {
+        Should.NotThrow(() => AlvoFilter.EnsureWithinLimits(In(AlvoFilter.MaxInCandidates)));
+        Should.Throw<ArgumentException>(() => AlvoFilter.EnsureWithinLimits(In(AlvoFilter.MaxInCandidates + 1)));
+    }
+
+    /// <summary>
+    /// A candidate list is caller-supplied and may be lazily generated, so the guard that rejects an
+    /// over-long one must not enumerate it to the end first — an infinite sequence would hang inside the
+    /// check that exists to refuse it.
+    /// </summary>
+    [Fact]
+    public void An_endless_in_list_is_rejected_rather_than_enumerated()
+    {
+        var endless = new AlvoComparison("title", AlvoFilterOperator.In, Forever());
+
+        Should.Throw<ArgumentException>(() => AlvoFilter.EnsureWithinLimits(endless));
+    }
+
+    /// <summary>A bare string operand is one value, never a candidate per character.</summary>
+    [Fact]
+    public void A_string_in_operand_does_not_count_as_one_candidate_per_character()
+    {
+        var text = new string('x', AlvoFilter.MaxInCandidates + 1);
+
+        Should.NotThrow(() => AlvoFilter.EnsureWithinLimits(
+            new AlvoComparison("title", AlvoFilterOperator.In, text)));
+    }
+
+    private static IEnumerable<string> Forever()
+    {
+        while (true)
+        {
+            yield return "x";
+        }
+    }
+
+    private static AlvoComparison In(int candidates) =>
+        new("title", AlvoFilterOperator.In, Enumerable.Range(0, candidates).Select(i => $"x{i}").ToList());
+
+    /// <summary>A conjunction of <paramref name="terms"/><c> - 1</c> comparisons, so the whole tree is exactly <paramref name="terms"/> nodes.</summary>
+    private static AlvoAnd Wide(int terms) =>
+        new([.. Enumerable.Range(0, terms - 1).Select(index => Comparison($"field_{index}"))]);
 
     [Fact]
     public void Referenced_fields_enumerates_every_comparison_in_a_nested_tree()
@@ -78,7 +153,7 @@ public class AlvoFilterTests
     [MemberData(nameof(MalformedTrees))]
     public void A_null_child_is_rejected_rather_than_dereferenced(AlvoFilter malformed)
     {
-        Should.Throw<ArgumentException>(() => AlvoFilter.EnsureWithinDepthLimit(malformed));
+        Should.Throw<ArgumentException>(() => AlvoFilter.EnsureWithinLimits(malformed));
         Should.Throw<ArgumentException>(() => AlvoFilter.ReferencedFields(malformed).ToList());
     }
 

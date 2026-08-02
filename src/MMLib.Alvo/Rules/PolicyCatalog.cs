@@ -32,12 +32,15 @@ public sealed class PolicyCatalog
     /// <summary>Initializes a new instance of the <see cref="PolicyCatalog"/> class.</summary>
     /// <param name="entities">The compiled per-entity policy, keyed by entity name.</param>
     /// <param name="roles">The project's declared roles, built from the same descriptor.</param>
-    internal PolicyCatalog(IReadOnlyDictionary<string, EntityPolicy> entities, RoleCatalog roles)
+    /// <param name="schema">The schema every rule in <paramref name="entities"/> was compiled against.</param>
+    internal PolicyCatalog(IReadOnlyDictionary<string, EntityPolicy> entities, RoleCatalog roles, SchemaModel schema)
     {
         ArgumentNullException.ThrowIfNull(entities);
         ArgumentNullException.ThrowIfNull(roles);
+        ArgumentNullException.ThrowIfNull(schema);
         _entities = entities;
         Roles = roles;
+        Schema = schema;
     }
 
     /// <summary>
@@ -54,6 +57,20 @@ public sealed class PolicyCatalog
     /// port's remarks.
     /// </remarks>
     internal RoleCatalog Roles { get; }
+
+    /// <summary>
+    /// Gets the schema every rule in this catalog was compiled and type-checked against — the same
+    /// <see cref="SchemaModel"/> handed to <see cref="Build"/>.
+    /// </summary>
+    /// <remarks>
+    /// <see langword="internal"/> for exactly the reason <see cref="Roles"/> is: a consumer reads the
+    /// applied schema through <see cref="Schema.ISchemaRegistry"/>, which
+    /// <see cref="IPolicyCatalogProvider"/> implements, so nothing above the engine has to know that the
+    /// authoritative schema currently happens to arrive with a policy catalog. A public member here would
+    /// make the <em>policy</em> catalog the authoritative source of the <em>applied schema</em> and
+    /// foreclose any other source — F7's dynamic-entity registry being the obvious next one.
+    /// </remarks>
+    internal SchemaModel Schema { get; }
 
     /// <summary>Builds a <see cref="PolicyCatalog"/> from a descriptor and its mapped schema.</summary>
     /// <param name="descriptor">The project descriptor whose <c>rules</c>/<c>hidden</c>/<c>readOnly</c> are compiled.</param>

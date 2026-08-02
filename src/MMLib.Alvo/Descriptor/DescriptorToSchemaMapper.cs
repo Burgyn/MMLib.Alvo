@@ -5,16 +5,25 @@ namespace MMLib.Alvo.Descriptor;
 
 /// <summary>
 /// Maps a parsed <see cref="AlvoDescriptor"/> to the public <see cref="SchemaModel"/>,
-/// injecting the framework-managed columns (id, tenant_id, audit quartet, deleted_at).
+/// injecting the framework-managed columns <see cref="AlvoManagedColumns"/> names.
 /// </summary>
 /// <remarks>
+/// <para>
+/// <b>Which columns are managed is not decided here.</b> <see cref="AlvoManagedColumns"/> is the
+/// authority, and this mapper injects exactly what it reports for an entity's traits — because the
+/// write guard that <em>refuses</em> a caller-supplied managed column is <see langword="internal"/> to a
+/// driver package and cannot see this file. When the two each carried their own list, this one grew to
+/// six columns and the guard's stayed at two.
+/// </para>
+/// <para>
 /// <c>src/MMLib.Alvo.Testing/Data/AlvoDataAdversarialTests.cs</c>'s private <c>BuildFixture</c>
-/// hand-mirrors this mapper's id/tenant_id column injection (it cannot reference this internal
+/// hand-mirrors this mapper's managed-column injection (it cannot reference this internal
 /// type — that project depends only on <c>MMLib.Alvo.Abstractions</c>). Its mirror only covers
-/// field type, <c>Required</c>/<c>Nullable</c>, and the two managed columns; it does not replicate
+/// field type, <c>Required</c>/<c>Nullable</c>, and the managed columns; it does not replicate
 /// <c>Indexed</c>, <c>MaxLength</c>, enum values, or a <c>Ref</c> target. A future change here
-/// (a new managed column, a different id/tenant_id shape) does not propagate there automatically —
-/// check that fixture when changing this method.
+/// (a different id/tenant_id shape) does not propagate there automatically — check that fixture when
+/// changing this method.
+/// </para>
 /// </remarks>
 internal static class DescriptorToSchemaMapper
 {
@@ -33,10 +42,7 @@ internal static class DescriptorToSchemaMapper
     private static EntitySchema MapEntity(string name, EntityDescriptor e, bool tenancyEnabled)
     {
         var fields = new List<FieldSchema>();
-        if (!e.Fields.ContainsKey("id"))
-        {
-            fields.Add(new FieldSchema { Name = "id", Type = SchemaFieldType.Uuid, Required = true });
-        }
+        AddManagedColumn(fields, e, AlvoManagedColumns.Id, IdColumn);
 
         foreach (var (fname, f) in e.Fields)
         {
@@ -45,8 +51,8 @@ internal static class DescriptorToSchemaMapper
 
         var tenancy = ResolveTenancy(e.Tenancy, tenancyEnabled);
         bool audit = e.Audit == true;
-        bool softDelete = e.SoftDelete == true;
-        AddManagedColumns(fields, tenancy, audit, softDelete);
+        bool softDelete = EnsureSoftDeleteIsImplementable(name, e);
+        AddManagedColumns(fields, e, tenancy, audit, softDelete);
 
         var indexes = (e.Indexes ?? [])
             .Select(i => new IndexSchema(i.Fields, i.Unique == true)).ToList();
@@ -64,26 +70,93 @@ internal static class DescriptorToSchemaMapper
         };
     }
 
-    private static void AddManagedColumns(List<FieldSchema> fields, TenancyMode? tenancy, bool audit, bool softDelete)
+    private static void AddManagedColumns(
+        List<FieldSchema> fields, EntityDescriptor e, TenancyMode? tenancy, bool audit, bool softDelete)
     {
         if (tenancy == TenancyMode.Scoped)
         {
-            fields.Add(new FieldSchema { Name = "tenant_id", Type = SchemaFieldType.Uuid, Required = true, Indexed = true });
+            AddManagedColumn(fields, e, AlvoManagedColumns.TenantId, TenantIdColumn);
         }
 
         if (audit)
         {
-            fields.Add(new FieldSchema { Name = "created_at", Type = SchemaFieldType.DateTime, Required = true });
-            fields.Add(new FieldSchema { Name = "created_by", Type = SchemaFieldType.Uuid, Nullable = true });
-            fields.Add(new FieldSchema { Name = "updated_at", Type = SchemaFieldType.DateTime, Required = true });
-            fields.Add(new FieldSchema { Name = "updated_by", Type = SchemaFieldType.Uuid, Nullable = true });
+            AddManagedColumn(fields, e, AlvoManagedColumns.CreatedAt, RequiredInstantColumn);
+            AddManagedColumn(fields, e, AlvoManagedColumns.CreatedBy, ActorColumn);
+            AddManagedColumn(fields, e, AlvoManagedColumns.UpdatedAt, RequiredInstantColumn);
+            AddManagedColumn(fields, e, AlvoManagedColumns.UpdatedBy, ActorColumn);
         }
 
         if (softDelete)
         {
-            fields.Add(new FieldSchema { Name = "deleted_at", Type = SchemaFieldType.DateTime, Nullable = true });
+            AddManagedColumn(fields, e, AlvoManagedColumns.DeletedAt, OptionalInstantColumn);
         }
     }
+
+    /// <summary>
+    /// Refuses <c>softDelete</c>, which is <b>declared in the frozen descriptor schema and not implemented
+    /// in F3</b>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The schema promises "DELETE becomes a soft delete, and reads/list/get/rollup auto-exclude
+    /// soft-deleted rows. A restore operation is provided." None of that exists: the data path
+    /// hard-deletes the row and lists a row whose <c>deleted_at</c> is set. Measured on real PostgreSQL,
+    /// where <c>DeleteAsync</c> removed a row from a <c>softDelete: true</c> entity outright — irrecoverable
+    /// data loss where the contract promises recoverability.
+    /// </para>
+    /// <para>
+    /// So it is refused at <b>apply</b> time, loudly, exactly as <c>computed</c> is: failing closed on a
+    /// descriptor beats silently destroying rows, and Alvo's own rule is that a bad descriptor fails at save
+    /// rather than per request. Implementing it is deliberately <em>not</em> in scope here — soft delete
+    /// changes what every read means, and that interacts with the policy predicate.
+    /// </para>
+    /// </remarks>
+    private static bool EnsureSoftDeleteIsImplementable(string name, EntityDescriptor e) => e.SoftDelete == true
+        ? throw new InvalidDataException(
+            $"Entity '{name}' declares 'softDelete', which is not supported yet: the delete path would " +
+            "hard-delete the row and reads would not exclude it, losing data the descriptor promises is " +
+            "recoverable. Remove 'softDelete' or track the soft-delete implementation issue.")
+        : false;
+
+    /// <summary>
+    /// Appends one framework-managed column <b>unless the descriptor already declares that name</b>.
+    /// </summary>
+    /// <remarks>
+    /// Appending unconditionally is what made a descriptor naming a managed column produce two
+    /// <see cref="FieldSchema"/> entries with one name, so every later operation on that entity died with
+    /// <c>An item with the same key has already been added</c> from the first code that keyed on the field
+    /// list — which made declaring <c>readOnly</c> on a managed column, the documented way to protect one,
+    /// break the entity instead of protecting it. <c>id</c> was the only column guarded this way; the guard
+    /// is now the shape every managed column goes through.
+    /// <para>
+    /// This de-duplicates by name only. A descriptor that declares a managed name with a <em>different
+    /// type</em> still wins the mapping, which is a reserved-name question the descriptor validator owns
+    /// (see <c>docs/architecture/data-path.md</c>), not something a mapper may silently override.
+    /// </para>
+    /// </remarks>
+    private static void AddManagedColumn(
+        List<FieldSchema> fields, EntityDescriptor e, string name, Func<string, FieldSchema> column)
+    {
+        if (!e.Fields.ContainsKey(name))
+        {
+            fields.Add(column(name));
+        }
+    }
+
+    private static FieldSchema IdColumn(string name) =>
+        new() { Name = name, Type = SchemaFieldType.Uuid, Required = true };
+
+    private static FieldSchema TenantIdColumn(string name) =>
+        new() { Name = name, Type = SchemaFieldType.Uuid, Required = true, Indexed = true };
+
+    private static FieldSchema RequiredInstantColumn(string name) =>
+        new() { Name = name, Type = SchemaFieldType.DateTime, Required = true };
+
+    private static FieldSchema OptionalInstantColumn(string name) =>
+        new() { Name = name, Type = SchemaFieldType.DateTime, Nullable = true };
+
+    private static FieldSchema ActorColumn(string name) =>
+        new() { Name = name, Type = SchemaFieldType.Uuid, Nullable = true };
 
     private static TenancyMode? ResolveTenancy(EntityTenancy? entityTenancy, bool tenancyEnabled) => entityTenancy switch
     {

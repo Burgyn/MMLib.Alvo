@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Rules.Internal;
+﻿using MMLib.Alvo.Schema;
+
+namespace MMLib.Alvo.Rules.Internal;
 
 /// <summary>
 /// The default <see cref="IPolicyCatalogProvider"/>: a single volatile reference, written once per
@@ -11,6 +13,8 @@
 /// </summary>
 internal sealed class PolicyCatalogProvider : IPolicyCatalogProvider
 {
+    private static readonly SchemaModel _unprimedSchema = new([]);
+
     private readonly Lock _gate = new();
     private string? _project;
     private PolicyCatalog? _current;
@@ -25,6 +29,18 @@ internal sealed class PolicyCatalogProvider : IPolicyCatalogProvider
     /// descriptor — never from two holders primed a moment apart.
     /// </remarks>
     public RoleCatalog? DeclaredRoles => Current?.Roles;
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// The same single volatile read <see cref="Current"/> and <see cref="DeclaredRoles"/> take, so a
+    /// request's rules, its role set and the schema validating its field names always come from one
+    /// applied descriptor. An unprimed provider reports an <em>empty</em> model rather than
+    /// <see langword="null"/> — unlike <see cref="DeclaredRoles"/>, whose port distinguishes "no set
+    /// declared" from "an empty set". Empty is the fail-closed value here: no entity declared means every
+    /// entity name and every field name a caller supplies is refused, and <c>IPolicyEngine</c> has already
+    /// denied the operation one layer earlier anyway.
+    /// </remarks>
+    public SchemaModel GetSchema() => Current?.Schema ?? _unprimedSchema;
 
     /// <inheritdoc/>
     public void SetCurrent(string project, PolicyCatalog catalog)

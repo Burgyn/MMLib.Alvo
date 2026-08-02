@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <!-- EF1001: IDatabaseModelFactory is design-time-only and never registered by the runtime
@@ -10,6 +10,16 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj" />
+    <!-- The relational half of the test-support library: AlvoSqlDialectContractTests (and, where a
+         test needs it, the T-SQL fake). Referenced per project rather than from
+         test/Directory.Build.props on purpose — only the projects with a dialect to hold to the
+         contract take an EF dependency for it. -->
+    <ProjectReference Include="../../src/MMLib.Alvo.Testing.EntityFrameworkCore/MMLib.Alvo.Testing.EntityFrameworkCore.csproj" />
+    <!-- The core, for the real ICelCompiler/IPolicyEngine/IPredicateRenderer the statement-composer and
+         filter tests resolve out of AddAlvo(). A PolicyDecision allow is internal to MMLib.Alvo by design,
+         so a composer test builds one the way production does — from a primed catalog — instead of by hand.
+         Test-only: the EF package itself still references MMLib.Alvo.Abstractions alone. -->
+    <ProjectReference Include="../../src/MMLib.Alvo/MMLib.Alvo.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -20,6 +30,9 @@
     <!-- Bootstraps SqliteDesignTimeServices reflectively (it's internal to the Sqlite
          assembly) to resolve IDatabaseModelFactory for EfCoreSchemaIntrospector tests. -->
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" />
+    <!-- The property/fuzz arms of the caller-filter suite (#20's "no interpolation" and
+         "fuzzing filtra bez pádu" criteria). -->
+    <PackageReference Include="CsCheck" />
   </ItemGroup>
 
 </Project>

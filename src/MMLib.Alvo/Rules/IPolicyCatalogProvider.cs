@@ -28,8 +28,18 @@
 /// One instance is registered as both, so the descriptor's <c>auth.roles</c> reaches authentication
 /// and rule validation from one apply, primed at one instant, behind one project-identity guard.
 /// </para>
+/// <para>
+/// It likewise serves as the default <see cref="Schema.ISchemaRegistry"/>. A data port has to validate a
+/// caller's filter and sort keys, and a write payload, against the entity's declared fields — and it must
+/// be the <em>same</em> schema the rules were compiled against, or the one path on which an unvalidated
+/// payload reaches storage is a mismatch between two independently primed holders. One instance
+/// registered as both means the rules that judge a request and the schema that validates it always come
+/// from one apply. A host with its own schema source registers its own
+/// <see cref="Schema.ISchemaRegistry"/> and takes it over, exactly as an external identity source does
+/// for <see cref="IRoleCatalogProvider"/>.
+/// </para>
 /// </remarks>
-public interface IPolicyCatalogProvider : IRoleCatalogProvider
+public interface IPolicyCatalogProvider : IRoleCatalogProvider, MMLib.Alvo.Schema.ISchemaRegistry
 {
     /// <summary>Gets the most recently primed catalog, or <see langword="null"/> when no descriptor has been applied yet.</summary>
     PolicyCatalog? Current { get; }

@@ -1,6 +1,100 @@
 ﻿using NetArchTest.Rules;
+using System.Reflection;
 
 namespace MMLib.Alvo.Tests.Architecture;
+
+/// <summary>
+/// Finds every publicly reachable mention of EF Core's <c>DbContext</c>, <c>DbSet&lt;&gt;</c> or
+/// <c>ChangeTracker</c> in an assembly's exported surface.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Matched by full type <em>name</em> rather than by <c>typeof</c>, because this scan is linked into test
+/// projects that resolve no EF Core at all — <c>MMLib.Alvo.Abstractions.Tests</c>,
+/// <c>MMLib.Alvo.Schema.Tests</c>, <c>MMLib.Alvo.Tests</c> — and not naming the types in code is what makes
+/// the rule independent of who can see them. That independence is real and was measured: PR2 briefly put an
+/// EF reference on <c>MMLib.Alvo.Testing</c>, which every test project references, and this rule neither
+/// broke nor noticed. Noticing is a different job and belongs to
+/// <c>MMLib.Alvo.Conventions.Tests.EfDependencyBoundaryTests</c>, which reads the project files instead of
+/// loading assemblies. The cost of a name match is that an EF rename would make this rule silently vacuous,
+/// so <c>MMLib.Alvo.Data.EntityFrameworkCore.Tests</c> — which references EF directly — carries a fact that
+/// every name here still resolves to a real type.
+/// </para>
+/// <para>
+/// Inherited members are included on purpose: a public type <em>deriving</em> from <c>DbContext</c> exposes
+/// its change tracker without declaring a single member of its own.
+/// </para>
+/// </remarks>
+internal static class EfSurfaceScan
+{
+    private const BindingFlags AllMembers =
+        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
+
+    private static readonly string[] _forbiddenTypeNames =
+    [
+        "Microsoft.EntityFrameworkCore.DbContext",
+        "Microsoft.EntityFrameworkCore.DbSet`1",
+        "Microsoft.EntityFrameworkCore.ChangeTracking.ChangeTracker",
+    ];
+
+    /// <summary>The forbidden type names, so a project that can see EF may assert they still exist.</summary>
+    internal static IReadOnlyList<string> ForbiddenTypeNames => _forbiddenTypeNames;
+
+    /// <summary>Every offending member, formatted as <c>Type.Member</c>, in <paramref name="types"/>.</summary>
+    /// <param name="types">The types whose externally visible surface to scan.</param>
+    internal static IReadOnlyList<string> Offenders(IEnumerable<Type> types) =>
+        [.. types.SelectMany(Offenders).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
+
+    /// <summary>How many externally visible members <paramref name="types"/> presented — the non-vacuity counter.</summary>
+    /// <param name="types">The types whose externally visible surface to count.</param>
+    internal static int VisibleMemberCount(IEnumerable<Type> types) =>
+        types.SelectMany(VisibleMembers).Count();
+
+    private static IEnumerable<string> Offenders(Type type) =>
+        InheritedTypes(type).Where(IsForbidden).Select(_ => type.FullName ?? type.Name)
+            .Concat(VisibleMembers(type)
+                .Where(member => SignatureTypes(member).SelectMany(Expand).Any(IsForbidden))
+                .Select(member => $"{type.FullName}.{member.Name}"));
+
+    private static Type[] InheritedTypes(Type type) =>
+        type.BaseType is { } baseType ? [baseType, .. type.GetInterfaces()] : type.GetInterfaces();
+
+    private static IEnumerable<MemberInfo> VisibleMembers(Type type) =>
+        type.GetMembers(AllMembers).Where(IsVisibleOutsideTheAssembly);
+
+    private static bool IsForbidden(Type type) =>
+        _forbiddenTypeNames.Contains(Normalize(type).FullName, StringComparer.Ordinal);
+
+    private static Type Normalize(Type type) => type.IsGenericType ? type.GetGenericTypeDefinition() : type;
+
+    /// <summary>A type plus every type reachable through it — generic arguments, array elements, by-ref targets.</summary>
+    private static IEnumerable<Type> Expand(Type type) =>
+    [
+        type,
+        .. type.HasElementType ? Expand(type.GetElementType()!) : [],
+        .. type.GenericTypeArguments.SelectMany(Expand),
+    ];
+
+    private static bool IsVisibleOutsideTheAssembly(MemberInfo member) => member switch
+    {
+        MethodBase method => method.IsPublic || method.IsFamily || method.IsFamilyOrAssembly,
+        PropertyInfo property => (property.GetMethod ?? property.SetMethod) is { } accessor
+            && (accessor.IsPublic || accessor.IsFamily || accessor.IsFamilyOrAssembly),
+        FieldInfo field => field.IsPublic || field.IsFamily || field.IsFamilyOrAssembly,
+        EventInfo @event => @event.AddMethod is { } add && (add.IsPublic || add.IsFamily || add.IsFamilyOrAssembly),
+        _ => false,
+    };
+
+    private static IEnumerable<Type> SignatureTypes(MemberInfo member) => member switch
+    {
+        MethodInfo method => [method.ReturnType, .. method.GetParameters().Select(parameter => parameter.ParameterType)],
+        ConstructorInfo constructor => constructor.GetParameters().Select(parameter => parameter.ParameterType),
+        PropertyInfo property => [property.PropertyType],
+        FieldInfo field => [field.FieldType],
+        EventInfo @event => @event.EventHandlerType is { } handler ? [handler] : [],
+        _ => [],
+    };
+}
 
 /// <summary>
 /// Architecture rules that must hold for EVERY MMLib.Alvo production assembly.
@@ -78,5 +172,31 @@ public class SharedArchitectureRules
             $"{CoreAssemblyName} must depend on no other MMLib.Alvo.* assembly besides "
             + $"{AbstractionsAssemblyName}. Offending references: "
             + string.Join(", ", unexpectedFamilyReferences));
+    }
+
+    /// <summary>
+    /// No Alvo assembly may hand EF Core's <c>DbContext</c>, <c>DbSet&lt;&gt;</c> or <c>ChangeTracker</c> to a
+    /// caller. This is a security boundary, not encapsulation taste: a tracked, mutated property bag saved
+    /// through the change tracker emits <c>UPDATE … WHERE id = @p</c> with <b>no policy predicate</b> — the
+    /// shortest and most idiomatic EF code available, and a complete authorization bypass (spike <c>Q5d</c>).
+    /// A caller who can reach a context can write around every rule the data path enforces.
+    /// </summary>
+    /// <remarks>
+    /// Family-wide rather than data-path-local on purpose: the invariant is "nowhere", so a package that
+    /// starts referencing EF later inherits the rule instead of needing to remember it.
+    /// </remarks>
+    [Fact]
+    public void No_public_surface_exposes_efs_context_or_change_tracker()
+    {
+        var types = TestTarget.Resolve().GetExportedTypes();
+
+        EfSurfaceScan.VisibleMemberCount(types).ShouldBeGreaterThan(
+            0, "The scan found no externally visible member at all, so an empty offender list proves nothing.");
+
+        var offenders = EfSurfaceScan.Offenders(types);
+
+        offenders.ShouldBeEmpty(
+            "No public or protected member of an Alvo assembly may expose EF's DbContext, DbSet or "
+            + $"ChangeTracker — a caller holding one writes around policy. Offenders: {string.Join(", ", offenders)}.");
     }
 }

@@ -207,11 +207,51 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
             return new PredicateFragment(fields.RenderBooleanPredicate(false), true);
         }
 
-        var left = RenderOperand(binary.Left, entity, context, fields, bag);
-        var right = RenderOperand(binary.Right, entity, context, fields, bag);
+        var (left, right) = fields.RenderComparableOperands(
+            RenderOperand(binary.Left, entity, context, fields, bag),
+            RenderOperand(binary.Right, entity, context, fields, bag),
+            PromotedType(binary.Left, binary.Right));
         var sql = $"{left} {ComparisonOperatorText(binary.Operator)} {right}";
         return new PredicateFragment(fields.RenderTwoValued(sql), true);
     }
+
+    /// <summary>
+    /// The type a comparison over these two operands is evaluated at, after CEL's numeric promotion —
+    /// <see cref="CelValueType.Decimal"/> wins over <see cref="CelValueType.Int"/>, since the type checker
+    /// admits a mixed numeric comparison. It is handed to
+    /// <see cref="IFieldSqlRenderer.RenderComparableOperands"/> so a dialect whose storage for that type
+    /// does not order the way the type does repairs <b>both</b> sides identically: on SQLite a decimal
+    /// lives in a <c>TEXT</c> column, and casting only the column would leave the parameter's own storage
+    /// class deciding the comparison — which the member's pair-shaped signature now prevents by
+    /// construction.
+    /// </summary>
+    private static CelValueType PromotedType(CelNode left, CelNode right)
+    {
+        var leftType = ValueTypeOf(left);
+        var rightType = ValueTypeOf(right);
+
+        if (leftType == CelValueType.Decimal || rightType == CelValueType.Decimal)
+        {
+            return CelValueType.Decimal;
+        }
+
+        return leftType == CelValueType.Null ? rightType : leftType;
+    }
+
+    /// <summary>
+    /// A node's own value type. An operator node carries none, so it takes its operands' promoted type —
+    /// which is what makes <c>(price + 1) &gt; 100</c> a decimal comparison rather than an untyped one.
+    /// </summary>
+    private static CelValueType ValueTypeOf(CelNode node) => node switch
+    {
+        CelLiteral literal => literal.Type,
+        CelFieldRef fieldRef => fieldRef.Type,
+        CelContextRef contextRef => contextRef.Type,
+        CelUnary unary => ValueTypeOf(unary.Operand),
+        CelBinary binary => PromotedType(binary.Left, binary.Right),
+        CelConditional conditional => PromotedType(conditional.WhenTrue, conditional.WhenFalse),
+        _ => CelValueType.Null,
+    };
 
     /// <summary>
     /// Renders role membership. The right operand is never read — the caller's role set answers it — so
@@ -380,8 +420,10 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
 
     private static string RenderScalarComparison(CelBinary binary, EntitySchema entity, IFieldSqlRenderer fields, ParameterBag bag)
     {
-        var left = RenderScalarOperand(binary.Left, entity, fields, bag);
-        var right = RenderScalarOperand(binary.Right, entity, fields, bag);
+        var (left, right) = fields.RenderComparableOperands(
+            RenderScalarOperand(binary.Left, entity, fields, bag),
+            RenderScalarOperand(binary.Right, entity, fields, bag),
+            PromotedType(binary.Left, binary.Right));
         return $"{left} {ComparisonOperatorText(binary.Operator)} {right}";
     }
 

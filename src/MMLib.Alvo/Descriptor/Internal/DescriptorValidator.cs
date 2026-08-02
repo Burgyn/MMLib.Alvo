@@ -181,6 +181,15 @@ internal sealed class DescriptorValidator : IDescriptorValidator
     private static IEnumerable<DescriptorValidationError> EntitySemanticErrors(
         JsonProperty entity, HashSet<string> entityNames)
     {
+        if (DeclaresSoftDelete(entity.Value))
+        {
+            yield return new DescriptorValidationError(
+                $"/entities/{entity.Name}/softDelete",
+                "Soft delete is not supported yet: a delete would remove the row and reads would not exclude it.",
+                "Remove 'softDelete' or track the soft-delete implementation issue.",
+                DescriptorValidationSeverity.Error);
+        }
+
         if (!entity.Value.TryGetProperty("fields", out var fields) || fields.ValueKind != JsonValueKind.Object)
         {
             yield break;
@@ -208,6 +217,10 @@ internal sealed class DescriptorValidator : IDescriptorValidator
             }
         }
     }
+
+    private static bool DeclaresSoftDelete(JsonElement entity) =>
+        entity.TryGetProperty("softDelete", out var softDelete)
+        && softDelete.ValueKind == JsonValueKind.True;
 
     /// <summary>
     /// Reserved entity name for the built-in auth entity (schema: <c>entities.users</c> is

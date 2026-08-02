@@ -44,7 +44,7 @@
     {
       Name: companies,
       Tenancy: Scoped,
-      SoftDelete: true,
+      SoftDelete: false,
       Audit: true,
       Fields: [
         {
@@ -135,14 +135,6 @@
         {
           Name: updated_by,
           Type: Uuid,
-          Required: false,
-          Unique: false,
-          Nullable: true,
-          Indexed: false
-        },
-        {
-          Name: deleted_at,
-          Type: DateTime,
           Required: false,
           Unique: false,
           Nullable: true,
@@ -242,7 +234,7 @@
     {
       Name: deals,
       Tenancy: Scoped,
-      SoftDelete: true,
+      SoftDelete: false,
       Audit: true,
       Fields: [
         {
@@ -356,14 +348,6 @@
         {
           Name: updated_by,
           Type: Uuid,
-          Required: false,
-          Unique: false,
-          Nullable: true,
-          Indexed: false
-        },
-        {
-          Name: deleted_at,
-          Type: DateTime,
           Required: false,
           Unique: false,
           Nullable: true,

@@ -4,6 +4,7 @@
     <Project Path="src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj" />
     <Project Path="src/MMLib.Alvo.Data.PostgreSql/MMLib.Alvo.Data.PostgreSql.csproj" />
     <Project Path="src/MMLib.Alvo.Data.Sqlite/MMLib.Alvo.Data.Sqlite.csproj" />
+    <Project Path="src/MMLib.Alvo.Testing.EntityFrameworkCore/MMLib.Alvo.Testing.EntityFrameworkCore.csproj" />
     <Project Path="src/MMLib.Alvo.Testing/MMLib.Alvo.Testing.csproj" />
     <Project Path="src/MMLib.Alvo/MMLib.Alvo.csproj" />
   </Folder>

@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <!-- Fast unit test project (no Docker/Testcontainers): hosts the shared arch
        + public-API approval baseline for MMLib.Alvo.Data.PostgreSql. The
@@ -13,6 +13,17 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/MMLib.Alvo.Data.PostgreSql/MMLib.Alvo.Data.PostgreSql.csproj" />
+    <!-- The relational half of the test-support library: AlvoSqlDialectContractTests (and, where a
+         test needs it, the T-SQL fake). Referenced per project rather than from
+         test/Directory.Build.props on purpose — only the projects with a dialect to hold to the
+         contract take an EF dependency for it. -->
+    <ProjectReference Include="../../src/MMLib.Alvo.Testing.EntityFrameworkCore/MMLib.Alvo.Testing.EntityFrameworkCore.csproj" />
+    <!-- The core, for the real ICelCompiler/IPredicateRenderer the golden CEL→SQL snapshot resolves out of
+         AddAlvo(). That baseline lives here rather than in the Testcontainers project on purpose: rendering
+         needs no engine, and a Docker-gated snapshot goes unverified on every host that skips the container,
+         which is exactly how a per-engine baseline drifts unnoticed. Test-only — the provider package itself
+         still references Data.EntityFrameworkCore + Abstractions alone. -->
+    <ProjectReference Include="../../src/MMLib.Alvo/MMLib.Alvo.csproj" />
   </ItemGroup>
 
 </Project>

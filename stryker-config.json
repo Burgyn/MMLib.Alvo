@@ -9,7 +9,6 @@
     "mutate": [
       "**/*.cs",
       "!**/AssemblyInfo.cs",
-      "!**/Schema/SchemaRegistry.cs",
       "!**/Internal/AlvoBuilder.cs",
       "!**/Migrations/Internal/FileDescriptorSource.cs",
       "!**/AlvoServiceCollectionExtensions.cs",

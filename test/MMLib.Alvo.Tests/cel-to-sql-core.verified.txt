@@ -24,7 +24,7 @@
   {
     source: total > 100,
     context: Alice,
-    Sql: COALESCE("total" > @alvo_p0, FALSE),
+    Sql: COALESCE(CAST("total" AS numeric) > CAST(@alvo_p0 AS numeric), FALSE),
     Parameters: [
       {
         Key: alvo_p0,
@@ -35,7 +35,7 @@
   {
     source: total >= 100,
     context: Alice,
-    Sql: COALESCE("total" >= @alvo_p0, FALSE),
+    Sql: COALESCE(CAST("total" AS numeric) >= CAST(@alvo_p0 AS numeric), FALSE),
     Parameters: [
       {
         Key: alvo_p0,
@@ -46,7 +46,7 @@
   {
     source: total < 100,
     context: Alice,
-    Sql: COALESCE("total" < @alvo_p0, FALSE),
+    Sql: COALESCE(CAST("total" AS numeric) < CAST(@alvo_p0 AS numeric), FALSE),
     Parameters: [
       {
         Key: alvo_p0,
@@ -57,7 +57,7 @@
   {
     source: total <= 100,
     context: Alice,
-    Sql: COALESCE("total" <= @alvo_p0, FALSE),
+    Sql: COALESCE(CAST("total" AS numeric) <= CAST(@alvo_p0 AS numeric), FALSE),
     Parameters: [
       {
         Key: alvo_p0,
@@ -235,7 +235,7 @@
   {
     source: total > 5 ? 1 : 2,
     context: (scalar),
-    Sql: (CASE WHEN COALESCE("total" > @p0, FALSE) THEN @p1 ELSE @p2 END),
+    Sql: (CASE WHEN COALESCE(CAST("total" AS numeric) > CAST(@p0 AS numeric), FALSE) THEN @p1 ELSE @p2 END),
     Parameters: [
       {
         Key: p0,
@@ -254,7 +254,7 @@
   {
     source: !(total > 5) ? 1 : 2,
     context: (scalar),
-    Sql: (CASE WHEN (NOT COALESCE("total" > @p0, FALSE)) THEN @p1 ELSE @p2 END),
+    Sql: (CASE WHEN (NOT COALESCE(CAST("total" AS numeric) > CAST(@p0 AS numeric), FALSE)) THEN @p1 ELSE @p2 END),
     Parameters: [
       {
         Key: p0,
@@ -273,7 +273,7 @@
   {
     source: (total > 5 && total < 10) ? 1 : 2,
     context: (scalar),
-    Sql: (CASE WHEN (COALESCE("total" > @p0, FALSE) AND COALESCE("total" < @p1, FALSE)) THEN @p2 ELSE @p3 END),
+    Sql: (CASE WHEN (COALESCE(CAST("total" AS numeric) > CAST(@p0 AS numeric), FALSE) AND COALESCE(CAST("total" AS numeric) < CAST(@p1 AS numeric), FALSE)) THEN @p2 ELSE @p3 END),
     Parameters: [
       {
         Key: p0,

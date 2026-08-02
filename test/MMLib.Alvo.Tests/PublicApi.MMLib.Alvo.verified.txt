@@ -43,7 +43,7 @@ namespace MMLib.Alvo.Migrations
 }
 namespace MMLib.Alvo.Rules
 {
-    public interface IPolicyCatalogProvider : MMLib.Alvo.IRoleCatalogProvider
+    public interface IPolicyCatalogProvider : MMLib.Alvo.IRoleCatalogProvider, MMLib.Alvo.Schema.ISchemaRegistry
     {
         MMLib.Alvo.Rules.PolicyCatalog? Current { get; }
         void SetCurrent(string project, MMLib.Alvo.Rules.PolicyCatalog catalog);

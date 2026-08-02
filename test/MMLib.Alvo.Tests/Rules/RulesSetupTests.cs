@@ -3,6 +3,7 @@ using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Rules.Internal;
+using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Tests.Rules;
 
@@ -57,5 +58,16 @@ public class RulesSetupTests
 
         var deniedForUnknownEntity = engine.Resolve("no_such_entity", DataOperation.List, context);
         deniedForUnknownEntity.IsDenied.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void The_schema_registry_resolves_to_the_policy_catalog_provider_instance()
+    {
+        var services = new ServiceCollection();
+        services.AddAlvoRules();
+        using var provider = services.BuildServiceProvider();
+
+        provider.GetRequiredService<ISchemaRegistry>()
+            .ShouldBeSameAs(provider.GetRequiredService<IPolicyCatalogProvider>());
     }
 }

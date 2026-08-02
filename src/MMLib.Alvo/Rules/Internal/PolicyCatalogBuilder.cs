@@ -48,7 +48,7 @@ internal static class PolicyCatalogBuilder
             return false;
         }
 
-        catalog = new PolicyCatalog(entities, roles);
+        catalog = new PolicyCatalog(entities, roles, schema);
         errors = [];
         return true;
     }
@@ -240,6 +240,75 @@ internal static class PolicyCatalogBuilder
             DescriptorValidationSeverity.Error);
     }
 
+    /// <summary>
+    /// The framework-owned row key, which no <c>hidden</c>/<c>readOnly</c> flag may name. Masking it is
+    /// not merely useless: a masked field is served as a projected typed SQL <c>NULL</c>, and the key is
+    /// the one column that can never be null — EF re-marks a key property required whatever the read model
+    /// asked for — so the row would fail to materialise, with a different exception type per engine.
+    /// </summary>
+    private const string RowKeyField = "id";
+
+    /// <summary>
+    /// Whether a field may carry a <c>hidden</c>/<c>readOnly</c> flag at all: it has to exist in the
+    /// entity's schema and must not be the framework-owned key.
+    /// </summary>
+    /// <remarks>
+    /// Both checks run before the flag's own value is looked at, so a flag written as <c>false</c> is
+    /// validated exactly like one written as <c>true</c>. Otherwise a mistake could be parked as
+    /// <c>false</c> and become live later, when nothing re-validates it. Refusing here rather than in the
+    /// data path is Alvo's stated rule — a bad descriptor fails at save, and DoD criterion 3 says it for
+    /// the sibling case ("a rule naming a nonexistent column fails at save, not at request time") — and a
+    /// read-time-only refusal would turn a one-off config error into a per-request failure.
+    /// </remarks>
+    private static bool IsFlaggable(string fieldName, string flagName, EntityBuild build)
+    {
+        var path = $"/entities/{build.Name}/fields/{fieldName}/{flagName}";
+
+        if (string.Equals(fieldName, RowKeyField, StringComparison.Ordinal))
+        {
+            build.Errors.Add(RowKeyFlagError(path, flagName));
+            return false;
+        }
+
+        if (build.Schema.Fields.Any(field => string.Equals(field.Name, fieldName, StringComparison.Ordinal)))
+        {
+            return true;
+        }
+
+        build.Errors.Add(UnknownFlaggedFieldError(path, fieldName, flagName, build));
+        return false;
+    }
+
+    private static DescriptorValidationError RowKeyFlagError(string path, string flagName) =>
+        new(
+            path,
+            $"'{RowKeyField}' is the framework-owned row key and cannot be marked {flagName}.",
+            $"Remove the {flagName} flag from '{RowKeyField}'. The key identifies the row in every response and "
+            + "in every subsequent request, so it can be neither masked nor made read-only.",
+            DescriptorValidationSeverity.Error);
+
+    /// <summary>
+    /// Builds the "flag on an undeclared field" rejection, reusing the same "did you mean" shape an unknown
+    /// role literal gets — a typo is by far the likeliest cause, and a mistyped <c>hidden</c> flag silently
+    /// exposes the field it was meant to hide, so naming the nearest declared field is the whole fix.
+    /// </summary>
+    private static DescriptorValidationError UnknownFlaggedFieldError(
+        string path, string fieldName, string flagName, EntityBuild build)
+    {
+        var declared = build.Schema.Fields.Select(field => field.Name)
+            .Where(name => !string.Equals(name, RowKeyField, StringComparison.Ordinal))
+            .OrderBy(name => name, StringComparer.Ordinal).ToList();
+        var closest = NameSuggestion.Closest(fieldName, declared);
+
+        return new(
+            path,
+            $"'{fieldName}' is not a field of '{build.Name}', so this {flagName} flag can never apply.",
+            closest is not null
+                ? $"Did you mean '{closest}'? Declared fields: {string.Join(", ", declared)}."
+                : $"Declared fields: {string.Join(", ", declared)}.",
+            DescriptorValidationSeverity.Error);
+    }
+
     private static Dictionary<string, FieldMask> CompileFieldFlags(
         string flagName,
         IReadOnlyDictionary<string, FieldDescriptor> fields,
@@ -262,6 +331,11 @@ internal static class PolicyCatalogBuilder
     private static FieldMask? CompileFieldFlag(string fieldName, string flagName, BoolOrCel? flag, EntityBuild build)
     {
         if (flag is null)
+        {
+            return null;
+        }
+
+        if (!IsFlaggable(fieldName, flagName, build))
         {
             return null;
         }

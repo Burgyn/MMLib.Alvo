@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using MMLib.Alvo.Rules.Internal;
+using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Rules;
 
@@ -26,6 +27,10 @@ internal static class RulesSetup
     /// keep the default one's roles. Registered with <c>TryAddSingleton</c>, so a host with an
     /// external identity source (OIDC groups, a directory — #36) registers its own role provider and
     /// takes identity roles over without touching the policy catalog.
+    /// <see cref="ISchemaRegistry"/> is registered the same way and for the same reason: the applied
+    /// schema a data port validates a caller's field names against must be the very one the rules that
+    /// judge the same request were compiled against, which a second independently primed holder cannot
+    /// guarantee.
     /// </remarks>
     /// <param name="services">The service collection to add the rules services to.</param>
     /// <returns><paramref name="services"/>, for chaining.</returns>
@@ -33,6 +38,8 @@ internal static class RulesSetup
     {
         services.TryAddSingleton<IPolicyCatalogProvider, PolicyCatalogProvider>();
         services.TryAddSingleton<IRoleCatalogProvider>(
+            provider => provider.GetRequiredService<IPolicyCatalogProvider>());
+        services.TryAddSingleton<ISchemaRegistry>(
             provider => provider.GetRequiredService<IPolicyCatalogProvider>());
         services.TryAddSingleton<IPolicyEngine, PolicyEngine>();
         return services;

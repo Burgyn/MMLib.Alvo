@@ -12,6 +12,15 @@ integration="$(find "$ROOT" -name '*.Tests.Integration.csproj' -not -path '*/bin
 if [ -z "$integration" ]; then
   echo "[ring2] no integration test projects yet — skipping"
 else
+  # This affected-scoping is now LOAD-BEARING, and it was not before. While ring0
+  # ran `dotnet test` over the whole solution, the integration projects had already
+  # run by the time this loop reached them, so a "unaffected, skipping" line cost
+  # nothing. ring0 no longer runs them (it must not need Docker), so a skip here is
+  # now a real skip. That is the intended behaviour — an integration project is
+  # skipped only on a POSITIVE determination that nothing it depends on changed, and
+  # every other path (no `origin/main`, dotnet-affected failing) falls through to
+  # running it — but it means this scoping decides coverage, so treat a change to it
+  # as a change to what the PR gate proves.
   echo "[ring2] integration tests (Testcontainers), affected-scoped"
   base="${ALVO_AFFECTED_BASE:-origin/main}"
   affected_scoped=false

@@ -287,17 +287,18 @@ of every use" — and audit is #42, in F7. A bypass shipped before the audit tha
 is supposed to log it is precisely the footgun the same section warns about, so
 it is deferred and explicitly tied to #42.
 
-### Ports (all in `Abstractions`, which stays ASP.NET-free)
+### Ports (in `Abstractions`, which stays ASP.NET-free — with one deliberate exception, deviation 11)
 
 | Namespace | Port / type | Guarantee |
 |---|---|---|
 | `MMLib.Alvo` | `AlvoContext`, `UserId`, `TenantId`, `Role`, `RoleCatalog`, `IRoleCatalogProvider` | identity, roles, tenant; the role set in effect arrives through a port, so authentication never depends on who holds it |
-| `MMLib.Alvo.Expressions` | `ICelCompiler` → `CompiledExpression` (a validated, typed tree) + `IPredicateRenderer` + `IPredicateEvaluator` | fail-fast at apply; input is never interpolated; the two Rule backends are symmetric ports — SQL for the stored row, rows for the candidate one |
+| `MMLib.Alvo.Expressions` | `ICelCompiler` → `CompiledExpression` (a validated, typed tree) + `IPredicateRenderer` + `IPredicateEvaluator` + `IFieldSqlRenderer` (incl. `RenderComparableOperands`, deviation 13) + `CelFieldType` (deviation 12) | fail-fast at apply; input is never interpolated; the two Rule backends are symmetric ports — SQL for the stored row, rows for the candidate one |
 | `MMLib.Alvo.Rules` | `IPolicyEngine` | for (entity, operation, context) returns a compiled predicate or deny; field-level `hidden` / `readOnly` |
-| `MMLib.Alvo.Data` | `IAlvoData`, `AlvoQuery`, `AlvoRecord` | policy is applied **inside** the port |
+| `MMLib.Alvo.Data` | `IAlvoData`, `AlvoQuery`, `AlvoRecord`, `AlvoManagedColumns`, `AlvoAuditStamp` (deviation 15) | policy is applied **inside** the port; the framework owns and writes its own columns |
 | `MMLib.Alvo.Events` | `IEventPublisher`, `IOutboxStore`, `IEventDispatcher` | the event and the change commit together |
 | `MMLib.Alvo.Hooks` | `IEntityHooks` | before is in-transaction and network-free; after is post-commit |
 | `MMLib.Alvo.Auth` | `IAlvoContextResolver` | default-deny when the context is absent |
+| **`MMLib.Alvo.Data.EntityFrameworkCore`** (not `Abstractions`) | `IAlvoSqlDialect`, `PreImageMutation` | statement shape — table source, column reference, typed-`NULL` projection, row lock, row limit; **deviation 11** says why it is not a port in `Abstractions` |
 
 Implementations live in the core as capability namespaces: the CEL compiler, the
 policy engine, the Data API generator (`MMLib.Alvo.Api`), the outbox and its
@@ -824,6 +825,97 @@ Recorded so a later reader can tell a decision from an oversight.
    external identity source (#36) registers its own `IRoleCatalogProvider` and takes
    identity roles over; the descriptor still governs which literals a rule may name,
    and the two can then legitimately differ.
+
+### Deviations added by PR2
+
+PR2's own Superpowers plan is discarded once merged (`docs/PLAN.md` §1: the plan is "the
+itinerary … discarded once merged"), so anything it decided that outlives it is recorded
+here. The implementation-level *why* for each lives in `docs/architecture/data-path.md`,
+which is the surviving detailed record; these entries exist so a reader of this design can
+tell a decision from an oversight without reading that file.
+
+11. **`IAlvoSqlDialect` is a port that deliberately does not live in `Abstractions`.** The
+   *Ports* table's own heading said "all in `Abstractions`", and the driver's half of
+   **statement** shape breaks it: it lives in `MMLib.Alvo.Data.EntityFrameworkCore`, beside
+   the data path, because statement shape is a *relational* concern and `Abstractions` is
+   required to stay free of one. The alternative considered and rejected was extending
+   `IFieldSqlRenderer` with a table-rendering member — that port renders **expressions**, and
+   every existing implementation (including the in-repo fakes) would have grown a member it has
+   no table for. Cost, stated plainly: a driver author takes a dependency on the EF package to
+   implement it, which is what every relational driver already does — and so does anyone who
+   wants its contract suite, which is why that suite and the T-SQL fake live in a **companion**
+   test-support project rather than in `MMLib.Alvo.Testing` (deviation 18).
+12. **`CelFieldType` is a new public type in `Abstractions`.** Two layers must map a declared
+   `FieldType` to the `CelValueType` a comparison over it is evaluated at, and neither can see
+   the other's copy: the CEL type checker resolves a field reference's type, and a storage
+   driver needs the same type for a **caller filter** or a keyset cursor, which are not CEL and
+   therefore have no compiled expression to read a resolved type off. A second copy would not
+   merely duplicate a table — a divergence changes *which comparisons get a dialect's value
+   repair*, so a filter treating a decimal column as an integer compares it lexicographically
+   on SQLite while the identical rule answers correctly. That is a fail-open reintroduced by
+   drift, which is why an agreement test between two copies was judged insufficient.
+13. **`IFieldSqlRenderer` gained `RenderComparableOperands`, a new member on a port PR1
+   shipped.** SQLite has no decimal storage class, so a `decimal` field is a `TEXT` column and
+   an unguarded `price > 100` becomes a *string* comparison — a rule gating access on an amount
+   admits different rows per engine, which is fail-open on one of them and exactly what §0's
+   engine-agnostic principle forbids. The member takes and returns **both** operands together
+   rather than one: repairing one side alone does not merely approximate, it inverts, because
+   SQLite orders every `TEXT` value above every `REAL` one. It also renders `ORDER BY`, so the
+   repair must be order-preserving and not merely comparison-consistent — the page's order and
+   its cursor boundary come from one member so they cannot drift. Cost: a driver must answer for
+   every `CelValueType`, and it is a default interface member so no existing implementation
+   broke.
+14. **`IPolicyCatalogProvider` now derives from `ISchemaRegistry` as well as
+   `IRoleCatalogProvider`.** Deviation 10 accepted the first derivation and its cost; this is
+   the same argument applied to the schema. The data path must answer "how is this entity
+   declared" for the *same* applied descriptor whose rules produced the verdict, and a second
+   registration is how a host replaces the policy provider and silently keeps another
+   component's stale schema. Cost, compounding deviation 10's: an implementer of the policy
+   provider must now answer three questions — the catalog, the roles in effect, and the applied
+   schema — and the three are one lifecycle by construction rather than by convention.
+15. **The framework owns *and writes* the columns it injects.** `AlvoManagedColumns` (which
+   columns the framework owns, answered from the entity's traits rather than a name list) and
+   `AlvoAuditStamp` (who and when) are new public types in `Abstractions`, because there are two
+   shipped `IAlvoData` implementations and F7 adds a third. A caller may never write one; the
+   actor comes from `AlvoContext` and the instant from an injected `TimeProvider`, registered
+   `TryAddSingleton(TimeProvider.System)` so a host can substitute one. Before this, the columns
+   were injected, refused for only two of six, and **never populated** — so an audited create
+   failed unless the caller forged its own audit trail.
+16. **Three decisions on `IAlvoData` that are forever, taken in PR2 rather than deferred to
+   PR3.** (a) The port's failure contract is exactly three exception families —
+   `ArgumentException` for a malformed query or payload, `AlvoAuthorizationException` for a
+   denial, `InvalidOperationException` for a broken invariant — stated on `IAlvoData`'s own
+   remarks, because PR3 maps 422/403/500 by exception type and the two implementations disagreed
+   on four malformed inputs. (b) `AlvoFilter` caps **breadth** as well as depth
+   (`MaxTerms`, `MaxInCandidates`), engine-independently, because 1200 `AND` terms failed on
+   SQLite and succeeded on PostgreSQL. (c) `softDelete` is **refused at apply time** rather than
+   silently hard-deleting; the flag and the `deleted_at` answer stay so the implementation issue
+   inherits a shape, and two `examples/*.json` were amended.
+17. **`UseRelationalNulls(true)` is set by both drivers**, and its cost is a constraint on
+   future code in these packages rather than a behaviour change today. See `data-path.md`; PR5,
+   which adds LINQ here, is the first PR the constraint binds.
+18. **`MMLib.Alvo.Testing` is split, and `MMLib.Alvo.Testing.EntityFrameworkCore` is a new
+   project.** Deviation 11's port does not live in `Abstractions`, so its contract suite cannot
+   either. Putting `AlvoSqlDialectContractTests` in `MMLib.Alvo.Testing` put an EF dependency on
+   the *whole* test-support library, and that library's own remarks say it earns a package when
+   **external provider authors** need the contract suites — so shipping it that way would hand EF
+   to every consumer of the adversarial and differential suites, including an author whose store
+   is not EF-backed at all. That forecloses the one audience the package exists for, and §0's
+   provider model is precisely about not making a consumer adopt one infrastructure choice. It
+   also had a local cost: `test/Directory.Build.props` references `MMLib.Alvo.Testing` from
+   **every** test project, so all of them resolved `Microsoft.EntityFrameworkCore.Relational`
+   transitively, including `MMLib.Alvo.Abstractions.Tests` and `MMLib.Alvo.Schema.Tests`, which
+   deliberately have none.
+
+   So `MMLib.Alvo.Testing` is Abstractions-only again and the relational half is a companion
+   project. Per `docs/architecture/package-boundary.md` this one is **earned**: a real dependency
+   boundary appeared, which is the trigger that rule describes, not a speculative split. Its types
+   keep the `MMLib.Alvo.Testing.Data` **namespace**, so a consumer who adds the companion finds the
+   dialect suite beside the data suites and nothing they already wrote moves.
+   `EfDependencyBoundaryTests` (os A, reading the project files rather than loaded assemblies)
+   asserts the boundary, because the family-wide runtime arch fact matches EF's types by *name* —
+   deliberately, so it works in a project that cannot see EF — and therefore says nothing about
+   who *can*.
 
 ## Assumptions (veto candidates)
 

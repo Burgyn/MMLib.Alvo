@@ -2,7 +2,8 @@
   "stryker-config": {
     "project": "MMLib.Alvo.Data.EntityFrameworkCore.csproj",
     "test-projects": [
-      "test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/MMLib.Alvo.Data.EntityFrameworkCore.Tests.csproj"
+      "test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/MMLib.Alvo.Data.EntityFrameworkCore.Tests.csproj",
+      "test/MMLib.Alvo.Data.Sqlite.Tests/MMLib.Alvo.Data.Sqlite.Tests.csproj"
     ],
     "test-runner": "mtp",
     "coverage-analysis": "off",
@@ -14,6 +15,7 @@
       "!Internal/RelationalSqlBatch.cs",
       "!Internal/SystemSchemaInitializer.cs",
       "!Internal/VersionRowWriter.cs",
+      "!Internal/AlvoDataSeed.cs",
       "!EfCoreDescriptorVersionStore.cs",
       "!EfCoreRuntimeSchemaWriter.cs",
       "!EfCoreSchemaIntrospector.cs",

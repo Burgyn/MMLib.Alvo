@@ -1,9 +1,9 @@
-# AlvoDataAdversarialTests is xUnit test code even though it lives in src/, not test/ — it is
-# inherited by every IAlvoData implementation's own test project (PR1's InMemoryAlvoData today,
-# PR2's SQLite/PostgreSQL backends next), so its [Fact] methods follow the same descriptive
-# snake_case convention as test/.editorconfig, for the same reason
-# src/MMLib.Alvo.Testing/Rules/.editorconfig does for PolicyEngineContractTests. Scoped to that one
-# file, not the whole folder, so InMemoryAlvoData still gets the normal naming rule.
+﻿# AlvoDataAdversarialTests and AlvoDataSqlSnapshotTests are xUnit test code even though they live in
+# src/, not test/ — each is inherited by every IAlvoData implementation's own test project (PR1's
+# InMemoryAlvoData today, PR2's SQLite/PostgreSQL backends next), so their [Fact] methods follow the
+# same descriptive snake_case convention as test/.editorconfig, for the same reason
+# src/MMLib.Alvo.Testing/Rules/.editorconfig does for PolicyEngineContractTests. Scoped to those
+# files, not the whole folder, so InMemoryAlvoData still gets the normal naming rule.
 
-[AlvoDataAdversarialTests.cs]
+[{AlvoDataAdversarialTests.cs,AlvoDataSqlSnapshotTests.cs,AlvoDataComparisonTests.cs,AlvoDataDifferentialTests.cs,AlvoDataOrderingTests.cs,AlvoDataStatementTests.cs}]
 dotnet_diagnostic.CA1707.severity = none
