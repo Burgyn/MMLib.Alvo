@@ -61,21 +61,41 @@ from that, and they are visible in every file:
    caller who *can* see the rows; the 404 with the same id read by a caller who owns it; the paging
    walk with the single-request read of the same query.
 
-## Two defects this suite found, and pins
+## The defects this suite found, and pins
 
-Both are the same class — **a database constraint the framework does not map onto `IAlvoData`'s
-refusal families** — and both are answered `500` where a `409` belongs. Each case asserts today's
-behaviour, labelled, so it turns red the day the defect is fixed.
+**Two independent problems. Do not conflate them** — a fix for the first does not touch the second,
+and the whole point of `080-Tenancy/002` is that it cannot be mistaken for one.
 
-- `030-Problems/002` — a duplicate value on a `unique` field. The framework validates `required`,
-  `maxLength`, `enum`, `format`, `precision`/`scale` and `ref` existence; `unique` is enforced only
-  by the database. An agent gets no violation, no pointer and no field name. On a tenant-scoped
-  entity a globally-unique field also becomes a cross-tenant existence oracle: tenant B distinguishes
-  `500` from `201` and learns whether tenant A holds a value.
+### 1. A database constraint violation is answered `500`, not `409`
+
+The framework validates `required`, `maxLength`, `enum`, `format`, `precision`/`scale` and `ref`
+existence, each with a per-field 422 carrying a pointer, a code and a fix. A constraint the
+**database** enforces is not mapped onto `IAlvoData`'s refusal families at all, so an agent gets no
+violation, no pointer and no field name — it cannot repair the request. Two reachable shapes:
+
+- `030-Problems/002` — a duplicate value on a `unique` field.
 - `100-Scenarios/001` — deleting a row a `ref` with `onDelete: restrict` still points at.
 
 Both cases also pin what must stay true meanwhile: the 500 leaks no exception type, SQL, constraint
 name or stack frame.
+
+### 2. A `unique` field on a `tenancy: "scoped"` entity is unique across *all* tenants
+
+`DescriptorModelBuilder.ConfigureField` emits `HasIndex(field.Name).IsUnique()` with no `tenant_id`,
+whatever the entity's tenancy. So tenant B's create collides with a value only tenant A holds, and B
+learns whether A holds it — a **cross-tenant existence oracle**, one request per candidate. It is the
+one channel through which the isolation the rest of `080-Tenancy` verifies actually leaks.
+
+**Mapping the violation to a clean `409` does not close this.** `409`-versus-`201` is the same signal
+to tenant B as `500`-versus-`201`. The fix is a **tenant-scoped unique index**, and it is not a
+one-line change: the index has to be emitted after every field is configured, because EF cannot
+resolve `tenant_id` while the field loop is still running (measured — the naive in-loop version fails
+at startup with *"The property 'tenant_id' cannot be added … no property type was specified"*).
+
+`080-Tenancy/002` therefore asserts **distinguishability**, not a status. Verified by mutation: it
+goes **red** under a tenant-scoped unique index and stays **green** under a status-only change, which
+is the behaviour that keeps a partial fix from reading as a complete one. The same mutation left
+`030-Problems/002` green — the two defects really are independent.
 
 ## Three TeaPie behaviours worth knowing before editing
 

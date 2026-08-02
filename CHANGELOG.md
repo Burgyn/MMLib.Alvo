@@ -153,13 +153,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   runs both stacks and adds two PostgreSQL assertions no HTTP check can make — that a hidden
   field's value really is stored, and that the two tenants' rows really are partitioned.
 
-  Two defects it found are recorded rather than fixed here, each pinned by a labelled case that
-  turns red when the defect is: **a duplicate value on a `unique` field, and a delete blocked by an
-  `onDelete: restrict` reference, are both answered `500` rather than `409`.** Every other declared
-  facet is validated and answered with a per-field 422; a database constraint is not mapped onto
-  `IAlvoData`'s refusal families at all, so an agent gets no violation, no pointer and no field
-  name. On a tenant-scoped entity the first also makes a globally-unique field a cross-tenant
-  existence oracle — `500` versus `201` tells tenant B whether tenant A holds a value.
+  **Three defects it found are recorded rather than fixed here**, each pinned by a labelled case
+  that turns red when the defect is. They are **two independent problems**, and conflating them
+  would let a fix for one be mistaken for a fix for the other:
+
+  - *A database constraint violation is answered `500`, not `409`.* Two reachable shapes — a
+    duplicate value on a `unique` field, and a delete blocked by an `onDelete: restrict` reference.
+    Every other declared facet is validated and answered with a per-field 422; a database constraint
+    is not mapped onto `IAlvoData`'s refusal families at all, so an agent gets no violation, no
+    pointer and no field name. Pinned by `030-Problems/002` and `100-Scenarios/001`.
+  - *A `unique` field on a `tenancy: "scoped"` entity is unique across **all** tenants.* The driver
+    emits `HasIndex(field).IsUnique()` with no `tenant_id`, so tenant B's create collides with a
+    value only tenant A holds — a **cross-tenant existence oracle**, one request per candidate, and
+    the one channel through which the isolation the rest of the framework enforces leaks.
+    **Mapping the violation to a clean `409` does not close this**: `409`-versus-`201` is the same
+    signal to tenant B as `500`-versus-`201`. The fix is a tenant-scoped unique index. Pinned
+    separately by `080-Tenancy/002`, which asserts *distinguishability* rather than a status
+    precisely so a status-only change cannot be mistaken for a fix.
 
   Known limits, so this is honest: the image is **not published yet** — you build it from this
   repository — and there is no dashboard, no Management API and no CLI (#24, all F4). A mis-typed

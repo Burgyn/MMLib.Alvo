@@ -1218,6 +1218,28 @@ worked around.
    The behaviour is right and the surface is `internal`, so the cost is nil — it is recorded only because
    deviation 46 was recorded on exactly the standard that a surface-neutral departure from the written plan
    still earns a line.
+50. **There are now TWO compose stacks and TWO TeaPie suites — deviations 40 and 43 are amended, not
+   replaced.** Deviation 40's "the compose stack is `alvo` + `postgres` only" is still true *of each stack*
+   and its reason still stands (minio/mailhog arrive with the subsystems that use them). What changed is the
+   count. `docker-compose.yml` keeps `vehicle-registry` on 8080 and answers "does the stack boot and
+   answer"; `docker-compose.field-service.yml` runs `examples/field-service` on 8081, over its own database,
+   and answers "does the product behave as documented" — two tenants, five keys differing only in role and
+   tenant, an audited entity beside an unaudited one, hidden and `readOnly` fields, an unconfigured
+   operation. `scripts/test-e2e` runs both, so deviation 43's "in no ring, one CI job" is unchanged.
+   **Why a second file rather than a second service or a compose profile**, since this is the decision most
+   likely to be undone by someone who does not know: Compose interpolates the *whole* file before it selects
+   which services to start, and **a profile does not defer that** — measured. Five more `${...:?}` secrets
+   inside `docker-compose.yml` would therefore make the README's plain `docker compose up` fail for anyone
+   who had exported only `ALVO_DEMO_KEY_SECRET`. A separate file leaves the quickstart byte-for-byte
+   unchanged and gives the demo its own database, so two descriptors can never apply into one schema. The
+   cost, stated: two files to keep in step when #24's remainder adds minio and mailhog.
+51. **The demo's tenant ids and user ids are committed; only the key secrets are not.**
+   `examples/field-service/demo-identities.env` carries them, and both compose and `scripts/test-e2e` read
+   that one file so the container's configuration and the environment the tests assert against cannot drift.
+   They are *identifiers*, not credentials — a create on a tenant-scoped entity has to carry `tenant_id` and
+   `assigned_to` names a technician by user id, so no test can be written without knowing them. The five key
+   secrets keep the `${...:?}` form: the image ships none (§2.14) and compose refuses to start rather than
+   invent one.
 
 ## Assumptions (veto candidates)
 

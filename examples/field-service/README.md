@@ -96,5 +96,9 @@ written without them. The five key secrets are credentials and are never committ
   answer is `403 The write was rejected by policy.` — correct, but it names no field.
 - **A duplicate value on a `unique` field is answered `500`, not `409`.** The framework validates
   `required`, `maxLength`, `enum`, `format`, `precision`/`scale` and `ref` existence, but a `unique`
-  constraint is enforced only by the database and its violation is not mapped. `test/teapie-field-service`
-  pins the current behaviour so the case turns red the day it is fixed. See that suite's README.
+  constraint is enforced only by the database and its violation is not mapped. The same is true of a
+  delete blocked by an `onDelete: restrict` reference. `test/teapie-field-service` pins the current
+  behaviour so each case turns red the day it is fixed.
+- **A `unique` field on a scoped entity is unique across *all* tenants**, which makes it a
+  cross-tenant existence oracle. This is a *separate* defect from the one above and a status-only fix
+  does not close it — see that suite's README, and `080-Tenancy/002`, which pins it on its own.

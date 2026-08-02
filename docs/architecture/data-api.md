@@ -485,6 +485,44 @@ Which operation can answer what is one table, `DataApiDocumentation.ResponsesFor
 endpoint metadata and by the OpenAPI transformer — so the document cannot advertise a status no delegate
 produces. **401 and 403 are unconditional on every route**, because the same gate is attached to all five.
 
+### The gap in this table: a database constraint violation is a 500, and 409 has only one entry
+
+`409` above names `idempotency-conflict` and nothing else, and that is a defect rather than a
+completeness claim. **A constraint the *database* enforces is not mapped onto `IAlvoData`'s refusal
+families at all**, so the provider's exception reaches the host and is rendered as `internal`. Two
+shapes are reachable today, both found end-to-end by `test/teapie-field-service` and pinned there:
+
+| What the caller did | Answered today | Should be |
+|---|---|---|
+| Supplied a value another row already holds on a `unique` field | `500 internal` | `409`, naming the field |
+| Deleted a row a `ref` with `onDelete: restrict` still points at | `500 internal` | `409`, naming the conflict |
+
+Every other declared facet — `required`, `maxLength`, `enum`, `format`, `precision`/`scale`, and `ref`
+existence — is validated by `RecordValidator` and answered with a per-field 422 carrying a pointer, a
+code and a fix suggestion. These two carry none of that, so an agent cannot repair the request: the
+detail says only "an internal error" and the field at fault is never named. `onDelete: restrict` is
+the descriptor *asking* for the refusal, which makes the second the harder one to defend.
+
+**Neither has a tracking issue yet** — they need one; every other known defect in this document
+carries a number. Note that **#127 is not this**: it covers the ten-transaction retry amplification and
+scopes its fix to the retry logic.
+
+### A `unique` field on a tenant-scoped entity is a cross-tenant existence oracle
+
+**A separate defect that shares a trigger with the first row above, and the more serious of the two.**
+`DescriptorModelBuilder.ConfigureField` emits `HasIndex(field.Name).IsUnique()` with no `tenant_id`,
+regardless of `tenancy: "scoped"` — so a `unique` field is unique across the whole instance rather
+than within a tenant. Tenant B's create collides with a value only tenant A holds, and B learns that
+A holds it, one request per candidate. That is precisely the inference the 404-everywhere rule above
+is built to prevent, and it conflicts with §0's secure-by-default.
+
+**Fixing the status does not fix this.** `409`-versus-`201` is the same one-bit signal to tenant B as
+`500`-versus-`201`. The fix is a **tenant-scoped unique index** — `HasIndex(tenant_id, field)` on a
+scoped entity — emitted *after* the field loop, because EF cannot resolve `tenant_id` while that loop
+is still running. `test/teapie-field-service/080-Tenancy/002` pins it by asserting the two answers are
+**distinguishable** rather than asserting a status, so a status-only change leaves it green and cannot
+be mistaken for a fix; a tenant-scoped index turns it red. Also needs an issue.
+
 **A slug keys on the refusal's *kind*, never on its *reason*.** RFC 9457 §3.1.1 makes `type` the
 classification a client may branch on and `detail` prose that "ought not be parsed". A slug encoding *why*
 policy refused would become the schema-and-data oracle every deny reason in the framework is worded to

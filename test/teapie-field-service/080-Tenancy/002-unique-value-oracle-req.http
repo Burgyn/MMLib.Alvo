@@ -1,0 +1,77 @@
+### A KNOWN DEFECT, and the one hole in this suite's tenancy story. Read this before "fixing" it.
+###
+### `work_orders.reference` is declared `unique`. The driver emits that as a plain
+### `HasIndex(field.Name).IsUnique()` — see `DescriptorModelBuilder.ConfigureField` — with **no
+### `tenant_id` in the index**, on a `tenancy: "scoped"` entity. So the constraint is unique across
+### the whole instance rather than within a tenant, and tenant B's create collides with a value only
+### tenant A holds.
+###
+### That makes it a **cross-tenant existence oracle**: tenant B learns whether tenant A holds a given
+### `reference`, one request per candidate. Everything else in 001 is careful to answer 404 precisely
+### so B cannot make that inference; this one channel gives it away.
+###
+### **The root cause is the index, not the status code.** The neighbouring defect —
+### `030-Problems/002`, a duplicate answered 500 rather than 409 — is a *different* problem that
+### happens to share a trigger, and mapping the violation to a clean 409 does NOT close this one:
+### 409-versus-201 is exactly the same signal to tenant B as 500-versus-201. The fix is a
+### tenant-scoped unique index (`HasIndex("tenant_id", field.Name)` on a scoped entity), after which
+### BOTH requests below are 201 and this case goes red so it can be rewritten as the
+### indistinguishability assertion it wants to be.
+###
+### The test below therefore asserts DISTINGUISHABILITY, not a status. A status-only change leaves it
+### green, which is correct — the leak would still be there.
+
+### Tenant south creates a work order whose `reference` only TENANT NORTH holds.
+# @name ProbeAValueAnotherTenantHolds
+## TEST-EXPECT-STATUS: [500]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantSouth}}",
+  "reference": "WO-1001",
+  "title": "Oracle probe",
+  "status": "scheduled",
+  "priority": 1,
+  "access_code": "ORACLE",
+  "customer_id": "{{SouthCustomerId}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+### The identical request with a `reference` NO tenant holds. The only difference between the two is
+### whether the other tenant happens to hold the value — which is precisely the fact B must not learn.
+# @name ProbeAValueNoTenantHolds
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantSouth}}",
+  "reference": "WO-9911",
+  "title": "Oracle probe",
+  "status": "scheduled",
+  "priority": 1,
+  "access_code": "ORACLE",
+  "customer_id": "{{SouthCustomerId}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+### The refused probe wrote nothing into tenant south
+# @name SouthAfterTheProbe
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=100&order=reference.asc
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
+
+### ...and tenant north's row is untouched by either probe
+# @name NorthsRowAfterTheProbe
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders/{{Wo1001Id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### Clean up the row the second probe created, so later groups measure the set they expect
+# @name RemoveTheProbeRow
+## TEST-EXPECT-STATUS: [204]
+DELETE {{fsBaseUrl}}/api/work_orders/{{ProbeAValueNoTenantHolds.response.body.$.id}}
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
