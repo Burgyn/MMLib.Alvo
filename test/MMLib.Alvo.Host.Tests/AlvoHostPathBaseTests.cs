@@ -33,7 +33,7 @@ public class AlvoHostPathBaseTests
         using var created = await world.SendAsync(
             HttpMethod.Post, "/alvo/api/warehouses", new JsonObject { ["code"] = "W-2" });
 
-        created.StatusCode.ShouldBe(HttpStatusCode.Created, await created.Content.ReadAsStringAsync(Ct));
+        created.StatusCode.ShouldBe(HttpStatusCode.Created, await created.ReadTextAsync());
         var location = created.Headers.Location!.ToString();
 
         using var followed = await world.SendAsync(HttpMethod.Get, location, body: null);
@@ -55,7 +55,7 @@ public class AlvoHostPathBaseTests
         using var created = await world.SendAsync(
             HttpMethod.Post, "/api/warehouses", new JsonObject { ["code"] = "W-3" }, ForwardedPrefix());
 
-        created.StatusCode.ShouldBe(HttpStatusCode.Created, await created.Content.ReadAsStringAsync(Ct));
+        created.StatusCode.ShouldBe(HttpStatusCode.Created, await created.ReadTextAsync());
         var location = created.Headers.Location!.ToString();
 
         var followed = await FollowThroughTheProxyAsync(world, location);
@@ -81,7 +81,7 @@ public class AlvoHostPathBaseTests
             new JsonObject { ["code"] = "W-4" },
             new Dictionary<string, string>(StringComparer.Ordinal) { ["X-Forwarded-Prefix"] = "/attacker" });
 
-        created.StatusCode.ShouldBe(HttpStatusCode.Created, await created.Content.ReadAsStringAsync(Ct));
+        created.StatusCode.ShouldBe(HttpStatusCode.Created, await created.ReadTextAsync());
         var location = created.Headers.Location!.ToString();
 
         using var followed = await world.SendAsync(HttpMethod.Get, location, body: null);
@@ -123,7 +123,7 @@ public class AlvoHostPathBaseTests
             new JsonObject { ["code"] = "W-5" },
             new Dictionary<string, string>(StringComparer.Ordinal) { ["X-Forwarded-Prefix"] = "/attacker" });
 
-        created.StatusCode.ShouldBe(HttpStatusCode.Created, await created.Content.ReadAsStringAsync(Ct));
+        created.StatusCode.ShouldBe(HttpStatusCode.Created, await created.ReadTextAsync());
         var location = created.Headers.Location!.ToString();
 
         location.ShouldBe(
@@ -169,6 +169,4 @@ public class AlvoHostPathBaseTests
         new(StringComparer.Ordinal) { ["ForwardedHeaders_Enabled"] = "true" };
 
     private static string IdIn(string location) => location[(location.LastIndexOf('/') + 1)..];
-
-    private static CancellationToken Ct => TestContext.Current.CancellationToken;
 }

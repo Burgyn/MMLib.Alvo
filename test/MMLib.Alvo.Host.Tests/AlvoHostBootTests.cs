@@ -29,7 +29,7 @@ public class AlvoHostBootTests
         using var read = await world.GetAsync(location);
 
         read.StatusCode.ShouldBe(HttpStatusCode.OK);
-        var body = JsonNode.Parse(await read.Content.ReadAsStringAsync(TestContext.Current.CancellationToken))!;
+        var body = await read.ReadJsonObjectAsync();
         body["code"]!.GetValue<string>().ShouldBe("W-1");
     }
 

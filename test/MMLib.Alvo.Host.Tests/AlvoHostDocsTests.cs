@@ -145,7 +145,7 @@ public class AlvoHostDocsTests
 
     private static async Task<ScalarPage> PageAsync(HttpResponseMessage response, string path)
     {
-        var html = await response.Content.ReadAsStringAsync(Ct);
+        var html = await response.ReadTextAsync();
 
         response.StatusCode.ShouldBe(HttpStatusCode.OK, html);
         response.Content.Headers.ContentType!.MediaType.ShouldBe("text/html");
@@ -216,18 +216,15 @@ public class AlvoHostDocsTests
         new Uri(new Uri(new Uri("http://alvo.invalid"), from), relative).AbsolutePath;
 
     /// <summary>The document served at <paramref name="path"/>, as JSON, after proving it is really there.</summary>
-    private static async Task<JsonNode> DocumentAtAsync(AlvoHostWorld world, string path)
+    private static async Task<JsonObject> DocumentAtAsync(AlvoHostWorld world, string path)
     {
         using var response = await world.SendAnonymouslyAsync(HttpMethod.Get, path);
-        var body = await response.Content.ReadAsStringAsync(Ct);
 
-        response.StatusCode.ShouldBe(HttpStatusCode.OK, body);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, await response.ReadTextAsync());
 
-        return JsonNode.Parse(body)!;
+        return await response.ReadJsonObjectAsync();
     }
 
     private static IEnumerable<string> PathsOf(JsonNode document) =>
         document["paths"]!.AsObject().Select(path => path.Key);
-
-    private static CancellationToken Ct => TestContext.Current.CancellationToken;
 }

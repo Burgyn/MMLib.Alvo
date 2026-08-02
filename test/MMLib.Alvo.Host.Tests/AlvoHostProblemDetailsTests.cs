@@ -1,4 +1,5 @@
-﻿using System.Net;
+﻿using MMLib.Alvo.Api;
+using System.Net;
 using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Host.Tests;
@@ -56,9 +57,9 @@ public class AlvoHostProblemDetailsTests
 
         response.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
         response.Content.Headers.ContentType!.MediaType.ShouldBe("application/problem+json");
-        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
-        JsonNode.Parse(body)!["type"]!.GetValue<string>().ShouldBe("https://alvo.dev/errors/internal");
-        body.ShouldNotContain("DUPLICATE", Case.Sensitive, "the caller's own value is not echoed back by a 500");
+        (await response.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.Internal);
+        (await response.ReadTextAsync()).ShouldNotContain(
+            "DUPLICATE", Case.Sensitive, "the caller's own value is not echoed back by a 500");
 
         world.Logs.Entries.ShouldContain(
             entry => entry.Level == Microsoft.Extensions.Logging.LogLevel.Error && entry.Exception != null,
@@ -79,7 +80,6 @@ public class AlvoHostProblemDetailsTests
 
         response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
         response.Content.Headers.ContentType!.MediaType.ShouldBe("application/problem+json");
-        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
-        JsonNode.Parse(body)!["type"]!.GetValue<string>().ShouldBe("https://alvo.dev/errors/malformed-query");
+        (await response.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.MalformedQuery);
     }
 }

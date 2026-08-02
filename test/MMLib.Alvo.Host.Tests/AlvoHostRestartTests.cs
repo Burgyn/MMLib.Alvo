@@ -47,9 +47,10 @@ public class AlvoHostRestartTests
 
             using var listed = await restarted.GetAsync("/api/warehouses");
 
-            listed.StatusCode.ShouldBe(HttpStatusCode.OK);
-            var body = await listed.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
-            body.ShouldContain("W-1");
+            (await listed.ReadFieldAsync("code")).ShouldBe(
+                ["W-1"],
+                "the row the first boot wrote must come back as a row in the page envelope — a substring "
+                + "search over the body also passes on a diagnostic that merely mentions it");
         }
         finally
         {

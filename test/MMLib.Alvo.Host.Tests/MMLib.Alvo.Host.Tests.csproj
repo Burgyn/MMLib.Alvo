@@ -12,6 +12,19 @@
     <PackageReference Include="Microsoft.AspNetCore.TestHost" />
   </ItemGroup>
 
+  <!--
+    The shared response readers, linked rather than re-implemented. A host fact reading a body by hand
+    (`body.ShouldContain("W-1")`) passes on a bare JSON array, on a row moved into a diagnostic field, and on
+    any response whose status nobody checked; ResponseReading exists precisely to refuse a body it does not
+    recognise — its own remarks call a quiet reader "a vacuity generator for every fact written after it".
+    Only the readers are linked, not the whole of test/_shared/api: the API world there builds its own
+    embedded WebApplication, and this suite's fixture must stay AlvoHost's own two methods.
+  -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/api/ResponseReading.cs" Link="_shared/ResponseReading.cs" />
+    <Using Include="MMLib.Alvo.Api.Tests" />
+  </ItemGroup>
+
   <ItemGroup>
     <Content Include="descriptors/*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
