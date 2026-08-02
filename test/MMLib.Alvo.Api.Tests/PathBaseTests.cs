@@ -78,6 +78,29 @@ public class PathBaseTests
         location.ShouldBe($"/%C3%BA%C4%8Dty/api/owners/{IdIn(location)}");
     }
 
+    /// <summary>
+    /// The other supported mount, <c>app.MapGroup("/backend").MapAlvoDataApi()</c>: the created row's
+    /// <c>Location</c> carries the group's prefix, because the row only exists under it.
+    /// </summary>
+    /// <remarks>
+    /// A route group is not a path base and fails harder than one. <c>UsePathBase</c> rewrites the request, so
+    /// a host mounted under one answers the unprefixed path too and a wrong <c>Location</c> still resolves
+    /// in-process (this file's own header opens with that); a group only lengthens the route, so
+    /// <c>/api/owners/&lt;id&gt;</c> is mapped by nothing and the follow-up below is a 404 — in-process, at the
+    /// client, everywhere.
+    /// </remarks>
+    [Fact]
+    public async Task Under_a_route_group_a_created_rows_location_carries_the_groups_prefix()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync(
+            [_admin], new AlvoApiWorldSetup(RouteGroupPrefix: "/backend"));
+
+        var location = await CreateAndReadLocationAsync(world, "/backend/api/owners");
+
+        await FollowingItAnswersOkAsync(world, location);
+        location.ShouldBe($"/backend/api/owners/{IdIn(location)}");
+    }
+
     private static async Task<string> CreateAndReadLocationAsync(AlvoApiWorld world, string path = "/api/owners")
     {
         using var response = await world.SendAsync(

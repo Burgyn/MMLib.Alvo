@@ -146,7 +146,17 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
 
         await ApplyDescriptorAsync(app);
 
-        app.MapAlvoDataApi();
+        // MapGroup, when a fact asks for one: the second supported way to mount the Data API, and the one
+        // whose route-group prefix a created row's Location has to carry (#121). Mapped through the group
+        // rather than onto the app, because IEndpointRouteBuilder is exactly the seam MapAlvoDataApi takes.
+        if (setup.RouteGroupPrefix is { } groupPrefix)
+        {
+            app.MapGroup(groupPrefix).MapAlvoDataApi();
+        }
+        else
+        {
+            app.MapAlvoDataApi();
+        }
 
         // Opt-in, because MapAlvoDataApi deliberately does not map it — serving a document is a hosting
         // decision (ApiSetup.AddAlvoApi says so) — and because every route-table fact in this suite counts
@@ -626,6 +636,13 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
 /// The path base the world is served under — <c>app.UsePathBase(...)</c>, the embedded shape #121 names —
 /// or <see langword="null"/> for a host mounted at the root, which is every other fact here.
 /// </param>
+/// <param name="RouteGroupPrefix">
+/// A route group to mount the Data API under — <c>app.MapGroup(prefix).MapAlvoDataApi()</c> — or
+/// <see langword="null"/> to map onto the application itself. It is a different mechanism from
+/// <paramref name="PathBase"/> and fails differently: a path base rewrites the request, whereas a group
+/// prefix only lengthens the route, so a host mounted this way answers <em>nothing</em> at the unprefixed
+/// path.
+/// </param>
 internal sealed record AlvoApiWorldSetup(
     Action<AlvoApiOptions>? ConfigureApi = null,
     string? RevokedKeyId = null,
@@ -634,7 +651,8 @@ internal sealed record AlvoApiWorldSetup(
     string? HostInfoDescription = null,
     bool MapAlvoProblemDetails = false,
     bool FaultingData = false,
-    string? PathBase = null);
+    string? PathBase = null,
+    string? RouteGroupPrefix = null);
 
 /// <summary>One dev API key a world issues, in the shape a test reads best.</summary>
 /// <param name="KeyId">The key's public identifier.</param>

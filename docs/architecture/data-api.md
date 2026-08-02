@@ -428,17 +428,30 @@ that are perfectly serviceable. Honouring it needs a third widening of `IAlvoDat
 
 ## A 201's `Location` carries the request's path base (#121)
 
-A `Location` is the request's `PathBase` plus the mapped route, written in one place
-(`RecordResult.ExecuteAsync`) — which is also the only place any `Location` is written, so the ordinary 201
-and the idempotent replay (deviation 30) are fixed by the same line. The template a route was mapped with
-carries no path base, so a create behind `app.UsePathBase(...)`, or behind a proxy that sets
-`X-Forwarded-Prefix` and a host told to trust it, used to answer a URL that 404s **at that proxy**.
+A `Location` is the request's `PathBase` plus **the matched endpoint's own route pattern**, written in one
+place (`RecordResult` / `CreatedRow`) — which is also the only place any `Location` is written, so the
+ordinary 201 and the idempotent replay (deviation 30) are fixed by the same line. Three request-time facts
+the mapped literal does not carry, and all three used to be lost:
 
-Where the 404 happens is worth stating, because it shapes what a test of this can claim. In-process the host
-answers both URLs: `UsePathBase` *strips* a prefix when the request carries one rather than requiring one, so
-following a prefix-less `Location` against the host itself still reaches the row. The failure is at the edge,
-which the host never sees. `PathBaseTests` therefore pins the header **whole** rather than by prefix, and
-`AlvoHostPathBaseTests` follows the forwarded-prefix case through a model of the proxy that produced it.
+- **`app.UsePathBase("/alvo")`**, and a proxy that sets `X-Forwarded-Prefix` for a host told to trust it.
+  Both land in `Request.PathBase`, which is prefixed here.
+- **`app.MapGroup("/backend").MapAlvoDataApi()`**, a supported mount whose prefix belongs to the *route*
+  rather than to the request. A grouped endpoint's `RoutePattern.RawText` is the combined pattern, so reading
+  the collection path off `HttpContext.GetEndpoint()` is reading it from the router — there is no second
+  place for the literal and the route to disagree. Not `LinkGenerator`: generating by name would mean naming
+  all five routes per entity, and route names are process-global, so two `MapAlvoDataApi()` calls under two
+  groups — the very shape this fixes — would collide at startup.
+- **Encoding.** The header is `ToUriComponent()`, not `PathString.Value`. `Value` is decoded, and over
+  Kestrel a non-ASCII path base (`/účty`) then throws while the response header is encoded as Latin-1 — a
+  500 on a create whose row is already committed.
+
+Where the 404 happens is worth stating, because it shapes what a test of this can claim. Under a path base,
+in-process the host answers both URLs: `UsePathBase` *strips* a prefix when the request carries one rather
+than requiring one, so following a prefix-less `Location` against the host itself still reaches the row. The
+failure is at the edge, which the host never sees. `PathBaseTests` therefore pins the header **whole** rather
+than by prefix, and `AlvoHostPathBaseTests` follows the forwarded-prefix case through a model of the proxy
+that produced it. A **route group** is the harder failure and needs none of that care: it only lengthens the
+route, so the unprefixed URL is mapped by nothing and a wrong header 404s in-process.
 
 The **OpenAPI document's path keys still have the original shape** — a document served under a path base
 declares no `servers` entry, so a client resolving its paths against `/` is wrong by the same prefix. That is

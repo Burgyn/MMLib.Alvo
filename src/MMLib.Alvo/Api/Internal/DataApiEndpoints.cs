@@ -171,7 +171,7 @@ internal static class DataApiEndpoints
                     var token = Idempotency(key, http.Request.Method, entity, body.Document);
                     var record = await data.CreateAsync(entity.Name, body.Values, context, token, ct)
                         .ConfigureAwait(false);
-                    return Created($"{pattern}/{AssignedId(record)}", record, entity);
+                    return Created(pattern, record, entity);
                 }))
             .Protect(entity, DataOperation.Create, filters);
 
@@ -843,7 +843,7 @@ internal static class DataApiEndpoints
         var entityTag = RowVersionETag.For(record, entity);
         return entityTag is not null && IsAlreadyHeld(request, entityTag)
             ? new NotModifiedResult(entityTag)
-            : new RecordResult(record, entityTag, StatusCodes.Status200OK, location: null);
+            : new RecordResult(record, entityTag, StatusCodes.Status200OK, created: null);
     }
 
     /// <summary>Whether the caller's <c>If-None-Match</c> covers <paramref name="entityTag"/>.</summary>
@@ -868,7 +868,7 @@ internal static class DataApiEndpoints
     /// <param name="record">The row the port returned.</param>
     /// <param name="entity">The entity as the applied schema declares it.</param>
     private static RecordResult Row(AlvoRecord record, EntitySchema entity) =>
-        new RecordResult(record, RowVersionETag.For(record, entity), StatusCodes.Status200OK, location: null);
+        new RecordResult(record, RowVersionETag.For(record, entity), StatusCodes.Status200OK, created: null);
 
     /// <summary>
     /// The 201 for a created row: the <c>Location</c> of the new row plus its representation, written with
@@ -880,14 +880,69 @@ internal static class DataApiEndpoints
     /// created row's field names under a host's <c>DictionaryKeyPolicy</c> while every other path kept
     /// them verbatim.
     /// </remarks>
-    /// <param name="location">
-    /// The created row's path <em>relative to the application</em>. The request's <c>PathBase</c> is prefixed
-    /// where the header is written (<see cref="RecordResult"/>), not here.
+    /// <param name="pattern">
+    /// The collection route this endpoint was mapped with. Neither the request's <c>PathBase</c> nor a route
+    /// group's prefix is applied here — both are request-time facts, resolved where the header is written
+    /// (<see cref="CreatedRow"/>).
     /// </param>
     /// <param name="record">The created row.</param>
     /// <param name="entity">The entity as the applied schema declares it.</param>
-    private static RecordResult Created(string location, AlvoRecord record, EntitySchema entity) =>
-        new RecordResult(record, RowVersionETag.For(record, entity), StatusCodes.Status201Created, location);
+    private static RecordResult Created(string pattern, AlvoRecord record, EntitySchema entity) =>
+        new RecordResult(
+            record,
+            RowVersionETag.For(record, entity),
+            StatusCodes.Status201Created,
+            new CreatedRow(pattern, AssignedId(record)));
+
+    /// <summary>
+    /// The created row's <c>Location</c>, resolved against the request that created it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The collection path is read off the matched endpoint, not off the literal this was mapped with</b>
+    /// (#121's second half). <c>app.MapGroup("/backend").MapAlvoDataApi()</c> is a supported call, and the
+    /// mapped literal knows nothing about the group: a create under it advertised <c>/api/owners/&lt;id&gt;</c>
+    /// and a client that followed the header got a 404. A grouped endpoint's own
+    /// <see cref="RouteEndpoint.RoutePattern"/> is the <em>combined</em> one, so asking the endpoint is asking
+    /// the router — there is no second place for the two to disagree.
+    /// </para>
+    /// <para>
+    /// <b>Not <c>LinkGenerator</c>, deliberately.</b> Generating by route name would mean naming all five of
+    /// every entity's routes, and route names are process-global: two <c>MapAlvoDataApi()</c> calls under two
+    /// groups — the very shape this fixes — would then collide at startup. The create endpoint's pattern
+    /// <em>is</em> the collection path and carries no parameter to substitute, so appending the id needs no
+    /// generator.
+    /// </para>
+    /// <para>
+    /// The mapped literal remains the fallback for a context with no <see cref="RouteEndpoint"/>, which is the
+    /// pre-fix behaviour rather than a throw: a 201 whose row is already committed must not become a 500 over
+    /// the shape of its own header.
+    /// </para>
+    /// </remarks>
+    /// <param name="MappedPattern">The collection route literal this endpoint was mapped with.</param>
+    /// <param name="Id">The created row's id.</param>
+    private sealed record CreatedRow(string MappedPattern, Guid Id)
+    {
+        /// <summary>The header value: path base, route group, collection route and id, percent-encoded.</summary>
+        /// <param name="httpContext">The request that created the row.</param>
+        internal string Header(HttpContext httpContext) =>
+            httpContext.Request.PathBase.Add($"{Collection(httpContext)}/{Id}").ToUriComponent();
+
+        /// <summary>
+        /// The matched endpoint's own collection path, or the mapped literal when there is no route endpoint.
+        /// </summary>
+        /// <remarks>
+        /// A pattern with no leading <c>/</c> is normalized rather than trusted: <c>PathString</c> refuses one,
+        /// and <c>MapGroup("backend")</c> is a spelling a host may well write.
+        /// </remarks>
+        /// <param name="httpContext">The request that created the row.</param>
+        private string Collection(HttpContext httpContext)
+        {
+            var matched = (httpContext.GetEndpoint() as RouteEndpoint)?.RoutePattern.RawText;
+            var collection = string.IsNullOrEmpty(matched) ? MappedPattern : matched;
+            return collection.StartsWith('/') ? collection : $"/{collection}";
+        }
+    }
 
     /// <summary>
     /// One row on the wire: its <c>ETag</c>, its <c>Location</c> on a create, and its values under
@@ -915,22 +970,22 @@ internal static class DataApiEndpoints
     /// <param name="record">The row to write.</param>
     /// <param name="entityTag">The row's entity tag, or <see langword="null"/> when it has no version.</param>
     /// <param name="statusCode">The status to answer with.</param>
-    /// <param name="location">
-    /// The created row's path <em>relative to the application</em>, on a 201; <see langword="null"/> otherwise.
-    /// The request's <c>PathBase</c> is prefixed when the header is written, not here — the route template the
-    /// caller site builds this from does not carry one, so a create behind <c>UsePathBase</c> or behind a proxy
-    /// that sets <c>X-Forwarded-Prefix</c> would otherwise answer a URL that 404s at that proxy (#121).
+    /// <param name="created">
+    /// The row a 201 is announcing, or <see langword="null"/> on any other status. Everything request-scoped
+    /// about its <c>Location</c> — the <c>PathBase</c>, a route group's prefix — is resolved when the header is
+    /// written rather than at the call site, because a route template carries neither and a create behind
+    /// <c>UsePathBase</c>, behind a proxy that sets <c>X-Forwarded-Prefix</c>, or under a
+    /// <c>MapGroup</c> would otherwise answer a URL that 404s (#121).
     /// </param>
     private sealed class RecordResult(
-        AlvoRecord record, string? entityTag, int statusCode, string? location) : IResult
+        AlvoRecord record, string? entityTag, int statusCode, CreatedRow? created) : IResult
     {
         public Task ExecuteAsync(HttpContext httpContext)
         {
             ArgumentNullException.ThrowIfNull(httpContext);
-            if (location is not null)
+            if (created is not null)
             {
-                httpContext.Response.Headers.Location =
-                    httpContext.Request.PathBase.Add(location).ToUriComponent();
+                httpContext.Response.Headers.Location = created.Header(httpContext);
             }
 
             if (entityTag is not null)
