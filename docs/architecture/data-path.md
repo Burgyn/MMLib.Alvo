@@ -1161,7 +1161,7 @@ string.
 
 ## Mutation-testing notes
 
-Mutation runs post-merge on `main` (`.github/workflows/mutation.yml`), across five parallel configs. Nothing
+Mutation runs post-merge on `main` (`.github/workflows/mutation.yml`), across six parallel configs. Nothing
 blocks a merge on the score, so a red run is a notification someone has to act on — which makes it worth
 knowing, before the merge, that each config is configured to answer at all.
 
@@ -1173,32 +1173,75 @@ own step greps for `0 total mutants will be tested` and `Number of tests found: 
 correctness therefore has to be measured, not asserted.
 
 It was measured with a **discovery-only probe** rather than a local mutation run (which `CLAUDE.md` forbids):
-each config was started with `dotnet-stryker -f <config> --concurrency 4`, watched until Stryker had printed
-the two numbers the workflow greps for, and then killed before the mutation loop began. That exercises the
-whole configuration — glob resolution, project resolution, the MTP runner, the initial test run — without
-paying for the run.
+each config was started with `dotnet-stryker -f ../<config> --concurrency 4` **from `test/`** (see below —
+the working directory is load-bearing), watched until Stryker had printed the two numbers the workflow greps
+for, and then killed before the mutation loop began. That exercises the whole configuration — glob resolution,
+project resolution, the MTP runner, the initial test run — without paying for the run.
+
+Measured 2026-08-02 on Stryker 4.16.0 / .NET SDK 10.0.100 / xunit.v3 3.2.2:
 
 | Config | Mutated project | Tests found | Mutants to be tested |
 |---|---|---|---|
-| `stryker-config.expressions.json` | `MMLib.Alvo` (`Expressions/**`) | 1267 | 834 |
-| `stryker-config.json` | `MMLib.Alvo` (the rest) | 1267 | 478 |
-| `stryker-config.data-ef.json` | `MMLib.Alvo.Data.EntityFrameworkCore` | 686 | 497 |
-| `stryker-config.data-sqlite.json` | `MMLib.Alvo.Data.Sqlite` | 268 | 13 |
-| `stryker-config.data-postgresql.json` | `MMLib.Alvo.Data.PostgreSql` | 132 | 11 |
+| `stryker-config.expressions.json` | `MMLib.Alvo` (`Expressions/**`) | 722 | 834 |
+| `stryker-config.api.json` | `MMLib.Alvo` (`Api/**`) | 722 | 1502 |
+| `stryker-config.json` | `MMLib.Alvo` (the rest) | 722 | 657 |
+| `stryker-config.data-ef.json` | `MMLib.Alvo.Data.EntityFrameworkCore` | 858 | 596 |
+| `stryker-config.data-sqlite.json` | `MMLib.Alvo.Data.Sqlite` | 403 | 38 |
+| `stryker-config.data-postgresql.json` | `MMLib.Alvo.Data.PostgreSql` | 101 | 16 |
 
-`data-ef`'s row is the second measurement, taken after `02f815d` fixed the negated-declaration-pattern blind
-spot below — the first probe (same commands, before that fix) found 677 tests and 488 mutants. The other
-four rows are unchanged since neither their mutated project nor their test projects were touched afterward.
+`Api/**` is its own config because F3's PR3 took `stryker-config.json` from 478 mutants to 2159. The carve-out
+is mechanical, and the arithmetic is the proof: 657 + 1502 = 2159, so the same files are measured, only split.
+The three `MMLib.Alvo` globs (`Expressions/**`, `Api/**`, the rest) partition the project exactly.
 
-All five are non-vacuous. The two driver configs are small on purpose — each driver is two files of rendering
+All six are non-vacuous. The two driver configs are small on purpose — each driver is two files of rendering
 — and small is the point: `TrueLiteral => "1"` mutated to `"0"` inverts a boolean inside a policy `WHERE`, and
 until PR2 the only other thing pinning those literals was an accepted Verify baseline, the one artefact a test
 can be made green with.
 
-**The `data-ef` `test-projects` list is now a result, not a hypothesis.** It names both
+### The working directory decides what the suite is (and the earlier numbers here were the tell)
+
+Started in a directory containing `MMLib.Alvo.slnx`, Stryker enters solution mode and **ignores each config's
+`test-projects`**, substituting every test project in the solution that references the mutated assembly. Same
+commit, same 834 mutants, `stryker-config.expressions.json`: **2211** tests found from the repo root, **722**
+from `test/`. The 1489 extra tests include the Testcontainers-backed `.Tests.Integration` projects that every
+config deliberately excludes. Since a run costs mutants × suite, that is a silent ~3× — the cause of the three
+shards that timed out on run 30292141967 (#99), and of `data-ef` regressing from 10 minutes at `2b6b340` to
+past 120 without its config changing: F3's PR3/PR4 added `Api.Tests`, `Api.Tests.Integration` and `Host.Tests`,
+which reference the mutated assemblies and were therefore swept into every shard.
+
+**The previous edition of the table above was already showing this and nobody read it that way**: it recorded
+1267 tests for a config whose single `test-projects` entry is `MMLib.Alvo.Tests` (722 today, fewer then). A
+"tests found" number larger than the listed test projects can hold is the signature of the bug. Hence the
+guard in the workflow that fails a run which reports `will mutate solution`: from `test/` there is no solution
+file, `test-projects` is honoured (verified: `Analyzing 2 test project(s)` for `data-ef`), and a regression to
+the inflated shape is loud instead of turning up as a timeout weeks later. The paths inside every config are
+therefore relative to `test/`, not to the repository root.
+
+### `coverage-analysis: off` is a measurement, not a preference
+
+Every config pins it. Under the MTP runner per-test coverage is not implemented upstream
+([stryker-net#3516](https://github.com/stryker-mutator/stryker-net/issues/3516), open), and enabling it is both
+wrong and pointless. Same 90 mutants of `MMLib.Alvo.Data.Sqlite`, same machine, same `--concurrency 4`:
+
+| `coverage-analysis` | tested | Killed | NoCoverage | score | wall clock |
+|---|---|---|---|---|---|
+| `off` | 38 | 38 | 0 | 100.00 % | 63 s |
+| `perTest` | 33 | 33 | 5 | 86.84 % | 59 s |
+
+The five `NoCoverage` mutants are **false** — with coverage off the very same mutants are Killed. They sit in
+`SqliteCaseSensitiveLike.cs` (lines 44, 45, 62) and `SqliteSqlDialect.cs` (137, 168): the LIKE shape and the
+dialect rendering this gate exists to protect. Because Stryker counts `NoCoverage` against the score,
+`perTest` reported 86.84 % for a suite that kills everything. It also bought nothing — 59 s against 63 s —
+which [stryker-net#3750](https://github.com/stryker-mutator/stryker-net/pull/3750) explains: the MTP
+`runTests` filter is serialised under a property the platform server does not bind, so a "filtered" run
+silently executes the whole assembly anyway. That same defect is why the score moves in the first place, and
+it can move in *either* direction, since tests outside the batch run against whichever mutant is active.
+Re-measure before re-enabling; do not take this table on trust once Stryker is upgraded.
+
+**The `data-ef` `test-projects` list is a result, not a hypothesis.** It names both
 `MMLib.Alvo.Data.EntityFrameworkCore.Tests` and `MMLib.Alvo.Data.Sqlite.Tests`, because the killing tests for
 `EfAlvoData`, `SortSqlRenderer`'s engine behaviour, `UpdateSetterFactory` and `WritePropertyBag` live in the
-latter; the probe confirms 686 tests reach the run, which is the two projects together rather than the EF
+latter; the probe confirms 858 tests reach the run, which is the two projects together rather than the EF
 project's own suite alone. `MMLib.Alvo.Data.PostgreSql.Tests.Integration` is deliberately **not** added: it is
 Docker-gated end to end, so on a CI shard with no daemon every one of its kills would report as a survivor and
 the score would read as a regression that is really an absent container. `MMLib.Alvo.Data.PostgreSql.Tests` is
