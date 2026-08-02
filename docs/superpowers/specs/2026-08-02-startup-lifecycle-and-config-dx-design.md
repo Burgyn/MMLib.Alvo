@@ -504,12 +504,26 @@ defaults make the same choice for the same reason.
 Found while implementing the boot service, and it is an information-disclosure
 bug that would otherwise have shipped in the obvious implementation.
 
-`AlvoBootState.Failure` records the reason a boot was refused. For a stage 1 or
-stage 2 failure that reason is **the database provider's own message**, which
-routinely carries a **connection string** or a filesystem path. And
+`AlvoBootState.Failure` records the reason a boot was refused, and
 `/health/ready` is **unauthenticated by design** — a probe cannot hold a
 credential, and the existing liveness fact
 `Liveness_answers_an_unauthenticated_probe` pins that shape.
+
+**The premise, measured and narrowed.** This design first claimed the reason is the
+provider's message and "routinely carries a connection string". That is **not
+evidenced for either shipped provider**: `SqliteException` reports
+`"SQLite Error 14: 'unable to open database file'"` with no path, and Npgsql reports
+a `SocketException` for an unreachable host and the offending *keyword* — never its
+value — for a bad connection string. What **is** genuinely leaked today is a
+**filesystem path**: a missing descriptor throws `FileNotFoundException` and
+`AlvoBootState.Failure` then contains the descriptor's absolute path.
+
+The guard is still right, for a reason that does not depend on the overclaim:
+`Failed(failure.Message)` accepts *any* exception from *any* provider, interceptor
+or third-party driver, and `IAppliedSchemaStore` is a public port precisely so a
+third party can implement it. So the barrier is against a class of message, not
+against a specific observed one — and the non-vacuity fact anchors on the path leak
+that does exist rather than on a hypothetical.
 
 So whatever answers readiness reports the **phase**, and never that text:
 
@@ -520,6 +534,18 @@ So whatever answers readiness reports the **phase**, and never that text:
 - a fact must assert the negative — that a readiness body does **not** contain a
   connection-string fragment — because the positive assertions (503 while pending,
   200 when ready) all pass happily while the body leaks.
+
+**There are two independent leak sites, so there are two facts.** The health
+*check*'s description and the response *writer* are separate barriers: making the
+check leak its reason does **not** turn the HTTP body fact red, because the writer
+discards the report. That is exactly why the HTTP fact alone is insufficient, and
+each barrier carries its own discriminating mutation.
+
+**`Degraded` is deliberately left mapping to 200.** Remapping it to 503 in
+`ResultStatusCodes` would hide the trap behind an option rather than pin it with a
+fact — and would make the `Unhealthy` → `Degraded` mutation *stop* going red, which
+is the one observation proving the gate works. A host's own checks may also mean
+`Degraded` honestly.
 
 This is why the change is labelled `needs-deep-review` and why
 `alvo-security-core-review` is run on it: the boot path decides *when the policy
@@ -689,6 +715,16 @@ Numbering continues the F3 design's series, which ends at 51.
     is unauthenticated by design. The operator gets the full reason on stderr and in
     the log; the probe gets a phase. Deviating from the agent-first error rule is
     correct here because the reader of a probe response is not the operator.
+
+63. **Alvo's health check is registered through `IConfigureOptions<HealthCheckServiceOptions>`
+    via `TryAddEnumerable`, not through `AddCheck`.** `AddCheck` is a plain `Configure`
+    and is **additive**, so a host calling `AddAlvo` twice — which `AddBoot`'s own remarks
+    explicitly support — would register two checks named `alvo-schema`, and
+    `DefaultHealthCheckService` **refuses to be constructed at all** on a duplicate name.
+    Both probes would then answer 500, which an orchestrator cannot distinguish from
+    "not ready". `TryAddEnumerable` dedupes on implementation type, matching what
+    `AddAlvoApi` already does. Recorded because it is a real trap for anyone adding a
+    second Alvo health check.
 
 60. **`IRuntimeSchemaWriter` becomes mandatory for every provider at boot.** It was
     previously resolved on demand, only by `RuntimeSchemaService` (the runtime
