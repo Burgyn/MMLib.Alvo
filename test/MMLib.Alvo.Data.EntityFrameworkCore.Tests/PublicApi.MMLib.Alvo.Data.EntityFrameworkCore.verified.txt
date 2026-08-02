@@ -24,11 +24,12 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore
     }
     public interface IAlvoSqlDialect
     {
+        MMLib.Alvo.Data.EntityFrameworkCore.SqlConstraintViolation? DecodeConstraintViolation(System.Data.Common.DbException failure);
         string RenderColumn(string columnName);
         string RenderNullProjection(string storeType);
         string RenderTable(MMLib.Alvo.Schema.EntitySchema entity, MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation? lockedPreImageFor);
-        string RowLimitClause(string rowCountParameterMarker);
         string RowLockClause(MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation mutation);
+        string RowWindowClause(string rowCountParameterMarker, string? rowOffsetParameterMarker = null);
     }
     public enum PreImageMutation
     {
@@ -45,5 +46,12 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore
         public required System.Func<Microsoft.EntityFrameworkCore.ModelBuilder> CreateModelBuilder { get; init; }
         public required MMLib.Alvo.Data.EntityFrameworkCore.IAlvoSqlDialect Dialect { get; init; }
         public required MMLib.Alvo.Expressions.IFieldSqlRenderer Fields { get; init; }
+    }
+    public sealed class SqlConstraintViolation : System.IEquatable<MMLib.Alvo.Data.EntityFrameworkCore.SqlConstraintViolation>
+    {
+        public SqlConstraintViolation() { }
+        public System.Collections.Generic.IReadOnlyList<string> Columns { get; init; }
+        public string? ConstraintName { get; init; }
+        public required MMLib.Alvo.Data.AlvoConstraintKind Kind { get; init; }
     }
 }

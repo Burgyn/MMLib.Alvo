@@ -1,0 +1,61 @@
+### A create on a tenant-scoped entity carries `tenant_id` itself: nothing stamps it from the
+### caller's context, and the synthesized tenant scope's WITH CHECK then judges the value.
+# @name CreateAcme
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/customers
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "name": "Acme Manufacturing",
+  "tier": "priority",
+  "email": "ops@acme.test",
+  "phone": "+421 900 123 456",
+  "notes": "Two sites, both on the annual contract."
+}
+
+### A second customer, so a filter over `customer_id` has something to discriminate
+# @name CreateBorovica
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/customers
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "name": "Borovica Bakery",
+  "tier": "standard",
+  "email": "office@borovica.test"
+}
+
+### Omitting `tenant_id` is refused rather than defaulted — a row must not land in a tenant by accident
+# @name CreateWithoutTenant
+## TEST-EXPECT-STATUS: [403]
+POST {{fsBaseUrl}}/api/customers
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{
+  "name": "Tenantless Ltd",
+  "tier": "standard"
+}
+
+### A dispatcher cannot place a row in a tenant their key was not issued for
+# @name CreateIntoAnotherTenant
+## TEST-EXPECT-STATUS: [403]
+POST {{fsBaseUrl}}/api/customers
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantSouth}}",
+  "name": "Trespass Ltd",
+  "tier": "standard"
+}
+
+### The state of the world after the two refusals: exactly the two rows that were accepted
+# @name ListNorthCustomers
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/customers?limit=100&order=name.asc
+X-Alvo-Api-Key: {{keyDispatcherNorth}}

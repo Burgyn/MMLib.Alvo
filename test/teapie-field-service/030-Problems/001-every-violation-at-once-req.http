@@ -1,0 +1,64 @@
+### One payload carrying NINE distinct problems. The claim is that the refusal names every one of
+### them — not the first, and not a representative sample. §0 principle 4's reader is an agent, and a
+### 422 reporting one problem per round trip costs it one request per mistake.
+###
+### The problems, one per field so nothing is double-counted:
+###   reference     - does not match the declared `work-order-ref` format
+###   title         - longer than the declared maxLength of 120
+###   status        - not one of the declared enum values
+###   priority      - required, and absent
+###   quoted_price  - three fractional digits where the field declares a scale of 2
+###   contact_email - not an email
+###   external_ref  - readOnly, so a caller may read it and never write it
+###   customer_id   - a ref to a row that does not exist
+###   region_id     - the same, on the second ref, so "every violation" covers a repeated kind
+# @name ManyViolations
+## TEST-EXPECT-STATUS: [422]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "reference": "NOT-A-REFERENCE",
+  "title": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "status": "pending",
+  "quoted_price": 1.234,
+  "contact_email": "not-an-email",
+  "external_ref": "mine-to-set",
+  "access_code": "PROBE",
+  "customer_id": "00000000-0000-0000-0000-0000000000c1",
+  "region_id": "00000000-0000-0000-0000-0000000000e1"
+}
+
+### A key the entity does not declare is refused with 422 rather than ignored
+# @name UnknownField
+## TEST-EXPECT-STATUS: [422]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "reference": "WO-3001",
+  "title": "Unknown field",
+  "status": "scheduled",
+  "priority": 3,
+  "access_code": "PROBE",
+  "customer_id": "{{CustomerAcmeId}}",
+  "region_id": "{{RegionNorthId}}",
+  "urgency": "very"
+}
+
+### The refusal kinds are different slugs, because their fixes are different: a body the schema
+### refuses is `validation`, a query string the parser refuses is `malformed-query`.
+# @name MalformedQueryKind
+## TEST-EXPECT-STATUS: [422]
+GET {{fsBaseUrl}}/api/work_orders?limit=notanumber
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### After nine violations and an unknown key, no row was written
+# @name NothingWasWritten
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=100&order=reference.asc
+X-Alvo-Api-Key: {{keyDispatcherNorth}}

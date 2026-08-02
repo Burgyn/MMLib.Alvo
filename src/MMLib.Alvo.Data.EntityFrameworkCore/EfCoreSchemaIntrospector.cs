@@ -16,9 +16,10 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// <see cref="SchemaModel"/> (entities/fields/indexes/references). The mapping is necessarily
 /// lossy on engines with weak column typing (e.g. SQLite's type affinities), so it only recovers
 /// what round-tripping and drift detection need: names, coarse field types, nullability, indexes,
-/// and foreign keys. The optional <c>excludedTableName</c> keeps Alvo's own bookkeeping table
-/// (<see cref="SystemSchemaInitializer.DescriptorVersionsTableName"/>) out of the introspected schema —
-/// without it, the code-first diff would see its own applied-schema table as a rogue user entity.
+/// and foreign keys. The optional <c>excludedTableNames</c> keeps Alvo's own bookkeeping tables
+/// (<see cref="SystemSchemaInitializer.FrameworkTableNames"/> — the descriptor-version history and the
+/// idempotency records) out of the introspected schema — without it, the code-first diff would see them as
+/// rogue user entities and plan a <c>DROP</c> for each on the next re-apply.
 ///
 /// <para>
 /// <see cref="IntrospectAsync"/> opens a fresh connection from the injected
@@ -30,22 +31,29 @@ public sealed class EfCoreSchemaIntrospector : ISchemaIntrospector
 {
     private readonly IDatabaseModelFactory _databaseModelFactory;
     private readonly RelationalConnectionFactory _connections;
-    private readonly string? _excludedTableName;
+    private readonly HashSet<string> _excludedTableNames;
 
     /// <summary>
     /// Initializes a new introspector from a provider's scaffolding factory and a per-call connection factory.
     /// </summary>
     /// <param name="databaseModelFactory">EF Core's provider-flavored reverse-engineering / scaffolding factory.</param>
     /// <param name="connections">Creates a fresh ADO.NET connection per <see cref="IntrospectAsync"/> call; each connection is owned and disposed within that call.</param>
-    /// <param name="excludedTableName">Optional table to omit from the introspected schema (e.g. Alvo's descriptor-versions bookkeeping table).</param>
-    internal EfCoreSchemaIntrospector(IDatabaseModelFactory databaseModelFactory, RelationalConnectionFactory connections, string? excludedTableName = null)
+    /// <param name="excludedTableNames">
+    /// Tables to omit from the introspected schema — Alvo's own bookkeeping tables, from
+    /// <see cref="SystemSchemaInitializer.FrameworkTableNames"/>. A set rather than one name because there is
+    /// more than one such table and a future one must not have to remember to teach this type about itself.
+    /// </param>
+    internal EfCoreSchemaIntrospector(
+        IDatabaseModelFactory databaseModelFactory,
+        RelationalConnectionFactory connections,
+        IEnumerable<string>? excludedTableNames = null)
     {
         ArgumentNullException.ThrowIfNull(databaseModelFactory);
         ArgumentNullException.ThrowIfNull(connections);
 
         _databaseModelFactory = databaseModelFactory;
         _connections = connections;
-        _excludedTableName = excludedTableName;
+        _excludedTableNames = (excludedTableNames ?? []).ToHashSet(StringComparer.Ordinal);
     }
 
     /// <inheritdoc/>
@@ -61,7 +69,7 @@ public sealed class EfCoreSchemaIntrospector : ISchemaIntrospector
         {
             var databaseModel = _databaseModelFactory.Create(connection, new DatabaseModelFactoryOptions());
             var entities = databaseModel.Tables
-                .Where(table => table.Name != _excludedTableName)
+                .Where(table => !_excludedTableNames.Contains(table.Name))
                 .Select(ToEntitySchema)
                 .ToList();
 

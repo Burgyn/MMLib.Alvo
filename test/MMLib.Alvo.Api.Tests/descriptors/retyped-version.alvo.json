@@ -1,0 +1,35 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "retyped-version",
+  "description": "An audited entity that declares its OWN 'updated_at' as a string. The schema mapper used to inject a framework-managed column only when the entity did not declare that name, so this declaration won — apply SUCCEEDED and then every create answered 422 with an internal \"(Parameter 'value')\" in the body, because the audit stamp writes a timestamp into a column the schema calls text. Strictly worse than the hidden sibling, and the reason the rule is 'you may not declare it' rather than 'you may not hide it'. This descriptor exists to be REFUSED at apply; nothing here is meant to work.",
+  "auth": {
+    "providers": [
+      "local"
+    ]
+  },
+  "entities": {
+    "records": {
+      "description": "An audited entity whose own 'updated_at' declaration replaces the framework's.",
+      "audit": true,
+      "fields": {
+        "title": {
+          "type": "string",
+          "required": true,
+          "maxLength": 120
+        },
+        "updated_at": {
+          "type": "string",
+          "maxLength": 40
+        }
+      },
+      "rules": {
+        "list": "true",
+        "get": "true",
+        "create": "true",
+        "update": "true",
+        "delete": "true"
+      }
+    }
+  }
+}

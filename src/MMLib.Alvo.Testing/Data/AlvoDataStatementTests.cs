@@ -133,7 +133,7 @@ public abstract class AlvoDataStatementTests
         var world = await OwnedNotesAsync();
         world.Probe.ClearStatements();
 
-        await world.Probe.Data.UpdateAsync(Entity, world.AliceRowId, Patch, world.Alice, Token);
+        await world.Probe.Data.UpdateAsync(Entity, world.AliceRowId, Patch, world.Alice, cancellationToken: Token);
 
         StatementStartingWith("UPDATE", world.Probe).ShouldContain(UsingPrefix);
     }
@@ -148,7 +148,7 @@ public abstract class AlvoDataStatementTests
         var world = await OwnedNotesAsync();
         world.Probe.ClearStatements();
 
-        await world.Probe.Data.DeleteAsync(Entity, world.AliceRowId, world.Alice, Token);
+        await world.Probe.Data.DeleteAsync(Entity, world.AliceRowId, world.Alice, cancellationToken: Token);
 
         StatementStartingWith("DELETE", world.Probe).ShouldContain(UsingPrefix);
     }
@@ -164,7 +164,7 @@ public abstract class AlvoDataStatementTests
         var world = await PublicNotesAsync();
         world.Probe.ClearStatements();
 
-        await world.Probe.Data.UpdateAsync(Entity, world.AliceRowId, Patch, world.Alice, Token);
+        await world.Probe.Data.UpdateAsync(Entity, world.AliceRowId, Patch, world.Alice, cancellationToken: Token);
 
         StatementStartingWith("UPDATE", world.Probe).ShouldNotContain(UsingPrefix);
     }

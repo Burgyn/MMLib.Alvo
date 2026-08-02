@@ -1,0 +1,5 @@
+### Following the 201's Location reaches the row
+# @name FollowLocation
+## TEST-EXPECT-STATUS: [200]
+GET {{baseUrl}}{{OwnerLocation}}
+X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}

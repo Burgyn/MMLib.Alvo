@@ -1,0 +1,4 @@
+### A configured rule is a row filter, so an anonymous read is an empty page rather than a refusal
+# @name AnonymousList
+## TEST-EXPECT-STATUS: [200]
+GET {{baseUrl}}/api/owners

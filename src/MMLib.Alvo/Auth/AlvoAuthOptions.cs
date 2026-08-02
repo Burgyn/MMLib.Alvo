@@ -13,6 +13,20 @@ public sealed class AlvoAuthOptions
 
     /// <summary>Gets the HTTP header a presented API key is read from, consumed by the HTTP Data API.</summary>
     public string HeaderName { get; init; } = "X-Alvo-Api-Key";
+
+    /// <summary>
+    /// Gets the HTTP header the tenant a caller asks to act in is read from, consumed by the HTTP
+    /// Data API.
+    /// </summary>
+    /// <remarks>
+    /// A header, and not a claim or a subdomain, because tenant resolution is host/environment
+    /// configuration and never descriptor input (schema <c>tenancy</c> says so in as many words). It is
+    /// only ever a <em>confirmation</em> of the tenant the presented key was issued for —
+    /// <see cref="TenantResolver"/> refuses any other value — so this header can never widen what a
+    /// credential grants. It is configurable for the same reason <see cref="HeaderName"/> is: an
+    /// embedded host may already own a header by that name.
+    /// </remarks>
+    public string TenantHeaderName { get; init; } = "X-Alvo-Tenant";
 }
 
 /// <summary>A single dev API key, as configured directly rather than issued by a provider.</summary>

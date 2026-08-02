@@ -1,7 +1,52 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/Burgyn/MMLib.Alvo")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Api.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Api.Tests.Integration")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Data.Sqlite.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Tests")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace MMLib.Alvo.Api
+{
+    public sealed class AlvoApiOptions
+    {
+        public AlvoApiOptions() { }
+        public int DefaultPageSize { get; set; }
+        public int MaxIdempotencyKeyBytes { get; set; }
+        public int MaxPageSize { get; set; }
+        public int MaxPayloadDepth { get; set; }
+        public int MaxPayloadKeys { get; set; }
+        public int MaxRequestBodyBytes { get; set; }
+        public string RoutePrefix { get; set; }
+    }
+    public static class AlvoProblemTypes
+    {
+        public const string BaseUri = "https://alvo.dev/errors/";
+        public const string Conflict = "conflict";
+        public const string Forbidden = "forbidden";
+        public const string IdempotencyConflict = "idempotency-conflict";
+        public const string Internal = "internal";
+        public const string MalformedQuery = "malformed-query";
+        public const string NotFound = "not-found";
+        public const string OutOfScope = "out-of-scope";
+        public const string PreconditionFailed = "precondition-failed";
+        public const string Unauthenticated = "unauthenticated";
+        public const string UnreadableRequest = "unreadable-request";
+        public const string Validation = "validation";
+        public static System.Collections.Generic.IReadOnlyList<string> All { get; }
+        public static string UriOf(string slug) { }
+    }
+    public sealed class AlvoViolation : System.IEquatable<MMLib.Alvo.Api.AlvoViolation>
+    {
+        public AlvoViolation(string Pointer, string Code, string Message, string? FixSuggestion) { }
+        [System.Text.Json.Serialization.JsonPropertyName("code")]
+        public string Code { get; init; }
+        [System.Text.Json.Serialization.JsonPropertyName("fixSuggestion")]
+        public string? FixSuggestion { get; init; }
+        [System.Text.Json.Serialization.JsonPropertyName("message")]
+        public string Message { get; init; }
+        [System.Text.Json.Serialization.JsonPropertyName("pointer")]
+        public string Pointer { get; init; }
+    }
+}
 namespace MMLib.Alvo.Auth
 {
     public sealed class AlvoAuthOptions
@@ -9,6 +54,7 @@ namespace MMLib.Alvo.Auth
         public AlvoAuthOptions() { }
         public System.Collections.Generic.IList<MMLib.Alvo.Auth.AlvoDevApiKey> DevKeys { get; }
         public string HeaderName { get; init; }
+        public string TenantHeaderName { get; init; }
     }
     public sealed class AlvoDevApiKey
     {
@@ -54,12 +100,31 @@ namespace MMLib.Alvo.Rules
         public static bool TryBuild(MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Expressions.ICelCompiler compiler, out MMLib.Alvo.Rules.PolicyCatalog? catalog, out System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Descriptor.DescriptorValidationError> errors) { }
     }
 }
+namespace Microsoft.AspNetCore.Builder
+{
+    public static class AlvoDataApiEndpointRouteBuilderExtensions
+    {
+        public static Microsoft.AspNetCore.Routing.IEndpointRouteBuilder MapAlvoDataApi(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints) { }
+    }
+}
 namespace Microsoft.Extensions.DependencyInjection
 {
     public static class AlvoBuilderExtensions
     {
         public static MMLib.Alvo.IAlvoBuilder FromDescriptor(this MMLib.Alvo.IAlvoBuilder builder, string path) { }
         public static MMLib.Alvo.IAlvoBuilder UseSchemaPrefix(this MMLib.Alvo.IAlvoBuilder builder, string prefix) { }
+    }
+    public static class AlvoDataApiExtensions
+    {
+        public static MMLib.Alvo.IAlvoBuilder AddDataApi(this MMLib.Alvo.IAlvoBuilder builder, System.Action<MMLib.Alvo.Api.AlvoApiOptions>? configure = null) { }
+    }
+    public static class AlvoDescriptorApplyExtensions
+    {
+        public static System.Threading.Tasks.Task<MMLib.Alvo.Migrations.MigrationResult> ApplyAlvoDescriptorAsync(this System.IServiceProvider services, MMLib.Alvo.Migrations.MigrationOptions? options = null, System.Threading.CancellationToken ct = default) { }
+    }
+    public static class AlvoProblemDetailsExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddAlvoProblemDetails(this Microsoft.Extensions.DependencyInjection.IServiceCollection services) { }
     }
     public static class AlvoServiceCollectionExtensions
     {

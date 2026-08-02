@@ -1,5 +1,6 @@
 ﻿using MMLib.Alvo.Data.EntityFrameworkCore;
 using MMLib.Alvo.Schema;
+using System.Data.Common;
 
 namespace MMLib.Alvo.Data.Sqlite.Tests;
 
@@ -47,10 +48,16 @@ internal sealed class LockRecordingSqlDialect : IAlvoSqlDialect
 
     public string RenderNullProjection(string storeType) => _inner.RenderNullProjection(storeType);
 
+    /// <summary>Forwarded unchanged: this wrapper records locks, it decides nothing about a constraint.</summary>
+    /// <param name="failure">The exception the write raised.</param>
+    public SqlConstraintViolation? DecodeConstraintViolation(DbException failure) =>
+        _inner.DecodeConstraintViolation(failure);
+
     /// <summary>
-    /// Forwards the row-limit clause through the interface, because it is a default interface member SQLite
-    /// does not override — the point of forwarding is that this wrapper adds no dialect decision of its own.
+    /// Forwards the paging window clause through the interface, because it is a default interface member
+    /// SQLite does not override — the point of forwarding is that this wrapper adds no dialect decision of
+    /// its own.
     /// </summary>
-    public string RowLimitClause(string rowCountParameterMarker) =>
-        ((IAlvoSqlDialect)_inner).RowLimitClause(rowCountParameterMarker);
+    public string RowWindowClause(string rowCountParameterMarker, string? rowOffsetParameterMarker = null) =>
+        ((IAlvoSqlDialect)_inner).RowWindowClause(rowCountParameterMarker, rowOffsetParameterMarker);
 }

@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Schema;
+using System.Data.Common;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore.Tests;
 
@@ -26,5 +27,16 @@ internal sealed class TestSqlDialect : IAlvoSqlDialect
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(storeType);
         return $"CAST(NULL AS {storeType})";
+    }
+
+    /// <summary>
+    /// Nothing: this dialect has no engine behind it, so it has no constraint violation to recognise. The
+    /// composer tests never write a row, so the honest answer is also the only reachable one.
+    /// </summary>
+    /// <param name="failure">The exception the write raised.</param>
+    public SqlConstraintViolation? DecodeConstraintViolation(DbException failure)
+    {
+        ArgumentNullException.ThrowIfNull(failure);
+        return null;
     }
 }

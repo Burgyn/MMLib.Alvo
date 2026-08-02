@@ -33,6 +33,10 @@ public class QueryFieldGuardTests
 
         undeclared.Message.ShouldBe(hidden.Message);
         undeclared.Message.ShouldNotContain("DROP TABLE");
+        undeclared.Message.ShouldBe(
+            AlvoAuthorizationException.QueryFieldUnavailable,
+            "the wording lives on the port because PR3's query-string parser refuses the same names one layer "
+            + "up, and a caller able to tell the two refusals apart would have the oracle they exist to close");
     }
 
     [Fact]

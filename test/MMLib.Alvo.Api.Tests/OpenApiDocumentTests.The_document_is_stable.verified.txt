@@ -1,0 +1,1795 @@
+{
+  "openapi": "3.1.1",
+  "info": {
+    "title": "Alvo API Tests Fixture",
+    "description": "Every route here is generated from the applied Alvo descriptor: an entity declared in the descriptor is the explicit decision to expose it, and a field marked `hidden` is the per-field opt-out. It appears in no response schema, and in a request schema only when the descriptor also marks it `required` — a mandatory field a caller cannot see could not be supplied at all, so the name is published only where a caller must read it to perform the write.\n\n**Default-deny.** Nothing is reachable without a policy that admits the caller for that entity and operation. An operation the descriptor configures no rule for is refused for everybody.\n\n**Refusals are RFC 9457 problem documents** (`application/problem+json`) whose `type` classifies the refusal under `https://alvo.dev/errors/`. Branch on `type`; `detail` is prose and, per RFC 9457 §3.1.1, ought not be parsed. A refusal carries every reason at once in `violations`, each with a JSON Pointer, a stable code and a fix suggestion.\n\n**Every response is `Cache-Control: no-store`**, refusals included. These representations are policy-masked per caller, and the `ETag` is minted over the row's *version* rather than over the response bytes — which is the only tag `If-Match`'s strong comparison could ever match, and the reason no intermediary may keep the body.\n\n**A 500 is not documented on any operation, and its body depends on the host.** An invariant the implementation itself relies on propagates past Alvo's endpoints untouched, so what a 500 looks like is the host's decision and not a promise this document can make. A host that opted in (`AddAlvoProblemDetails()`) answers with the same problem document as every other refusal, under `https://alvo.dev/errors/internal` — which is why that value is in `type`'s list. A host that did not composes its own.\n\n**A request the web server would not read is not documented on any operation either.** A body over the server's limit, one that arrived too slowly, or one whose framing broke never reaches the operation, so no operation can promise a status for it. A host that opted in answers it under `https://alvo.dev/errors/unreadable-request`, at the status the server chose (413, 408 or 400) — the second value in `type`'s list that no operation lists.",
+    "version": "v1"
+  },
+  "servers": [
+    {
+      "url": "http://localhost/"
+    }
+  ],
+  "paths": {
+    "/api/categories": {
+      "get": {
+        "tags": [
+          "categories"
+        ],
+        "summary": "List 'categories' rows",
+        "description": "Reads a page of rows the caller's policy admits.\n\n**Filtering** follows PostgREST's spelling: every query parameter that is not one of the reserved names (order, limit, offset, after, select, or, and, not) names a field, and its value is `<operator>.<operand>` — `?year=gte.2020`. The operators are eq, neq, gt, gte, lt, lte, like, ilike, in, is. `in` takes a bracketed candidate list (`in.(skoda,vw)`) and `is` takes exactly `null`, `true` or `false`; `like`/`ilike` take a pattern. An unrecognised operator is refused with 422, never quietly read as equality, and an ordering operator applied to a type this API defines no total order over is refused too — so one filter means the same thing on every engine.\n\nSeveral parameters are one **conjunction** (AND), which is the only reading that keeps a filter narrowing as terms are added. `or=(…)` and `and=(…)` group terms explicitly and may nest, and prefixing any parameter name or group keyword with `not.` negates it (`not.color=eq.red`, `not.or=(…)`).\n\n**A field that is unavailable to the caller is refused exactly like one that does not exist**, in `filter`, `order` and `select` alike — the refusal names the parameter's role and never the field, so filtering, ordering or selecting cannot be used to discover a hidden field's name. The one exception is a field the descriptor also marks `required`: its name is published in the write schemas below, because a mandatory field a caller cannot see could not be supplied — see the overview.\n\nThe response is an envelope — `{ \"items\": [ … ], \"next\": <cursor or null> }` — and never a bare array. `next` is the cursor for the page after this one, and it is the *only* place that cursor appears: there is deliberately no `Link` or `Content-Range` header, so an agent reading the body never has to parse HTTP headers to keep paging.\n\n**A caller whose rule excludes every row is answered 200 with an empty page, not 403.** A rule compiles to a row-level `USING` predicate, so a caller who fails it receives an *allow* carrying a predicate that matches nothing. A 403 here means something else entirely: the operation is unconfigured for this entity, the entity is unknown to the applied descriptor, the caller has no tenant on a tenant-scoped entity, or the policy reads a caller value this caller does not carry.\n\n**Neither precondition header is honoured on a list.** A page has no version of its own to compare, so `If-Match` and `If-None-Match` are ignored here — not refused, as they would be on a write. Condition a single row's read or write instead.\n\n**A nullable field cannot be a sort key**, and since every list over HTTP is paged (`limit` always resolves, to a configured default when the request names none), that is every list: `order` over a nullable field is refused with 422. A keyset cursor is a chain of comparisons with no `IS NULL` arm, so paging over a nullable key silently drops rows — which is why it is refused rather than answered. The consequence for the two null-placement modifiers is that `nullsfirst` and `nullslast` parse, and their effect is currently unobservable: the only reads that could show it are the unpaged ones this endpoint does not offer.",
+        "operationId": "categories.list",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/select"
+          },
+          {
+            "$ref": "#/components/parameters/order"
+          },
+          {
+            "$ref": "#/components/parameters/limit"
+          },
+          {
+            "$ref": "#/components/parameters/offset"
+          },
+          {
+            "$ref": "#/components/parameters/after"
+          },
+          {
+            "$ref": "#/components/parameters/orGroup"
+          },
+          {
+            "$ref": "#/components/parameters/andGroup"
+          },
+          {
+            "name": "id",
+            "in": "query",
+            "description": "Filter on `id`, as `<operator>.<operand>`. See the operation description for the operators, the `not.` prefix and how several parameters combine.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "query",
+            "description": "The category's display name. Filter on `name`, as `<operator>.<operand>`. See the operation description for the operators, the `not.` prefix and how several parameters combine.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "code",
+            "in": "query",
+            "description": "An optional short code, unique across categories. Declared so a 409 on this entity's update is reachable — a duplicate on a field declared unique is the only way a PATCH reaches one, and every documented status has to be reachable. Filter on `code`, as `<operator>.<operand>`. See the operation description for the operators, the `not.` prefix and how several parameters combine.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of rows the caller's policy admits.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Cache-Control"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/categoriesPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/unprocessable"
+          }
+        },
+        "security": [
+          { },
+          {
+            "alvoApiKey": [ ]
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "categories"
+        ],
+        "summary": "Create one 'categories' row",
+        "description": "Creates one row and returns it, with `Location` naming the new row and `ETag` carrying its version.\n\nThe row's `id` is assigned by the store and must not be sent. Framework-managed columns are the framework's to write and are refused in a payload — with the one exception of `tenant_id` on a tenant-scoped entity, which legitimately places the new row in a tenant and is then judged by the tenant scope. A key the entity does not declare is refused with 422 rather than ignored.\n\n**`Idempotency-Key` makes the create retry-safe.** The first request is performed and its result recorded against the key *and the caller's own scope*; a retry carrying the same key and the same body is answered with the first result and writes no second row, and the same key with a different body is 409. An anonymous caller's key is refused (422): a record's identity is the key plus the caller, and every anonymous caller shares one reserved identity, so their keys would share one space.\n\n**If your role may create this entity but not read it back, the retry is still 201, never 403.** The body then carries only `id` — the same id your original `201` and its `Location` already gave you — rather than a re-read of a row your role cannot see. A retry must not be worse than the create it replays.\n\n**A create carrying `If-Match` or `If-None-Match` is refused with 412.** There is no stored record for a version to be compared against and this API assigns the new row's id itself, so neither header can be evaluated — and the rule this feature is built on is that a precondition which cannot be evaluated is refused rather than ignored, because a 201 would tell a caller their condition held. Note what this means for a client that blanket-attaches `If-Match` to every mutating request, as several SDKs do: it will be refused here. There is no `PUT`, so create-if-absent was never on offer in the first place. Send the create unconditionally, and `If-Match` on the update that follows it.",
+        "operationId": "categories.create",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/idempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "description": "The row to write, as the entity's declared fields.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/categoriesCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The created row. 'Location' names it, and 'ETag' carries the version a later conditional write may send as 'If-Match' — so a first conditional write needs no read of its own.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Cache-Control"
+              },
+              "Location": {
+                "$ref": "#/components/headers/Location"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/categories"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/unprocessable"
+          },
+          "412": {
+            "$ref": "#/components/responses/preconditionFailed"
+          },
+          "409": {
+            "$ref": "#/components/responses/conflict"
+          }
+        },
+        "security": [
+          { },
+          {
+            "alvoApiKey": [ ]
+          }
+        ]
+      }
+    },
+    "/api/categories/{id}": {
+      "get": {
+        "tags": [
+          "categories"
+        ],
+        "summary": "Read one 'categories' row",
+        "description": "Reads one row by id.\n\nA row the caller's policy excludes reads exactly like one that was never there: 404, with the same problem `type` and the same prose, so the status cannot be used to prove a row exists.\n\n**This entity's rows carry no version, so no `ETag` is returned** and no conditional request against one is possible. A row version comes from `audit: true` in the descriptor; without it there is no column the framework writes on every change, and a version a caller can rewrite is not a version. `If-None-Match` therefore never matches here, and `If-Match` is ignored.\n\n**`If-Match` is ignored on a read.** On a `GET`, RFC 9110 §13.1.1 means \"send the body only if it is still this version\", which saves a caller nothing they cannot get by comparing the `ETag` they were sent — so the header is neither honoured nor refused here. That is the read side's asymmetry with the write side, and it is safe for one reason: an unhonoured precondition on a read costs a response body the caller said they already had, where on a write it would cost somebody their change.",
+        "operationId": "categories.get",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/rowId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The row.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Cache-Control"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/categories"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/notFound"
+          }
+        },
+        "security": [
+          { },
+          {
+            "alvoApiKey": [ ]
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "categories"
+        ],
+        "summary": "Update one 'categories' row",
+        "description": "Partially updates one row and returns it. A field the body does not mention keeps its stored value — which is why this is a `PATCH` and there is no `PUT`: the underlying update is partial by contract, so a `PUT` would advertise whole-resource replacement that never happens.\n\nA write to a read-only field is refused with 422 rather than silently dropped, and so is a key the entity does not declare. `id` and the framework-managed columns can never be rewritten, `tenant_id` included: a row does not move between tenants.\n\n**This entity's rows carry no version, so this write cannot be conditioned.** A row version comes from `audit: true` in the descriptor; without it there is no column the framework writes on every change, and a version a caller can rewrite is not a version. No `ETag` is ever returned for a row of this entity, so there is no tag a caller could ever send back — and an `If-Match` naming a version is therefore **refused with 412**, never ignored, because a success would tell a caller their condition held when nothing was compared. `If-None-Match` is refused with 412 here as it is on every write. The one precondition that is accepted is `If-Match: *`, and it changes nothing: it asks only that the row still exist, which an absent row already answers with 404. Neither header is offered as a parameter on this operation for that reason — a parameter is an invitation to send a value, and there is no value to send. Note what this means for a client that blanket-attaches `If-Match` to every mutating request, as several SDKs do: unless it sends `*`, it is refused here. Add `audit: true` to the entity to make a conditional write possible.\n\n**`Idempotency-Key` is accepted and ignored here — a known limitation, and this is what it costs.** The row's end state is unaffected: an update assigns *absolute* values to named fields, so applying it twice leaves exactly the state applying it once leaves, and there is no duplicate row to prevent. The *outcome you observe* is another matter. If the 200 is lost to a dropped connection and you retry the identical request, the retry assigns the same absolute values again and is answered 200 — so unlike an audited entity, there is no 412 to misread. What you cannot learn is whether anybody changed the row between your two attempts: this entity keeps no version, so the retry overwrites a concurrent change exactly as the first attempt would have, and silently. **Read the row back and compare it with what you sent** before treating the write as settled. That is the whole of retry safety on this verb here; `audit: true` on the entity is what buys the rest. Refusing the header instead would break the widespread client habit of attaching it to every mutating request and would reject requests that are otherwise fine, so it is accepted — and declared here rather than left to be discovered.",
+        "operationId": "categories.update",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/rowId"
+          }
+        ],
+        "requestBody": {
+          "description": "The row to write, as the entity's declared fields.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/categoriesPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The row as it now stands.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Cache-Control"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/categories"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/unprocessable"
+          },
+          "404": {
+            "$ref": "#/components/responses/notFound"
+          },
+          "412": {
+            "description": "A precondition was supplied that this entity cannot answer. Its rows carry no version — 'audit: true' is what mints one — so an 'If-Match' naming a version, and any 'If-None-Match', are refused here rather than ignored: there is nothing stored for either to be compared against. On this entity the status never means 'the version did not match', because no comparison is possible. 'If-Match: *' is accepted and is not this refusal.",
+            "$ref": "#/components/responses/preconditionFailed"
+          },
+          "409": {
+            "$ref": "#/components/responses/conflict"
+          }
+        },
+        "security": [
+          { },
+          {
+            "alvoApiKey": [ ]
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "categories"
+        ],
+        "summary": "Delete one 'categories' row",
+        "description": "Deletes one row and returns no body. A row the caller's policy excludes is 404, exactly as an absent one is.\n\n**This entity's rows carry no version, so this write cannot be conditioned.** A row version comes from `audit: true` in the descriptor; without it there is no column the framework writes on every change, and a version a caller can rewrite is not a version. No `ETag` is ever returned for a row of this entity, so there is no tag a caller could ever send back — and an `If-Match` naming a version is therefore **refused with 412**, never ignored, because a success would tell a caller their condition held when nothing was compared. `If-None-Match` is refused with 412 here as it is on every write. The one precondition that is accepted is `If-Match: *`, and it changes nothing: it asks only that the row still exist, which an absent row already answers with 404. Neither header is offered as a parameter on this operation for that reason — a parameter is an invitation to send a value, and there is no value to send. Note what this means for a client that blanket-attaches `If-Match` to every mutating request, as several SDKs do: unless it sends `*`, it is refused here. Add `audit: true` to the entity to make a conditional write possible.\n\n**`Idempotency-Key` is accepted and ignored here — the same known limitation as on the update.** Removing one row twice leaves the same state as removing it once, so nothing is duplicated; but a retry after a lost `204` is a **404 you cannot tell apart from somebody else's delete**, which is precisely the question a key would have answered. Read the row back rather than treating the second answer as evidence the first attempt did not land.",
+        "operationId": "categories.delete",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/rowId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The row was deleted. No body.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Cache-Control"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/notFound"
+          },
+          "412": {
+            "description": "A precondition was supplied that this entity cannot answer. Its rows carry no version — 'audit: true' is what mints one — so an 'If-Match' naming a version, and any 'If-None-Match', are refused here rather than ignored: there is nothing stored for either to be compared against. On this entity the status never means 'the version did not match', because no comparison is possible. 'If-Match: *' is accepted and is not this refusal.",
+            "$ref": "#/components/responses/preconditionFailed"
+          },
+          "409": {
+            "$ref": "#/components/responses/conflict"
+          }
+        },
+        "security": [
+          { },
+          {
+            "alvoApiKey": [ ]
+          }
+        ]
+      }
+    },
+    "/api/products": {
+      "get": {
+        "tags": [
+          "products"
+        ],
+        "summary": "List 'products' rows",
+        "description": "Reads a page of rows the caller's policy admits.\n\n**Filtering** follows PostgREST's spelling: every query parameter that is not one of the reserved names (order, limit, offset, after, select, or, and, not) names a field, and its value is `<operator>.<operand>` — `?year=gte.2020`. The operators are eq, neq, gt, gte, lt, lte, like, ilike, in, is. `in` takes a bracketed candidate list (`in.(skoda,vw)`) and `is` takes exactly `null`, `true` or `false`; `like`/`ilike` take a pattern. An unrecognised operator is refused with 422, never quietly read as equality, and an ordering operator applied to a type this API defines no total order over is refused too — so one filter means the same thing on every engine.\n\nSeveral parameters are one **conjunction** (AND), which is the only reading that keeps a filter narrowing as terms are added. `or=(…)` and `and=(…)` group terms explicitly and may nest, and prefixing any parameter name or group keyword with `not.` negates it (`not.color=eq.red`, `not.or=(…)`).\n\n**A field that is unavailable to the caller is refused exactly like one that does not exist**, in `filter`, `order` and `select` alike — the refusal names the parameter's role and never the field, so filtering, ordering or selecting cannot be used to discover a hidden field's name. The one exception is a field the descriptor also marks `required`: its name is published in the write schemas below, because a mandatory field a caller cannot see could not be supplied — see the overview.\n\nThe response is an envelope — `{ \"items\": [ … ], \"next\": <cursor or null> }` — and never a bare array. `next` is the cursor for the page after this one, and it is the *only* place that cursor appears: there is deliberately no `Link` or `Content-Range` header, so an agent reading the body never has to parse HTTP headers to keep paging.\n\n**A caller whose rule excludes every row is answered 200 with an empty page, not 403.** A rule compiles to a row-level `USING` predicate, so a caller who fails it receives an *allow* carrying a predicate that matches nothing. A 403 here means something else entirely: the operation is unconfigured for this entity, the entity is unknown to the applied descriptor, the caller has no tenant on a tenant-scoped entity, or the policy reads a caller value this caller does not carry.\n\n**Neither precondition header is honoured on a list.** A page has no version of its own to compare, so `If-Match` and `If-None-Match` are ignored here — not refused, as they would be on a write. Condition a single row's read or write instead.\n\n**A nullable field cannot be a sort key**, and since every list over HTTP is paged (`limit` always resolves, to a configured default when the request names none), that is every list: `order` over a nullable field is refused with 422. A keyset cursor is a chain of comparisons with no `IS NULL` arm, so paging over a nullable key silently drops rows — which is why it is refused rather than answered. The consequence for the two null-placement modifiers is that `nullsfirst` and `nullslast` parse, and their effect is currently unobservable: the only reads that could show it are the unpaged ones this endpoint does not offer.",
+        "operationId": "products.list",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/select"
+          },
+          {
+            "$ref": "#/components/parameters/order"
+          },
+          {
+            "$ref": "#/components/parameters/limit"
+          },
+          {
+            "$ref": "#/components/parameters/offset"
+          },
+          {
+            "$ref": "#/components/parameters/after"
+          },
+          {
+            "$ref": "#/components/parameters/orGroup"
+          },
+          {
+            "$ref": "#/components/parameters/andGroup"
+          },
+          {
+            "name": "id",
+            "in": "query",
+            "description": "Filter on `id`, as `<operator>.<operand>`. See the operation description for the operators, the `not.` prefix and how several parameters combine.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "query",
+            "description": "The product's display name, as it appears on an invoice. Filter on `name`, as `<operator>.<operand>`. See the operation description for the operators, the `not.` prefix and how several parameters combine.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sku",
+            "in": "query",
+            "description": "The stock-keeping unit, unique across the catalogue. Filter on `sku`, as `<operator>.<operand>`. See the operation description for the operators, the `not.` prefix and how several parameters combine.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "contact",
+            "in": "query",
+            "description": "Who to ask about this product. Filter on `contact`, as `<operator>.<operand>`. See the operation description for the operators, the `not.` prefix and how several parameters combine.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Where the product is in its life cycle. Filter on `status`, as `<operator>.<operand>`. See the operation description for the operators, the `not.` prefix and how several parameters combine.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "price",
+            "in": "query",
+            "description": "The list price, excluding tax. Filter on `price`, as `<operator>.<operand>`. See the operation description for the operators, the `not.` prefix and how several parameters combine.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "released_on",
+            "in": "query",
+            "description": "The day the product went on sale. Filter on `released_on`, as `<operator>.<operand>`. See the operation description for the operators, the `not.` prefix and how several parameters combine.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "discontinued_at",
+            "in": "query",
+            "description": "When the product was withdrawn, if it has been. Filter on `discontinued_at`, as `<operator>.<operand>`. See the operation description for the operators, the `not.` prefix and how several parameters combine.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "in_stock",
+            "in": "query",
+            "description": "Whether any unit is currently on hand. Filter on `in_stock`, as `<operator>.<operand>`. See the operation description for the operators, the `not.` prefix and how several parameters combine.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "specs",
+            "in": "query",
+            "description": "Whatever the supplier publishes about the product. Filter on `specs`, as `<operator>.<operand>`. See the operation description for the operators, the `not.` prefix and how several parameters combine.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "notes",
+            "in": "query",
+            "description": "Free-form internal notes. Filter on `notes`, as `<operator>.<operand>`. See the operation description for the operators, the `not.` prefix and how several parameters combine.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "in": "query",
+            "description": "The URL segment this product is published under. Maintained outside the API. Filter on `slug`, as `<operator>.<operand>`. See the operation description for the operators, the `not.` prefix and how several parameters combine.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "category_id",
+            "in": "query",
+            "description": "The category this product belongs to. Filter on `category_id`, as `<operator>.<operand>`. See the operation description for the operators, the `not.` prefix and how several parameters combine.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "parent_id",
+            "in": "query",
+            "description": "An optional parent product. A self-reference, and the cheapest way to make a 409 on THIS entity's delete reachable: 'categories' is already made conflict-on-delete by 'category_id' above, and a third entity would only move the problem to whatever nothing references. Filter on `parent_id`, as `<operator>.<operand>`. See the operation description for the operators, the `not.` prefix and how several parameters combine.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "created_at",
+            "in": "query",
+            "description": "Filter on `created_at`, as `<operator>.<operand>`. See the operation description for the operators, the `not.` prefix and how several parameters combine.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "created_by",
+            "in": "query",
+            "description": "Filter on `created_by`, as `<operator>.<operand>`. See the operation description for the operators, the `not.` prefix and how several parameters combine.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "updated_at",
+            "in": "query",
+            "description": "Filter on `updated_at`, as `<operator>.<operand>`. See the operation description for the operators, the `not.` prefix and how several parameters combine.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "updated_by",
+            "in": "query",
+            "description": "Filter on `updated_by`, as `<operator>.<operand>`. See the operation description for the operators, the `not.` prefix and how several parameters combine.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of rows the caller's policy admits.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Cache-Control"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/productsPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/unprocessable"
+          }
+        },
+        "security": [
+          { },
+          {
+            "alvoApiKey": [ ]
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "products"
+        ],
+        "summary": "Create one 'products' row",
+        "description": "Creates one row and returns it, with `Location` naming the new row and `ETag` carrying its version.\n\nThe row's `id` is assigned by the store and must not be sent. Framework-managed columns are the framework's to write and are refused in a payload — with the one exception of `tenant_id` on a tenant-scoped entity, which legitimately places the new row in a tenant and is then judged by the tenant scope. A key the entity does not declare is refused with 422 rather than ignored.\n\n**`Idempotency-Key` makes the create retry-safe.** The first request is performed and its result recorded against the key *and the caller's own scope*; a retry carrying the same key and the same body is answered with the first result and writes no second row, and the same key with a different body is 409. An anonymous caller's key is refused (422): a record's identity is the key plus the caller, and every anonymous caller shares one reserved identity, so their keys would share one space.\n\n**If your role may create this entity but not read it back, the retry is still 201, never 403.** The body then carries only `id` — the same id your original `201` and its `Location` already gave you — rather than a re-read of a row your role cannot see. A retry must not be worse than the create it replays.\n\n**A create carrying `If-Match` or `If-None-Match` is refused with 412.** There is no stored record for a version to be compared against and this API assigns the new row's id itself, so neither header can be evaluated — and the rule this feature is built on is that a precondition which cannot be evaluated is refused rather than ignored, because a 201 would tell a caller their condition held. Note what this means for a client that blanket-attaches `If-Match` to every mutating request, as several SDKs do: it will be refused here. There is no `PUT`, so create-if-absent was never on offer in the first place. Send the create unconditionally, and `If-Match` on the update that follows it.",
+        "operationId": "products.create",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/idempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "description": "The row to write, as the entity's declared fields.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/productsCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The created row. 'Location' names it, and 'ETag' carries the version a later conditional write may send as 'If-Match' — so a first conditional write needs no read of its own.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Cache-Control"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              },
+              "Location": {
+                "$ref": "#/components/headers/Location"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/products"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/unprocessable"
+          },
+          "412": {
+            "$ref": "#/components/responses/preconditionFailed"
+          },
+          "409": {
+            "$ref": "#/components/responses/conflict"
+          }
+        },
+        "security": [
+          { },
+          {
+            "alvoApiKey": [ ]
+          }
+        ]
+      }
+    },
+    "/api/products/{id}": {
+      "get": {
+        "tags": [
+          "products"
+        ],
+        "summary": "Read one 'products' row",
+        "description": "Reads one row by id.\n\nA row the caller's policy excludes reads exactly like one that was never there: 404, with the same problem `type` and the same prose, so the status cannot be used to prove a row exists.\n\n`If-None-Match` **is** honoured: a caller who already holds the current version is answered 304 with the `ETag` and no body. Comparison is RFC 9110 §13.1.2's *weak* one, so a `W/` prefix is ignored — deliberately not the strong comparison `If-Match` gets on a write.\n\n**`If-Match` is ignored on a read.** On a `GET`, RFC 9110 §13.1.1 means \"send the body only if it is still this version\", which saves a caller nothing they cannot get by comparing the `ETag` they were sent — so the header is neither honoured nor refused here. That is the read side's asymmetry with the write side, and it is safe for one reason: an unhonoured precondition on a read costs a response body the caller said they already had, where on a write it would cost somebody their change.",
+        "operationId": "products.get",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/rowId"
+          },
+          {
+            "$ref": "#/components/parameters/ifNoneMatch"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The row.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Cache-Control"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/products"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The caller's 'If-None-Match' covers the current version, so the body is omitted. The 'ETag' is repeated (RFC 9110 §15.4.5) so a client need not re-read the row to get its tag back.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Cache-Control"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/notFound"
+          }
+        },
+        "security": [
+          { },
+          {
+            "alvoApiKey": [ ]
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "products"
+        ],
+        "summary": "Update one 'products' row",
+        "description": "Partially updates one row and returns it. A field the body does not mention keeps its stored value — which is why this is a `PATCH` and there is no `PUT`: the underlying update is partial by contract, so a `PUT` would advertise whole-resource replacement that never happens.\n\nA write to a read-only field is refused with 422 rather than silently dropped, and so is a key the entity does not declare. `id` and the framework-managed columns can never be rewritten, `tenant_id` included: a row does not move between tenants.\n\n**`If-Match` conditions the write on the row's current version**, compared with RFC 9110 §13.1.1's *strong* comparison. Send back one `ETag` exactly as a previous response returned it, or `*` to require only that the row still exist. Anything this API cannot turn into exactly one version it minted — several tags, a weak `W/` tag, an opaque value it never issued — is 412, never ignored. `If-None-Match` is refused with 412 as well: this API compares a row against the version a caller *holds*, and has no channel for \"act only if the row is not at this version\". That is a labelled deviation from RFC 9110 §13.1.2, which would let a non-matching `If-None-Match` simply succeed — Alvo cannot evaluate the header at all, so a conforming success would be indistinguishable from a precondition that was never checked.\n\n**`Idempotency-Key` is accepted and ignored here — a known limitation, and this is what it costs.** The row's end state is unaffected: an update assigns *absolute* values to named fields, so applying it twice leaves exactly the state applying it once leaves, and there is no duplicate row to prevent. The *outcome you observe* is another matter. If you send `PATCH … If-Match: \"v1\"`, the 200 is lost to a dropped connection, and you retry the identical request, the write has landed and the row is at `v2` — so the retry is **412, and you cannot tell it apart from someone else having changed the row**. Resolving that 412 the usual way (re-read, re-merge, re-apply) would clobber a genuinely concurrent change if it *was* someone else. A key would have told you it was your own write. So retry safety on this verb is `If-Match` plus a re-read, not a key: after a lost response, **read the row back and compare it with what you sent** before deciding the write did not land. Refusing the header instead would break the widespread client habit of attaching it to every mutating request and would reject requests that are otherwise fine, so it is accepted — and declared here rather than left to be discovered.",
+        "operationId": "products.update",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/rowId"
+          },
+          {
+            "$ref": "#/components/parameters/ifMatch"
+          }
+        ],
+        "requestBody": {
+          "description": "The row to write, as the entity's declared fields.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/productsPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The row as it now stands.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Cache-Control"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/products"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/unprocessable"
+          },
+          "404": {
+            "$ref": "#/components/responses/notFound"
+          },
+          "412": {
+            "$ref": "#/components/responses/preconditionFailed"
+          },
+          "409": {
+            "$ref": "#/components/responses/conflict"
+          }
+        },
+        "security": [
+          { },
+          {
+            "alvoApiKey": [ ]
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "products"
+        ],
+        "summary": "Delete one 'products' row",
+        "description": "Deletes one row and returns no body. A row the caller's policy excludes is 404, exactly as an absent one is.\n\n**`If-Match` conditions the delete** on the row's current version, and `If-None-Match` is refused with 412 — both exactly as on the update, including the wording of what cannot be compared.\n\n**`Idempotency-Key` is accepted and ignored here — the same known limitation as on the update.** Removing one row twice leaves the same state as removing it once, so nothing is duplicated; but a retry after a lost `204` is a **404 (or a 412) you cannot tell apart from somebody else's delete**, which is precisely the question a key would have answered. Read the row back rather than treating the second answer as evidence the first attempt did not land.",
+        "operationId": "products.delete",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/rowId"
+          },
+          {
+            "$ref": "#/components/parameters/ifMatch"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The row was deleted. No body.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Cache-Control"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/notFound"
+          },
+          "412": {
+            "$ref": "#/components/responses/preconditionFailed"
+          },
+          "409": {
+            "$ref": "#/components/responses/conflict"
+          }
+        },
+        "security": [
+          { },
+          {
+            "alvoApiKey": [ ]
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "categories": {
+        "title": "categories",
+        "required": [
+          "id",
+          "name",
+          "code"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "readOnly": true,
+            "example": "3f8d6c1e-9b47-4a5f-8c21-0d7e5a2b6f04"
+          },
+          "name": {
+            "maxLength": 60,
+            "type": "string",
+            "description": "The category's display name."
+          },
+          "code": {
+            "maxLength": 12,
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "An optional short code, unique across categories. Declared so a 409 on this entity's update is reachable — a duplicate on a field declared unique is the only way a PATCH reaches one, and every documented status has to be reachable."
+          }
+        },
+        "description": "A product category. Not audited, so its rows carry no version — no ETag is minted for them and no conditional read or write of one is possible.\n\nOne row as a single read, a create or an update returns it. Every field is present, even one with no value — that field is present and null. Fields marked read-only are written by the framework and refused in a request body."
+      },
+      "categoriesCreate": {
+        "title": "categoriesCreate",
+        "required": [
+          "name"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "maxLength": 60,
+            "type": "string",
+            "description": "The category's display name."
+          },
+          "code": {
+            "maxLength": 12,
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "An optional short code, unique across categories. Declared so a 409 on this entity's update is reachable — a duplicate on a field declared unique is the only way a PATCH reaches one, and every documented status has to be reachable."
+          }
+        },
+        "description": "The row to create. A field declared `required` by the descriptor must be present; the row's `id` and the framework's own columns are assigned by Alvo and are refused if supplied."
+      },
+      "categoriesPage": {
+        "title": "categoriesPage",
+        "required": [
+          "items",
+          "next"
+        ],
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/categoriesPageItem"
+            },
+            "description": "The rows in this page, in the requested order."
+          },
+          "next": {
+            "maxLength": 512,
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "The opaque cursor for the next page, or null when this page is the last. Send it back verbatim as `after`; it is the provider's to interpret and must not be decoded."
+          }
+        },
+        "description": "One page of rows, plus the cursor that reads the page after it."
+      },
+      "categoriesPageItem": {
+        "title": "categoriesPageItem",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "readOnly": true,
+            "example": "3f8d6c1e-9b47-4a5f-8c21-0d7e5a2b6f04"
+          },
+          "name": {
+            "maxLength": 60,
+            "type": "string",
+            "description": "The category's display name."
+          },
+          "code": {
+            "maxLength": 12,
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "An optional short code, unique across categories. Declared so a 409 on this entity's update is reachable — a duplicate on a field declared unique is the only way a PATCH reaches one, and every documented status has to be reachable."
+          }
+        },
+        "description": "A product category. Not audited, so its rows carry no version — no ETag is minted for them and no conditional read or write of one is possible.\n\nOne row inside a list's page. Every field is present unless the request narrowed the projection with `select`; a field with no value is present and null. Fields marked read-only are written by the framework and refused in a request body."
+      },
+      "categoriesPatch": {
+        "title": "categoriesPatch",
+        "type": "object",
+        "properties": {
+          "name": {
+            "maxLength": 60,
+            "type": "string",
+            "description": "The category's display name."
+          },
+          "code": {
+            "maxLength": 12,
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "An optional short code, unique across categories. Declared so a 409 on this entity's update is reachable — a duplicate on a field declared unique is the only way a PATCH reaches one, and every documented status has to be reachable."
+          }
+        },
+        "description": "The fields to change. A field this object does not mention keeps its stored value, so nothing here is mandatory — that is what makes the verb PATCH rather than PUT."
+      },
+      "problemDetails": {
+        "title": "problemDetails",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail"
+        ],
+        "type": "object",
+        "properties": {
+          "type": {
+            "enum": [
+              "https://alvo.dev/errors/validation",
+              "https://alvo.dev/errors/malformed-query",
+              "https://alvo.dev/errors/forbidden",
+              "https://alvo.dev/errors/out-of-scope",
+              "https://alvo.dev/errors/not-found",
+              "https://alvo.dev/errors/precondition-failed",
+              "https://alvo.dev/errors/idempotency-conflict",
+              "https://alvo.dev/errors/conflict",
+              "https://alvo.dev/errors/unauthenticated",
+              "https://alvo.dev/errors/unreadable-request",
+              "https://alvo.dev/errors/internal"
+            ],
+            "type": "string",
+            "description": "The classification to branch on. Every value is listed here, so a client needs no prose: the namespace is `https://alvo.dev/errors/` and the slug names the kind of refusal.",
+            "format": "uri"
+          },
+          "title": {
+            "type": "string",
+            "description": "The status code's standard reason phrase. Carries no Alvo-specific information."
+          },
+          "status": {
+            "type": "integer",
+            "description": "The HTTP status code, repeated in the body as RFC 9457 §3.1.2 allows.",
+            "format": "int32"
+          },
+          "detail": {
+            "type": "string",
+            "description": "What went wrong, in prose. Built from constants and server-owned values only — it never echoes a caller-supplied field name or value, because a refusal is answered before authorization on some paths and would otherwise be the cheapest oracle in the API."
+          },
+          "violations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/problemViolation"
+            },
+            "description": "Every itemised reason the request was refused, not only the first — so one round trip is enough to repair it. Present on a refusal that has itemised reasons (a malformed query string, a body the entity's declared shape refuses) and absent on one that does not."
+          }
+        },
+        "description": "An RFC 9457 problem document. Branch on `type`; `detail` is prose and, per §3.1.1, ought not be parsed. A `type` keys on the *kind* of refusal and never on its reason — one value covers every policy refusal, and one covers both an absent row and a row the caller may not see."
+      },
+      "problemViolation": {
+        "title": "problemViolation",
+        "required": [
+          "pointer",
+          "code",
+          "message"
+        ],
+        "type": "object",
+        "properties": {
+          "pointer": {
+            "type": "string",
+            "description": "An RFC 6901 JSON Pointer into the request body, or the *role* of the query-string parameter concerned (`filter`, `order`, `limit`, `offset`, `after`, `select`). A role rather than a name, because in this filter grammar a parameter's name is a field name.",
+            "example": "/name"
+          },
+          "code": {
+            "type": "string",
+            "description": "A stable kebab-case code for the kind of violation, safe to branch on.",
+            "example": "max-length"
+          },
+          "message": {
+            "type": "string",
+            "description": "One sentence, free of caller-supplied text."
+          },
+          "fixSuggestion": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "What to change. Every refusal Alvo itself raises carries one; it is nullable for a violation forwarded from a source that has none to offer, where an empty string would be indistinguishable from a blank suggestion."
+          }
+        },
+        "description": "One machine-readable reason a request was refused."
+      },
+      "products": {
+        "title": "products",
+        "required": [
+          "id",
+          "name",
+          "sku",
+          "contact",
+          "status",
+          "price",
+          "released_on",
+          "discontinued_at",
+          "in_stock",
+          "specs",
+          "notes",
+          "slug",
+          "category_id",
+          "parent_id",
+          "created_at",
+          "created_by",
+          "updated_at",
+          "updated_by"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "readOnly": true,
+            "example": "3f8d6c1e-9b47-4a5f-8c21-0d7e5a2b6f04"
+          },
+          "name": {
+            "maxLength": 120,
+            "type": "string",
+            "description": "The product's display name, as it appears on an invoice."
+          },
+          "sku": {
+            "maxLength": 40,
+            "pattern": "^(?:[A-Z]{3}-[0-9]{4})$",
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "The stock-keeping unit, unique across the catalogue."
+          },
+          "contact": {
+            "maxLength": 120,
+            "pattern": "^(?:[^@\\s]+@[^@\\s.]+(\\.[^@\\s.]+)+)$",
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "Who to ask about this product.",
+            "format": "email",
+            "example": "someone@example.com"
+          },
+          "status": {
+            "enum": [
+              "draft",
+              "active",
+              "retired"
+            ],
+            "type": "string",
+            "description": "Where the product is in its life cycle.",
+            "example": "draft"
+          },
+          "price": {
+            "type": [
+              "null",
+              "number"
+            ],
+            "description": "The list price, excluding tax. At most 9 digits in total, 2 of them after the decimal point.",
+            "format": "decimal"
+          },
+          "released_on": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "The day the product went on sale.",
+            "format": "date",
+            "example": "2026-01-31"
+          },
+          "discontinued_at": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "When the product was withdrawn, if it has been.",
+            "format": "date-time",
+            "example": "2026-01-31T09:30:00+00:00"
+          },
+          "in_stock": {
+            "type": [
+              "null",
+              "boolean"
+            ],
+            "description": "Whether any unit is currently on hand."
+          },
+          "specs": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "Whatever the supplier publishes about the product. Accepts any JSON value on a write, and reads back as a string carrying that value's JSON text."
+          },
+          "notes": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "Free-form internal notes."
+          },
+          "slug": {
+            "maxLength": 40,
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "The URL segment this product is published under. Maintained outside the API.",
+            "readOnly": true
+          },
+          "category_id": {
+            "type": "string",
+            "description": "The category this product belongs to.",
+            "format": "uuid",
+            "example": "3f8d6c1e-9b47-4a5f-8c21-0d7e5a2b6f04"
+          },
+          "parent_id": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "An optional parent product. A self-reference, and the cheapest way to make a 409 on THIS entity's delete reachable: 'categories' is already made conflict-on-delete by 'category_id' above, and a third entity would only move the problem to whatever nothing references.",
+            "format": "uuid",
+            "example": "3f8d6c1e-9b47-4a5f-8c21-0d7e5a2b6f04"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "readOnly": true,
+            "example": "2026-01-31T09:30:00+00:00"
+          },
+          "created_by": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid",
+            "readOnly": true,
+            "example": "3f8d6c1e-9b47-4a5f-8c21-0d7e5a2b6f04"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "readOnly": true,
+            "example": "2026-01-31T09:30:00+00:00"
+          },
+          "updated_by": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid",
+            "readOnly": true,
+            "example": "3f8d6c1e-9b47-4a5f-8c21-0d7e5a2b6f04"
+          }
+        },
+        "description": "A product in the catalogue. Audited, so every row carries a version and every read and write of one can be made conditional.\n\nOne row as a single read, a create or an update returns it. Every field is present, even one with no value — that field is present and null. Fields marked read-only are written by the framework and refused in a request body."
+      },
+      "productsCreate": {
+        "title": "productsCreate",
+        "required": [
+          "name",
+          "status",
+          "activation_secret",
+          "category_id"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "maxLength": 120,
+            "type": "string",
+            "description": "The product's display name, as it appears on an invoice."
+          },
+          "sku": {
+            "maxLength": 40,
+            "pattern": "^(?:[A-Z]{3}-[0-9]{4})$",
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "The stock-keeping unit, unique across the catalogue."
+          },
+          "contact": {
+            "maxLength": 120,
+            "pattern": "^(?:[^@\\s]+@[^@\\s.]+(\\.[^@\\s.]+)+)$",
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "Who to ask about this product.",
+            "format": "email"
+          },
+          "status": {
+            "enum": [
+              "draft",
+              "active",
+              "retired"
+            ],
+            "type": "string",
+            "description": "Where the product is in its life cycle."
+          },
+          "price": {
+            "type": [
+              "null",
+              "number"
+            ],
+            "description": "The list price, excluding tax. At most 9 digits in total, 2 of them after the decimal point.",
+            "format": "decimal"
+          },
+          "released_on": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "The day the product went on sale.",
+            "format": "date"
+          },
+          "discontinued_at": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "When the product was withdrawn, if it has been.",
+            "format": "date-time"
+          },
+          "in_stock": {
+            "type": [
+              "null",
+              "boolean"
+            ],
+            "description": "Whether any unit is currently on hand."
+          },
+          "specs": {
+            "description": "Whatever the supplier publishes about the product. Accepts any JSON value on a write, and reads back as a string carrying that value's JSON text."
+          },
+          "notes": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "Free-form internal notes."
+          },
+          "activation_secret": {
+            "maxLength": 64,
+            "type": "string",
+            "description": "A one-time activation token the caller must supply on create and can never read back."
+          },
+          "category_id": {
+            "type": "string",
+            "description": "The category this product belongs to.",
+            "format": "uuid"
+          },
+          "parent_id": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "An optional parent product. A self-reference, and the cheapest way to make a 409 on THIS entity's delete reachable: 'categories' is already made conflict-on-delete by 'category_id' above, and a third entity would only move the problem to whatever nothing references.",
+            "format": "uuid"
+          }
+        },
+        "description": "The row to create. A field declared `required` by the descriptor must be present; the row's `id` and the framework's own columns are assigned by Alvo and are refused if supplied."
+      },
+      "productsPage": {
+        "title": "productsPage",
+        "required": [
+          "items",
+          "next"
+        ],
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/productsPageItem"
+            },
+            "description": "The rows in this page, in the requested order."
+          },
+          "next": {
+            "maxLength": 512,
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "The opaque cursor for the next page, or null when this page is the last. Send it back verbatim as `after`; it is the provider's to interpret and must not be decoded."
+          }
+        },
+        "description": "One page of rows, plus the cursor that reads the page after it."
+      },
+      "productsPageItem": {
+        "title": "productsPageItem",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "readOnly": true,
+            "example": "3f8d6c1e-9b47-4a5f-8c21-0d7e5a2b6f04"
+          },
+          "name": {
+            "maxLength": 120,
+            "type": "string",
+            "description": "The product's display name, as it appears on an invoice."
+          },
+          "sku": {
+            "maxLength": 40,
+            "pattern": "^(?:[A-Z]{3}-[0-9]{4})$",
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "The stock-keeping unit, unique across the catalogue."
+          },
+          "contact": {
+            "maxLength": 120,
+            "pattern": "^(?:[^@\\s]+@[^@\\s.]+(\\.[^@\\s.]+)+)$",
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "Who to ask about this product.",
+            "format": "email",
+            "example": "someone@example.com"
+          },
+          "status": {
+            "enum": [
+              "draft",
+              "active",
+              "retired"
+            ],
+            "type": "string",
+            "description": "Where the product is in its life cycle.",
+            "example": "draft"
+          },
+          "price": {
+            "type": [
+              "null",
+              "number"
+            ],
+            "description": "The list price, excluding tax. At most 9 digits in total, 2 of them after the decimal point.",
+            "format": "decimal"
+          },
+          "released_on": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "The day the product went on sale.",
+            "format": "date",
+            "example": "2026-01-31"
+          },
+          "discontinued_at": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "When the product was withdrawn, if it has been.",
+            "format": "date-time",
+            "example": "2026-01-31T09:30:00+00:00"
+          },
+          "in_stock": {
+            "type": [
+              "null",
+              "boolean"
+            ],
+            "description": "Whether any unit is currently on hand."
+          },
+          "specs": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "Whatever the supplier publishes about the product. Accepts any JSON value on a write, and reads back as a string carrying that value's JSON text."
+          },
+          "notes": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "Free-form internal notes."
+          },
+          "slug": {
+            "maxLength": 40,
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "The URL segment this product is published under. Maintained outside the API.",
+            "readOnly": true
+          },
+          "category_id": {
+            "type": "string",
+            "description": "The category this product belongs to.",
+            "format": "uuid",
+            "example": "3f8d6c1e-9b47-4a5f-8c21-0d7e5a2b6f04"
+          },
+          "parent_id": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "An optional parent product. A self-reference, and the cheapest way to make a 409 on THIS entity's delete reachable: 'categories' is already made conflict-on-delete by 'category_id' above, and a third entity would only move the problem to whatever nothing references.",
+            "format": "uuid",
+            "example": "3f8d6c1e-9b47-4a5f-8c21-0d7e5a2b6f04"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "readOnly": true,
+            "example": "2026-01-31T09:30:00+00:00"
+          },
+          "created_by": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid",
+            "readOnly": true,
+            "example": "3f8d6c1e-9b47-4a5f-8c21-0d7e5a2b6f04"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "readOnly": true,
+            "example": "2026-01-31T09:30:00+00:00"
+          },
+          "updated_by": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid",
+            "readOnly": true,
+            "example": "3f8d6c1e-9b47-4a5f-8c21-0d7e5a2b6f04"
+          }
+        },
+        "description": "A product in the catalogue. Audited, so every row carries a version and every read and write of one can be made conditional.\n\nOne row inside a list's page. Every field is present unless the request narrowed the projection with `select`; a field with no value is present and null. Fields marked read-only are written by the framework and refused in a request body."
+      },
+      "productsPatch": {
+        "title": "productsPatch",
+        "type": "object",
+        "properties": {
+          "name": {
+            "maxLength": 120,
+            "type": "string",
+            "description": "The product's display name, as it appears on an invoice."
+          },
+          "sku": {
+            "maxLength": 40,
+            "pattern": "^(?:[A-Z]{3}-[0-9]{4})$",
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "The stock-keeping unit, unique across the catalogue."
+          },
+          "contact": {
+            "maxLength": 120,
+            "pattern": "^(?:[^@\\s]+@[^@\\s.]+(\\.[^@\\s.]+)+)$",
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "Who to ask about this product.",
+            "format": "email"
+          },
+          "status": {
+            "enum": [
+              "draft",
+              "active",
+              "retired"
+            ],
+            "type": "string",
+            "description": "Where the product is in its life cycle."
+          },
+          "price": {
+            "type": [
+              "null",
+              "number"
+            ],
+            "description": "The list price, excluding tax. At most 9 digits in total, 2 of them after the decimal point.",
+            "format": "decimal"
+          },
+          "released_on": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "The day the product went on sale.",
+            "format": "date"
+          },
+          "discontinued_at": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "When the product was withdrawn, if it has been.",
+            "format": "date-time"
+          },
+          "in_stock": {
+            "type": [
+              "null",
+              "boolean"
+            ],
+            "description": "Whether any unit is currently on hand."
+          },
+          "specs": {
+            "description": "Whatever the supplier publishes about the product. Accepts any JSON value on a write, and reads back as a string carrying that value's JSON text."
+          },
+          "notes": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "Free-form internal notes."
+          },
+          "activation_secret": {
+            "maxLength": 64,
+            "type": "string",
+            "description": "A one-time activation token the caller must supply on create and can never read back."
+          },
+          "category_id": {
+            "type": "string",
+            "description": "The category this product belongs to.",
+            "format": "uuid"
+          },
+          "parent_id": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "An optional parent product. A self-reference, and the cheapest way to make a 409 on THIS entity's delete reachable: 'categories' is already made conflict-on-delete by 'category_id' above, and a third entity would only move the problem to whatever nothing references.",
+            "format": "uuid"
+          }
+        },
+        "description": "The fields to change. A field this object does not mention keeps its stored value, so nothing here is mandatory — that is what makes the verb PATCH rather than PUT."
+      }
+    },
+    "responses": {
+      "unauthenticated": {
+        "description": "A credential was presented and cannot be used — unknown, revoked, expired, malformed, or issued for another tenant. One wording for all of them, so key ids cannot be enumerated one request at a time. 'WWW-Authenticate' names the scheme and the header to send. Presenting no credential at all is not a 401: an anonymous caller is judged by policy like any other.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/Cache-Control"
+          },
+          "WWW-Authenticate": {
+            "$ref": "#/components/headers/WWW-Authenticate"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/problemDetails"
+            }
+          }
+        }
+      },
+      "forbidden": {
+        "description": "The operation is refused. Two kinds, told apart by the problem 'type' and never by its prose: 'out-of-scope' means the presented key's scopes do not cover this entity and operation (grant the key the scope), and 'forbidden' means policy refused it (change a rule). A policy refusal here is an operation-level one — the operation is unconfigured, the entity is unknown to the applied descriptor, the caller has no tenant on a tenant-scoped entity, or the policy reads a caller value this caller does not carry. It is never 'your rule excluded these rows'; see the 200.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/Cache-Control"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/problemDetails"
+            }
+          }
+        }
+      },
+      "notFound": {
+        "description": "No such row — or one the caller's policy excludes. The two are indistinguishable on purpose, in the problem 'type' as much as in the prose, so a 404 cannot be used to prove a row exists.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/Cache-Control"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/problemDetails"
+            }
+          }
+        }
+      },
+      "preconditionFailed": {
+        "description": "A precondition this API cannot evaluate, or one that did not hold. A header it cannot compare is refused rather than ignored: ignoring it would be the lost update 'If-Match' exists to prevent, and the caller would read the success as proof it did not happen.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/Cache-Control"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/problemDetails"
+            }
+          }
+        }
+      },
+      "conflict": {
+        "description": "The request conflicts with what is already stored. Two kinds, told apart by the problem 'type': 'idempotency-conflict' means the 'Idempotency-Key' was already used by this caller for a request with a different body (retry with the same key and the same body to replay the first result, or send a fresh key); 'conflict' means a constraint the database enforces refused the write — a value another record already holds on a field declared unique, or a delete another record still references through a 'ref' declaring onDelete: restrict. The 'violations' array names the field for the first of those and carries a fix suggestion for both.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/Cache-Control"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/problemDetails"
+            }
+          }
+        }
+      },
+      "unprocessable": {
+        "description": "The request could not be acted on: a query string or body that is malformed, a body the entity's declared shape refuses, or a header this API cannot honour. The 'violations' array carries every reason at once — a pointer, a stable code and a fix suggestion each — never only the first, so one round trip is enough to repair the request.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/Cache-Control"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/problemDetails"
+            }
+          }
+        }
+      }
+    },
+    "parameters": {
+      "rowId": {
+        "name": "id",
+        "in": "path",
+        "description": "The row's key. A value routing cannot read as a GUID is a 404 from routing itself, before the endpoint runs; a well-formed key naming a row the caller may not see is also a 404, indistinguishable from one that does not exist.",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "ifMatch": {
+        "name": "If-Match",
+        "in": "header",
+        "description": "Perform the write only if the row is still at this version. One entity tag exactly as a previous response returned it, or `*` to require only that the row still exist. Anything else — several tags, a weak `W/` tag, a value this API never minted — is 412 rather than ignored, because ignoring a precondition is the lost update the header exists to prevent.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "ifNoneMatch": {
+        "name": "If-None-Match",
+        "in": "header",
+        "description": "Read the row only if it is no longer at one of these versions; otherwise 304 with no body. Compared with RFC 9110 §13.1.2's *weak* comparison, so a `W/` prefix is ignored — deliberately not the strong comparison `If-Match` gets on a write.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "idempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "description": "Makes this create retry-safe. The result is recorded against the key and the caller's own scope: the same key with the same body replays the first result and writes no second row, and the same key with a different body is 409. An anonymous caller's key is refused, because every anonymous caller shares one identity and their keys would share one space. The bound below is a **byte** bound — at most 255 bytes once UTF-8 encoded — so a key of non-ASCII characters reaches it sooner than `maxLength` suggests; an over-long key is refused rather than shortened, because two keys differing only past the cut would become one.",
+        "schema": {
+          "maxLength": 255,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "select": {
+        "name": "select",
+        "in": "query",
+        "description": "Comma-separated field names to return, in the order named. It narrows the *response* only — the read still fetches the whole row — so it saves bandwidth to the caller and nothing at the database. A field the caller may not read is refused exactly as an undeclared one is.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "order": {
+        "name": "order",
+        "in": "query",
+        "description": "`<field>[.asc|.desc][.nullsfirst|.nullslast]`, comma-separated for several keys, outermost first. The modifiers must appear in that order and each at most once, so one sort key has one spelling; an unrecognised modifier is refused rather than ignored. **A nullable field is refused as a sort key** — see the operation description for why, and for what that means for the two null-placement modifiers.",
+        "schema": {
+          "type": "string"
+        },
+        "example": "id.desc"
+      },
+      "limit": {
+        "name": "limit",
+        "in": "query",
+        "description": "How many rows this page carries. A value past the maximum is **refused, not clamped**: a client that asked for more and silently received fewer computes its paging from a number no response ever told it. Zero is refused too — it is a read that can never return a row.",
+        "schema": {
+          "maximum": 200,
+          "minimum": 1,
+          "type": "integer",
+          "format": "int32",
+          "default": 50
+        }
+      },
+      "offset": {
+        "name": "offset",
+        "in": "query",
+        "description": "How many rows to skip. Prefer `after`: an offset re-scans the skipped rows and shifts under concurrent writes, where a keyset cursor does neither.",
+        "schema": {
+          "minimum": 0,
+          "type": "integer",
+          "format": "int32"
+        }
+      },
+      "after": {
+        "name": "after",
+        "in": "query",
+        "description": "The keyset cursor a previous page returned as `next`, sent back verbatim. It is opaque and only the provider that issued it may interpret it, so it must not be decoded or constructed. A forged one yields an empty page rather than an error.",
+        "schema": {
+          "maxLength": 512,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "orGroup": {
+        "name": "or",
+        "in": "query",
+        "description": "A bracketed, comma-separated list of terms combined as a disjunction (OR): `or=(color.eq.red,make.in.(skoda,vw))`. Groups may nest, and either the keyword or any member may carry the `not.` prefix. Repeating the parameter conjoins the groups.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "andGroup": {
+        "name": "and",
+        "in": "query",
+        "description": "A bracketed, comma-separated list of terms combined as a conjunction (AND): `and=(color.eq.red,make.in.(skoda,vw))`. Groups may nest, and either the keyword or any member may carry the `not.` prefix. Repeating the parameter conjoins the groups.",
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "headers": {
+      "Cache-Control": {
+        "description": "Always `no-store`. These representations are policy-masked per caller and the `ETag` is minted over the row's version rather than over the response bytes, so no cache — shared or private — may keep the body. Keeping the tag alone is not caching a representation, which is what makes a conditional write still possible.",
+        "schema": {
+          "type": "string"
+        },
+        "example": "no-store"
+      },
+      "ETag": {
+        "description": "The row's version as a strong entity tag. Send it back verbatim as `If-Match` to make a later write conditional; it is compared octet-for-octet, so it must not be reformatted. Absent when the row has no version this caller can be given.",
+        "schema": {
+          "type": "string"
+        },
+        "example": "\"638712345678900000\""
+      },
+      "Location": {
+        "description": "The path of the created row, under the same route prefix the create was sent to.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "WWW-Authenticate": {
+        "description": "The RFC 7235 challenge, naming the scheme and the request header a credential is read from — so an agent can discover how to authenticate rather than guess. The header name is host configuration, which is why the challenge states it rather than assuming a default.",
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "securitySchemes": {
+      "alvoApiKey": {
+        "type": "apiKey",
+        "description": "An Alvo API key, presented as `<keyId>.<secret>`. A key that cannot be used — unknown, revoked, expired, malformed, or issued for another tenant — is a 401 with one wording for all of them. The header's name is host configuration; this is the name this host reads.",
+        "name": "X-Alvo-Api-Key",
+        "in": "header"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "categories",
+      "description": "A product category. Not audited, so its rows carry no version — no ETag is minted for them and no conditional read or write of one is possible."
+    },
+    {
+      "name": "products",
+      "description": "A product in the catalogue. Audited, so every row carries a version and every read and write of one can be made conditional."
+    }
+  ]
+}

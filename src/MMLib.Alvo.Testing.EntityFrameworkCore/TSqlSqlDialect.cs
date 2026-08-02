@@ -1,5 +1,7 @@
-﻿using MMLib.Alvo.Data.EntityFrameworkCore;
+﻿using MMLib.Alvo.Data;
+using MMLib.Alvo.Data.EntityFrameworkCore;
 using MMLib.Alvo.Schema;
+using System.Data.Common;
 
 namespace MMLib.Alvo.Testing.Data;
 
@@ -94,14 +96,53 @@ public sealed class TSqlSqlDialect : IAlvoSqlDialect
     }
 
     /// <summary>
-    /// T-SQL spells truncation as <c>OFFSET 0 ROWS FETCH NEXT &lt;n&gt; ROWS ONLY</c> — the
-    /// <c>OFFSET</c> is not optional there, which is exactly why this member is a default interface
-    /// member a differing dialect overrides rather than a shape baked into the composer.
+    /// T-SQL spells the whole window as one clause, offset first: <c>OFFSET &lt;m&gt; ROWS FETCH NEXT
+    /// &lt;n&gt; ROWS ONLY</c> — <c>OFFSET</c> is not optional there even with no caller-supplied offset,
+    /// which is exactly why this member takes both markers together rather than being split across two
+    /// members the way an earlier revision of this port shaped it. That split let this fake answer the
+    /// limit half correctly (hard-coding <c>OFFSET 0 ROWS</c> when no real offset existed) while the *pair*
+    /// would have been wrong the moment a real offset arrived — two conflicting <c>OFFSET</c> clauses in
+    /// one statement, a silently wrong page. One member that sees both values at once makes that
+    /// unrepresentable: with no offset it renders the same literal zero the old split version hard-coded,
+    /// and with one it renders the caller's real value instead.
     /// </summary>
     /// <param name="rowCountParameterMarker">The bind-parameter reference holding the row count.</param>
-    public string RowLimitClause(string rowCountParameterMarker)
+    /// <param name="rowOffsetParameterMarker">
+    /// The bind-parameter reference holding the number of rows to skip, or <see langword="null"/> for none —
+    /// rendered as the literal <c>0</c> rather than omitted, because T-SQL's <c>FETCH</c> cannot appear
+    /// without a preceding <c>OFFSET</c>. The literal is safe to format directly: it is a framework
+    /// constant standing in for "no offset was asked for," never caller-supplied text.
+    /// </param>
+    public string RowWindowClause(string rowCountParameterMarker, string? rowOffsetParameterMarker = null)
     {
         ArgumentNullException.ThrowIfNull(rowCountParameterMarker);
-        return $"OFFSET 0 ROWS FETCH NEXT {rowCountParameterMarker} ROWS ONLY";
+        var offset = rowOffsetParameterMarker ?? "0";
+        return $"OFFSET {offset} ROWS FETCH NEXT {rowCountParameterMarker} ROWS ONLY";
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <para>
+    /// <b>Nothing, and the reason is a property of this stand-in rather than of T-SQL.</b> A real SQL Server /
+    /// Azure SQL driver decodes this from <c>SqlException.Number</c> — <c>2627</c> (a unique <em>constraint</em>),
+    /// <c>2601</c> (a unique <em>index</em>; both mean the same thing to a caller and both must be handled, which
+    /// is the trap here) and <c>547</c> (a constraint conflict, which is how a <c>RESTRICT</c>-ed delete surfaces
+    /// on this engine). This package ships no <c>Microsoft.Data.SqlClient</c> reference, so it cannot see that
+    /// type, and inventing a decode from the base <see cref="DbException"/> would be exactly the guess the port
+    /// forbids: <see cref="DbException.SqlState"/> is not populated by SqlClient, so the only thing left to match
+    /// would be the message.
+    /// </para>
+    /// <para>
+    /// It is still worth having the member here rather than leaving it unimplemented, because this type's job is
+    /// to prove the seam is <em>sufficient</em> — and the fact that it is answerable honestly with
+    /// <see langword="null"/>, without producing a wrong <c>409</c>, is part of what that means. Answering
+    /// <see langword="null"/> costs only the improvement: the failure keeps propagating as a 500, exactly as it
+    /// did before #138.
+    /// </para>
+    /// </remarks>
+    public SqlConstraintViolation? DecodeConstraintViolation(DbException failure)
+    {
+        ArgumentNullException.ThrowIfNull(failure);
+        return null;
     }
 }

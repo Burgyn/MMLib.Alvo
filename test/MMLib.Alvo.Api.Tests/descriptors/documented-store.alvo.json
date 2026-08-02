@@ -1,0 +1,139 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "documented-store",
+  "description": "Two entities carrying every facet the generated OpenAPI document has to publish, and exactly one facet per reason: a declared field description, an enum, a maxLength, a built-in format, a descriptor-declared format (so a published 'pattern' is distinguishable from a published 'format'), a decimal whose precision/scale JSON Schema cannot express, a date and a datetime (the two wire encodings a type alone does not imply), a json field (whose request and response shapes genuinely differ), a nullable field (the sort key a paged read refuses), a readOnly field, an optional hidden field WITH its own description (so 'excluded from every schema' covers the prose as well as the name), a required-AND-hidden field (a mandatory secret a caller must supply on create but can never read back — the one case a hidden field's name is published, and only in the write schemas), and a required ref. 'products' is audited and 'categories' is not, which is what makes '304 and ETag are documented only where a row has a version' a claim two entities can disagree about — a one-entity descriptor would let that pass whichever way the code went.",
+  "auth": {
+    "providers": ["local"],
+    "roles": ["clerk"]
+  },
+  "formats": {
+    "sku-code": {
+      "pattern": "[A-Z]{3}-[0-9]{4}",
+      "description": "Three upper-case letters, a dash, four digits. Deliberately written without anchors, so the published pattern shows the anchoring the API applies rather than the author's."
+    }
+  },
+  "entities": {
+    "categories": {
+      "description": "A product category. Not audited, so its rows carry no version — no ETag is minted for them and no conditional read or write of one is possible.",
+      "fields": {
+        "name": {
+          "type": "string",
+          "description": "The category's display name.",
+          "required": true,
+          "maxLength": 60
+        },
+        "code": {
+          "type": "string",
+          "description": "An optional short code, unique across categories. Declared so a 409 on this entity's update is reachable — a duplicate on a field declared unique is the only way a PATCH reaches one, and every documented status has to be reachable.",
+          "maxLength": 12,
+          "unique": true
+        }
+      },
+      "rules": {
+        "list": "true",
+        "get": "true",
+        "create": "true",
+        "update": "true",
+        "delete": "true"
+      }
+    },
+    "products": {
+      "description": "A product in the catalogue. Audited, so every row carries a version and every read and write of one can be made conditional.",
+      "audit": true,
+      "fields": {
+        "name": {
+          "type": "string",
+          "description": "The product's display name, as it appears on an invoice.",
+          "required": true,
+          "maxLength": 120
+        },
+        "sku": {
+          "type": "string",
+          "description": "The stock-keeping unit, unique across the catalogue.",
+          "unique": true,
+          "maxLength": 40,
+          "format": "sku-code"
+        },
+        "contact": {
+          "type": "string",
+          "description": "Who to ask about this product.",
+          "maxLength": 120,
+          "format": "email"
+        },
+        "status": {
+          "type": "enum",
+          "description": "Where the product is in its life cycle.",
+          "required": true,
+          "values": ["draft", "active", "retired"]
+        },
+        "price": {
+          "type": "decimal",
+          "description": "The list price, excluding tax.",
+          "precision": 9,
+          "scale": 2
+        },
+        "released_on": {
+          "type": "date",
+          "description": "The day the product went on sale."
+        },
+        "discontinued_at": {
+          "type": "datetime",
+          "description": "When the product was withdrawn, if it has been."
+        },
+        "in_stock": {
+          "type": "boolean",
+          "description": "Whether any unit is currently on hand."
+        },
+        "specs": {
+          "type": "json",
+          "description": "Whatever the supplier publishes about the product."
+        },
+        "notes": {
+          "type": "text",
+          "description": "Free-form internal notes."
+        },
+        "slug": {
+          "type": "string",
+          "description": "The URL segment this product is published under. Maintained outside the API.",
+          "maxLength": 40,
+          "readOnly": true
+        },
+        "cost": {
+          "type": "decimal",
+          "description": "What the product costs us. Commercially confidential: neither the value nor the fact that this field exists may reach a caller.",
+          "precision": 9,
+          "scale": 2,
+          "hidden": true
+        },
+        "activation_secret": {
+          "type": "string",
+          "description": "A one-time activation token the caller must supply on create and can never read back.",
+          "required": true,
+          "hidden": true,
+          "maxLength": 64
+        },
+        "category_id": {
+          "type": "ref",
+          "description": "The category this product belongs to.",
+          "entity": "categories",
+          "required": true,
+          "onDelete": "restrict"
+        },
+        "parent_id": {
+          "type": "ref",
+          "description": "An optional parent product. A self-reference, and the cheapest way to make a 409 on THIS entity's delete reachable: 'categories' is already made conflict-on-delete by 'category_id' above, and a third entity would only move the problem to whatever nothing references.",
+          "entity": "products",
+          "onDelete": "restrict"
+        }
+      },
+      "rules": {
+        "list": "true",
+        "get": "true",
+        "create": "true",
+        "update": "true",
+        "delete": "true"
+      }
+    }
+  }
+}

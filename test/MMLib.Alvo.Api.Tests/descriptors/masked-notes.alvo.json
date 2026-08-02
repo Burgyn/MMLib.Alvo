@@ -1,0 +1,36 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "masked-notes",
+  "description": "Two entities carrying a hidden field, differing only in whether the caller may read them at all — so the hidden field's NAME can be shown indistinguishable from an unknown one for BOTH an authorized and a policy-denied caller. The carve-out being tested: a hidden field's name must stay indistinguishable from an unknown one, because Task 8 excludes it from the published document while the rest of the declared shape is public. The denied half exists because a denied decision carries an EMPTY mask, so resolving the policy only after the query parser made the two answers differ (422 for an undeclared field, 403 for a declared-hidden one) for exactly the caller most likely to be probing.",
+  "auth": {
+    "providers": ["local"]
+  },
+  "entities": {
+    "notes": {
+      "description": "A note with one field the descriptor author marked confidential. Every rule permits every caller, so a fact about the hidden field's name is not also a fact about access.",
+      "fields": {
+        "title": { "type": "string", "required": true, "maxLength": 120 },
+        "secret": { "type": "string", "hidden": true }
+      },
+      "rules": {
+        "list": "true",
+        "get": "true",
+        "create": "true",
+        "update": "true",
+        "delete": "true"
+      }
+    },
+    "ledgers": {
+      "description": "The same shape as 'notes', with NO 'list' or 'get' rule at all — so default-deny refuses every read outright, which is the only way to reach a DENIED decision for a lister. A role test like \"'auditor' in @user.roles\" cannot do it: a rule compiles to a row-level USING predicate, so a caller without the role gets an ALLOW carrying a predicate that matches nothing (200 with an empty page), never IsDenied. A caller must still hold the 'ledgers:read' scope to get this far, since a scope refusal answers a different slug from the endpoint filter and never resolves a policy. 'audit: true' is deliberate too: it gives a caller who may create but not get an ordinary create with a real ETag, so an id-only replay's ETag-less response is a verified degradation rather than a coincidence of this entity carrying no version column at all.",
+      "audit": true,
+      "fields": {
+        "title": { "type": "string", "required": true, "maxLength": 120 },
+        "secret": { "type": "string", "hidden": true }
+      },
+      "rules": {
+        "create": "true"
+      }
+    }
+  }
+}

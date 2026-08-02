@@ -1,0 +1,199 @@
+### SCENARIO 6 — tenant A does a day's work; tenant B then tries everything; tenant A is untouched.
+###
+### Both dispatchers hold the same role, the same scopes and the same rules. The only difference is
+### the tenant their key was issued for, so anything B cannot do is tenancy and nothing else.
+###
+### It ends by re-reading tenant A's whole working set and comparing it, field by field, with what A
+### left behind — because "B got a 404" is not the same claim as "A's data is intact". A write that
+### was refused with the right status and applied anyway would pass the first and fail the second.
+
+### Tenant A's session: a customer, two jobs, an update, and a read of its own set.
+# @name ACreatesCustomer
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/customers
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "name": "Journey Holdings",
+  "tier": "priority",
+  "email": "ops@journey.test"
+}
+
+###
+# @name ACreatesJob1
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "reference": "WO-8501",
+  "title": "Journey job one",
+  "status": "scheduled",
+  "priority": 1,
+  "quoted_price": 111.00,
+  "internal_notes": "Tenant A only.",
+  "access_code": "JOURNEY-1",
+  "customer_id": "{{ACreatesCustomer.response.body.$.id}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+###
+# @name ACreatesJob2
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "reference": "WO-8502",
+  "title": "Journey job two",
+  "status": "scheduled",
+  "priority": 2,
+  "quoted_price": 222.00,
+  "access_code": "JOURNEY-2",
+  "customer_id": "{{ACreatesCustomer.response.body.$.id}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+###
+# @name AUpdatesJob1
+## TEST-EXPECT-STATUS: [200]
+PATCH {{fsBaseUrl}}/api/work_orders/{{ACreatesJob1.response.body.$.id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+If-Match: {{ACreatesJob1.response.headers.ETag}}
+Content-Type: application/json
+
+{ "status": "in_progress", "quoted_price": 131.00 }
+
+### What tenant A leaves behind, and the thing the end of this scenario compares against.
+# @name ASetBefore
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?customer_id=eq.{{ACreatesCustomer.response.body.$.id}}&order=reference.asc&limit=100
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### Tenant B's turn. It cannot SEE them.
+# @name BListsWorkOrders
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=100&order=reference.asc
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
+
+###
+# @name BListsCustomers
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/customers?limit=100&order=name.asc
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
+
+### It cannot INFER them: a filter naming A's row narrows to nothing rather than refusing
+# @name BFiltersForAsJob
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?reference=eq.WO-8501&limit=100
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
+
+### It cannot READ them
+# @name BReadsAsJob
+## TEST-EXPECT-STATUS: [404]
+GET {{fsBaseUrl}}/api/work_orders/{{ACreatesJob1.response.body.$.id}}
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
+
+###
+# @name BReadsAsCustomer
+## TEST-EXPECT-STATUS: [404]
+GET {{fsBaseUrl}}/api/customers/{{ACreatesCustomer.response.body.$.id}}
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
+
+### It cannot MODIFY them
+# @name BUpdatesAsJob
+## TEST-EXPECT-STATUS: [404]
+PATCH {{fsBaseUrl}}/api/work_orders/{{ACreatesJob1.response.body.$.id}}
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
+Content-Type: application/json
+
+{ "status": "cancelled", "quoted_price": 1.00, "title": "Hijacked" }
+
+### It cannot DELETE them
+# @name BDeletesAsJob
+## TEST-EXPECT-STATUS: [404]
+DELETE {{fsBaseUrl}}/api/work_orders/{{ACreatesJob2.response.body.$.id}}
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
+
+### It cannot condition a write on A's version either — a 412 would confirm the row exists, so the
+### row-level exclusion has to be answered FIRST.
+# @name BConditionsOnAsVersion
+## TEST-EXPECT-STATUS: [404]
+PATCH {{fsBaseUrl}}/api/work_orders/{{ACreatesJob1.response.body.$.id}}
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
+If-Match: {{ACreatesJob1.response.headers.ETag}}
+Content-Type: application/json
+
+{ "status": "cancelled" }
+
+### It cannot reach them through a reference from a row of its own
+# @name BReferencesAsCustomer
+## TEST-EXPECT-STATUS: [422]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantSouth}}",
+  "reference": "WO-8601",
+  "title": "Reaching across",
+  "status": "scheduled",
+  "priority": 1,
+  "access_code": "CROSS",
+  "customer_id": "{{ACreatesCustomer.response.body.$.id}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+### And it cannot place a row into A's tenant
+# @name BCreatesIntoA
+## TEST-EXPECT-STATUS: [403]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "reference": "WO-8602",
+  "title": "Planting",
+  "status": "scheduled",
+  "priority": 1,
+  "access_code": "CROSS",
+  "customer_id": "{{SouthCustomerId}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+### Tenant B's own session still works, so none of the above is B being broken
+# @name BWorksInItsOwnTenant
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantSouth}}",
+  "reference": "WO-8603",
+  "title": "Tenant B's own job",
+  "status": "scheduled",
+  "priority": 1,
+  "access_code": "OWN",
+  "customer_id": "{{SouthCustomerId}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+### THE STATE OF THE WORLD: tenant A's set, re-read after everything above.
+# @name ASetAfter
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?customer_id=eq.{{ACreatesCustomer.response.body.$.id}}&order=reference.asc&limit=100
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+###
+# @name AsCustomerAfter
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/customers/{{ACreatesCustomer.response.body.$.id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}

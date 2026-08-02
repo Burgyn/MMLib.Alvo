@@ -520,7 +520,7 @@
           "additionalProperties": {
             "$ref": "#/$defs/field"
           },
-          "description": "Entity fields. The `id` field (uuid, PK) is added automatically when not defined."
+          "description": "Entity fields. The `id` field (uuid, PK) is added automatically when not defined. Key = field name (snake_case). The names `order`, `limit`, `offset`, `after`, `select`, `or`, `and` and `not` are reserved and are rejected when the descriptor is applied: the generated Data API's query string gives each of them a meaning (`?limit=10`, `?or=(...)`, `?not.color=eq.red`), so a request could not tell a filter on such a field from the parameter itself. The pattern above cannot express that exclusion, which is why it is stated here rather than validated by the schema \u2014 rename the field."
         },
         "rules": {
           "$ref": "#/$defs/rules"

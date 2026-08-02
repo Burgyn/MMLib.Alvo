@@ -1,0 +1,144 @@
+### `dispatcher-south` holds EXACTLY the rights `dispatcher-north` holds — same role, same scopes,
+### same rules — and differs in one thing: the tenant its key was issued for. So every difference
+### below is tenancy and can be nothing else.
+
+### Tenant south's list of a scoped entity carries its own row and none of tenant north's seven
+# @name SouthListsWorkOrders
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=100&order=reference.asc
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
+
+### The control: north's own list, in the same system state
+# @name NorthListsWorkOrders
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=100&order=reference.asc
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+###
+# @name SouthListsCustomers
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/customers?limit=100&order=name.asc
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
+
+### A filter naming a row of the other tenant returns nothing rather than refusing — the tenant scope
+### is a row predicate, so it narrows silently and cannot be probed by comparing refusals.
+# @name SouthFiltersForNorthsReference
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?reference=eq.WO-1001&limit=100
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
+
+### Reading the other tenant's row BY ID is 404, not 403: a 403 would confirm it exists
+# @name SouthReadsNorthsRow
+## TEST-EXPECT-STATUS: [404]
+GET {{fsBaseUrl}}/api/work_orders/{{Wo1001Id}}
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
+
+### The control: the same id, read by north, in the same system state
+# @name NorthReadsTheSameRow
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders/{{Wo1001Id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### And a row id that exists in NO tenant answers identically, which is the indistinguishability
+# @name SouthReadsANonexistentRow
+## TEST-EXPECT-STATUS: [404]
+GET {{fsBaseUrl}}/api/work_orders/00000000-0000-0000-0000-0000000000fe
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
+
+### Modifying the other tenant's row is 404 too
+# @name SouthUpdatesNorthsRow
+## TEST-EXPECT-STATUS: [404]
+PATCH {{fsBaseUrl}}/api/work_orders/{{Wo1001Id}}
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
+Content-Type: application/json
+
+{ "status": "cancelled", "priority": 5 }
+
+###
+# @name SouthDeletesNorthsRow
+## TEST-EXPECT-STATUS: [404]
+DELETE {{fsBaseUrl}}/api/work_orders/{{Wo1001Id}}
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
+
+### Placing a row INTO the other tenant is refused by the scope's WITH CHECK over the candidate row
+# @name SouthCreatesIntoNorth
+## TEST-EXPECT-STATUS: [403]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "reference": "WO-7001",
+  "title": "Trespass",
+  "status": "scheduled",
+  "priority": 1,
+  "access_code": "TRESPASS",
+  "customer_id": "{{SouthCustomerId}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+### Referencing the other tenant's row from a create of one's own is `unresolved-reference`, not a
+### confirmation that the id exists — the reference probe runs AS THE CALLER for exactly this reason.
+# @name SouthReferencesNorthsCustomer
+## TEST-EXPECT-STATUS: [422]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantSouth}}",
+  "reference": "WO-7002",
+  "title": "Cross-tenant reference",
+  "status": "scheduled",
+  "priority": 1,
+  "access_code": "PROBE",
+  "customer_id": "{{CustomerAcmeId}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+### The same body naming a customer of its OWN tenant succeeds, so the 422 above is the tenant and
+### not the shape of the request.
+# @name SouthReferencesItsOwnCustomer
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantSouth}}",
+  "reference": "WO-7003",
+  "title": "Cross-tenant reference",
+  "status": "scheduled",
+  "priority": 1,
+  "access_code": "PROBE",
+  "customer_id": "{{SouthCustomerId}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+### Asking to act in the other tenant with the tenant header is 401: a requested tenant is only ever
+### a CONFIRMATION of the key's own, never a way to widen it.
+# @name SouthAsksToActAsNorth
+## TEST-EXPECT-STATUS: [401]
+GET {{fsBaseUrl}}/api/work_orders?limit=100
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
+X-Alvo-Tenant: {{tenantNorth}}
+
+### The same header naming the key's OWN tenant is honoured, so the 401 is the tenant and not the header
+# @name SouthConfirmsItsOwnTenant
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=100&order=reference.asc
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
+X-Alvo-Tenant: {{tenantSouth}}
+
+### After every attempt above, tenant north's data is byte-for-byte what it was
+# @name NorthIsIntact
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=100&order=reference.asc
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+###
+# @name NorthsRowIsIntact
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders/{{Wo1001Id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}

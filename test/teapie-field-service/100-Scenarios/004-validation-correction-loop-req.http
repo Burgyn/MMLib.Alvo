@@ -1,0 +1,75 @@
+### SCENARIO 4 — the loop a coding agent actually runs, and the one this framework is built for.
+###
+### Submit a payload with several distinct problems. Read the `violations` array. Change EXACTLY the
+### fields it names, in exactly the way each `fixSuggestion` prescribes. Resubmit. Succeed.
+###
+### It fails if the violations are incomplete (the corrected payload is refused again, for something
+### that was wrong the first time and went unreported), mis-pointed (the correction lands on the wrong
+### field), or insufficient (fixing what they name is not enough). The test script asserts the
+### strongest form of that: the set of keys that differ between the two request bodies is EQUAL to the
+### set of pointers the refusal named — no more, no fewer. So "I corrected it" cannot be satisfied by
+### quietly changing something the refusal never mentioned.
+###
+### The eight problems, and the fix each violation prescribes:
+###   /reference      format               -> spell it in the declared work-order-ref shape
+###   /title          max-length           -> shorten to at most 120 characters
+###   /status         enum-value           -> use one of the declared values
+###   /priority       required             -> supply it
+###   /quoted_price   scale                -> round to 2 decimal places
+###   /contact_email  format               -> send an email address
+###   /external_ref   read-only-field      -> remove the field from the body
+###   /customer_id    unresolved-reference -> reference a row that exists and you can read
+
+# @name Rejected
+## TEST-EXPECT-STATUS: [422]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "reference": "job-8300",
+  "title": "Replace the compressor and recommission the plant room, including the secondary circuit and the two pressure vessels on the roof",
+  "status": "open",
+  "quoted_price": 99.999,
+  "contact_email": "site at example",
+  "external_ref": "CRM-99",
+  "description": "Raised by the site manager on Friday.",
+  "access_code": "FIXLOOP",
+  "customer_id": "00000000-0000-0000-0000-00000000abcd",
+  "region_id": "{{RegionNorthId}}"
+}
+
+### The correction. Every field the refusal named is changed as its fixSuggestion prescribes; every
+### field it did not name is byte-for-byte what it was.
+# @name Accepted
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "reference": "WO-8300",
+  "title": "Replace the compressor and recommission the plant room",
+  "status": "scheduled",
+  "priority": 2,
+  "quoted_price": 100.00,
+  "contact_email": "site@example.test",
+  "description": "Raised by the site manager on Friday.",
+  "access_code": "FIXLOOP",
+  "customer_id": "{{CustomerAcmeId}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+### And the row really is there, carrying the untouched fields exactly as the first attempt sent them
+# @name ReadTheCorrectedRow
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}{{Accepted.response.headers.Location}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### The rejected attempt wrote nothing: the reference it tried to use names no row
+# @name RejectedWroteNothing
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?reference=in.(job-8300,WO-8300)&limit=100
+X-Alvo-Api-Key: {{keyDispatcherNorth}}

@@ -487,6 +487,14 @@ ordering.
 - **Idempotency:** an `alvo.idempotency` table keyed `(key, endpoint, request
   hash)` storing status and response body, written in the same transaction as the
   operation. The same key with a different body is a 409, not a silent replay.
+  > **Superseded by PR3 — see deviations 21 and 30.** The shipped table is keyed
+  > `(idempotency_key, scope)` where scope is tenant + acting user, and stores the
+  > **`row_id`, never a status or a response body**: a stored body would be a second
+  > copy of a row the caller's own `get` decision must re-filter, and replaying it
+  > would hand back a projection the replaying caller is not entitled to. The
+  > reasoning is in `IdempotencyTable` and `docs/architecture/data-api.md`. This
+  > paragraph is left in place because the design is a record of what was decided
+  > when, not a live specification.
 
 ### Exposure and field-level behaviour
 
@@ -916,6 +924,322 @@ tell a decision from an oversight without reading that file.
    asserts the boundary, because the family-wide runtime arch fact matches EF's types by *name* —
    deliberately, so it works in a project that cannot see EF — and therefore says nothing about
    who *can*.
+
+### Deviations added by PR3
+
+PR3's own Superpowers plan is discarded once merged, so anything it decided that outlives it is
+recorded here. The implementation-level *why* for each lives in `docs/architecture/data-api.md`,
+which is the surviving detailed record for the HTTP layer (`data-path.md` remains it for the port);
+these entries exist so a reader of this design can tell a decision from an oversight without reading
+either file.
+
+19. **`QueryAsync` returns an `AlvoPage`, not a list, and `AlvoQuery` gains `Offset`.** Two of the
+   three port widenings PR3 took, and both are cheaper before an HTTP layer exists than after —
+   nothing is released, so a signature change costs a recompile of in-repo callers and nothing else.
+   (a) The next-page cursor **cannot** be produced above the port: `KeysetCursor` is `internal` to
+   the EF package on purpose, and only the provider can answer "is there another page" without a
+   second round trip (it over-fetches by one row). A layer that re-encoded the cursor would be the
+   second copy of one fact, which is the defect class PR2's review closed four times. (b) §2.1
+   requires *both* paging modes, and `AlvoQuery`'s own remarks license exactly this — "a new optional
+   member … can be added here without breaking an existing caller". Cost: `AlvoPage` adds a
+   `TotalCount` that is always `null` in F3, which is a modelled member no shipped code fills;
+   modelling it now is what keeps `Prefer: count=` additive later (#110).
+20. **Two new exception families join the "three families" contract PR2 called settled.**
+   `AlvoPreconditionFailedException` (412) and `AlvoIdempotencyConflictException` (409), and
+   `IAlvoData`'s remarks table grows to five rows. Deviation 16(a) fixed the count at three
+   deliberately, so growing it is a departure and not a footnote. The reason is that a request layer
+   has nothing but the exception *type* to map a status from: folding either into `ArgumentException`
+   would render 422 for a condition that is neither malformed nor the caller's mistake, and folding
+   them together would lose the difference between "the row moved" and "you reused a key". Cost: a
+   third-party `IAlvoData` implementation must now raise five families rather than three, and the
+   port's contract suite is what tells it so.
+21. **The precondition and the idempotency token enter the port rather than living above it** (#90).
+   The third port widening. Both must be evaluated *inside* the write transaction — the precondition
+   against PR2's row-locked pre-image, the idempotency record in the same commit as the row — so
+   neither can live in the HTTP layer. Doing it from above would be a lost update and a duplicate row
+   respectively, each invisible to a test that does not look for it. Cost, and it is a real one: the
+   port now carries two concepts whose *names* come from HTTP (`If-Match`, `Idempotency-Key`), so
+   `AlvoPrecondition` and `AlvoIdempotency` are deliberately spelled in the port's own vocabulary — a
+   row version and a key plus a fingerprint — and the HTTP spellings are mapped at the edge.
+22. **A write to a `readOnly` field is 422 from validation and 403 from the port — one behaviour per
+   layer, not one behaviour.** The API's validator refuses it as a malformed request naming the field;
+   the port refuses it as an authorization failure. Both are correct for where they stand: the
+   validator holds the caller's resolved `readOnly` mask and can say *which* field, which is the
+   answer an agent can act on, while the port cannot assume any layer ran first and must fail closed.
+   Cost: the same descriptor mistake has two status codes depending on whether it arrived over HTTP,
+   and a host calling `IAlvoData` directly gets the 403 form. Recorded rather than unified, because
+   unifying would mean either the port trusting a caller's word or the API discarding the field name.
+23. **An anonymous caller is a *context*, not a 401.** `AlvoContext.Anonymous` is what the endpoints
+   see when the auth filter published no principal, and it is judged by the same default-deny policy
+   as any other caller — so an anonymous request to an entity whose rules admit `anon` succeeds, and
+   one to any other entity is refused by policy. 401 is reserved for a credential that **was**
+   presented and cannot be used. It follows that `Idempotency-Key` from an anonymous caller is a
+   **422, not a 401**: nothing failed authentication, so a 401 would owe a `WWW-Authenticate`
+   challenge (RFC 7235 §3.1) for a request that never attempted it, and would blur the line this
+   deviation keeps disjoint. Rationale under §2.1's default-deny reading; the anonymous fallback is
+   also the fail-*closed* direction if an endpoint were ever mapped without the filter.
+24. **PATCH-only partial update; no `PUT`.** `UpdateAsync` is partial by contract — "a field this
+   dictionary does not mention keeps its stored value" — so a `PUT` would advertise whole-resource
+   replacement the port does not perform. Cost: no upsert, and no create-with-a-caller-supplied-id,
+   which is the shape a GitOps-style caller reaches for. Both need a port that can create-or-replace
+   with `WITH CHECK` evaluated on the candidate row in both branches, and are deferred with a stated
+   reason (#105) rather than approximated.
+25. **A JSON envelope (`items` / `next`) rather than PostgREST's bare array plus `Content-Range`.**
+   PostgREST is the syntax Alvo adopts for the *query string*, and this is the one place the response
+   shape departs from it. The reason is that the alternatives put the cursor in a header, which gives
+   it two homes and forces an agent reading a JSON body to parse HTTP headers to keep paging. `next`
+   has exactly one home. Cost: a client written against PostgREST's response shape does not read
+   Alvo's, and a `Link: rel="next"` header is deliberately not shipped (#104) so the two cannot
+   disagree.
+26. **`FieldClrType` is a new public type in `Abstractions`.** Deviation 12's precedent, one layer
+   over: two layers must map a declared `FieldType` to the CLR type a value is carried as through
+   `IAlvoData`, and neither can see the other's copy — a storage driver builds its read model and its
+   bind parameters from it, and the HTTP layer binds a JSON request body with it. The
+   "collapse onto `FieldClrTypeMap`" alternative was **impossible**, not merely unattractive: that
+   type is `internal` to the EF package, and the core cannot reference it at all
+   (`SharedArchitectureRules.Core_depends_only_on_Abstractions`). It belongs in the ports because it
+   is not one backend's opinion — it is the contract `IAlvoData` publishes. PR3's first pass had two
+   copies and **they already disagreed on failure mode**: the driver threw `NotSupportedException`
+   for an unmapped type while the HTTP copy laundered the same condition into a client 422, telling a
+   caller to fix a request that was fine.
+27. **Position A: the declared, non-hidden schema shape is public; what is confidential is data and
+   the *name* of a `hidden` field.** Not a new mechanism but a position that had never been written
+   down, and it has to be, because the design already commits to it twice — route literals disclose
+   entity existence *before* authorization, and the OpenAPI document publishes every entity's
+   non-hidden field list. A framework cannot publish its schema shape and treat that shape as
+   confidential. Stated so the third anti-enumeration claim does not get written; the full statement
+   is `data-api.md`'s first section.
+28. **A `hidden` field appears in a *request* schema only if it is `required`** — necessary, not
+   sufficient: `Belongs` also excludes a `readOnly` field and a managed name the caller cannot write, so
+   `required + hidden + readOnly` (legal today, and a create nobody can satisfy — issue #124) appears
+   nowhere. The extra conditions only ever withhold more —
+   **this one needs the maintainer's ratification.** It is a deliberate, bounded confidentiality
+   trade, on the same footing as PR2's two collation rulings. Excluding a hidden field from *every*
+   schema would drop a mandatory field from the body a caller must send, since a required field a
+   caller cannot see cannot be supplied at all; the rejected alternative — refuse `required` +
+   `hidden` at apply — forecloses a real pattern, because a mandatory secret (a password, an API
+   token the caller supplies and can never read back) is exactly that combination, and the frozen
+   schema defines `hidden` as response-side. An **optional** hidden field's name still appears
+   nowhere. Cost: a hidden, writable, optional field is absent from the request schemas while a write
+   to it is accepted, so the document understates what a create will take — the safe direction, but a
+   documented inaccuracy.
+29. **Four decisions in the OpenAPI emission, none of which the brief covered.** (a) **Six files, not
+   two** — the ~25-line method ceiling makes one transformer impossible, and `DataApiDocumentation` in
+   particular earns its keep twice, being read by both the endpoint metadata and the transformer,
+   which is what stops the document advertising a status no delegate emits. (b)
+   **`.Produces(status, contentType)` rather than `.ProducesProblem(status)`**, because ApiExplorer's
+   own `ProblemDetails` component omits the `violations` array every Alvo refusal carries, and an
+   orphan schema missing it is strictly worse than none. (c) **`EntitySchema.Description` is carried
+   onto the applied schema**, because the transformer cannot see the descriptor and a document
+   describing every entity as nothing is a real loss; verified behaviour-free — `SchemaDiff.IsUnchanged`
+   compares types and facets only, and `IsUnchangedReapply` compares serialized descriptor JSON, so
+   the added record member plans no migration. (d) **An API-key security scheme plus reusable
+   `responses`/`parameters`/`headers`**, since a documented 401 with nowhere to put a credential
+   defeats §6; `security: [{}, {alvoApiKey: []}]` is correct rather than a hedge, because a descriptor
+   may admit `anon` while the 401 is for a credential that was presented.
+30. **A keyed-`POST` replay by a caller who may `create` but not `get` answers `201` with an id-only
+   body, never 403.** When the replaying caller's `get` is denied outright, the retry must not be
+   worse than the create it replays — so the answer is the original `Location` and a body carrying
+   only `id`, taken from the idempotency record's own `row_id` with no row read performed. The safety
+   argument is the record's identity: it is keyed on the key, the tenant *and* the acting user, so a
+   match proves this caller created that row, and the id disclosed is the one their own original 201
+   already gave them. Cost: `CreateAsync` now has one return shape that is not a full row, stated in
+   its contract; and the sibling case — a *configured* `get` whose predicate excludes the row — stays
+   a 404 (#101), because telling "invisible to me" from "deleted since" would need a policy-free
+   existence probe.
+31. **The core takes an ASP.NET Core dependency, so `package-boundary.md`'s "the core depends only on
+   `Abstractions`" is now true only of project references.** §0 principle 8 makes every generated
+   endpoint a minimal-API delegate, so `MMLib.Alvo` carries `FrameworkReference
+   Microsoft.AspNetCore.App` plus `Microsoft.AspNetCore.OpenApi`. `Abstractions` deliberately stays
+   free of both, and an arch test holds that line — the ports must stay implementable by a host that
+   is not an ASP.NET application at all. Cost: an embedded consumer of the core is now an ASP.NET
+   consumer whether or not it maps the Data API, and the framework reference silently supplies
+   `Microsoft.Extensions.Options`, whose explicit `PackageReference`s had to be **removed** because
+   NuGet's `NU1510` (raised as an error here) objects to a reference it will not prune.
+
+32. **The apply step refuses six more things, and warns about five others.** Refused, because ignoring one
+   silently produces wrong data: `field.default`, `field.computed`, `field.rollup`, `field.validation`,
+   `entity.softDelete`, the six `entity.hooks.*` points, and **declaring a framework-managed column name at
+   all**, whatever attributes the declaration carries. Warned but honoured nowhere, because the absence is
+   observable: `webhooks`, `automation`, `templates`, `functions`, `dynamicEntities` — an author notices that
+   no webhook ever fires, whereas an ignored `default` stores NULL where a value was expected. **This is a
+   descriptor-level breaking change**, and it cost two shipped examples: `examples/simple-tasks` lost its
+   defaults, its rollup and a `beforeUpdate`, and `examples/complex-crm` gained a `NOT-RUNNABLE.md`. The one
+   capability the strict managed-column rule removes is `readOnly` on `tenant_id` as a narrowing; that intent
+   belongs in a policy rule, since the tenant scope's `WITH CHECK` already guards the candidate row.
+
+33. **The frozen `schema/project.schema.json` gained prose, not structure.** The `fields` description now
+   declares the eight reserved field names the apply step refuses for every host. §0 principle 7 is *one
+   schema, one parser, one truth*, and a schema advertising a name the apply step rejects is two. Recorded as
+   a deviation on **deviation 3's precedent from PR1** — a prose edit to the frozen schema is a deviation even
+   when the structure is untouched. The machine-checkable constraint is issue **#96**; a JSON Schema pattern
+   cannot express the exclusion.
+
+34. **`AddAlvo()` now calls `AddLogging()`.** The core writes at least one warning of its own (deviation 32's
+   unhonoured-blocks line), so it resolves `ILogger<T>` — and it must not require the host to have arranged
+   that. `AddLogging` is idempotent (`TryAdd` throughout), so an ASP.NET host or one that already called it is
+   unaffected, and `Microsoft.Extensions.Logging` arrives via the framework reference deviation 31 already
+   takes rather than as a new dependency. Without it, a plain console host embedding Alvo fails to activate
+   the migration runner at all. The rejected alternative — an optional `ILoggerFactory` with a `NullLogger`
+   fallback — would silently swallow a real registration mistake. Cost, stated: with no logging *provider*
+   configured the warning is dropped silently, so a crash was traded for a silent drop; and a dashboard-first
+   apply emits no warning at all (issue **#83**).
+
+### Deviations added by PR4
+
+PR4's own Superpowers plan is discarded once merged, so anything it decided that outlives it is recorded
+here. The implementation-level *why* lives in `docs/architecture/host.md`, which is the surviving detailed
+record for the standalone host.
+
+35. **The core gained a public apply seam, and `extensibility.md`'s verb taxonomy gained a verb.**
+   `SchemaMigrationRunner` is `internal` and no public surface exposed it, so `MMLib.Alvo.Host` — a separate
+   assembly with no `InternalsVisibleTo` grant, and none is safe to give an unsigned assembly — could not
+   bring a descriptor up at all. `IServiceProvider.ApplyAlvoDescriptorAsync(MigrationOptions?, CancellationToken)`
+   is that seam, and `Apply{Thing}` is a new verb in `extensibility.md` rule 4 because the operation acts on a
+   *built* container rather than registering anything, so `Use`/`Add`/`Enable`/`From` all mis-describe it.
+   It takes `IServiceProvider` rather than `IHost` so a console host, a scope and a `WebApplication` all reach
+   it through one member. Cost: one more public member forever, and the orchestrator's six-collaborator
+   constructor stays `internal`, which is the trade. Its refusal message is crafted rather than left to
+   `GetRequiredService`, which would name the `internal` runner to a caller who cannot reference it.
+36. **#119's exception handler lives in the core, opt-in — not in the Host, as the issue said.**
+   `ProblemResultFactory` is `internal`, so a Host-side handler would be a second hand-written copy of Alvo's
+   problem-document shape, which is the defect class PR2's and PR3's reviews closed repeatedly. The issue's
+   *premise* is preserved exactly: `AddAlvo` does not register it, so an embedded host still owns its own
+   error rendering and Alvo still does not steal the exception. Cost: one more public extension
+   (`AddAlvoProblemDetails`), and the `internal` slug is emitted by a component only some hosts register — so
+   `ProblemDetailsTests` had to grow a second, faulting world to keep its catalogue facts set-equal. This is
+   the deviation `data-api.md` and `host.md` cite.
+37. **`MMLib.Alvo.Host` is `IsPackable=false`, and it is the one project allowed two providers.**
+   Earned by `package-boundary.md` rule (c) — a different distribution: it ships as the `mmlib/alvo` image,
+   so a nupkg of an entry point would publish a surface nobody references. Rule (a) applies to Scalar
+   alongside it. It references both `Data.Sqlite` and `Data.PostgreSql` because the deployment criterion is a
+   working backend with *no* configuration (SQLite) while compose runs PostgreSQL; exactly one is
+   *registered*, chosen by `Alvo:Database:Provider`, and an unknown name is refused by name. Recorded in
+   `package-boundary.md`'s *Current projects*, which the design asked to be updated when PR4 landed.
+38. **Health is liveness only.** §2.12 asks for readiness with database, cache and message-bus reachability;
+   no port answers "can you reach the database" cheaply, and adding one is a port widening PR4 has no mandate
+   for. What PR4 has instead is stronger than it looks: the host applies the descriptor **before** it listens,
+   so answering `/health/live` at all proves the descriptor applied, and a host whose apply failed exits
+   non-zero rather than reporting healthy with no schema. What is missing is the *continuing* answer — a
+   database that goes away after boot is invisible to liveness. Filed as **#133**, which is where the
+   reachability port gets designed; the rest of §2.12 is F4's, with #24's remainder.
+39. **Container configuration uses .NET's standard `Section__Key` environment spelling, not §X.1's
+   `ALVO_*` names.** The spec sketches `ALVO_ADMIN_EMAIL`, `ALVO_ADMIN__PATH`, `ALVO_SCRIPTS_ALLOW_UI_EDIT`;
+   PR4 uses `Alvo__DescriptorPath`, `Alvo__Database__Provider`, `ConnectionStrings__Alvo`. Reason: those
+   `ALVO_*` names belong to subsystems that do not exist yet (the admin UI, the script host), and inventing a
+   second naming convention now would mean either two spellings per setting or a translation layer nobody
+   asked for. The mount point (`/alvo/descriptor.json`) and the port (8080) *are* the spec's. **This is the
+   maintainer's to confirm, and it wants deciding before the image is published** (#24, F4) — after
+   publication the env names are a breaking change.
+40. **The compose stack is `alvo` + `postgres` only.** §X.1's stack is
+   `alvo + postgres + minio + mailhog`; object storage and email do not exist in F3, and a service nothing
+   talks to makes the stack prove less rather than more. The two missing services arrive with the
+   subsystems that use them.
+41. **#121 is fixed for the `Location` header; the OpenAPI document's `servers` is deferred.** The header is
+   built in one place and now carries `HttpRequest.PathBase`, with a matrix (no base / a configured base / a
+   trusted proxy's `X-Forwarded-Prefix`) that follows the header rather than comparing it. The document half
+   is a different problem: `OpenApiDocumentTransformerContext` carries no `HttpContext` and the document is
+   cached per document name, so a request-derived `servers` entry is a decision about whether Alvo's document
+   is per-request at all — which also cuts against the golden snapshot whose value is determinism. Filed as
+   **#130** rather than approximated. The docs UI's own document fetch under a path base is a third, separate
+   gap — **#134**, unmeasured rather than known-broken.
+42. **Forwarded headers are off by default, and turning them on clears `KnownIPNetworks`/`KnownProxies`.**
+   `X-Forwarded-Prefix` decides the URL a 201 advertises, so honouring it from an untrusted caller lets that
+   caller choose where a client is sent next. A container also cannot know its proxy's address, so the
+   allow-list has to be cleared for the feature to work at all — which is precisely why the switch is
+   explicit rather than inferred: only an operator knows something in front strips those headers.
+   `KnownIPNetworks`, not `KnownNetworks` — the latter is `ASPDEPR005` on .NET 10 and this repository builds
+   warnings as errors.
+43. **The compose + TeaPie e2e is in no ring.** `scripts/test-e2e` is run by a new CI job (`e2e`), folded
+   into the existing `Build & test` aggregate (`needs: [build-test, e2e]`, failing on any non-success) so it
+   is a required check with no branch-ruleset change. ring0 must stay Docker-free by its own comment, and
+   ring2's Docker use is one self-skipping Testcontainers image rather than an image build plus a
+   multi-service stack — the design's testing table already placed the full e2e at "CI on the PR, never
+   locally". Cost, stated: an agent's pre-PR gate does not run the e2e, so a compose-only breakage is first
+   seen on the PR.
+44. **#83 is not PR4's, and PR4 closed the half of deviation 34 that was reachable.** The Host is
+   code-first, so it never enters runtime-apply mode and nothing PR4 ships can reach #83's failure — there is
+   no Management API to apply through until F4. What PR4 *did* close is deviation 34's other stated cost —
+   "with no logging provider configured the warning is dropped silently" — because the standalone host
+   configures providers and `AlvoHostLoggingTests.The_unhonoured_subsystem_warning_reaches_the_hosts_logging_provider`
+   proves the unhonoured-subsystem warning actually arrives. #83's remaining gap is exactly and only the
+   dashboard-first mode: priming the policy catalog from the stored descriptor at startup, and emitting the
+   same warning on that path — the second of which needs `ILogger` on `RuntimeSchemaService`'s **public**
+   six-parameter constructor, and therefore moves the public-API baseline for a subsystem PR4 does not host.
+45. **The docs UI is on by default.** `Alvo:Docs:Enabled` defaults to `true`, so a container serves
+   `/openapi/v1.json` and `/scalar` unless told not to. Consistent with deviation 27 (the declared,
+   non-hidden schema shape is public) and with §0 principle 4 (the document *is* the contract an agent
+   reads); a deployment that disagrees turns it off with one setting, and the switch removes **both** routes,
+   because a docs page without its document renders an error rather than nothing.
+46. **`UseRouting()` was dropped after a probe showed it inert on .NET 10 — a deviation from PR4's own
+   written plan, which listed it under *consumes*.** The widely cited rule, which Microsoft Learn still
+   states, is that a `WebApplication` needs an explicit `UseRouting` *after* `UsePathBase` or routes match
+   before the path is rewritten. Measured under this runtime rather than assumed: `UsePathBaseMiddleware`
+   re-runs matching over the rewritten path itself, a probe answers 200 for `UsePathBase` and 404 for the
+   same rewrite performed by hand, and removing the call leaves every path-base fact green. Shipping it
+   would imply **Alvo imposes a pipeline-ordering requirement on consumers**, which it does not. Surface-
+   neutral, recorded because a deviation from the plan a reader can still find is otherwise indistinguishable
+   from an oversight.
+47. **The image build states its version (`MinVerVersionOverride=0.0.0-docker`) rather than skipping MinVer,
+   and turns SourceLink off.** The authorized fallback was `-p:MinVerSkip=true`; it was not taken, because
+   skipping stamps every assembly `1.0.0` — a version this pre-1.0 project has never released — whereas
+   `0.0.0-docker` is honest and is the `ARG` F4's publish pipeline hands the real version to. The measured
+   fact that corrected the premise behind the authorization: an unflagged image build **succeeds** with 17
+   warnings and **none of them is an error**, because `MINVER1001` and the Git/SourceLink warnings are
+   MSBuild *task* warnings and `TreatWarningsAsErrors` governs the C# compiler — so the "if it errors"
+   contingency could never have fired. And **12 of those 17 are SourceLink**, not MinVer, which nobody had
+   anticipated; `EnableSourceLink=false` + `EnableSourceControlManagerQueries=false` is what silences them,
+   and source-link metadata serves symbol servers for published packages, which this image is not.
+   `TreatWarningsAsErrors` itself is inherited unchanged — the image builds under the repository's own bar.
+
+**A smaller note, recorded so it is a decision rather than a slip:** the TeaPie suite lives at `test/teapie`,
+not the skill's default `tests/teapie`. `CLAUDE.md`'s repo map documents `test/` as this repository's test
+root, and `test/` beside `tests/` — one letter apart — is a navigation hazard for exactly the agent-first
+reader this project optimises for. The TeaPie skill explicitly permits a custom path, so nothing is being
+worked around.
+
+48. **`AlvoHostOptions` is bound with a bare `Configure<T>`, not validated at startup — a deviation from
+   PR4's own plan and from `extensibility.md` rule 5.** The plan's locked File Structure row promised "the
+   `Alvo` configuration section as typed, **validated** options", and rule 5 requires
+   `ValidateDataAnnotations().ValidateOnStart()` or an `IValidateOptions<T>` producing a structured
+   fail-fast error with a fix suggestion (§0 principle 4). Neither is present: the option classes carry no
+   annotations and nothing validates them on start. The two settings that *are* fail-fast got there by hand
+   — `AlvoDatabaseSelector`'s crafted refusal, and the PostgreSQL driver's own refusal for a null
+   connection string — while `DescriptorPath` got nothing. **Its visible cost is issue #132**: a mis-typed
+   descriptor mount ends in an unhandled `FileNotFoundException` and exit 139, which is precisely the
+   failure an `IValidateOptions<AlvoHostOptions>` would have rendered as a structured refusal naming the
+   path it could not find. Recorded here rather than fixed, because the fix belongs with #132 in F4 — but
+   recorded, so a later reader can tell a deferred decision from an oversight.
+
+49. **`ProblemResultFactory.Internal()` takes no argument, where the plan specified
+   `Internal(string detail)`.** The detail is a baked-in constant instead, and the reasoning is in the
+   member's own XML docs, in `data-api.md`'s mode table and in the changelog: a 500's detail must not vary
+   with the exception, or it becomes the disclosure channel the whole family-5 contract exists to close.
+   The behaviour is right and the surface is `internal`, so the cost is nil — it is recorded only because
+   deviation 46 was recorded on exactly the standard that a surface-neutral departure from the written plan
+   still earns a line.
+50. **There are now TWO compose stacks and TWO TeaPie suites — deviations 40 and 43 are amended, not
+   replaced.** Deviation 40's "the compose stack is `alvo` + `postgres` only" is still true *of each stack*
+   and its reason still stands (minio/mailhog arrive with the subsystems that use them). What changed is the
+   count. `docker-compose.yml` keeps `vehicle-registry` on 8080 and answers "does the stack boot and
+   answer"; `docker-compose.field-service.yml` runs `examples/field-service` on 8081, over its own database,
+   and answers "does the product behave as documented" — two tenants, five keys differing only in role and
+   tenant, an audited entity beside an unaudited one, hidden and `readOnly` fields, an unconfigured
+   operation. `scripts/test-e2e` runs both, so deviation 43's "in no ring, one CI job" is unchanged.
+   **Why a second file rather than a second service or a compose profile**, since this is the decision most
+   likely to be undone by someone who does not know: Compose interpolates the *whole* file before it selects
+   which services to start, and **a profile does not defer that** — measured. Five more `${...:?}` secrets
+   inside `docker-compose.yml` would therefore make the README's plain `docker compose up` fail for anyone
+   who had exported only `ALVO_DEMO_KEY_SECRET`. A separate file leaves the quickstart byte-for-byte
+   unchanged and gives the demo its own database, so two descriptors can never apply into one schema. The
+   cost, stated: two files to keep in step when #24's remainder adds minio and mailhog.
+51. **The demo's tenant ids and user ids are committed; only the key secrets are not.**
+   `examples/field-service/demo-identities.env` carries them, and both compose and `scripts/test-e2e` read
+   that one file so the container's configuration and the environment the tests assert against cannot drift.
+   They are *identifiers*, not credentials — a create on a tenant-scoped entity has to carry `tenant_id` and
+   `assigned_to` names a technician by user id, so no test can be written without knowing them. The five key
+   secrets keep the `${...:?}` form: the image ships none (§2.14) and compose refuses to start rather than
+   invent one.
 
 ## Assumptions (veto candidates)
 

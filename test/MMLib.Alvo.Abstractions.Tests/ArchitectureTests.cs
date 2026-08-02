@@ -48,22 +48,39 @@ public class ArchitectureTests
     }
 
     /// <summary>
-    /// The milestone plan adds ASP.NET to the core in PR3 (the HTTP Data API) — never to
-    /// Abstractions. This keeps the port assembly (the contracts PR2's SQLite/PostgreSQL
-    /// providers and any future host implement) free of every concrete infrastructure
-    /// dependency: ASP.NET Core, EF Core, Npgsql, and ADO.NET's own <c>System.Data</c>.
+    /// PR3 adds ASP.NET to the core (the HTTP Data API) — never to Abstractions. This keeps the port
+    /// assembly (the contracts PR2's SQLite/PostgreSQL providers and any future host implement) free of
+    /// every concrete infrastructure dependency: ASP.NET Core, EF Core, Npgsql, and ADO.NET's own
+    /// <c>System.Data</c>.
     /// </summary>
+    /// <remarks>
+    /// The ban list is asserted to actually match something first. "Abstractions references none of
+    /// these" is trivially true of a misspelled prefix, and this fact went from hypothetical to
+    /// load-bearing the moment the core really did take a <c>Microsoft.AspNetCore.App</c> framework
+    /// reference — so the predicate has to be seen to fire, using assembly names Abstractions itself
+    /// does not carry.
+    /// </remarks>
     [Fact]
     public void Abstractions_stays_free_of_asp_net_and_data_access()
     {
+        IsForbiddenInfrastructure("Microsoft.AspNetCore.Http.Abstractions").ShouldBeTrue(
+            "the ASP.NET arm of the ban list must match a real ASP.NET assembly name");
+        IsForbiddenInfrastructure("Microsoft.EntityFrameworkCore.Relational").ShouldBeTrue(
+            "the EF arm of the ban list must match a real EF Core assembly name");
+        IsForbiddenInfrastructure("MMLib.Alvo.Abstractions").ShouldBeFalse(
+            "and it must not match the assembly under test, or the fact could never pass");
+
         var abstractions = Assembly.Load(AbstractionsAssemblyName);
         var referenced = abstractions.GetReferencedAssemblies().Select(reference => reference.Name!).ToArray();
 
-        referenced.ShouldNotContain(name =>
-            name.StartsWith("Microsoft.AspNetCore", StringComparison.Ordinal)
-            || name.StartsWith("Microsoft.EntityFrameworkCore", StringComparison.Ordinal)
-            || name.StartsWith("Npgsql", StringComparison.Ordinal)
-            || name.StartsWith("System.Data", StringComparison.Ordinal),
+        referenced.ShouldNotContain(
+            name => IsForbiddenInfrastructure(name),
             $"MMLib.Alvo.Abstractions must not reference ASP.NET/EF Core/Npgsql/System.Data, but references: {string.Join(", ", referenced)}.");
     }
+
+    private static bool IsForbiddenInfrastructure(string assemblyName) =>
+        assemblyName.StartsWith("Microsoft.AspNetCore", StringComparison.Ordinal)
+        || assemblyName.StartsWith("Microsoft.EntityFrameworkCore", StringComparison.Ordinal)
+        || assemblyName.StartsWith("Npgsql", StringComparison.Ordinal)
+        || assemblyName.StartsWith("System.Data", StringComparison.Ordinal);
 }

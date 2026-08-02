@@ -1,0 +1,54 @@
+# The local stack the F3 demo runs on: the standalone host over real PostgreSQL, driven by the
+# vehicle-registry descriptor and nothing else. MinIO and MailHog are deliberately absent — object
+# storage and email do not exist in F3, and the full stack is #24's remainder in F4.
+name: alvo
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: alvo
+      POSTGRES_USER: alvo
+      POSTGRES_PASSWORD: alvo
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alvo -d alvo"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  alvo:
+    build:
+      context: .
+      dockerfile: src/MMLib.Alvo.Host/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      Alvo__DescriptorPath: /alvo/descriptor.json
+      Alvo__Database__Provider: postgresql
+      ConnectionStrings__Alvo: Host=postgres;Port=5432;Database=alvo;Username=alvo;Password=alvo
+      # The image ships no credential of its own (§2.14: "image nikdy nedodáva prednastavené
+      # prihlásenie"), and the `:?` form makes compose refuse to start rather than invent one.
+      Alvo__Auth__DevKeys__0__KeyId: demo
+      Alvo__Auth__DevKeys__0__Secret: ${ALVO_DEMO_KEY_SECRET:?set ALVO_DEMO_KEY_SECRET before starting the stack}
+      Alvo__Auth__DevKeys__0__User: 6f9619ff-8b86-d011-b42d-00c04fc964ff
+      Alvo__Auth__DevKeys__0__Roles__0: admin
+      Alvo__Auth__DevKeys__0__Roles__1: authenticated
+      Alvo__Auth__DevKeys__0__Roles__2: inspector
+      Alvo__Auth__DevKeys__0__Scopes__0: "*:read"
+      Alvo__Auth__DevKeys__0__Scopes__1: "*:write"
+    # Loopback only. "8080:8080" binds 0.0.0.0, and Docker's DOCKER-USER iptables chain sits ahead of
+    # UFW — so an operator who follows the README's quickstart on a cloud VM publishes this demo's
+    # admin + *:read + *:write key to the internet, with /openapi/v1.json and /scalar anonymous to
+    # describe the surface. The `:?` guard makes them choose a secret; it says nothing about who can
+    # reach the port. Everything that consumes it is on this machine anyway: scripts/test-e2e and the
+    # README both use http://localhost:8080, and the healthcheck below runs inside the container.
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./examples/vehicle-registry/vehicles.alvo.json:/alvo/descriptor.json:ro
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health/live"]
+      interval: 2s
+      timeout: 3s
+      retries: 30

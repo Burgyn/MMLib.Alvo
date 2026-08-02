@@ -90,7 +90,8 @@ public static class AlvoEfCoreProvider
         services.GetRequiredService<IFieldSqlRenderer>(),
         services.GetRequiredService<IAlvoSqlDialect>(),
         services.GetRequiredService<AlvoDataContextFactory>(),
-        services.GetRequiredService<TimeProvider>());
+        services.GetRequiredService<TimeProvider>(),
+        services.GetRequiredService<IOptions<AlvoOptions>>().Value);
 
     private static RelationalConnectionFactory CreateConnectionFactory(IServiceProvider services, RelationalProviderRegistration registration)
     {
@@ -124,7 +125,7 @@ public static class AlvoEfCoreProvider
         return new EfCoreSchemaIntrospector(
             databaseModelFactory,
             connections,
-            SystemSchemaInitializer.DescriptorVersionsTableName(schemaPrefix));
+            SystemSchemaInitializer.FrameworkTableNames(schemaPrefix));
     }
 
     private static EfCoreDescriptorVersionStore CreateDescriptorVersionStore(IServiceProvider services)

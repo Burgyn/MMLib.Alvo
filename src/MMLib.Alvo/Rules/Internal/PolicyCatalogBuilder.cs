@@ -253,12 +253,28 @@ internal static class PolicyCatalogBuilder
     /// entity's schema and must not be the framework-owned key.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Both checks run before the flag's own value is looked at, so a flag written as <c>false</c> is
     /// validated exactly like one written as <c>true</c>. Otherwise a mistake could be parked as
     /// <c>false</c> and become live later, when nothing re-validates it. Refusing here rather than in the
     /// data path is Alvo's stated rule — a bad descriptor fails at save, and DoD criterion 3 says it for
     /// the sibling case ("a rule naming a nonexistent column fails at save, not at request time") — and a
     /// read-time-only refusal would turn a one-off config error into a per-request failure.
+    /// </para>
+    /// <para>
+    /// <b>It does not check the other framework-managed columns, and no longer needs to.</b> A flag can only be
+    /// written on a field the descriptor <em>declares</em>, and declaring any managed column is now refused two
+    /// passes earlier — by <c>DescriptorValidator</c>'s semantic pass and by the mapper, both reading
+    /// <c>ManagedColumnNames</c>. A rule here as well would be a third copy of one decision, and it briefly was
+    /// exactly that: it covered <c>hidden</c> only, which left a wrong-typed declaration reachable and told a
+    /// <c>softDelete</c>-only entity its <c>deleted_at</c> was part of an audit trail it never asked for.
+    /// </para>
+    /// <para>
+    /// <see cref="RowKeyField"/> stays, because this method is reachable without either of those passes:
+    /// <see cref="PolicyCatalog.TryBuild"/> takes a <see cref="SchemaModel"/> a host may have assembled itself,
+    /// which is the same reason <c>EfAlvoData.EnsureNotSoftDeleted</c> exists. It keeps the one refusal whose
+    /// consequence is not a wrong column but a row that cannot materialise at all.
+    /// </para>
     /// </remarks>
     private static bool IsFlaggable(string fieldName, string flagName, EntityBuild build)
     {

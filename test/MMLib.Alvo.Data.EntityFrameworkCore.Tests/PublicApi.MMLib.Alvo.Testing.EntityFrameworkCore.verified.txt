@@ -29,12 +29,14 @@ namespace MMLib.Alvo.Testing.Data
         public void A_repair_is_a_function_of_its_inputs_alone(MMLib.Alvo.Expressions.CelValueType type) { }
         [Xunit.MemberData("CelValueTypes", new object[0])]
         public void A_repair_wraps_its_operand_rather_than_replacing_it(MMLib.Alvo.Expressions.CelValueType type) { }
-        public void A_row_limit_clause_names_the_marker_and_carries_no_separator_of_its_own() { }
         [Xunit.InlineData(new object[] {
                 MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation.Delete})]
         [Xunit.InlineData(new object[] {
                 MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation.Update})]
         public void A_row_lock_clause_carries_no_separator_of_its_own(MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation mutation) { }
+        public void A_row_window_clause_names_the_row_count_marker_and_carries_no_separator_of_its_own() { }
+        public void A_row_window_clause_with_an_offset_names_both_markers_and_carries_no_separator_of_its_own() { }
+        public void A_row_window_clause_with_an_offset_renders_exactly_one_offset_keyword() { }
         [Xunit.InlineData(new object[] {
                 MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation.Delete})]
         [Xunit.InlineData(new object[] {
@@ -42,6 +44,7 @@ namespace MMLib.Alvo.Testing.Data
         [Xunit.InlineData(null)]
         public void A_table_source_is_a_from_clause_body_and_nothing_else(MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation? lockedPreImageFor) { }
         public void A_table_source_is_a_function_of_its_inputs_alone() { }
+        public void An_exception_this_engine_did_not_raise_is_not_decoded_as_a_constraint_violation() { }
         public void An_identifier_that_would_not_strictly_need_delimiting_is_delimited_anyway() { }
         [Xunit.MemberData("CelValueTypes", new object[0])]
         public void An_ordering_key_is_the_repair_both_sides_of_the_boundary_see(MMLib.Alvo.Expressions.CelValueType type) { }
@@ -49,6 +52,7 @@ namespace MMLib.Alvo.Testing.Data
         public void Both_operands_of_a_comparison_get_the_same_repair(MMLib.Alvo.Expressions.CelValueType type) { }
         protected abstract MMLib.Alvo.Data.EntityFrameworkCore.IAlvoSqlDialect CreateDialect();
         protected abstract MMLib.Alvo.Expressions.IFieldSqlRenderer CreateFieldRenderer();
+        public void Decoding_a_null_failure_is_refused() { }
         [Xunit.MemberData("CelValueTypes", new object[0])]
         public void Every_cel_value_type_is_answered_rather_than_refused(MMLib.Alvo.Expressions.CelValueType type) { }
         public void Two_different_names_never_render_to_the_same_identifier() { }
@@ -57,10 +61,11 @@ namespace MMLib.Alvo.Testing.Data
     public sealed class TSqlSqlDialect : MMLib.Alvo.Data.EntityFrameworkCore.IAlvoSqlDialect
     {
         public TSqlSqlDialect() { }
+        public MMLib.Alvo.Data.EntityFrameworkCore.SqlConstraintViolation? DecodeConstraintViolation(System.Data.Common.DbException failure) { }
         public string RenderColumn(string columnName) { }
         public string RenderNullProjection(string storeType) { }
         public string RenderTable(MMLib.Alvo.Schema.EntitySchema entity, MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation? lockedPreImageFor) { }
-        public string RowLimitClause(string rowCountParameterMarker) { }
         public string RowLockClause(MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation mutation) { }
+        public string RowWindowClause(string rowCountParameterMarker, string? rowOffsetParameterMarker = null) { }
     }
 }

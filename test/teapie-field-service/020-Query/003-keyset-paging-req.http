@@ -1,0 +1,57 @@
+### Keyset paging across the seeded seven rows at two per page — FOUR pages, so "the pages all fit in
+### one page" cannot be why this passes. The sort key is `priority`, which carries three deliberate
+### ties (1,1 / 2,2 / 3,3): with ties the `id` tie-breaker is the only thing making the order total,
+### so a boundary that lost it would repeat or skip a row and the set comparison below would catch it.
+# @name Page1
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=2&order=priority.desc.nullslast
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+###
+# @name Page2
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=2&order=priority.desc.nullslast&after={{Page1.response.body.$.next}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+###
+# @name Page3
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=2&order=priority.desc.nullslast&after={{Page2.response.body.$.next}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+###
+# @name Page4
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=2&order=priority.desc.nullslast&after={{Page3.response.body.$.next}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### The whole set in one request, so the four pages can be compared with the truth rather than with
+### each other — four pages that consistently lost the same row would agree with themselves.
+# @name WholeSet
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=100&order=priority.desc.nullslast
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### A cursor no page could have issued is refused rather than answered with the first page
+# @name ForgedCursor
+## TEST-EXPECT-STATUS: [422]
+GET {{fsBaseUrl}}/api/work_orders?limit=2&after=
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### `after` and `offset` anchor one window two ways, so a request carrying both is refused
+# @name CursorAndOffset
+## TEST-EXPECT-STATUS: [422]
+GET {{fsBaseUrl}}/api/work_orders?limit=2&offset=1&after={{Page1.response.body.$.next}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### The other paging mode §2.1 asks for beside the keyset default
+# @name OffsetPaging
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=2&offset=5&order=priority.desc.nullslast
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### A page size past the configured maximum is refused, never quietly clamped
+# @name PageSizeTooLarge
+## TEST-EXPECT-STATUS: [422]
+GET {{fsBaseUrl}}/api/work_orders?limit=5000
+X-Alvo-Api-Key: {{keyDispatcherNorth}}

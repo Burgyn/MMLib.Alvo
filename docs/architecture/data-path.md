@@ -3,9 +3,16 @@
 How an Alvo read or write becomes one SQL statement, and the decisions that shape it. Written during F3 PR2
 (#20).
 
-> **Status: complete for PR2.** Everything below describes what the code does today, on the branch that
-> closes #20. Where a decision was deliberately deferred it says so and names the phase that owns it — see
-> *What later work inherits* at the end, which is the one place a PR3, PR5 or F7 author should start.
+> **Status: complete for PR2**, with the PR3 port widenings folded in where they closed a deferral.
+> Everything below describes what the code does today. Where a decision was deliberately deferred it says
+> so and names the phase that owns it — see *What later work inherits* at the end, which is the one place a
+> PR3, PR5 or F7 author should start.
+>
+> **Sibling record:** this file owns the **port and the SQL**. `docs/architecture/data-api.md` owns the
+> **HTTP layer** PR3 added — the URL grammar and its allow-lists, the status/`type`-slug catalogue, the
+> `ETag` spelling, and Position A (what the framework publishes and what it treats as confidential). The
+> two are deliberately split along the port boundary, so a decision about a wire format lives there and a
+> decision about a statement lives here.
 
 ## One statement, one `WHERE`
 
@@ -45,6 +52,7 @@ single declaration of every name this data path can generate:
 | `alvo_k<n>` | the keyset boundary's bound values | `KeysetSqlRenderer` |
 | `alvo_id` | the row id of a single-row read — a `get`, and an update's pre-image | `ReadStatementComposer.AddRowId` |
 | `alvo_limit` | a page's row limit — bound, never formatted into the text | `ReadStatementComposer` |
+| `alvo_offset` | `AlvoQuery.Offset`'s leading-row skip count — reserved for the same reason `alvo_limit` is, and named separately because T-SQL's `OFFSET … FETCH` needs the two as distinct markers | `ReadStatementComposer` |
 
 A write's own row id is **not** in that table: `update` and `delete` match the row with a LINQ `Where` over
 the policy root, and EF names that parameter after the C# local (`@id`). It cannot collide because every name
@@ -515,13 +523,190 @@ transaction closes all four. It goes through the same composed root; `create` ha
 constrains it is the tenant scope the candidate was already checked against plus the row id just written, and
 a row that cannot be read back is an invariant violation rather than a "not found".
 
-**The `If-Match` precondition channel is PR3's, deliberately.** `UpdateAsync` has no argument that can carry a
-caller's expected version, and adding one is a change to a shipped public interface with two implementations
-and an inherited contract suite — so it is a decision, not a detail. The *mechanism* is already in the right
-place and this is the note that says so: the merge-then-check pre-image is read inside the transaction under
-the driver's row lock, which is exactly where a version comparison belongs. Nothing here should be reshaped in
-anticipation; PR3 widens the signature when it owns the precondition semantics (which header, which column,
-what a missing one means).
+### The `If-Match` precondition channel, landed in PR3 (#90)
+
+PR2 left this as a note saying the *mechanism* was already in the right place — the merge-then-check pre-image
+is read inside the transaction under the driver's row lock, which is exactly where a version comparison
+belongs — and that PR3 would widen the signature when it owned the semantics. It now has, and this is what it
+decided.
+
+`UpdateAsync` and `DeleteAsync` take an `AlvoPrecondition?`; `CreateAsync` takes an `AlvoIdempotency?`. Both
+sit **before** `CancellationToken`, which is a source break for a caller that passed the token positionally
+(several tests in this repository did) and deliberately not a new overload: two overloads of a security-core
+member is two things to keep in step.
+
+**The version is `DateTimeOffset`, not an opaque string.** This port does not know what an HTTP `ETag` is; the
+encoding belongs to the layer that speaks HTTP. `AlvoManagedColumns.VersionColumn` answers which column
+versions a row, from the entity's **traits** — `updated_at`, and only on an `audit` entity — so a non-audited
+entity has no version source at all.
+
+**The version only ever comes out of the database.** PostgreSQL's `timestamptz` keeps microseconds, SQLite
+keeps rendered text, and a .NET clock keeps 100-nanosecond ticks, so a version minted from `TimeProvider` at
+write time would not equal the value the same write stored and every following `If-Match` would fail with
+nothing to diagnose. `EfAlvoData.StoredVersion` reads it off the row-locked pre-image the `WITH CHECK` verdict
+is already reached over — no second read — and `CreateAsync`'s existing re-read is what gives a 201 a version
+in the first place. `AlvoDataConcurrencyTests.The_version_a_write_returns_is_the_one_a_following_precondition_accepts`
+chains create → update → update, each precondition minted from the record the previous call returned.
+
+**Three ordering rules, and they are the contract rather than an implementation detail:**
+
+1. The comparison happens **inside the write transaction, against the locked pre-image**, so it cannot race the
+   write it guards.
+2. An entity with **no version column refuses a precondition** rather than ignoring it
+   (`AlvoPrecondition.EnsureSupported`, from the schema alone, before any row lookup). A silently ignored
+   `If-Match` is a lost update the caller believes it prevented — the only one of the three possible answers
+   that tells them nothing.
+3. **Invisibility outranks the precondition.** A row the `USING` predicate excludes raises
+   `AlvoRecordNotFoundException` whichever precondition was supplied. The other order would confirm a row's
+   existence to a caller who cannot read it, one request at a time, which is the oracle this port's whole
+   failure contract exists to close.
+
+The precondition is compared **before** `WITH CHECK`, which is a free choice between two already-visible-row
+decisions: a stale precondition means the caller's patch was computed against a row that no longer exists in
+that form, so a verdict over their merged post-image would be a verdict about a merge that should not happen.
+
+### The idempotency-record table
+
+`CreateAsync` with an `AlvoIdempotency` token records the key against the row it created, so a replay carrying
+the same key and fingerprint returns that row and writes nothing. `IdempotencyTable` owns the name (via
+`AlvoOptions.SchemaPrefix`, like the versions table), the DDL, and the two statements:
+
+```sql
+CREATE TABLE IF NOT EXISTS alvo_idempotency (
+    idempotency_key TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    row_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (idempotency_key, scope)
+)
+```
+
+- **`scope` is part of the primary key, not a column beside it, and it carries the tenant *and* the acting
+  user.** A key is the caller's own opaque string, so two clients collide on `"1"` — across tenants, and just
+  as easily *within* one. A key space shared between two users in one tenant let one client's replay return the
+  other's row, which is a row-level authorization bypass rather than a collision nuisance; it also made the
+  409-versus-201 outcome a probe of the other client's key space. The scope is built by one member on the port,
+  `AlvoIdempotency.IdentityOf`, because the reference implementation has to answer it identically and the two
+  copies had no test that could catch them drifting. Its tenantless sentinel is the literal `global` rather
+  than the empty GUID: no GUID text can equal it, so it needs no non-empty guard on `TenantId` — the empty-GUID
+  version relied on an invariant nothing enforces.
+- **No `entity` column.** One was stored and never read, which is a control that does not exist: it made a key
+  unique per scope across every entity while telling the lookup nothing, so reusing a key on a second entity
+  silently created nothing at all. `AlvoIdempotency.Fingerprint` covers the entity by contract (an HTTP
+  fingerprint hashes method, path and body, and the path names the entity), so a matched fingerprint already
+  proves the replay is for the entity the original wrote — and the same key on a different entity is a 409 like
+  any other different request. A caller whose fingerprint does *not* distinguish the entity is still never
+  handed a wrong row: the recorded id is re-read under the entity being served, is not there, and the answer is
+  `AlvoRecordNotFoundException`. Both arms are pinned by
+  `The_same_key_on_a_different_entity_is_a_conflict_not_a_silent_replay`.
+- **`idempotency_key`, not `key`.** `KEY` is reserved in T-SQL, and §0 names Azure SQL as a target engine; this
+  repository has already paid once for a T-SQL trap a seam's shape hid (see *Row locking has two grammars*).
+  The **portability claim for this DDL is scoped to the two shipped engines**: `TEXT` is deprecated on T-SQL and
+  would need `nvarchar` there. That mapping is follow-up work for whoever writes that driver rather than a
+  guess made here for a driver nobody is writing.
+- **The record stores a row id, never a response body.** A replay re-reads the row through the caller's
+  *current* `get` policy, so it cannot hand back a representation that policy would no longer produce, and a row
+  that has since been deleted answers `AlvoRecordNotFoundException` like any other missing row.
+- **A different fingerprint under one key is a conflict, not a replay** (`AlvoIdempotencyConflictException`).
+  Answering with the first row would report success for a create that never happened and silently discard the
+  second payload.
+- **The record's insert *is* the concurrency control.** Two requests carrying one key can both find no record
+  and both insert a row; the primary key is what makes exactly one of them commit. The loser is rolled back and
+  restarted, and its next attempt finds the winner's record and answers as a replay —
+  `EfAlvoData.ReplayableCreateAsync`, ten attempts over ~450 ms, sized so ordinary contention on a real engine
+  cannot exhaust it and still bounded, because a loop that retries forever turns a permanently failing write
+  into a hung request. Which failure the loser sees is engine-specific and neither is distinguishable without a
+  provider error code (which this package does not read — see `VersionRowWriter`'s own translation):
+  PostgreSQL violates the primary key, SQLite refuses the write with `database is locked` before the key is
+  ever consulted.
+- **Exhaustion is `InvalidOperationException` with the provider exception inside**, not the raw
+  `DbException`/`DbUpdateException`. The raw one escaped the five families `IAlvoData` promises a request layer
+  can map a status from, so PR3's problem-details layer would have rendered a provider message as an unhandled
+  500. It is family 3 — an invariant this implementation relies on — and the message names the exhausted retry
+  and the constraint that guards the write.
+- **Why a broad catch cannot become a false replay.** The retry catches any storage write failure, which
+  includes a unique violation in the caller's *own* data (a duplicate `vin`). That never becomes a replay of an
+  unrelated row, and the reason is structural rather than a classification: an attempt answers as a replay
+  **only** if the lookup finds a record for this key in this scope, and a duplicate `vin` commits no such
+  record, so every attempt takes the insert path again and fails again. Pinned on a real engine by
+  `SqliteIdempotentCreateFailureTests` — which also needs the engine, since the in-memory reference cannot
+  declare a unique constraint.
+
+**The `CREATE TABLE IF NOT EXISTS` runs outside the write transaction, and that is measured rather than
+tidiness.** Run *inside* it, the DDL serializes two concurrent idempotent creates — PostgreSQL will not let two
+transactions create one table name at once, so the second blocks until the first commits and then finds the
+record already there. The outcome is still correct, but the primary key is never reached: with the DDL inside
+the transaction, `Two_concurrent_creates_with_one_idempotency_key_produce_exactly_one_row` **passed on real
+PostgreSQL with the `PRIMARY KEY` clause deleted from the DDL**. Moving it out (ensure-once, on the context's
+connection, before `BeginTransactionAsync`) makes the same deletion fail the fact, which is the only state in
+which that fact is evidence of anything. A memo set outside a transaction is also honest, where one set inside
+a transaction that later rolls back would claim a table exists that was rolled back with everything else.
+
+**A replay re-reads under a freshly resolved `get` decision, never under the `create` decision the call
+arrived with.** That was a row-level authorization bypass, and it is worth stating plainly because the first
+implementation looked right: `create` has no stored row to filter, so `PolicyDecision.Using` is `null` by
+contract and `ReadStatementComposer` renders it as a constant true. A replay read that way returns the recorded
+row *whoever owns it* — and with the record's scope missing the acting user, a second client in the same tenant
+sending the same key reached the first client's record and was handed their row. Two independent changes close
+it, and each closes a different future one: the scope now carries the user (so the collision is unreachable),
+and the read now resolves `get` (so even a reachable one is filtered by the caller's own predicate, and masked
+by the caller's own `hidden` set — masking is per caller, and a replay must return what a `GET` by that caller
+would). `A_replay_by_a_second_user_in_the_same_tenant_never_returns_the_first_users_row` fails if either half is
+reverted, differently each way.
+
+**A retry must not be worse than the create it replays, so a `get`-denied replay is no longer refused.** A caller
+who may **create but not read** used to have their replay refused with `AlvoAuthorizationException`, while their
+original create succeeded and returned its own row — the feature exists to make "did my first attempt land"
+answerable, and for this caller it answered "you are not allowed to ask". When `_policy.Resolve(entity, Get,
+context)` comes back denied outright (no policy allows `get` at all), the replay now answers with an `AlvoRecord`
+carrying **only `id`**, taken from the idempotency record's own `RowId` — and performs **no row read** to produce
+it. The safety argument is the record's own identity: it is keyed on the key, the tenant *and* the acting user
+(`AlvoIdempotency.IdentityOf`), so a match proves this caller created that row, and the id disclosed is exactly
+the id their own original `201` already gave them, in the body and in `Location`. This must never fall back to
+reading the row under the `create` decision to mint that id-only record — that read is precisely the bypass
+above, even with every field but `id` then discarded, because `create`'s `null` `Using` predicate would match the
+row regardless of who owns it. `A_replay_on_an_entity_the_caller_cannot_read_performs_no_row_read` pins it, and
+proves the "no read" half structurally by deleting the row before the replay: with the row physically gone, any
+read of it — under any decision, `create`'s constant-true predicate included — answers
+`AlvoRecordNotFoundException`, so the fact can only pass if the replay never reads it at all.
+
+**The sibling case stays exactly as it was, deliberately.** A *configured* `get` whose own predicate excludes
+this specific row (an entity whose rule is `USING (status == 'published')`, say) still reads, and the replay
+still answers `AlvoRecordNotFoundException` — indistinguishable from a row that was genuinely deleted. Telling
+the two apart would need a second, policy-free read, and refusing to add one is the more conservative of the two
+errors; it is filed as an issue rather than fixed here.
+
+**`EfCoreSchemaIntrospector` excludes both bookkeeping tables**, through
+`SystemSchemaInitializer.FrameworkTableNames` — one member returning every framework table rather than a name
+per caller, because an introspector that knows about one and not the next would plan a `DROP` for it on the
+following re-apply, silently, and the symptom would be a lost idempotency history rather than an error. The
+runner's fallback is the path that reaches it: `SchemaMigrationRunner` diffs against introspection whenever
+there is no applied snapshot. **One fact per table**, in `AddAlvoIntegrationTests` against a real SQLite
+database through the full container, each asserting the table physically exists (non-vacuity, read from
+`sqlite_master`), that introspection does not report it as an entity, and that no step of the resulting plan
+names it. The names are spelled out in the test rather than read from `FrameworkTableNames`, because taking
+them from the member under test is how a name dropped from that member stops being checked at all.
+
+**What actually breaks first, measured by deleting a name from that member**, is not the planned `DROP` this
+section has claimed since PR2 — it is a hard `InvalidOperationException` out of the model build, *"the property
+'id' cannot be added to the type 'alvo_idempotency'"*, because a bookkeeping table has no row key and the
+property-bag model requires one. And it breaks on **every first run**, not only on a re-apply:
+`SchemaMigrationRunner` reads the applied snapshot first — which is what creates these tables — and then falls
+back to introspection because that read found no revision yet. Five pre-existing `AddAlvoIntegrationTests`
+facts fail alongside the two new ones, so the exclusion was never as uncovered as it looked; what was missing
+was a fact that *names the reason*, which is what makes a future failure diagnosable rather than mystifying.
+The silent-`DROP` framing stays in the docs as the failure mode that would appear if the model builder ever
+tolerated a keyless table.
+
+**Its bind-parameter names (`@key`, `@scope`, `@fingerprint`, `@row_id`, `@created_at`) are
+deliberately not in `PolicyParameterPrefix`.** That registry exists because one composed *read* statement
+carries fragments from several renderers that never see each other's output; these two statements are
+hand-written, single-fragment, and touch no entity table, so there is no second contributor a name could
+collide with. `IdempotencyTable.cs` is added to `ChangeTrackerReachTests`' SQL-composing allow-list on the same
+ground the five other framework-table files earn their place: it never touches an entity table. Its
+`created_at` text form comes from `StoredInstant.Text`, this codebase's single conversion authority, rather
+than a second `ToString("O")` beside `VersionRowWriter`'s.
 
 ### Row locking has two grammars, and T-SQL uses the one that is not a trailing clause
 
@@ -695,11 +880,19 @@ validator owns. It is not implemented and is declared here rather than left look
 | `get` of an invisible or absent row | `null` | the engine |
 | `update`/`delete` of an invisible or absent row | `AlvoRecordNotFoundException`, identical message | rows affected / pre-image |
 | Post-image fails `WITH CHECK` or the tenant scope | `AlvoAuthorizationException` | `IPredicateEvaluator` |
+| A precondition that does not match the locked pre-image's version, or a precondition against an entity with no version column | `AlvoPreconditionFailedException` | the pre-image / the schema alone |
+| An idempotency key already used for a request with a different fingerprint | `AlvoIdempotencyConflictException` | the recorded fingerprint |
+| A replay whose entity allows this caller no `get` at all | `AlvoAuthorizationException` | a freshly resolved `get` decision |
+| A replay whose recorded row is absent, or invisible under that `get` decision | `AlvoRecordNotFoundException`, identical message | that decision + the row |
+| An idempotency token from an anonymous caller | `ArgumentException` family | the token and the context alone |
 
-**Three families, and the boundary between them is the contract.** A request layer above this port has
+**Five families, and the boundary between them is the contract.** A request layer above this port has
 nothing but the exception type to map a status code from, so it is stated on `IAlvoData`'s own remarks, where
 a PR3 author reads it: `ArgumentException` = malformed query (422), `AlvoAuthorizationException` = denial
-(403), `InvalidOperationException` = an invariant this implementation relies on (500).
+(403), `InvalidOperationException` = an invariant this implementation relies on (500), and PR3's two additions
+— `AlvoPreconditionFailedException` = 412 (re-read and retry) and `AlvoIdempotencyConflictException` = 409
+(send a fresh key). Neither of the last two is folded into `ArgumentException`: the request was well-formed,
+and "your version is stale" and "your body is malformed" are different instructions to a client.
 
 That needed settling because the two shipped implementations gave **four different answers** to four
 malformed inputs:
@@ -1139,6 +1332,50 @@ reconstruct the reasoning from a scattered set of remarks.
 | `Limit = 0` is accepted and renders `LIMIT 0` | Both engines agree on it, so it is not an engine-agnosticism defect — but whether "give me nothing" is an empty page or a refusal is a request-layer decision | `ReadStatementComposer` |
 | A **`NUL` in a text value on the *write* path** still surfaces as `DbUpdateException` | The read path refuses it in the binder (PostgreSQL cannot encode it, SQLite can); the write analogue is one more storage-constraint violation, on the same boundary as the row above | `PredicateParameterBinder` holds the read-side guard |
 | The query-string surface, the offset mode, and a server-enforced maximum page size | `AlvoQuery.After` is opaque by contract and PR2 owns only its encoding | `KeysetCursor` |
+
+Two of those rows are now closed: `AlvoQuery.Offset` (PR3 task 1) and the `If-Match`/`Idempotency-Key`
+channels (PR3 task 2, #90 — see *The `If-Match` precondition channel* above). What PR3's own HTTP layer still
+owns, and this port deliberately does not: how a version is spelled on the wire (`ETag` quoting, weak vs
+strong), what a request's idempotency **fingerprint** is computed over, and whether an idempotency record is
+ever pruned.
+
+The **fingerprint** clause is now closed too: PR3 task 7 defines it as `SHA-256(method \n entity \n canonical
+body)`, hex, where *canonical* means re-serialized from the parsed document with property names sorted
+ordinally (`MMLib.Alvo.Api.Internal.IdempotencyFingerprint`). The route is deliberately **not** in the digest,
+so moving `AlvoApiOptions.RoutePrefix` does not invalidate stored fingerprints.
+
+#### Idempotency-record retention is an operator's job, and there is nothing automatic yet
+
+Task 7 wired `Idempotency-Key` over HTTP, which makes `<prefix>_idempotency` the one framework table an
+outside caller can add rows to. **Nothing expires a record**, so the table grows by one row per keyed create,
+for ever — every row is read at most once (by the retry it exists to answer) and then never again.
+
+Scope of the growth, stated so it is not mistaken for something worse: a record requires a caller who
+authenticated **and** passed the entity's `create` policy, so it is a strict subset of the writes that caller
+may already perform. There is no unauthenticated amplification and no cross-tenant reach (the record's scope
+is the tenant plus the acting user — `AlvoIdempotency.IdentityOf`). It is a housekeeping cost, not a
+vulnerability.
+
+Until a retention window ships, prune it by hand. The `created_at` column exists for exactly this and nothing
+else reads it:
+
+```sql
+-- Records older than the longest retry window any client of yours uses. Nothing reads a record after the
+-- retry it answers, so anything past that window is dead weight. Run it as often as the table's growth
+-- warrants; it takes no lock a write path waits on for long, and a concurrent create simply inserts again.
+DELETE FROM alvo_idempotency WHERE created_at < '2026-01-01T00:00:00.0000000+00:00';
+```
+
+`created_at` is stored as portable text in the round-trip format `StoredInstant.Text` writes
+(`DateTimeOffset` with `"O"`), so it compares lexicographically in the same order it compares chronologically
+as long as every row carries the same offset — which the framework's own clock guarantees, since it always
+writes UTC. Deleting a record for a key a client is *still* retrying costs that client one duplicate row on
+its next retry rather than a replay, so the window has to outlast the longest retry any client performs.
+
+**Filed as #115, not built:** a configurable retention window plus a background sweep. It is scheduler-shaped
+work — Alvo has no hosted-service seam yet — and it belongs with whatever ships the first one rather than
+bolted onto a request path. `docs/product/baas-analyza.md` puts cron and retention in the scheduling
+component, which is where the issue is filed.
 
 ### PR5 — outbox, events and hooks (#22)
 

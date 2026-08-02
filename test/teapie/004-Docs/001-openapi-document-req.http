@@ -1,0 +1,4 @@
+### The document describes the routes the mounted descriptor generated
+# @name OpenApiDocument
+## TEST-EXPECT-STATUS: [200]
+GET {{baseUrl}}/openapi/v1.json

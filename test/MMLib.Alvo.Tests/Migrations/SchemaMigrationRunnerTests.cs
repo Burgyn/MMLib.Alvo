@@ -1,4 +1,6 @@
-﻿using MMLib.Alvo.Descriptor;
+﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Descriptor.Internal;
 using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Migrations;
@@ -39,7 +41,7 @@ public sealed class SchemaMigrationRunnerTests
     public SchemaMigrationRunnerTests()
     {
         _source.LoadAsync(Arg.Any<CancellationToken>()).Returns(FleetDescriptorJson);
-        _runner = new SchemaMigrationRunner(_source, new DescriptorValidator(), _migrator, _introspector, _store, new CelCompiler(), new PolicyCatalogProvider());
+        _runner = new SchemaMigrationRunner(_source, new DescriptorValidator(), _migrator, _introspector, _store, new CelCompiler(), new PolicyCatalogProvider(), NullLogger<SchemaMigrationRunner>.Instance);
     }
 
     [Fact]
@@ -139,13 +141,105 @@ public sealed class SchemaMigrationRunnerTests
         };
         migrator.PlanAsync(Arg.Any<SchemaModel>(), Arg.Any<SchemaModel>(), Arg.Any<MigrationOptions>(), Arg.Any<CancellationToken>())
             .Returns(nonEmptyPlan);
-        var runner = new SchemaMigrationRunner(_source, new DescriptorValidator(), migrator, _introspector, _store, new CelCompiler(), new PolicyCatalogProvider());
+        var runner = new SchemaMigrationRunner(_source, new DescriptorValidator(), migrator, _introspector, _store, new CelCompiler(), new PolicyCatalogProvider(), NullLogger<SchemaMigrationRunner>.Instance);
         _store.GetCurrentAsync("fleet", Arg.Any<CancellationToken>()).Returns((AppliedSchema?)null);
         _introspector.IntrospectAsync(Arg.Any<CancellationToken>()).Returns(new SchemaModel([]));
 
         await runner.RunAsync(new MigrationOptions { DryRun = true }, TestContext.Current.CancellationToken);
 
         await migrator.DidNotReceive().ApplyAsync(Arg.Any<MigrationPlan>(), Arg.Any<MigrationOptions>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// The same fleet, plus one declared-but-unhonoured top-level block — the minimum a descriptor needs to
+    /// earn the §D warning.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Purpose-built rather than <c>examples/complex-crm</c>, which is the fixture the pure-function facts
+    /// use.</b> <c>complex-crm</c> is deliberately not appliable: it declares four refused <em>features</em>
+    /// as well, so <see cref="SchemaMigrationRunner.RunAsync"/> over it throws before reaching the warning —
+    /// the fact would fail for the wrong reason and then pass again once someone "fixed" the descriptor.
+    /// </para>
+    /// <para>
+    /// <c>webhooks</c> is the block, and one endpoint is what makes it a declaration: <c>"webhooks": {}</c>
+    /// would be an author saying they are not using the feature, which
+    /// <see cref="UnhonouredSubsystems.DeclaredBy"/> correctly does not warn about.
+    /// </para>
+    /// </remarks>
+    private const string FleetWithUnhonouredBlockJson = """
+        {
+          "apiVersion": "alvo.dev/v1",
+          "name": "fleet",
+          "entities": {
+            "vehicles": {
+              "fields": {
+                "vin": { "type": "string", "required": true, "maxLength": 17 }
+              }
+            }
+          },
+          "webhooks": {
+            "endpoints": {
+              "vehicle-changed": {
+                "url": "https://example.test/hooks/vehicle-changed",
+                "secretRef": "vehicle-changed-secret"
+              }
+            }
+          }
+        }
+        """;
+
+    /// <summary>
+    /// <b>Applying a descriptor that declares an unhonoured block writes a warning naming it.</b> This is the
+    /// fact that the §D warning is <em>reached</em>, as opposed to correct.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Without it, the whole user-visible deliverable had no coverage.</b> All four facts in
+    /// <c>UnhonouredSubsystemsTests</c> call <c>UnhonouredSubsystems.Warn(logger, descriptor)</c> directly, so
+    /// they prove a pure function is right and nothing proves anybody calls it — deleting the
+    /// <c>UnhonouredSubsystems.Warn(_logger, descriptor)</c> line from
+    /// <see cref="SchemaMigrationRunner.RunAsync"/> left the entire suite green. Every other fact in this class
+    /// builds the runner with <c>NullLogger&lt;SchemaMigrationRunner&gt;.Instance</c>, which cannot observe a
+    /// warning by construction, and the descriptors the real apply paths use declare no unhonoured block — so
+    /// even a log-capturing world would have been silent.
+    /// </para>
+    /// <para>
+    /// <b>It asserts the block is <em>named</em>, not that a warning was logged.</b> The latter passes on any
+    /// wording, which is the vacuity <c>UnhonouredSubsystemsTests</c>' own remarks refuse; and it drives a
+    /// genuine apply rather than the empty-plan no-op, because that is the run an author is looking at when
+    /// they go hunting for the webhook that never fired.
+    /// </para>
+    /// <para>
+    /// The logger is a real <see cref="LoggerFactory"/> over a capturing provider rather than the
+    /// <see cref="ILogger"/> the runner takes, so the <c>LoggerMessage</c> source-generated delegate that
+    /// actually formats this message is on the path.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task Applying_a_descriptor_that_declares_an_unhonoured_block_warns_naming_it()
+    {
+        _source.LoadAsync(Arg.Any<CancellationToken>()).Returns(FleetWithUnhonouredBlockJson);
+        _store.GetCurrentAsync("fleet", Arg.Any<CancellationToken>()).Returns((AppliedSchema?)null);
+        _introspector.IntrospectAsync(Arg.Any<CancellationToken>()).Returns(new SchemaModel([]));
+
+        using var capturing = new CapturingLogger();
+        using var loggers = LoggerFactory.Create(logging => logging.AddProvider(capturing));
+        var runner = new SchemaMigrationRunner(
+            _source, new DescriptorValidator(), _migrator, _introspector, _store, new CelCompiler(),
+            new PolicyCatalogProvider(), loggers.CreateLogger<SchemaMigrationRunner>());
+
+        var result = await runner.RunAsync(new MigrationOptions(), TestContext.Current.CancellationToken);
+
+        result.Applied.ShouldBeTrue(
+            "or this fact never reached the apply path whose warning it is asserting on");
+        capturing.Warnings.ShouldHaveSingleItem(
+                "one line for the whole set, and exactly one apply happened")
+            .ShouldContain(
+                "webhooks",
+                Shouldly.Case.Sensitive,
+                "the descriptor declares 'webhooks' and this build honours it nowhere; a warning that does not "
+                + "name the block leaves the author debugging the endpoint they think is down");
     }
 
     private static SchemaModel MapFleetDescriptor()

@@ -1,0 +1,112 @@
+### The three authorization shapes, reached in ONE system state so they are provably distinguishable
+### rather than merely each reachable somewhere.
+###
+###   SHAPE 1  the operation has no rule at all          -> 403
+###   SHAPE 2  a rule exists and the caller fails it     -> 200 with an empty page
+###   SHAPE 3  a rule exists and ONE ROW fails it        -> 404
+###
+### Shape 2 is the one that has caught two briefs out: a rule compiles to a row-level predicate, so a
+### caller who fails it is ALLOWED and simply matches no rows. It is not a gate.
+
+### SHAPE 1. `regions` declares list, get and create — and no update and no delete. So there is no
+### policy to consult, and the answer names the operation rather than the row.
+# @name DeleteUnconfiguredOperation
+## TEST-EXPECT-STATUS: [403]
+DELETE {{fsBaseUrl}}/api/regions/{{RegionCentralId}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### The same shape on the other unconfigured verb, by the ADMIN key — so "the caller was too weak"
+### cannot be the explanation. Nobody can update a region, because nothing says who may.
+# @name AdminAlsoCannotUpdateRegion
+## TEST-EXPECT-STATUS: [403]
+PATCH {{fsBaseUrl}}/api/regions/{{RegionCentralId}}
+X-Alvo-Api-Key: {{keyAdmin}}
+Content-Type: application/json
+
+{ "name": "Renamed" }
+
+### The control for shape 1: the SAME caller on the SAME entity, on a verb the descriptor configures.
+### So the 403 above is the missing rule and not the entity or the key.
+# @name SameCallerCanReadRegions
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/regions?limit=100&order=code.asc
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### SHAPE 2. `customers.list` names dispatcher and admin. A technician holds neither, so the
+### predicate is false for them — and the answer is 200 with nothing in it, not 403.
+# @name TechnicianListsCustomers
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/customers?limit=100
+X-Alvo-Api-Key: {{keyTechNorth}}
+
+### The control for shape 2: the rows really are there, for a caller the predicate admits. Without
+### this, an empty page would be indistinguishable from an empty table.
+# @name DispatcherListsTheSameCustomers
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/customers?limit=100&order=name.asc
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### Shape 2 again with a ROW-LEVEL predicate rather than a caller-level one: `spare-north` is a
+### technician with nothing assigned, so `assigned_to == @user.id` matches no row.
+# @name SpareTechnicianListsWorkOrders
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=100
+X-Alvo-Api-Key: {{keySpareNorth}}
+
+### And the same predicate for a technician who IS assigned: a subset, not everything and not nothing
+# @name AssignedTechnicianListsWorkOrders
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=100&order=reference.asc
+X-Alvo-Api-Key: {{keyTechNorth}}
+
+### SHAPE 3. WO-1004 exists and the technician is not assigned to it, so the row-level predicate
+### excludes it — and an excluded row reads exactly like one that was never there.
+# @name TechnicianReadsRowTheyAreNotAssigned
+## TEST-EXPECT-STATUS: [404]
+GET {{fsBaseUrl}}/api/work_orders/{{Wo1004Id}}
+X-Alvo-Api-Key: {{keyTechNorth}}
+
+### The control for shape 3: an id that genuinely does not exist answers the same 404, which is the
+### indistinguishability the design promises.
+# @name NobodyReadsANonexistentRow
+## TEST-EXPECT-STATUS: [404]
+GET {{fsBaseUrl}}/api/work_orders/00000000-0000-0000-0000-0000000000ff
+X-Alvo-Api-Key: {{keyTechNorth}}
+
+### And the second control: the SAME technician reading a row they ARE assigned gets it. So the 404
+### above is the predicate excluding a row and not the technician being unable to read at all.
+# @name TechnicianReadsTheirOwnRow
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders/{{Wo1001Id}}
+X-Alvo-Api-Key: {{keyTechNorth}}
+
+### A write is judged the same way: a technician may update a row assigned to them...
+# @name TechnicianUpdatesTheirOwnRow
+## TEST-EXPECT-STATUS: [200]
+PATCH {{fsBaseUrl}}/api/work_orders/{{Wo1001Id}}
+X-Alvo-Api-Key: {{keyTechNorth}}
+Content-Type: application/json
+
+{ "status": "in_progress" }
+
+### ...and not one they are not
+# @name TechnicianUpdatesSomebodyElsesRow
+## TEST-EXPECT-STATUS: [404]
+PATCH {{fsBaseUrl}}/api/work_orders/{{Wo1004Id}}
+X-Alvo-Api-Key: {{keyTechNorth}}
+Content-Type: application/json
+
+{ "status": "cancelled" }
+
+### A credential that was presented and cannot be used is 401 — a different diagnosis from all three
+### shapes above, and it owes a WWW-Authenticate challenge.
+# @name UnusableCredential
+## TEST-EXPECT-STATUS: [401]
+GET {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: dispatcher-north.not-the-secret
+
+### The row the technician was refused is unchanged, read by a caller who can see it
+# @name TheRefusedRowIsUnchanged
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders/{{Wo1004Id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}

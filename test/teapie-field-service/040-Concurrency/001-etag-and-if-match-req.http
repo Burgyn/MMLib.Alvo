@@ -1,0 +1,92 @@
+### A read of an AUDITED row yields an ETag, because `audit: true` mints the `updated_at` that
+### versions it. The pair of cases in this file is what `audit` is for.
+# @name ReadForTag
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders/{{Wo1007Id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### A write carrying the CURRENT version succeeds
+# @name WriteWithCurrentTag
+## TEST-EXPECT-STATUS: [200]
+PATCH {{fsBaseUrl}}/api/work_orders/{{Wo1007Id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+If-Match: {{ReadForTag.response.headers.ETag}}
+Content-Type: application/json
+
+{ "priority": 5 }
+
+### The SAME tag again is now stale, and a stale precondition is 412 rather than an overwrite
+# @name WriteWithStaleTag
+## TEST-EXPECT-STATUS: [412]
+PATCH {{fsBaseUrl}}/api/work_orders/{{Wo1007Id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+If-Match: {{ReadForTag.response.headers.ETag}}
+Content-Type: application/json
+
+{ "priority": 1 }
+
+### The tag the successful write returned is the one that works next
+# @name WriteWithRefreshedTag
+## TEST-EXPECT-STATUS: [200]
+PATCH {{fsBaseUrl}}/api/work_orders/{{Wo1007Id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+If-Match: {{WriteWithCurrentTag.response.headers.ETag}}
+Content-Type: application/json
+
+{ "priority": 4 }
+
+### A tag this API never minted cannot be compared, so it is refused rather than ignored
+# @name UnknownTag
+## TEST-EXPECT-STATUS: [412]
+PATCH {{fsBaseUrl}}/api/work_orders/{{Wo1007Id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+If-Match: "not-a-version-this-api-issued"
+Content-Type: application/json
+
+{ "priority": 2 }
+
+### A WEAK tag can never match under the strong comparison RFC 9110 §13.1.1 requires for If-Match
+# @name WeakTag
+## TEST-EXPECT-STATUS: [412]
+PATCH {{fsBaseUrl}}/api/work_orders/{{Wo1007Id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+If-Match: W/{{WriteWithCurrentTag.response.headers.ETag}}
+Content-Type: application/json
+
+{ "priority": 2 }
+
+### `If-Match: *` asks only that the row exist, which is a question the 404 already answers
+# @name IfMatchAny
+## TEST-EXPECT-STATUS: [200]
+PATCH {{fsBaseUrl}}/api/work_orders/{{Wo1007Id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+If-Match: *
+Content-Type: application/json
+
+{ "priority": 4 }
+
+### A create carries no precondition: there is no stored version to compare and the id is assigned here
+# @name ConditionalCreate
+## TEST-EXPECT-STATUS: [412]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+If-Match: {{WriteWithCurrentTag.response.headers.ETag}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "reference": "WO-4001",
+  "title": "Conditional create",
+  "status": "scheduled",
+  "priority": 3,
+  "access_code": "COND",
+  "customer_id": "{{CustomerAcmeId}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+### The end state: the row is at the priority the LAST accepted write set, and none of the four
+### refused writes touched it.
+# @name FinalState
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders/{{Wo1007Id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}

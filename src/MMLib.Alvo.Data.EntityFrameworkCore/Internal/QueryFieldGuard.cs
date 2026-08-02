@@ -27,7 +27,11 @@ internal static class QueryFieldGuard
     /// </summary>
     internal const string UnmaskableFieldMessage = "The resolved field mask cannot be applied to this entity.";
 
-    private const string UnavailableQueryFieldMessage = "The query references a field that is not available to this caller.";
+    /// <summary>
+    /// Read from the port rather than written here: the whole point of this refusal is that it is identical
+    /// wherever it is raised, and a literal per assembly is how that stops being true silently.
+    /// </summary>
+    private const string UnavailableQueryFieldMessage = AlvoAuthorizationException.QueryFieldUnavailable;
 
     private const string UndeclaredPayloadFieldMessage = "The payload names a field that is not writable on this entity.";
 

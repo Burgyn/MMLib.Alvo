@@ -1,0 +1,162 @@
+### SCENARIO 1 — a full lifecycle, and it ends by asserting the STATE OF THE WORLD.
+###
+### An application does not make one request. It creates a parent, hangs children off it, narrows and
+### orders them, reads one, changes it under its own version, removes another — and what matters at
+### the end is what is left. Every step below consumes what an earlier step returned, and the closing
+### assertion is the exact contents of the collection, field by field, not "the last call was 200".
+###
+### This scenario owns its own customer, so the set it asserts is complete rather than "the seeded
+### seven plus whatever this file added".
+
+### 1. The parent.
+# @name CreateCustomer
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/customers
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "name": "Lifecycle Ltd",
+  "tier": "standard",
+  "email": "ops@lifecycle.test"
+}
+
+### 2. Four children, all referencing the parent by the id step 1 returned.
+# @name CreateChildA
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "reference": "WO-8001",
+  "title": "Survey the site",
+  "status": "scheduled",
+  "priority": 1,
+  "quoted_price": 200.00,
+  "access_code": "LC-8001",
+  "customer_id": "{{CreateCustomer.response.body.$.id}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+###
+# @name CreateChildB
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "reference": "WO-8002",
+  "title": "Install the unit",
+  "status": "scheduled",
+  "priority": 2,
+  "quoted_price": 4200.00,
+  "access_code": "LC-8002",
+  "customer_id": "{{CreateCustomer.response.body.$.id}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+###
+# @name CreateChildC
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "reference": "WO-8003",
+  "title": "Commission the unit",
+  "status": "scheduled",
+  "priority": 3,
+  "quoted_price": 600.00,
+  "access_code": "LC-8003",
+  "customer_id": "{{CreateCustomer.response.body.$.id}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+### The fourth is the one that gets cancelled and deleted, so it starts out different
+# @name CreateChildD
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "reference": "WO-8004",
+  "title": "Remove the old unit",
+  "status": "cancelled",
+  "priority": 4,
+  "quoted_price": 150.00,
+  "access_code": "LC-8004",
+  "customer_id": "{{CreateCustomer.response.body.$.id}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+### 3. List the children, filtered to this customer and to the live ones, in dispatch order.
+# @name ListScheduledChildren
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?customer_id=eq.{{CreateCustomer.response.body.$.id}}&status=eq.scheduled&order=priority.asc&limit=100
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### 4. Read one of them, and take its version.
+# @name ReadChildB
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders/{{CreateChildB.response.body.$.id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### 5. Change it under the version the read handed out.
+# @name UpdateChildB
+## TEST-EXPECT-STATUS: [200]
+PATCH {{fsBaseUrl}}/api/work_orders/{{CreateChildB.response.body.$.id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+If-Match: {{ReadChildB.response.headers.ETag}}
+Content-Type: application/json
+
+{
+  "status": "in_progress",
+  "assigned_to": "{{userTechNorth}}",
+  "quoted_price": 4550.00
+}
+
+### 6. Remove the cancelled one.
+# @name DeleteChildD
+## TEST-EXPECT-STATUS: [204]
+DELETE {{fsBaseUrl}}/api/work_orders/{{CreateChildD.response.body.$.id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### 7. THE STATE OF THE WORLD. Everything this customer now has, in a known order.
+# @name FinalCollection
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?customer_id=eq.{{CreateCustomer.response.body.$.id}}&order=reference.asc&limit=100
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### The deleted one is gone, by id, not merely absent from a page
+# @name DeletedChildIsGone
+## TEST-EXPECT-STATUS: [404]
+GET {{fsBaseUrl}}/api/work_orders/{{CreateChildD.response.body.$.id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### The updated one carries the new values, read back rather than trusted from the write's echo
+# @name ReadUpdatedChild
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders/{{CreateChildB.response.body.$.id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### An untouched sibling is byte-for-byte what it was created as
+# @name ReadUntouchedChild
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders/{{CreateChildA.response.body.$.id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### And the parent still cannot be deleted while a child references it (`onDelete: restrict`) — refused as
+### the caller's conflict it is (#138), not as an internal error
+# @name DeleteParentWithChildren
+## TEST-EXPECT-STATUS: [409]
+DELETE {{fsBaseUrl}}/api/customers/{{CreateCustomer.response.body.$.id}}
+X-Alvo-Api-Key: {{keyAdmin}}

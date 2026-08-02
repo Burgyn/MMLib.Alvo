@@ -335,21 +335,26 @@ internal sealed class DataWorld(AlvoDataHost host)
     /// </summary>
     internal IAlvoData Data => host.Data;
 
-    internal Task<IReadOnlyList<AlvoRecord>> QueryAsync(AlvoQuery query, AlvoContext caller) =>
-        Data.QueryAsync(query, caller, TestContext.Current.CancellationToken);
+    /// <summary>
+    /// The page's rows alone, for the many facts here that only assert on the returned set. A test that
+    /// needs <see cref="AlvoPage.NextCursor"/> goes through <see cref="Data"/> directly instead of this
+    /// wrapper.
+    /// </summary>
+    internal async Task<IReadOnlyList<AlvoRecord>> QueryAsync(AlvoQuery query, AlvoContext caller) =>
+        (await Data.QueryAsync(query, caller, TestContext.Current.CancellationToken)).Items;
 
     internal Task<AlvoRecord?> GetAsync(string entity, Guid id, AlvoContext caller) =>
         Data.GetAsync(entity, id, caller, TestContext.Current.CancellationToken);
 
     internal Task<AlvoRecord> CreateAsync(string entity, IReadOnlyDictionary<string, object?> values, AlvoContext caller) =>
-        Data.CreateAsync(entity, values, caller, TestContext.Current.CancellationToken);
+        Data.CreateAsync(entity, values, caller, cancellationToken: TestContext.Current.CancellationToken);
 
     internal Task<AlvoRecord> UpdateAsync(
         string entity, Guid id, IReadOnlyDictionary<string, object?> values, AlvoContext caller) =>
-        Data.UpdateAsync(entity, id, values, caller, TestContext.Current.CancellationToken);
+        Data.UpdateAsync(entity, id, values, caller, cancellationToken: TestContext.Current.CancellationToken);
 
     internal Task DeleteAsync(string entity, Guid id, AlvoContext caller) =>
-        Data.DeleteAsync(entity, id, caller, TestContext.Current.CancellationToken);
+        Data.DeleteAsync(entity, id, caller, cancellationToken: TestContext.Current.CancellationToken);
 
     internal IReadOnlyList<string> Statements => host.Statements;
 

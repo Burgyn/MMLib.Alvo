@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Descriptor.Internal;
 using MMLib.Alvo.Schema;
 using System.Text.Json.Nodes;
 using FieldType = MMLib.Alvo.Schema.FieldType;
@@ -88,86 +89,345 @@ public class DescriptorToSchemaMapperTests
     // generated audit/soft-delete columns, refs) is already fully covered, at 100% mutation
     // coverage, by the other tests in this file, so this fixture's role is proving the computed
     // guardrail fires on a real, schema-valid descriptor rather than re-snapshotting the mapping.
+    //
+    // The fixture declares three features this build does not honour ('default', 'rollup', 'computed'),
+    // and the mapper refuses at the first one it meets — which is 'default', on an earlier entity. The
+    // other two are stripped here so this fact is about the 'computed' arm specifically; the arms
+    // themselves get one fact each in Map_refuses_every_field_feature_it_does_not_honour below.
     [Fact]
     public void Complex_crm_mapping_rejects_computed()
     {
-        var ex = Should.Throw<InvalidDataException>(() => Map("complex-crm/crm.alvo.json"));
+        var json = ComplexCrmWithout("default", "rollup");
+
+        var ex = Should.Throw<InvalidDataException>(() => MapInline(json));
 
         ex.Message.ShouldContain("computed");
         ex.Message.ShouldContain("#21");
     }
 
+    /// <summary>
+    /// <b>The tie between the two refusal passes.</b> Every entry in
+    /// <see cref="UnhonouredFeatures.OnAField"/> — the table <c>DescriptorValidator</c> reports from — is one
+    /// the <em>mapper</em> also throws for, driven off that table rather than off a copy of it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the fact whose absence let the list become four hand-written copies. A theory with its own
+    /// <c>[InlineData]</c> per feature proves each arm works and proves nothing about whether the two passes
+    /// agree: adding a fifth feature to the validator's table and forgetting the mapper left both green. Driven
+    /// off the table, a new entry fails here until the mapper honours it too, and there is nowhere to add a
+    /// feature that only one pass refuses.
+    /// </para>
+    /// <para>
+    /// The declaration is synthesised from the table's own path, so the theory needs no per-feature JSON
+    /// either — the one thing it cannot derive is a <em>value</em> the schema accepts for each key, which
+    /// <see cref="DeclarationFor"/> supplies and which fails loudly for a key it has not been taught.
+    /// </para>
+    /// </remarks>
+    /// <param name="path">The table entry's path.</param>
+    [Theory]
+    [MemberData(nameof(EveryUnhonouredFieldFeature))]
+    public void Map_refuses_every_field_feature_the_table_records(string path)
+    {
+        var json = $$"""
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": {
+            "lines": { "fields": { "invoice_id": { "type": "uuid" } } },
+            "invoices": { "fields": {
+              "net": { "type": "decimal", "precision": 8, "scale": 2 },
+              "amount": { "type": "decimal", "precision": 8, "scale": 2, {{DeclarationFor(path)}} } } } } }
+        """;
+
+        var ex = Should.Throw<InvalidDataException>(() => MapInline(json));
+
+        ex.Message.ShouldContain(path);
+        ex.Message.ShouldContain("amount");
+    }
+
+    /// <summary>The same tie one layer up, for the entity-level table — <c>softDelete</c> and the six hook points.</summary>
+    /// <param name="path">The table entry's path.</param>
+    [Theory]
+    [MemberData(nameof(EveryUnhonouredEntityFeature))]
+    public void Map_refuses_every_entity_feature_the_table_records(string path)
+    {
+        var json = $$"""
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "notes": {
+            {{DeclarationFor(path)}},
+            "fields": { "title": { "type": "string" } } } } }
+        """;
+
+        var ex = Should.Throw<InvalidDataException>(() => MapInline(json));
+
+        ex.Message.ShouldContain(path);
+        ex.Message.ShouldContain("notes");
+    }
+
+    public static TheoryData<string> EveryUnhonouredFieldFeature() =>
+        [.. UnhonouredFeatures.OnAField.Select(feature => feature.Path)];
+
+    public static TheoryData<string> EveryUnhonouredEntityFeature() =>
+        [.. UnhonouredFeatures.OnAnEntity.Select(feature => feature.Path)];
+
+    /// <summary>
+    /// A schema-valid declaration of one table entry, for the theories that are driven off the table.
+    /// </summary>
+    /// <remarks>
+    /// It <b>throws</b> for a path it does not know rather than guessing a shape, so adding a table entry
+    /// fails the theory with "teach DeclarationFor about it" instead of silently testing a key the schema
+    /// would have rejected anyway — which would be a green theory case asserting nothing.
+    /// </remarks>
+    /// <param name="path">The table entry's path.</param>
+    private static string DeclarationFor(string path) => path switch
+    {
+        "computed" => @"""computed"": ""net * 1.2""",
+        "rollup" => @"""rollup"": { ""from"": ""lines"", ""op"": ""count"" }",
+        "validation" => @"""validation"": ""value >= 0""",
+        "default" => @"""default"": 1",
+        "softDelete" => @"""softDelete"": true",
+        _ when path.StartsWith("hooks/before", StringComparison.Ordinal) =>
+            $@"""hooks"": {{ ""{path["hooks/".Length..]}"": [ {{ ""action"": {{ ""reject"": ""no"" }} }} ] }}",
+        // An after-hook's action is polymorphic on a 'type' discriminator (AutomationAction), so a shape
+        // without it does not parse at all — which is what the first version of this method got wrong, and
+        // what the theory caught by throwing NotSupportedException instead of InvalidDataException.
+        _ when path.StartsWith("hooks/after", StringComparison.Ordinal) =>
+            $@"""hooks"": {{ ""{path["hooks/".Length..]}"": [ {{ ""action"": {{ ""type"": ""webhook"", ""endpoint"": ""notify"" }} }} ] }}",
+        _ => throw new InvalidOperationException(
+            $"'{path}' is in UnhonouredFeatures but DeclarationFor does not know how to declare it. Teach it "
+            + "a schema-valid declaration, or the theory case would assert nothing."),
+    };
+
+    /// <summary>
+    /// <b>Every example this repository ships as runnable really maps</b> — no refusal, no exception.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The apply-time refusals are right, and their fallout was not: three shipped examples declared features
+    /// the build does not honour, so a user following the README got a file that would be rejected. Two were
+    /// cleaned; <c>complex-crm</c> is deliberately kept rich and carries a
+    /// <see cref="AlvoExamples.NotRunnableMarker"/> saying so.
+    /// </para>
+    /// <para>
+    /// Driven off the tree rather than a list of names, so a <em>new</em> example is covered the moment it is
+    /// added — nobody has to remember to extend a theory. The non-empty assertion is what stops the whole
+    /// thing passing vacuously if the enumeration ever returns nothing (a moved directory, a renamed
+    /// extension), which is the failure mode a file-scanning fact has.
+    /// </para>
+    /// </remarks>
+    /// <param name="descriptorPath">One runnable example.</param>
+    [Theory]
+    [MemberData(nameof(EveryRunnableExample))]
+    public void Every_runnable_example_maps_without_refusal(string descriptorPath)
+    {
+        var descriptor = AlvoDescriptor.Parse(File.ReadAllText(descriptorPath));
+
+        var model = DescriptorToSchemaMapper.Map(descriptor);
+
+        model.Entities.ShouldNotBeEmpty($"'{Path.GetFileName(descriptorPath)}' mapped to no entities at all");
+    }
+
+    /// <summary>
+    /// <b>And every example marked not runnable really is refused.</b> This is the half that makes the marker
+    /// a claim rather than a comment.
+    /// </summary>
+    /// <remarks>
+    /// Without it, nothing would force the marker to shrink: when <c>default</c>, <c>rollup</c>,
+    /// <c>computed</c> and hooks eventually land, <c>complex-crm</c> becomes appliable and its
+    /// <c>NOT-RUNNABLE.md</c> would quietly go on telling readers to start elsewhere. With it, the last of
+    /// those features to land fails this fact until the file is deleted — which is the only kind of marker
+    /// worth having.
+    /// </remarks>
+    /// <param name="descriptorPath">One example marked not runnable.</param>
+    [Theory]
+    [MemberData(nameof(EveryExampleMarkedNotRunnable))]
+    public void Every_example_marked_not_runnable_really_is_refused(string descriptorPath)
+    {
+        var descriptor = AlvoDescriptor.Parse(File.ReadAllText(descriptorPath));
+
+        Should.Throw<InvalidDataException>(
+            () => DescriptorToSchemaMapper.Map(descriptor),
+            $"'{Path.GetFileName(descriptorPath)}' carries {AlvoExamples.NotRunnableMarker} but now applies "
+            + "cleanly — delete the marker, and the README paragraph that points readers away from it");
+    }
+
+    public static TheoryData<string> EveryRunnableExample()
+    {
+        var runnable = AlvoExamples.Runnable().ToList();
+        runnable.ShouldNotBeEmpty("the examples tree must be findable, or this theory covers nothing");
+        return [.. runnable];
+    }
+
+    public static TheoryData<string> EveryExampleMarkedNotRunnable() => [.. AlvoExamples.NotRunnable()];
+
+    /// <summary>
+    /// The negative leg for the whole guard: a field and an entity declaring <b>none</b> of the table's
+    /// features map without complaint, so the theories above are about the features rather than about the
+    /// mapper refusing everything.
+    /// </summary>
+    [Fact]
+    public void A_descriptor_declaring_none_of_the_unhonoured_features_maps_normally()
+    {
+        var json = """
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "invoices": { "softDelete": false, "audit": true, "fields": {
+            "amount": { "type": "decimal", "precision": 8, "scale": 2 } } } } }
+        """;
+
+        var invoices = MapInline(json).Entities.Single(e => e.Name == "invoices");
+        var amount = invoices.Fields.Single(f => f.Name == "amount");
+
+        amount.Precision.ShouldBe(8);
+        amount.Scale.ShouldBe(2);
+        invoices.SoftDelete.ShouldBeFalse("a flag written as false is not a declaration");
+        invoices.Fields.ShouldNotContain(field => field.Name == "deleted_at");
+    }
+
     // Full-model regression freeze: the rich complex-crm fixture exercises every mapping
     // concern in one place (managed-column injection, ref FKs, tenancy, audit, softDelete,
     // renamedFrom, indexes, all field types) across multiple entities — a breadth the
-    // narrower, branch-level tests above don't give. 'computed' (gross_total/line_total) is
-    // rejected by the mapper until #21 (CEL→SQL compiler), so it is stripped at the JSON level
-    // here — the one not-yet-supported feature — before mapping; everything else in the
-    // fixture stays intact. Drop the stripping and snapshot the descriptor directly once #21 lands.
+    // narrower, branch-level tests above don't give. The features this build does not honour
+    // ('computed' on gross_total/line_total, 'default' and 'rollup' elsewhere) are refused by
+    // the mapper, so they are stripped at the JSON level here before mapping; everything else in
+    // the fixture stays intact. None of the four ever reached the mapped model, so stripping them
+    // changes no snapshot line — the fixture keeps them because its job is to document the
+    // descriptor format, not to be applied. Drop the stripping per feature as each is implemented.
     [Fact]
-    public async Task Complex_crm_without_computed_maps_to_a_stable_model()
+    public async Task Complex_crm_without_its_unhonoured_features_maps_to_a_stable_model()
+    {
+        var m = DescriptorToSchemaMapper.Map(
+            AlvoDescriptor.Parse(ComplexCrmWithout("computed", "rollup", "validation", "default")));
+
+        await Verify(m);
+    }
+
+    /// <summary>
+    /// The <c>complex-crm</c> showcase with some field keys removed — the only way to map a fixture whose
+    /// job is to document every key the schema declares, including the ones this build refuses.
+    /// </summary>
+    /// <param name="keys">The field keys to strip.</param>
+    private static string ComplexCrmWithout(params string[] keys)
     {
         var path = Path.Combine(RepositoryRoot.Find(), "examples", "complex-crm", "crm.alvo.json");
         var json = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
 
         foreach (var (_, entity) in json["entities"]!.AsObject())
         {
-            foreach (var (_, field) in entity!["fields"]!.AsObject())
+            // Entity-level unhonoured features are stripped unconditionally: the fixture declares hooks on
+            // two entities, and they are refused before any field is looked at, so leaving them would make
+            // every one of these facts fail for the entity's reason rather than the field's.
+            entity!.AsObject().Remove("hooks");
+            entity.AsObject().Remove("softDelete");
+
+            foreach (var (_, field) in entity["fields"]!.AsObject())
             {
-                field!.AsObject().Remove("computed");
+                foreach (var key in keys)
+                {
+                    field!.AsObject().Remove(key);
+                }
             }
         }
 
-        var descriptor = AlvoDescriptor.Parse(json.ToJsonString());
-        var m = DescriptorToSchemaMapper.Map(descriptor);
-
-        await Verify(m);
+        return json.ToJsonString();
     }
 
     /// <summary>
-    /// A descriptor that declares a field the mapper also injects used to produce <b>two</b>
-    /// <see cref="FieldSchema"/> entries with one name, and every later operation on that entity died
-    /// with <c>ArgumentException: An item with the same key has already been added</c> out of the data
-    /// path — so declaring <c>readOnly</c> on a managed column, the documented way to protect one, broke
-    /// the entity instead. Only <c>id</c> had a de-duplication guard.
+    /// Declaring a field the mapper also injects is <b>refused</b>, whatever attributes the declaration
+    /// carries — the framework owns those names on an entity whose traits carry them.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This branch has had three behaviours and it is worth keeping all three recorded, because the
+    /// middle one looked correct. Appending unconditionally produced <b>two</b> <see cref="FieldSchema"/>
+    /// entries with one name, and every later operation on the entity died with
+    /// <c>ArgumentException: An item with the same key has already been added</c>. Letting the declaration
+    /// win fixed that and opened two worse holes: an audited entity declaring <c>updated_at</c> as
+    /// <c>{"type":"string"}</c> applied cleanly and then <b>failed every create with an internal
+    /// <c>(Parameter 'value')</c> in the response body</b>, and one declaring it <c>hidden</c> applied
+    /// cleanly and switched optimistic concurrency off in silence. Refusing is the only answer that is
+    /// neither a duplicate nor a silent override.
+    /// </para>
+    /// <para>
+    /// Both attribute shapes are driven — the type the framework would have used, and a wrong one — because
+    /// "redundant" and "wrong" must not be told apart: a declaration that happens to match today would still
+    /// be a caller-authored column standing in for one the framework writes, and the type the framework uses
+    /// is not part of the descriptor's contract.
+    /// </para>
+    /// </remarks>
+    /// <param name="column">The managed column the entity declares.</param>
+    /// <param name="attributes">The declaration's attributes.</param>
     [Theory]
-    [InlineData("created_by")]
-    [InlineData("created_at")]
-    [InlineData("updated_by")]
-    [InlineData("updated_at")]
-    public void A_declared_managed_column_is_not_injected_a_second_time(string column)
+    [InlineData("created_by", @"""type"": ""uuid""")]
+    [InlineData("created_at", @"""type"": ""datetime""")]
+    [InlineData("updated_by", @"""type"": ""uuid"", ""readOnly"": true")]
+    [InlineData("updated_at", @"""type"": ""datetime""")]
+    [InlineData("updated_at", @"""type"": ""string""")]
+    [InlineData("updated_at", @"""type"": ""datetime"", ""hidden"": true")]
+    [InlineData("id", @"""type"": ""uuid""")]
+    public void A_declared_managed_column_is_refused(string column, string attributes)
     {
         var json = $$"""
         { "apiVersion": "alvo.dev/v1", "name": "demo",
           "entities": { "notes": { "audit": true, "fields": {
             "title": { "type": "string" },
-            "{{column}}": { "type": "uuid", "readOnly": true } } } } }
+            "{{column}}": { {{attributes}} } } } } }
         """;
 
-        var notes = MapInline(json).Entities.Single(e => e.Name == "notes");
+        var ex = Should.Throw<InvalidDataException>(() => MapInline(json));
 
-        notes.Fields.Count(field => field.Name == column).ShouldBe(1);
-        notes.Fields.Select(field => field.Name).ShouldBeUnique();
+        ex.Message.ShouldContain($"'{column}' is a framework-managed column and cannot be declared");
+        ex.Message.ShouldContain("declare it under a different name", Case.Sensitive);
     }
 
     /// <summary>
-    /// The tenant discriminator has the same shape, and a scoped entity is the ordinary case rather
+    /// The tenant discriminator is refused the same way, and a scoped entity is the ordinary case rather
     /// than the audited one.
     /// </summary>
+    /// <remarks>
+    /// It also carries the one capability the general rule removed: an earlier, narrower rule permitted
+    /// <c>readOnly</c> on <c>tenant_id</c>, since that is the single managed column a caller may write. The fix
+    /// suggestion has to name the replacement — a <c>create</c> rule, whose <c>WITH CHECK</c> already sees the
+    /// candidate row — or an author loses the capability with nowhere to go.
+    /// </remarks>
     [Fact]
-    public void A_declared_tenant_id_is_not_injected_a_second_time()
+    public void A_declared_tenant_id_is_refused_and_the_fix_names_a_create_rule()
     {
         var json = """
         { "apiVersion": "alvo.dev/v1", "name": "demo",
           "entities": { "notes": { "tenancy": "scoped", "fields": {
-            "tenant_id": { "type": "uuid", "required": true } } } } }
+            "tenant_id": { "type": "uuid", "required": true, "readOnly": true } } } } }
+        """;
+
+        var ex = Should.Throw<InvalidDataException>(() => MapInline(json));
+
+        ex.Message.ShouldContain("'tenant_id' is a framework-managed column and cannot be declared");
+        ex.Message.ShouldContain("'create' rule", Case.Sensitive);
+    }
+
+    /// <summary>
+    /// A field named like a managed column on an entity whose traits do <b>not</b> carry it is mapped
+    /// normally — the rule is trait-scoped, never a flat name list.
+    /// </summary>
+    /// <remarks>
+    /// An entity without <c>audit</c> may legitimately declare an ordinary <c>created_at</c>, and refusing that
+    /// would refuse a field the framework does not manage. It is the same reasoning
+    /// <see cref="AlvoManagedColumns"/>' own remarks give for answering membership from traits, and this is the
+    /// boundary a flat name list would quietly move.
+    /// </remarks>
+    [Fact]
+    public void A_managed_name_on_an_entity_whose_traits_do_not_carry_it_is_an_ordinary_field()
+    {
+        var json = """
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "notes": { "fields": {
+            "created_at": { "type": "datetime" },
+            "deleted_at": { "type": "datetime" } } } } }
         """;
 
         var notes = MapInline(json).Entities.Single(e => e.Name == "notes");
 
+        notes.Fields.Select(field => field.Name).ShouldContain("created_at");
+        notes.Fields.Select(field => field.Name).ShouldContain("deleted_at");
         notes.Fields.Select(field => field.Name).ShouldBeUnique();
-        notes.Fields.Count(field => field.Name == "tenant_id").ShouldBe(1);
     }
 
     /// <summary>

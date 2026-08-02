@@ -1,0 +1,88 @@
+### SCENARIO 3 — a client whose response was lost, retrying as a client actually does.
+###
+### The client sends a create, the connection drops, and it has no idea whether the row exists. It
+### resends the identical request with the identical key. What it must get back is the FIRST
+### attempt's result — same id, same Location — and what must NOT happen is a second row.
+###
+### The count is taken before and after, so "no second row" is measured rather than inferred from a
+### status code that would be 201 either way.
+
+# @name CountBefore
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?customer_id=eq.{{CustomerBorovicaId}}&limit=100
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### The attempt whose response the client never sees.
+# @name LostAttempt
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Idempotency-Key: 8f2c1d6a-4b3e-4c8a-9d21-retry-scenario
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "reference": "WO-8200",
+  "title": "Emergency call-out",
+  "status": "scheduled",
+  "priority": 1,
+  "is_emergency": true,
+  "quoted_price": 320.00,
+  "access_code": "LOST",
+  "customer_id": "{{CustomerBorovicaId}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+### The retry: byte for byte the same request, the same key.
+# @name Retry
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Idempotency-Key: 8f2c1d6a-4b3e-4c8a-9d21-retry-scenario
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "reference": "WO-8200",
+  "title": "Emergency call-out",
+  "status": "scheduled",
+  "priority": 1,
+  "is_emergency": true,
+  "quoted_price": 320.00,
+  "access_code": "LOST",
+  "customer_id": "{{CustomerBorovicaId}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+### And a third time, because a client that lost two responses retries twice.
+# @name RetryAgain
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Idempotency-Key: 8f2c1d6a-4b3e-4c8a-9d21-retry-scenario
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "reference": "WO-8200",
+  "title": "Emergency call-out",
+  "status": "scheduled",
+  "priority": 1,
+  "is_emergency": true,
+  "quoted_price": 320.00,
+  "access_code": "LOST",
+  "customer_id": "{{CustomerBorovicaId}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+### The client finally follows the Location it was given, as it would have after the first attempt.
+# @name FollowLocation
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}{{Retry.response.headers.Location}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### THE STATE OF THE WORLD: exactly one more row than before, whatever the client did.
+# @name CountAfter
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?customer_id=eq.{{CustomerBorovicaId}}&limit=100
+X-Alvo-Api-Key: {{keyDispatcherNorth}}

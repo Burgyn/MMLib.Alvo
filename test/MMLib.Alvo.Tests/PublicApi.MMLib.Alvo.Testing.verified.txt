@@ -2,6 +2,14 @@
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace MMLib.Alvo.Testing
 {
+    public static class AlvoExamples
+    {
+        public static string NotRunnableMarker { get; }
+        public static System.Collections.Generic.IEnumerable<string> Descriptors() { }
+        public static bool IsMarkedNotRunnable(string descriptorPath) { }
+        public static System.Collections.Generic.IEnumerable<string> NotRunnable() { }
+        public static System.Collections.Generic.IEnumerable<string> Runnable() { }
+    }
     [System.AttributeUsage(System.AttributeTargets.Assembly, AllowMultiple=false)]
     public sealed class ArchTargetAttribute : System.Attribute
     {
@@ -170,6 +178,42 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task Equality_against_a_decimal_column_answers_numerically(string rule, int expected) { }
         protected abstract System.Threading.Tasks.Task<int> MatchesAsync(string rule, decimal? price, long? mileage);
     }
+    public abstract class AlvoDataConcurrencyTests
+    {
+        protected AlvoDataConcurrencyTests() { }
+        public System.Threading.Tasks.Task A_blank_idempotency_key_is_refused_by_the_port() { }
+        public System.Threading.Tasks.Task A_delete_whose_precondition_is_stale_is_refused_and_the_row_survives() { }
+        public System.Threading.Tasks.Task A_precondition_against_an_entity_with_no_version_column_is_refused_not_ignored() { }
+        public System.Threading.Tasks.Task A_replay_by_a_second_user_in_the_same_tenant_never_returns_the_first_users_row() { }
+        public System.Threading.Tasks.Task A_replay_on_an_entity_the_caller_cannot_read_performs_no_row_read() { }
+        public System.Threading.Tasks.Task A_replay_returns_the_same_field_set_a_get_by_that_caller_returns() { }
+        public System.Threading.Tasks.Task A_stale_precondition_is_refused_before_the_policy_check_reveals_anything() { }
+        public System.Threading.Tasks.Task An_idempotency_key_is_scoped_to_its_tenant_so_one_tenant_cannot_replay_anothers() { }
+        public System.Threading.Tasks.Task An_idempotency_key_past_the_ports_byte_bound_is_refused() { }
+        public System.Threading.Tasks.Task An_idempotency_token_from_an_anonymous_caller_is_refused_with_a_fix_suggestion() { }
+        public System.Threading.Tasks.Task An_idempotency_token_from_the_system_context_is_accepted() { }
+        public System.Threading.Tasks.Task An_update_whose_precondition_is_stale_is_refused_and_changes_nothing() { }
+        public System.Threading.Tasks.Task An_update_whose_precondition_matches_the_stored_version_succeeds() { }
+        protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Data.IAlvoData> CreateAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, System.Collections.Generic.IReadOnlyDictionary<string, System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRecord>> seed);
+        public System.Threading.Tasks.Task Replaying_an_idempotency_key_returns_the_row_and_creates_no_second_one() { }
+        public System.Threading.Tasks.Task Replaying_an_idempotency_key_with_the_same_fingerprint_returns_the_first_row() { }
+        public System.Threading.Tasks.Task The_same_idempotency_key_with_a_different_fingerprint_is_a_conflict() { }
+        public System.Threading.Tasks.Task The_same_key_on_a_different_entity_is_a_conflict_not_a_silent_replay() { }
+        public System.Threading.Tasks.Task The_version_a_write_returns_is_the_one_a_following_precondition_accepts() { }
+        public System.Threading.Tasks.Task Two_concurrent_creates_with_one_idempotency_key_produce_exactly_one_row() { }
+    }
+    public abstract class AlvoDataConstraintTests
+    {
+        protected AlvoDataConstraintTests() { }
+        public System.Threading.Tasks.Task A_conflict_discloses_the_field_and_nothing_else() { }
+        public System.Threading.Tasks.Task A_duplicate_unique_value_inside_one_tenant_is_still_refused() { }
+        public System.Threading.Tasks.Task A_duplicate_unique_value_on_update_is_refused_naming_the_field() { }
+        public System.Threading.Tasks.Task A_unique_field_on_a_non_scoped_entity_is_still_unique_across_the_instance() { }
+        protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Data.IAlvoData> CreateAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor);
+        public System.Threading.Tasks.Task Deleting_a_row_another_row_still_references_is_refused_as_a_conflict() { }
+        public System.Threading.Tasks.Task Deleting_a_row_nothing_references_still_succeeds() { }
+        public System.Threading.Tasks.Task One_unique_value_may_be_held_by_two_tenants_at_once() { }
+    }
     public abstract class AlvoDataDifferentialTests
     {
         protected AlvoDataDifferentialTests() { }
@@ -208,6 +252,18 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task Paging_over_a_utc_timestamp_key_neither_skips_nor_repeats_a_row() { }
         public System.Threading.Tasks.Task Paging_over_sub_second_timestamps_keeps_instant_order() { }
     }
+    public abstract class AlvoDataPagingTests
+    {
+        protected AlvoDataPagingTests() { }
+        public System.Threading.Tasks.Task A_negative_offset_is_refused_as_malformed() { }
+        public System.Threading.Tasks.Task A_page_that_is_not_the_last_carries_a_cursor_and_the_last_one_does_not() { }
+        public System.Threading.Tasks.Task A_query_asking_for_both_a_cursor_and_an_offset_is_refused_as_malformed() { }
+        public System.Threading.Tasks.Task An_offset_page_skips_exactly_that_many_rows_of_the_same_order() { }
+        protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Data.IAlvoData> CreateAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, System.Collections.Generic.IReadOnlyDictionary<string, System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRecord>> seed);
+        public System.Threading.Tasks.Task Paging_the_whole_set_by_cursor_visits_every_row_exactly_once() { }
+        public System.Threading.Tasks.Task The_last_page_of_an_exactly_divisible_set_carries_no_cursor() { }
+        public System.Threading.Tasks.Task Walking_an_exactly_divisible_set_by_cursor_stops_after_the_full_last_page() { }
+    }
     public abstract class AlvoDataSqlSnapshotTests
     {
         protected AlvoDataSqlSnapshotTests() { }
@@ -245,12 +301,12 @@ namespace MMLib.Alvo.Testing.Data
     public sealed class InMemoryAlvoData : MMLib.Alvo.Data.IAlvoData
     {
         public InMemoryAlvoData(MMLib.Alvo.Rules.IPolicyEngine policy, MMLib.Alvo.Expressions.IPredicateEvaluator evaluator, MMLib.Alvo.Schema.SchemaModel schema, System.TimeProvider? time = null) { }
-        public System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord> CreateAsync(string entity, System.Collections.Generic.IReadOnlyDictionary<string, object?> values, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default) { }
-        public System.Threading.Tasks.Task DeleteAsync(string entity, System.Guid id, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default) { }
+        public System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord> CreateAsync(string entity, System.Collections.Generic.IReadOnlyDictionary<string, object?> values, MMLib.Alvo.AlvoContext context, MMLib.Alvo.Data.AlvoIdempotency? idempotency = default, System.Threading.CancellationToken cancellationToken = default) { }
+        public System.Threading.Tasks.Task DeleteAsync(string entity, System.Guid id, MMLib.Alvo.AlvoContext context, MMLib.Alvo.Data.AlvoPrecondition? precondition = default, System.Threading.CancellationToken cancellationToken = default) { }
         public System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord?> GetAsync(string entity, System.Guid id, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default) { }
-        public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRecord>> QueryAsync(MMLib.Alvo.Data.AlvoQuery query, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default) { }
+        public System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoPage> QueryAsync(MMLib.Alvo.Data.AlvoQuery query, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default) { }
         public void Seed(string entity, params MMLib.Alvo.Data.AlvoRecord[] rows) { }
-        public System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord> UpdateAsync(string entity, System.Guid id, System.Collections.Generic.IReadOnlyDictionary<string, object?> values, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default) { }
+        public System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord> UpdateAsync(string entity, System.Guid id, System.Collections.Generic.IReadOnlyDictionary<string, object?> values, MMLib.Alvo.AlvoContext context, MMLib.Alvo.Data.AlvoPrecondition? precondition = default, System.Threading.CancellationToken cancellationToken = default) { }
     }
 }
 namespace MMLib.Alvo.Testing.Migrations

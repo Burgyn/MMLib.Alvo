@@ -1,0 +1,200 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "field-service",
+  "description": "A multi-tenant field-service dispatch backend: shared region reference data, per-tenant customers, and per-tenant work orders assigned to technicians. Every construct here exists so one end-to-end test can measure one behaviour F3 claims — see README.md for the construct-to-behaviour table.",
+  "tenancy": {
+    "enabled": true
+  },
+  "auth": {
+    "providers": ["local"],
+    "roles": ["dispatcher", "technician"]
+  },
+  "formats": {
+    "work-order-ref": {
+      "pattern": "WO-[0-9]{4,8}",
+      "description": "The letters WO, a dash, then four to eight digits. Written without ^...$ on purpose: Alvo anchors a format over the whole value, so a value with trailing text is refused by the framework's anchoring rather than by the author's."
+    }
+  },
+  "entities": {
+    "regions": {
+      "description": "A service region. Shared reference data (a ciselnik): global rather than tenant-scoped, so every tenant reads the same rows.",
+      "tenancy": "global",
+      "fields": {
+        "code": {
+          "type": "string",
+          "description": "The region's short code, unique across the instance.",
+          "required": true,
+          "unique": true,
+          "maxLength": 12
+        },
+        "name": {
+          "type": "string",
+          "description": "The region's display name.",
+          "required": true,
+          "maxLength": 80
+        }
+      },
+      "rules": {
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+        "create": "'admin' in @user.roles"
+      }
+    },
+    "customers": {
+      "description": "A customer of one tenant. Deliberately NOT audited, so its rows carry no version: no ETag is minted for one and an If-Match naming a version is refused rather than ignored.",
+      "tenancy": "scoped",
+      "fields": {
+        "name": {
+          "type": "string",
+          "description": "The customer's display name.",
+          "required": true,
+          "maxLength": 120
+        },
+        "tier": {
+          "type": "enum",
+          "description": "Which service tier the customer is on.",
+          "required": true,
+          "values": ["standard", "priority"]
+        },
+        "email": {
+          "type": "string",
+          "description": "Where to send correspondence.",
+          "maxLength": 160,
+          "format": "email"
+        },
+        "phone": {
+          "type": "string",
+          "description": "Where to call.",
+          "maxLength": 40,
+          "format": "phone"
+        },
+        "notes": {
+          "type": "text",
+          "description": "Free-form notes about the customer."
+        }
+      },
+      "rules": {
+        "list": "'dispatcher' in @user.roles || 'admin' in @user.roles",
+        "get": "'dispatcher' in @user.roles || 'admin' in @user.roles",
+        "create": "'dispatcher' in @user.roles || 'admin' in @user.roles",
+        "update": "'dispatcher' in @user.roles || 'admin' in @user.roles",
+        "delete": "'admin' in @user.roles"
+      },
+      "indexes": [
+        { "fields": ["tier", "name"] }
+      ]
+    },
+    "work_orders": {
+      "description": "One job to be carried out for a customer, in a region, by a technician. Audited, so every row carries a version and every write of one can be made conditional.",
+      "tenancy": "scoped",
+      "audit": true,
+      "fields": {
+        "reference": {
+          "type": "string",
+          "description": "The human-facing work-order reference, unique within the instance.",
+          "required": true,
+          "unique": true,
+          "maxLength": 24,
+          "format": "work-order-ref"
+        },
+        "title": {
+          "type": "string",
+          "description": "One line describing the job.",
+          "required": true,
+          "maxLength": 120
+        },
+        "description": {
+          "type": "text",
+          "description": "The full job description as the customer gave it."
+        },
+        "status": {
+          "type": "enum",
+          "description": "Where the job is in its life cycle.",
+          "required": true,
+          "values": ["scheduled", "in_progress", "completed", "cancelled"]
+        },
+        "priority": {
+          "type": "integer",
+          "description": "Dispatch priority, 1 (highest) to 5 (lowest). Required, so a paged read may sort by it.",
+          "required": true
+        },
+        "quoted_price": {
+          "type": "decimal",
+          "description": "What the customer was quoted, excluding tax.",
+          "precision": 10,
+          "scale": 2
+        },
+        "is_emergency": {
+          "type": "boolean",
+          "description": "Whether the job was raised as an emergency call-out."
+        },
+        "scheduled_for": {
+          "type": "datetime",
+          "description": "When the technician is due on site. Nullable, so a paged read may NOT sort by it."
+        },
+        "completed_on": {
+          "type": "date",
+          "description": "The day the job was signed off, if it has been."
+        },
+        "contact_email": {
+          "type": "string",
+          "description": "Who to tell when the job is done.",
+          "maxLength": 160,
+          "format": "email"
+        },
+        "metadata": {
+          "type": "json",
+          "description": "Whatever the dispatch system attached to the job."
+        },
+        "assigned_to": {
+          "type": "uuid",
+          "description": "The user id of the technician the job is assigned to. The rules below compare it with @user.id, which is what makes a technician's list a subset rather than a refusal."
+        },
+        "external_ref": {
+          "type": "string",
+          "description": "The identifier this job carries in the customer's own system. Maintained by the integration, never by an API caller.",
+          "maxLength": 64,
+          "readOnly": true
+        },
+        "internal_notes": {
+          "type": "text",
+          "description": "Dispatcher-only commentary. Confidential: neither the value nor the fact that this field exists may reach a caller, so it appears in no response and in no published schema.",
+          "hidden": true
+        },
+        "access_code": {
+          "type": "string",
+          "description": "The site access code the caller must supply on create and can never read back. Required AND hidden, which is the one case a hidden field's name is published — in the write schemas only.",
+          "required": true,
+          "hidden": true,
+          "maxLength": 32
+        },
+        "customer_id": {
+          "type": "ref",
+          "description": "The customer this job is for.",
+          "entity": "customers",
+          "required": true,
+          "onDelete": "restrict"
+        },
+        "region_id": {
+          "type": "ref",
+          "description": "The region the job is carried out in.",
+          "entity": "regions",
+          "required": true,
+          "onDelete": "restrict"
+        }
+      },
+      "rules": {
+        "list": "'dispatcher' in @user.roles || 'admin' in @user.roles || assigned_to == @user.id",
+        "get": "'dispatcher' in @user.roles || 'admin' in @user.roles || assigned_to == @user.id",
+        "create": "'dispatcher' in @user.roles || 'admin' in @user.roles",
+        "update": "'dispatcher' in @user.roles || 'admin' in @user.roles || assigned_to == @user.id",
+        "delete": "'dispatcher' in @user.roles || 'admin' in @user.roles"
+      },
+      "indexes": [
+        { "fields": ["status", "priority"] },
+        { "fields": ["assigned_to"] }
+      ]
+    }
+  }
+}

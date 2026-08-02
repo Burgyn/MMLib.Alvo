@@ -1,0 +1,35 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "hidden-version",
+  "description": "An audited entity that declares its OWN 'updated_at' and marks it hidden. The schema mapper used to inject a framework-managed column only when the entity did not declare that name, so this declaration won — and masking it dropped the key from every returned record, so no ETag was minted, the caller had nothing to send as If-Match, and optimistic concurrency was off for this entity with nothing raised anywhere. See retyped-version.alvo.json for the strictly worse sibling. This descriptor exists to be REFUSED at apply; nothing here is meant to work.",
+  "auth": {
+    "providers": [
+      "local"
+    ]
+  },
+  "entities": {
+    "records": {
+      "description": "An audited entity whose own 'updated_at' declaration replaces the framework's.",
+      "audit": true,
+      "fields": {
+        "title": {
+          "type": "string",
+          "required": true,
+          "maxLength": 120
+        },
+        "updated_at": {
+          "type": "datetime",
+          "hidden": true
+        }
+      },
+      "rules": {
+        "list": "true",
+        "get": "true",
+        "create": "true",
+        "update": "true",
+        "delete": "true"
+      }
+    }
+  }
+}

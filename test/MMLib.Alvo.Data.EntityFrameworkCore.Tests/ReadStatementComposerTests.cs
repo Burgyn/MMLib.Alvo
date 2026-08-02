@@ -191,6 +191,32 @@ public class ReadStatementComposerTests
     }
 
     [Fact]
+    public void An_offset_read_binds_both_markers_in_one_window_clause()
+    {
+        var statement = Compose(new ReadStatementComposer.ReadStatementOptions { Limit = 5, Offset = 3 });
+
+        statement.Sql.ShouldEndWith(" ORDER BY \"id\" LIMIT @alvo_limit OFFSET @alvo_offset");
+        statement.Parameters[PolicyParameterPrefix.RowLimit].Value.ShouldBe(5);
+        statement.Parameters[PolicyParameterPrefix.RowOffset].Value.ShouldBe(3);
+    }
+
+    /// <summary>
+    /// SQLite's grammar makes <c>OFFSET</c> a sub-clause of <c>LIMIT</c> and rejects a bare one, so a
+    /// caller who asks for an offset with no explicit <see cref="AlvoQuery.Limit"/> still gets a
+    /// <c>LIMIT</c> rendered — bound to a sentinel large enough that no real page is ever bounded by it,
+    /// rather than left out or bound to a negative value PostgreSQL's own <c>LIMIT</c> refuses.
+    /// </summary>
+    [Fact]
+    public void An_offset_with_no_caller_supplied_limit_still_renders_a_window_clause()
+    {
+        var statement = Compose(new ReadStatementComposer.ReadStatementOptions { Offset = 5 });
+
+        statement.Sql.ShouldEndWith(" ORDER BY \"id\" LIMIT @alvo_limit OFFSET @alvo_offset");
+        statement.Parameters[PolicyParameterPrefix.RowLimit].Value.ShouldBe(int.MaxValue);
+        statement.Parameters[PolicyParameterPrefix.RowOffset].Value.ShouldBe(5);
+    }
+
+    [Fact]
     public void An_unsorted_unlimited_first_page_needs_no_ordering_at_all()
     {
         var statement = Compose(new ReadStatementComposer.ReadStatementOptions());

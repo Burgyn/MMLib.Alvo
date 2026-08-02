@@ -1,0 +1,71 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The HTTP Data API's own test project. It has no sibling production assembly — the API is a
+    *feature inside* MMLib.Alvo, not a package (docs/architecture/package-boundary.md), and
+    MMLib.Alvo.Tests already owns that assembly's architecture rules and public-API baseline. So it
+    opts out of the shared architecture and public-API tests that test/Directory.Build.props links into
+    every test project, exactly as MMLib.Alvo.Conventions.Tests does: leaving them on would make
+    TestTarget.Resolve() try to load a non-existent "MMLib.Alvo.Api", and would approve MMLib.Alvo's
+    public API a second time from a second baseline.
+  -->
+  <PropertyGroup>
+    <AlvoSharedArchTests>false</AlvoSharedArchTests>
+    <!-- test/_shared/api/AlvoApiWorld.cs calls AddOpenApi itself, playing the host's part for
+         OpenApiDocumentTests (Alvo deliberately does not call it — ApiSetup.AddAlvoApi says why). That
+         call site is what makes ASP.NET's OpenApi XML-comment source generator emit an interceptor into
+         THIS compilation, which needs the generated namespace enabled here. -->
+    <InterceptorsNamespaces>$(InterceptorsNamespaces);Microsoft.AspNetCore.OpenApi.Generated</InterceptorsNamespaces>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The API endpoints are hosted in a real WebApplication here, so the test project needs the
+         same framework reference the core now carries. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/MMLib.Alvo/MMLib.Alvo.csproj" />
+    <!-- Real rows, real SQL, real policy predicates: the API facts are only worth anything over an
+         actual store. SQLite keeps ring0 Docker-free; Task 9 runs the same suite on PostgreSQL. -->
+    <ProjectReference Include="../../src/MMLib.Alvo.Data.Sqlite/MMLib.Alvo.Data.Sqlite.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" />
+    <!-- The query-string parser is the framework's most attacker-exposed surface, so its facts include a
+         property run over a generated corpus — §2.1's "adversarial/fuzz" acceptance criterion. -->
+    <PackageReference Include="CsCheck" />
+    <!-- The OpenAPI document is a published contract, so its baseline is a golden snapshot (the design's
+         own testing table says so). This project opts out of the shared arch/public-API tests, which is
+         where Directory.Build.props would otherwise have brought Verify in — so it takes the reference
+         directly, exactly as MMLib.Alvo.Schema.Tests does for the same reason. -->
+    <PackageReference Include="Verify.XunitV3" />
+  </ItemGroup>
+
+  <!-- The statement recorder, linked rather than copied for the same reason the engine test projects
+       link it: "no row was touched" is a claim about the SQL that ran, and a second copy of the
+       recorder is how two suites come to disagree about what they are watching. -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/SqlCapture.cs" Link="_shared/SqlCapture.cs" />
+  </ItemGroup>
+
+  <!-- The API test world, its response readers, its engine seam, and the one suite both engines run
+       (Task 9). They live in test/_shared/api rather than in this directory because
+       MMLib.Alvo.Api.Tests.Integration compiles the same sources against PostgreSQL: #19's DoD is "green
+       on SQLite + Postgres", and a second copy of the world is how the two legs come to exercise two
+       different APIs. Neither project owns them, which is the arrangement test/_shared/ef already has for
+       the two engine test projects. -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/api/*.cs" Link="_shared/%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="VerifyXunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="descriptors/*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
