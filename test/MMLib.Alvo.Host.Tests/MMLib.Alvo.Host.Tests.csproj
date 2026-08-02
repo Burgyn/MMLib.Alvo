@@ -22,6 +22,14 @@
   -->
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/api/ResponseReading.cs" Link="_shared/ResponseReading.cs" />
+
+    <!--
+      And the faulting store, for the same reason: family 5 is unreachable from a well-formed request by
+      design, and since #138 mapped the last real-store failure that reached it onto a 409, a fact about a
+      500 has to substitute one. Re-implementing it here would be a second store whose failure family could
+      drift from the one the core's suite measures.
+    -->
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/api/FaultingAlvoData.cs" Link="_shared/FaultingAlvoData.cs" />
     <Using Include="MMLib.Alvo.Api.Tests" />
   </ItemGroup>
 

@@ -70,6 +70,30 @@ public static class AlvoProblemTypes
     /// <summary>An idempotency key was reused for a different request (409).</summary>
     public const string IdempotencyConflict = "idempotency-conflict";
 
+    /// <summary>The request collides with stored state a database constraint guards (409).</summary>
+    /// <remarks>
+    /// <para>
+    /// A value another record already holds on a <c>unique</c> field, or a delete a <c>ref</c> declaring
+    /// <c>onDelete: "restrict"</c> refuses. Both were <see cref="Internal"/> until #138 — "an invariant Alvo
+    /// itself relies on is broken", which neither of them is: the caller's request conflicts with data that was
+    /// already there, and that is what 409 means.
+    /// </para>
+    /// <para>
+    /// <b>A second 409 beside <see cref="IdempotencyConflict"/>, by the same rule <see cref="OutOfScope"/> is a
+    /// second 403 by.</b> The two have different fixes and a caller can act on the difference: an idempotency
+    /// conflict is repaired with a fresh key and the same body, and this one with a different body (or by
+    /// removing what stands in the way). A caller who cannot tell them apart retries the wrong one forever.
+    /// </para>
+    /// <para>
+    /// <b>One slug for both kinds, and the <c>violations</c> array carries the difference.</b> A slug keys on
+    /// the refusal's kind, and "your request conflicts with stored state" is one kind; which constraint, and
+    /// which field, is per-violation detail with its own stable <c>code</c> (<c>unique</c>, <c>referenced</c>)
+    /// and pointer. Splitting the slug would put the schema's shape into the classification an agent branches
+    /// on.
+    /// </para>
+    /// </remarks>
+    public const string Conflict = "conflict";
+
     /// <summary>A credential was presented and cannot be used (401).</summary>
     public const string Unauthenticated = "unauthenticated";
 
@@ -111,6 +135,7 @@ public static class AlvoProblemTypes
         NotFound,
         PreconditionFailed,
         IdempotencyConflict,
+        Conflict,
         Unauthenticated,
         UnreadableRequest,
         Internal,

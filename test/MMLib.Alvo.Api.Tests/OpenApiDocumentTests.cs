@@ -147,9 +147,11 @@ public sealed class OpenApiDocumentTests
         }
 
         documented.Count.ShouldBe(
-            51,
-            "25 on the version-less entity and 26 on the audited one, whose read adds a 304 — pinned from "
-            + "outside so the equality below cannot be satisfied by two empty sets");
+            55,
+            "27 on the version-less entity and 28 on the audited one, whose read adds a 304 — pinned from "
+            + "outside so the equality below cannot be satisfied by two empty sets. It went 51 -> 55 with "
+            + "#138: an update and a delete can each now answer 409 when a database constraint refuses the "
+            + "write, on both entities");
         observed.ShouldBe(documented, "a documented status no request reaches, or a status no document lists");
     }
 
@@ -308,8 +310,9 @@ public sealed class OpenApiDocumentTests
         var refusals = Refusals(document).ToList();
 
         refusals.Count.ShouldBe(
-            40,
-            "twenty per entity — three on a list and a read, five on a create and an update, four on a delete");
+            44,
+            "twenty-two per entity — three on a list and a read, five on a create, six on an update and five "
+            + "on a delete, the last two having each gained the 409 #138 made reachable");
         foreach (var (route, status, response) in refusals)
         {
             var content = Resolve(document, response)["content"]!.AsObject();
@@ -905,6 +908,8 @@ public sealed class OpenApiDocumentTests
         var spent = Header("Idempotency-Key", await SpendAnIdempotencyKeyAsync(world, entity, categoryId));
         var stale = Header("If-Match", StaleTag);
         var body = Body(entity, categoryId);
+        var taken = await TakeAUniqueValueAsync(world, entity, categoryId);
+        var referenced = await ReferencedRowAsync(world, entity, categoryId);
 
         return
         [
@@ -928,12 +933,77 @@ public sealed class OpenApiDocumentTests
             new("update", 404, HttpMethod.Patch, absent, _admin, Rename()),
             new("update", 422, HttpMethod.Patch, row, _admin, Overlong()),
             new("update", 412, HttpMethod.Patch, row, _admin, Rename(), stale),
+            new("update", 409, HttpMethod.Patch, row, _admin, TakenUniqueValue(entity, taken)),
 
             .. Gated(row, "delete", HttpMethod.Delete),
             new("delete", 412, HttpMethod.Delete, row, _admin, null, stale),
             new("delete", 404, HttpMethod.Delete, absent, _admin, null),
+            new("delete", 409, HttpMethod.Delete, referenced, _admin, null),
             new("delete", 204, HttpMethod.Delete, doomed, _admin, null),
         ];
+    }
+
+    /// <summary>
+    /// The value one row of <paramref name="entity"/> already holds on its <c>unique</c> field, patched onto a
+    /// different row — the only way an update reaches a 409.
+    /// </summary>
+    /// <remarks>
+    /// Each entity has its own such field, deliberately: <c>categories</c> earned <c>code</c> for this, because
+    /// otherwise the document would list a status one of the two entities could never answer, and this fact
+    /// compares the document and the observed set in both directions.
+    /// </remarks>
+    /// <param name="entity">The entity being patched.</param>
+    /// <param name="value">A value some other row of it already holds.</param>
+    private static JsonObject TakenUniqueValue(string entity, string value) =>
+        string.Equals(entity, "categories", StringComparison.Ordinal)
+            ? new JsonObject { ["code"] = value }
+            : new JsonObject { ["sku"] = value };
+
+    /// <summary>
+    /// Creates a row of <paramref name="entity"/> holding a fresh value on its <c>unique</c> field, and returns
+    /// that value for <see cref="TakenUniqueValue"/> to collide with.
+    /// </summary>
+    /// <param name="world">The running API.</param>
+    /// <param name="entity">The entity to seed.</param>
+    /// <param name="categoryId">The category a product must belong to.</param>
+    private static async Task<string> TakeAUniqueValueAsync(AlvoApiWorld world, string entity, Guid categoryId)
+    {
+        var isCategory = string.Equals(entity, "categories", StringComparison.Ordinal);
+        var value = isCategory ? "TAKEN" : "AAA-9999";
+        var body = Body(entity, categoryId);
+        body[isCategory ? "code" : "sku"] = value;
+
+        await CreateAsync(world, entity, body);
+        return value;
+    }
+
+    /// <summary>
+    /// Creates a row of <paramref name="entity"/> that another row references through a <c>ref</c> declaring
+    /// <c>onDelete: "restrict"</c>, and returns its route — the only way a delete reaches a 409.
+    /// </summary>
+    /// <remarks>
+    /// A product's <c>parent_id</c> is a self-reference for exactly this: without it the document would list a
+    /// 409 on <c>products.delete</c> that nothing could provoke, and a third entity would only move the gap to
+    /// whatever nothing referenced in turn.
+    /// </remarks>
+    /// <param name="world">The running API.</param>
+    /// <param name="entity">The entity whose row must end up referenced.</param>
+    /// <param name="categoryId">The category a product must belong to.</param>
+    private static async Task<string> ReferencedRowAsync(AlvoApiWorld world, string entity, Guid categoryId)
+    {
+        if (string.Equals(entity, "categories", StringComparison.Ordinal))
+        {
+            // A category a product points at through `category_id`.
+            var category = await CreateAsync(world, "categories", CategoryBody());
+            await CreateAsync(world, "products", ProductBody(category));
+            return $"/api/categories/{category}";
+        }
+
+        var parent = await CreateAsync(world, "products", ProductBody(categoryId));
+        var child = ProductBody(categoryId);
+        child["parent_id"] = parent.ToString();
+        await CreateAsync(world, "products", child);
+        return $"/api/products/{parent}";
     }
 
     /// <summary>

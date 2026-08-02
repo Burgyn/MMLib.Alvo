@@ -415,6 +415,7 @@ public sealed class ProblemDetailsTests
     {
         await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin, _narrow]);
         await SeedTheReusedIdempotencyKeyAsync(world);
+        await SeedTheTakenEmailAsync(world);
         var reached = new List<string>();
         foreach (var probe in EveryReachableSlugProbe())
         {
@@ -518,7 +519,29 @@ public sealed class ProblemDetailsTests
             _admin,
             new JsonObject { ["name"] = "Reused Ltd" },
             new Dictionary<string, string>(StringComparer.Ordinal) { ["Idempotency-Key"] = ReusedIdempotencyKey }),
+
+        // A value another row already holds on a field the descriptor declares `unique`. Like the probe above
+        // it is a statement about a request that came before, so the fact seeds the first owner before running
+        // the list. It is the one refusal in the catalogue no layer of Alvo can decide on its own — only the
+        // engine knows, which is why it was a 500 until #138. ConflictTests owns the behaviour; this owns the
+        // slug.
+        new(HttpMethod.Post, "/api/owners", _admin, new JsonObject { ["name"] = "Second Ltd", ["email"] = TakenEmail }),
     ];
+
+    /// <summary>The address the probe above collides with, first used by <see cref="SeedTheTakenEmailAsync"/>.</summary>
+    private const string TakenEmail = "taken@example.test";
+
+    /// <summary>Creates the owner whose <c>email</c> the conflict probe then tries to reuse.</summary>
+    /// <param name="world">The running API.</param>
+    private static async Task SeedTheTakenEmailAsync(AlvoApiWorld world)
+    {
+        using var response = await world.SendAsync(
+            HttpMethod.Post, "/api/owners", _admin, body: new JsonObject { ["name"] = "First Ltd", ["email"] = TakenEmail });
+
+        response.StatusCode.ShouldBe(
+            HttpStatusCode.Created,
+            "the address must really be taken, or the probe that reuses it is answered 201 and measures nothing");
+    }
 
     /// <summary>The key the probe above reuses, first used by <see cref="SeedTheReusedIdempotencyKeyAsync"/>.</summary>
     private const string ReusedIdempotencyKey = "already-used-for-another-body";
@@ -564,6 +587,7 @@ public sealed class ProblemDetailsTests
         Guarded(new AlvoRecordNotFoundException()),
         Guarded(new AlvoPreconditionFailedException("stale")),
         Guarded(new AlvoIdempotencyConflictException("reused")),
+        Guarded(new AlvoConstraintViolationException(AlvoConstraintKind.Unique, ["email"])),
         Guarded(new ArgumentException("malformed")),
     ];
 

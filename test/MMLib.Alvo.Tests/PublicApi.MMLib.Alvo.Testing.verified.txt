@@ -202,6 +202,18 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task The_version_a_write_returns_is_the_one_a_following_precondition_accepts() { }
         public System.Threading.Tasks.Task Two_concurrent_creates_with_one_idempotency_key_produce_exactly_one_row() { }
     }
+    public abstract class AlvoDataConstraintTests
+    {
+        protected AlvoDataConstraintTests() { }
+        public System.Threading.Tasks.Task A_conflict_discloses_the_field_and_nothing_else() { }
+        public System.Threading.Tasks.Task A_duplicate_unique_value_inside_one_tenant_is_still_refused() { }
+        public System.Threading.Tasks.Task A_duplicate_unique_value_on_update_is_refused_naming_the_field() { }
+        public System.Threading.Tasks.Task A_unique_field_on_a_non_scoped_entity_is_still_unique_across_the_instance() { }
+        protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Data.IAlvoData> CreateAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor);
+        public System.Threading.Tasks.Task Deleting_a_row_another_row_still_references_is_refused_as_a_conflict() { }
+        public System.Threading.Tasks.Task Deleting_a_row_nothing_references_still_succeeds() { }
+        public System.Threading.Tasks.Task One_unique_value_may_be_held_by_two_tenants_at_once() { }
+    }
     public abstract class AlvoDataDifferentialTests
     {
         protected AlvoDataDifferentialTests() { }

@@ -20,6 +20,7 @@ namespace MMLib.Alvo.Api
     public static class AlvoProblemTypes
     {
         public const string BaseUri = "https://alvo.dev/errors/";
+        public const string Conflict = "conflict";
         public const string Forbidden = "forbidden";
         public const string IdempotencyConflict = "idempotency-conflict";
         public const string Internal = "internal";

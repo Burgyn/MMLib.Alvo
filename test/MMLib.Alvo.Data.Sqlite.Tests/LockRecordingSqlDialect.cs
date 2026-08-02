@@ -1,5 +1,6 @@
 ﻿using MMLib.Alvo.Data.EntityFrameworkCore;
 using MMLib.Alvo.Schema;
+using System.Data.Common;
 
 namespace MMLib.Alvo.Data.Sqlite.Tests;
 
@@ -46,6 +47,11 @@ internal sealed class LockRecordingSqlDialect : IAlvoSqlDialect
     public string RenderColumn(string columnName) => _inner.RenderColumn(columnName);
 
     public string RenderNullProjection(string storeType) => _inner.RenderNullProjection(storeType);
+
+    /// <summary>Forwarded unchanged: this wrapper records locks, it decides nothing about a constraint.</summary>
+    /// <param name="failure">The exception the write raised.</param>
+    public SqlConstraintViolation? DecodeConstraintViolation(DbException failure) =>
+        _inner.DecodeConstraintViolation(failure);
 
     /// <summary>
     /// Forwards the paging window clause through the interface, because it is a default interface member

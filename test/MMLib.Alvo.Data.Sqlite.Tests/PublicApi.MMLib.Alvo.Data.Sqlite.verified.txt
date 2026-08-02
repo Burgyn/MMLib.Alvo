@@ -23,6 +23,7 @@ namespace MMLib.Alvo.Data.Sqlite
     public sealed class SqliteSqlDialect : MMLib.Alvo.Data.EntityFrameworkCore.IAlvoSqlDialect
     {
         public SqliteSqlDialect() { }
+        public MMLib.Alvo.Data.EntityFrameworkCore.SqlConstraintViolation? DecodeConstraintViolation(System.Data.Common.DbException failure) { }
         public string RenderColumn(string columnName) { }
         public string RenderNullProjection(string storeType) { }
         public string RenderTable(MMLib.Alvo.Schema.EntitySchema entity, MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation? lockedPreImageFor) { }

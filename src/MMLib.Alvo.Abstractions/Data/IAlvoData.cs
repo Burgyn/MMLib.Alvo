@@ -36,7 +36,7 @@ namespace MMLib.Alvo.Data;
 /// all. Neither exception's message names the entity, the row id, or whether the row exists.
 /// </para>
 /// <para>
-/// <b>Five exception families, and the boundary between them is the contract — not a detail.</b> A layer
+/// <b>Six exception families, and the boundary between them is the contract — not a detail.</b> A layer
 /// above this port (PR3's RFC 7807 problem-details layer) has nothing but the exception type to map a status
 /// code from, so an implementation must place every refusal in exactly one of these:
 /// </para>
@@ -97,6 +97,29 @@ namespace MMLib.Alvo.Data;
 ///     the first row would silently discard the second payload, and creating a second row would break the
 ///     promise the key exists to make. The payload itself is well-formed, so this is not the malformed-query
 ///     channel. Render 409; the fix is a fresh key, not a corrected body.
+///     </description>
+///   </item>
+///   <item>
+///     <term><see cref="AlvoConstraintViolationException"/></term>
+///     <description>
+///     <b>The request collides with stored state the database itself guards.</b> A value another record
+///     already holds on a <c>unique</c> field, or a delete a <c>ref</c> declaring <c>onDelete: "restrict"</c>
+///     refuses. The payload is well-formed and every facet an implementation can check itself has already
+///     passed, so this is neither the malformed-query channel nor a policy refusal; what is wrong is the
+///     request's relationship to rows the caller may not even be able to see. Render 409, naming the fields
+///     the exception carries — see its own remarks for what may and may not appear there.
+///     <para>
+///     <b>An implementation must not let the provider's exception escape as this family's neighbour below.</b>
+///     Rendered as a 500 it tells the caller nothing they can act on, invites a retry that cannot succeed, and
+///     pages an operator for an ordinary mistake. Provider-specific decoding belongs behind the driver's own
+///     SQL seam — a constraint's kind is engine-specific (an SQLSTATE, an extended result code, an error
+///     number) and must not be recovered by pattern-matching an exception's message in a <c>catch</c>.
+///     </para>
+///     <para>
+///     <b>A collision confined to framework-managed columns is not this family.</b> A caller cannot change
+///     <c>id</c> or <c>tenant_id</c>, so a conflict on those alone is an invariant the implementation relies
+///     on, and it belongs below with its stack trace intact.
+///     </para>
 ///     </description>
 ///   </item>
 ///   <item>
@@ -325,6 +348,9 @@ public interface IAlvoData
     /// <exception cref="AlvoIdempotencyConflictException">
     /// <paramref name="idempotency"/>'s key was already used for a request with a different fingerprint.
     /// </exception>
+    /// <exception cref="AlvoConstraintViolationException">
+    /// <paramref name="values"/> supplies a value another record already holds on a <c>unique</c> field.
+    /// </exception>
     /// <exception cref="AlvoRecordNotFoundException">
     /// <paramref name="idempotency"/> replays a create whose row no longer exists, or is excluded by a
     /// <em>configured</em> <c>get</c> rule's own predicate for <paramref name="context"/> — an entity whose
@@ -373,6 +399,9 @@ public interface IAlvoData
     /// its <c>WITH CHECK</c> predicate; or <paramref name="values"/> writes a field the policy marks
     /// read-only.
     /// </exception>
+    /// <exception cref="AlvoConstraintViolationException">
+    /// <paramref name="values"/> supplies a value another record already holds on a <c>unique</c> field.
+    /// </exception>
     Task<AlvoRecord> UpdateAsync(string entity, Guid id, IReadOnlyDictionary<string, object?> values, AlvoContext context, AlvoPrecondition? precondition = null, CancellationToken cancellationToken = default);
 
     /// <summary>Deletes a row by id.</summary>
@@ -394,5 +423,8 @@ public interface IAlvoData
     /// version of a row at all.
     /// </exception>
     /// <exception cref="AlvoAuthorizationException">No policy allows <c>delete</c> on this entity for <paramref name="context"/>.</exception>
+    /// <exception cref="AlvoConstraintViolationException">
+    /// Another record still references this one through a <c>ref</c> declaring <c>onDelete: "restrict"</c>.
+    /// </exception>
     Task DeleteAsync(string entity, Guid id, AlvoContext context, AlvoPrecondition? precondition = null, CancellationToken cancellationToken = default);
 }

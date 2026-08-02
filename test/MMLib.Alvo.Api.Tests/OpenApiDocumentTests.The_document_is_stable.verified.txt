@@ -56,6 +56,14 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "code",
+            "in": "query",
+            "description": "An optional short code, unique across categories. Declared so a 409 on this entity's update is reachable — a duplicate on a field declared unique is the only way a PATCH reaches one, and every documented status has to be reachable. Filter on `code`, as `<operator>.<operand>`. See the operation description for the operators, the `not.` prefix and how several parameters combine.",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -146,7 +154,7 @@
             "$ref": "#/components/responses/preconditionFailed"
           },
           "409": {
-            "$ref": "#/components/responses/idempotencyConflict"
+            "$ref": "#/components/responses/conflict"
           }
         },
         "security": [
@@ -257,6 +265,9 @@
           "412": {
             "description": "A precondition was supplied that this entity cannot answer. Its rows carry no version — 'audit: true' is what mints one — so an 'If-Match' naming a version, and any 'If-None-Match', are refused here rather than ignored: there is nothing stored for either to be compared against. On this entity the status never means 'the version did not match', because no comparison is possible. 'If-Match: *' is accepted and is not this refusal.",
             "$ref": "#/components/responses/preconditionFailed"
+          },
+          "409": {
+            "$ref": "#/components/responses/conflict"
           }
         },
         "security": [
@@ -299,6 +310,9 @@
           "412": {
             "description": "A precondition was supplied that this entity cannot answer. Its rows carry no version — 'audit: true' is what mints one — so an 'If-Match' naming a version, and any 'If-None-Match', are refused here rather than ignored: there is nothing stored for either to be compared against. On this entity the status never means 'the version did not match', because no comparison is possible. 'If-Match: *' is accepted and is not this refusal.",
             "$ref": "#/components/responses/preconditionFailed"
+          },
+          "409": {
+            "$ref": "#/components/responses/conflict"
           }
         },
         "security": [
@@ -444,6 +458,14 @@
             }
           },
           {
+            "name": "parent_id",
+            "in": "query",
+            "description": "An optional parent product. A self-reference, and the cheapest way to make a 409 on THIS entity's delete reachable: 'categories' is already made conflict-on-delete by 'category_id' above, and a third entity would only move the problem to whatever nothing references. Filter on `parent_id`, as `<operator>.<operand>`. See the operation description for the operators, the `not.` prefix and how several parameters combine.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "created_at",
             "in": "query",
             "description": "Filter on `created_at`, as `<operator>.<operand>`. See the operation description for the operators, the `not.` prefix and how several parameters combine.",
@@ -570,7 +592,7 @@
             "$ref": "#/components/responses/preconditionFailed"
           },
           "409": {
-            "$ref": "#/components/responses/idempotencyConflict"
+            "$ref": "#/components/responses/conflict"
           }
         },
         "security": [
@@ -703,6 +725,9 @@
           },
           "412": {
             "$ref": "#/components/responses/preconditionFailed"
+          },
+          "409": {
+            "$ref": "#/components/responses/conflict"
           }
         },
         "security": [
@@ -747,6 +772,9 @@
           },
           "412": {
             "$ref": "#/components/responses/preconditionFailed"
+          },
+          "409": {
+            "$ref": "#/components/responses/conflict"
           }
         },
         "security": [
@@ -764,7 +792,8 @@
         "title": "categories",
         "required": [
           "id",
-          "name"
+          "name",
+          "code"
         ],
         "type": "object",
         "properties": {
@@ -778,6 +807,14 @@
             "maxLength": 60,
             "type": "string",
             "description": "The category's display name."
+          },
+          "code": {
+            "maxLength": 12,
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "An optional short code, unique across categories. Declared so a 409 on this entity's update is reachable — a duplicate on a field declared unique is the only way a PATCH reaches one, and every documented status has to be reachable."
           }
         },
         "description": "A product category. Not audited, so its rows carry no version — no ETag is minted for them and no conditional read or write of one is possible.\n\nOne row as a single read, a create or an update returns it. Every field is present, even one with no value — that field is present and null. Fields marked read-only are written by the framework and refused in a request body."
@@ -793,6 +830,14 @@
             "maxLength": 60,
             "type": "string",
             "description": "The category's display name."
+          },
+          "code": {
+            "maxLength": 12,
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "An optional short code, unique across categories. Declared so a 409 on this entity's update is reachable — a duplicate on a field declared unique is the only way a PATCH reaches one, and every documented status has to be reachable."
           }
         },
         "description": "The row to create. A field declared `required` by the descriptor must be present; the row's `id` and the framework's own columns are assigned by Alvo and are refused if supplied."
@@ -837,6 +882,14 @@
             "maxLength": 60,
             "type": "string",
             "description": "The category's display name."
+          },
+          "code": {
+            "maxLength": 12,
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "An optional short code, unique across categories. Declared so a 409 on this entity's update is reachable — a duplicate on a field declared unique is the only way a PATCH reaches one, and every documented status has to be reachable."
           }
         },
         "description": "A product category. Not audited, so its rows carry no version — no ETag is minted for them and no conditional read or write of one is possible.\n\nOne row inside a list's page. Every field is present unless the request narrowed the projection with `select`; a field with no value is present and null. Fields marked read-only are written by the framework and refused in a request body."
@@ -849,6 +902,14 @@
             "maxLength": 60,
             "type": "string",
             "description": "The category's display name."
+          },
+          "code": {
+            "maxLength": 12,
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "An optional short code, unique across categories. Declared so a 409 on this entity's update is reachable — a duplicate on a field declared unique is the only way a PATCH reaches one, and every documented status has to be reachable."
           }
         },
         "description": "The fields to change. A field this object does not mention keeps its stored value, so nothing here is mandatory — that is what makes the verb PATCH rather than PUT."
@@ -872,6 +933,7 @@
               "https://alvo.dev/errors/not-found",
               "https://alvo.dev/errors/precondition-failed",
               "https://alvo.dev/errors/idempotency-conflict",
+              "https://alvo.dev/errors/conflict",
               "https://alvo.dev/errors/unauthenticated",
               "https://alvo.dev/errors/unreadable-request",
               "https://alvo.dev/errors/internal"
@@ -952,6 +1014,7 @@
           "notes",
           "slug",
           "category_id",
+          "parent_id",
           "created_at",
           "created_by",
           "updated_at",
@@ -1059,6 +1122,15 @@
           "category_id": {
             "type": "string",
             "description": "The category this product belongs to.",
+            "format": "uuid",
+            "example": "3f8d6c1e-9b47-4a5f-8c21-0d7e5a2b6f04"
+          },
+          "parent_id": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "An optional parent product. A self-reference, and the cheapest way to make a 409 on THIS entity's delete reachable: 'categories' is already made conflict-on-delete by 'category_id' above, and a third entity would only move the problem to whatever nothing references.",
             "format": "uuid",
             "example": "3f8d6c1e-9b47-4a5f-8c21-0d7e5a2b6f04"
           },
@@ -1187,6 +1259,14 @@
           "category_id": {
             "type": "string",
             "description": "The category this product belongs to.",
+            "format": "uuid"
+          },
+          "parent_id": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "An optional parent product. A self-reference, and the cheapest way to make a 409 on THIS entity's delete reachable: 'categories' is already made conflict-on-delete by 'category_id' above, and a third entity would only move the problem to whatever nothing references.",
             "format": "uuid"
           }
         },
@@ -1325,6 +1405,15 @@
             "format": "uuid",
             "example": "3f8d6c1e-9b47-4a5f-8c21-0d7e5a2b6f04"
           },
+          "parent_id": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "An optional parent product. A self-reference, and the cheapest way to make a 409 on THIS entity's delete reachable: 'categories' is already made conflict-on-delete by 'category_id' above, and a third entity would only move the problem to whatever nothing references.",
+            "format": "uuid",
+            "example": "3f8d6c1e-9b47-4a5f-8c21-0d7e5a2b6f04"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -1445,6 +1534,14 @@
             "type": "string",
             "description": "The category this product belongs to.",
             "format": "uuid"
+          },
+          "parent_id": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "An optional parent product. A self-reference, and the cheapest way to make a 409 on THIS entity's delete reachable: 'categories' is already made conflict-on-delete by 'category_id' above, and a third entity would only move the problem to whatever nothing references.",
+            "format": "uuid"
           }
         },
         "description": "The fields to change. A field this object does not mention keeps its stored value, so nothing here is mandatory — that is what makes the verb PATCH rather than PUT."
@@ -1514,8 +1611,8 @@
           }
         }
       },
-      "idempotencyConflict": {
-        "description": "The 'Idempotency-Key' was already used by this caller for a request with a different body. Retrying with the same key and the same body replays the first result instead; a different body under the same key is a mistake, not a retry.",
+      "conflict": {
+        "description": "The request conflicts with what is already stored. Two kinds, told apart by the problem 'type': 'idempotency-conflict' means the 'Idempotency-Key' was already used by this caller for a request with a different body (retry with the same key and the same body to replay the first result, or send a fresh key); 'conflict' means a constraint the database enforces refused the write — a value another record already holds on a field declared unique, or a delete another record still references through a 'ref' declaring onDelete: restrict. The 'violations' array names the field for the first of those and carries a fix suggestion for both.",
         "headers": {
           "Cache-Control": {
             "$ref": "#/components/headers/Cache-Control"

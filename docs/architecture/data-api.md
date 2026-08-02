@@ -475,53 +475,115 @@ Every `type` is `https://alvo.dev/errors/<slug>`; the nine slugs are `AlvoProble
 | 403 | `out-of-scope` | the presented key's scopes do not cover this entity and operation |
 | 404 | `not-found` | the row is absent **or** the caller's policy excludes it, indistinguishably |
 | 409 | `idempotency-conflict` | the key was reused for a different request |
+| 409 | `conflict` | a constraint the database enforces refused the write — a `unique` value another record holds, or a `restrict`-ed reference |
 | 412 | `precondition-failed` | a precondition this API cannot evaluate, or a version that does not match |
 | 422 | `validation` | schema-derived validation refused the body |
 | 422 | `malformed-query` | the query string or the body is malformed — the shape is wrong, nothing is hidden |
 | 413, 408, 400 | `unreadable-request` | the **web server** refused the request before Alvo read it (a body over `MaxRequestBodySize`, one arriving too slowly, one whose framing broke) — same opt-in as `internal`, and likewise documented on no operation |
 | 500 | `internal` | an invariant Alvo relies on is broken — **only** in a host that called `AddAlvoProblemDetails()`; no endpoint produces it and no operation documents it |
 
+**Two 409s, and the split is the same rule `forbidden`/`out-of-scope` follows.** Both mean "the request
+conflicts with what is already stored", and they have different fixes a caller can act on: an
+`idempotency-conflict` is repaired with a fresh key and the same body, a `conflict` with a different value
+(or by removing what stands in the way). One slug covers *both kinds* of constraint conflict — a `unique`
+collision and a `restrict`-ed reference — because a slug keys on the refusal's kind and "your write collides
+with stored state" is one kind; which constraint and which field is per-violation detail, carried in
+`violations` with its own stable `code` (`unique`, `referenced`). OpenAPI keys a response by status, so the
+document describes both under one `conflict` response and the problem `type` tells them apart.
+
+`conflict` is listed on **create, update and delete** — unconditionally per operation, not narrowed per
+entity. That is a deliberate imprecision, and it is worth naming: whether a *delete* can conflict depends on
+whether some **other** entity references this one with `onDelete: "restrict"`, which is a property of the
+whole applied schema, and `DataApiDocumentation.ResponsesFor` is handed one `EntitySchema`. Narrowing it
+would mean threading the model through three layers (the endpoint metadata, the header catalogue and the
+document transformer) for a documentation nicety; the cost of not doing it is that an entity nothing
+references advertises a 409 on delete it cannot reach.
+
 Which operation can answer what is one table, `DataApiDocumentation.ResponsesFor`, read both by the
 endpoint metadata and by the OpenAPI transformer — so the document cannot advertise a status no delegate
 produces. **401 and 403 are unconditional on every route**, because the same gate is attached to all five.
 
-### The gap in this table: a database constraint violation is a 500, and 409 has only one entry
+### How a database constraint violation reaches the caller (#138, fixed)
 
-`409` above names `idempotency-conflict` and nothing else, and that is a defect rather than a
-completeness claim. **A constraint the *database* enforces is not mapped onto `IAlvoData`'s refusal
-families at all**, so the provider's exception reaches the host and is rendered as `internal`. Two
-shapes are reachable today, both found end-to-end by `test/teapie-field-service` and pinned there:
+Every declared facet the framework can check itself — `required`, `maxLength`, `enum`, `format`,
+`precision`/`scale`, `ref` existence — is validated by `RecordValidator` and answered with a per-field 422.
+Two cannot be checked before the write, because only the engine knows: a `unique` value another record
+already holds, and a `restrict`-ed reference. Both used to reach the host as the provider's own exception
+and render as `500 internal` — *"an invariant Alvo itself relies on is broken"*, which neither is. Both are
+now `409 conflict`:
 
-| What the caller did | Answered today | Should be |
+| What the caller did | Answered | `violations` |
 |---|---|---|
-| Supplied a value another row already holds on a `unique` field | `500 internal` | `409`, naming the field |
-| Deleted a row a `ref` with `onDelete: restrict` still points at | `500 internal` | `409`, naming the conflict |
+| Supplied a value another record holds on a `unique` field | `409 conflict` | one per field, pointer `/<field>`, code `unique` |
+| Deleted a record a `ref` with `onDelete: restrict` still points at | `409 conflict` | one, pointer `""`, code `referenced` |
 
-Every other declared facet — `required`, `maxLength`, `enum`, `format`, `precision`/`scale`, and `ref`
-existence — is validated by `RecordValidator` and answered with a per-field 422 carrying a pointer, a
-code and a fix suggestion. These two carry none of that, so an agent cannot repair the request: the
-detail says only "an internal error" and the field at fault is never named. `onDelete: restrict` is
-the descriptor *asking* for the refusal, which makes the second the harder one to defend.
+**Three costs the misclassification had, each a separate defect.** An agent could not repair the request —
+no pointer, no field, no fix suggestion, in a framework whose principle 4 is structured errors *with* one. A
+500 invites a retry that can never succeed. And the operator was paged, with a stack trace, for an ordinary
+caller mistake; `AlvoHostProblemDetailsTests` now asserts that a duplicate logs **no** `Error` entry.
 
-**Neither has a tracking issue yet** — they need one; every other known defect in this document
-carries a number. Note that **#127 is not this**: it covers the ten-transaction retry amplification and
-scopes its fix to the retry logic.
+**Where the engine-specific part lives, and why it is not in a `catch`.** The kind is recovered by
+`IAlvoSqlDialect.DecodeConstraintViolation`, one member per driver: PostgreSQL reads SQLSTATE `23505`/`23503`
+and reports the violated constraint's *name*; SQLite reads the extended result code `2067`/`1555`/`787` and
+names the *columns*, in its message and nowhere else — and names nothing at all for a foreign key. The
+shared data path (`ConstraintViolationTranslator`) resolves either against the entity's own model and never
+looks at a message, because a message match in the shared layer is a dependency on one provider's prose that
+a caller-supplied value can end up quoted in. The member is **abstract**, not a default interface member:
+`null` means "not a constraint violation", which is legitimate for every other failure, so an inherited
+default would have a new driver silently answer 500 for every duplicate.
 
-### A `unique` field on a tenant-scoped entity is a cross-tenant existence oracle
+Two engine differences were **measured, not assumed** (#139), and both are absorbed behind that seam:
+`Microsoft.Data.Sqlite` reports the extended result code only when the connection handle still agrees with
+the return code, so `ExecuteDelete`'s foreign-key failure arrives as bare `SQLITE_CONSTRAINT` while
+`SaveChanges`' unique failure carries `SQLITE_CONSTRAINT_UNIQUE`; and Npgsql withholds the `Detail` line
+that would carry the columns unless `Include Error Detail` is on, which it should not be, because that line
+quotes the caller's values. Both drivers are held to `AlvoDataConstraintTests`, inherited unchanged.
 
-**A separate defect that shares a trigger with the first row above, and the more serious of the two.**
-`DescriptorModelBuilder.ConfigureField` emits `HasIndex(field.Name).IsUnique()` with no `tenant_id`,
-regardless of `tenancy: "scoped"` — so a `unique` field is unique across the whole instance rather
-than within a tenant. Tenant B's create collides with a value only tenant A holds, and B learns that
-A holds it, one request per candidate. That is precisely the inference the 404-everywhere rule above
-is built to prevent, and it conflicts with §0's secure-by-default.
+**What the refusal does not say.** Never the value the caller sent, never the engine's constraint or index
+name, never its message. A `restrict` refusal names **no entity either**: which of the entities that may
+reference this row actually holds one is a fact about data the caller may have no read access to, so the
+refusal says only that some record still references it. A conflict confined to framework-managed columns
+(`id`, `tenant_id`) is *not* translated — a caller cannot change one — and keeps propagating as the broken
+invariant it is.
 
-**Fixing the status does not fix this.** `409`-versus-`201` is the same one-bit signal to tenant B as
-`500`-versus-`201`. The fix is a **tenant-scoped unique index** — `HasIndex(tenant_id, field)` on a
-scoped entity — emitted *after* the field loop, because EF cannot resolve `tenant_id` while that loop
-is still running. `test/teapie-field-service/080-Tenancy/002` pins it by asserting the two answers are
-**distinguishable** rather than asserting a status, so a status-only change leaves it green and cannot
-be mistaken for a fix; a tenant-scoped index turns it red. Also needs an issue.
+**A duplicate no longer costs ten transactions.** `EfAlvoData.ReplayableCreateAsync` retries any storage
+write failure, so a duplicate in an idempotent create used to be re-attempted ten times before surfacing.
+`AlvoConstraintViolationException` is not a `DbException`, so it leaves on the first attempt; the idempotency
+record's own primary key is deliberately **not** translated, because losing that race is what the retry
+exists to converge on. That is the part of **#127** this happens to close; the rest of #127 is still open.
+
+### A `unique` field on a tenant-scoped entity was a cross-tenant existence oracle (#137, fixed)
+
+**A separate defect that shared a trigger with the one above, and the more serious of the two.**
+`DescriptorModelBuilder` emitted `HasIndex(field.Name).IsUnique()` with no `tenant_id`, regardless of
+`tenancy: "scoped"` — and the same for a *declared* unique index — so a `unique` field was unique across the
+whole instance rather than within a tenant. Tenant B's create collided with a value only tenant A held, and
+B learned that A held it, one request per candidate. That is precisely the inference the 404-everywhere rule
+above is built to prevent, and it conflicted with §0's secure-by-default.
+
+**Fixing the status did not fix this, which is why the two were separate issues.** `409`-versus-`201` is the
+same one-bit signal to tenant B as `500`-versus-`201` was. The fix is a **tenant-scoped unique index** —
+`(tenant_id, field)` on a scoped entity, unchanged on a non-scoped one — emitted *after* the field loop,
+because `DescriptorToSchemaMapper` appends `tenant_id` after the declared fields and EF refuses to resolve it
+mid-loop (measured: *"The property 'tenant_id' cannot be added … no property type was specified"* — a startup
+failure, not a wrong index). A non-unique index enforces nothing and is left alone; a descriptor that already
+named `tenant_id` keeps its own column order.
+
+Three directions are pinned, because a fix satisfying one alone would be wrong: two tenants may hold one
+value, one tenant still may not, and a non-scoped entity keeps instance-wide uniqueness. The first two are
+proved against **both engines** by `AlvoDataConstraintTests`; the index shape itself by
+`DescriptorModelBuilderTests`; and the HTTP-level indistinguishability by
+`test/teapie-field-service/080-Tenancy/002`, which now asserts the two probes are **equal** where it used to
+assert they differed.
+
+**What this means for a database that already exists.** The emitted DDL changed: `IX_<table>_<field>` becomes
+`IX_<table>_tenant_id_<field>` on a scoped entity, so the next apply drops one index and creates another —
+`SchemaChangeKind.DropIndex`/`AddIndex`, neither classified destructive, so no `AllowDestructive` is needed.
+It can still *fail*, and legitimately: if two tenants already hold one value the old instance-wide index
+would have refused, nothing is affected — but an instance that has been running with the narrow index cannot
+acquire rows the wide one forbids, so the create will succeed where it used to fail. The migration is
+therefore always in the widening direction and no existing row can violate the new index. Nothing is
+released, which is exactly why now was the cheap moment to change it.
 
 **A slug keys on the refusal's *kind*, never on its *reason*.** RFC 9457 §3.1.1 makes `type` the
 classification a client may branch on and `detail` prose that "ought not be parsed". A slug encoding *why*
