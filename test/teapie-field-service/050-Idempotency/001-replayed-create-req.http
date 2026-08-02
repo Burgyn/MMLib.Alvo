@@ -1,0 +1,143 @@
+### How many work orders exist before the replay, so the row COUNT can be the assertion rather than
+### the status. A replay answered 201 while writing a second row is exactly the failure a
+### status-only case would miss.
+# @name CountBefore
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=100&order=reference.asc
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### The create a client sends, and never learns the outcome of
+# @name FirstAttempt
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Idempotency-Key: field-service-suite-replay-1
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "reference": "WO-6001",
+  "title": "Retry me",
+  "status": "scheduled",
+  "priority": 2,
+  "quoted_price": 500.00,
+  "access_code": "RETRY",
+  "customer_id": "{{CustomerAcmeId}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+### The identical request again, byte for byte, as a client retries after a lost response
+# @name Replay
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Idempotency-Key: field-service-suite-replay-1
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "reference": "WO-6001",
+  "title": "Retry me",
+  "status": "scheduled",
+  "priority": 2,
+  "quoted_price": 500.00,
+  "access_code": "RETRY",
+  "customer_id": "{{CustomerAcmeId}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+### The same key with a DIFFERENT body is a conflict, not a second create and not a silent replay
+# @name SameKeyDifferentBody
+## TEST-EXPECT-STATUS: [409]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Idempotency-Key: field-service-suite-replay-1
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "reference": "WO-6002",
+  "title": "Different body, same key",
+  "status": "scheduled",
+  "priority": 2,
+  "access_code": "RETRY",
+  "customer_id": "{{CustomerAcmeId}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+### A DIFFERENT key with the same body is a genuinely new create — the key scopes the record, and
+### without this the case above could pass because the body was rejected for some other reason.
+# @name DifferentKeySameShape
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Idempotency-Key: field-service-suite-replay-2
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "reference": "WO-6003",
+  "title": "Retry me",
+  "status": "scheduled",
+  "priority": 2,
+  "quoted_price": 500.00,
+  "access_code": "RETRY",
+  "customer_id": "{{CustomerAcmeId}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+### An anonymous caller carrying a key is answered about the thing that actually stopped them.
+###
+### The port DOES refuse an anonymous idempotency key with a 422 — a record's identity is the key
+### plus the caller, and every anonymous caller shares one reserved identity — but that refusal is
+### unreachable here, and the reason is the design working: the endpoint resolves the operation's
+### policy decision BEFORE it reads any header, so an anonymous caller on a tenant-scoped entity is
+### told they are unauthorized rather than told to fix a header they were never going to get to use.
+### Sending an agent to fix the wrong thing is precisely what that ordering exists to prevent.
+# @name AnonymousKey
+## TEST-EXPECT-STATUS: [403]
+POST {{fsBaseUrl}}/api/work_orders
+Idempotency-Key: field-service-suite-anonymous
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "reference": "WO-6004",
+  "title": "Anonymous",
+  "status": "scheduled",
+  "priority": 2,
+  "access_code": "RETRY",
+  "customer_id": "{{CustomerAcmeId}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+### The state of the world: two new rows for two distinct keys, and nothing for the replay or the conflict
+# @name CountAfter
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=100&order=reference.asc
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### And the replayed reference names exactly one row, not two
+# @name RowsForTheReplayedReference
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?reference=eq.WO-6001&limit=100
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### The two rows this case created are removed again, so every later group measures the seeded seven
+### rather than an inherited leftover. Asserted below, not assumed.
+# @name RemoveReplayedRow
+## TEST-EXPECT-STATUS: [204]
+DELETE {{fsBaseUrl}}/api/work_orders/{{FirstAttempt.response.body.$.id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+###
+# @name RemoveSecondKeyRow
+## TEST-EXPECT-STATUS: [204]
+DELETE {{fsBaseUrl}}/api/work_orders/{{DifferentKeySameShape.response.body.$.id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+###
+# @name BackToTheSeededSet
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=100&order=reference.asc
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
