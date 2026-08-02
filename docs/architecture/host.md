@@ -88,6 +88,17 @@ known-address check entirely for a remote address it does not know.
 `X-Forwarded-Prefix` chooses the URL a 201 advertises, so an untrusted caller honoured by default would choose
 where the next client is sent. `An_untrusted_forwarded_prefix_is_ignored` is the fact that holds it.
 
+**The flags are *registered* only when the switch is on, not merely *used* only when it is on.** ASP.NET Core
+has a forwarded-headers switch of its own — `ASPNETCORE_FORWARDEDHEADERS_ENABLED=true`, the recipe every
+container guide gives — and it registers a `ForwardedHeadersStartupFilter` that calls `UseForwardedHeaders`
+against the *same* `ForwardedHeadersOptions` instance the host configures. A host that configured its flags
+unconditionally therefore handed that filter Alvo's permissive set, `X-Forwarded-Prefix` included and both
+known-address lists cleared, while `Alvo:ForwardedHeaders:Enabled` was still `false`: an internet client sent
+`X-Forwarded-Prefix: /evil` and got `201 Location: /evil/api/...`. Alvo's `Configure` runs after the
+framework's, so its values won. Two switches, one options object, and only one of them documented as the
+trust decision — the conditional registration is what makes the documented one true.
+`The_frameworks_own_forwarded_headers_switch_does_not_grant_alvos_trust` holds it.
+
 **There is deliberately no explicit `UseRouting()`.** The widely cited rule — Microsoft Learn still states it —
 that `WebApplication` needs `UseRouting` *after* `UsePathBase`, or routes match before the path is rewritten,
 no longer holds: `UsePathBaseMiddleware` re-runs matching over the rewritten path itself. Measured under this

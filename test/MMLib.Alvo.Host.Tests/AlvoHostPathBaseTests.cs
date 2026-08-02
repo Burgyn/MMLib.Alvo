@@ -93,6 +93,45 @@ public class AlvoHostPathBaseTests
     }
 
     /// <summary>
+    /// The framework has a forwarded-headers switch of its own, and turning <em>it</em> on must not turn
+    /// Alvo's flags on: <c>Alvo:ForwardedHeaders:Enabled</c> is still the only thing that decides trust.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>ASPNETCORE_FORWARDEDHEADERS_ENABLED=true</c> is the recipe every container guide gives, and it
+    /// registers a <c>ForwardedHeadersStartupFilter</c> that calls <c>UseForwardedHeaders</c> against the
+    /// same options instance the host configures. A host that configured its flags unconditionally therefore
+    /// ran <b>Alvo's</b> permissive set — <c>X-Forwarded-Prefix</c> included, both known-address lists
+    /// cleared — from the framework's filter, with Alvo's own switch still off. An internet client then chose
+    /// the URL a 201 advertised.
+    /// </para>
+    /// <para>
+    /// The variable is set as the configuration key it binds to: the host builder reads
+    /// <c>ASPNETCORE_</c>-prefixed environment variables with the prefix stripped, so
+    /// <c>ForwardedHeaders_Enabled</c> <em>is</em> that variable, and setting it here rather than in the
+    /// process environment keeps the fact from leaking into every other test running beside it.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task The_frameworks_own_forwarded_headers_switch_does_not_grant_alvos_trust()
+    {
+        await using var world = await AlvoHostWorld.StartAsync(overrides: FrameworkForwardedHeadersEnabled());
+
+        using var created = await world.SendAsync(
+            HttpMethod.Post,
+            "/api/warehouses",
+            new JsonObject { ["code"] = "W-5" },
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["X-Forwarded-Prefix"] = "/attacker" });
+
+        created.StatusCode.ShouldBe(HttpStatusCode.Created, await created.Content.ReadAsStringAsync(Ct));
+        var location = created.Headers.Location!.ToString();
+
+        location.ShouldBe(
+            $"/api/warehouses/{IdIn(location)}",
+            "ASPNETCORE_FORWARDEDHEADERS_ENABLED must not activate the flags Alvo's own switch guards");
+    }
+
+    /// <summary>
     /// Follows <paramref name="location"/> the way a client behind the proxy does, because that is where #121's
     /// 404 happens and the host cannot produce it.
     /// </summary>
@@ -124,6 +163,10 @@ public class AlvoHostPathBaseTests
 
     private static Dictionary<string, string?> ForwardedHeadersEnabled() =>
         new(StringComparer.Ordinal) { ["Alvo:ForwardedHeaders:Enabled"] = "true" };
+
+    /// <summary>The key <c>ASPNETCORE_FORWARDEDHEADERS_ENABLED</c> binds to, with Alvo's own switch left off.</summary>
+    private static Dictionary<string, string?> FrameworkForwardedHeadersEnabled() =>
+        new(StringComparer.Ordinal) { ["ForwardedHeaders_Enabled"] = "true" };
 
     private static string IdIn(string location) => location[(location.LastIndexOf('/') + 1)..];
 

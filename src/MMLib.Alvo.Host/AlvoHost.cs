@@ -69,7 +69,12 @@ public static class AlvoHost
 
         builder.Services.Configure<AlvoHostOptions>(builder.Configuration.GetSection(ConfigurationSection));
         builder.Services.Configure<AlvoAuthOptions>(builder.Configuration.GetSection(AuthSection));
-        builder.Services.Configure<ForwardedHeadersOptions>(ConfigureForwardedHeaders);
+
+        if (options.ForwardedHeaders.Enabled)
+        {
+            builder.Services.Configure<ForwardedHeadersOptions>(ConfigureForwardedHeaders);
+        }
+
         builder.Services.AddHealthChecks();
         builder.Services.AddAlvoProblemDetails();
 
@@ -161,11 +166,24 @@ public static class AlvoHost
     /// says something in front of it sets them.
     /// </summary>
     /// <remarks>
-    /// Always configured and only conditionally used, so the flags live in one place whether or not they are
-    /// switched on. The known-address lists are cleared because a container cannot know its proxy's address,
-    /// and their defaults (IPv6 loopback) would drop every header a sidecar or an ingress sends.
+    /// <para>
+    /// <b>Registered only when the switch is on, and that is the security half of the switch rather than
+    /// tidiness.</b> ASP.NET Core registers a <c>ForwardedHeadersStartupFilter</c> of its own whenever
+    /// <c>ASPNETCORE_FORWARDEDHEADERS_ENABLED=true</c> — the standard container recipe, and a variable an
+    /// operator may well set without knowing Alvo has a switch of its own. That filter calls
+    /// <c>UseForwardedHeaders</c> against the <em>same</em> <see cref="ForwardedHeadersOptions"/> instance
+    /// this configures, so a version of this that always ran would hand the framework's filter Alvo's
+    /// permissive flags with both known-address lists cleared while
+    /// <see cref="AlvoHostForwardedHeadersOptions.Enabled"/> was still <see langword="false"/> — any internet
+    /// client could then set <c>X-Forwarded-Prefix</c> and choose the URL a 201 advertises, which is exactly
+    /// what that option's remarks promise the switch prevents.
+    /// </para>
+    /// <para>
+    /// The known-address lists are cleared because a container cannot know its proxy's address, and their
+    /// defaults (IPv6 loopback) would drop every header a sidecar or an ingress sends.
     /// <c>KnownIPNetworks</c> rather than <c>KnownNetworks</c>: the latter is obsolete as of .NET 10
     /// (<c>ASPDEPR005</c>), and this repository builds warnings as errors.
+    /// </para>
     /// </remarks>
     private static void ConfigureForwardedHeaders(ForwardedHeadersOptions options)
     {
