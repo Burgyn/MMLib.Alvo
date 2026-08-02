@@ -139,8 +139,9 @@ jobs:
       # The spec's standing instruction (§X.1): after building and starting the demo image, run
       # `teapie test` against the running container and publish a JUnit report. Linux only —
       # Windows GitHub runners run Docker in Windows-container mode and cannot run either image.
-      # The script owns the whole stack (build, up --wait, teapie, the PostgreSQL row assertion,
-      # logs on failure, teardown) so a human runs exactly what CI runs.
+      # The script owns both stacks (build, up --wait, both teapie suites, the PostgreSQL row, hidden-
+      # value and tenant-partition assertions, logs on failure, teardown) so a human runs exactly
+      # what CI runs.
       - name: Compose up + teapie test
         run: scripts/test-e2e
 
@@ -154,7 +155,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: teapie-report
-          path: artifacts/teapie/report.xml
+          path: artifacts/teapie/report*.xml
           if-no-files-found: ignore
 
   # Stable required status check: the branch ruleset requires "Build & test",
