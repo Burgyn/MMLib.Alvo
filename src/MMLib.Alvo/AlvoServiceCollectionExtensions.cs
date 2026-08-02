@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.DependencyInjection.Extensions;
+﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo;
 using MMLib.Alvo.Api;
@@ -7,6 +8,7 @@ using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Internal;
 using MMLib.Alvo.Migrations;
+using MMLib.Alvo.Migrations.Internal;
 using MMLib.Alvo.Rules;
 
 namespace Microsoft.Extensions.DependencyInjection;
@@ -48,6 +50,8 @@ public static class AlvoServiceCollectionExtensions
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IValidateOptions<AlvoOptions>, AlvoProviderValidation>());
 
+        AddSchemaOptions(services);
+
         services.TryAddSingleton<IDescriptorValidator, MMLib.Alvo.Descriptor.Internal.DescriptorValidator>();
         services.TryAddSingleton<SchemaMigrationRunner>();
         services.TryAddSingleton<RuntimeSchemaService>();
@@ -59,5 +63,32 @@ public static class AlvoServiceCollectionExtensions
         configure?.Invoke(builder);
 
         return builder;
+    }
+
+    /// <summary>
+    /// Registers <see cref="AlvoSchemaOptions"/>, bound from its configuration section and validated at
+    /// startup: the setting that decides whether a boot may run DDL has to be refused before the boot, not
+    /// read for the first time once one is already under way.
+    /// </summary>
+    /// <remarks>
+    /// The section is bound here rather than left to the host so that <c>Alvo__Schema__Startup</c> works in
+    /// every distribution with no wiring, exactly as the connection-string convention does
+    /// (<c>extensibility.md</c> rule 5). <see cref="AlvoSchemaOptionsConfiguration"/> both binds and validates,
+    /// and its <see cref="IConfiguration"/> arrives through a factory so a host that registered none gets the
+    /// defaults instead of a DI failure — see that type for why the framework binder cannot do either job here.
+    /// </remarks>
+    private static void AddSchemaOptions(IServiceCollection services)
+    {
+        services.AddOptions<AlvoSchemaOptions>()
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IConfigureOptions<AlvoSchemaOptions>, AlvoSchemaOptionsConfiguration>(Create));
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IValidateOptions<AlvoSchemaOptions>, AlvoSchemaOptionsConfiguration>(Create));
+
+        static AlvoSchemaOptionsConfiguration Create(IServiceProvider provider)
+            => new(provider.GetService<IConfiguration>());
     }
 }

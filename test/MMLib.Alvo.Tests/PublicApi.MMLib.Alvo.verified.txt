@@ -80,6 +80,13 @@ namespace MMLib.Alvo.Auth
 }
 namespace MMLib.Alvo.Migrations
 {
+    public sealed class AlvoSchemaOptions
+    {
+        public const string SectionName = "Alvo:Schema";
+        public AlvoSchemaOptions() { }
+        public bool AllowDestructive { get; set; }
+        public MMLib.Alvo.Migrations.AlvoSchemaStartupMode Startup { get; set; }
+    }
     public sealed class RuntimeSchemaService
     {
         public RuntimeSchemaService(MMLib.Alvo.Descriptor.IDescriptorValidator validator, MMLib.Alvo.Migrations.ISchemaMigrator migrator, MMLib.Alvo.Migrations.IDescriptorVersionStore store, MMLib.Alvo.Migrations.IRuntimeSchemaWriter writer, MMLib.Alvo.Expressions.ICelCompiler compiler, MMLib.Alvo.Rules.IPolicyCatalogProvider policyCatalogProvider) { }

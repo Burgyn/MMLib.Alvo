@@ -906,6 +906,12 @@ namespace MMLib.Alvo.Expressions
 }
 namespace MMLib.Alvo.Migrations
 {
+    public enum AlvoSchemaStartupMode
+    {
+        Verify = 0,
+        Apply = 1,
+        Skip = 2,
+    }
     public sealed class AppliedSchema : System.IEquatable<MMLib.Alvo.Migrations.AppliedSchema>
     {
         public AppliedSchema(MMLib.Alvo.Schema.SchemaModel Schema, string DescriptorJson, int Revision, System.DateTimeOffset UpdatedAt) { }
