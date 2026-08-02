@@ -101,8 +101,10 @@ public class AlvoHostRestartTests
     /// <para>
     /// The claim is asserted on the <em>container</em>, not on <c>File.Delete</c>, because deleting an open
     /// file succeeds on Unix and fails only on Windows — a fact written the other way round would measure the
-    /// leak on one CI runner and nothing at all on a developer's machine. The delete still happens, in the
-    /// <c>finally</c> every fact here shares, and <c>TryDeleteDatabase</c> no longer swallows its failure.
+    /// leak on one CI runner and nothing at all on a developer's machine. This probe is therefore the whole
+    /// guard: <c>AlvoHostWorld.TryDeleteDatabase</c> in the <c>finally</c> below is teardown hygiene and is
+    /// deliberately tolerant, and no delete anywhere could take this claim's place — clearing the SQLite pool
+    /// frees the file whether the refused start disposed its application or leaked it.
     /// </para>
     /// </remarks>
     [Fact]

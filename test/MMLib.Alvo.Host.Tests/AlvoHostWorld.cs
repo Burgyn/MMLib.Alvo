@@ -88,15 +88,65 @@ internal sealed class AlvoHostWorld : IAsyncDisposable
     internal static string TempDatabasePath() =>
         Path.Combine(Path.GetTempPath(), $"alvo-host-tests-{Guid.NewGuid():N}.db");
 
-    /// <summary>Deletes a caller-owned database.</summary>
+    /// <summary>Releases and removes a caller-owned database, as far as the platform allows.</summary>
     /// <remarks>
-    /// It used to swallow an <see cref="IOException"/> "tolerating a file a refused start still holds open",
-    /// and that tolerance was the visible end of a real leak: <see cref="AlvoHost.BuildAsync"/> did not
-    /// dispose the <c>WebApplication</c> it had built when the apply threw, so the connection pool kept the
-    /// file. Deleting strictly is what keeps every fact that starts over its own file measuring the fix.
+    /// <para>
+    /// <b>This is teardown hygiene, not an assertion.</b> A file left behind in the temp directory is untidy; it
+    /// is not a failed fact, and a suite that fails on one reports the platform rather than the product. The
+    /// claim that a refused start released the application it had already built belongs to
+    /// <see cref="DisposalProbe"/>, asserted on the <em>container</em>, which behaves identically everywhere.
+    /// A delete does not: POSIX unlinks a file other handles still hold open and Windows refuses to, so a
+    /// strict delete here asserts nothing on Unix and fails every fact on Windows. It did exactly that.
+    /// </para>
+    /// <para>
+    /// <see cref="SqliteConnection.ClearAllPools"/> comes first, because the pool is the real holder.
+    /// Microsoft.Data.Sqlite pools by default, so a connection returned to the pool keeps its SQLite handle —
+    /// and the file — open past the disposal of the application that opened it, and the pool is process-wide.
+    /// Clearing it turns "the file is probably free by now" into "no pooled handle to this file exists", which
+    /// is what makes the delete below deterministic rather than lucky. Safe while another world runs: a
+    /// connection in use is not closed, only barred from returning to the pool, and every database this suite
+    /// opens is a file that reopens on demand — never a <c>Mode=Memory</c> one, which clearing would destroy.
+    /// </para>
+    /// <para>
+    /// The bounded retry covers what clearing the pool cannot: on Windows a handle can outlive the call that
+    /// released it, and something outside the process — a virus scanner or the search indexer opening a file
+    /// the moment it was written — can hold one briefly, so a sharing violation is not necessarily permanent.
+    /// </para>
     /// </remarks>
     /// <param name="databasePath">The path <see cref="TempDatabasePath"/> returned.</param>
-    internal static void TryDeleteDatabase(string databasePath) => File.Delete(databasePath);
+    internal static void TryDeleteDatabase(string databasePath)
+    {
+        SqliteConnection.ClearAllPools();
+
+        for (var attempt = 1; attempt <= DeleteAttempts; attempt++)
+        {
+            if (Deleted(databasePath) || attempt == DeleteAttempts)
+            {
+                return;
+            }
+
+            Thread.Sleep(_deleteRetryDelay);
+        }
+    }
+
+    /// <summary>One delete attempt; <see langword="false"/> when something still holds the file.</summary>
+    /// <param name="databasePath">The path to delete.</param>
+    private static bool Deleted(string databasePath)
+    {
+        try
+        {
+            File.Delete(databasePath);
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+    }
+
+    private const int DeleteAttempts = 4;
+
+    private static readonly TimeSpan _deleteRetryDelay = TimeSpan.FromMilliseconds(50);
 
     /// <summary>Every table name in a SQLite database, or nothing at all when the file was never created.</summary>
     /// <remarks>
@@ -112,7 +162,11 @@ internal sealed class AlvoHostWorld : IAsyncDisposable
             return [];
         }
 
-        using var connection = new SqliteConnection($"Data Source={databasePath}");
+        // Unpooled on purpose: a pooled probe connection would return its SQLite handle to the process-wide
+        // pool rather than close it, leaving this file open for a caller that deletes it next — the same
+        // reason AlvoSqliteBuilderExtensions opens the migrator's and introspector's connections unpooled.
+        using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder($"Data Source={databasePath}") { Pooling = false }.ToString());
         connection.Open();
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%';";
