@@ -1,0 +1,84 @@
+### SCENARIO 2 — a concurrent-edit conflict, and the loop that RESOLVES it.
+###
+### Nothing else in this repository walks the whole loop. Two clients read the same row and hold the
+### same version. The first writes and wins. The second writes and is refused — and then does the
+### thing `If-Match` exists to make possible: re-reads, sees the first writer's change, merges its own
+### on top, and retries with the fresh version.
+###
+### The payoff is asserted at the end and it is the point of the whole mechanism: the final row
+### carries BOTH writers' changes. A lost update would leave it carrying only one.
+
+### The row both clients are about to edit.
+# @name CreateContestedRow
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "reference": "WO-8100",
+  "title": "Contested job",
+  "status": "scheduled",
+  "priority": 3,
+  "quoted_price": 1000.00,
+  "access_code": "LOOP",
+  "customer_id": "{{CustomerAcmeId}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+### Client 1 reads and holds a version.
+# @name ClientOneReads
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders/{{CreateContestedRow.response.body.$.id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### Client 2 reads the same row and holds the SAME version. Nothing has changed yet.
+# @name ClientTwoReads
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders/{{CreateContestedRow.response.body.$.id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### Client 1 writes first, under the version it holds. It wins.
+# @name ClientOneWrites
+## TEST-EXPECT-STATUS: [200]
+PATCH {{fsBaseUrl}}/api/work_orders/{{CreateContestedRow.response.body.$.id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+If-Match: {{ClientOneReads.response.headers.ETag}}
+Content-Type: application/json
+
+{ "priority": 1 }
+
+### Client 2 writes under the version IT holds, which the row has since moved past. 412.
+### Without the loop below, the usual reaction to this 412 — re-read, re-apply — is what clobbers
+### client 1's change, so being refused is only half of the mechanism.
+# @name ClientTwoIsRefused
+## TEST-EXPECT-STATUS: [412]
+PATCH {{fsBaseUrl}}/api/work_orders/{{CreateContestedRow.response.body.$.id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+If-Match: {{ClientTwoReads.response.headers.ETag}}
+Content-Type: application/json
+
+{ "status": "in_progress" }
+
+### Client 2 re-reads. This is where it LEARNS about client 1's change rather than overwriting it.
+# @name ClientTwoRereads
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders/{{CreateContestedRow.response.body.$.id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### Client 2 retries with the fresh version, carrying only its own field. It succeeds.
+# @name ClientTwoRetries
+## TEST-EXPECT-STATUS: [200]
+PATCH {{fsBaseUrl}}/api/work_orders/{{CreateContestedRow.response.body.$.id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+If-Match: {{ClientTwoRereads.response.headers.ETag}}
+Content-Type: application/json
+
+{ "status": "in_progress" }
+
+### THE STATE OF THE WORLD: both changes are present. Neither writer lost.
+# @name FinalContestedRow
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders/{{CreateContestedRow.response.body.$.id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
