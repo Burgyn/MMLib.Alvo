@@ -81,14 +81,16 @@ name: Mutation
 # >120-minute timeout with no config change: 858 tests from `test/`, 1489 from the
 # repo root, 596 mutants either way.
 #
-# scripts/assert-mutation-run enforces all of that after every shard, and its header
-# is where the reasoning lives. It asserts POSITIVELY — the run must report the number
-# of test projects the config declares, must report a mutant count, and must not be
-# vacuous — because the first version of the solution-mode check was a negative
-# `grep -q 'will mutate solution'`, which fails OPEN the moment a Stryker release
-# rewords that line. Note especially why the solution-mode check is the TEST-PROJECT
-# count and not the mutant count: solution mode leaves the mutant count untouched
-# (834 and 834, 596 and 596 above) and moves only the suite.
+# scripts/assert-mutation-run enforces all of that after every shard, and its header is
+# where the reasoning lives. It asserts POSITIVELY — the run must not be vacuous, must
+# report the number of test projects the config declares, and must not have lost 40 % of
+# either its mutants or its suite — because the first version of the solution-mode check
+# was a negative `grep -q 'will mutate solution'`, which fails OPEN the moment a Stryker
+# release rewords that line. Note especially why the solution-mode check is the
+# TEST-PROJECT count and not the mutant count: solution mode leaves the mutant count
+# untouched (834 and 834, 596 and 596 above) and moves only the suite. The `mutants:` and
+# `suite:` values in the matrix are what those two floors are measured against.
+# scripts/test-assert-mutation-run runs the whole thing over real logs from both modes.
 #
 # READ #142 BEFORE TRUSTING A SCORE FROM THIS WORKFLOW. Measured on the same
 # versions: this runner reports mutants as Killed that demonstrably survive the
@@ -115,6 +117,8 @@ name: Mutation
 #     ceiling without being sharded several ways.
 #   - Sharding it that way is premature while #142 makes the resulting scores
 #     untrustworthy, and a leg that always times out is noise, not a gate.
+# TRACKED IN #143, which is where the re-shard checklist lives — this comment is not the
+# work item, because #99 closes with this change and #142 is about the Killed artefact.
 # Run it on demand meanwhile: cd test && dotnet tool run dotnet-stryker
 #   -f ../stryker-config.api.json --concurrency 4
 #
@@ -146,7 +150,6 @@ on:
       - 'src/MMLib.Alvo.Data.PostgreSql/**'
       - 'stryker-config.json'
       - 'stryker-config.expressions.json'
-      - 'stryker-config.api.json'
       - 'stryker-config.data-ef.json'
       - 'stryker-config.data-sqlite.json'
       - 'stryker-config.data-postgresql.json'
@@ -169,6 +172,14 @@ on:
       # because what separates them is a dependency boundary, not a coverage one.
       - 'src/MMLib.Alvo.Testing/**'
       - 'src/MMLib.Alvo.Testing.EntityFrameworkCore/**'
+      # And what DECIDES what this gate checks, on the same principle
+      # .husky/task-runner.json already applies to the local gate. Breaking the
+      # guard or the workflow must trigger a run, or the breakage lands unrun.
+      # stryker-config.api.json is deliberately NOT here: no matrix leg reads it
+      # (see DECLARED GAP), so a change to it would start a multi-hour run that
+      # cannot exercise it.
+      - '.github/workflows/mutation.yml'
+      - 'scripts/assert-mutation-run'
   workflow_dispatch:
 
 permissions:
@@ -212,27 +223,32 @@ jobs:
           - name: security core (expressions)
             config: stryker-config.expressions.json
             project: src/MMLib.Alvo/MMLib.Alvo.csproj
-            mutants: 834      # suite: 722 tests
+            mutants: 834
+            suite: 722
             timeout: 180
           - name: security core (rules, auth, rest)
             config: stryker-config.json
             project: src/MMLib.Alvo/MMLib.Alvo.csproj
-            mutants: 657      # suite: 722 tests
+            mutants: 657
+            suite: 722
             timeout: 120
           - name: data-ef
             config: stryker-config.data-ef.json
             project: src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj
-            mutants: 596      # suite: 858 tests (two test projects)
+            mutants: 596
+            suite: 858    # two test projects
             timeout: 120
           - name: data-sqlite
             config: stryker-config.data-sqlite.json
             project: src/MMLib.Alvo.Data.Sqlite/MMLib.Alvo.Data.Sqlite.csproj
-            mutants: 38       # suite: 403 tests
+            mutants: 38
+            suite: 403
             timeout: 60
           - name: data-postgresql
             config: stryker-config.data-postgresql.json
             project: src/MMLib.Alvo.Data.PostgreSql/MMLib.Alvo.Data.PostgreSql.csproj
-            mutants: 16       # suite: 101 tests
+            mutants: 16
+            suite: 101
             timeout: 60
     steps:
       - name: Checkout
@@ -245,53 +261,66 @@ jobs:
         with:
           global-json-file: global.json
 
+      # Fails the shard rather than skipping it. This step used to set run=false and
+      # let every later step skip, which reported the leg as SUCCESS — a shard that
+      # measured nothing looking exactly like a shard that measured everything, and
+      # `notify` never firing because the matrix result was 'success'. That guard made
+      # sense while the mutated projects were still being created one at a time; all
+      # of them exist now, so a missing csproj means a rename that silently retired a
+      # leg, which is precisely the failure this workflow exists to make loud.
       - name: Guard — mutated project must exist
-        id: guard
+        env:
+          PROJECT: ${{ matrix.project }}
+          SHARD: ${{ matrix.name }}
         run: |
-          if [ -f "${{ matrix.project }}" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "Project ${{ matrix.project }} not present — skipping mutation."
+          if [ ! -f "$PROJECT" ]; then
+            echo "::error::Mutation run ($SHARD) has no project at '$PROJECT'. If it was renamed or moved, update the matrix; a shard that cannot find its project must not report success."
+            exit 1
           fi
 
       - name: Restore tools
-        if: steps.guard.outputs.run == 'true'
         run: dotnet tool restore
 
       - name: Mutation test
-        if: steps.guard.outputs.run == 'true'
         shell: bash
         # From `test/`, NOT the repo root: with MMLib.Alvo.slnx in the working directory
         # Stryker enters solution mode and ignores each config's `test-projects`, running
         # every test project that references the mutated assembly (measured: 2211 tests
         # instead of 722 for the expressions shard, Testcontainers integration suites
-        # included). The header comment has the numbers. Hence `-f ../<config>` too.
+        # included). The header comment has the numbers. Hence `../<config>` too.
         working-directory: test
+        env:
+          CONFIG: ../${{ matrix.config }}
+          MUTANTS: ${{ matrix.mutants }}
+          SUITE: ${{ matrix.suite }}
+          SHARD: ${{ matrix.name }}
         run: |
-          set -o pipefail
+          # `shell: bash` means `bash -eo pipefail`, so the pipeline below would abort
+          # the whole step the moment Stryker exits non-zero — before the assertions
+          # run. Turn -e off around it and take the exit code by hand, so that a run
+          # which measured the WRONG THING is diagnosed as that rather than as a low
+          # score. `|| true` would not do: it clobbers PIPESTATUS.
+          #
           # --concurrency: Stryker defaults to half the logical cores, i.e. 2 test runners on a
           # GitHub-hosted 4-vCPU runner, leaving half the machine idle for a run whose whole cost
           # is wall-clock. The runner has ~16 GB, comfortably more than four MTP hosts need for
           # this suite. Set on the command line rather than in the config so this reasoning has
           # somewhere to live — the config files are strict JSON with nowhere to put a comment.
-          dotnet tool run dotnet-stryker -f "../${{ matrix.config }}" --concurrency 4 2>&1 | tee stryker-output.log
+          set +e
+          dotnet tool run dotnet-stryker -f "$CONFIG" --concurrency 4 2>&1 | tee stryker-output.log
           stryker_exit="${PIPESTATUS[0]}"
+          set -e
 
-          # Did this run MEASURE what the config asked for? Three positive assertions —
-          # vacuity, the test-project count, and a floor on the mutant count — live in
-          # scripts/assert-mutation-run so they can be run over a saved log by hand,
-          # which is how they were verified. Read that script's header before changing
-          # any of them; in particular it records WHY the solution-mode check is the
-          # test-project count and not the mutant count (measured: solution mode leaves
-          # the mutant count identical and moves only the test count).
-          # Deliberately run BEFORE propagating Stryker's own exit code, so a run that
-          # measured the wrong thing fails as that, not as a low score.
+          # Did this run MEASURE what the config asked for? Four positive assertions —
+          # vacuity, the test-project count, a floor on the mutant count and a floor on
+          # the suite size — live in scripts/assert-mutation-run so they can be run over
+          # a saved log by hand, which is how they were verified
+          # (scripts/test-assert-mutation-run). Read that script's header before
+          # changing any of them; in particular it records WHY the solution-mode check
+          # is the test-project count and not the mutant count (measured: solution mode
+          # leaves the mutant count identical and moves only the test count).
           ../scripts/assert-mutation-run \
-            stryker-output.log \
-            "../${{ matrix.config }}" \
-            "${{ matrix.mutants }}" \
-            "${{ matrix.name }}" || exit 1
+            stryker-output.log "$CONFIG" "$MUTANTS" "$SUITE" "$SHARD"
 
           exit "$stryker_exit"
 

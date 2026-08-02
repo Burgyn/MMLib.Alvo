@@ -45,12 +45,12 @@ fail() {
 # failure assert WHICH check tripped — otherwise a guard that fails for the wrong
 # reason (or for an unrelated crash) would still look like a pass here.
 GUARD_OUT=""
-run_guard() { # <log> <config> <expected-mutants>
-  GUARD_OUT="$("$GUARD" "$1" "$2" "$3" "test-shard" 2>&1)"
+run_guard() { # <log> <config> <expected-mutants> <expected-tests>
+  GUARD_OUT="$("$GUARD" "$1" "$2" "$3" "$4" "test-shard" 2>&1)"
   return $?
 }
 
-assert_ok() { # <label> <log> <config> <expected-mutants>
+assert_ok() { # <label> <log> <config> <expected-mutants> <expected-tests>
   local label="$1"; shift
   if run_guard "$@"; then
     pass "$label"
@@ -59,7 +59,7 @@ assert_ok() { # <label> <log> <config> <expected-mutants>
   fi
 }
 
-assert_rejected() { # <label> <needle proving which check tripped> <log> <config> <expected>
+assert_rejected() { # <label> <needle proving which check tripped> <log> <config> <expected-mutants> <expected-tests>
   local label="$1" needle="$2"; shift 2
   if run_guard "$@"; then
     fail "$label" "non-zero exit (guard rejects the run)" "exit 0: $GUARD_OUT"
@@ -79,10 +79,18 @@ COLLAPSED="A collapse this size is not ordinary drift"
 NO_TEST_PROJECTS="declares no test-projects"
 NO_LOG="no Stryker log at"
 
+# A perturbation that silently matches nothing would leave the fixture untouched, and
+# the two `assert_ok` drift/growth cases would then pass against an UNCHANGED 834 —
+# green for the wrong reason. Refuse to hand back a copy identical to its source.
 derive() { # <fixture> <sed-expression> -> path to a perturbed copy
   local out
   out="$(mktemp "$TMP_ROOT/derived.XXXXXX")"
   command sed "$2" "$FIXTURES/$1" > "$out"
+  if cmp -s "$FIXTURES/$1" "$out"; then
+    printf 'derive: sed %s matched nothing in %s — the case it feeds would prove nothing\n' \
+      "$2" "$1" >&2
+    exit 1
+  fi
   printf '%s\n' "$out"
 }
 
@@ -97,10 +105,10 @@ EF_CFG="$ROOT/stryker-config.data-ef.json"
 echo "check 2 — the run used the test projects the config declares"
 
 assert_ok "scoped run (expressions, 1 project, 722 tests) is accepted" \
-  "$FIXTURES/expressions-scoped.txt" "$EXPR_CFG" 834
+  "$FIXTURES/expressions-scoped.txt" "$EXPR_CFG" 834 722
 
 assert_rejected "solution mode (expressions, 2211 tests) is rejected" "$WRONG_SUITE" \
-  "$FIXTURES/expressions-solution-mode.txt" "$EXPR_CFG" 834
+  "$FIXTURES/expressions-solution-mode.txt" "$EXPR_CFG" 834 722
 
 # The pair above is the whole argument for check 2 being the test-project count: both
 # logs report 834 mutants tested, so no assertion on the mutant count could separate
@@ -117,13 +125,13 @@ for f in expressions-scoped expressions-solution-mode; do
 done
 
 assert_ok "scoped run (data-ef, 2 projects, 858 tests) is accepted" \
-  "$FIXTURES/data-ef-scoped.txt" "$EF_CFG" 596
+  "$FIXTURES/data-ef-scoped.txt" "$EF_CFG" 596 858
 
 assert_rejected "solution mode (data-ef, 1489 tests) is rejected — the real regression" "$WRONG_SUITE" \
-  "$FIXTURES/data-ef-solution-mode.txt" "$EF_CFG" 596
+  "$FIXTURES/data-ef-solution-mode.txt" "$EF_CFG" 596 858
 
 # The rejection has to be actionable, so it must quote the inflated suite it saw.
-if run_guard "$FIXTURES/data-ef-solution-mode.txt" "$EF_CFG" 596; then
+if run_guard "$FIXTURES/data-ef-solution-mode.txt" "$EF_CFG" 596 858; then
   fail "data-ef rejection names the inflated test count" "non-zero exit" "exit 0"
 else
   case "$GUARD_OUT" in
@@ -140,11 +148,43 @@ echo "fail-closed — a reworded Stryker log line must not disarm a check"
 
 assert_rejected "reworded 'Analyzing N test project(s).' is rejected" "$WRONG_SUITE" \
   "$(derive expressions-scoped.txt 's/Analyzing 1 test project(s)./Resolved 1 test project for mutation./')" \
-  "$EXPR_CFG" 834
+  "$EXPR_CFG" 834 722
 
 assert_rejected "reworded 'N total mutants will be tested' is rejected" "$NO_MUTANT_LINE" \
   "$(derive expressions-scoped.txt 's/834   total mutants will be tested/834   mutants queued for testing/')" \
-  "$EXPR_CFG" 834
+  "$EXPR_CFG" 834 722
+
+# ================================================================ oversized log
+# THE case that the 3-5 KB fixtures cannot express, and the reason it is here: the guard
+# used to match with `printf '%s\n' "$text" | grep -q PATTERN`, which under
+# `set -o pipefail` returns 141 — not 0 — whenever grep matches early and exits while
+# printf is still writing. Every fixture fits the 64 KiB pipe buffer, so the suite was
+# green while the guard would have rejected all five shards on the first real run,
+# reporting that the log did not contain a line it quoted back in the same message.
+# A real Stryker log is hundreds of KB with "Analyzing N test project(s)." near the top.
+
+echo "oversized log — the pipe-buffer trap that small fixtures cannot show"
+
+big="$(mktemp "$TMP_ROOT/big.XXXXXX")"
+{
+  cat "$FIXTURES/expressions-scoped.txt"
+  # Progress output, which is what makes a real log large and lands AFTER discovery.
+  i=0
+  while [ "$i" -lt 6000 ]; do
+    echo "[00:00:00 INF] progress noise line $i emitted after discovery, as a real run does"
+    i=$((i + 1))
+  done
+} > "$big"
+
+big_bytes="$(command wc -c < "$big" | tr -d ' ')"
+if [ "$big_bytes" -gt 65536 ]; then
+  pass "the oversized fixture exceeds one pipe buffer ($big_bytes bytes)"
+else
+  fail "the oversized fixture exceeds one pipe buffer" ">65536 bytes" "$big_bytes"
+fi
+
+assert_ok "a scoped run in a >64 KiB log is still accepted" \
+  "$big" "$EXPR_CFG" 834 722
 
 # =========================================================================== vacuity
 # Check 1, kept from the original workflow step: a run that measured nothing.
@@ -152,7 +192,17 @@ assert_rejected "reworded 'N total mutants will be tested' is rejected" "$NO_MUT
 echo "check 1 — a run that tested nothing is not a passing run"
 
 assert_rejected "a run that tested no mutants is rejected" "$VACUOUS" \
-  "$FIXTURES/vacuous-run.txt" "$EXPR_CFG" 834
+  "$FIXTURES/vacuous-run.txt" "$EXPR_CFG" 834 722
+
+# The vacuous fixture trips two of check 1's alternatives at once. Strip the
+# "unable to calculate a mutation score" line so the ZERO-MUTANT alternative has to
+# fire on its own — it is the one that was written as `0 total mutants will be tested`,
+# with a single space, and could therefore never match Stryker's column-padded
+# "0     total mutants will be tested". A dead alternative inside a live check is
+# invisible until the live one stops applying.
+assert_rejected "a zero-mutant run is rejected on the count alone (padded columns)" "$VACUOUS" \
+  "$(derive vacuous-run.txt '/unable to calculate a mutation score/d')" \
+  "$EXPR_CFG" 834 722
 
 # ============================================================== mutant-count floor
 # Check 3, for the failure a count CAN catch: a mutate glob that stops matching
@@ -162,15 +212,40 @@ echo "check 3 — the mutate glob still matches (one-sided floor at 60%)"
 
 assert_rejected "a collapse to 400 of 834 (floor 500) is rejected" "$COLLAPSED" \
   "$(derive expressions-scoped.txt 's/834   total mutants will be tested/400   total mutants will be tested/')" \
-  "$EXPR_CFG" 834
+  "$EXPR_CFG" 834 722
 
 assert_ok "ordinary drift down to 800 of 834 is accepted" \
   "$(derive expressions-scoped.txt 's/834   total mutants will be tested/800   total mutants will be tested/')" \
-  "$EXPR_CFG" 834
+  "$EXPR_CFG" 834 722
 
 assert_ok "growth to 1200 of 834 is accepted (the floor is one-sided on purpose)" \
   "$(derive expressions-scoped.txt 's/834   total mutants will be tested/1200  total mutants will be tested/')" \
-  "$EXPR_CFG" 834
+  "$EXPR_CFG" 834 722
+
+# ================================================================ suite-size floor
+# Check 4. Check 2 catches the suite being SUBSTITUTED (solution mode inflates it);
+# this catches it being GUTTED — "the adversarial suite stopped biting", the failure
+# mutation testing exists for. Deleting half the tests leaves the project count and the
+# mutant count untouched, so checks 1-3 all pass, and per #142 the score cannot be
+# relied on either.
+
+echo "check 4 — the suite did not shrink (one-sided floor at 60%)"
+
+assert_rejected "a suite gutted from 722 to 300 tests is rejected" "lost two fifths of its tests" \
+  "$(derive expressions-scoped.txt 's/Number of tests found: 722/Number of tests found: 300/')" \
+  "$EXPR_CFG" 834 722
+
+assert_ok "ordinary test-count drift 722 -> 700 is accepted" \
+  "$(derive expressions-scoped.txt 's/Number of tests found: 722/Number of tests found: 700/')" \
+  "$EXPR_CFG" 834 722
+
+assert_ok "a grown suite 722 -> 1500 is accepted (adding tests is never the bug)" \
+  "$(derive expressions-scoped.txt 's/Number of tests found: 722/Number of tests found: 1500/')" \
+  "$EXPR_CFG" 834 722
+
+assert_rejected "a reworded 'Number of tests found' is rejected" "size of the suite behind this verdict is unknown" \
+  "$(derive expressions-scoped.txt 's/Number of tests found: 722/Discovered 722 tests/')" \
+  "$EXPR_CFG" 834 722
 
 # ===================================================================== bad inputs
 # A guard that cannot read its own inputs must say so rather than wave the run
@@ -179,17 +254,20 @@ assert_ok "growth to 1200 of 834 is accepted (the floor is one-sided on purpose)
 echo "inputs — missing or unusable inputs fail rather than pass"
 
 assert_rejected "a missing log is rejected" "$NO_LOG" \
-  "$TMP_ROOT/does-not-exist.txt" "$EXPR_CFG" 834
+  "$TMP_ROOT/does-not-exist.txt" "$EXPR_CFG" 834 722
 
 no_tp_cfg="$TMP_ROOT/no-test-projects.json"
-python3 - "$EXPR_CFG" "$no_tp_cfg" <<'PY'
-import json, sys
-config = json.load(open(sys.argv[1]))
-del config["stryker-config"]["test-projects"]
-json.dump(config, open(sys.argv[2], "w"), indent=2)
-PY
+jq 'del(.["stryker-config"]["test-projects"])' "$EXPR_CFG" > "$no_tp_cfg"
 assert_rejected "a config declaring no test-projects is rejected" "$NO_TEST_PROJECTS" \
-  "$FIXTURES/expressions-scoped.txt" "$no_tp_cfg" 834
+  "$FIXTURES/expressions-scoped.txt" "$no_tp_cfg" 834 722
+
+# A non-numeric calibration figure reaches `$(( ))`, which trips `set -u` — and on
+# bash 3.2 the script then exits 0, i.e. the guard fails OPEN on a typo in the matrix.
+assert_rejected "a non-numeric mutant count is rejected, not silently accepted" "must be a whole number" \
+  "$FIXTURES/expressions-scoped.txt" "$EXPR_CFG" "eight-hundred" 722
+
+assert_rejected "a non-numeric test count is rejected, not silently accepted" "must be a whole number" \
+  "$FIXTURES/expressions-scoped.txt" "$EXPR_CFG" 834 "seven-twenty-two"
 
 # ======================================================================= provenance
 # Fixtures are evidence; evidence without provenance is decoration. Every one has to
@@ -218,16 +296,17 @@ done
 # `-text` override for this directory were ever dropped. Assert the bytes rather than
 # trusting the attribute, because a fixture quietly losing what it was capturing is
 # the same failure as a test quietly stopping.
-cr_total=0
-for f in "$FIXTURES"/*.txt; do
-  cr_total=$((cr_total + $(tr -cd '\r' < "$f" | command wc -c)))
+# Per FILE, not summed: the two data-ef captures contain no \r of their own, so a total
+# would stay green while three of five fixtures were silently normalised.
+for f in expressions-scoped expressions-solution-mode vacuous-run; do
+  crs="$(tr -cd '\r' < "$FIXTURES/$f.txt" | command wc -c | tr -d ' ')"
+  if [ "$crs" -gt 0 ]; then
+    pass "$f.txt still carries $crs carriage returns (the guard's \\r handling stays exercised)"
+  else
+    fail "$f.txt still carries carriage returns" "at least one" \
+      "none — check the scripts/fixtures/mutation-logs/*.txt -text rule in .gitattributes"
+  fi
 done
-if [ "$cr_total" -gt 0 ]; then
-  pass "fixtures still carry carriage returns ($cr_total), so the guard's \\r handling is exercised"
-else
-  fail "fixtures still carry carriage returns" "at least one" \
-    "none — check the scripts/fixtures/mutation-logs/*.txt -text rule in .gitattributes"
-fi
 
 # ============================================================================ total
 

@@ -1240,12 +1240,29 @@ paths inside every config are relative to `test/`, not to the repository root.
 `scripts/assert-mutation-run` keeps it that way, and the shape of that guard is itself a lesson. Its first
 version was `grep -q 'will mutate solution'` — a **negative** assertion, which fails **open** the moment a
 Stryker release rewords the line, i.e. the same class of defect as the vacuous run it sits next to. It now
-asserts **positively**: the run must report that it analysed exactly as many test projects as the config
-declares (derived from the config with `jq`, so it cannot drift), must report a mutant count at all, and must
-not be vacuous. Note which number catches solution mode and which does not — the mutant count is *identical*
-in both modes (834/834, 596/596), so only the **test-project count** can catch it; the mutant count is asserted
-separately, as a one-sided floor at 60 % of the calibrated figure, to catch a `mutate` glob that stops matching
-after a rename (a collapse, not a zero, so the vacuity check waves it through).
+makes four **positive** assertions after every shard:
+
+1. **not vacuous** — no zero-mutant run, no "unable to calculate a mutation score" (stryker-net#3094);
+2. **the suite is the configured one** — the run must report analysing exactly as many test projects as the
+   config declares, read from the config with `jq` so it cannot drift from what it guards;
+3. **the mutate glob still matches** — the mutant count must not have fallen below 60 % of the calibrated
+   `mutants:`;
+4. **the suite did not shrink** — the test count must not have fallen below 60 % of the calibrated `suite:`.
+
+Note which number catches solution mode and which does not: the mutant count is *identical* in both modes
+(834/834, 596/596), so only assertion 2 can catch it. Assertions 3 and 4 exist for the two collapses a score
+cannot show — a glob that stops matching after a rename, and a suite that stopped biting — both one-sided,
+because growth is never the defect and a band would fail every ordinary PR. Assertion 4 matters especially
+while #142 stands: with the score untrustworthy, a gutted suite would otherwise pass every check.
+
+Two lessons are embedded in the implementation rather than the assertions, and both were found by review after
+the guard was already "verified". The guard normalises the log into a temp **file** instead of piping into
+`grep`, because `printf '%s\n' "$text" | grep -q PATTERN` under `set -o pipefail` returns **141** whenever grep
+matches early and exits while `printf` is still writing — true of every real (hundreds-of-KB) log, and it
+inverted assertion 2 so completely that the guard would have failed all five shards while quoting back the line
+it claimed was missing. And the workflow step drops `set -e` around the Stryker pipeline before capturing
+`PIPESTATUS`, because GitHub runs `shell: bash` as `bash -eo pipefail`: without that, a below-threshold run
+aborted the step *before* the assertions could say what had actually gone wrong.
 
 `scripts/test-assert-mutation-run` keeps the guard honest, because a guard whose job is "do not trust a green
 signal" is worth nothing unguarded. It runs the guard over **real Stryker logs captured from both working
@@ -1256,7 +1273,8 @@ fixture stays real captured output. Two cases exist purely to pin the reasoning 
 asserts that **both** expressions fixtures report 834 mutants, so nobody re-proposes the mutant-count check that
 cannot separate the modes; the fail-closed cases assert that a *reworded* line still fails, which is the only
 thing that distinguishes the current positive assertion from the negative grep it replaced — reverting to that
-grep passes every other case in the suite.
+grep passes every other case in the suite. One case builds a **>64 KiB** log on the fly, because the committed
+fixtures are 3-5 KB and the pipe-buffer defect above is invisible below that size.
 
 ### `coverage-analysis: off` is a measurement, not a preference
 
