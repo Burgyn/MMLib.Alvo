@@ -27,7 +27,8 @@
 # COUNT (check 2), and the mutant count is asserted for a different failure (check 3).
 #
 # VERIFYING THIS SCRIPT: run it over a real log from either mode, e.g.
-#   scripts/assert-mutation-run saved-solution-mode.log stryker-config.data-ef.json 596 data-ef
+#   scripts/assert-mutation-run scripts/fixtures/mutation-logs/data-ef-solution-mode.txt \
+#                               stryker-config.data-ef.json 596 data-ef
 # It must fail check 2 on a solution-mode log and pass on a `test/`-scoped one.
 set -uo pipefail
 

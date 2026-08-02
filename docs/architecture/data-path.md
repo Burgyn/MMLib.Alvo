@@ -1245,9 +1245,18 @@ declares (derived from the config with `jq`, so it cannot drift), must report a 
 not be vacuous. Note which number catches solution mode and which does not — the mutant count is *identical*
 in both modes (834/834, 596/596), so only the **test-project count** can catch it; the mutant count is asserted
 separately, as a one-sided floor at 60 % of the calibrated figure, to catch a `mutate` glob that stops matching
-after a rename (a collapse, not a zero, so the vacuity check waves it through). Verified by running the script
-over real logs from both modes: it passes the `test/` ones and fails the solution-mode ones, including the
-`data-ef` pair above.
+after a rename (a collapse, not a zero, so the vacuity check waves it through).
+
+`scripts/test-assert-mutation-run` keeps the guard honest, because a guard whose job is "do not trust a green
+signal" is worth nothing unguarded. It runs the guard over **real Stryker logs captured from both working
+directories** and committed, with provenance headers, under `scripts/fixtures/mutation-logs/` — the `data-ef`
+pair above and the `expressions` pair, plus a genuinely vacuous run. Perturbations (a reworded log line, a
+collapsed count, ordinary drift) are derived from a fixture inside the harness with `sed`, so every committed
+fixture stays real captured output. Two cases exist purely to pin the reasoning rather than the behaviour: one
+asserts that **both** expressions fixtures report 834 mutants, so nobody re-proposes the mutant-count check that
+cannot separate the modes; the fail-closed cases assert that a *reworded* line still fails, which is the only
+thing that distinguishes the current positive assertion from the negative grep it replaced — reverting to that
+grep passes every other case in the suite.
 
 ### `coverage-analysis: off` is a measurement, not a preference
 

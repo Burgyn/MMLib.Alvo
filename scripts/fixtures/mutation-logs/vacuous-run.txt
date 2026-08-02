@@ -1,0 +1,62 @@
+# Stryker log fixture for scripts/test-assert-mutation-run. DO NOT hand-edit.
+# Produced by: cd test && dotnet tool run dotnet-stryker -f ../<expressions config with a
+#   deliberately malformed mutate span glob> --concurrency 4 --break-on-initial-test-failure
+# Captured: 2026-08-02 23:53 local, source tree at 018d47b (F3 PR4 merge on main).
+# Stryker 4.16.0 / .NET SDK 10.0.100 / xunit.v3 3.2.2, macOS arm64. Ran to completion.
+# SHOWS: a run that reached the end having tested nothing — every mutant a compile error, so
+# Stryker could not produce a score, and yet exited 0. This is the shape check 1 exists for.
+# Machine-specific absolute paths replaced by /repo. Otherwise verbatim.
+#
+
+   _____ _              _               _   _ ______ _______  
+  / ____| |            | |             | \ | |  ____|__   __| 
+ | (___ | |_ _ __ _   _| | _____ _ __  |  \| | |__     | |    
+  \___ \| __| '__| | | | |/ / _ \ '__| | . ` |  __|    | |    
+  ____) | |_| |  | |_| |   <  __/ |    | |\  | |____   | |    
+ |_____/ \__|_|   \__, |_|\_\___|_| (_)|_| \_|______|  |_|    
+                   __/ |                                      
+                  |___/                                       
+
+
+Version: 4.16.0
+
+[23:53:52 INF] Stryker will use a max of 2 parallel testsessions.
+[23:53:52 INF] Analysis starting.
+[23:53:52 INF] Analyzing 1 test project(s).
+[23:53:56 INF] Found project /repo/src/MMLib.Alvo/MMLib.Alvo.csproj to mutate.
+[23:53:56 INF] Analysis complete.
+[23:53:56 INF] Building test project /repo/test/MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj (1/1)
+[23:53:57 INF] Building project MMLib.Alvo.Tests.csproj using dotnet build MMLib.Alvo.Tests.csproj -c Debug --property:Platform=AnyCPU (directory /repo/test/MMLib.Alvo.Tests.)
+[23:54:20 WRN] The Microsoft Test Platform testrunner is currently in preview. Results should be verified since this feature is still being tested.
+[23:54:22 INF] Number of tests found: 722 for project /repo/src/MMLib.Alvo/MMLib.Alvo.csproj. Initial test run started.
+[23:54:51 WRN] An unidentified mutation in /repo/src/MMLib.Alvo/Api/Internal/PayloadViolations.cs resulted in a compile error (at 236:12) with id: CS1620, message: Argument 2 must be passed with the 'ref' keyword (Source code: (StrykeruMeWHdaygUOiXt2.MutantControl.IsActive(1307)?            $""
+:            $"The field stores {field.Precision} digits in total with {field.Scale} of them fractional, so "
+)
+            + (StrykeruMeWHdaygUOiXt2.MutantControl.IsActive(1308)?$"":$"at most {(StrykeruMeWHdaygUOiXt2.MutantControl.IsActive(1309)?field.Precision + field.Scale:field.Precision - field.Scale)} digits may precede the decimal point."))
+[23:54:51 INF] Safe Mode! Stryker will remove all mutations in Precision and mark them as 'compile error'.
+[23:55:01 WRN] An unidentified mutation in /repo/src/MMLib.Alvo/Api/Internal/AlvoDocumentTransformer.cs resulted in a compile error (at 262:16) with id: CS0165, message: Use of unassigned local variable 'policy' (Source code: policy)
+[23:55:01 INF] Safe Mode! Stryker will remove all mutations in FlagsOf and mark them as 'compile error'.
+[23:55:01 WRN] An unidentified mutation in /repo/src/MMLib.Alvo/Api/Internal/QueryStringParser.cs resulted in a compile error (at 384:35) with id: CS0165, message: Use of unassigned local variable 'declared' (Source code: declared)
+[23:55:01 INF] Safe Mode! Stryker will remove all mutations in ReadSelect and mark them as 'compile error'.
+[23:55:12 WRN] An unidentified mutation in /repo/src/MMLib.Alvo/Api/Internal/FormatCatalog.cs resulted in a compile error (at 217:17) with id: CS0165, message: Use of unassigned local variable 'format' (Source code: format)
+[23:55:12 INF] Safe Mode! Stryker will remove all mutations in AddFormatOf and mark them as 'compile error'.
+[23:55:14 INF] 4064 mutants created
+[23:55:14 INF] 435   mutants got status CompileError. Reason: Mutant caused compile errors
+[23:55:14 INF] 3629  mutants got status Ignored.      Reason: Removed by mutate filter
+[23:55:14 INF] 4064  total mutants are skipped for the above mentioned reasons
+[23:55:14 INF] 0     total mutants will be tested
+[23:55:14 WRN] It looks like all mutants with tests were ignored. Try a re-run with less ignoring!
+[23:55:14 WRN] It looks like all mutants resulted in compile errors. Mutants sure are strange!
+
+Killed:   0
+Survived: 0
+Timeout:  0
+Errors:  0
+
+Your json report has been generated at:
+file:///private/tmp/claude-775810410/-Users-martiniak-Developer-GitHub-Burgyn-MM
+Lib-Alvo-worktree-crud/6fe31725-60b7-40ea-bd80-f5d4730266d7/scratchpad/initprobe
+/reports/mutation-report.json
+[23:55:15 INF] Time Elapsed 00:01:23.7551095
+[23:55:15 INF] Stryker was unable to calculate a mutation score
+EXIT=0

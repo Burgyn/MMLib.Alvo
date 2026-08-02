@@ -1,0 +1,37 @@
+# Stryker log fixture for scripts/test-assert-mutation-run. DO NOT hand-edit.
+# Produced by: cd test && dotnet tool run dotnet-stryker -f ../stryker-config.data-ef.json --concurrency 4
+# Captured: 2026-08-03 00:06 local, source tree at 293a47c (branch chore/mutation-gate).
+# Stryker 4.16.0 / .NET SDK 10.0.100 / xunit.v3 3.2.2, macOS arm64. Killed after the mutant list.
+# SHOWS: two test projects resolved from the config, as declared, and 858 tests.
+# Machine-specific absolute paths replaced by /repo. Otherwise verbatim.
+#
+
+   _____ _              _               _   _ ______ _______  
+  / ____| |            | |             | \ | |  ____|__   __| 
+ | (___ | |_ _ __ _   _| | _____ _ __  |  \| | |__     | |    
+  \___ \| __| '__| | | | |/ / _ \ '__| | . ` |  __|    | |    
+  ____) | |_| |  | |_| |   <  __/ |    | |\  | |____   | |    
+ |_____/ \__|_|   \__, |_|\_\___|_| (_)|_| \_|______|  |_|    
+                   __/ |                                      
+                  |___/                                       
+
+
+Version: 4.16.0
+
+[00:06:44 INF] Stryker will use a max of 4 parallel testsessions.
+[00:06:45 INF] Analysis starting.
+[00:06:45 INF] Analyzing 2 test project(s).
+[00:06:48 INF] Found project /repo/src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj to mutate.
+[00:06:48 INF] Analysis complete.
+[00:06:48 INF] Building test project /repo/test/MMLib.Alvo.Data.Sqlite.Tests/MMLib.Alvo.Data.Sqlite.Tests.csproj (1/2)
+[00:06:49 INF] Building project MMLib.Alvo.Data.Sqlite.Tests.csproj using dotnet build MMLib.Alvo.Data.Sqlite.Tests.csproj -c Debug --property:Platform=AnyCPU (directory /repo/test/MMLib.Alvo.Data.Sqlite.Tests.)
+[00:06:57 INF] Building test project /repo/test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/MMLib.Alvo.Data.EntityFrameworkCore.Tests.csproj (2/2)
+[00:06:57 INF] Building project MMLib.Alvo.Data.EntityFrameworkCore.Tests.csproj using dotnet build MMLib.Alvo.Data.EntityFrameworkCore.Tests.csproj -c Debug --property:Platform=AnyCPU (directory /repo/test/MMLib.Alvo.Data.EntityFrameworkCore.Tests.)
+[00:07:01 WRN] The Microsoft Test Platform testrunner is currently in preview. Results should be verified since this feature is still being tested.
+[00:07:02 INF] Number of tests found: 858 for project /repo/src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj. Initial test run started.
+[00:07:08 INF] 1302 mutants created
+[00:07:08 INF] 168   mutants got status CompileError. Reason: Mutant caused compile errors
+[00:07:08 INF] 154   mutants got status Ignored.      Reason: Removed by block already covered filter
+[00:07:08 INF] 384   mutants got status Ignored.      Reason: Removed by mutate filter
+[00:07:08 INF] 706   total mutants are skipped for the above mentioned reasons
+[00:07:08 INF] 596   total mutants will be tested
