@@ -80,12 +80,33 @@ namespace MMLib.Alvo.Auth
 }
 namespace MMLib.Alvo.Migrations
 {
+    public enum AlvoBootPhase
+    {
+        Pending = 0,
+        Ready = 1,
+        Failed = 2,
+    }
+    public sealed class AlvoBootState
+    {
+        public AlvoBootState() { }
+        public int? AppliedRevision { get; }
+        public string? Failure { get; }
+        public MMLib.Alvo.Migrations.AlvoBootPhase Phase { get; }
+    }
     public sealed class AlvoSchemaOptions
     {
         public const string SectionName = "Alvo:Schema";
         public AlvoSchemaOptions() { }
         public bool AllowDestructive { get; set; }
         public MMLib.Alvo.Migrations.AlvoSchemaStartupMode Startup { get; set; }
+    }
+    public sealed class AlvoStartupRefusedException : System.Exception
+    {
+        public AlvoStartupRefusedException() { }
+        public AlvoStartupRefusedException(string message) { }
+        public AlvoStartupRefusedException(string message, System.Exception innerException) { }
+        public AlvoStartupRefusedException(string message, string fixSuggestion) { }
+        public string FixSuggestion { get; }
     }
     public sealed class RuntimeSchemaService
     {

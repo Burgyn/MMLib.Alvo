@@ -32,8 +32,14 @@ internal enum SchemaStartupOutcome
 /// The operator-readable refusal, naming the steps and the setting that would allow them. Non-<c>null</c> if
 /// and only if <paramref name="Outcome"/> is <see cref="SchemaStartupOutcome.Refuse"/>.
 /// </param>
+/// <param name="Fix">
+/// The actionable lines of <paramref name="Refusal"/> on their own — what
+/// <see cref="AlvoStartupRefusedException.FixSuggestion"/> publishes, so a caller that presents failures
+/// structurally reaches the fix without parsing the refusal's prose. Non-<c>null</c> on exactly the same
+/// condition as <paramref name="Refusal"/>.
+/// </param>
 internal readonly record struct SchemaStartupDecision(
-    SchemaStartupOutcome Outcome, MigrationPlan Plan, string? Refusal);
+    SchemaStartupOutcome Outcome, MigrationPlan Plan, string? Refusal, string? Fix = null);
 
 /// <summary>
 /// Stage 2 of the boot sequence, as a pure function: given the snapshot the database reports, the plan that
@@ -98,9 +104,14 @@ internal static class SchemaStartupPolicy
 
     private static SchemaStartupDecision Refused(
         AppliedSchema? applied, MigrationPlan plan, AlvoSchemaOptions options)
-        => new(SchemaStartupOutcome.Refuse, plan, BuildRefusal(applied, plan, options));
+    {
+        var fix = BuildFix(plan, options);
 
-    private static string BuildRefusal(AppliedSchema? applied, MigrationPlan plan, AlvoSchemaOptions options)
+        return new SchemaStartupDecision(
+            SchemaStartupOutcome.Refuse, plan, BuildRefusal(applied, plan, fix), fix);
+    }
+
+    private static string BuildRefusal(AppliedSchema? applied, MigrationPlan plan, string fix)
         => string.Join(
             Environment.NewLine,
             [
@@ -108,8 +119,11 @@ internal static class SchemaStartupPolicy
                 string.Empty,
                 Indent(DestructiveChangeGuard.DescribeAllSteps(plan)),
                 string.Empty,
-                .. Fixes(plan, options),
+                fix,
             ]);
+
+    private static string BuildFix(MigrationPlan plan, AlvoSchemaOptions options)
+        => string.Join(Environment.NewLine, Fixes(plan, options));
 
     private static string Headline(AppliedSchema? applied) => applied is null
         ? "Alvo cannot start: initializing this database from the descriptor would discard data it already "

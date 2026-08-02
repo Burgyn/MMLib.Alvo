@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo;
 using MMLib.Alvo.Api;
@@ -56,6 +57,7 @@ public static class AlvoServiceCollectionExtensions
         services.TryAddSingleton<DescriptorBootPlan>();
         services.TryAddSingleton<SchemaMigrationRunner>();
         services.TryAddSingleton<RuntimeSchemaService>();
+        AddBoot(services);
         services.AddAlvoAuth();
         services.AddAlvoExpressions();
         services.AddAlvoRules();
@@ -64,6 +66,31 @@ public static class AlvoServiceCollectionExtensions
         configure?.Invoke(builder);
 
         return builder;
+    }
+
+    /// <summary>
+    /// Registers the boot: the state a readiness probe reads, and the hosted lifecycle service that fills it
+    /// in before the server binds.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Registered as an <see cref="IHostedService"/> because that is what the host resolves; the
+    /// implementation is an <see cref="IHostedLifecycleService"/>, which is how it gets to run before every
+    /// <see cref="IHostedService.StartAsync"/> rather than merely before the ones registered after it. See
+    /// <see cref="AlvoBootService"/> for why that distinction is a guarantee rather than a preference.
+    /// </para>
+    /// <para>
+    /// <c>TryAddEnumerable</c>, so a host that called <c>AddAlvo</c> twice boots once. The boot needs a
+    /// descriptor source and a database provider — the same collaborators <c>ApplyAlvoDescriptorAsync</c>
+    /// needs — so a host that registered Alvo without either now fails its <em>start</em> rather than serving
+    /// nothing while reporting healthy.
+    /// </para>
+    /// </remarks>
+    /// <param name="services">The service collection.</param>
+    private static void AddBoot(IServiceCollection services)
+    {
+        services.TryAddSingleton<AlvoBootState>();
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, AlvoBootService>());
     }
 
     /// <summary>

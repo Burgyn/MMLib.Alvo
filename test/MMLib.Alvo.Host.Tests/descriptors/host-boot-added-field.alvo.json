@@ -1,0 +1,27 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "host-boot",
+  "description": "host-boot with a nullable 'region' added — the ordinary GitOps edit that adds a field, which a boot must apply under Apply and refuse under Verify.",
+  "auth": {
+    "providers": ["local"],
+    "roles": ["admin"]
+  },
+  "entities": {
+    "warehouses": {
+      "description": "A storage location.",
+      "fields": {
+        "code": { "type": "string", "required": true, "unique": true, "maxLength": 20 },
+        "city": { "type": "string", "maxLength": 60 },
+        "region": { "type": "string", "maxLength": 40 }
+      },
+      "rules": {
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+        "create": "'admin' in @user.roles",
+        "update": "'admin' in @user.roles",
+        "delete": "'admin' in @user.roles"
+      }
+    }
+  }
+}
