@@ -74,8 +74,19 @@ internal static class DescriptorModelBuilder
     /// nothing; prefixing one would change emitted DDL for no security gain and would overrule an author's own
     /// column-order decision, which is the whole content of a non-unique index.
     /// </para>
+    /// <para>
+    /// <b><see langword="internal"/> rather than private, because two models have to agree about this.</b>
+    /// This builder's model is the one the migrator <em>creates</em> the index from;
+    /// <c>AlvoDataContext</c>'s runtime model is the one that has to <em>recognise</em> it, because
+    /// <c>ConstraintViolationTranslator</c> resolves the constraint name PostgreSQL reports against
+    /// <c>IEntityType.GetIndexes()</c>. While the runtime model declared no indexes at all that resolution
+    /// always came back empty, and a duplicate on PostgreSQL kept surfacing as a 500 — measured by
+    /// <c>MMLib.Alvo.Testing.Data.AlvoDataConstraintTests</c> after SQLite had already passed on the strength
+    /// of the columns its own message names. One method called from both places is what makes the two models'
+    /// index sets one decision rather than two.
+    /// </para>
     /// </remarks>
-    private static void ConfigureIndexes(EntityTypeBuilder entityBuilder, EntitySchema entity)
+    internal static void ConfigureIndexes(EntityTypeBuilder entityBuilder, EntitySchema entity)
     {
         foreach (var field in entity.Fields.Where(field => field.Unique))
         {

@@ -139,6 +139,15 @@ internal sealed class AlvoDataContext : DbContext
         }
 
         builder.HasKey(IdColumn);
+
+        // The runtime model has to know the entity's indexes even though it never creates one: it is what
+        // ConstraintViolationTranslator resolves the constraint name PostgreSQL reports against, and while
+        // this model declared none, every unique violation on that engine kept surfacing as a 500 while
+        // SQLite's answered 409 — SQLite names the columns in its message and needs no lookup at all.
+        // Emitted by DescriptorModelBuilder's own method rather than restated here, so the index the migrator
+        // CREATES and the index this model RECOGNISES cannot come to disagree — which includes the tenant
+        // scoping #137 added.
+        DescriptorModelBuilder.ConfigureIndexes(builder, entity);
     }
 
     private static void ConfigureField(EntityTypeBuilder<Dictionary<string, object>> builder, FieldSchema field)
