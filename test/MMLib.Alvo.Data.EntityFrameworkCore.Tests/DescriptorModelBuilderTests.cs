@@ -194,6 +194,132 @@ public class DescriptorModelBuilderTests
         index.IsUnique.ShouldBeTrue();
     }
 
+    /// <summary>
+    /// #137. A <c>unique</c> field on a <c>tenancy: "scoped"</c> entity must be unique <em>within</em> the
+    /// tenant, never across the instance: an instance-wide constraint answers tenant B a question about
+    /// tenant A's data — whether it holds a given value — one create per candidate, which is a cross-tenant
+    /// existence oracle and not merely a modelling nit.
+    /// </summary>
+    [Fact]
+    public void Unique_field_on_a_scoped_entity_is_scoped_to_the_tenant()
+    {
+        IModel efModel = DescriptorModelBuilder.Build(ScopedVehicles(), NewSqliteBuilder);
+
+        var index = efModel.FindEntityType("vehicles")!.GetIndexes().Single(i => i.IsUnique);
+        index.Properties.Select(p => p.Name).ShouldBe(["tenant_id", "vin"]);
+    }
+
+    /// <summary>
+    /// #137's other half: the constraint must still <b>hold</b>. Scoping it to the tenant is only correct if
+    /// two rows in one tenant still collide, so the index has to be unique over the pair rather than over
+    /// <c>tenant_id</c> alone or a non-unique index on both.
+    /// </summary>
+    [Fact]
+    public void The_tenant_scoped_unique_index_is_still_unique()
+    {
+        IModel efModel = DescriptorModelBuilder.Build(ScopedVehicles(), NewSqliteBuilder);
+
+        var index = efModel.FindEntityType("vehicles")!.GetIndexes()
+            .Single(i => i.Properties.Select(p => p.Name).SequenceEqual(["tenant_id", "vin"]));
+        index.IsUnique.ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// A non-scoped entity keeps instance-wide uniqueness. Tenancy is what narrows the constraint, so an
+    /// entity with none must be left exactly as it was — the fix must not weaken uniqueness where there is
+    /// no tenant boundary to respect.
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData(TenancyMode.Global)]
+    public void Unique_field_without_scoped_tenancy_stays_unique_instance_wide(TenancyMode? tenancy)
+    {
+        var model = new SchemaModel([
+            new EntitySchema
+            {
+                Name = "vehicles",
+                Tenancy = tenancy,
+                Fields = [
+                    new FieldSchema { Name = "id", Type = FieldType.Uuid, Required = true },
+                    new FieldSchema { Name = "vin", Type = FieldType.String, Required = true, Unique = true },
+                ],
+            },
+        ]);
+
+        IModel efModel = DescriptorModelBuilder.Build(model, NewSqliteBuilder);
+
+        var index = efModel.FindEntityType("vehicles")!.GetIndexes().Single(i => i.IsUnique);
+        index.Properties.Select(p => p.Name).ShouldBe(["vin"]);
+    }
+
+    /// <summary>
+    /// #137's second site. The issue text named only the per-field emission; a <b>declared</b> unique index
+    /// (<c>indexes: [{ "fields": [...], "unique": true }]</c>) is the identical oracle and was omitted, so
+    /// both are asserted rather than one.
+    /// </summary>
+    [Fact]
+    public void Declared_unique_index_on_a_scoped_entity_is_scoped_to_the_tenant()
+    {
+        IModel efModel = DescriptorModelBuilder.Build(
+            ScopedVehicles([new IndexSchema(["make", "model"], true)]), NewSqliteBuilder);
+
+        var index = efModel.FindEntityType("vehicles")!.GetIndexes().Single(i => i.Properties.Count == 3);
+        index.IsUnique.ShouldBeTrue();
+        index.Properties.Select(p => p.Name).ShouldBe(["tenant_id", "make", "model"]);
+    }
+
+    /// <summary>
+    /// A declared <em>non-unique</em> index enforces nothing, so it discloses nothing and is left alone —
+    /// prefixing it would change emitted DDL for no security gain, and an index's column order is the
+    /// author's own performance decision.
+    /// </summary>
+    [Fact]
+    public void Declared_non_unique_index_on_a_scoped_entity_is_left_alone()
+    {
+        IModel efModel = DescriptorModelBuilder.Build(
+            ScopedVehicles([new IndexSchema(["make", "model"], false)]), NewSqliteBuilder);
+
+        var index = efModel.FindEntityType("vehicles")!.GetIndexes().Single(i => !i.IsUnique);
+        index.Properties.Select(p => p.Name).ShouldBe(["make", "model"]);
+    }
+
+    /// <summary>
+    /// A descriptor that already named <c>tenant_id</c> in its own unique index gets it once, not twice: EF
+    /// refuses an index naming one property twice, so an unconditional prepend would turn a legal descriptor
+    /// into a startup crash.
+    /// </summary>
+    [Fact]
+    public void Declared_unique_index_already_naming_the_tenant_is_not_doubled()
+    {
+        IModel efModel = DescriptorModelBuilder.Build(
+            ScopedVehicles([new IndexSchema(["tenant_id", "make"], true)]), NewSqliteBuilder);
+
+        var columns = efModel.FindEntityType("vehicles")!.GetIndexes()
+            .Select(i => i.Properties.Select(p => p.Name).ToArray());
+        columns.ShouldContain(names => names.SequenceEqual(new[] { "tenant_id", "make" }));
+    }
+
+    /// <summary>
+    /// The fixture #137's facts are measured against: a scoped entity whose <c>tenant_id</c> is declared
+    /// <b>after</b> the unique field, exactly as <c>DescriptorToSchemaMapper</c> appends its managed columns.
+    /// That ordering is the reason the emission cannot stay in the per-field loop.
+    /// </summary>
+    private static SchemaModel ScopedVehicles(IReadOnlyList<IndexSchema>? indexes = null) => new([
+        new EntitySchema
+        {
+            Name = "vehicles",
+            Tenancy = TenancyMode.Scoped,
+            Fields = [
+                new FieldSchema { Name = "id", Type = FieldType.Uuid, Required = true },
+                new FieldSchema { Name = "vin", Type = FieldType.String, Required = true, Unique = true },
+                new FieldSchema { Name = "make", Type = FieldType.String, Required = true },
+                new FieldSchema { Name = "model", Type = FieldType.String, Required = true },
+                new FieldSchema { Name = "tenant_id", Type = FieldType.Uuid, Required = true },
+            ],
+            Indexes = indexes ?? [],
+        },
+    ]);
+
     [Fact]
     public void Indexed_field_produces_a_non_unique_index()
     {

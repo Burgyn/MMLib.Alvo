@@ -89,7 +89,7 @@ public sealed class AddAlvoIntegrationTests : IDisposable
     [Fact]
     public async Task AddAlvo_UseSqlite_FromDescriptor_migrates_the_real_vehicle_registry_descriptor()
     {
-        var descriptorPath = Path.Combine(RepositoryRoot.Find(), "examples", "vehicle-registry", "vehicles.alvo.json");
+        var descriptorPath = VehicleRegistryDescriptorPath();
 
         var services = new ServiceCollection();
         services.AddAlvo(alvo => alvo.UseSqlite($"Data Source={_databasePath}").FromDescriptor(descriptorPath));
@@ -108,6 +108,87 @@ public sealed class AddAlvoIntegrationTests : IDisposable
         entityNames.ShouldContain("owners");
         entityNames.ShouldContain("vehicles");
         entityNames.ShouldContain("inspections");
+    }
+
+    /// <summary>
+    /// The apply seam a host in another assembly actually has. <c>SchemaMigrationRunner</c> is
+    /// <see langword="internal"/> to the core, so <c>MMLib.Alvo.Host</c> cannot resolve it — this extension is
+    /// the whole reason a standalone host can bring a descriptor up, and it is asserted through the physical
+    /// tables it produced rather than through the result flag alone.
+    /// </summary>
+    [Fact]
+    public async Task The_public_apply_extension_creates_the_descriptors_tables()
+    {
+        var services = new ServiceCollection();
+        services.AddAlvo(alvo => alvo
+            .UseSqlite($"Data Source={_databasePath}")
+            .FromDescriptor(VehicleRegistryDescriptorPath()));
+
+        using var sp = services.BuildServiceProvider();
+
+        var result = await sp.ApplyAlvoDescriptorAsync(ct: TestContext.Current.CancellationToken);
+
+        result.Applied.ShouldBeTrue("a host that cannot apply maps no route at all");
+        result.WasDryRun.ShouldBeFalse();
+
+        var introspected = await sp.GetRequiredService<ISchemaIntrospector>()
+            .IntrospectAsync(TestContext.Current.CancellationToken);
+        introspected.Entities.Select(entity => entity.Name)
+            .ShouldContain("vehicles", "the descriptor's entities must exist as real tables, not merely validate");
+    }
+
+    /// <summary>
+    /// The options argument reaches the runner. Without this the parameter could be dropped and every
+    /// existing fact would stay green, because they all pass the default.
+    /// </summary>
+    [Fact]
+    public async Task The_public_apply_extension_honours_a_dry_run()
+    {
+        var services = new ServiceCollection();
+        services.AddAlvo(alvo => alvo
+            .UseSqlite($"Data Source={_databasePath}")
+            .FromDescriptor(VehicleRegistryDescriptorPath()));
+
+        using var sp = services.BuildServiceProvider();
+
+        var result = await sp.ApplyAlvoDescriptorAsync(
+            new MigrationOptions { DryRun = true }, TestContext.Current.CancellationToken);
+
+        result.WasDryRun.ShouldBeTrue();
+
+        var introspected = await sp.GetRequiredService<ISchemaIntrospector>()
+            .IntrospectAsync(TestContext.Current.CancellationToken);
+        introspected.Entities.ShouldBeEmpty("a dry run must plan and write nothing");
+    }
+
+    /// <summary>
+    /// A host that never registered Alvo is told to call <c>AddAlvo</c> — not to register
+    /// <c>SchemaMigrationRunner</c>, which is <see langword="internal"/> and which they cannot reference.
+    /// </summary>
+    /// <remarks>
+    /// <b>This is the only reachable path to that message</b>, which is why the fact builds a provider
+    /// deliberately without <c>AddAlvo</c>: every other caller in this repository registers Alvo first, so a
+    /// regression here is invisible to all of them. Asserting on the wording is deliberate and follows
+    /// <c>UseSqlite</c>'s precedent in this same file — the fix suggestion *is* the contract (§0 principle 4),
+    /// and a message nothing pins is one an edit can quietly turn back into a type name.
+    /// </remarks>
+    [Fact]
+    public async Task Applying_without_AddAlvo_names_AddAlvo_and_never_the_internal_runner()
+    {
+        var services = new ServiceCollection();
+        using var sp = services.BuildServiceProvider();
+
+        var exception = await Should.ThrowAsync<InvalidOperationException>(
+            () => sp.ApplyAlvoDescriptorAsync(ct: TestContext.Current.CancellationToken));
+
+        exception.Message.ShouldContain(
+            "services.AddAlvo",
+            Shouldly.Case.Sensitive,
+            "the message has to name the call the host author can actually make");
+        exception.Message.ShouldNotContain(
+            nameof(SchemaMigrationRunner),
+            Shouldly.Case.Sensitive,
+            "naming an internal type tells a host author to register something they cannot reference");
     }
 
     [Fact]
@@ -303,6 +384,9 @@ public sealed class AddAlvoIntegrationTests : IDisposable
 
     private static string DescriptorPath() =>
         Path.Combine(RepositoryRoot.Find(), "examples", "simple-tasks", "tasks.alvo.json");
+
+    private static string VehicleRegistryDescriptorPath() =>
+        Path.Combine(RepositoryRoot.Find(), "examples", "vehicle-registry", "vehicles.alvo.json");
 
     private static IConfiguration ConfigurationWith(string key, string value) =>
         new ConfigurationBuilder()

@@ -54,6 +54,10 @@ extension method in its own package, never an edit to `AddAlvo`/`IAlvoBuilder`.
    - `Add{Thing}` — additive registration.
    - `Enable{Feature}` — a toggle (`EnableDynamicEntities`).
    - `From{Source}` — a descriptor source (`FromDescriptor`).
+   - `Apply{Thing}` — a runtime operation on a built container, not a registration
+     (`ApplyAlvoDescriptorAsync` on `IServiceProvider`). Added in PR4 because a host
+     outside the core assembly cannot reach the `internal` migration orchestrator, and
+     the operation is not a registration so no existing verb fits it.
    - Fluent methods return `IAlvoBuilder`.
 5. **Config via the options pattern, validated at startup.** Infrastructure config
    is typed options (`AlvoOptions`, and per-provider options), bound and validated

@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    The standalone host (spec §2.14 mode 1, §X.1). Not packable: it is distributed as the
+    `mmlib/alvo` container image, not as a NuGet package, so a .nupkg of an entry point would
+    publish a surface no consumer references. package-boundary.md records the project and the
+    rule that earns it.
+  -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <UserSecretsId>mmlib-alvo-host</UserSecretsId>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../MMLib.Alvo/MMLib.Alvo.csproj" />
+    <!-- Both drivers ship in the image: SQLite is the zero-configuration default the deployment
+         acceptance criterion names, PostgreSQL is what docker-compose runs. Exactly one is
+         *registered*, chosen by configuration in AlvoDatabaseSelector. -->
+    <ProjectReference Include="../MMLib.Alvo.Data.Sqlite/MMLib.Alvo.Data.Sqlite.csproj" />
+    <ProjectReference Include="../MMLib.Alvo.Data.PostgreSql/MMLib.Alvo.Data.PostgreSql.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Direct rather than inherited from the core's ProjectReference, because the host calls
+         AddOpenApi/MapOpenApi itself. A build target only travels with a direct PackageReference,
+         and this package's target is what sets InterceptorsNamespaces for the XML-comment source
+         generator AddOpenApi switches on: without the direct reference the generated file is
+         emitted and then refused with CS9137. -->
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <!-- The only third-party package the host carries: the docs UI that renders the OpenAPI
+         document the core emits. Host-only on purpose — see docs/architecture/host.md, "Docs". -->
+    <PackageReference Include="Scalar.AspNetCore" />
+  </ItemGroup>
+
+</Project>

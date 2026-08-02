@@ -1,0 +1,74 @@
+### `internal_notes` and `access_code` are both `hidden`. Every row of every read below carried a
+### value for both — the seed supplied one on all seven work orders — so an assertion that neither
+### key appears is a statement about the mask and not about the data.
+# @name ListEveryRow
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=100
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+###
+# @name ReadOneRow
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders/{{Wo1001Id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### A write echoes the row back, and the echo is masked exactly as a read is
+# @name WriteEchoesTheRow
+## TEST-EXPECT-STATUS: [200]
+PATCH {{fsBaseUrl}}/api/work_orders/{{Wo1001Id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "internal_notes": "A hidden field is still WRITABLE — hidden restricts reading, readOnly restricts writing." }
+
+### A filter over a hidden field must be refused EXACTLY as a filter over an undeclared field is.
+### The pair is the whole test: if the two answers differ in any byte, the refusal answers
+### "does this entity have a field called internal_notes" for whoever is asking.
+# @name FilterOverHiddenField
+## TEST-EXPECT-STATUS: [422]
+GET {{fsBaseUrl}}/api/work_orders?internal_notes=eq.anything
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+###
+# @name FilterOverUndeclaredField
+## TEST-EXPECT-STATUS: [422]
+GET {{fsBaseUrl}}/api/work_orders?no_such_field_at_all=eq.anything
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### The same rule for the other two places a field name can appear
+# @name OrderByHiddenField
+## TEST-EXPECT-STATUS: [422]
+GET {{fsBaseUrl}}/api/work_orders?order=internal_notes.asc
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+###
+# @name OrderByUndeclaredField
+## TEST-EXPECT-STATUS: [422]
+GET {{fsBaseUrl}}/api/work_orders?order=no_such_field_at_all.asc
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+###
+# @name SelectHiddenField
+## TEST-EXPECT-STATUS: [422]
+GET {{fsBaseUrl}}/api/work_orders?select=reference,access_code
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+###
+# @name SelectUndeclaredField
+## TEST-EXPECT-STATUS: [422]
+GET {{fsBaseUrl}}/api/work_orders?select=reference,no_such_field_at_all
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### The control that keeps all of the above from passing for the wrong reason: a filter over a
+### DECLARED, VISIBLE field of the same entity is served. So "422 for everything" is not the answer.
+# @name FilterOverVisibleField
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?reference=eq.WO-1001
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### And the write above really did land, which is what makes "hidden is not readOnly" a measured claim
+### rather than a comment: the value cannot be read back, so the row's version is the evidence.
+# @name AfterTheHiddenWrite
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders/{{Wo1001Id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}

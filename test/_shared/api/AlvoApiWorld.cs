@@ -8,6 +8,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.OpenApi;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Auth.Internal;
+using MMLib.Alvo.Data;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Tests.Data;
 using System.Data.Common;
@@ -123,9 +124,44 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
         AlvoApiDatabase database)
     {
         var app = BuildApp(descriptorPath, database, keys, setup);
+
+        // Middleware ordering the compiler cannot check: UseExceptionHandler has to be added before any
+        // endpoint runs, and WebApplication auto-terminates the pipeline with routing — so registering it
+        // here, before MapAlvoDataApi below, is what puts it upstream of the endpoints.
+        if (setup.MapAlvoProblemDetails)
+        {
+            app.UseExceptionHandler();
+        }
+
+        // UsePathBase with no explicit UseRouting after it, which is the whole shape an embedded host writes
+        // (#121 quotes it verbatim) and therefore the only shape worth measuring. The widely cited rule that
+        // WebApplication needs UseRouting *after* UsePathBase — Microsoft Learn still states it — no longer
+        // holds: UsePathBaseMiddleware re-runs matching itself, so routing observes the rewritten path.
+        // Measured, not assumed: a probe under this runtime answers 200 for UsePathBase and 404 for the same
+        // rewrite performed by hand, and adding UseRouting here leaves every fact in this suite unchanged.
+        if (setup.PathBase is { } pathBase)
+        {
+            app.UsePathBase(pathBase);
+        }
+
+        if (setup.ServerBodyLimitBytes is { } serverLimit)
+        {
+            app.Use(ServerBodyLimit.Enforcing(serverLimit));
+        }
+
         await ApplyDescriptorAsync(app);
 
-        app.MapAlvoDataApi();
+        // MapGroup, when a fact asks for one: the second supported way to mount the Data API, and the one
+        // whose route-group prefix a created row's Location has to carry (#121). Mapped through the group
+        // rather than onto the app, because IEndpointRouteBuilder is exactly the seam MapAlvoDataApi takes.
+        if (setup.RouteGroupPrefix is { } groupPrefix)
+        {
+            app.MapGroup(groupPrefix).MapAlvoDataApi();
+        }
+        else
+        {
+            app.MapAlvoDataApi();
+        }
 
         // Opt-in, because MapAlvoDataApi deliberately does not map it — serving a document is a hosting
         // decision (ApiSetup.AddAlvoApi says so) — and because every route-table fact in this suite counts
@@ -209,6 +245,16 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
                 options.DevKeys.Add(key.ToDevKey());
             }
         });
+
+        if (setup.FaultingData)
+        {
+            builder.Services.AddSingleton<IAlvoData>(new FaultingAlvoData());
+        }
+
+        if (setup.MapAlvoProblemDetails)
+        {
+            builder.Services.AddAlvoProblemDetails();
+        }
 
         builder.Services.AddAlvo(alvo =>
         {
@@ -296,6 +342,12 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
     internal async Task<JsonObject> OpenApiDocumentAsync() =>
         JsonNode.Parse(await OpenApiTextAsync()) as JsonObject
         ?? throw new InvalidOperationException("The OpenAPI document is not a JSON object.");
+
+    /// <summary>
+    /// This world's container, for the facts whose claim is about what a host's <em>registrations</em> are
+    /// rather than about a response — "<c>AddAlvo</c> registered no exception handler" is invisible on the wire.
+    /// </summary>
+    internal IServiceProvider Services => _app.Services;
 
     /// <summary>Every statement the engine has run against this world's database since the last <see cref="ClearStatements"/>.</summary>
     internal IReadOnlyList<string> Statements => _capture.Statements;
@@ -575,12 +627,45 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
 /// exactly as <see cref="FixtureDocumentTitle"/>/<see cref="FixtureDocumentVersion"/> set it, which is what
 /// every fact except the append-not-overwrite one needs.
 /// </param>
+/// <param name="MapAlvoProblemDetails">
+/// Whether the world calls <c>AddAlvoProblemDetails()</c> and <c>UseExceptionHandler()</c> — the standalone
+/// host's decision, which <c>AddAlvo</c> deliberately does not make for an embedded one (#119). Off by
+/// default, so the suite's ordinary worlds still let a broken invariant propagate the way an embedded host
+/// sees it.
+/// </param>
+/// <param name="FaultingData">
+/// Whether <see cref="MMLib.Alvo.Data.IAlvoData"/> is <see cref="FaultingAlvoData"/> instead of the engine's
+/// own store — the only way to reach the port's fifth failure family, which no well-formed request can.
+/// </param>
+/// <param name="PathBase">
+/// The path base the world is served under — <c>app.UsePathBase(...)</c>, the embedded shape #121 names —
+/// or <see langword="null"/> for a host mounted at the root, which is every other fact here.
+/// </param>
+/// <param name="ServerBodyLimitBytes">
+/// A byte budget the <em>web server</em> enforces on the request body, below Alvo's own
+/// <c>MaxRequestBodyBytes</c> — or <see langword="null"/> for no server limit, which is every other fact
+/// here. It is the one way to reach <c>BadHttpRequestException</c>, the family a request layer cannot
+/// produce from a well-formed request, exactly as <see cref="MMLib.Alvo.Data.IAlvoData"/>'s fifth family
+/// needs <see cref="FaultingAlvoData"/>.
+/// </param>
+/// <param name="RouteGroupPrefix">
+/// A route group to mount the Data API under — <c>app.MapGroup(prefix).MapAlvoDataApi()</c> — or
+/// <see langword="null"/> to map onto the application itself. It is a different mechanism from
+/// <paramref name="PathBase"/> and fails differently: a path base rewrites the request, whereas a group
+/// prefix only lengthens the route, so a host mounted this way answers <em>nothing</em> at the unprefixed
+/// path.
+/// </param>
 internal sealed record AlvoApiWorldSetup(
     Action<AlvoApiOptions>? ConfigureApi = null,
     string? RevokedKeyId = null,
     Action<System.Text.Json.JsonSerializerOptions>? ConfigureHostJson = null,
     bool MapOpenApiDocument = false,
-    string? HostInfoDescription = null);
+    string? HostInfoDescription = null,
+    bool MapAlvoProblemDetails = false,
+    bool FaultingData = false,
+    string? PathBase = null,
+    int? ServerBodyLimitBytes = null,
+    string? RouteGroupPrefix = null);
 
 /// <summary>One dev API key a world issues, in the shape a test reads best.</summary>
 /// <param name="KeyId">The key's public identifier.</param>

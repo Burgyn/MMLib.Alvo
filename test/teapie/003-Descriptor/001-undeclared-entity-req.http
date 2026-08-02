@@ -1,0 +1,5 @@
+### An entity the mounted descriptor does not declare has no route
+# @name UndeclaredEntity
+## TEST-EXPECT-STATUS: [404]
+GET {{baseUrl}}/api/warehouses
+X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}

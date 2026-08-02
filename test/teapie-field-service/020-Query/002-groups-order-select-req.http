@@ -1,0 +1,59 @@
+### `or=(...)`: the union of two terms, and it has to be wider than either term alone
+# @name OrGroup
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?or=(status.eq.completed,status.eq.cancelled)&limit=100
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### `and=(...)`: the intersection, and it has to be narrower than either term alone
+# @name AndGroup
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?and=(status.eq.in_progress,is_emergency.is.true)&limit=100
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### The two terms of the `and` above, alone — so "narrower than either" is measured, not assumed
+# @name AndLeftTermAlone
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?status=eq.in_progress&limit=100
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### `not.` negates the term it prefixes
+# @name NotPrefix
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?not.status=eq.scheduled&limit=100
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### A group combined with a top-level term: the conjunction of the two
+# @name GroupAndTerm
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?or=(priority.eq.1,priority.eq.4)&status=eq.scheduled&limit=100
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### `order=field.desc.nullslast` over the required paging key
+# @name OrderDesc
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?order=priority.desc.nullslast,reference.asc&limit=100
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### The same keys the other way round, so "the order is the one requested" is a real claim
+# @name OrderAsc
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?order=priority.asc.nullslast,reference.desc&limit=100
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### `select` narrows the row to the named fields, in the order they were named
+# @name SelectProjection
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?select=reference,priority&order=reference.asc&limit=100
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### A paged read sorted by a NULLABLE field is refused: a keyset cursor cannot place its nulls
+# @name UnpageableSortKey
+## TEST-EXPECT-STATUS: [422]
+GET {{fsBaseUrl}}/api/work_orders?order=scheduled_for.desc.nullslast&limit=3
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### An unrecognised sort modifier is refused rather than ignored — an ignored one is a silent re-sort
+# @name MalformedOrder
+## TEST-EXPECT-STATUS: [422]
+GET {{fsBaseUrl}}/api/work_orders?order=priority.sideways
+X-Alvo-Api-Key: {{keyDispatcherNorth}}

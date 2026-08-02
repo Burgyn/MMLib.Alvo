@@ -40,6 +40,13 @@ internal sealed class EfAlvoData : IAlvoData
     private readonly IPolicyEngine _policy;
     private readonly IPredicateEvaluator _evaluator;
     private readonly ReadStatementComposer _statements;
+
+    /// <summary>
+    /// The driver's SQL seam, kept whole rather than only handed to the composer: it also owns the
+    /// engine-specific decoding of a constraint violation — see
+    /// <see cref="ConstraintViolationTranslator"/>.
+    /// </summary>
+    private readonly IAlvoSqlDialect _dialect;
     private readonly AlvoDataContextFactory _contexts;
     private readonly TimeProvider _time;
     private readonly string _idempotencyTable;
@@ -65,6 +72,7 @@ internal sealed class EfAlvoData : IAlvoData
         _policy = policy;
         _evaluator = evaluator;
         _statements = new ReadStatementComposer(predicates, fields, dialect);
+        _dialect = dialect;
         _contexts = contexts;
         _time = time;
         _idempotencyTable = IdempotencyTable.NameFor(options.SchemaPrefix);
@@ -211,14 +219,20 @@ internal sealed class EfAlvoData : IAlvoData
     /// </para>
     /// <para>
     /// <b>Why a broad catch cannot become a false replay.</b> This catches any storage write failure, which
-    /// includes a unique-constraint violation in the caller's <em>own</em> entity — a duplicate <c>vin</c>,
-    /// say. That never turns into a replay of an unrelated row, and the reason is structural rather than a
+    /// never turns into a replay of an unrelated row, and the reason is structural rather than a
     /// classification: the only thing a retry does is start the attempt over, and an attempt answers as a
-    /// replay <b>only</b> if the lookup finds a record for this key in this scope. A duplicate <c>vin</c>
-    /// commits no such record, so every attempt takes the insert path again and fails again, and the loop ends
-    /// at <see cref="ExhaustedAsRetryLimit"/> with the provider's exception as the inner one. Matching this
-    /// table's constraint specifically would need a provider error code, which is what
-    /// <see cref="VersionRowWriter"/> deliberately does not read.
+    /// replay <b>only</b> if the lookup finds a record for this key in this scope.
+    /// </para>
+    /// <para>
+    /// <b>A duplicate in the caller's own entity no longer reaches this loop at all (#138).</b> It used to:
+    /// the entity's own insert failed with the provider's exception, every one of the ten attempts took the
+    /// insert path again and failed again, and the loop ended at <see cref="ExhaustedAsRetryLimit"/> — ten
+    /// transactions and about 450 ms spent re-answering a question whose answer could not change. That write
+    /// now goes through <see cref="ConstraintViolationTranslator"/>, which turns a recognised violation into
+    /// <see cref="AlvoConstraintViolationException"/>; that is not a <see cref="DbException"/>, so
+    /// <see cref="IsStorageWriteFailure"/> does not match it and it leaves on the first attempt. The
+    /// idempotency record's own insert is deliberately <em>not</em> translated — a rival winning that primary
+    /// key is exactly what this loop exists to converge on — so the retry it was written for is unaffected.
     /// </para>
     /// <para>
     /// <b>Exhaustion stays inside the port's five failure families.</b> The raw
@@ -499,7 +513,8 @@ internal sealed class EfAlvoData : IAlvoData
         Dictionary<string, object> candidate, CancellationToken cancellationToken)
     {
         db.Rows(schema.Name).Add(candidate);
-        await db.SaveChangesAsync(cancellationToken);
+        await ConstraintViolationTranslator.TranslatedAsync(
+            () => db.SaveChangesAsync(cancellationToken), _dialect, db.Rows(schema.Name).EntityType, schema);
 
         var id = (Guid)candidate[AlvoDataContext.IdColumn];
         return await SingleAsync(db, schema, decision, context, id, lockFor: null, cancellationToken)
@@ -641,8 +656,13 @@ internal sealed class EfAlvoData : IAlvoData
             ?? throw new AlvoRecordNotFoundException();
         AlvoPrecondition.EnsureMatches(precondition, StoredVersion(schema, stored));
 
-        var affected = await RowOf(PolicyRoot(db, schema, decision, context), id)
-            .ExecuteDeleteAsync(cancellationToken);
+        // A `ref` declaring onDelete: "restrict" is the descriptor ASKING the store to refuse this, so the
+        // refusal is a conflict the caller can act on rather than a broken invariant — hence the translation.
+        var affected = await ConstraintViolationTranslator.TranslatedAsync(
+            () => RowOf(PolicyRoot(db, schema, decision, context), id).ExecuteDeleteAsync(cancellationToken),
+            _dialect,
+            db.Rows(schema.Name).EntityType,
+            schema);
         if (affected == 0)
         {
             throw new AlvoRecordNotFoundException();
@@ -723,11 +743,15 @@ internal sealed class EfAlvoData : IAlvoData
     private static object? StoredVersion(EntitySchema schema, Dictionary<string, object> preImage) =>
         AlvoManagedColumns.VersionColumn(schema) is { } column ? preImage.GetValueOrDefault(column) : null;
 
-    private async Task<int> AffectedAsync(
+    private Task<int> AffectedAsync(
         AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context,
         Guid id, IReadOnlyDictionary<string, object?> values, CancellationToken cancellationToken)
-        => await RowOf(PolicyRoot(db, schema, decision, context), id)
-            .ExecuteUpdateAsync(UpdateSetterFactory.For(schema, values), cancellationToken);
+        => ConstraintViolationTranslator.TranslatedAsync(
+            () => RowOf(PolicyRoot(db, schema, decision, context), id)
+                .ExecuteUpdateAsync(UpdateSetterFactory.For(schema, values), cancellationToken),
+            _dialect,
+            db.Rows(schema.Name).EntityType,
+            schema);
 
     /// <summary>
     /// The queryable a write is composed over: a <c>FromSql</c> root whose <c>WHERE</c> already carries the

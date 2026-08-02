@@ -1,0 +1,11 @@
+### Validation comes from the descriptor's own maxLength, and reports every violation
+# @name RefusedOwner
+## TEST-EXPECT-STATUS: [422]
+POST {{baseUrl}}/api/owners
+X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+Content-Type: application/json
+
+{
+  "name": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+  "email": "not-an-email"
+}

@@ -1,0 +1,133 @@
+### SCENARIO 5 — one dataset, two roles, walked in sequence.
+###
+### A dispatcher sets up a day's work. A technician then does what a technician does: sees their own
+### jobs and nobody else's, opens one, tries something their role does not cover, and asks for a job
+### that is not theirs. All four answers come from ONE system state, which is what makes them
+### comparable — three isolated cases can each be right about a different world.
+###
+### The four answers are deliberately four DIFFERENT things:
+###   the technician's list          200 with a subset      (a rule is a row filter)
+###   the technician's own job       200 with the row
+###   an operation with no rule      403                    (nothing says who may)
+###   somebody else's job            404                    (the row is excluded, not the caller)
+
+### The dispatcher's setup: three jobs, two of them for this technician.
+# @name DispatcherCreatesMine1
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "reference": "WO-8401",
+  "title": "Morning call — mine",
+  "status": "scheduled",
+  "priority": 1,
+  "assigned_to": "{{userSpareNorth}}",
+  "access_code": "ROLE-1",
+  "customer_id": "{{CustomerAcmeId}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+###
+# @name DispatcherCreatesMine2
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "reference": "WO-8402",
+  "title": "Afternoon call — mine",
+  "status": "scheduled",
+  "priority": 2,
+  "assigned_to": "{{userSpareNorth}}",
+  "access_code": "ROLE-2",
+  "customer_id": "{{CustomerAcmeId}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+### The third is somebody else's, and it is the row the 404 below is about
+# @name DispatcherCreatesSomebodyElses
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "reference": "WO-8403",
+  "title": "Somebody else's call",
+  "status": "scheduled",
+  "priority": 3,
+  "assigned_to": "{{userTechNorth}}",
+  "access_code": "ROLE-3",
+  "customer_id": "{{CustomerAcmeId}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+### The dispatcher sees all three, which is the baseline every claim below is measured against.
+# @name DispatcherSeesEverything
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?reference=in.(WO-8401,WO-8402,WO-8403)&order=reference.asc&limit=100
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### 1. The technician's own list: a subset. Not everything, and not nothing.
+# @name TechnicianListsTheirDay
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?order=reference.asc&limit=100
+X-Alvo-Api-Key: {{keySpareNorth}}
+
+### 2. Opening one of their own jobs.
+# @name TechnicianOpensTheirJob
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders/{{DispatcherCreatesMine1.response.body.$.id}}
+X-Alvo-Api-Key: {{keySpareNorth}}
+
+### ...and working on it. `work_orders.update` admits a technician for a row assigned to them.
+# @name TechnicianStartsTheirJob
+## TEST-EXPECT-STATUS: [200]
+PATCH {{fsBaseUrl}}/api/work_orders/{{DispatcherCreatesMine1.response.body.$.id}}
+X-Alvo-Api-Key: {{keySpareNorth}}
+If-Match: {{TechnicianOpensTheirJob.response.headers.ETag}}
+Content-Type: application/json
+
+{ "status": "in_progress" }
+
+### 3. An operation no rule covers. `regions` declares no delete at all, so nobody may — which is
+### why the answer names the operation and not the caller.
+# @name TechnicianDeletesARegion
+## TEST-EXPECT-STATUS: [403]
+DELETE {{fsBaseUrl}}/api/regions/{{RegionNorthId}}
+X-Alvo-Api-Key: {{keySpareNorth}}
+
+### And the shape it must be distinguishable from: a configured rule the technician fails, which is
+### a 200 with an empty page rather than a refusal.
+# @name TechnicianListsCustomers
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/customers?limit=100
+X-Alvo-Api-Key: {{keySpareNorth}}
+
+### 4. Somebody else's job, by id.
+# @name TechnicianOpensSomebodyElsesJob
+## TEST-EXPECT-STATUS: [404]
+GET {{fsBaseUrl}}/api/work_orders/{{DispatcherCreatesSomebodyElses.response.body.$.id}}
+X-Alvo-Api-Key: {{keySpareNorth}}
+
+### ...and cannot write it either
+# @name TechnicianWritesSomebodyElsesJob
+## TEST-EXPECT-STATUS: [404]
+PATCH {{fsBaseUrl}}/api/work_orders/{{DispatcherCreatesSomebodyElses.response.body.$.id}}
+X-Alvo-Api-Key: {{keySpareNorth}}
+Content-Type: application/json
+
+{ "status": "cancelled" }
+
+### THE STATE OF THE WORLD, read by the dispatcher who can see all three: the technician's own job
+### moved, and the job that was refused did not.
+# @name FinalState
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?reference=in.(WO-8401,WO-8402,WO-8403)&order=reference.asc&limit=100
+X-Alvo-Api-Key: {{keyDispatcherNorth}}

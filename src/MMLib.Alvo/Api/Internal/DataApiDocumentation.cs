@@ -109,8 +109,11 @@ internal static class DataApiDocumentation
     ///   string — so the malformed-request channel is unreachable from them.
     ///   </item>
     ///   <item>
-    ///   <b>No 409 outside a create, and no 412 on a read.</b> Only a create records an idempotency key, and
-    ///   the read side ignores <c>If-Match</c> rather than refusing it (see <see cref="ReadOne"/>).
+    ///   <b>No 409 on a read, and no 412 on one either.</b> A 409 is a write colliding with stored state — a
+    ///   reused idempotency key on a create, a <c>unique</c> value another record holds on a create or an
+    ///   update, a <c>restrict</c>-ed reference on a delete — and none of the three is reachable from a read,
+    ///   which changes nothing. The read side ignores <c>If-Match</c> rather than refusing it (see
+    ///   <see cref="ReadOne"/>), so it has no 412 either.
     ///   </item>
     /// </list>
     /// <para>
@@ -135,9 +138,9 @@ internal static class DataApiDocumentation
                 [Created(), .. Refusals(Malformed, Precondition, Conflict)],
             DataOperation.Update =>
                 [Ok(ResponseBody.Row, "The row as it now stands."),
-                 .. Refusals(Malformed, Absent, PreconditionOn(entity))],
+                 .. Refusals(Malformed, Absent, PreconditionOn(entity), Conflict)],
             DataOperation.Delete =>
-                [NoContent(), .. Refusals(Absent, PreconditionOn(entity))],
+                [NoContent(), .. Refusals(Absent, PreconditionOn(entity), Conflict)],
             _ => throw new InvalidOperationException($"No response catalogue for operation '{operation}'."),
         };
     }
@@ -252,13 +255,22 @@ internal static class DataApiDocumentation
             }
             : Precondition;
 
+    /// <summary>
+    /// The 409, covering both of its kinds — the shape <see cref="Forbidden"/> already uses for its two, and
+    /// the only shape available: OpenAPI keys a response by status, so one sentence has to describe every way
+    /// an operation can answer with it, and the problem <c>type</c> is what tells them apart.
+    /// </summary>
     private static Response Conflict => new(
         StatusCodes.Status409Conflict,
         ResponseBody.Problem,
-        "The 'Idempotency-Key' was already used by this caller for a request with a different body. Retrying "
-        + "with the same key and the same body replays the first result instead; a different body under the "
-        + "same key is a mistake, not a retry.",
-        SharedId: "idempotencyConflict");
+        "The request conflicts with what is already stored. Two kinds, told apart by the problem 'type': "
+        + "'idempotency-conflict' means the 'Idempotency-Key' was already used by this caller for a request "
+        + "with a different body (retry with the same key and the same body to replay the first result, or "
+        + "send a fresh key); 'conflict' means a constraint the database enforces refused the write — a value "
+        + "another record already holds on a field declared unique, or a delete another record still "
+        + "references through a 'ref' declaring onDelete: restrict. The 'violations' array names the field "
+        + "for the first of those and carries a fix suggestion for both.",
+        SharedId: "conflict");
 
     private static Response Malformed => new(
         StatusCodes.Status422UnprocessableEntity,
@@ -568,7 +580,15 @@ internal static class DataApiDocumentation
         + "policy-masked per caller, and the `ETag` is minted over the row's *version* rather than over the "
         + "response bytes — which is the only tag `If-Match`'s strong comparison could ever match, and the "
         + "reason no intermediary may keep the body.\n\n"
-        + "**A 500 is not documented on any operation.** An invariant the implementation itself relies on "
-        + "propagates past Alvo untouched, so the response is composed by the host and Alvo cannot describe a "
-        + "body it does not write.";
+        + "**A 500 is not documented on any operation, and its body depends on the host.** An invariant the "
+        + "implementation itself relies on propagates past Alvo's endpoints untouched, so what a 500 looks "
+        + "like is the host's decision and not a promise this document can make. A host that opted in "
+        + "(`AddAlvoProblemDetails()`) answers with the same problem document as every other refusal, under "
+        + "`" + AlvoProblemTypes.BaseUri + AlvoProblemTypes.Internal + "` — which is why that value is in "
+        + "`type`'s list. A host that did not composes its own.\n\n"
+        + "**A request the web server would not read is not documented on any operation either.** A body over "
+        + "the server's limit, one that arrived too slowly, or one whose framing broke never reaches the "
+        + "operation, so no operation can promise a status for it. A host that opted in answers it under `"
+        + AlvoProblemTypes.BaseUri + AlvoProblemTypes.UnreadableRequest + "`, at the status the server chose "
+        + "(413, 408 or 400) — the second value in `type`'s list that no operation lists.";
 }

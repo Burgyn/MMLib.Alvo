@@ -1,0 +1,54 @@
+### The other direction, and it needs its own entity: `customers` declares no `audit`, so it keeps no
+### `updated_at`, so there is no version to tag. Both halves matter — an entity that always tags and
+### an entity that never can — and one entity could not show both.
+# @name ReadUnversioned
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/customers/{{CustomerBorovicaId}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### An unconditional write is fine
+# @name UnconditionalWrite
+## TEST-EXPECT-STATUS: [200]
+PATCH {{fsBaseUrl}}/api/customers/{{CustomerBorovicaId}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tier": "priority" }
+
+### An If-Match naming a version is REFUSED rather than ignored: a 200 would tell the caller their
+### condition held, when nothing was compared and a concurrent writer was overwritten.
+# @name IfMatchOnUnversioned
+## TEST-EXPECT-STATUS: [412]
+PATCH {{fsBaseUrl}}/api/customers/{{CustomerBorovicaId}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+If-Match: "639212702445441920"
+Content-Type: application/json
+
+{ "tier": "standard" }
+
+### `If-Match: *` is the one precondition this entity CAN answer — it asks only that the row exist
+# @name IfMatchAnyOnUnversioned
+## TEST-EXPECT-STATUS: [200]
+PATCH {{fsBaseUrl}}/api/customers/{{CustomerBorovicaId}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+If-Match: *
+Content-Type: application/json
+
+{ "notes": "Upgraded to the priority tier." }
+
+### `If-None-Match` is refused on every write, versioned or not: this API compares a row against the
+### version a caller HOLDS and has no channel for "act only if the row is not at this version".
+# @name IfNoneMatchOnWrite
+## TEST-EXPECT-STATUS: [412]
+PATCH {{fsBaseUrl}}/api/customers/{{CustomerBorovicaId}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+If-None-Match: *
+Content-Type: application/json
+
+{ "tier": "standard" }
+
+### The end state: the two accepted writes landed and the two refusals did not
+# @name FinalUnversionedState
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/customers/{{CustomerBorovicaId}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}

@@ -23,8 +23,10 @@ namespace MMLib.Alvo.Api.Internal;
 /// <see cref="ArgumentNullException"/>.</b> Both mean "an invariant the implementation itself relies on is
 /// broken" — <c>IAlvoData</c>'s fifth family — which is never a well-formed request from an authorized
 /// caller; swallowing either into a hand-made 500 would lose the stack trace the host's own logging is there
-/// to record. They propagate, and the host answers 500 — see <see cref="AlvoProblemTypes"/> for why the
-/// catalogue therefore has no slug for it.
+/// to record. They propagate, and the host answers 500. A host that asked Alvo to answer for it
+/// (<c>AddAlvoProblemDetails()</c>) renders that 500 through <see cref="Internal"/> from an exception
+/// handler, <em>after</em> logging the exception — which is why the entry point below exists and why no
+/// endpoint calls it.
 /// </para>
 /// </remarks>
 internal static class ProblemResultFactory
@@ -86,6 +88,47 @@ internal static class ProblemResultFactory
         StatusCodes.Status404NotFound, AlvoProblemTypes.NotFound, new AlvoRecordNotFoundException().Message);
 
     /// <summary>
+    /// The 500 for a broken invariant, in a host that asked Alvo to answer for it.
+    /// </summary>
+    /// <remarks>
+    /// The detail is a constant. Nothing about the failure is reflected — not the exception type, not its
+    /// message, not a stack frame — because the caller cannot act on any of it and an attacker can. The
+    /// exception itself is logged by <c>AlvoExceptionHandler</c>, which is the trade #119 describes: log
+    /// everything, disclose the classification and nothing else.
+    /// </remarks>
+    internal static IResult Internal() => Problem(
+        StatusCodes.Status500InternalServerError,
+        AlvoProblemTypes.Internal,
+        "The request could not be completed because of an internal error. It has been logged; retry, and if it "
+        + "persists, report it to whoever operates this instance.");
+
+    /// <summary>
+    /// The refusal for a request the web server would not read — rendered at <em>its</em> status, not 500.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The status is a parameter because the server, not Alvo, decided it.</b>
+    /// <c>BadHttpRequestException.StatusCode</c> is 413 for a body over the configured limit, 400 for framing
+    /// that broke mid-upload, 408 for a body arriving too slowly; the caller can act on the difference, and
+    /// collapsing all three into a 500 tells an agent to retry a request whose size or framing is the thing
+    /// that has to change.
+    /// </para>
+    /// <para>
+    /// The <c>detail</c> is a constant, for the same reason <see cref="Internal"/>'s is: the server's own
+    /// message can carry the configured limit and, for some rejections, part of what the caller sent, and
+    /// neither belongs in a body. What the caller needs — that this request cannot succeed unchanged — is
+    /// server-owned prose.
+    /// </para>
+    /// </remarks>
+    /// <param name="statusCode">The status the web server refused the request with.</param>
+    internal static IResult Unreadable(int statusCode) => Problem(
+        statusCode,
+        AlvoProblemTypes.UnreadableRequest,
+        "The server refused this request before Alvo could read it — the status says which limit it crossed: "
+        + "a body too large, a body that arrived too slowly, or one whose framing broke. Send a smaller or "
+        + "well-formed request; retrying this one unchanged cannot succeed.");
+
+    /// <summary>
     /// The 422 for a request whose shape is wrong, carrying every reason rather than the first.
     /// </summary>
     /// <remarks>
@@ -126,6 +169,68 @@ internal static class ProblemResultFactory
         Problem(StatusCodes.Status422UnprocessableEntity, AlvoProblemTypes.Validation, violations);
 
     /// <summary>
+    /// The 409 for a request that collides with stored state a database constraint guards — the one refusal
+    /// whose reason the framework could not check itself before the write reached the engine.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// It carries a <c>violations</c> array like a 422 does, and for the same reason: §0 principle 4's reader
+    /// is an agent deciding what to change, and "409" alone tells it only to stop. Each entry names a field
+    /// the caller supplied, with a stable <c>code</c> and a fix suggestion — which is precisely what the
+    /// <c>500 internal</c> this replaced could not carry.
+    /// </para>
+    /// <para>
+    /// <b>The pointer names a field, never a value, and the field name comes from the schema.</b> The port
+    /// resolves it from the violated index's own properties (never from the payload's keys, which are
+    /// caller-supplied text), and framework-managed columns are already excluded there — so this cannot tell a
+    /// caller to change <c>tenant_id</c>, which they may not write on an update at all.
+    /// </para>
+    /// <para>
+    /// <b>A refusal that names no field still gets one entry, pointed at the document.</b>
+    /// <see cref="AlvoConstraintKind.Referenced"/> deliberately names nothing (see
+    /// <see cref="AlvoConstraintViolationException"/>), and SQLite reports no columns for a foreign-key
+    /// failure at all — so an empty <c>violations</c> array would be the shape a caller reads as "no
+    /// machine-readable reason", which is the defect being fixed. RFC 6901's empty pointer is the whole
+    /// document, which is exactly what is in conflict when no single field is.
+    /// </para>
+    /// </remarks>
+    /// <param name="exception">The port's refusal, carrying the kind and the fields it named.</param>
+    private static IResult Conflict(AlvoConstraintViolationException exception) => Problem(
+        StatusCodes.Status409Conflict, AlvoProblemTypes.Conflict, ConflictViolations(exception));
+
+    /// <summary>One violation per named field, or one for the whole document when none was named.</summary>
+    /// <param name="exception">The port's refusal.</param>
+    private static IReadOnlyList<AlvoViolation> ConflictViolations(AlvoConstraintViolationException exception) =>
+        exception.Kind == AlvoConstraintKind.Unique && exception.Fields.Count > 0
+            ? [.. exception.Fields.Select(UniqueViolation)]
+            : [new AlvoViolation(string.Empty, CodeFor(exception.Kind), exception.Message, FixFor(exception.Kind))];
+
+    /// <summary>The entry for one field a unique constraint refused.</summary>
+    /// <remarks>
+    /// The message says nothing about <em>which</em> record holds the value, or whether the caller can see it:
+    /// on a tenant-scoped entity the constraint spans the tenant (#137), so the colliding row is always one of
+    /// the caller's own — but the wording must not start depending on that, because a non-scoped entity's
+    /// collision can be with a row no rule of theirs admits.
+    /// </remarks>
+    /// <param name="field">The field name, from the entity's schema.</param>
+    private static AlvoViolation UniqueViolation(string field) => new(
+        "/" + field,
+        "unique",
+        "This field is declared unique and another record already holds the value sent for it.",
+        "Send a value no other record holds, or change the record that holds it.");
+
+    /// <summary>The stable code for a refusal that names no field.</summary>
+    /// <param name="kind">Which constraint refused the request.</param>
+    private static string CodeFor(AlvoConstraintKind kind) =>
+        kind == AlvoConstraintKind.Referenced ? "referenced" : "unique";
+
+    /// <summary>The fix for a refusal that names no field.</summary>
+    /// <param name="kind">Which constraint refused the request.</param>
+    private static string FixFor(AlvoConstraintKind kind) => kind == AlvoConstraintKind.Referenced
+        ? "Delete the records that reference this one, or point them at something else, then retry."
+        : "Send a value no other record holds on the field declared unique.";
+
+    /// <summary>
     /// Runs <paramref name="operation"/> and maps every refusal <c>IAlvoData</c> is allowed to raise
     /// onto its status code and problem type.
     /// </summary>
@@ -155,6 +260,10 @@ internal static class ProblemResultFactory
         catch (AlvoIdempotencyConflictException exception)
         {
             return Problem(StatusCodes.Status409Conflict, AlvoProblemTypes.IdempotencyConflict, exception.Message);
+        }
+        catch (AlvoConstraintViolationException exception)
+        {
+            return Conflict(exception);
         }
         catch (ArgumentException exception) when (exception is not ArgumentNullException)
         {

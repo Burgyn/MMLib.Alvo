@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Http;
+﻿using Microsoft.AspNetCore.Diagnostics;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using MMLib.Alvo.Api.Internal;
 using MMLib.Alvo.Data;
@@ -202,6 +203,111 @@ public sealed class ProblemDetailsTests
     }
 
     /// <summary>
+    /// #119: in a host that registered Alvo's problem details, an unhandled failure from the port's fifth
+    /// family answers with Alvo's own <c>type</c> — not the framework's RFC 9110 status-code URI, which would
+    /// put a foreign classification in the one member an agent branches on.
+    /// </summary>
+    /// <remarks>
+    /// The exception's own message must not reach the caller. It is logged, which is the whole reason the API
+    /// layer does not catch this family, and a 500 body carrying it would hand an attacker the shape of the
+    /// implementation.
+    /// </remarks>
+    [Fact]
+    public async Task An_unhandled_failure_is_rendered_with_alvos_own_internal_type()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync(
+            [_admin], new AlvoApiWorldSetup(MapAlvoProblemDetails: true, FaultingData: true));
+
+        using var response = await world.SendAsync(HttpMethod.Get, "/api/owners", _admin);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
+        response.Content.Headers.ContentType!.MediaType.ShouldBe("application/problem+json");
+
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        var document = JsonNode.Parse(body)!;
+        document["type"]!.GetValue<string>().ShouldBe("https://alvo.dev/errors/internal");
+        body.ShouldNotContain(
+            FaultingAlvoData.FailureMessage,
+            Case.Sensitive,
+            "the exception's message is for the log, never for the caller");
+    }
+
+    /// <summary>
+    /// The control for the fact above, and the reason #119 was filed rather than assumed: a host that did not
+    /// ask gets no handler and no document — the failure leaves the pipeline exactly as it did before, so the
+    /// two hosting modes really do differ and an embedded host keeps owning its own rendering.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Both halves are needed and neither implies the other. <b>The container half</b> — <c>AddAlvo</c> leaves
+    /// no <see cref="IExceptionHandler"/> behind — is the one that fails if the registration is ever moved
+    /// into <c>AddAlvo</c>, which is exactly the change #119 says must not happen. <b>The wire half</b> is
+    /// what that buys: nothing is written, so whatever hosts Alvo still decides what a 500 looks like.
+    /// </para>
+    /// <para>
+    /// The wire half is asserted as a <em>propagating exception</em> rather than as a 500 body, because that
+    /// is what an un-opted-in pipeline really does: <c>TestServer</c> hands an unhandled failure to its
+    /// client, and a real server answers a bodiless 500. A fact written against a 500 response here would
+    /// never run its assertions at all — the call throws first — and would therefore pass for the wrong
+    /// reason if the handler were later registered unconditionally.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task Without_the_registration_alvo_neither_handles_nor_renders_a_500()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync(
+            [_admin], new AlvoApiWorldSetup(FaultingData: true));
+
+        world.Services.GetServices<IExceptionHandler>().ShouldBeEmpty(
+            "AddAlvo must not register Alvo's exception handler — an embedded host owns its own rendering (#119)");
+
+        var propagated = await Should.ThrowAsync<InvalidOperationException>(
+            () => world.SendAsync(HttpMethod.Get, "/api/owners", _admin));
+
+        propagated.Message.ShouldBe(
+            FaultingAlvoData.FailureMessage,
+            "the failure must reach the host with its stack trace, not be turned into a document Alvo wrote");
+    }
+
+    /// <summary>
+    /// A body the <em>web server</em> refuses is answered at the server's own status, with Alvo's
+    /// classification — not as a 500 saying an invariant of Alvo's is broken.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The status is the fact. <c>BadHttpRequestException</c> is not one of <c>IAlvoData</c>'s five families,
+    /// so the handler that answered every exception with <c>alvo.dev/errors/internal</c> told an agent its
+    /// request had triggered a defect and invited it to retry — when the one thing that could ever change the
+    /// outcome is the request's size. A 413 says "this cannot succeed unchanged" in the one member every HTTP
+    /// client already reads.
+    /// </para>
+    /// <para>
+    /// The world's budget is below Alvo's own <c>MaxRequestBodyBytes</c> on purpose: Alvo refuses an
+    /// over-declared <c>Content-Length</c> itself, with a 422 and a violation, so the server only ever wins
+    /// the race where an operator has configured a smaller limit than Alvo's. Both refusals exist and they are
+    /// different answers to different questions — <see cref="AlvoProblemTypes.Validation"/> is Alvo measuring
+    /// a body it read.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_body_the_server_refuses_answers_the_servers_status_rather_than_a_500()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync(
+            [_admin], new AlvoApiWorldSetup(MapAlvoProblemDetails: true, ServerBodyLimitBytes: ServerBodyLimitBytes));
+
+        using var response = await world.SendAsync(
+            HttpMethod.Post, "/api/owners", _admin, body: OversizedOwner());
+
+        response.StatusCode.ShouldBe(
+            HttpStatusCode.RequestEntityTooLarge,
+            "the server's own status must survive; a 500 tells an agent to retry something that cannot work");
+        response.Content.Headers.ContentType!.MediaType.ShouldBe(ProblemMediaType);
+        (await response.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.UnreadableRequest);
+        (await response.ReadTextAsync()).ShouldNotContain(
+            "oooo", Case.Sensitive, "the caller's own value is not echoed back by a refusal it never read");
+    }
+
+    /// <summary>
     /// <see cref="AlvoProblemTypes.UriOf"/> mints a URI only for a slug the catalogue declares, and refuses
     /// anything else — so a call site cannot invent a <c>type</c> that no documentation exists for.
     /// </summary>
@@ -309,16 +415,55 @@ public sealed class ProblemDetailsTests
     {
         await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin, _narrow]);
         await SeedTheReusedIdempotencyKeyAsync(world);
+        await SeedTheTakenEmailAsync(world);
         var reached = new List<string>();
         foreach (var probe in EveryReachableSlugProbe())
         {
             reached.Add(await SlugAnsweredByAsync(world, probe));
         }
 
+        reached.Add(await InternalSlugAnsweredByAFaultingStoreAsync());
+        reached.Add(await UnreadableSlugAnsweredByABodyTheServerRefusesAsync());
+
         reached.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ShouldBe(
             AlvoProblemTypes.All.Except(PendingUntilALaterTask, StringComparer.Ordinal).Order(StringComparer.Ordinal),
             "every slug not pending a later task must be reachable from an endpoint");
     }
+
+    /// <summary>
+    /// The <c>internal</c> slug's probe. It needs a <em>second</em> world, because the store it drives faults
+    /// for every entity and would answer 500 to every other probe in the list — so the two worlds' answers are
+    /// unioned rather than one world being made to do both.
+    /// </summary>
+    private static async Task<string> InternalSlugAnsweredByAFaultingStoreAsync()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync(
+            [_admin], new AlvoApiWorldSetup(MapAlvoProblemDetails: true, FaultingData: true));
+
+        return await SlugAnsweredByAsync(world, new Probe(HttpMethod.Get, "/api/owners", _admin, null));
+    }
+
+    /// <summary>
+    /// The <c>unreadable-request</c> slug's probe. A third world, for the same reason the second one exists:
+    /// it runs behind a server body budget far below Alvo's own, which several other probes' bodies would
+    /// trip on their way to the refusal they are actually about.
+    /// </summary>
+    private static async Task<string> UnreadableSlugAnsweredByABodyTheServerRefusesAsync()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync(
+            [_admin], new AlvoApiWorldSetup(MapAlvoProblemDetails: true, ServerBodyLimitBytes: ServerBodyLimitBytes));
+
+        return await SlugAnsweredByAsync(world, new Probe(HttpMethod.Post, "/api/owners", _admin, OversizedOwner()));
+    }
+
+    /// <summary>
+    /// A server body budget small enough that an ordinary row crosses it, and far below Alvo's own 1 MB
+    /// bound — the deployment where the server, not Alvo, is the one that refuses.
+    /// </summary>
+    private const int ServerBodyLimitBytes = 64;
+
+    /// <summary>A row whose body is over <see cref="ServerBodyLimitBytes"/> and well under Alvo's own bound.</summary>
+    private static JsonObject OversizedOwner() => new() { ["name"] = new string('o', 200) };
 
     /// <summary>
     /// The slugs no request can yet produce, because whatever causes them is not honoured yet — empty today.
@@ -374,7 +519,29 @@ public sealed class ProblemDetailsTests
             _admin,
             new JsonObject { ["name"] = "Reused Ltd" },
             new Dictionary<string, string>(StringComparer.Ordinal) { ["Idempotency-Key"] = ReusedIdempotencyKey }),
+
+        // A value another row already holds on a field the descriptor declares `unique`. Like the probe above
+        // it is a statement about a request that came before, so the fact seeds the first owner before running
+        // the list. It is the one refusal in the catalogue no layer of Alvo can decide on its own — only the
+        // engine knows, which is why it was a 500 until #138. ConflictTests owns the behaviour; this owns the
+        // slug.
+        new(HttpMethod.Post, "/api/owners", _admin, new JsonObject { ["name"] = "Second Ltd", ["email"] = TakenEmail }),
     ];
+
+    /// <summary>The address the probe above collides with, first used by <see cref="SeedTheTakenEmailAsync"/>.</summary>
+    private const string TakenEmail = "taken@example.test";
+
+    /// <summary>Creates the owner whose <c>email</c> the conflict probe then tries to reuse.</summary>
+    /// <param name="world">The running API.</param>
+    private static async Task SeedTheTakenEmailAsync(AlvoApiWorld world)
+    {
+        using var response = await world.SendAsync(
+            HttpMethod.Post, "/api/owners", _admin, body: new JsonObject { ["name"] = "First Ltd", ["email"] = TakenEmail });
+
+        response.StatusCode.ShouldBe(
+            HttpStatusCode.Created,
+            "the address must really be taken, or the probe that reuses it is answered 201 and measures nothing");
+    }
 
     /// <summary>The key the probe above reuses, first used by <see cref="SeedTheReusedIdempotencyKeyAsync"/>.</summary>
     private const string ReusedIdempotencyKey = "already-used-for-another-body";
@@ -414,10 +581,13 @@ public sealed class ProblemDetailsTests
         ProblemResultFactory.NotFound(),
         ProblemResultFactory.ScopeRefused(),
         ProblemResultFactory.Unauthenticated("X-Alvo-Api-Key"),
+        ProblemResultFactory.Internal(),
+        ProblemResultFactory.Unreadable(StatusCodes.Status413PayloadTooLarge),
         Guarded(new AlvoAuthorizationException("refused")),
         Guarded(new AlvoRecordNotFoundException()),
         Guarded(new AlvoPreconditionFailedException("stale")),
         Guarded(new AlvoIdempotencyConflictException("reused")),
+        Guarded(new AlvoConstraintViolationException(AlvoConstraintKind.Unique, ["email"])),
         Guarded(new ArgumentException("malformed")),
     ];
 

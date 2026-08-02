@@ -22,6 +22,12 @@
           "description": "The category's display name.",
           "required": true,
           "maxLength": 60
+        },
+        "code": {
+          "type": "string",
+          "description": "An optional short code, unique across categories. Declared so a 409 on this entity's update is reachable — a duplicate on a field declared unique is the only way a PATCH reaches one, and every documented status has to be reachable.",
+          "maxLength": 12,
+          "unique": true
         }
       },
       "rules": {
@@ -112,6 +118,12 @@
           "description": "The category this product belongs to.",
           "entity": "categories",
           "required": true,
+          "onDelete": "restrict"
+        },
+        "parent_id": {
+          "type": "ref",
+          "description": "An optional parent product. A self-reference, and the cheapest way to make a 409 on THIS entity's delete reachable: 'categories' is already made conflict-on-delete by 'category_id' above, and a third entity would only move the problem to whatever nothing references.",
+          "entity": "products",
           "onDelete": "restrict"
         }
       },

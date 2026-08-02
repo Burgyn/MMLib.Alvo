@@ -1,5 +1,6 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/Burgyn/MMLib.Alvo")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Tests")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace MMLib.Alvo
 {
@@ -151,6 +152,20 @@ namespace MMLib.Alvo.Data
         public string Field { get; init; }
         public MMLib.Alvo.Data.AlvoFilterOperator Operator { get; init; }
         public object? Value { get; init; }
+    }
+    public enum AlvoConstraintKind
+    {
+        Unique = 0,
+        Referenced = 1,
+    }
+    public sealed class AlvoConstraintViolationException : System.Exception
+    {
+        public AlvoConstraintViolationException() { }
+        public AlvoConstraintViolationException(string message) { }
+        public AlvoConstraintViolationException(string message, System.Exception innerException) { }
+        public AlvoConstraintViolationException(MMLib.Alvo.Data.AlvoConstraintKind kind, System.Collections.Generic.IReadOnlyList<string> fields, System.Exception? innerException = null) { }
+        public System.Collections.Generic.IReadOnlyList<string> Fields { get; }
+        public MMLib.Alvo.Data.AlvoConstraintKind Kind { get; }
     }
     public abstract class AlvoFilter : System.IEquatable<MMLib.Alvo.Data.AlvoFilter>
     {
@@ -976,6 +991,7 @@ namespace MMLib.Alvo.Migrations
         public bool Applied { get; init; }
         public MMLib.Alvo.Migrations.MigrationPlan Plan { get; init; }
         public bool WasDryRun { get; init; }
+        public MMLib.Alvo.Migrations.MigrationResult EnsureApplied() { }
     }
     public sealed class MigrationStep : System.IEquatable<MMLib.Alvo.Migrations.MigrationStep>
     {

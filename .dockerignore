@@ -1,0 +1,12 @@
+**/bin/
+**/obj/
+**/artifacts/
+**/.vs/
+**/.idea/
+.git/
+.github/
+.husky/
+docs/
+test/
+StrykerOutput/
+*.md

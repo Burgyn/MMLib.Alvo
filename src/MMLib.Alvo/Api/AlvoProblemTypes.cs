@@ -22,13 +22,14 @@
 /// caller who cannot tell them apart re-issues the wrong one.
 /// </para>
 /// <para>
-/// <b>There is no slug for a 500, and that is deliberate.</b> <c>IAlvoData</c>'s fifth failure family
-/// (<see cref="InvalidOperationException"/> — "an invariant the implementation itself relies on is broken")
-/// is never caught by this layer: swallowing it into a hand-made problem document would lose the stack
-/// trace the host's own logging exists to record, so it propagates and the host answers. Cataloguing a slug
-/// Alvo never emits would document a behaviour that does not exist — which is the same defect as an
-/// unreachable entry anywhere else — so the catalogue stops at what Alvo actually produces, and
-/// <c>ProblemDetailsTests</c> holds it to that.
+/// <b>The 500's slug exists, and only a host that asked for it emits one.</b> <c>IAlvoData</c>'s fifth
+/// failure family (<see cref="InvalidOperationException"/> — "an invariant the implementation itself relies on
+/// is broken") is still never caught by the endpoint layer: swallowing it there would lose the stack trace the
+/// host's own logging exists to record, so it propagates. What changed in PR4 is that a host may now ask Alvo
+/// to answer for it — <c>AddAlvoProblemDetails()</c> plus <c>UseExceptionHandler()</c> — and when it does, the
+/// answer carries <see cref="Internal"/> rather than the framework's RFC 9110 status-code URI, which would
+/// classify a refusal by the status the response line already carried. An embedded host that registers
+/// neither keeps rendering its own 500, which is the point (#119).
 /// </para>
 /// <para>
 /// Public because it <em>is</em> the contract: an agent or an embedded host branching on a refusal needs the
@@ -69,8 +70,57 @@ public static class AlvoProblemTypes
     /// <summary>An idempotency key was reused for a different request (409).</summary>
     public const string IdempotencyConflict = "idempotency-conflict";
 
+    /// <summary>The request collides with stored state a database constraint guards (409).</summary>
+    /// <remarks>
+    /// <para>
+    /// A value another record already holds on a <c>unique</c> field, or a delete a <c>ref</c> declaring
+    /// <c>onDelete: "restrict"</c> refuses. Both were <see cref="Internal"/> until #138 — "an invariant Alvo
+    /// itself relies on is broken", which neither of them is: the caller's request conflicts with data that was
+    /// already there, and that is what 409 means.
+    /// </para>
+    /// <para>
+    /// <b>A second 409 beside <see cref="IdempotencyConflict"/>, by the same rule <see cref="OutOfScope"/> is a
+    /// second 403 by.</b> The two have different fixes and a caller can act on the difference: an idempotency
+    /// conflict is repaired with a fresh key and the same body, and this one with a different body (or by
+    /// removing what stands in the way). A caller who cannot tell them apart retries the wrong one forever.
+    /// </para>
+    /// <para>
+    /// <b>One slug for both kinds, and the <c>violations</c> array carries the difference.</b> A slug keys on
+    /// the refusal's kind, and "your request conflicts with stored state" is one kind; which constraint, and
+    /// which field, is per-violation detail with its own stable <c>code</c> (<c>unique</c>, <c>referenced</c>)
+    /// and pointer. Splitting the slug would put the schema's shape into the classification an agent branches
+    /// on.
+    /// </para>
+    /// </remarks>
+    public const string Conflict = "conflict";
+
     /// <summary>A credential was presented and cannot be used (401).</summary>
     public const string Unauthenticated = "unauthenticated";
+
+    /// <summary>The server refused the request before Alvo could read it (400, 408 or 413).</summary>
+    /// <remarks>
+    /// <para>
+    /// The one slug whose status is not fixed, and deliberately so: it keys on the <em>kind</em> of refusal —
+    /// the request never became something Alvo could look at — while the status says which limit the server
+    /// applied (a body over <c>MaxRequestBodySize</c>, framing that broke mid-upload, a body arriving too
+    /// slowly). Splitting it per status would encode the server's configuration in the classification an
+    /// agent branches on, and the fix is the same for all three: send a different request.
+    /// </para>
+    /// <para>
+    /// Distinct from <see cref="MalformedQuery"/>, which is Alvo reading a request and refusing its
+    /// <em>content</em>. This one is emitted only by <c>AlvoExceptionHandler</c>, from a
+    /// <c>BadHttpRequestException</c> the web server raised, and therefore only in a host that registered it.
+    /// </para>
+    /// </remarks>
+    public const string UnreadableRequest = "unreadable-request";
+
+    /// <summary>An invariant Alvo itself relies on is broken (500).</summary>
+    /// <remarks>
+    /// Emitted only by <c>AlvoExceptionHandler</c>, and therefore only in a host that registered it. The slug
+    /// carries no reason at all — not the exception's type, not its message — because a 500 is the one refusal
+    /// whose cause is by definition not the caller's business, and its text is the log's.
+    /// </remarks>
+    public const string Internal = "internal";
 
     /// <summary>
     /// Every slug this catalogue declares. Enumerated rather than discovered by reflection so a fact can
@@ -85,7 +135,10 @@ public static class AlvoProblemTypes
         NotFound,
         PreconditionFailed,
         IdempotencyConflict,
+        Conflict,
         Unauthenticated,
+        UnreadableRequest,
+        Internal,
     ];
 
     /// <summary>The full problem <c>type</c> URI for one slug.</summary>

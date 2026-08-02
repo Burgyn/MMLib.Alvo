@@ -3,9 +3,16 @@
 /// <summary>
 /// Formats the destructive steps of a <see cref="MigrationPlan"/> into an agent-readable
 /// "what will happen" summary, one line per destructive step. Pure and I/O-free: callers
-/// (e.g. <see cref="SchemaMigrationRunner"/>, structured error responses, logging) attach the
-/// result wherever a human or an agent needs to understand a refused migration at a glance.
+/// (<see cref="MigrationResult.EnsureApplied"/>, the core's migration runner, structured error
+/// responses, logging) attach the result wherever a human or an agent needs to understand a
+/// refused migration at a glance.
 /// </summary>
+/// <remarks>
+/// It lives beside the model rather than in the core because <see cref="MigrationResult.EnsureApplied"/>
+/// — the member every host calls to turn a refused plan into a failed start — needs the same summary,
+/// and the core is downstream of this assembly. The core still reaches it: Abstractions grants
+/// <c>InternalsVisibleTo</c> to <c>MMLib.Alvo</c>.
+/// </remarks>
 internal static class DestructiveChangeGuard
 {
     private const string NoDestructiveChangesSummary = "No destructive changes.";

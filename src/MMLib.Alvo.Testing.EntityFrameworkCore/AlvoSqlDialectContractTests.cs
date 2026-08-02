@@ -2,6 +2,7 @@
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Schema;
 using Shouldly;
+using System.Data.Common;
 using System.Text.RegularExpressions;
 using Xunit;
 
@@ -389,6 +390,57 @@ public abstract class AlvoSqlDialectContractTests
         fields.RenderComparableOperands(Column, Marker, type)
             .ShouldBe(fields.RenderComparableOperands(Column, Marker, type));
     }
+
+    /// <summary>
+    /// A dialect must not guess: an exception no engine of its own raised is not a constraint violation, and
+    /// answering one for it turns an unrelated failure into a <c>409</c> that tells the caller to change a
+    /// value which was never the problem.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// It is asserted generically because the failure mode is silent. The shared data path only translates what
+    /// a dialect claims, so a decoder that pattern-matched a message would classify a connection failure or a
+    /// <c>CHECK</c> violation as a duplicate — and the test that would have caught it is per driver, which is
+    /// exactly the gap this suite exists to close.
+    /// </para>
+    /// <para>
+    /// The probe is a <see cref="DbException"/> subclass no provider produces, so every dialect must answer
+    /// <see langword="null"/> — including a stand-in like <c>TSqlSqlDialect</c>, whose answer is
+    /// <see langword="null"/> for everything and which therefore passes this without evidence. That is the
+    /// price of a generic fact and it is stated rather than hidden: the positive direction — that a real
+    /// duplicate really is decoded — can only be proved against a real engine, and both shipped drivers prove
+    /// it in <c>MMLib.Alvo.Testing.Data.AlvoDataConstraintTests</c>.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void An_exception_this_engine_did_not_raise_is_not_decoded_as_a_constraint_violation()
+    {
+        CreateDialect().DecodeConstraintViolation(new ForeignDbException()).ShouldBeNull(
+            "a dialect that answers for another provider's exception classifies failures it cannot see");
+    }
+
+    /// <summary>
+    /// The member guards its argument, like every other member of this port that takes a reference: a
+    /// <see langword="null"/> here is the shared data path's bug, and it must not be answered with
+    /// <see langword="null"/> — which is a legitimate result and would hide it.
+    /// </summary>
+    [Fact]
+    public void Decoding_a_null_failure_is_refused()
+    {
+        var dialect = CreateDialect();
+
+        Should.Throw<ArgumentNullException>(() => dialect.DecodeConstraintViolation(null!));
+    }
+
+    /// <summary>
+    /// A <see cref="DbException"/> from no provider at all, for the fact above. It carries a message shaped
+    /// like the ones the engines really use, so a decoder that reads prose instead of a numeric code fails
+    /// rather than passing on the absence of a match.
+    /// </summary>
+#pragma warning disable RCS1194 // Nothing constructs this but the fact above, so the shape rule buys nothing.
+    private sealed class ForeignDbException()
+        : DbException("UNIQUE constraint failed: plate. FOREIGN KEY constraint failed. SQLSTATE 23505.");
+#pragma warning restore RCS1194
 
     private static EntitySchema Entity(string name) => new()
     {

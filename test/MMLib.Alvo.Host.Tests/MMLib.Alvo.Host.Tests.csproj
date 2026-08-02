@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/MMLib.Alvo.Host/MMLib.Alvo.Host.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" />
+  </ItemGroup>
+
+  <!--
+    The shared response readers, linked rather than re-implemented. A host fact reading a body by hand
+    (`body.ShouldContain("W-1")`) passes on a bare JSON array, on a row moved into a diagnostic field, and on
+    any response whose status nobody checked; ResponseReading exists precisely to refuse a body it does not
+    recognise — its own remarks call a quiet reader "a vacuity generator for every fact written after it".
+    Only the readers are linked, not the whole of test/_shared/api: the API world there builds its own
+    embedded WebApplication, and this suite's fixture must stay AlvoHost's own two methods.
+  -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/api/ResponseReading.cs" Link="_shared/ResponseReading.cs" />
+
+    <!--
+      And the faulting store, for the same reason: family 5 is unreachable from a well-formed request by
+      design, and since #138 mapped the last real-store failure that reached it onto a 409, a fact about a
+      500 has to substitute one. Re-implementing it here would be a second store whose failure family could
+      drift from the one the core's suite measures.
+    -->
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/api/FaultingAlvoData.cs" Link="_shared/FaultingAlvoData.cs" />
+    <Using Include="MMLib.Alvo.Api.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="descriptors/*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

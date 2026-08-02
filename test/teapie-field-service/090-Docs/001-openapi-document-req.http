@@ -1,0 +1,12 @@
+### The published document is the contract an agent reads (§0 principle 4), so the confidentiality
+### rules have to hold there too — a field name absent from every response but present in the
+### document is disclosed just the same.
+# @name Document
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/openapi/v1.json
+
+### And the UI that renders it, from the container's own assets rather than a CDN
+# @name Scalar
+## TEST-EXPECT-STATUS: [200]
+## TEST-HAS-BODY
+GET {{fsBaseUrl}}/scalar

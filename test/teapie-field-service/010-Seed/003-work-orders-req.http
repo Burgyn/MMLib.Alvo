@@ -1,0 +1,160 @@
+### Seven work orders in tenant north. The shape of this data is what every later assertion is
+### measured against, so it is deliberate rather than arbitrary:
+###   - priorities 1,1,2,2,3,3,4 — three ties, so keyset paging has to lean on the `id` tie-breaker
+###   - WO-1001..WO-1003 assigned to `tech-north`, the rest to nobody: a technician's list is a subset
+###   - `scheduled_for` set on two and null on five: `is.null` has a non-trivial answer
+###   - every status value used, so `or=(…)`, `not.` and `neq` each exclude a different set
+###   - `internal_notes` and `access_code` on every row: both hidden, so neither may ever come back
+# @name CreateWo1001
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "reference": "WO-1001",
+  "title": "Boiler service",
+  "description": "Annual service of the two ground-floor boilers.",
+  "status": "scheduled",
+  "priority": 1,
+  "quoted_price": 1250.50,
+  "is_emergency": false,
+  "scheduled_for": "2026-09-01T08:00:00+00:00",
+  "contact_email": "site@acme.test",
+  "metadata": { "floor": 3, "keys_at": "reception" },
+  "assigned_to": "{{userTechNorth}}",
+  "internal_notes": "Customer disputes last year's invoice.",
+  "access_code": "ACME-1001",
+  "customer_id": "{{CustomerAcmeId}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+### An emergency, same priority as WO-1001 — the first of the three ties
+# @name CreateWo1002
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "reference": "WO-1002",
+  "title": "Pump replacement",
+  "status": "scheduled",
+  "priority": 1,
+  "quoted_price": 890.00,
+  "is_emergency": true,
+  "scheduled_for": "2026-09-02T13:30:00+00:00",
+  "assigned_to": "{{userTechNorth}}",
+  "internal_notes": "Out-of-hours rate agreed by phone.",
+  "access_code": "ACME-1002",
+  "customer_id": "{{CustomerAcmeId}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+### The third and last row `tech-north` is assigned
+# @name CreateWo1003
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "reference": "WO-1003",
+  "title": "Annual inspection",
+  "status": "in_progress",
+  "priority": 2,
+  "quoted_price": 340.25,
+  "is_emergency": false,
+  "assigned_to": "{{userTechNorth}}",
+  "internal_notes": "Second visit; first was aborted.",
+  "access_code": "BORO-1003",
+  "customer_id": "{{CustomerBorovicaId}}",
+  "region_id": "{{RegionCentralId}}"
+}
+
+### Unassigned from here on: this is the row a technician's `get` must answer 404 for
+# @name CreateWo1004
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "reference": "WO-1004",
+  "title": "Leak repair",
+  "status": "in_progress",
+  "priority": 2,
+  "quoted_price": 120.00,
+  "is_emergency": true,
+  "internal_notes": "Escalated by the site manager.",
+  "access_code": "BORO-1004",
+  "customer_id": "{{CustomerBorovicaId}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+### Completed, so `completed_on` exercises the `date` type beside `scheduled_for`'s `datetime`
+# @name CreateWo1005
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "reference": "WO-1005",
+  "title": "Filter change",
+  "status": "completed",
+  "priority": 3,
+  "quoted_price": 75.00,
+  "is_emergency": false,
+  "completed_on": "2026-07-14",
+  "internal_notes": "Filters supplied by the customer.",
+  "access_code": "ACME-1005",
+  "customer_id": "{{CustomerAcmeId}}",
+  "region_id": "{{RegionCentralId}}"
+}
+
+### The second completed job, so `status=eq.completed` returns a pair rather than a single row
+# @name CreateWo1006
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "reference": "WO-1006",
+  "title": "Duct cleaning",
+  "status": "completed",
+  "priority": 3,
+  "quoted_price": 610.75,
+  "is_emergency": false,
+  "completed_on": "2026-07-28",
+  "internal_notes": "Ductwork older than the survey said.",
+  "access_code": "BORO-1006",
+  "customer_id": "{{CustomerBorovicaId}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+### The only row with no `is_emergency` and no `quoted_price` — so `is.null` on a boolean is reachable
+# @name CreateWo1007
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "reference": "WO-1007",
+  "title": "Safety audit",
+  "status": "cancelled",
+  "priority": 4,
+  "internal_notes": "Cancelled after the site closed.",
+  "access_code": "ACME-1007",
+  "customer_id": "{{CustomerAcmeId}}",
+  "region_id": "{{RegionCentralId}}"
+}

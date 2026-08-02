@@ -1085,6 +1085,162 @@ either file.
    configured the warning is dropped silently, so a crash was traded for a silent drop; and a dashboard-first
    apply emits no warning at all (issue **#83**).
 
+### Deviations added by PR4
+
+PR4's own Superpowers plan is discarded once merged, so anything it decided that outlives it is recorded
+here. The implementation-level *why* lives in `docs/architecture/host.md`, which is the surviving detailed
+record for the standalone host.
+
+35. **The core gained a public apply seam, and `extensibility.md`'s verb taxonomy gained a verb.**
+   `SchemaMigrationRunner` is `internal` and no public surface exposed it, so `MMLib.Alvo.Host` — a separate
+   assembly with no `InternalsVisibleTo` grant, and none is safe to give an unsigned assembly — could not
+   bring a descriptor up at all. `IServiceProvider.ApplyAlvoDescriptorAsync(MigrationOptions?, CancellationToken)`
+   is that seam, and `Apply{Thing}` is a new verb in `extensibility.md` rule 4 because the operation acts on a
+   *built* container rather than registering anything, so `Use`/`Add`/`Enable`/`From` all mis-describe it.
+   It takes `IServiceProvider` rather than `IHost` so a console host, a scope and a `WebApplication` all reach
+   it through one member. Cost: one more public member forever, and the orchestrator's six-collaborator
+   constructor stays `internal`, which is the trade. Its refusal message is crafted rather than left to
+   `GetRequiredService`, which would name the `internal` runner to a caller who cannot reference it.
+36. **#119's exception handler lives in the core, opt-in — not in the Host, as the issue said.**
+   `ProblemResultFactory` is `internal`, so a Host-side handler would be a second hand-written copy of Alvo's
+   problem-document shape, which is the defect class PR2's and PR3's reviews closed repeatedly. The issue's
+   *premise* is preserved exactly: `AddAlvo` does not register it, so an embedded host still owns its own
+   error rendering and Alvo still does not steal the exception. Cost: one more public extension
+   (`AddAlvoProblemDetails`), and the `internal` slug is emitted by a component only some hosts register — so
+   `ProblemDetailsTests` had to grow a second, faulting world to keep its catalogue facts set-equal. This is
+   the deviation `data-api.md` and `host.md` cite.
+37. **`MMLib.Alvo.Host` is `IsPackable=false`, and it is the one project allowed two providers.**
+   Earned by `package-boundary.md` rule (c) — a different distribution: it ships as the `mmlib/alvo` image,
+   so a nupkg of an entry point would publish a surface nobody references. Rule (a) applies to Scalar
+   alongside it. It references both `Data.Sqlite` and `Data.PostgreSql` because the deployment criterion is a
+   working backend with *no* configuration (SQLite) while compose runs PostgreSQL; exactly one is
+   *registered*, chosen by `Alvo:Database:Provider`, and an unknown name is refused by name. Recorded in
+   `package-boundary.md`'s *Current projects*, which the design asked to be updated when PR4 landed.
+38. **Health is liveness only.** §2.12 asks for readiness with database, cache and message-bus reachability;
+   no port answers "can you reach the database" cheaply, and adding one is a port widening PR4 has no mandate
+   for. What PR4 has instead is stronger than it looks: the host applies the descriptor **before** it listens,
+   so answering `/health/live` at all proves the descriptor applied, and a host whose apply failed exits
+   non-zero rather than reporting healthy with no schema. What is missing is the *continuing* answer — a
+   database that goes away after boot is invisible to liveness. Filed as **#133**, which is where the
+   reachability port gets designed; the rest of §2.12 is F4's, with #24's remainder.
+39. **Container configuration uses .NET's standard `Section__Key` environment spelling, not §X.1's
+   `ALVO_*` names.** The spec sketches `ALVO_ADMIN_EMAIL`, `ALVO_ADMIN__PATH`, `ALVO_SCRIPTS_ALLOW_UI_EDIT`;
+   PR4 uses `Alvo__DescriptorPath`, `Alvo__Database__Provider`, `ConnectionStrings__Alvo`. Reason: those
+   `ALVO_*` names belong to subsystems that do not exist yet (the admin UI, the script host), and inventing a
+   second naming convention now would mean either two spellings per setting or a translation layer nobody
+   asked for. The mount point (`/alvo/descriptor.json`) and the port (8080) *are* the spec's. **This is the
+   maintainer's to confirm, and it wants deciding before the image is published** (#24, F4) — after
+   publication the env names are a breaking change.
+40. **The compose stack is `alvo` + `postgres` only.** §X.1's stack is
+   `alvo + postgres + minio + mailhog`; object storage and email do not exist in F3, and a service nothing
+   talks to makes the stack prove less rather than more. The two missing services arrive with the
+   subsystems that use them.
+41. **#121 is fixed for the `Location` header; the OpenAPI document's `servers` is deferred.** The header is
+   built in one place and now carries `HttpRequest.PathBase`, with a matrix (no base / a configured base / a
+   trusted proxy's `X-Forwarded-Prefix`) that follows the header rather than comparing it. The document half
+   is a different problem: `OpenApiDocumentTransformerContext` carries no `HttpContext` and the document is
+   cached per document name, so a request-derived `servers` entry is a decision about whether Alvo's document
+   is per-request at all — which also cuts against the golden snapshot whose value is determinism. Filed as
+   **#130** rather than approximated. The docs UI's own document fetch under a path base is a third, separate
+   gap — **#134**, unmeasured rather than known-broken.
+42. **Forwarded headers are off by default, and turning them on clears `KnownIPNetworks`/`KnownProxies`.**
+   `X-Forwarded-Prefix` decides the URL a 201 advertises, so honouring it from an untrusted caller lets that
+   caller choose where a client is sent next. A container also cannot know its proxy's address, so the
+   allow-list has to be cleared for the feature to work at all — which is precisely why the switch is
+   explicit rather than inferred: only an operator knows something in front strips those headers.
+   `KnownIPNetworks`, not `KnownNetworks` — the latter is `ASPDEPR005` on .NET 10 and this repository builds
+   warnings as errors.
+43. **The compose + TeaPie e2e is in no ring.** `scripts/test-e2e` is run by a new CI job (`e2e`), folded
+   into the existing `Build & test` aggregate (`needs: [build-test, e2e]`, failing on any non-success) so it
+   is a required check with no branch-ruleset change. ring0 must stay Docker-free by its own comment, and
+   ring2's Docker use is one self-skipping Testcontainers image rather than an image build plus a
+   multi-service stack — the design's testing table already placed the full e2e at "CI on the PR, never
+   locally". Cost, stated: an agent's pre-PR gate does not run the e2e, so a compose-only breakage is first
+   seen on the PR.
+44. **#83 is not PR4's, and PR4 closed the half of deviation 34 that was reachable.** The Host is
+   code-first, so it never enters runtime-apply mode and nothing PR4 ships can reach #83's failure — there is
+   no Management API to apply through until F4. What PR4 *did* close is deviation 34's other stated cost —
+   "with no logging provider configured the warning is dropped silently" — because the standalone host
+   configures providers and `AlvoHostLoggingTests.The_unhonoured_subsystem_warning_reaches_the_hosts_logging_provider`
+   proves the unhonoured-subsystem warning actually arrives. #83's remaining gap is exactly and only the
+   dashboard-first mode: priming the policy catalog from the stored descriptor at startup, and emitting the
+   same warning on that path — the second of which needs `ILogger` on `RuntimeSchemaService`'s **public**
+   six-parameter constructor, and therefore moves the public-API baseline for a subsystem PR4 does not host.
+45. **The docs UI is on by default.** `Alvo:Docs:Enabled` defaults to `true`, so a container serves
+   `/openapi/v1.json` and `/scalar` unless told not to. Consistent with deviation 27 (the declared,
+   non-hidden schema shape is public) and with §0 principle 4 (the document *is* the contract an agent
+   reads); a deployment that disagrees turns it off with one setting, and the switch removes **both** routes,
+   because a docs page without its document renders an error rather than nothing.
+46. **`UseRouting()` was dropped after a probe showed it inert on .NET 10 — a deviation from PR4's own
+   written plan, which listed it under *consumes*.** The widely cited rule, which Microsoft Learn still
+   states, is that a `WebApplication` needs an explicit `UseRouting` *after* `UsePathBase` or routes match
+   before the path is rewritten. Measured under this runtime rather than assumed: `UsePathBaseMiddleware`
+   re-runs matching over the rewritten path itself, a probe answers 200 for `UsePathBase` and 404 for the
+   same rewrite performed by hand, and removing the call leaves every path-base fact green. Shipping it
+   would imply **Alvo imposes a pipeline-ordering requirement on consumers**, which it does not. Surface-
+   neutral, recorded because a deviation from the plan a reader can still find is otherwise indistinguishable
+   from an oversight.
+47. **The image build states its version (`MinVerVersionOverride=0.0.0-docker`) rather than skipping MinVer,
+   and turns SourceLink off.** The authorized fallback was `-p:MinVerSkip=true`; it was not taken, because
+   skipping stamps every assembly `1.0.0` — a version this pre-1.0 project has never released — whereas
+   `0.0.0-docker` is honest and is the `ARG` F4's publish pipeline hands the real version to. The measured
+   fact that corrected the premise behind the authorization: an unflagged image build **succeeds** with 17
+   warnings and **none of them is an error**, because `MINVER1001` and the Git/SourceLink warnings are
+   MSBuild *task* warnings and `TreatWarningsAsErrors` governs the C# compiler — so the "if it errors"
+   contingency could never have fired. And **12 of those 17 are SourceLink**, not MinVer, which nobody had
+   anticipated; `EnableSourceLink=false` + `EnableSourceControlManagerQueries=false` is what silences them,
+   and source-link metadata serves symbol servers for published packages, which this image is not.
+   `TreatWarningsAsErrors` itself is inherited unchanged — the image builds under the repository's own bar.
+
+**A smaller note, recorded so it is a decision rather than a slip:** the TeaPie suite lives at `test/teapie`,
+not the skill's default `tests/teapie`. `CLAUDE.md`'s repo map documents `test/` as this repository's test
+root, and `test/` beside `tests/` — one letter apart — is a navigation hazard for exactly the agent-first
+reader this project optimises for. The TeaPie skill explicitly permits a custom path, so nothing is being
+worked around.
+
+48. **`AlvoHostOptions` is bound with a bare `Configure<T>`, not validated at startup — a deviation from
+   PR4's own plan and from `extensibility.md` rule 5.** The plan's locked File Structure row promised "the
+   `Alvo` configuration section as typed, **validated** options", and rule 5 requires
+   `ValidateDataAnnotations().ValidateOnStart()` or an `IValidateOptions<T>` producing a structured
+   fail-fast error with a fix suggestion (§0 principle 4). Neither is present: the option classes carry no
+   annotations and nothing validates them on start. The two settings that *are* fail-fast got there by hand
+   — `AlvoDatabaseSelector`'s crafted refusal, and the PostgreSQL driver's own refusal for a null
+   connection string — while `DescriptorPath` got nothing. **Its visible cost is issue #132**: a mis-typed
+   descriptor mount ends in an unhandled `FileNotFoundException` and exit 139, which is precisely the
+   failure an `IValidateOptions<AlvoHostOptions>` would have rendered as a structured refusal naming the
+   path it could not find. Recorded here rather than fixed, because the fix belongs with #132 in F4 — but
+   recorded, so a later reader can tell a deferred decision from an oversight.
+
+49. **`ProblemResultFactory.Internal()` takes no argument, where the plan specified
+   `Internal(string detail)`.** The detail is a baked-in constant instead, and the reasoning is in the
+   member's own XML docs, in `data-api.md`'s mode table and in the changelog: a 500's detail must not vary
+   with the exception, or it becomes the disclosure channel the whole family-5 contract exists to close.
+   The behaviour is right and the surface is `internal`, so the cost is nil — it is recorded only because
+   deviation 46 was recorded on exactly the standard that a surface-neutral departure from the written plan
+   still earns a line.
+50. **There are now TWO compose stacks and TWO TeaPie suites — deviations 40 and 43 are amended, not
+   replaced.** Deviation 40's "the compose stack is `alvo` + `postgres` only" is still true *of each stack*
+   and its reason still stands (minio/mailhog arrive with the subsystems that use them). What changed is the
+   count. `docker-compose.yml` keeps `vehicle-registry` on 8080 and answers "does the stack boot and
+   answer"; `docker-compose.field-service.yml` runs `examples/field-service` on 8081, over its own database,
+   and answers "does the product behave as documented" — two tenants, five keys differing only in role and
+   tenant, an audited entity beside an unaudited one, hidden and `readOnly` fields, an unconfigured
+   operation. `scripts/test-e2e` runs both, so deviation 43's "in no ring, one CI job" is unchanged.
+   **Why a second file rather than a second service or a compose profile**, since this is the decision most
+   likely to be undone by someone who does not know: Compose interpolates the *whole* file before it selects
+   which services to start, and **a profile does not defer that** — measured. Five more `${...:?}` secrets
+   inside `docker-compose.yml` would therefore make the README's plain `docker compose up` fail for anyone
+   who had exported only `ALVO_DEMO_KEY_SECRET`. A separate file leaves the quickstart byte-for-byte
+   unchanged and gives the demo its own database, so two descriptors can never apply into one schema. The
+   cost, stated: two files to keep in step when #24's remainder adds minio and mailhog.
+51. **The demo's tenant ids and user ids are committed; only the key secrets are not.**
+   `examples/field-service/demo-identities.env` carries them, and both compose and `scripts/test-e2e` read
+   that one file so the container's configuration and the environment the tests assert against cannot drift.
+   They are *identifiers*, not credentials — a create on a tenant-scoped entity has to carry `tenant_id` and
+   `assigned_to` names a technician by user id, so no test can be written without knowing them. The five key
+   secrets keep the `${...:?}` form: the image ships none (§2.14) and compose refuses to start rather than
+   invent one.
+
 ## Assumptions (veto candidates)
 
 1. Own outbox in the core with an `IEventDispatcher` port. **Decided with the

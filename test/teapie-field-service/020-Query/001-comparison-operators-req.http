@@ -1,0 +1,85 @@
+### Every operator on the PostgREST allow-list, one request each, against the seeded seven rows.
+### Each one is asserted as the exact SET of references it returns, never as "the request succeeded":
+### a 200 carrying the wrong rows is the failure this group exists to catch.
+# @name Eq
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?reference=eq.WO-1003&limit=100
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+###
+# @name Neq
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?status=neq.completed&limit=100
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+###
+# @name Gt
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?priority=gt.2&limit=100
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+###
+# @name Gte
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?priority=gte.3&limit=100
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+###
+# @name Lt
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?priority=lt.2&limit=100
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+###
+# @name Lte
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?priority=lte.1&limit=100
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### `like` is case-SENSITIVE, and the pair below is what proves it rather than asserting it
+# @name Like
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?title=like.%25repair&limit=100
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### The same pattern in the wrong case: `like` must return nothing where `ilike` returns the row
+# @name LikeWrongCase
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?title=like.%25REPAIR&limit=100
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+###
+# @name ILike
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?title=ilike.%25REPAIR&limit=100
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+###
+# @name In
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?reference=in.(WO-1001,WO-1007,WO-4242)&limit=100
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### `is` over a null: five of the seven rows carry no `scheduled_for`
+# @name IsNull
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?scheduled_for=is.null&limit=100
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### `is` over a boolean, which SQL's own IS accepts and `eq` would answer differently for nulls
+# @name IsTrue
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?is_emergency=is.true&limit=100
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### Several parameters are one conjunction, PostgREST's own reading — a filter only ever narrows
+# @name TwoParametersConjoin
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?status=eq.completed&priority=eq.3&limit=100
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### An operator spelling that is not on the allow-list is refused, never quietly read as `eq`
+# @name UnknownOperator
+## TEST-EXPECT-STATUS: [422]
+GET {{fsBaseUrl}}/api/work_orders?priority=between.1
+X-Alvo-Api-Key: {{keyDispatcherNorth}}

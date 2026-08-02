@@ -1,0 +1,5 @@
+### Scalar renders the document, and does so from the container's own assets
+# @name Scalar
+## TEST-EXPECT-STATUS: [200]
+## TEST-HAS-BODY
+GET {{baseUrl}}/scalar

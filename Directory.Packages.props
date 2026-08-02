@@ -49,6 +49,11 @@
          System.Security.Cryptography.Xml below: pin the first patched version so it wins over the
          transitive one, without any project taking a direct reference. -->
     <PackageVersion Include="Microsoft.OpenApi" Version="2.7.5" />
+    <!-- The docs UI MMLib.Alvo.Host renders the OpenAPI document with. MIT (verified on the 2.16.17
+         nuspec: <license type="expression">MIT</license>). Host-only by the package-boundary rule: a
+         docs UI is a hosting decision (the F3 design's OpenAPI and Scalar section), so the core stays
+         on Microsoft.AspNetCore.OpenApi alone and an embedded consumer picks its own UI or none. -->
+    <PackageVersion Include="Scalar.AspNetCore" Version="2.16.17" />
     <!-- Test-only: an in-process TestServer for the Data API suite. WebApplicationFactory is
          deliberately not used — it needs an entry-point assembly, which does not exist until
          MMLib.Alvo.Host lands in PR4. -->

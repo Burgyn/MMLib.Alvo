@@ -1,0 +1,5 @@
+### The list is a paged envelope, and it contains what we created
+# @name ListOwners
+## TEST-EXPECT-STATUS: [200]
+GET {{baseUrl}}/api/owners?limit=50&order=name.asc
+X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}

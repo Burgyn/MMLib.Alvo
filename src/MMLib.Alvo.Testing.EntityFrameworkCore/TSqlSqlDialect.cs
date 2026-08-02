@@ -1,5 +1,7 @@
-﻿using MMLib.Alvo.Data.EntityFrameworkCore;
+﻿using MMLib.Alvo.Data;
+using MMLib.Alvo.Data.EntityFrameworkCore;
 using MMLib.Alvo.Schema;
+using System.Data.Common;
 
 namespace MMLib.Alvo.Testing.Data;
 
@@ -116,5 +118,31 @@ public sealed class TSqlSqlDialect : IAlvoSqlDialect
         ArgumentNullException.ThrowIfNull(rowCountParameterMarker);
         var offset = rowOffsetParameterMarker ?? "0";
         return $"OFFSET {offset} ROWS FETCH NEXT {rowCountParameterMarker} ROWS ONLY";
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <para>
+    /// <b>Nothing, and the reason is a property of this stand-in rather than of T-SQL.</b> A real SQL Server /
+    /// Azure SQL driver decodes this from <c>SqlException.Number</c> — <c>2627</c> (a unique <em>constraint</em>),
+    /// <c>2601</c> (a unique <em>index</em>; both mean the same thing to a caller and both must be handled, which
+    /// is the trap here) and <c>547</c> (a constraint conflict, which is how a <c>RESTRICT</c>-ed delete surfaces
+    /// on this engine). This package ships no <c>Microsoft.Data.SqlClient</c> reference, so it cannot see that
+    /// type, and inventing a decode from the base <see cref="DbException"/> would be exactly the guess the port
+    /// forbids: <see cref="DbException.SqlState"/> is not populated by SqlClient, so the only thing left to match
+    /// would be the message.
+    /// </para>
+    /// <para>
+    /// It is still worth having the member here rather than leaving it unimplemented, because this type's job is
+    /// to prove the seam is <em>sufficient</em> — and the fact that it is answerable honestly with
+    /// <see langword="null"/>, without producing a wrong <c>409</c>, is part of what that means. Answering
+    /// <see langword="null"/> costs only the improvement: the failure keeps propagating as a 500, exactly as it
+    /// did before #138.
+    /// </para>
+    /// </remarks>
+    public SqlConstraintViolation? DecodeConstraintViolation(DbException failure)
+    {
+        ArgumentNullException.ThrowIfNull(failure);
+        return null;
     }
 }

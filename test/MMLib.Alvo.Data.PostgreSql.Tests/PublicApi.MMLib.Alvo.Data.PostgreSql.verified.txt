@@ -19,6 +19,7 @@ namespace MMLib.Alvo.Data.PostgreSql
     public sealed class PostgreSqlSqlDialect : MMLib.Alvo.Data.EntityFrameworkCore.IAlvoSqlDialect
     {
         public PostgreSqlSqlDialect() { }
+        public MMLib.Alvo.Data.EntityFrameworkCore.SqlConstraintViolation? DecodeConstraintViolation(System.Data.Common.DbException failure) { }
         public string RenderColumn(string columnName) { }
         public string RenderNullProjection(string storeType) { }
         public string RenderTable(MMLib.Alvo.Schema.EntitySchema entity, MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation? lockedPreImageFor) { }

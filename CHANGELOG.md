@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (breaking)
 
+- **A `unique` field on a `tenancy: "scoped"` entity is now unique *within* the tenant, not across the
+  instance** (#137). It was a **cross-tenant existence oracle**: `DescriptorModelBuilder` emitted
+  `HasIndex(field).IsUnique()` with no `tenant_id` — and the same for a declared `unique` index — so
+  tenant B's create of a value only tenant A held was refused while the same create of a free value
+  succeeded. The two requests differ in exactly one thing, so the difference between the answers *was*
+  the disclosure: B learned whether A held the value, one request per candidate. That is the inference
+  the 404-everywhere rule exists to prevent, and it contradicted §0's secure-by-default. A scoped
+  entity's unique index now spans `(tenant_id, …)`; a non-scoped entity keeps instance-wide uniqueness,
+  a non-unique index is unchanged, and a descriptor that already named `tenant_id` keeps its own column
+  order. **Mapping the underlying refusal to a clean 409 did not fix this** — `409`-versus-`201` is the
+  same one-bit signal as `500`-versus-`201` was — which is why the two were separate issues.
+
+  **This changes emitted DDL.** `IX_<table>_<field>` becomes `IX_<table>_tenant_id_<field>` on a scoped
+  entity, so the next apply drops one index and creates another (`DropIndex`/`AddIndex`, neither
+  destructive, so no `AllowDestructive` is needed). The change is always in the *widening* direction —
+  the new index forbids strictly less than the old one — so no existing row can violate it and no
+  migration can fail on data. Nothing is released, which is why this was the cheap moment.
+
+- **`IAlvoSqlDialect` gained an abstract member, `DecodeConstraintViolation`.** A driver outside this
+  repo will no longer compile until it implements it. Abstract rather than a default interface member on
+  purpose: `null` means "not a constraint violation", which is a legitimate answer for every other
+  failure, so an inherited default would have a new driver silently answer `500` for every duplicate —
+  indistinguishable from correct behaviour on an engine that really reported something else.
+
+
 - **A descriptor may no longer name a field `order`, `limit`, `offset`, `after`, `select`,
   `or`, `and` or `not`.** The generated Data API's query string reserves each of these
   (`?limit=10`, `?or=(...)`, `?not.color=eq.red`), so a request could not tell a filter on
@@ -86,7 +111,128 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   difference is that the new code's fix suggestion is **retry the request**, which is the one action
   that can succeed when nothing about the value was wrong.
 
+- **A 201's `Location` header now honours `HttpRequest.PathBase`** (#121). A host mounted under a
+  path base — `UsePathBase("/alvo")`, or a reverse proxy sending `X-Forwarded-Prefix` — used to
+  advertise `/api/owners/<id>`, which 404s at the proxy edge; it now advertises
+  `/alvo/api/owners/<id>`. This is a behaviour change for anyone already deploying under a path
+  base, and the direction is that URLs which used to be wrong are now right: following the header
+  works where it previously did not. No released version is affected — both the header and the fix
+  land in this same unreleased cycle. A host with no path base is unaffected, byte for byte. The
+  **OpenAPI document** still declares no `servers` entry, so its paths remain root-relative behind
+  a path base (#130), and the Scalar UI's own behaviour there is unmeasured (#134).
+
 ### Added
+
+- **A standalone host you can run without writing any code.** `docker compose up` brings up a
+  working backend defined entirely by a JSON descriptor mounted at `/alvo/descriptor.json` — no
+  project, no migrations, no scaffolding. What you get:
+  - **The descriptor is the whole backend.** Entities, fields, validation and per-operation rules
+    from the mounted file become tables and a REST API. Edit the file and restart, and an
+    **additive** change (a new entity, a new field) migrates on the way up. A **destructive** one
+    does not: the host applies with `AllowDestructive: false` and has no setting to change that, so
+    a descriptor that would drop a column or a table is refused and the container fails to start
+    rather than losing data on a restart. An entity the file does not declare 404s, which is the
+    point: nothing is baked in.
+  - **Interactive documentation at `/scalar`**, rendering the OpenAPI document the host serves at
+    `/openapi/v1.json`. It works with **no outbound network access** — the assets ship inside the
+    image. `Alvo__Docs__Enabled=false` removes both routes.
+  - **Liveness at `/health/live`**, and it means something: the host applies the descriptor
+    *before* it listens, so an answer proves the schema is up. A host whose apply fails exits
+    non-zero rather than reporting healthy with no schema. There is **no** readiness probe yet —
+    that needs a database-reachability port (#133).
+  - **Configuration is standard .NET environment binding** — `Alvo__DescriptorPath`,
+    `Alvo__Database__Provider` (`sqlite` | `postgresql`), `ConnectionStrings__Alvo`,
+    `Alvo__PathBase`, `Alvo__Docs__Enabled`, `Alvo__Auth__DevKeys__0__*`. SQLite is the
+    zero-configuration default; an unknown provider name is refused rather than defaulted, and a
+    PostgreSQL host with no connection string fails rather than quietly writing to a
+    container-local file.
+  - **Behind a reverse proxy**, `Alvo__PathBase` and — opt-in, off by default —
+    `Alvo__ForwardedHeaders__Enabled` for `X-Forwarded-*`. Off by default deliberately:
+    `X-Forwarded-Prefix` decides the URL a 201 advertises, so an untrusted caller honoured by
+    default would choose where the next client is sent.
+  - **No default credential, ever.** The image ships no API key and seeds none; the demo stack
+    refuses to start until you supply one. A host with no key configured still starts and still
+    refuses every write. The stack publishes its port on **`127.0.0.1` only**, so following the
+    quickstart on a cloud VM does not put a read/write backend on the internet — Docker's
+    `DOCKER-USER` chain sits ahead of a host firewall, so a `0.0.0.0` bind here would not be
+    stopped by one.
+  - **An end-to-end suite** (`scripts/test-e2e`) that builds the image, brings the stack up
+    against PostgreSQL, runs TeaPie against the published port and asserts the created row is in
+    the database. It runs in CI on every pull request.
+
+- **A runnable complex demo, and an end-to-end suite that measures what F3 claims.**
+  `examples/field-service` is a multi-tenant field-service backend — global reference data beside
+  two tenant-scoped entities, one audited and one not, an optional hidden field, a required hidden
+  field, a `readOnly` field, an unconfigured operation, both a caller-level and a row-level rule,
+  every field type, both kinds of `format`, and indexes over the fields the tests filter and order
+  on. Its README states, per construct, which behaviour it exists to let a test measure.
+  `docker-compose.field-service.yml` runs it on `:8081` with five dev keys differing only in role
+  and tenant; the repo-root `docker compose up` is unchanged.
+
+  `test/teapie-field-service` drives 327 assertions against that container: the PostgREST query
+  grammar including keyset paging over four pages, RFC 9457 problem documents carrying every
+  violation at once, `ETag`/`If-Match` in both directions of the `audit` pair, `Idempotency-Key`
+  measured by row count, field confidentiality compared as a whole refusal document, all three
+  authorization shapes in one system state, tenant isolation, the published OpenAPI document, and
+  six multi-step CRUD journeys that end by asserting the state of the world. `scripts/test-e2e`
+  runs both stacks and adds two PostgreSQL assertions no HTTP check can make — that a hidden
+  field's value really is stored, and that the two tenants' rows really are partitioned.
+
+  **Three defects it found are recorded rather than fixed here**, each pinned by a labelled case
+  that turns red when the defect is. They are **two independent problems**, and conflating them
+  would let a fix for one be mistaken for a fix for the other:
+
+  - *A database constraint violation is answered `500`, not `409`.* Two reachable shapes — a
+    duplicate value on a `unique` field, and a delete blocked by an `onDelete: restrict` reference.
+    Every other declared facet is validated and answered with a per-field 422; a database constraint
+    is not mapped onto `IAlvoData`'s refusal families at all, so an agent gets no violation, no
+    pointer and no field name. Pinned by `030-Problems/002` and `100-Scenarios/001`.
+  - *A `unique` field on a `tenancy: "scoped"` entity is unique across **all** tenants.* The driver
+    emits `HasIndex(field).IsUnique()` with no `tenant_id`, so tenant B's create collides with a
+    value only tenant A holds — a **cross-tenant existence oracle**, one request per candidate, and
+    the one channel through which the isolation the rest of the framework enforces leaks.
+    **Mapping the violation to a clean `409` does not close this**: `409`-versus-`201` is the same
+    signal to tenant B as `500`-versus-`201`. The fix is a tenant-scoped unique index. Pinned
+    separately by `080-Tenancy/002`, which asserts *distinguishability* rather than a status
+    precisely so a status-only change cannot be mistaken for a fix.
+
+  Known limits, so this is honest: the image is **not published yet** — you build it from this
+  repository — and there is no dashboard, no Management API and no CLI (#24, all F4). A mis-typed
+  descriptor mount currently ends in a stack trace rather than a readable refusal (#132), and the
+  docs UI's behaviour behind a path base is unmeasured (#134). `docs/architecture/host.md` records
+  what the host is and what it deliberately is not.
+
+- **`IServiceProvider.ApplyAlvoDescriptorAsync()`** — new public API in the core. The one verb a
+  host performs on a built container: bring the configured descriptor up, creating or migrating the
+  schema it declares. Call it *before* mapping endpoints — `MapAlvoDataApi()` reads entity names off
+  the applied schema, and the apply is also what primes the policy catalog (an unprimed catalog
+  denies everything). Previously the orchestrator behind it was `internal`, so only code inside the
+  core assembly could apply a descriptor at all. A **refusal is a return value, not an exception** —
+  a caller doing a dry run wants to read the plan — so a host that wants a running backend calls
+  **`MigrationResult.EnsureApplied()`** on the result, also new. It throws only on a plan that was
+  neither applied, empty, nor a dry run, naming the destructive steps that were refused; an
+  unchanged descriptor (empty plan) and a dry run pass through untouched.
+
+- **`AddAlvoProblemDetails()`** — new public API in the core, and **opt-in**: `AddAlvo()` does not
+  register it, so nothing changes for an existing host. Registering it, together with
+  `UseExceptionHandler()`, makes an unhandled exception **on one of Alvo's generated routes** come
+  back as Alvo's own problem document (`type: https://alvo.dev/errors/internal`) with a constant
+  detail and nothing about the exception in the body, logged with its stack trace server-side —
+  except when the caller simply hung up (an `OperationCanceledException` on an aborted request),
+  which is not an error and is not logged as one. It is opt-in because an embedded host owns
+  its own error rendering, and Alvo silently swallowing your exceptions would be the wrong default.
+  It also calls `AddProblemDetails()` for you, because `UseExceptionHandler()` refuses to configure
+  itself with neither a handler path nor a problem-details fallback. The `internal` slug joins
+  `AlvoProblemTypes.All` and the published `problemDetails` schema's `type` enum.
+
+  **The handler declines what is not Alvo's**, which is what makes it safe to add to a host that
+  renders its own errors: an `IExceptionHandler` you register *after* it still runs — for your own
+  endpoints, and for anything that failed before routing matched. And a request your **web server**
+  refused before Alvo could read it (a body over Kestrel's `MaxRequestBodySize`, an upload the
+  client truncated, a body arriving too slowly) is answered at *that* status — 413, 400 or 408 —
+  under the new `https://alvo.dev/errors/unreadable-request` slug, and logged at `Warning` without a
+  stack trace, rather than coming back as a 500 that tells an agent to retry a request whose size is
+  the thing that has to change.
 
 - **The HTTP Data API.** A host that calls `MapAlvoDataApi()` gets a REST API generated from its
   descriptor: five routes per declared entity (`GET` collection, `GET {id}`, `POST`, `PATCH`,
@@ -142,3 +288,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   non-allow-listed licenses), and a CodeRabbit config (`.coderabbit.yaml`) tuned to this
   project's conventions (Central Package Management, disallowed packages, XML doc and
   comment-style rules).
+
+### Fixed
+
+- **A database constraint violation is now `409`, naming the field, instead of `500 internal`** (#138).
+  A value another record already holds on a `unique` field, and a delete an `onDelete: "restrict"`
+  reference refuses, both reached the host as the provider's own exception and rendered as
+  `alvo.dev/errors/internal` — *"an invariant Alvo itself relies on is broken"*, which neither is: the
+  caller's request conflicts with stored state, which is what `409` means. Three costs, each its own
+  defect: an agent could not repair the request (no pointer, no field, no fix suggestion, in a framework
+  whose principle 4 is structured errors *with* one); a `500` invites a retry that can never succeed;
+  and the operator was paged, with a stack trace, for an ordinary caller mistake.
+
+  A new slug, `conflict`, is a second `409` beside `idempotency-conflict` by the same rule `out-of-scope`
+  is a second `403` by — the two have different fixes. One slug covers both constraint kinds, with the
+  difference in `violations`: code `unique` and pointer `/<field>` for a collision, code `referenced` and
+  the empty pointer for a `restrict` refusal (a `DELETE` has no field to change). The refusal still
+  discloses no value, no engine message and no constraint or index name, and the `restrict` case names no
+  entity either — which of the entities that may reference a row actually holds one is a fact about data
+  the caller may not be able to read. A conflict confined to framework-managed columns keeps propagating
+  as the broken invariant it is.
+
+  The engine-specific decoding lives behind the driver's own SQL seam, never in a `catch` that matches a
+  message: PostgreSQL reads SQLSTATE `23505`/`23503` plus the constraint name, SQLite the extended result
+  code `2067`/`1555`/`787` plus the columns its message names. Both are held to one inherited suite
+  (#139), which caught two real engine differences the PostgreSQL-only e2e could not have: `ExecuteDelete`
+  on SQLite loses the extended result code, and Alvo's *runtime* EF model declared no indexes at all, so
+  the constraint-name resolution PostgreSQL depends on always came back empty.
+
+- **A duplicate in an *idempotent* create no longer costs ten transactions.** The retry that converges a
+  lost key race caught any storage write failure, so a duplicate was re-attempted ten times — about
+  450 ms — before surfacing. It is no longer a `DbException`, so it leaves on the first attempt. The
+  idempotency record's own primary key is deliberately still untranslated, because losing that race is
+  what the retry exists for. (Part of #127; the rest of #127 is still open.)

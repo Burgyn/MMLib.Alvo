@@ -1,0 +1,35 @@
+### Only an 'admin' may create a region — the descriptor gives `regions` no other create rule
+# @name CreateNorthRegion
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/regions
+X-Alvo-Api-Key: {{keyAdmin}}
+Content-Type: application/json
+
+{
+  "code": "NORTH",
+  "name": "Northern region"
+}
+
+### A second region, so a filter over `region_id` has something to discriminate
+# @name CreateCentralRegion
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/regions
+X-Alvo-Api-Key: {{keyAdmin}}
+Content-Type: application/json
+
+{
+  "code": "CENTRAL",
+  "name": "Central region"
+}
+
+### A dispatcher may not create one: `regions.create` names 'admin' and nothing else
+# @name DispatcherCannotCreateRegion
+## TEST-EXPECT-STATUS: [403]
+POST {{fsBaseUrl}}/api/regions
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{
+  "code": "WEST",
+  "name": "Western region"
+}
