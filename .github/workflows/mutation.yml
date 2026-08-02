@@ -324,6 +324,26 @@ jobs:
 
           exit "$stryker_exit"
 
+      # The tracking issue tells whoever reads it to open the log to tell a vacuous run
+      # from a below-threshold score. Until now that log existed only in the job console,
+      # which is not linkable from an issue and is truncated for a long run — so upload it.
+      # `always()` so it survives the shard failing, which is the only case anyone wants it.
+      #
+      # WHAT THIS DOES NOT COVER, deliberately stated: a shard killed by `timeout-minutes`
+      # is CANCELLED, and a cancelled job does not run its remaining steps, `always()`
+      # included. So the one outcome with no verdict at all — #98's whole subject — is also
+      # the one whose log is not captured here. Nothing short of streaming the log
+      # elsewhere fixes that, and it is not worth it: a timeout needs the shard's budget
+      # looked at, not its log read.
+      - name: Upload the Stryker log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: stryker-log-${{ matrix.name }}
+          path: test/stryker-output.log
+          if-no-files-found: ignore
+          retention-days: 30
+
   # Post-merge, nothing blocks on this workflow, so a failure has to leave a mark
   # somebody trips over. Without this the only signal is GitHub's default email to
   # whoever clicked merge — which is precisely how a quietly-rotting main happens.
@@ -407,15 +427,22 @@ jobs:
 
           - **`failure` — mutation score below threshold.** The adversarial suite
             stopped biting. The fix is to add or strengthen a test, not to revert.
-          - **`failure` — vacuous run (zero mutants tested).** The gate itself is
-            broken (see stryker-net#3094); the shard's log carries an `::error::`
-            annotation naming it. More urgent than a low score: it means the
-            previous greens were meaningless. Open the log to tell this apart from
-            a below-threshold failure.
+          - **`failure` — a vacuous run, or one that measured the wrong thing.**
+            The gate is broken, not the suite (stryker-net#3094); the shard's log
+            carries an `::error::` annotation naming it, emitted by
+            `scripts/assert-mutation-run`. More urgent than a low score: it means
+            the previous greens were meaningless.
           - **`cancelled` / `timed_out` — no verdict produced.** The shard hit
             `timeout-minutes`, so there is no score at all, and nothing here says
             the suite got worse. What needs looking at is the run's cost and its
             budget — not the tests.
+
+          Each shard uploads its Stryker log as a **`stryker-log-<shard>`** artifact
+          on the run linked above; that is how to tell a vacuous run from a
+          below-threshold score. One gap worth knowing rather than discovering: a
+          shard killed by `timeout-minutes` is *cancelled*, and a cancelled job never
+          reaches its upload step — so the third case above is precisely the one with
+          no artifact. It is a budget question anyway, not a log-reading one.
           MD
           } > mutation-report.md
 

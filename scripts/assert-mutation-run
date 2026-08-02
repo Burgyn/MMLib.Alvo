@@ -61,6 +61,12 @@ require_number() { # <value> <what it is>
             # script then exits 0 — a guard failing open on a typo in its own
             # arguments.
             fail "$2 must be a whole number, got '$1'." ;;
+        0*)
+            # `$(( 0834 ))` is OCTAL in bash, so a leading zero would either compute a
+            # silently wrong floor (010 -> 8) or abort on a digit >= 8 ("value too great
+            # for base"). A bare 0 is rejected by the same arm, which is right for a
+            # different reason: a floor of zero is a check that cannot fail.
+            fail "$2 must not have a leading zero (bash reads 0NNN as octal), got '$1'." ;;
     esac
 }
 
