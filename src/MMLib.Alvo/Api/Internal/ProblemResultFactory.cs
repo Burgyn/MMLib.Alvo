@@ -103,6 +103,32 @@ internal static class ProblemResultFactory
         + "persists, report it to whoever operates this instance.");
 
     /// <summary>
+    /// The refusal for a request the web server would not read — rendered at <em>its</em> status, not 500.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The status is a parameter because the server, not Alvo, decided it.</b>
+    /// <c>BadHttpRequestException.StatusCode</c> is 413 for a body over the configured limit, 400 for framing
+    /// that broke mid-upload, 408 for a body arriving too slowly; the caller can act on the difference, and
+    /// collapsing all three into a 500 tells an agent to retry a request whose size or framing is the thing
+    /// that has to change.
+    /// </para>
+    /// <para>
+    /// The <c>detail</c> is a constant, for the same reason <see cref="Internal"/>'s is: the server's own
+    /// message can carry the configured limit and, for some rejections, part of what the caller sent, and
+    /// neither belongs in a body. What the caller needs — that this request cannot succeed unchanged — is
+    /// server-owned prose.
+    /// </para>
+    /// </remarks>
+    /// <param name="statusCode">The status the web server refused the request with.</param>
+    internal static IResult Unreadable(int statusCode) => Problem(
+        statusCode,
+        AlvoProblemTypes.UnreadableRequest,
+        "The server refused this request before Alvo could read it — the status says which limit it crossed: "
+        + "a body too large, a body that arrived too slowly, or one whose framing broke. Send a smaller or "
+        + "well-formed request; retrying this one unchanged cannot succeed.");
+
+    /// <summary>
     /// The 422 for a request whose shape is wrong, carrying every reason rather than the first.
     /// </summary>
     /// <remarks>

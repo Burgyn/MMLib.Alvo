@@ -154,15 +154,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`AddAlvoProblemDetails()`** — new public API in the core, and **opt-in**: `AddAlvo()` does not
   register it, so nothing changes for an existing host. Registering it, together with
-  `UseExceptionHandler()`, makes an unhandled exception come back as Alvo's own problem document
-  (`type: https://alvo.dev/errors/internal`) with a constant detail and nothing about the exception
-  in the body, logged with its stack trace server-side — except when the caller simply hung up
-  (an `OperationCanceledException` on an aborted request), which is not an error and is not logged
-  as one. It is opt-in because an embedded host owns
+  `UseExceptionHandler()`, makes an unhandled exception **on one of Alvo's generated routes** come
+  back as Alvo's own problem document (`type: https://alvo.dev/errors/internal`) with a constant
+  detail and nothing about the exception in the body, logged with its stack trace server-side —
+  except when the caller simply hung up (an `OperationCanceledException` on an aborted request),
+  which is not an error and is not logged as one. It is opt-in because an embedded host owns
   its own error rendering, and Alvo silently swallowing your exceptions would be the wrong default.
   It also calls `AddProblemDetails()` for you, because `UseExceptionHandler()` refuses to configure
   itself with neither a handler path nor a problem-details fallback. The `internal` slug joins
   `AlvoProblemTypes.All` and the published `problemDetails` schema's `type` enum.
+
+  **The handler declines what is not Alvo's**, which is what makes it safe to add to a host that
+  renders its own errors: an `IExceptionHandler` you register *after* it still runs — for your own
+  endpoints, and for anything that failed before routing matched. And a request your **web server**
+  refused before Alvo could read it (a body over Kestrel's `MaxRequestBodySize`, an upload the
+  client truncated, a body arriving too slowly) is answered at *that* status — 413, 400 or 408 —
+  under the new `https://alvo.dev/errors/unreadable-request` slug, and logged at `Warning` without a
+  stack trace, rather than coming back as a 500 that tells an agent to retry a request whose size is
+  the thing that has to change.
 
 - **The HTTP Data API.** A host that calls `MapAlvoDataApi()` gets a REST API generated from its
   descriptor: five routes per declared entity (`GET` collection, `GET {id}`, `POST`, `PATCH`,

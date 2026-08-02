@@ -478,6 +478,7 @@ Every `type` is `https://alvo.dev/errors/<slug>`; the nine slugs are `AlvoProble
 | 412 | `precondition-failed` | a precondition this API cannot evaluate, or a version that does not match |
 | 422 | `validation` | schema-derived validation refused the body |
 | 422 | `malformed-query` | the query string or the body is malformed — the shape is wrong, nothing is hidden |
+| 413, 408, 400 | `unreadable-request` | the **web server** refused the request before Alvo read it (a body over `MaxRequestBodySize`, one arriving too slowly, one whose framing broke) — same opt-in as `internal`, and likewise documented on no operation |
 | 500 | `internal` | an invariant Alvo relies on is broken — **only** in a host that called `AddAlvoProblemDetails()`; no endpoint produces it and no operation documents it |
 
 Which operation can answer what is one table, `DataApiDocumentation.ResponsesFor`, read both by the
@@ -507,6 +508,25 @@ logs the exception (as an exception, so the stack trace survives) and *then* ren
 not a frame — because a caller can act on none of it and an attacker can act on all of it. It is
 deliberately **not** part of `AddAlvo`: an embedded host owns its own error rendering, and Alvo stealing the
 exception is the defect #119 was filed to prevent, not the one it was filed to fix.
+
+**The handler answers for Alvo's generated endpoints and declines everything else**, and both directions are
+the same principle as the opt-in itself. It reads `DataApiOperationMetadata` off
+`IExceptionHandlerFeature.Endpoint` — the endpoint the middleware captured before it cleared the
+`HttpContext` — so:
+
+| What failed | What Alvo does |
+|---|---|
+| family 5 on a generated route | logs `Error` with the stack trace, answers `500 internal` |
+| `BadHttpRequestException` on a generated route | logs `Warning` **without** the exception, answers `unreadable-request` at the exception's own `StatusCode` |
+| anything on the host's own route, or before routing matched | returns `false` and writes nothing |
+
+The declining half is what keeps an `IExceptionHandler` the host registers *after* `AddAlvoProblemDetails()`
+alive: the framework stops at the first handler that claims a failure, so a handler claiming all of them
+deleted the host's error contract from its own 500s. The `BadHttpRequestException` half is the other side of
+the same mistake in the other direction — a caller's oversized or truncated upload is not one of `IAlvoData`'s
+five families, and answering it with `internal` told an agent that Alvo was broken and to retry a request
+whose *size* is the thing that has to change, while paging an operator with a stack trace for a client-side
+error.
 
 The handler lives in the core rather than in `MMLib.Alvo.Host`, which #119's letter asked for, because
 `ProblemResultFactory` is `internal`: a Host-side handler would be a second hand-written copy of the

@@ -157,10 +157,17 @@ invisible to it.
 
 ## A 500 is Alvo's own refusal here (#119)
 
-The host calls `AddAlvoProblemDetails()` and `UseExceptionHandler()`, so an unhandled failure is logged with
-its stack trace and answered with `type: https://alvo.dev/errors/internal` and a **constant** detail. Nothing
-about the exception reaches the caller. Embedded hosts register neither and keep answering their own way,
-which is why the registration is opt-in rather than part of `AddAlvo`.
+The host calls `AddAlvoProblemDetails()` and `UseExceptionHandler()`, so an unhandled failure **on one of
+Alvo's generated routes** is logged with its stack trace and answered with
+`type: https://alvo.dev/errors/internal` and a **constant** detail. Nothing about the exception reaches the
+caller. Embedded hosts register neither and keep answering their own way, which is why the registration is
+opt-in rather than part of `AddAlvo`.
+
+The scope matters here too, even though this host is almost all Alvo: a failure on `/health/live`, on the
+docs routes, or before routing matched anything is declined by the handler and rendered by the framework's
+own problem-details writer. And a request this host's web server would not read — a body over Kestrel's
+`MaxRequestBodySize`, an upload the client truncated — is answered at *that* status under
+`https://alvo.dev/errors/unreadable-request`, not as a 500.
 
 `UseExceptionHandler` is the **first** middleware in `BuildAsync`, before liveness and before the Data API: a
 middleware only sees what runs after it, and a failure that got past that line would be rendered by the

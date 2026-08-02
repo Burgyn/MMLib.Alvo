@@ -573,5 +573,10 @@ internal static class DataApiDocumentation
         + "like is the host's decision and not a promise this document can make. A host that opted in "
         + "(`AddAlvoProblemDetails()`) answers with the same problem document as every other refusal, under "
         + "`" + AlvoProblemTypes.BaseUri + AlvoProblemTypes.Internal + "` — which is why that value is in "
-        + "`type`'s list. A host that did not composes its own.";
+        + "`type`'s list. A host that did not composes its own.\n\n"
+        + "**A request the web server would not read is not documented on any operation either.** A body over "
+        + "the server's limit, one that arrived too slowly, or one whose framing broke never reaches the "
+        + "operation, so no operation can promise a status for it. A host that opted in answers it under `"
+        + AlvoProblemTypes.BaseUri + AlvoProblemTypes.UnreadableRequest + "`, at the status the server chose "
+        + "(413, 408 or 400) — the second value in `type`'s list that no operation lists.";
 }

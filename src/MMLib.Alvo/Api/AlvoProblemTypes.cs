@@ -73,6 +73,23 @@ public static class AlvoProblemTypes
     /// <summary>A credential was presented and cannot be used (401).</summary>
     public const string Unauthenticated = "unauthenticated";
 
+    /// <summary>The server refused the request before Alvo could read it (400, 408 or 413).</summary>
+    /// <remarks>
+    /// <para>
+    /// The one slug whose status is not fixed, and deliberately so: it keys on the <em>kind</em> of refusal —
+    /// the request never became something Alvo could look at — while the status says which limit the server
+    /// applied (a body over <c>MaxRequestBodySize</c>, framing that broke mid-upload, a body arriving too
+    /// slowly). Splitting it per status would encode the server's configuration in the classification an
+    /// agent branches on, and the fix is the same for all three: send a different request.
+    /// </para>
+    /// <para>
+    /// Distinct from <see cref="MalformedQuery"/>, which is Alvo reading a request and refusing its
+    /// <em>content</em>. This one is emitted only by <c>AlvoExceptionHandler</c>, from a
+    /// <c>BadHttpRequestException</c> the web server raised, and therefore only in a host that registered it.
+    /// </para>
+    /// </remarks>
+    public const string UnreadableRequest = "unreadable-request";
+
     /// <summary>An invariant Alvo itself relies on is broken (500).</summary>
     /// <remarks>
     /// Emitted only by <c>AlvoExceptionHandler</c>, and therefore only in a host that registered it. The slug
@@ -95,6 +112,7 @@ public static class AlvoProblemTypes
         PreconditionFailed,
         IdempotencyConflict,
         Unauthenticated,
+        UnreadableRequest,
         Internal,
     ];
 

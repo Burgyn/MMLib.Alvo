@@ -9,8 +9,8 @@ namespace Microsoft.Extensions.DependencyInjection;
 public static class AlvoProblemDetailsExtensions
 {
     /// <summary>
-    /// Registers the exception handler that logs an unhandled failure and answers it with
-    /// <c>https://alvo.dev/errors/internal</c>. Pair it with <c>app.UseExceptionHandler()</c>.
+    /// Registers the exception handler that answers an unhandled failure <b>from one of Alvo's own
+    /// endpoints</b> with Alvo's problem document. Pair it with <c>app.UseExceptionHandler()</c>.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -19,10 +19,18 @@ public static class AlvoProblemDetailsExtensions
     /// pipeline and nothing else can answer. One registration, two correct behaviours (#119).
     /// </para>
     /// <para>
+    /// <b>The scope is Alvo's generated routes, not the pipeline.</b> The handler declines a failure from any
+    /// other endpoint, so an <c>IExceptionHandler</c> a host registers <em>after</em> this call still runs for
+    /// the host's own endpoints — the framework stops at the first handler that claims a failure, and a
+    /// version of this that claimed all of them silently deleted the host's error contract from its own 500s.
+    /// A host that wants Alvo's document everywhere therefore does not get it, and that is the trade: an
+    /// embedded host owning its rendering is the whole point of the opt-in.
+    /// </para>
+    /// <para>
     /// <c>AddProblemDetails()</c> is registered alongside because <c>UseExceptionHandler()</c> refuses to
-    /// configure a middleware with neither a handler path nor a problem-details service to fall back to. The
-    /// fallback is unreachable while this handler is registered — it answers every exception and returns
-    /// <see langword="true"/> — so the framework's own writer never renders an Alvo response.
+    /// configure a middleware with neither a handler path nor a problem-details service to fall back to. It is
+    /// a real fallback rather than a formality: it is what answers a failure this handler declines and no host
+    /// handler claims.
     /// </para>
     /// </remarks>
     /// <param name="services">The service collection.</param>

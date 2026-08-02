@@ -270,6 +270,44 @@ public sealed class ProblemDetailsTests
     }
 
     /// <summary>
+    /// A body the <em>web server</em> refuses is answered at the server's own status, with Alvo's
+    /// classification — not as a 500 saying an invariant of Alvo's is broken.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The status is the fact. <c>BadHttpRequestException</c> is not one of <c>IAlvoData</c>'s five families,
+    /// so the handler that answered every exception with <c>alvo.dev/errors/internal</c> told an agent its
+    /// request had triggered a defect and invited it to retry — when the one thing that could ever change the
+    /// outcome is the request's size. A 413 says "this cannot succeed unchanged" in the one member every HTTP
+    /// client already reads.
+    /// </para>
+    /// <para>
+    /// The world's budget is below Alvo's own <c>MaxRequestBodyBytes</c> on purpose: Alvo refuses an
+    /// over-declared <c>Content-Length</c> itself, with a 422 and a violation, so the server only ever wins
+    /// the race where an operator has configured a smaller limit than Alvo's. Both refusals exist and they are
+    /// different answers to different questions — <see cref="AlvoProblemTypes.Validation"/> is Alvo measuring
+    /// a body it read.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_body_the_server_refuses_answers_the_servers_status_rather_than_a_500()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync(
+            [_admin], new AlvoApiWorldSetup(MapAlvoProblemDetails: true, ServerBodyLimitBytes: ServerBodyLimitBytes));
+
+        using var response = await world.SendAsync(
+            HttpMethod.Post, "/api/owners", _admin, body: OversizedOwner());
+
+        response.StatusCode.ShouldBe(
+            HttpStatusCode.RequestEntityTooLarge,
+            "the server's own status must survive; a 500 tells an agent to retry something that cannot work");
+        response.Content.Headers.ContentType!.MediaType.ShouldBe(ProblemMediaType);
+        (await response.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.UnreadableRequest);
+        (await response.ReadTextAsync()).ShouldNotContain(
+            "oooo", Case.Sensitive, "the caller's own value is not echoed back by a refusal it never read");
+    }
+
+    /// <summary>
     /// <see cref="AlvoProblemTypes.UriOf"/> mints a URI only for a slug the catalogue declares, and refuses
     /// anything else — so a call site cannot invent a <c>type</c> that no documentation exists for.
     /// </summary>
@@ -384,6 +422,7 @@ public sealed class ProblemDetailsTests
         }
 
         reached.Add(await InternalSlugAnsweredByAFaultingStoreAsync());
+        reached.Add(await UnreadableSlugAnsweredByABodyTheServerRefusesAsync());
 
         reached.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ShouldBe(
             AlvoProblemTypes.All.Except(PendingUntilALaterTask, StringComparer.Ordinal).Order(StringComparer.Ordinal),
@@ -402,6 +441,28 @@ public sealed class ProblemDetailsTests
 
         return await SlugAnsweredByAsync(world, new Probe(HttpMethod.Get, "/api/owners", _admin, null));
     }
+
+    /// <summary>
+    /// The <c>unreadable-request</c> slug's probe. A third world, for the same reason the second one exists:
+    /// it runs behind a server body budget far below Alvo's own, which several other probes' bodies would
+    /// trip on their way to the refusal they are actually about.
+    /// </summary>
+    private static async Task<string> UnreadableSlugAnsweredByABodyTheServerRefusesAsync()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync(
+            [_admin], new AlvoApiWorldSetup(MapAlvoProblemDetails: true, ServerBodyLimitBytes: ServerBodyLimitBytes));
+
+        return await SlugAnsweredByAsync(world, new Probe(HttpMethod.Post, "/api/owners", _admin, OversizedOwner()));
+    }
+
+    /// <summary>
+    /// A server body budget small enough that an ordinary row crosses it, and far below Alvo's own 1 MB
+    /// bound — the deployment where the server, not Alvo, is the one that refuses.
+    /// </summary>
+    private const int ServerBodyLimitBytes = 64;
+
+    /// <summary>A row whose body is over <see cref="ServerBodyLimitBytes"/> and well under Alvo's own bound.</summary>
+    private static JsonObject OversizedOwner() => new() { ["name"] = new string('o', 200) };
 
     /// <summary>
     /// The slugs no request can yet produce, because whatever causes them is not honoured yet — empty today.
@@ -498,6 +559,7 @@ public sealed class ProblemDetailsTests
         ProblemResultFactory.ScopeRefused(),
         ProblemResultFactory.Unauthenticated("X-Alvo-Api-Key"),
         ProblemResultFactory.Internal(),
+        ProblemResultFactory.Unreadable(StatusCodes.Status413PayloadTooLarge),
         Guarded(new AlvoAuthorizationException("refused")),
         Guarded(new AlvoRecordNotFoundException()),
         Guarded(new AlvoPreconditionFailedException("stale")),

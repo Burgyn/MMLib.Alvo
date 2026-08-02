@@ -144,6 +144,11 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
             app.UsePathBase(pathBase);
         }
 
+        if (setup.ServerBodyLimitBytes is { } serverLimit)
+        {
+            app.Use(ServerBodyLimit.Enforcing(serverLimit));
+        }
+
         await ApplyDescriptorAsync(app);
 
         // MapGroup, when a fact asks for one: the second supported way to mount the Data API, and the one
@@ -636,6 +641,13 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
 /// The path base the world is served under — <c>app.UsePathBase(...)</c>, the embedded shape #121 names —
 /// or <see langword="null"/> for a host mounted at the root, which is every other fact here.
 /// </param>
+/// <param name="ServerBodyLimitBytes">
+/// A byte budget the <em>web server</em> enforces on the request body, below Alvo's own
+/// <c>MaxRequestBodyBytes</c> — or <see langword="null"/> for no server limit, which is every other fact
+/// here. It is the one way to reach <c>BadHttpRequestException</c>, the family a request layer cannot
+/// produce from a well-formed request, exactly as <see cref="MMLib.Alvo.Data.IAlvoData"/>'s fifth family
+/// needs <see cref="FaultingAlvoData"/>.
+/// </param>
 /// <param name="RouteGroupPrefix">
 /// A route group to mount the Data API under — <c>app.MapGroup(prefix).MapAlvoDataApi()</c> — or
 /// <see langword="null"/> to map onto the application itself. It is a different mechanism from
@@ -652,6 +664,7 @@ internal sealed record AlvoApiWorldSetup(
     bool MapAlvoProblemDetails = false,
     bool FaultingData = false,
     string? PathBase = null,
+    int? ServerBodyLimitBytes = null,
     string? RouteGroupPrefix = null);
 
 /// <summary>One dev API key a world issues, in the shape a test reads best.</summary>
