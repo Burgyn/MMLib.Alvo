@@ -33,10 +33,12 @@ namespace MMLib.Alvo.Tests.Descriptor;
 /// <para>
 /// <b>Every fact here therefore proves the warning is <em>correct</em>, and none of them proves it is
 /// <em>reached</em>.</b> They all call <see cref="UnhonouredSubsystems.Warn"/> themselves, so deleting the
-/// call from <c>SchemaMigrationRunner.RunAsync</c> left this file — and the whole suite — green while the
-/// user-visible deliverable did nothing. That half is pinned by
+/// call from the boot's stage 0 left this file — and the whole suite — green while the user-visible
+/// deliverable did nothing. That half is pinned by
+/// <c>Migrations.DescriptorBootPlanTests.A_declared_but_unhonoured_block_warns_on_every_boot_naming_it</c>
+/// and, on the apply path that drives stage 0,
 /// <c>Migrations.SchemaMigrationRunnerTests.Applying_a_descriptor_that_declares_an_unhonoured_block_warns_naming_it</c>,
-/// over a purpose-built appliable descriptor and a capturing logger provider. Read the two together; neither
+/// over a purpose-built appliable descriptor and a capturing logger provider. Read them together; none
 /// is sufficient alone, and this file used to be presented as if it were.
 /// </para>
 /// </remarks>

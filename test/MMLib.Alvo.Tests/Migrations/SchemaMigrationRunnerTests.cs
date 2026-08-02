@@ -4,6 +4,7 @@ using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Descriptor.Internal;
 using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Migrations;
+using MMLib.Alvo.Migrations.Internal;
 using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Schema;
 using MMLib.Alvo.Testing.Migrations;
@@ -41,8 +42,20 @@ public sealed class SchemaMigrationRunnerTests
     public SchemaMigrationRunnerTests()
     {
         _source.LoadAsync(Arg.Any<CancellationToken>()).Returns(FleetDescriptorJson);
-        _runner = new SchemaMigrationRunner(_source, new DescriptorValidator(), _migrator, _introspector, _store, new CelCompiler(), new PolicyCatalogProvider(), NullLogger<SchemaMigrationRunner>.Instance);
+        _runner = new SchemaMigrationRunner(BootPlan(), _migrator, _introspector, _store, new PolicyCatalogProvider());
     }
+
+    /// <summary>
+    /// Stage 0 over this fixture's descriptor source — the runner's first call, and the only place the
+    /// descriptor is loaded, validated, mapped and compiled.
+    /// </summary>
+    /// <param name="logger">The logger stage 0 writes its unhonoured-block warning through.</param>
+    private DescriptorBootPlan BootPlan(ILogger<DescriptorBootPlan>? logger = null)
+        => new(
+            _source,
+            new DescriptorValidator(),
+            new CelCompiler(),
+            logger ?? NullLogger<DescriptorBootPlan>.Instance);
 
     [Fact]
     public async Task First_run_against_empty_database_applies_create_plan_and_saves_revision_1()
@@ -141,7 +154,7 @@ public sealed class SchemaMigrationRunnerTests
         };
         migrator.PlanAsync(Arg.Any<SchemaModel>(), Arg.Any<SchemaModel>(), Arg.Any<MigrationOptions>(), Arg.Any<CancellationToken>())
             .Returns(nonEmptyPlan);
-        var runner = new SchemaMigrationRunner(_source, new DescriptorValidator(), migrator, _introspector, _store, new CelCompiler(), new PolicyCatalogProvider(), NullLogger<SchemaMigrationRunner>.Instance);
+        var runner = new SchemaMigrationRunner(BootPlan(), migrator, _introspector, _store, new PolicyCatalogProvider());
         _store.GetCurrentAsync("fleet", Arg.Any<CancellationToken>()).Returns((AppliedSchema?)null);
         _introspector.IntrospectAsync(Arg.Any<CancellationToken>()).Returns(new SchemaModel([]));
 
@@ -198,11 +211,11 @@ public sealed class SchemaMigrationRunnerTests
     /// <b>Without it, the whole user-visible deliverable had no coverage.</b> All four facts in
     /// <c>UnhonouredSubsystemsTests</c> call <c>UnhonouredSubsystems.Warn(logger, descriptor)</c> directly, so
     /// they prove a pure function is right and nothing proves anybody calls it — deleting the
-    /// <c>UnhonouredSubsystems.Warn(_logger, descriptor)</c> line from
-    /// <see cref="SchemaMigrationRunner.RunAsync"/> left the entire suite green. Every other fact in this class
-    /// builds the runner with <c>NullLogger&lt;SchemaMigrationRunner&gt;.Instance</c>, which cannot observe a
-    /// warning by construction, and the descriptors the real apply paths use declare no unhonoured block — so
-    /// even a log-capturing world would have been silent.
+    /// <c>UnhonouredSubsystems.Warn(_logger, descriptor)</c> line from the apply path left the entire suite
+    /// green. Every other fact in this class builds the runner with
+    /// <c>NullLogger&lt;DescriptorBootPlan&gt;.Instance</c>, which cannot observe a warning by construction,
+    /// and the descriptors the real apply paths use declare no unhonoured block — so even a log-capturing
+    /// world would have been silent.
     /// </para>
     /// <para>
     /// <b>It asserts the block is <em>named</em>, not that a warning was logged.</b> The latter passes on any
@@ -212,8 +225,14 @@ public sealed class SchemaMigrationRunnerTests
     /// </para>
     /// <para>
     /// The logger is a real <see cref="LoggerFactory"/> over a capturing provider rather than the
-    /// <see cref="ILogger"/> the runner takes, so the <c>LoggerMessage</c> source-generated delegate that
+    /// <see cref="ILogger"/> stage 0 takes, so the <c>LoggerMessage</c> source-generated delegate that
     /// actually formats this message is on the path.
+    /// </para>
+    /// <para>
+    /// The warning itself is written by <see cref="DescriptorBootPlan"/> now, and
+    /// <c>DescriptorBootPlanTests.A_declared_but_unhonoured_block_warns_on_every_boot_naming_it</c> pins it
+    /// there. This fact is kept, and is not a duplicate of that one: it is what proves the <em>apply</em> path
+    /// still runs stage 0 at all, which is the only reason an author of an appliable descriptor sees the line.
     /// </para>
     /// </remarks>
     [Fact]
@@ -226,8 +245,11 @@ public sealed class SchemaMigrationRunnerTests
         using var capturing = new CapturingLogger();
         using var loggers = LoggerFactory.Create(logging => logging.AddProvider(capturing));
         var runner = new SchemaMigrationRunner(
-            _source, new DescriptorValidator(), _migrator, _introspector, _store, new CelCompiler(),
-            new PolicyCatalogProvider(), loggers.CreateLogger<SchemaMigrationRunner>());
+            BootPlan(loggers.CreateLogger<DescriptorBootPlan>()),
+            _migrator,
+            _introspector,
+            _store,
+            new PolicyCatalogProvider());
 
         var result = await runner.RunAsync(new MigrationOptions(), TestContext.Current.CancellationToken);
 

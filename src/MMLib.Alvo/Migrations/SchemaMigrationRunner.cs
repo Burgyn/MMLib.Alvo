@@ -1,9 +1,5 @@
-﻿using Microsoft.Extensions.Logging;
-using MMLib.Alvo.Descriptor;
-using MMLib.Alvo.Descriptor.Internal;
-using MMLib.Alvo.Expressions;
+﻿using MMLib.Alvo.Migrations.Internal;
 using MMLib.Alvo.Rules;
-using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Migrations;
@@ -14,55 +10,52 @@ namespace MMLib.Alvo.Migrations;
 /// unapproved destructive changes, apply, and persist the new snapshot.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Invoked by the code-first builder (<c>FromDescriptor()</c>) and, later, a Management-API
-/// migration endpoint — both compose the same four ports rather than duplicating this flow. Every
+/// migration endpoint — both compose the same ports rather than duplicating this flow. Every
 /// branch that accepts the descriptor as authoritative for the schema actually in the database (an
 /// empty plan, or a genuinely applied one) also (re)primes <see cref="IPolicyCatalogProvider"/>
 /// from the same parsed descriptor, so <c>IPolicyEngine</c> is never left serving a stale or
-/// never-primed catalog after a successful run. The empty-plan branch — nothing to durably change —
-/// uses <see cref="PolicyCatalogPriming"/> to build and publish together. The genuinely-applied
-/// branch builds the catalog before <see cref="ISchemaMigrator.ApplyAsync"/> runs any DDL — so an
-/// uncompilable rule set rejects the run before anything is durable — and publishes it via
-/// <see cref="IPolicyCatalogProvider.SetCurrent"/> only after the applied snapshot is saved.
+/// never-primed catalog after a successful run.
+/// </para>
+/// <para>
+/// Loading, validating, mapping and compiling are <see cref="DescriptorBootPlan"/>'s — the boot's stage
+/// 0, which touches no database and which the boot service runs on every start. This runner is what
+/// happens <em>after</em> it: read the applied snapshot, plan, guard, apply, save. The catalog therefore
+/// arrives already compiled, which keeps the property the two priming branches were built around —
+/// an uncompilable rule set rejects the run before <see cref="ISchemaMigrator.ApplyAsync"/> makes
+/// anything durable — and strengthens it, because the compilation now precedes even the store read.
+/// Publishing is still per branch: the empty plan (nothing to durably change) publishes at once, and
+/// the genuinely-applied branch publishes via <see cref="IPolicyCatalogProvider.SetCurrent"/> only
+/// after the applied snapshot is saved.
+/// </para>
 /// </remarks>
 internal sealed class SchemaMigrationRunner
 {
-    private readonly IDescriptorSource _source;
-    private readonly IDescriptorValidator _validator;
+    private readonly DescriptorBootPlan _bootPlan;
     private readonly ISchemaMigrator _migrator;
     private readonly ISchemaIntrospector _introspector;
     private readonly IAppliedSchemaStore _store;
-    private readonly ICelCompiler _compiler;
     private readonly IPolicyCatalogProvider _policyCatalogProvider;
-    private readonly ILogger<SchemaMigrationRunner> _logger;
 
     public SchemaMigrationRunner(
-        IDescriptorSource source,
-        IDescriptorValidator validator,
+        DescriptorBootPlan bootPlan,
         ISchemaMigrator migrator,
         ISchemaIntrospector introspector,
         IAppliedSchemaStore store,
-        ICelCompiler compiler,
-        IPolicyCatalogProvider policyCatalogProvider,
-        ILogger<SchemaMigrationRunner> logger)
+        IPolicyCatalogProvider policyCatalogProvider)
     {
-        ArgumentNullException.ThrowIfNull(source);
-        ArgumentNullException.ThrowIfNull(validator);
+        ArgumentNullException.ThrowIfNull(bootPlan);
         ArgumentNullException.ThrowIfNull(migrator);
         ArgumentNullException.ThrowIfNull(introspector);
         ArgumentNullException.ThrowIfNull(store);
-        ArgumentNullException.ThrowIfNull(compiler);
         ArgumentNullException.ThrowIfNull(policyCatalogProvider);
-        ArgumentNullException.ThrowIfNull(logger);
 
-        _source = source;
-        _validator = validator;
+        _bootPlan = bootPlan;
         _migrator = migrator;
         _introspector = introspector;
         _store = store;
-        _compiler = compiler;
         _policyCatalogProvider = policyCatalogProvider;
-        _logger = logger;
     }
 
     /// <summary>Runs the code-first migration flow described in the type's remarks.</summary>
@@ -85,22 +78,7 @@ internal sealed class SchemaMigrationRunner
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        var descriptorJson = await _source.LoadAsync(ct).ConfigureAwait(false);
-        var validation = _validator.Validate(descriptorJson);
-        if (!validation.IsValid)
-        {
-            throw new DescriptorValidationException(validation);
-        }
-
-        var descriptor = AlvoDescriptor.Parse(descriptorJson);
-        var desired = DescriptorToSchemaMapper.Map(descriptor);
-
-        // Emitted here rather than on the branches that write something: this is the last point at which the
-        // descriptor is known to be appliable (the mapper refuses every unhonoured *feature* above), and every
-        // branch below runs through it — including the empty-plan no-op, which is the ordinary case on a
-        // restart. Warning only on a genuine apply would tell an author about their unhonoured blocks exactly
-        // once, on the deploy where they are least surprised by them, and never again.
-        UnhonouredSubsystems.Warn(_logger, descriptor);
+        var (descriptor, desired, descriptorJson, catalog) = await _bootPlan.LoadAsync(ct).ConfigureAwait(false);
 
         var appliedSnapshot = await _store.GetCurrentAsync(descriptor.Name, ct).ConfigureAwait(false);
         var current = appliedSnapshot?.Schema
@@ -110,7 +88,7 @@ internal sealed class SchemaMigrationRunner
 
         if (plan.IsEmpty)
         {
-            PolicyCatalogPriming.Prime(_policyCatalogProvider, _compiler, descriptor.Name, descriptor, desired);
+            _policyCatalogProvider.SetCurrent(descriptor.Name, catalog);
             return new MigrationResult(Applied: false, plan, WasDryRun: options.DryRun);
         }
 
@@ -124,7 +102,6 @@ internal sealed class SchemaMigrationRunner
             return new MigrationResult(Applied: false, plan, WasDryRun: true);
         }
 
-        var catalog = PolicyCatalog.Build(descriptor, desired, _compiler);
         var result = await _migrator.ApplyAsync(plan, options, ct).ConfigureAwait(false);
 
         if (result.Applied)
