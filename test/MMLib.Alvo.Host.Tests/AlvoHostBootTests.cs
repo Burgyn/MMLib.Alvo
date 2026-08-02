@@ -105,21 +105,39 @@ public class AlvoHostBootTests
     /// no credential of its own.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The fact above can only see a host configured by its caller. The realistic way a preset login reaches
     /// an operator is a dev key added to the host's own <c>appsettings.json</c> for convenience, which no
     /// runtime fact can distinguish from a key the deployment configured — so it is asserted against the file.
+    /// </para>
+    /// <para>
+    /// <b>Every</b> <c>appsettings*.json</c>, not the one file. <c>Microsoft.NET.Sdk.Web</c>'s default
+    /// <c>Content</c> glob publishes all of them into the image, and an operator running the demo image with
+    /// <c>ASPNETCORE_ENVIRONMENT=Development</c> — a normal thing to do — activates
+    /// <c>appsettings.Development.json</c>. Naming one file would leave a one-line way to ship a credential
+    /// past a green suite. The enumeration is asserted non-empty for the same reason: a glob that matches
+    /// nothing passes every claim made about its members.
+    /// </para>
     /// </remarks>
     [Fact]
     public void The_hosts_own_settings_declare_no_credential()
     {
-        var settings = File.ReadAllText(
-            Path.Combine(RepositoryRoot.Find(), "src", "MMLib.Alvo.Host", "appsettings.json"));
+        var hostProject = Path.Combine(RepositoryRoot.Find(), "src", "MMLib.Alvo.Host");
+        var settingsFiles = Directory.GetFiles(hostProject, "appsettings*.json");
 
-        var alvo = JsonNode.Parse(settings)![AlvoHost.ConfigurationSection]!;
+        settingsFiles.ShouldNotBeEmpty(
+            $"no appsettings*.json was found under {hostProject}, so this fact would assert nothing about "
+            + "the files the image actually ships");
 
-        alvo["Auth"].ShouldBeNull(
-            "the image must never ship a preset login (§2.14), and a dev key added here for convenience is "
-            + "one every deployment of the image would inherit");
+        foreach (var file in settingsFiles)
+        {
+            var alvo = JsonNode.Parse(File.ReadAllText(file))?[AlvoHost.ConfigurationSection];
+
+            alvo?["Auth"].ShouldBeNull(
+                $"the image must never ship a preset login (§2.14), and the dev key {Path.GetFileName(file)} "
+                + "declares is one every deployment of the image would inherit — the SDK's default Content "
+                + "glob publishes every appsettings*.json, not just appsettings.json");
+        }
     }
 
     /// <summary>Liveness answers without a credential — a probe cannot present one.</summary>
