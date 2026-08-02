@@ -1,4 +1,5 @@
-﻿using System.Net;
+﻿using Microsoft.Extensions.Configuration;
+using System.Net;
 using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Host.Tests;
@@ -118,6 +119,16 @@ public class AlvoHostBootTests
     /// past a green suite. The enumeration is asserted non-empty for the same reason: a glob that matches
     /// nothing passes every claim made about its members.
     /// </para>
+    /// <para>
+    /// <b>Read through the configuration binder, not through <c>JsonNode</c>.</b> A <c>JsonNode</c> indexer is
+    /// ordinal case-sensitive and <c>Microsoft.Extensions.Configuration.Json</c> is not, so a lowercase
+    /// <c>"alvo"</c> section — or <c>"Alvo"</c> with a lowercase <c>"auth"</c> child, or a single flattened
+    /// <c>"Alvo:Auth"</c> key — binds a working admin credential into the published image while a hand-rolled
+    /// key lookup reports nothing. That is the same hole one layer down from the one this fact already fixed
+    /// once: the file <em>enumeration</em> was widened from one name to the glob and the <em>key lookup</em>
+    /// was not. Asking the very parser the host binds with removes the class rather than the instance — any
+    /// spelling the binder accepts is a spelling this sees.
+    /// </para>
     /// </remarks>
     [Fact]
     public void The_hosts_own_settings_declare_no_credential()
@@ -131,9 +142,9 @@ public class AlvoHostBootTests
 
         foreach (var file in settingsFiles)
         {
-            var alvo = JsonNode.Parse(File.ReadAllText(file))?[AlvoHost.ConfigurationSection];
+            var settings = new ConfigurationBuilder().AddJsonFile(file, optional: false).Build();
 
-            alvo?["Auth"].ShouldBeNull(
+            settings.GetSection($"{AlvoHost.ConfigurationSection}:Auth").Exists().ShouldBeFalse(
                 $"the image must never ship a preset login (§2.14), and the dev key {Path.GetFileName(file)} "
                 + "declares is one every deployment of the image would inherit — the SDK's default Content "
                 + "glob publishes every appsettings*.json, not just appsettings.json");

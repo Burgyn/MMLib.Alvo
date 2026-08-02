@@ -67,9 +67,12 @@ preset login, so the host seeds no API key. A host with none configured still st
 still refuses every operation, because an anonymous caller is judged by the same
 default-deny policy as any other (deviation 23). Two facts hold that line: an anonymous
 *write* is refused (a *read* would be an honest 200 with zero rows and would prove nothing),
-and the host's own `appsettings.json` is asserted to declare no `Alvo:Auth` section — the
-realistic way a preset login reaches an operator is a dev key added there for convenience,
-which no runtime fact can tell apart from one the deployment configured.
+and every `appsettings*.json` the image publishes is asserted to declare no `Alvo:Auth`
+section — the realistic way a preset login reaches an operator is a dev key added there
+for convenience, which no runtime fact can tell apart from one the deployment configured.
+That assertion reads the files **through `ConfigurationBuilder.AddJsonFile`**, not through
+`JsonNode`: the binder is case-insensitive and a `JsonNode` indexer is not, so a lowercase
+`"alvo"` or `"auth"` would otherwise bind a working credential past a green fact.
 
 ## Behind a reverse proxy
 
