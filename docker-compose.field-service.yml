@@ -1,0 +1,116 @@
+# The field-service demo stack: the standalone host over real PostgreSQL, driven by the
+# examples/field-service descriptor and five dev keys that differ in role and in tenant.
+#
+# A SECOND compose file rather than a second service in docker-compose.yml, and the reason is
+# mechanical rather than stylistic. Compose interpolates the WHOLE file before it decides which
+# services to start — profiles do not defer it, measured — so a service demanding five more
+# `${...:?}` secrets inside docker-compose.yml would make the plain `docker compose up` in the
+# README fail for anyone who had only exported ALVO_DEMO_KEY_SECRET. Keeping the demo in its own
+# file leaves the repo-root quickstart working byte-for-byte unchanged, and it gives the demo its
+# own database with no chance of two descriptors applying into one schema.
+#
+#   set -a; . examples/field-service/demo-identities.env; set +a
+#   export ALVO_FS_DISPATCHER_NORTH_SECRET=... (and the other four, see the README)
+#   docker compose --env-file examples/field-service/demo-identities.env \
+#     -f docker-compose.field-service.yml up --wait
+#
+# scripts/test-e2e does all of that for you, with fresh secrets per run.
+name: alvo-field-service
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: alvo_field_service
+      POSTGRES_USER: alvo
+      POSTGRES_PASSWORD: alvo
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alvo -d alvo_field_service"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  alvo:
+    build:
+      context: .
+      dockerfile: src/MMLib.Alvo.Host/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      Alvo__DescriptorPath: /alvo/descriptor.json
+      Alvo__Database__Provider: postgresql
+      ConnectionStrings__Alvo: Host=postgres;Port=5432;Database=alvo_field_service;Username=alvo;Password=alvo
+
+      # Five dev keys, differing in exactly the two things the suite measures: which roles the caller
+      # holds, and which tenant they act in. Every secret comes from the shell with `:?`, so the image
+      # ships none and compose refuses to start rather than invent one (§2.14). The tenant and user ids
+      # are NOT secrets — a scoped create has to carry `tenant_id` and `assigned_to` names a technician
+      # by user id — so they live in demo-identities.env where a test can read the same values.
+
+      # 1. The tenant-north dispatcher: the privileged caller inside tenant north.
+      Alvo__Auth__DevKeys__0__KeyId: dispatcher-north
+      Alvo__Auth__DevKeys__0__Secret: ${ALVO_FS_DISPATCHER_NORTH_SECRET:?set ALVO_FS_DISPATCHER_NORTH_SECRET before starting the field-service stack}
+      Alvo__Auth__DevKeys__0__User: ${ALVO_FS_USER_DISPATCHER_NORTH:?set ALVO_FS_USER_DISPATCHER_NORTH (see examples/field-service/demo-identities.env)}
+      Alvo__Auth__DevKeys__0__Tenant: ${ALVO_FS_TENANT_NORTH:?set ALVO_FS_TENANT_NORTH (see examples/field-service/demo-identities.env)}
+      Alvo__Auth__DevKeys__0__Roles__0: authenticated
+      Alvo__Auth__DevKeys__0__Roles__1: dispatcher
+      Alvo__Auth__DevKeys__0__Scopes__0: "*:read"
+      Alvo__Auth__DevKeys__0__Scopes__1: "*:write"
+
+      # 2. A tenant-north technician WITH work orders assigned to them: the restricted caller whose
+      #    list is a subset rather than a refusal.
+      Alvo__Auth__DevKeys__1__KeyId: tech-north
+      Alvo__Auth__DevKeys__1__Secret: ${ALVO_FS_TECH_NORTH_SECRET:?set ALVO_FS_TECH_NORTH_SECRET before starting the field-service stack}
+      Alvo__Auth__DevKeys__1__User: ${ALVO_FS_USER_TECH_NORTH:?set ALVO_FS_USER_TECH_NORTH (see examples/field-service/demo-identities.env)}
+      Alvo__Auth__DevKeys__1__Tenant: ${ALVO_FS_TENANT_NORTH:?set ALVO_FS_TENANT_NORTH (see examples/field-service/demo-identities.env)}
+      Alvo__Auth__DevKeys__1__Roles__0: authenticated
+      Alvo__Auth__DevKeys__1__Roles__1: technician
+      Alvo__Auth__DevKeys__1__Scopes__0: "*:read"
+      Alvo__Auth__DevKeys__1__Scopes__1: "*:write"
+
+      # 3. A tenant-north technician with NOTHING assigned to them. The same rule, the same tenant, the
+      #    same scopes — so a read of theirs that comes back empty is the row predicate excluding rows
+      #    and can be nothing else.
+      Alvo__Auth__DevKeys__2__KeyId: spare-north
+      Alvo__Auth__DevKeys__2__Secret: ${ALVO_FS_SPARE_NORTH_SECRET:?set ALVO_FS_SPARE_NORTH_SECRET before starting the field-service stack}
+      Alvo__Auth__DevKeys__2__User: ${ALVO_FS_USER_SPARE_NORTH:?set ALVO_FS_USER_SPARE_NORTH (see examples/field-service/demo-identities.env)}
+      Alvo__Auth__DevKeys__2__Tenant: ${ALVO_FS_TENANT_NORTH:?set ALVO_FS_TENANT_NORTH (see examples/field-service/demo-identities.env)}
+      Alvo__Auth__DevKeys__2__Roles__0: authenticated
+      Alvo__Auth__DevKeys__2__Roles__1: technician
+      Alvo__Auth__DevKeys__2__Scopes__0: "*:read"
+      Alvo__Auth__DevKeys__2__Scopes__1: "*:write"
+
+      # 4. The tenant-south dispatcher: identical rights to key 1, in the other tenant. Anything it
+      #    cannot see is tenancy and not policy.
+      Alvo__Auth__DevKeys__3__KeyId: dispatcher-south
+      Alvo__Auth__DevKeys__3__Secret: ${ALVO_FS_DISPATCHER_SOUTH_SECRET:?set ALVO_FS_DISPATCHER_SOUTH_SECRET before starting the field-service stack}
+      Alvo__Auth__DevKeys__3__User: ${ALVO_FS_USER_DISPATCHER_SOUTH:?set ALVO_FS_USER_DISPATCHER_SOUTH (see examples/field-service/demo-identities.env)}
+      Alvo__Auth__DevKeys__3__Tenant: ${ALVO_FS_TENANT_SOUTH:?set ALVO_FS_TENANT_SOUTH (see examples/field-service/demo-identities.env)}
+      Alvo__Auth__DevKeys__3__Roles__0: authenticated
+      Alvo__Auth__DevKeys__3__Roles__1: dispatcher
+      Alvo__Auth__DevKeys__3__Scopes__0: "*:read"
+      Alvo__Auth__DevKeys__3__Scopes__1: "*:write"
+
+      # 5. The administrator: the only caller the descriptor lets create a region.
+      Alvo__Auth__DevKeys__4__KeyId: admin
+      Alvo__Auth__DevKeys__4__Secret: ${ALVO_FS_ADMIN_SECRET:?set ALVO_FS_ADMIN_SECRET before starting the field-service stack}
+      Alvo__Auth__DevKeys__4__User: ${ALVO_FS_USER_ADMIN:?set ALVO_FS_USER_ADMIN (see examples/field-service/demo-identities.env)}
+      Alvo__Auth__DevKeys__4__Tenant: ${ALVO_FS_TENANT_NORTH:?set ALVO_FS_TENANT_NORTH (see examples/field-service/demo-identities.env)}
+      Alvo__Auth__DevKeys__4__Roles__0: authenticated
+      Alvo__Auth__DevKeys__4__Roles__1: admin
+      Alvo__Auth__DevKeys__4__Scopes__0: "*:read"
+      Alvo__Auth__DevKeys__4__Scopes__1: "*:write"
+
+    # Loopback only, for the reason docker-compose.yml states at length: publishing 0.0.0.0 puts five
+    # keys and an anonymous /openapi/v1.json describing them on the internet of any cloud VM whose
+    # operator followed a quickstart.
+    ports:
+      - "127.0.0.1:${ALVO_FS_PORT:?set ALVO_FS_PORT (see examples/field-service/demo-identities.env)}:8080"
+    volumes:
+      - ./examples/field-service/field-service.alvo.json:/alvo/descriptor.json:ro
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health/live"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
