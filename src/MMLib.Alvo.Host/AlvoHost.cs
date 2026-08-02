@@ -142,6 +142,35 @@ public static class AlvoHost
         ArgumentNullException.ThrowIfNull(builder);
 
         var app = builder.Build();
+
+        try
+        {
+            return await ComposeAsync(app, ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            await app.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Everything <see cref="BuildAsync"/> does to an application it has already built, so the one thing that
+    /// can fail has exactly one owner responsible for disposing it.
+    /// </summary>
+    /// <remarks>
+    /// <b>Split out because a refused start used to leak the whole application.</b>
+    /// <c>WebApplicationBuilder.Build()</c> creates a full service provider; if the apply or
+    /// <c>EnsureApplied</c> then threw, nothing disposed it, and the store's connection pool kept the
+    /// database file open for the rest of the process. That leak was visible in this repository's own suite
+    /// long before it was named — the host fixture's database cleanup swallowed an <c>IOException</c>
+    /// "tolerating a file a refused start still holds open" — and in a container it is the difference between
+    /// a clean non-zero exit and a process holding a socket and a file while the orchestrator restarts it.
+    /// </remarks>
+    /// <param name="app">The application <see cref="BuildAsync"/> built.</param>
+    /// <param name="ct">Cancels the descriptor apply.</param>
+    private static async Task<WebApplication> ComposeAsync(WebApplication app, CancellationToken ct)
+    {
         var options = app.Services.GetRequiredService<IOptions<AlvoHostOptions>>().Value;
 
         app.UseExceptionHandler();

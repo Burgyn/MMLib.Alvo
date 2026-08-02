@@ -5,6 +5,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
@@ -55,10 +56,15 @@ internal sealed class AlvoHostWorld : IAsyncDisposable
     /// way to exercise a restart, the path an operator takes on every deploy. A world handed one does not
     /// delete it; the default is a fresh file per world, deleted on disposal.
     /// </param>
+    /// <param name="configure">
+    /// Anything the caller adds to the builder before <see cref="AlvoHost.BuildAsync"/> runs — the seam a fact
+    /// about a <em>failed</em> start needs, since it never gets a world back to read anything off.
+    /// </param>
     internal static async Task<AlvoHostWorld> StartAsync(
         string descriptor = DefaultDescriptorFileName,
         IReadOnlyDictionary<string, string?>? overrides = null,
-        string? databasePath = null)
+        string? databasePath = null,
+        Action<WebApplicationBuilder>? configure = null)
     {
         var descriptorPath = Path.IsPathRooted(descriptor) ? descriptor : DescriptorPath(descriptor);
         var ownedDatabasePath = databasePath is null ? TempDatabasePath() : null;
@@ -71,6 +77,7 @@ internal sealed class AlvoHostWorld : IAsyncDisposable
         builder.Logging.AddProvider(logs);
         builder.WebHost.UseTestServer();
         builder.Services.AddSingleton<IStartupFilter>(new RemoteAddressStartupFilter(_remoteAddress));
+        configure?.Invoke(builder);
 
         var app = await AlvoHost.BuildAsync(builder, TestContext.Current.CancellationToken);
         await app.StartAsync(TestContext.Current.CancellationToken);
@@ -270,6 +277,45 @@ internal sealed class AlvoHostWorld : IAsyncDisposable
             TryDeleteDatabase(path);
         }
     }
+}
+
+/// <summary>
+/// A service that records whether the container it was resolved from was ever disposed — the only
+/// platform-independent way to say "the refused start released the application it had already built".
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>It is an <see cref="IConfigureOptions{TOptions}"/> on purpose, and the choice is the whole reason this
+/// works.</b> A service provider disposes what it <em>created</em>, so a probe registered as a bare instance
+/// (<c>AddSingleton(probe)</c>) would never be tracked, and one registered as a type nothing resolves would
+/// never be created. <see cref="AlvoHost.BuildAsync"/> reads <c>IOptions&lt;AlvoHostOptions&gt;</c> as its
+/// first act, which resolves every configurator through the factory below and therefore captures this one as
+/// a disposable of the root scope.
+/// </para>
+/// <para>
+/// Registered by a fact rather than by every world, because a world that started successfully disposes its
+/// application anyway and the claim would be vacuous there.
+/// </para>
+/// </remarks>
+internal sealed class DisposalProbe : IConfigureOptions<AlvoHostOptions>, IDisposable
+{
+    /// <summary>Registers one probe so the container creates it, and hands it back to the fact.</summary>
+    /// <param name="builder">The builder the world is starting.</param>
+    internal static DisposalProbe RegisteredOn(WebApplicationBuilder builder)
+    {
+        var probe = new DisposalProbe();
+        builder.Services.AddSingleton<IConfigureOptions<AlvoHostOptions>>(_ => probe);
+        return probe;
+    }
+
+    /// <summary>Whether the container this was resolved from has been disposed.</summary>
+    internal bool Disposed { get; private set; }
+
+    public void Configure(AlvoHostOptions options)
+    {
+    }
+
+    public void Dispose() => Disposed = true;
 }
 
 /// <summary>Every log record the host wrote, so a fact can assert a warning was actually delivered.</summary>

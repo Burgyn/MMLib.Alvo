@@ -87,6 +87,51 @@ public class AlvoHostRestartTests
         }
     }
 
+    /// <summary>
+    /// A refused start disposes the application it had already built, so nothing keeps the database file open.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>builder.Build()</c> creates a full service provider before anything can fail, and the apply is what
+    /// fails; a version of <see cref="AlvoHost.BuildAsync"/> that let the exception out without disposing left
+    /// the store's connection pool holding this file for the rest of the process. In a container it is a
+    /// process holding a socket and a file handle while the orchestrator restarts it.
+    /// </para>
+    /// <para>
+    /// The claim is asserted on the <em>container</em>, not on <c>File.Delete</c>, because deleting an open
+    /// file succeeds on Unix and fails only on Windows — a fact written the other way round would measure the
+    /// leak on one CI runner and nothing at all on a developer's machine. The delete still happens, in the
+    /// <c>finally</c> every fact here shares, and <c>TryDeleteDatabase</c> no longer swallows its failure.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_refused_restart_disposes_the_application_it_had_already_built()
+    {
+        var databasePath = AlvoHostWorld.TempDatabasePath();
+        DisposalProbe? probe = null;
+
+        try
+        {
+            await CreateWarehouseAsync(databasePath);
+
+            await Should.ThrowAsync<DestructiveChangeNotAllowedException>(
+                () => AlvoHostWorld.StartAsync(
+                    DroppedFieldDescriptor,
+                    overrides: null,
+                    databasePath: databasePath,
+                    configure: builder => probe = DisposalProbe.RegisteredOn(builder)));
+
+            probe.ShouldNotBeNull("the fixture must really have registered the probe");
+            probe.Disposed.ShouldBeTrue(
+                "a refused start must dispose the application it built, or the connection pool keeps the "
+                + "database file open for the rest of the process");
+        }
+        finally
+        {
+            AlvoHostWorld.TryDeleteDatabase(databasePath);
+        }
+    }
+
     /// <summary>Boots once over <paramref name="databasePath"/>, writes one row, and stops.</summary>
     private static async Task CreateWarehouseAsync(string databasePath)
     {
