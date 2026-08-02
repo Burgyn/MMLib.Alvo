@@ -211,37 +211,92 @@ jobs:
   notify:
     name: Report a failed mutation run
     needs: mutation
-    if: failure() && github.event_name == 'push'
+    # NOT `failure()`. A job killed by `timeout-minutes` ends with conclusion
+    # `cancelled`, so `failure()` is false and this job was SKIPPED for the one
+    # outcome that is worse than a low score: a run that produced no verdict at
+    # all. That is what happened to run 30292141967 (#98) — three shards hit the
+    # 120-minute budget and nobody was told. `always()` plus an explicit result
+    # check covers failure, timeout and cancellation alike.
+    # Accepted cost: a human cancelling a push-triggered run by hand now also
+    # files a report. That is the same "no verdict" state, it is cheap to close,
+    # and it is strictly better than a silent timeout. (The concurrency group is
+    # keyed on the commit with cancel-in-progress off, so GitHub itself never
+    # cancels one of these runs as superseded.)
+    if: always() && github.event_name == 'push' && needs.mutation.result != 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       issues: write
+      # To read this run's PER-LEG job conclusions: `needs.mutation.result`
+      # collapses all five shards into one word, and the three failure shapes
+      # below want telling apart, which needs the individual conclusions.
+      actions: read
     steps:
       - name: Open or update the tracking issue
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          MATRIX_RESULT: ${{ needs.mutation.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         shell: bash
         run: |
           set -euo pipefail
 
-          body="$(cat <<EOF
-          The post-merge mutation run failed for \`$SHA\`.
+          # Advisory enrichment only: if the API call fails, the report is still
+          # filed — just without the per-shard breakdown. Never let fetching
+          # detail be the reason the notification goes missing.
+          legs="$(gh api --paginate \
+            "repos/$REPO/actions/runs/$RUN_ID/jobs?per_page=100" \
+            --jq '.jobs[] | select(.name | startswith("Stryker (")) | [.conclusion, .name] | @tsv' \
+            2>/dev/null || true)"
+
+          legs_md="$(printf '%s\n' "$legs" \
+            | awk -F'\t' 'NF==2 && $1!="success" { printf "- `%s` — **%s**\n", $2, $1 }')"
+
+          if [ -z "$legs_md" ]; then
+            legs_md="- (per-shard conclusions unavailable; matrix result: \`$MATRIX_RESULT\`)"
+          fi
+
+          # Build the report in a FILE, with the heredocs at statement level and
+          # the static half quoted (<<'MD'). Not cosmetic: a heredoc nested inside
+          # a `$( )` command substitution still has its body scanned for quotes on
+          # bash 3.2, so a single apostrophe ("the shard's log") turns the whole
+          # step into a syntax error — and this step only ever runs in the failure
+          # case, where a syntax error would silence the notification exactly like
+          # the bug this job was fixed for. `--body-file` also means backticks need
+          # no escaping, so the Markdown below reads as Markdown.
+          {
+            cat <<EOF
+          The post-merge mutation run did not succeed for \`$SHA\` (matrix result:
+          \`$MATRIX_RESULT\`).
 
           Run: $RUN_URL
 
-          Mutation runs post-merge by design, so this did not block the merge —
-          it needs someone to act. Two shapes of failure:
+          Shards that did not succeed:
 
-          - **Mutation score below threshold** — the adversarial suite stopped
-            biting. The fix is to add or strengthen a test, not to revert.
-          - **Vacuous run (zero mutants tested)** — the gate itself is broken
-            (see stryker-net#3094). That is more urgent than a low score: it
-            means the previous greens were meaningless.
+          $legs_md
           EOF
-          )"
+            cat <<'MD'
+
+          Mutation runs post-merge by design, so this did not block the merge — it
+          needs someone to act. There are three shapes, and the right action differs
+          per shape; each shard's conclusion above says which one you are looking at.
+
+          - **`failure` — mutation score below threshold.** The adversarial suite
+            stopped biting. The fix is to add or strengthen a test, not to revert.
+          - **`failure` — vacuous run (zero mutants tested).** The gate itself is
+            broken (see stryker-net#3094); the shard's log carries an `::error::`
+            annotation naming it. More urgent than a low score: it means the
+            previous greens were meaningless. Open the log to tell this apart from
+            a below-threshold failure.
+          - **`cancelled` / `timed_out` — no verdict produced.** The shard hit
+            `timeout-minutes`, so there is no score at all, and nothing here says
+            the suite got worse. What needs looking at is the run's cost and its
+            budget — not the tests.
+          MD
+          } > mutation-report.md
 
           # The label may not exist yet; creating it must not fail the job.
           gh label create mutation-gate \
@@ -253,10 +308,10 @@ jobs:
             --label mutation-gate --limit 1 --json number --jq '.[0].number // empty')"
 
           if [ -n "$existing" ]; then
-            gh issue comment "$existing" --repo "$REPO" --body "$body"
+            gh issue comment "$existing" --repo "$REPO" --body-file mutation-report.md
           else
             gh issue create --repo "$REPO" \
               --title "Mutation gate failed on main" \
               --label mutation-gate \
-              --body "$body"
+              --body-file mutation-report.md
           fi
