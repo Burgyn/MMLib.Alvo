@@ -37,8 +37,14 @@ services:
       Alvo__Auth__DevKeys__0__Roles__2: inspector
       Alvo__Auth__DevKeys__0__Scopes__0: "*:read"
       Alvo__Auth__DevKeys__0__Scopes__1: "*:write"
+    # Loopback only. "8080:8080" binds 0.0.0.0, and Docker's DOCKER-USER iptables chain sits ahead of
+    # UFW — so an operator who follows the README's quickstart on a cloud VM publishes this demo's
+    # admin + *:read + *:write key to the internet, with /openapi/v1.json and /scalar anonymous to
+    # describe the surface. The `:?` guard makes them choose a secret; it says nothing about who can
+    # reach the port. Everything that consumes it is on this machine anyway: scripts/test-e2e and the
+    # README both use http://localhost:8080, and the healthcheck below runs inside the container.
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     volumes:
       - ./examples/vehicle-registry/vehicles.alvo.json:/alvo/descriptor.json:ro
     healthcheck:
