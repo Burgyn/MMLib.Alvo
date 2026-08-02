@@ -17,11 +17,11 @@
         "phone": { "type": "string", "format": "phone" }
       },
       "rules": {
-        "list": "@user.id != null",
-        "get": "@user.id != null",
-        "create": "@user.role == 'admin'",
-        "update": "@user.role == 'admin'",
-        "delete": "@user.role == 'admin'"
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+        "create": "'admin' in @user.roles",
+        "update": "'admin' in @user.roles",
+        "delete": "'admin' in @user.roles"
       }
     },
     "vehicles": {
@@ -48,11 +48,11 @@
         }
       },
       "rules": {
-        "list": "@user.id != null",
-        "get": "@user.id != null",
-        "create": "@user.role == 'admin'",
-        "update": "@user.role in ['admin', 'inspector']",
-        "delete": "@user.role == 'admin'"
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+        "create": "'admin' in @user.roles",
+        "update": "'admin' in @user.roles || 'inspector' in @user.roles",
+        "delete": "'admin' in @user.roles"
       },
       "indexes": [
         { "fields": ["make", "model"] }
@@ -73,11 +73,11 @@
         "notes": { "type": "text" }
       },
       "rules": {
-        "list": "@user.id != null",
-        "get": "@user.id != null",
-        "create": "@user.role in ['admin', 'inspector']",
-        "update": "@user.role in ['admin', 'inspector']",
-        "delete": "@user.role == 'admin'"
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+        "create": "'admin' in @user.roles || 'inspector' in @user.roles",
+        "update": "'admin' in @user.roles || 'inspector' in @user.roles",
+        "delete": "'admin' in @user.roles"
       },
       "indexes": [
         { "fields": ["vehicle_id", "inspected_on"] }

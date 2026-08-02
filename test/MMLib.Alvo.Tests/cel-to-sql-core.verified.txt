@@ -1,0 +1,296 @@
+﻿[
+  {
+    source: owner_id == @user.id,
+    context: Alice,
+    Sql: COALESCE("owner_id" = @alvo_p0, FALSE),
+    Parameters: [
+      {
+        Key: alvo_p0,
+        Value: {alice-user-id}
+      }
+    ]
+  },
+  {
+    source: status != 'draft',
+    context: Alice,
+    Sql: COALESCE("status" <> @alvo_p0, FALSE),
+    Parameters: [
+      {
+        Key: alvo_p0,
+        Value: draft
+      }
+    ]
+  },
+  {
+    source: total > 100,
+    context: Alice,
+    Sql: COALESCE("total" > @alvo_p0, FALSE),
+    Parameters: [
+      {
+        Key: alvo_p0,
+        Value: 100
+      }
+    ]
+  },
+  {
+    source: total >= 100,
+    context: Alice,
+    Sql: COALESCE("total" >= @alvo_p0, FALSE),
+    Parameters: [
+      {
+        Key: alvo_p0,
+        Value: 100
+      }
+    ]
+  },
+  {
+    source: total < 100,
+    context: Alice,
+    Sql: COALESCE("total" < @alvo_p0, FALSE),
+    Parameters: [
+      {
+        Key: alvo_p0,
+        Value: 100
+      }
+    ]
+  },
+  {
+    source: total <= 100,
+    context: Alice,
+    Sql: COALESCE("total" <= @alvo_p0, FALSE),
+    Parameters: [
+      {
+        Key: alvo_p0,
+        Value: 100
+      }
+    ]
+  },
+  {
+    source: created_at == approved_at,
+    context: Alice,
+    Sql: COALESCE("created_at" = "approved_at", FALSE),
+    Parameters: []
+  },
+  {
+    source: !(owner_id == @user.id),
+    context: Alice,
+    Sql: (NOT COALESCE("owner_id" = @alvo_p0, FALSE)),
+    Parameters: [
+      {
+        Key: alvo_p0,
+        Value: {alice-user-id}
+      }
+    ]
+  },
+  {
+    source: has(owner_id),
+    context: Alice,
+    Sql: ("owner_id" IS NOT NULL),
+    Parameters: []
+  },
+  {
+    source: !has(owner_id),
+    context: Alice,
+    Sql: (NOT ("owner_id" IS NOT NULL)),
+    Parameters: []
+  },
+  {
+    source: is_public,
+    context: Alice,
+    Sql: COALESCE("is_public", FALSE),
+    Parameters: []
+  },
+  {
+    source: !is_public,
+    context: Alice,
+    Sql: (NOT COALESCE("is_public", FALSE)),
+    Parameters: []
+  },
+  {
+    source: 'editor' in @user.roles,
+    context: Editor,
+    Sql: TRUE,
+    Parameters: []
+  },
+  {
+    source: 'editor' in @user.roles,
+    context: Alice,
+    Sql: FALSE,
+    Parameters: []
+  },
+  {
+    source: status in @user.roles,
+    context: Editor,
+    Sql: COALESCE("status" IN (@alvo_p0, @alvo_p1), FALSE),
+    Parameters: [
+      {
+        Key: alvo_p0,
+        Value: authenticated
+      },
+      {
+        Key: alvo_p1,
+        Value: editor
+      }
+    ]
+  },
+  {
+    source: tenant_id == @tenant.id,
+    context: Alice,
+    Sql: COALESCE("tenant_id" = @alvo_p0, FALSE),
+    Parameters: [
+      {
+        Key: alvo_p0,
+        Value: {acme-tenant-id}
+      }
+    ]
+  },
+  {
+    source: tenant_id == @tenant.id,
+    context: TenantlessAlice,
+    Sql: FALSE,
+    Parameters: []
+  },
+  {
+    source: owner_id == @user.id && status == 'approved',
+    context: Alice,
+    Sql: (COALESCE("owner_id" = @alvo_p0, FALSE) AND COALESCE("status" = @alvo_p1, FALSE)),
+    Parameters: [
+      {
+        Key: alvo_p0,
+        Value: {alice-user-id}
+      },
+      {
+        Key: alvo_p1,
+        Value: approved
+      }
+    ]
+  },
+  {
+    source: owner_id == @user.id || 'editor' in @user.roles,
+    context: Editor,
+    Sql: (COALESCE("owner_id" = @alvo_p0, FALSE) OR TRUE),
+    Parameters: [
+      {
+        Key: alvo_p0,
+        Value: {editor-user-id}
+      }
+    ]
+  },
+  {
+    source: (owner_id == @user.id || status == 'approved') && !has(owner_id),
+    context: Alice,
+    Sql: ((COALESCE("owner_id" = @alvo_p0, FALSE) OR COALESCE("status" = @alvo_p1, FALSE)) AND (NOT ("owner_id" IS NOT NULL))),
+    Parameters: [
+      {
+        Key: alvo_p0,
+        Value: {alice-user-id}
+      },
+      {
+        Key: alvo_p1,
+        Value: approved
+      }
+    ]
+  },
+  {
+    source: total + 1,
+    context: (scalar),
+    Sql: ("total" + @p0),
+    Parameters: [
+      {
+        Key: p0,
+        Value: 1
+      }
+    ]
+  },
+  {
+    source: total * 2 + 1,
+    context: (scalar),
+    Sql: (("total" * @p0) + @p1),
+    Parameters: [
+      {
+        Key: p0,
+        Value: 2
+      },
+      {
+        Key: p1,
+        Value: 1
+      }
+    ]
+  },
+  {
+    source: (total + 1) * (total - 1),
+    context: (scalar),
+    Sql: (("total" + @p0) * ("total" - @p1)),
+    Parameters: [
+      {
+        Key: p0,
+        Value: 1
+      },
+      {
+        Key: p1,
+        Value: 1
+      }
+    ]
+  },
+  {
+    source: total > 5 ? 1 : 2,
+    context: (scalar),
+    Sql: (CASE WHEN COALESCE("total" > @p0, FALSE) THEN @p1 ELSE @p2 END),
+    Parameters: [
+      {
+        Key: p0,
+        Value: 5
+      },
+      {
+        Key: p1,
+        Value: 1
+      },
+      {
+        Key: p2,
+        Value: 2
+      }
+    ]
+  },
+  {
+    source: !(total > 5) ? 1 : 2,
+    context: (scalar),
+    Sql: (CASE WHEN (NOT COALESCE("total" > @p0, FALSE)) THEN @p1 ELSE @p2 END),
+    Parameters: [
+      {
+        Key: p0,
+        Value: 5
+      },
+      {
+        Key: p1,
+        Value: 1
+      },
+      {
+        Key: p2,
+        Value: 2
+      }
+    ]
+  },
+  {
+    source: (total > 5 && total < 10) ? 1 : 2,
+    context: (scalar),
+    Sql: (CASE WHEN (COALESCE("total" > @p0, FALSE) AND COALESCE("total" < @p1, FALSE)) THEN @p2 ELSE @p3 END),
+    Parameters: [
+      {
+        Key: p0,
+        Value: 5
+      },
+      {
+        Key: p1,
+        Value: 10
+      },
+      {
+        Key: p2,
+        Value: 1
+      },
+      {
+        Key: p3,
+        Value: 2
+      }
+    ]
+  }
+]

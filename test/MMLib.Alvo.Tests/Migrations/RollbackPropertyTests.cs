@@ -1,7 +1,9 @@
 ﻿using CsCheck;
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Descriptor.Internal;
+using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Migrations;
+using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Schema;
 using MMLib.Alvo.Testing.Migrations;
 using System.Text.Json.Nodes;
@@ -97,7 +99,7 @@ public sealed class RollbackPropertyTests
         var writer = new InMemoryRuntimeSchemaWriter(store);
         var migrator = new InMemorySchemaMigrator();
         var validator = new DescriptorValidator();
-        return (new RuntimeSchemaService(validator, migrator, store, writer), store);
+        return (new RuntimeSchemaService(validator, migrator, store, writer, new CelCompiler(), new PolicyCatalogProvider()), store);
     }
 
     private sealed record FieldSpec(string Name, string TypeJson);

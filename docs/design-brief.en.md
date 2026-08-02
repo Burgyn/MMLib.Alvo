@@ -1,6 +1,6 @@
 <!-- GENERATED — do not hand-edit. Regenerate via the alvo-regen-brief skill. -->
-<!-- brief-source: docs/product/alvo-specifikacia.md sha256:b68ea0e0f3be283122eeb8214560136d737bc8baf5b33f17d3cc2db7c330d5c9 -->
-<!-- brief-source: docs/product/baas-analyza.md sha256:1a1d038e7aae03da549f2caec4b43da84088b8510d3855afebc76fa6f6e99bbb -->
+<!-- brief-source: docs/product/alvo-specifikacia.md sha256:7a1b8ca5765fe15e17da56454c009b618fc53dea97c124e672f75f5d22d70d3a -->
+<!-- brief-source: docs/product/baas-analyza.md sha256:dc68abd3d21d16aafb2b35df4770d40982864d447a5085f6de18a74a62737f3d -->
 
 # Alvo design brief (compressed)
 
@@ -352,7 +352,7 @@ another port**; lockstep SemVer (everything released together as one version).
 - **RBAC ≠ row-level authorization** (two complementary layers, not
   alternatives). RBAC (roles/teams/permissions) says "Ján is an editor" — coarse.
   The rule engine says "an editor may change only invoices of his department" —
-  fine-grained. RBAC (`@user.role`, `@user.teams`, custom claims) *feeds* the
+  fine-grained. RBAC (`@user.roles`, `@user.teams`, custom claims) *feeds* the
   row-level rules; without the second layer RBAC is all-or-nothing.
 
 ---

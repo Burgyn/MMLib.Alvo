@@ -1,5 +1,9 @@
 ﻿using Corvus.Json;
 using MMLib.Alvo.Descriptor.SchemaGen;
+using MMLib.Alvo.Expressions;
+using MMLib.Alvo.Expressions.Internal;
+using MMLib.Alvo.Rules;
+using MMLib.Alvo.Schema;
 using System.Text.Json;
 
 namespace MMLib.Alvo.Descriptor.Internal;
@@ -7,18 +11,59 @@ namespace MMLib.Alvo.Descriptor.Internal;
 /// <summary>
 /// Layered descriptor validator: (1) a schema pass against the build-time Corvus-generated
 /// <see cref="GeneratedProjectDescriptor"/> (from project.schema.json), (2) a semantic pass for
-/// cross-field rules the schema cannot express, each producing agent-first
-/// <see cref="DescriptorValidationError"/>s with fix suggestions.
+/// cross-field rules the schema cannot express, (3) a rule-compilation pass that runs every
+/// <c>rules</c>/<c>hidden</c>/<c>readOnly</c> CEL expression through <see cref="ICelCompiler"/> —
+/// each producing agent-first <see cref="DescriptorValidationError"/>s with fix suggestions, so a
+/// rule that references an unknown column or the retired singular <c>@user.role</c> idiom fails
+/// here, when the descriptor is applied, never at request time.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Corvus.Json.SourceGenerator emits <see cref="GeneratedProjectDescriptor"/> at compile time —
 /// the schema is fixed at build time (Alvo's own per-version descriptor grammar), but the
 /// runtime JSON being validated is fully arbitrary/untrusted (CLI/dashboard/API input). At
 /// runtime this is a plain compiled .NET type: no Roslyn, no <c>PreserveCompilationContext</c>,
 /// unlike the Corvus.Json.Validator (runtime-Roslyn) package Alvo used before this rework.
+/// </para>
+/// <para>
+/// The rule-compilation pass runs only when the schema pass produced no errors — a descriptor the
+/// schema already rejects cannot reliably be parsed into <see cref="AlvoDescriptor"/> and mapped by
+/// <see cref="DescriptorToSchemaMapper"/>. It compiles the same <see cref="PolicyCatalog"/> the
+/// apply-time priming path (<c>PolicyCatalogPriming</c>, <c>SchemaMigrationRunner</c>,
+/// <c>RuntimeSchemaService</c>) later builds for real; this pass discards the built catalog and
+/// keeps only its errors, since <see cref="IDescriptorValidator.Validate"/>'s public contract
+/// returns findings, not a catalog. A descriptor that passes this pass is compiled a second time by
+/// the priming path immediately afterward — recompiling the same CEL strings once more is the
+/// deliberate, documented cost of keeping <see cref="IDescriptorValidator"/>'s contract narrow
+/// (report findings only) rather than smuggling an internal type through a public interface for a
+/// rarely-hot path (schema/rule compilation runs once per apply, never per request).
+/// </para>
 /// </remarks>
 internal sealed class DescriptorValidator : IDescriptorValidator
 {
+    private readonly ICelCompiler _compiler;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DescriptorValidator"/> class with the default CEL
+    /// compiler — for a caller that has no container to resolve one from (a test, a CLI validate
+    /// command). A host that replaced <see cref="ICelCompiler"/> must not use this overload: it would
+    /// validate rules against a different compiler from the one the apply path then compiles them
+    /// with, so the pass that reports findings and the pass that builds the real catalog could
+    /// disagree. The DI registration always uses the other constructor.
+    /// </summary>
+    public DescriptorValidator()
+        : this(new CelCompiler())
+    {
+    }
+
+    /// <summary>Initializes a new instance of the <see cref="DescriptorValidator"/> class.</summary>
+    /// <param name="compiler">The CEL compiler every rule and field flag is compiled through.</param>
+    public DescriptorValidator(ICelCompiler compiler)
+    {
+        ArgumentNullException.ThrowIfNull(compiler);
+        _compiler = compiler;
+    }
+
     public DescriptorValidationResult Validate(string descriptorJson)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(descriptorJson);
@@ -35,11 +80,37 @@ internal sealed class DescriptorValidator : IDescriptorValidator
 
         using (document)
         {
-            var errors = new List<DescriptorValidationError>();
-            errors.AddRange(SchemaErrors(document.RootElement));
+            var schemaErrors = SchemaErrors(document.RootElement);
+            var errors = new List<DescriptorValidationError>(schemaErrors);
             errors.AddRange(SemanticErrors(document.RootElement));
+            if (schemaErrors.Count == 0)
+            {
+                errors.AddRange(RuleErrors(descriptorJson));
+            }
+
             return new DescriptorValidationResult(errors);
         }
+    }
+
+    private List<DescriptorValidationError> RuleErrors(string descriptorJson)
+    {
+        AlvoDescriptor descriptor;
+        SchemaModel schema;
+        try
+        {
+            descriptor = AlvoDescriptor.Parse(descriptorJson);
+            schema = DescriptorToSchemaMapper.Map(descriptor);
+        }
+        catch (InvalidDataException)
+        {
+            // Already reported by the semantic pass above (today's 'computed' rejection) — do not
+            // double-report the same field, and a mapping failure leaves nothing to compile rules against.
+            return [];
+        }
+
+        return PolicyCatalog.TryBuild(descriptor, schema, _compiler, out _, out var errors)
+            ? []
+            : [.. errors];
     }
 
     private static DescriptorValidationError Malformed(JsonException ex) =>

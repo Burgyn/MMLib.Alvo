@@ -1,4 +1,7 @@
 ﻿using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Expressions;
+using MMLib.Alvo.Rules;
+using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Migrations;
@@ -10,7 +13,15 @@ namespace MMLib.Alvo.Migrations;
 /// </summary>
 /// <remarks>
 /// Invoked by the code-first builder (<c>FromDescriptor()</c>) and, later, a Management-API
-/// migration endpoint — both compose the same four ports rather than duplicating this flow.
+/// migration endpoint — both compose the same four ports rather than duplicating this flow. Every
+/// branch that accepts the descriptor as authoritative for the schema actually in the database (an
+/// empty plan, or a genuinely applied one) also (re)primes <see cref="IPolicyCatalogProvider"/>
+/// from the same parsed descriptor, so <c>IPolicyEngine</c> is never left serving a stale or
+/// never-primed catalog after a successful run. The empty-plan branch — nothing to durably change —
+/// uses <see cref="PolicyCatalogPriming"/> to build and publish together. The genuinely-applied
+/// branch builds the catalog before <see cref="ISchemaMigrator.ApplyAsync"/> runs any DDL — so an
+/// uncompilable rule set rejects the run before anything is durable — and publishes it via
+/// <see cref="IPolicyCatalogProvider.SetCurrent"/> only after the applied snapshot is saved.
 /// </remarks>
 internal sealed class SchemaMigrationRunner
 {
@@ -19,25 +30,33 @@ internal sealed class SchemaMigrationRunner
     private readonly ISchemaMigrator _migrator;
     private readonly ISchemaIntrospector _introspector;
     private readonly IAppliedSchemaStore _store;
+    private readonly ICelCompiler _compiler;
+    private readonly IPolicyCatalogProvider _policyCatalogProvider;
 
     public SchemaMigrationRunner(
         IDescriptorSource source,
         IDescriptorValidator validator,
         ISchemaMigrator migrator,
         ISchemaIntrospector introspector,
-        IAppliedSchemaStore store)
+        IAppliedSchemaStore store,
+        ICelCompiler compiler,
+        IPolicyCatalogProvider policyCatalogProvider)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(validator);
         ArgumentNullException.ThrowIfNull(migrator);
         ArgumentNullException.ThrowIfNull(introspector);
         ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(compiler);
+        ArgumentNullException.ThrowIfNull(policyCatalogProvider);
 
         _source = source;
         _validator = validator;
         _migrator = migrator;
         _introspector = introspector;
         _store = store;
+        _compiler = compiler;
+        _policyCatalogProvider = policyCatalogProvider;
     }
 
     /// <summary>Runs the code-first migration flow described in the type's remarks.</summary>
@@ -75,6 +94,7 @@ internal sealed class SchemaMigrationRunner
 
         if (plan.IsEmpty)
         {
+            PolicyCatalogPriming.Prime(_policyCatalogProvider, _compiler, descriptor.Name, descriptor, desired);
             return new MigrationResult(Applied: false, plan, WasDryRun: options.DryRun);
         }
 
@@ -88,6 +108,7 @@ internal sealed class SchemaMigrationRunner
             return new MigrationResult(Applied: false, plan, WasDryRun: true);
         }
 
+        var catalog = PolicyCatalog.Build(descriptor, desired, _compiler);
         var result = await _migrator.ApplyAsync(plan, options, ct).ConfigureAwait(false);
 
         if (result.Applied)
@@ -95,6 +116,7 @@ internal sealed class SchemaMigrationRunner
             var revision = (appliedSnapshot?.Revision ?? 0) + 1;
             var snapshot = new AppliedSchema(desired, descriptorJson, revision, DateTimeOffset.UtcNow);
             await _store.SaveAsync(descriptor.Name, snapshot, ct).ConfigureAwait(false);
+            _policyCatalogProvider.SetCurrent(descriptor.Name, catalog);
         }
 
         return result;

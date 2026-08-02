@@ -7,6 +7,15 @@ namespace MMLib.Alvo.Descriptor;
 /// Maps a parsed <see cref="AlvoDescriptor"/> to the public <see cref="SchemaModel"/>,
 /// injecting the framework-managed columns (id, tenant_id, audit quartet, deleted_at).
 /// </summary>
+/// <remarks>
+/// <c>src/MMLib.Alvo.Testing/Data/AlvoDataAdversarialTests.cs</c>'s private <c>BuildFixture</c>
+/// hand-mirrors this mapper's id/tenant_id column injection (it cannot reference this internal
+/// type — that project depends only on <c>MMLib.Alvo.Abstractions</c>). Its mirror only covers
+/// field type, <c>Required</c>/<c>Nullable</c>, and the two managed columns; it does not replicate
+/// <c>Indexed</c>, <c>MaxLength</c>, enum values, or a <c>Ref</c> target. A future change here
+/// (a new managed column, a different id/tenant_id shape) does not propagate there automatically —
+/// check that fixture when changing this method.
+/// </remarks>
 internal static class DescriptorToSchemaMapper
 {
     public static SchemaModel Map(AlvoDescriptor d)

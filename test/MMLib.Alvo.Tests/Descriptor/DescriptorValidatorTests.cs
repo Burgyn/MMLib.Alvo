@@ -144,4 +144,67 @@ public class DescriptorValidatorTests
         result.Errors.ShouldContain(e => e.Path.Contains("entities"));
         result.Errors.Select(e => e.Message).Distinct().Count().ShouldBe(result.Errors.Count);
     }
+
+    [Fact]
+    public void A_rule_referencing_an_unknown_column_fails_validation_not_the_request()
+    {
+        var result = Validate(DescriptorWithRule("list", "ownr_id == @user.id"));
+
+        result.IsValid.ShouldBeFalse();
+        result.Errors.ShouldContain(error =>
+            error.Path == "/entities/orders/rules/list" && error.Message.Contains("ownr_id"));
+    }
+
+    [Fact]
+    public void The_singular_user_role_is_refused_at_apply_with_the_plural_fix()
+    {
+        var result = Validate(DescriptorWithRule("list", "@user.role == 'admin'"));
+
+        result.Errors.ShouldContain(error => error.FixSuggestion!.Contains("in @user.roles"));
+    }
+
+    [Fact]
+    public void A_row_dependent_hidden_expression_is_refused_at_apply()
+    {
+        var result = Validate(DescriptorWithHidden("owner_id != @user.id"));
+
+        result.Errors.ShouldContain(error =>
+            error.Path == "/entities/orders/fields/notes/hidden");
+    }
+
+    [Fact]
+    public void A_context_only_hidden_expression_is_accepted()
+    {
+        Validate(DescriptorWithHidden("'compliance' in @user.roles")).IsValid.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void A_valid_rule_set_still_validates()
+    {
+        Validate(DescriptorWithRule("list", "owner_id == @user.id")).IsValid.ShouldBeTrue();
+    }
+
+    private static DescriptorValidationResult Validate(string json) => _validator.Validate(json);
+
+    private static string DescriptorWithRule(string operation, string expression) => $$"""
+    { "apiVersion": "alvo.dev/v1", "name": "demo",
+      "entities": { "orders": {
+        "fields": {
+          "owner_id": { "type": "uuid" },
+          "notes": { "type": "string" }
+        },
+        "rules": { "{{operation}}": "{{expression}}" }
+      } } }
+    """;
+
+    private static string DescriptorWithHidden(string expression) => $$"""
+    { "apiVersion": "alvo.dev/v1", "name": "demo",
+      "auth": { "roles": ["compliance"] },
+      "entities": { "orders": {
+        "fields": {
+          "owner_id": { "type": "uuid" },
+          "notes": { "type": "string", "hidden": "{{expression}}" }
+        }
+      } } }
+    """;
 }

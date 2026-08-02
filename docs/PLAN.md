@@ -100,7 +100,8 @@ are numbered independently of the plan's own bracketed `[N]` step numbers
   file (GitOps) or a DB record (dashboard-first), bridged bidirectionally.
 - **CEL for conditions, JSONata for transforms** — CEL is safe-by-construction
   and runs in-transaction; JSONata is Turing-complete and **never** runs
-  in-transaction.
+  in-transaction. See `docs/architecture/cel.md` for the three profiles, the
+  two-valued rendering rule, and every deliberate narrowing from conformant CEL.
 - **Never merge to `main` directly** — the PR is the gate for every layer
   but mutation (Stryker runs post-merge on `main`; see `CLAUDE.md`).
 - **The core is one big package** — a package is earned (foreign dependency,

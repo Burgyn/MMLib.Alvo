@@ -1,0 +1,215 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/Burgyn/MMLib.Alvo")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace MMLib.Alvo.Testing
+{
+    [System.AttributeUsage(System.AttributeTargets.Assembly, AllowMultiple=false)]
+    public sealed class ArchTargetAttribute : System.Attribute
+    {
+        public ArchTargetAttribute(string targetAssemblyName) { }
+        public string TargetAssemblyName { get; }
+    }
+    public sealed class DifferentialRuleCase : System.IEquatable<MMLib.Alvo.Testing.DifferentialRuleCase>
+    {
+        public DifferentialRuleCase(string Rule, MMLib.Alvo.Data.AlvoRecord Row, string ContextName) { }
+        public string ContextName { get; init; }
+        public MMLib.Alvo.Data.AlvoRecord Row { get; init; }
+        public string Rule { get; init; }
+    }
+    public static class DifferentialRuleCases
+    {
+        public static MMLib.Alvo.AlvoContext AcmeUser { get; }
+        public static MMLib.Alvo.AlvoContext Admin { get; }
+        public static MMLib.Alvo.AlvoContext Alice { get; }
+        public static System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Testing.DifferentialRuleCase> All { get; }
+        public static MMLib.Alvo.AlvoContext Bob { get; }
+        public static MMLib.Alvo.AlvoContext Editor { get; }
+        public static MMLib.Alvo.AlvoContext OtherTenantUser { get; }
+        public static MMLib.Alvo.AlvoContext TenantlessAlice { get; }
+        public static MMLib.Alvo.AlvoContext ContextFor(string name) { }
+    }
+    public static class RepositoryRoot
+    {
+        public static string Find() { }
+    }
+    public sealed class TestFieldSqlRenderer : MMLib.Alvo.Expressions.IFieldSqlRenderer
+    {
+        public TestFieldSqlRenderer() { }
+        public string FalseLiteral { get; }
+        public string TrueLiteral { get; }
+        public string RenderCaseInsensitiveLike(string left, string right) { }
+        public string RenderField(MMLib.Alvo.Schema.EntitySchema entity, string fieldName) { }
+        public string RenderParameter(string parameterName) { }
+    }
+}
+namespace MMLib.Alvo.Testing.Data
+{
+    public abstract class AlvoDataAdversarialTests
+    {
+        protected AlvoDataAdversarialTests() { }
+        public System.Threading.Tasks.Task A_filter_naming_a_hidden_field_is_rejected_rather_than_answered() { }
+        public System.Threading.Tasks.Task A_filter_or_sort_naming_a_field_the_schema_does_not_declare_is_rejected() { }
+        public System.Threading.Tasks.Task A_filter_tree_deeper_than_the_cap_is_rejected_rather_than_walked() { }
+        public System.Threading.Tasks.Task A_global_entity_whose_negated_rule_references_the_tenant_denies_a_tenantless_caller() { }
+        public System.Threading.Tasks.Task A_global_entity_whose_rule_references_the_user_denies_the_anonymous_caller() { }
+        public System.Threading.Tasks.Task A_hidden_expression_that_cannot_resolve_still_masks_the_field() { }
+        public System.Threading.Tasks.Task A_hidden_field_never_appears_in_a_returned_record() { }
+        public System.Threading.Tasks.Task A_nullable_boolean_field_used_bare_in_a_rule_works_end_to_end() { }
+        public System.Threading.Tasks.Task A_query_limit_is_applied_after_the_policy_predicate_not_before() { }
+        public System.Threading.Tasks.Task A_query_with_no_tenant_context_fails_rather_than_returning_every_tenants_rows() { }
+        public System.Threading.Tasks.Task A_sort_naming_a_hidden_field_is_rejected_rather_than_leaking_its_ordering() { }
+        public System.Threading.Tasks.Task A_tenant_scoped_entity_never_returns_another_tenants_rows() { }
+        public System.Threading.Tasks.Task A_tenantless_context_cannot_create_into_a_scoped_entity() { }
+        public System.Threading.Tasks.Task A_user_filter_cannot_widen_the_policy_predicate() { }
+        public System.Threading.Tasks.Task A_write_to_a_read_only_field_is_rejected_rather_than_silently_dropped() { }
+        public System.Threading.Tasks.Task An_admin_rule_over_the_role_set_matches_a_multi_role_caller() { }
+        public System.Threading.Tasks.Task An_entity_with_no_rule_denies_every_operation() { }
+        public System.Threading.Tasks.Task An_operation_with_no_rule_denies_while_its_siblings_work() { }
+        protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Data.IAlvoData> CreateAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, System.Collections.Generic.IReadOnlyDictionary<string, System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRecord>> seed);
+        public System.Threading.Tasks.Task Create_into_another_tenant_is_denied() { }
+        public System.Threading.Tasks.Task Create_of_an_allowed_row_persists_and_is_subsequently_readable() { }
+        public System.Threading.Tasks.Task Create_that_would_place_the_row_outside_the_callers_scope_is_denied() { }
+        public System.Threading.Tasks.Task Cross_tenant_get_by_id_is_indistinguishable_from_absent() { }
+        public System.Threading.Tasks.Task Delete_of_another_users_row_reports_not_found_and_does_not_delete() { }
+        public System.Threading.Tasks.Task Get_of_another_users_row_is_indistinguishable_from_absent() { }
+        public System.Threading.Tasks.Task List_returns_only_the_callers_own_rows() { }
+        public System.Threading.Tasks.Task Update_cannot_move_a_row_into_another_tenant() { }
+        public System.Threading.Tasks.Task Update_cannot_move_a_row_out_of_the_callers_scope() { }
+        public System.Threading.Tasks.Task Update_cannot_rewrite_the_row_id() { }
+        public System.Threading.Tasks.Task Update_of_an_unrelated_field_succeeds_when_the_post_image_still_satisfies_the_rule() { }
+        public System.Threading.Tasks.Task Update_of_another_users_row_reports_not_found() { }
+    }
+    public sealed class InMemoryAlvoData : MMLib.Alvo.Data.IAlvoData
+    {
+        public InMemoryAlvoData(MMLib.Alvo.Rules.IPolicyEngine policy, MMLib.Alvo.Expressions.IPredicateEvaluator evaluator, MMLib.Alvo.Schema.SchemaModel schema) { }
+        public System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord> CreateAsync(string entity, System.Collections.Generic.IReadOnlyDictionary<string, object?> values, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default) { }
+        public System.Threading.Tasks.Task DeleteAsync(string entity, System.Guid id, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default) { }
+        public System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord?> GetAsync(string entity, System.Guid id, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default) { }
+        public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRecord>> QueryAsync(MMLib.Alvo.Data.AlvoQuery query, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default) { }
+        public void Seed(string entity, params MMLib.Alvo.Data.AlvoRecord[] rows) { }
+        public System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord> UpdateAsync(string entity, System.Guid id, System.Collections.Generic.IReadOnlyDictionary<string, object?> values, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default) { }
+    }
+}
+namespace MMLib.Alvo.Testing.Migrations
+{
+    public abstract class DescriptorVersionStoreContractTests
+    {
+        protected DescriptorVersionStoreContractTests() { }
+        public System.Threading.Tasks.Task Concurrent_appends_at_same_expected_revision_yield_exactly_one_winner() { }
+        protected abstract MMLib.Alvo.Migrations.IDescriptorVersionStore CreateStore();
+        protected virtual void EnsureEngineAvailable() { }
+        public System.Threading.Tasks.Task First_append_is_revision_1() { }
+        public System.Threading.Tasks.Task Get_returns_a_specific_historical_revision() { }
+        public System.Threading.Tasks.Task History_is_append_only_and_ordered() { }
+        public System.Threading.Tasks.Task Stale_expected_revision_conflicts() { }
+        public System.Threading.Tasks.Task Unknown_project_or_revision_returns_null() { }
+    }
+    public sealed class InMemoryDescriptorVersionStore : MMLib.Alvo.Migrations.IDescriptorVersionStore
+    {
+        public InMemoryDescriptorVersionStore() { }
+        public System.Threading.Tasks.Task<MMLib.Alvo.Migrations.DescriptorVersion> AppendAsync(string project, MMLib.Alvo.Migrations.DescriptorVersion candidate, int expectedRevision, System.Threading.CancellationToken ct = default) { }
+        public System.Threading.Tasks.Task<MMLib.Alvo.Migrations.DescriptorVersion?> GetAsync(string project, int revision, System.Threading.CancellationToken ct = default) { }
+        public System.Threading.Tasks.Task<MMLib.Alvo.Migrations.DescriptorVersion?> GetCurrentAsync(string project, System.Threading.CancellationToken ct = default) { }
+        public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Migrations.DescriptorVersion>> ListAsync(string project, System.Threading.CancellationToken ct = default) { }
+    }
+    public sealed class InMemoryRuntimeSchemaWriter : MMLib.Alvo.Migrations.IRuntimeSchemaWriter
+    {
+        public InMemoryRuntimeSchemaWriter(MMLib.Alvo.Testing.Migrations.InMemoryDescriptorVersionStore store) { }
+        public System.Threading.Tasks.Task<MMLib.Alvo.Migrations.DescriptorVersion> ApplyAndAppendAsync(string project, MMLib.Alvo.Migrations.MigrationPlan plan, MMLib.Alvo.Migrations.DescriptorVersion candidate, int expectedRevision, MMLib.Alvo.Migrations.MigrationOptions options, System.Threading.CancellationToken ct = default) { }
+    }
+    public sealed class InMemorySchemaMigrator : MMLib.Alvo.Migrations.ISchemaMigrator
+    {
+        public InMemorySchemaMigrator() { }
+        public MMLib.Alvo.Schema.SchemaModel Applied { get; }
+        public System.Threading.Tasks.Task<MMLib.Alvo.Migrations.MigrationResult> ApplyAsync(MMLib.Alvo.Migrations.MigrationPlan plan, MMLib.Alvo.Migrations.MigrationOptions options, System.Threading.CancellationToken ct = default) { }
+        public System.Threading.Tasks.Task<MMLib.Alvo.Migrations.MigrationPlan> PlanAsync(MMLib.Alvo.Schema.SchemaModel current, MMLib.Alvo.Schema.SchemaModel desired, MMLib.Alvo.Migrations.MigrationOptions options, System.Threading.CancellationToken ct = default) { }
+    }
+    public abstract class RuntimeSchemaWriterContractTests
+    {
+        protected RuntimeSchemaWriterContractTests() { }
+        public System.Threading.Tasks.Task Concurrent_applies_at_same_expected_revision_yield_exactly_one_winner() { }
+        protected abstract MMLib.Alvo.Migrations.IRuntimeSchemaWriter CreateWriter();
+        protected virtual void EnsureEngineAvailable() { }
+        public System.Threading.Tasks.Task Winner_appends_loser_conflicts() { }
+    }
+    public static class SchemaDiff
+    {
+        public static System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Migrations.MigrationStep> Compute(MMLib.Alvo.Schema.SchemaModel current, MMLib.Alvo.Schema.SchemaModel desired) { }
+    }
+    public abstract class SchemaMigratorContractTests
+    {
+        protected SchemaMigratorContractTests() { }
+        protected abstract MMLib.Alvo.Migrations.ISchemaMigrator CreateMigrator();
+        public System.Threading.Tasks.Task Create_then_introspect_matches_desired() { }
+        public System.Threading.Tasks.Task Drop_without_AllowDestructive_is_refused() { }
+        protected virtual void EnsureEngineAvailable() { }
+        protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Schema.SchemaModel> IntrospectAsync();
+        public System.Threading.Tasks.Task Reapply_is_idempotent() { }
+        public System.Threading.Tasks.Task Rename_preserves_data() { }
+        public System.Threading.Tasks.Task Same_suite_passes_over_a_dynamic_entity() { }
+    }
+    public abstract class SchemaSqlSnapshotTests
+    {
+        protected SchemaSqlSnapshotTests() { }
+        protected abstract string EngineName { get; }
+        public System.Threading.Tasks.Task Add_column_sql_is_stable() { }
+        public System.Threading.Tasks.Task Add_composite_index_sql_is_stable() { }
+        public System.Threading.Tasks.Task Add_ref_foreign_key_sql_is_stable() { }
+        protected abstract MMLib.Alvo.Migrations.ISchemaMigrator CreateMigrator();
+        public System.Threading.Tasks.Task Create_audited_tenant_entity_sql_is_stable() { }
+        public System.Threading.Tasks.Task Create_entity_with_every_field_type_sql_is_stable() { }
+        public System.Threading.Tasks.Task Create_vehicles_table_sql_is_stable() { }
+        public System.Threading.Tasks.Task Drop_column_sql_is_stable() { }
+        protected virtual void EnsureEngineAvailable() { }
+        public System.Threading.Tasks.Task Rename_column_sql_is_stable() { }
+    }
+}
+namespace MMLib.Alvo.Testing.Rules
+{
+    public abstract class PolicyEngineContractTests
+    {
+        protected PolicyEngineContractTests() { }
+        public void A_denied_decision_carries_no_predicate_and_no_mask() { }
+        public void A_field_declared_statically_hidden_is_in_the_hidden_mask() { }
+        public void A_field_declared_statically_read_only_is_in_the_read_only_mask() { }
+        [Xunit.InlineData(new object[] {
+                "Create"})]
+        [Xunit.InlineData(new object[] {
+                "Delete"})]
+        [Xunit.InlineData(new object[] {
+                "Get"})]
+        [Xunit.InlineData(new object[] {
+                "List"})]
+        [Xunit.InlineData(new object[] {
+                "Update"})]
+        public void A_global_entity_whose_rule_reads_the_tenant_denies_a_tenantless_caller(string operationName) { }
+        public void A_global_entity_whose_rules_read_no_context_allows_a_tenantless_caller() { }
+        public void A_null_rule_for_the_requested_operation_denies() { }
+        public void A_rule_reading_the_tenant_and_the_user_allows_a_caller_who_has_both() { }
+        [Xunit.InlineData(new object[] {
+                "Create"})]
+        [Xunit.InlineData(new object[] {
+                "Delete"})]
+        [Xunit.InlineData(new object[] {
+                "Get"})]
+        [Xunit.InlineData(new object[] {
+                "List"})]
+        [Xunit.InlineData(new object[] {
+                "Update"})]
+        public void A_rule_reading_the_user_denies_a_caller_with_no_identity(string operationName) { }
+        public void A_scoped_entity_denies_a_tenantless_caller_before_any_rule_is_consulted() { }
+        public void A_scoped_entity_with_a_tenant_present_synthesizes_a_non_null_tenant_scope() { }
+        public void A_true_rule_allows_with_a_non_null_predicate() { }
+        public void An_entity_with_no_rules_block_denies_every_operation() { }
+        public void An_unknown_entity_denies_rather_than_throwing() { }
+        protected abstract MMLib.Alvo.Rules.IPolicyEngine CreateEngine(MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, MMLib.Alvo.Schema.SchemaModel schema);
+        public void Create_carries_with_check_only() { }
+        [Xunit.InlineData(new object[] {
+                "Delete"})]
+        [Xunit.InlineData(new object[] {
+                "Get"})]
+        [Xunit.InlineData(new object[] {
+                "List"})]
+        public void List_get_and_delete_carry_using_only(string operationName) { }
+        public void Update_carries_both_using_and_with_check_from_updates_own_distinctive_source() { }
+    }
+}

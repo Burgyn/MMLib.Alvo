@@ -22,6 +22,17 @@
     <ProjectReference Include="../MMLib.Alvo.Abstractions/MMLib.Alvo.Abstractions.csproj" />
   </ItemGroup>
 
+  <!--
+    InMemoryAlvoData (Task 12) enforces the resolved policy predicate per row through
+    IPredicateEvaluator (MMLib.Alvo.Abstractions/Expressions) — a published port, not an
+    InternalsVisibleTo into the core. This project stays Abstractions-only: a prior revision
+    referenced MMLib.Alvo directly (via InternalsVisibleTo) to reach CelInterpreter, which review
+    correctly rejected — MMLib.Alvo.Testing is a package planned to ship, and an unsigned
+    InternalsVisibleTo to a published assembly name is forgeable by anyone naming their own
+    assembly the same. IPredicateEvaluator is the one real CEL evaluator, reached through a
+    contract instead, exactly like IPredicateRenderer is for SQL.
+  -->
+
   <ItemGroup>
     <PackageReference Include="xunit.v3.extensibility.core" />
     <PackageReference Include="Shouldly" />

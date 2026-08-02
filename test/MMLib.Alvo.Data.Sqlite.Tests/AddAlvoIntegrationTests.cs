@@ -74,6 +74,36 @@ public sealed class AddAlvoIntegrationTests : IDisposable
         projects.Fields.Single(field => field.Name == "deleted_at").Nullable.ShouldBeTrue();
     }
 
+    /// <summary>
+    /// Regression guard for Task 11 Finding 2: the showcase descriptor's rules must stay compilable
+    /// end to end (descriptor → mapper → migration → policy catalog priming), not merely
+    /// schema-valid. Unlike <c>simple-tasks</c>, <c>vehicle-registry</c> has no <c>computed</c>/
+    /// <c>rollup</c> field, so nothing else blocks a full apply.
+    /// </summary>
+    [Fact]
+    public async Task AddAlvo_UseSqlite_FromDescriptor_migrates_the_real_vehicle_registry_descriptor()
+    {
+        var descriptorPath = Path.Combine(RepositoryRoot.Find(), "examples", "vehicle-registry", "vehicles.alvo.json");
+
+        var services = new ServiceCollection();
+        services.AddAlvo(alvo => alvo.UseSqlite($"Data Source={_databasePath}").FromDescriptor(descriptorPath));
+
+        using var sp = services.BuildServiceProvider();
+        var runner = sp.GetRequiredService<SchemaMigrationRunner>();
+
+        var result = await runner.RunAsync(new MigrationOptions(), TestContext.Current.CancellationToken);
+
+        result.Applied.ShouldBeTrue();
+
+        var introspected = await sp.GetRequiredService<ISchemaIntrospector>()
+            .IntrospectAsync(TestContext.Current.CancellationToken);
+        var entityNames = introspected.Entities.Select(entity => entity.Name).ToList();
+
+        entityNames.ShouldContain("owners");
+        entityNames.ShouldContain("vehicles");
+        entityNames.ShouldContain("inspections");
+    }
+
     [Fact]
     public async Task AddAlvo_UseSqlite_options_only_migrates_the_real_tasks_descriptor()
     {

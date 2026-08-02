@@ -2,13 +2,56 @@
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Data.Sqlite.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Tests")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace MMLib.Alvo.Auth
+{
+    public sealed class AlvoAuthOptions
+    {
+        public AlvoAuthOptions() { }
+        public System.Collections.Generic.IList<MMLib.Alvo.Auth.AlvoDevApiKey> DevKeys { get; }
+        public string HeaderName { get; init; }
+    }
+    public sealed class AlvoDevApiKey
+    {
+        public AlvoDevApiKey() { }
+        public System.DateTimeOffset? ExpiresAt { get; set; }
+        public string KeyId { get; set; }
+        public System.Collections.Generic.IList<string> Roles { get; }
+        public System.Collections.Generic.IList<string> Scopes { get; }
+        public string Secret { get; set; }
+        public System.Guid? Tenant { get; set; }
+        public System.Guid User { get; set; }
+    }
+    public sealed class ScopeGate
+    {
+        public ScopeGate() { }
+        public bool Allows(MMLib.Alvo.Auth.AlvoPrincipal principal, string entity, MMLib.Alvo.Rules.DataOperation operation) { }
+    }
+    public sealed class TenantResolver
+    {
+        public TenantResolver() { }
+        public bool TryResolve(MMLib.Alvo.Auth.ApiKeyRecord key, string? requestedTenant, out MMLib.Alvo.TenantId? tenant) { }
+    }
+}
 namespace MMLib.Alvo.Migrations
 {
     public sealed class RuntimeSchemaService
     {
-        public RuntimeSchemaService(MMLib.Alvo.Descriptor.IDescriptorValidator validator, MMLib.Alvo.Migrations.ISchemaMigrator migrator, MMLib.Alvo.Migrations.IDescriptorVersionStore store, MMLib.Alvo.Migrations.IRuntimeSchemaWriter writer) { }
+        public RuntimeSchemaService(MMLib.Alvo.Descriptor.IDescriptorValidator validator, MMLib.Alvo.Migrations.ISchemaMigrator migrator, MMLib.Alvo.Migrations.IDescriptorVersionStore store, MMLib.Alvo.Migrations.IRuntimeSchemaWriter writer, MMLib.Alvo.Expressions.ICelCompiler compiler, MMLib.Alvo.Rules.IPolicyCatalogProvider policyCatalogProvider) { }
         public System.Threading.Tasks.Task<MMLib.Alvo.Migrations.DescriptorVersion> ApplyAsync(string project, string descriptorJson, int expectedRevision, MMLib.Alvo.Migrations.MigrationOptions options, System.Threading.CancellationToken ct = default) { }
         public System.Threading.Tasks.Task<MMLib.Alvo.Migrations.DescriptorVersion> RollbackAsync(string project, int targetRevision, MMLib.Alvo.Migrations.MigrationOptions options, System.Threading.CancellationToken ct = default) { }
+    }
+}
+namespace MMLib.Alvo.Rules
+{
+    public interface IPolicyCatalogProvider : MMLib.Alvo.IRoleCatalogProvider
+    {
+        MMLib.Alvo.Rules.PolicyCatalog? Current { get; }
+        void SetCurrent(string project, MMLib.Alvo.Rules.PolicyCatalog catalog);
+    }
+    public sealed class PolicyCatalog
+    {
+        public static MMLib.Alvo.Rules.PolicyCatalog Build(MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Expressions.ICelCompiler compiler) { }
+        public static bool TryBuild(MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Expressions.ICelCompiler compiler, out MMLib.Alvo.Rules.PolicyCatalog? catalog, out System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Descriptor.DescriptorValidationError> errors) { }
     }
 }
 namespace Microsoft.Extensions.DependencyInjection

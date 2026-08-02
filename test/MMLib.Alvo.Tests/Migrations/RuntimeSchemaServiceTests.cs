@@ -1,6 +1,8 @@
 ﻿using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Descriptor.Internal;
+using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Migrations;
+using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Schema;
 using MMLib.Alvo.Testing.Migrations;
 
@@ -97,7 +99,7 @@ public sealed class RuntimeSchemaServiceTests
         var writer = new InMemoryRuntimeSchemaWriter(store);
         var migrator = new RecordingSchemaMigrator(new InMemorySchemaMigrator());
         var validator = new DescriptorValidator();
-        var service = new RuntimeSchemaService(validator, migrator, store, writer);
+        var service = new RuntimeSchemaService(validator, migrator, store, writer, new CelCompiler(), new PolicyCatalogProvider());
 
         await service.ApplyAsync("demo", TasksV1, expectedRevision: 0, new MigrationOptions(), TestContext.Current.CancellationToken); // -> rev 1
         var callsAfterFirstApply = migrator.PlanAsyncCallCount;
@@ -287,6 +289,6 @@ public sealed class RuntimeSchemaServiceTests
         var writer = new InMemoryRuntimeSchemaWriter(store);
         var migrator = new InMemorySchemaMigrator();
         var validator = new DescriptorValidator();
-        return new RuntimeSchemaService(validator, migrator, store, writer);
+        return new RuntimeSchemaService(validator, migrator, store, writer, new CelCompiler(), new PolicyCatalogProvider());
     }
 }

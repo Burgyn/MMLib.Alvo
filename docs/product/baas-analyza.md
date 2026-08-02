@@ -1152,9 +1152,9 @@ Descriptor (skrátený — podmienky sú CEL, transformácie JSONata, viď §3.3
   },
   "admin": {
     "access": {
-      "admin":     "@user.role == 'manager' && @user.email.endsWith('@firma.sk')",
-      "developer": "@user.role == 'manager'",
-      "viewer":    "@user.role in ['sales','manager']"
+      "admin":     "'manager' in @user.roles && @user.email.endsWith('@firma.sk')",
+      "developer": "'manager' in @user.roles",
+      "viewer":    "'sales' in @user.roles || 'manager' in @user.roles"
     },
     "branding": { "title": "Firma CRM", "logoUrl": "/assets/logo.svg" }
   },
@@ -1166,9 +1166,9 @@ Descriptor (skrátený — podmienky sú CEL, transformácie JSONata, viď §3.3
         "owner_id": { "type": "ref", "entity": "users" }
       },
       "rules": {
-        "list":   "@user.role in ['sales','manager']",
-        "create": "@user.role in ['sales','manager']",
-        "update": "@user.role == 'manager' || owner_id == @user.id"
+        "list":   "'sales' in @user.roles || 'manager' in @user.roles",
+        "create": "'sales' in @user.roles || 'manager' in @user.roles",
+        "update": "'manager' in @user.roles || owner_id == @user.id"
       }
     },
     "contacts": {
@@ -1194,12 +1194,12 @@ Descriptor (skrátený — podmienky sú CEL, transformácie JSONata, viď §3.3
         "owner_id": { "type": "ref", "entity": "users" }
       },
       "rules": {
-        "list":   "@user.role == 'manager' || owner_id == @user.id",
-        "update": "@user.role == 'manager' || owner_id == @user.id"
+        "list":   "'manager' in @user.roles || owner_id == @user.id",
+        "update": "'manager' in @user.roles || owner_id == @user.id"
       },
       "hooks": {
         "beforeUpdate": [
-          { "condition": "old.stage in ['won','lost'] && @user.role != 'manager'",
+          { "condition": "old.stage in ['won','lost'] && !('manager' in @user.roles)",
             "action": { "reject": "Uzavretý deal môže meniť len manažér" } }
         ]
       }
@@ -1224,7 +1224,7 @@ Descriptor (skrátený — podmienky sú CEL, transformácie JSONata, viď §3.3
         "gross_total":{ "type": "decimal", "precision": 12, "scale": 2,
                         "computed": "net_total + vat_total" }
       },
-      "rules": { "list": "@user.id != null", "create": "@user.role == 'manager'" },
+      "rules": { "list": "@user.id != null", "create": "'manager' in @user.roles" },
       "hooks": {
         "beforeCreate": [
           { "action": { "mutate": { "vat_total": "round(net_total * vatRate(issued_on, @tenant.country), 2)" } } }
@@ -1240,7 +1240,7 @@ Descriptor (skrátený — podmienky sú CEL, transformácie JSONata, viď §3.3
         "line_total": { "type": "decimal", "precision": 12, "scale": 2,
                         "computed": "unit_price * amount" }
       },
-      "rules": { "list": "@user.id != null", "create": "@user.role == 'manager'" }
+      "rules": { "list": "@user.id != null", "create": "'manager' in @user.roles" }
     }
   },
   "automation": [

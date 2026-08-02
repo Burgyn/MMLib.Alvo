@@ -1,7 +1,18 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/Burgyn/MMLib.Alvo")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace MMLib.Alvo
 {
+    public sealed class AlvoContext : System.IEquatable<MMLib.Alvo.AlvoContext>
+    {
+        public AlvoContext() { }
+        public required System.Collections.Generic.IReadOnlySet<MMLib.Alvo.Role> Roles { get; init; }
+        public MMLib.Alvo.TenantId? Tenant { get; init; }
+        public required MMLib.Alvo.UserId User { get; init; }
+        public static MMLib.Alvo.AlvoContext Anonymous { get; }
+        public bool HasRole(MMLib.Alvo.Role role) { }
+        public static MMLib.Alvo.AlvoContext System(MMLib.Alvo.TenantId? tenant) { }
+    }
     public enum AlvoMode
     {
         Standalone = 0,
@@ -17,6 +28,202 @@ namespace MMLib.Alvo
     public interface IAlvoBuilder
     {
         Microsoft.Extensions.DependencyInjection.IServiceCollection Services { get; }
+    }
+    public interface IRoleCatalogProvider
+    {
+        MMLib.Alvo.RoleCatalog? DeclaredRoles { get; }
+    }
+    public readonly struct Role : System.IEquatable<MMLib.Alvo.Role>
+    {
+        public string Name { get; }
+        public static MMLib.Alvo.Role Admin { get; }
+        public static MMLib.Alvo.Role Anon { get; }
+        public static MMLib.Alvo.Role Authenticated { get; }
+        public bool Equals(MMLib.Alvo.Role other) { }
+        public override int GetHashCode() { }
+        public override string ToString() { }
+    }
+    public sealed class RoleCatalog
+    {
+        public System.Collections.Generic.IReadOnlySet<MMLib.Alvo.Role> All { get; }
+        public static MMLib.Alvo.RoleCatalog BuiltInOnly { get; }
+        public MMLib.Alvo.Role Get(string name) { }
+        public System.Collections.Generic.IReadOnlySet<MMLib.Alvo.Role> Resolve(System.Collections.Generic.IEnumerable<string> names) { }
+        public bool TryGet(string name, out MMLib.Alvo.Role role) { }
+        public static MMLib.Alvo.RoleCatalog Create(System.Collections.Generic.IEnumerable<string> applicationRoles) { }
+        public static MMLib.Alvo.RoleCatalog FromDescriptor(MMLib.Alvo.Descriptor.AlvoDescriptor descriptor) { }
+    }
+    [System.Text.Json.Serialization.JsonConverter(typeof(MMLib.Alvo.TenantIdJsonConverter))]
+    public readonly struct TenantId : System.IEquatable<MMLib.Alvo.TenantId>, System.IParsable<MMLib.Alvo.TenantId>
+    {
+        public TenantId(System.Guid Value) { }
+        public System.Guid Value { get; init; }
+        public override string ToString() { }
+        public static MMLib.Alvo.TenantId New() { }
+        public static MMLib.Alvo.TenantId Parse(string s, System.IFormatProvider? provider) { }
+        public static bool TryParse([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] string? s, System.IFormatProvider? provider, out MMLib.Alvo.TenantId result) { }
+    }
+    public sealed class UnknownRoleException : System.Exception
+    {
+        public UnknownRoleException() { }
+        public UnknownRoleException(string message) { }
+        public UnknownRoleException(string message, System.Exception innerException) { }
+        public string RoleName { get; }
+    }
+    [System.Text.Json.Serialization.JsonConverter(typeof(MMLib.Alvo.UserIdJsonConverter))]
+    public readonly struct UserId : System.IEquatable<MMLib.Alvo.UserId>, System.IParsable<MMLib.Alvo.UserId>
+    {
+        public UserId(System.Guid Value) { }
+        public System.Guid Value { get; init; }
+        public override string ToString() { }
+        public static MMLib.Alvo.UserId New() { }
+        public static MMLib.Alvo.UserId Parse(string s, System.IFormatProvider? provider) { }
+        public static bool TryParse([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] string? s, System.IFormatProvider? provider, out MMLib.Alvo.UserId result) { }
+    }
+}
+namespace MMLib.Alvo.Auth
+{
+    public sealed class AlvoPrincipal : System.IEquatable<MMLib.Alvo.Auth.AlvoPrincipal>
+    {
+        public AlvoPrincipal() { }
+        public required MMLib.Alvo.AlvoContext Context { get; init; }
+        public required string KeyId { get; init; }
+        public required System.Collections.Generic.IReadOnlySet<MMLib.Alvo.Auth.ApiKeyScope> Scopes { get; init; }
+    }
+    public sealed class ApiKeyRecord : System.IEquatable<MMLib.Alvo.Auth.ApiKeyRecord>
+    {
+        public ApiKeyRecord() { }
+        public System.DateTimeOffset? ExpiresAt { get; init; }
+        public required string KeyId { get; init; }
+        public System.DateTimeOffset? LastUsedAt { get; init; }
+        public System.DateTimeOffset? RevokedAt { get; init; }
+        public required System.Collections.Generic.IReadOnlyList<string> RoleNames { get; init; }
+        public required System.Collections.Generic.IReadOnlySet<MMLib.Alvo.Auth.ApiKeyScope> Scopes { get; init; }
+        public required string Sha256Hash { get; init; }
+        public MMLib.Alvo.TenantId? Tenant { get; init; }
+        public required MMLib.Alvo.UserId User { get; init; }
+        public bool IsUsable(System.DateTimeOffset now) { }
+    }
+    public readonly struct ApiKeyScope : System.IEquatable<MMLib.Alvo.Auth.ApiKeyScope>
+    {
+        public required MMLib.Alvo.Auth.ScopeAccess Access { get; init; }
+        public required string Entity { get; init; }
+        public bool Allows(string entity, MMLib.Alvo.Rules.DataOperation operation) { }
+        public static bool TryParse(string value, out MMLib.Alvo.Auth.ApiKeyScope scope) { }
+    }
+    public interface IAlvoContextAccessor
+    {
+        MMLib.Alvo.Auth.AlvoPrincipal? Principal { get; set; }
+    }
+    public interface IAlvoContextResolver
+    {
+        System.Threading.Tasks.ValueTask<MMLib.Alvo.Auth.AlvoPrincipal?> ResolveAsync(string? presentedKey, string? requestedTenant, System.Threading.CancellationToken cancellationToken);
+    }
+    public interface IApiKeyStore
+    {
+        System.Threading.Tasks.ValueTask<MMLib.Alvo.Auth.ApiKeyRecord?> FindAsync(string keyId, System.Threading.CancellationToken cancellationToken);
+        System.Threading.Tasks.ValueTask TouchAsync(string keyId, System.DateTimeOffset usedAt, System.Threading.CancellationToken cancellationToken);
+    }
+    public enum ScopeAccess
+    {
+        Read = 0,
+        Write = 1,
+    }
+}
+namespace MMLib.Alvo.Data
+{
+    public sealed class AlvoAnd : MMLib.Alvo.Data.AlvoFilter, System.IEquatable<MMLib.Alvo.Data.AlvoAnd>
+    {
+        public AlvoAnd(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoFilter> Filters) { }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoFilter> Filters { get; init; }
+    }
+    public sealed class AlvoAuthorizationException : System.Exception
+    {
+        public AlvoAuthorizationException() { }
+        public AlvoAuthorizationException(string message) { }
+        public AlvoAuthorizationException(string message, System.Exception innerException) { }
+    }
+    public sealed class AlvoComparison : MMLib.Alvo.Data.AlvoFilter, System.IEquatable<MMLib.Alvo.Data.AlvoComparison>
+    {
+        public AlvoComparison(string Field, MMLib.Alvo.Data.AlvoFilterOperator Operator, object? Value) { }
+        public string Field { get; init; }
+        public MMLib.Alvo.Data.AlvoFilterOperator Operator { get; init; }
+        public object? Value { get; init; }
+    }
+    public abstract class AlvoFilter : System.IEquatable<MMLib.Alvo.Data.AlvoFilter>
+    {
+        public static int MaxDepth { get; }
+        public static void EnsureWithinDepthLimit(MMLib.Alvo.Data.AlvoFilter? filter) { }
+        public static System.Collections.Generic.IEnumerable<string> ReferencedFields(MMLib.Alvo.Data.AlvoFilter? filter) { }
+    }
+    public enum AlvoFilterOperator
+    {
+        Eq = 0,
+        Neq = 1,
+        Gt = 2,
+        Gte = 3,
+        Lt = 4,
+        Lte = 5,
+        Like = 6,
+        ILike = 7,
+        In = 8,
+        Is = 9,
+    }
+    public sealed class AlvoNot : MMLib.Alvo.Data.AlvoFilter, System.IEquatable<MMLib.Alvo.Data.AlvoNot>
+    {
+        public AlvoNot(MMLib.Alvo.Data.AlvoFilter Filter) { }
+        public MMLib.Alvo.Data.AlvoFilter Filter { get; init; }
+    }
+    public enum AlvoNullPlacement
+    {
+        Last = 0,
+        First = 1,
+    }
+    public sealed class AlvoOr : MMLib.Alvo.Data.AlvoFilter, System.IEquatable<MMLib.Alvo.Data.AlvoOr>
+    {
+        public AlvoOr(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoFilter> Filters) { }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoFilter> Filters { get; init; }
+    }
+    public sealed class AlvoQuery : System.IEquatable<MMLib.Alvo.Data.AlvoQuery>
+    {
+        public AlvoQuery() { }
+        public string? After { get; init; }
+        public required string Entity { get; init; }
+        public MMLib.Alvo.Data.AlvoFilter? Filter { get; init; }
+        public int? Limit { get; init; }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoSort> Sort { get; init; }
+    }
+    public sealed class AlvoRecord : System.IEquatable<MMLib.Alvo.Data.AlvoRecord>
+    {
+        public AlvoRecord(System.Collections.Generic.IReadOnlyDictionary<string, object?> values) { }
+        public object? this[string field] { get; }
+        public System.Collections.Generic.IReadOnlyDictionary<string, object?> Values { get; }
+        public static MMLib.Alvo.Data.AlvoRecord Empty { get; }
+        public bool Equals(MMLib.Alvo.Data.AlvoRecord? other) { }
+        public override int GetHashCode() { }
+        public bool TryGetValue(string field, out object? value) { }
+        public MMLib.Alvo.Data.AlvoRecord With(string field, object? value) { }
+    }
+    public sealed class AlvoRecordNotFoundException : System.Exception
+    {
+        public AlvoRecordNotFoundException() { }
+        public AlvoRecordNotFoundException(string message) { }
+        public AlvoRecordNotFoundException(string message, System.Exception innerException) { }
+    }
+    public sealed class AlvoSort : System.IEquatable<MMLib.Alvo.Data.AlvoSort>
+    {
+        public AlvoSort(string Field, bool Descending = false, MMLib.Alvo.Data.AlvoNullPlacement Nulls = 0) { }
+        public bool Descending { get; init; }
+        public string Field { get; init; }
+        public MMLib.Alvo.Data.AlvoNullPlacement Nulls { get; init; }
+    }
+    public interface IAlvoData
+    {
+        System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord> CreateAsync(string entity, System.Collections.Generic.IReadOnlyDictionary<string, object?> values, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task DeleteAsync(string entity, System.Guid id, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord?> GetAsync(string entity, System.Guid id, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRecord>> QueryAsync(MMLib.Alvo.Data.AlvoQuery query, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord> UpdateAsync(string entity, System.Guid id, System.Collections.Generic.IReadOnlyDictionary<string, object?> values, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default);
     }
 }
 namespace MMLib.Alvo.Descriptor
@@ -451,6 +658,182 @@ namespace MMLib.Alvo.Descriptor
         public System.Collections.Generic.IReadOnlyDictionary<string, MMLib.Alvo.Descriptor.WebhookEndpoint>? Endpoints { get; init; }
     }
 }
+namespace MMLib.Alvo.Expressions
+{
+    public sealed class CelBinary : MMLib.Alvo.Expressions.CelNode, System.IEquatable<MMLib.Alvo.Expressions.CelBinary>
+    {
+        public CelBinary(MMLib.Alvo.Expressions.CelBinaryOperator Operator, MMLib.Alvo.Expressions.CelNode Left, MMLib.Alvo.Expressions.CelNode Right) { }
+        public MMLib.Alvo.Expressions.CelNode Left { get; init; }
+        public MMLib.Alvo.Expressions.CelBinaryOperator Operator { get; init; }
+        public MMLib.Alvo.Expressions.CelNode Right { get; init; }
+    }
+    public enum CelBinaryOperator
+    {
+        Equal = 0,
+        NotEqual = 1,
+        Less = 2,
+        LessOrEqual = 3,
+        Greater = 4,
+        GreaterOrEqual = 5,
+        And = 6,
+        Or = 7,
+        In = 8,
+        Add = 9,
+        Subtract = 10,
+        Multiply = 11,
+        Divide = 12,
+    }
+    public sealed class CelChanged : MMLib.Alvo.Expressions.CelNode, System.IEquatable<MMLib.Alvo.Expressions.CelChanged>
+    {
+        public CelChanged(string FieldName) { }
+        public string FieldName { get; init; }
+    }
+    public sealed class CelCompilationError : System.IEquatable<MMLib.Alvo.Expressions.CelCompilationError>
+    {
+        public CelCompilationError(string Message, string? FixSuggestion, int Position) { }
+        public string? FixSuggestion { get; init; }
+        public string Message { get; init; }
+        public int Position { get; init; }
+    }
+    public sealed class CelCompilationResult : System.IEquatable<MMLib.Alvo.Expressions.CelCompilationResult>
+    {
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Expressions.CelCompilationError> Errors { get; }
+        public MMLib.Alvo.Expressions.CompiledExpression? Expression { get; }
+        public bool IsSuccess { get; }
+        public static MMLib.Alvo.Expressions.CelCompilationResult Failure(params MMLib.Alvo.Expressions.CelCompilationError[] errors) { }
+        public static MMLib.Alvo.Expressions.CelCompilationResult Success(MMLib.Alvo.Expressions.CompiledExpression expression) { }
+    }
+    public sealed class CelConditional : MMLib.Alvo.Expressions.CelNode, System.IEquatable<MMLib.Alvo.Expressions.CelConditional>
+    {
+        public CelConditional(MMLib.Alvo.Expressions.CelNode Condition, MMLib.Alvo.Expressions.CelNode WhenTrue, MMLib.Alvo.Expressions.CelNode WhenFalse) { }
+        public MMLib.Alvo.Expressions.CelNode Condition { get; init; }
+        public MMLib.Alvo.Expressions.CelNode WhenFalse { get; init; }
+        public MMLib.Alvo.Expressions.CelNode WhenTrue { get; init; }
+    }
+    public sealed class CelContextRef : MMLib.Alvo.Expressions.CelNode, System.IEquatable<MMLib.Alvo.Expressions.CelContextRef>
+    {
+        public CelContextRef(MMLib.Alvo.Expressions.CelContextValue Value, MMLib.Alvo.Expressions.CelValueType Type) { }
+        public MMLib.Alvo.Expressions.CelValueType Type { get; init; }
+        public MMLib.Alvo.Expressions.CelContextValue Value { get; init; }
+    }
+    public enum CelContextValue
+    {
+        UserId = 0,
+        UserRoles = 1,
+        TenantId = 2,
+    }
+    public sealed class CelFieldRef : MMLib.Alvo.Expressions.CelNode, System.IEquatable<MMLib.Alvo.Expressions.CelFieldRef>
+    {
+        public CelFieldRef(string FieldName, MMLib.Alvo.Expressions.CelValueType Type, MMLib.Alvo.Expressions.CelRecordState State) { }
+        public string FieldName { get; init; }
+        public MMLib.Alvo.Expressions.CelRecordState State { get; init; }
+        public MMLib.Alvo.Expressions.CelValueType Type { get; init; }
+    }
+    public sealed class CelHas : MMLib.Alvo.Expressions.CelNode, System.IEquatable<MMLib.Alvo.Expressions.CelHas>
+    {
+        public CelHas(MMLib.Alvo.Expressions.CelFieldRef Field) { }
+        public MMLib.Alvo.Expressions.CelFieldRef Field { get; init; }
+    }
+    public sealed class CelLiteral : MMLib.Alvo.Expressions.CelNode, System.IEquatable<MMLib.Alvo.Expressions.CelLiteral>
+    {
+        public CelLiteral(MMLib.Alvo.Expressions.CelValueType Type, object? Value) { }
+        public MMLib.Alvo.Expressions.CelValueType Type { get; init; }
+        public object? Value { get; init; }
+    }
+    public abstract class CelNode : System.IEquatable<MMLib.Alvo.Expressions.CelNode>
+    {
+        protected CelNode() { }
+    }
+    public enum CelProfile
+    {
+        Rule = 0,
+        Computed = 1,
+        Condition = 2,
+    }
+    public enum CelRecordState
+    {
+        Current = 0,
+        New = 1,
+        Old = 2,
+    }
+    public sealed class CelSyntaxException : System.Exception
+    {
+        public CelSyntaxException() { }
+        public CelSyntaxException(string message) { }
+        public CelSyntaxException(string message, System.Exception innerException) { }
+        public CelSyntaxException(string message, int position, string? fixSuggestion = null) { }
+        public string? FixSuggestion { get; }
+        public int Position { get; }
+    }
+    public sealed class CelUnary : MMLib.Alvo.Expressions.CelNode, System.IEquatable<MMLib.Alvo.Expressions.CelUnary>
+    {
+        public CelUnary(MMLib.Alvo.Expressions.CelUnaryOperator Operator, MMLib.Alvo.Expressions.CelNode Operand) { }
+        public MMLib.Alvo.Expressions.CelNode Operand { get; init; }
+        public MMLib.Alvo.Expressions.CelUnaryOperator Operator { get; init; }
+    }
+    public enum CelUnaryOperator
+    {
+        Not = 0,
+        Negate = 1,
+    }
+    public enum CelValueType
+    {
+        Bool = 0,
+        Int = 1,
+        Decimal = 2,
+        String = 3,
+        Timestamp = 4,
+        Uuid = 5,
+        Json = 6,
+        StringList = 7,
+        Null = 8,
+    }
+    public sealed class CompiledExpression : System.IEquatable<MMLib.Alvo.Expressions.CompiledExpression>
+    {
+        public MMLib.Alvo.Schema.EntitySchema Entity { get; }
+        public MMLib.Alvo.Expressions.CelProfile Profile { get; }
+        public MMLib.Alvo.Expressions.CelValueType ResultType { get; }
+        public MMLib.Alvo.Expressions.CelNode Root { get; }
+        public string Source { get; }
+    }
+    public interface ICelCompiler
+    {
+        MMLib.Alvo.Expressions.CelCompilationResult Compile(string source, MMLib.Alvo.Expressions.CelProfile profile, MMLib.Alvo.Schema.EntitySchema entity);
+    }
+    public interface IFieldSqlRenderer
+    {
+        string FalseLiteral { get; }
+        string TrueLiteral { get; }
+        string RenderBooleanFieldAsPredicate(string booleanValue);
+        string RenderBooleanPredicate(bool value);
+        string RenderCaseInsensitiveLike(string left, string right);
+        string RenderField(MMLib.Alvo.Schema.EntitySchema entity, string fieldName);
+        string RenderParameter(string parameterName);
+        string RenderTwoValued(string predicate);
+    }
+    public interface IPredicateEvaluator
+    {
+        bool Evaluate(MMLib.Alvo.Expressions.CompiledExpression expression, MMLib.Alvo.Data.AlvoRecord current, MMLib.Alvo.Data.AlvoRecord? previous, MMLib.Alvo.AlvoContext context);
+    }
+    public interface IPredicateRenderer
+    {
+        MMLib.Alvo.Expressions.SqlExpression Render(MMLib.Alvo.Expressions.CompiledExpression expression, MMLib.Alvo.Expressions.IFieldSqlRenderer fields);
+        MMLib.Alvo.Expressions.SqlPredicate Render(MMLib.Alvo.Expressions.CompiledExpression expression, MMLib.Alvo.AlvoContext context, MMLib.Alvo.Expressions.IFieldSqlRenderer fields, string parameterPrefix = "alvo_p");
+    }
+    public sealed class SqlExpression : System.IEquatable<MMLib.Alvo.Expressions.SqlExpression>
+    {
+        public SqlExpression(string sql, System.Collections.Generic.IReadOnlyDictionary<string, object?> parameters) { }
+        public System.Collections.Generic.IReadOnlyDictionary<string, object?> Parameters { get; }
+        public string Sql { get; }
+    }
+    public sealed class SqlPredicate : System.IEquatable<MMLib.Alvo.Expressions.SqlPredicate>
+    {
+        public SqlPredicate(string sql, System.Collections.Generic.IReadOnlyDictionary<string, object?> parameters) { }
+        public System.Collections.Generic.IReadOnlyDictionary<string, object?> Parameters { get; }
+        public string Sql { get; }
+        public static MMLib.Alvo.Expressions.SqlPredicate AlwaysFalse(MMLib.Alvo.Expressions.IFieldSqlRenderer fields) { }
+    }
+}
 namespace MMLib.Alvo.Migrations
 {
     public sealed class AppliedSchema : System.IEquatable<MMLib.Alvo.Migrations.AppliedSchema>
@@ -568,6 +951,32 @@ namespace MMLib.Alvo.Migrations
         AddIndex = 7,
         DropIndex = 8,
         RenameIndex = 9,
+    }
+}
+namespace MMLib.Alvo.Rules
+{
+    public enum DataOperation
+    {
+        List = 0,
+        Get = 1,
+        Create = 2,
+        Update = 3,
+        Delete = 4,
+    }
+    public interface IPolicyEngine
+    {
+        MMLib.Alvo.Rules.PolicyDecision Resolve(string entity, MMLib.Alvo.Rules.DataOperation operation, MMLib.Alvo.AlvoContext context);
+    }
+    public sealed class PolicyDecision : System.IEquatable<MMLib.Alvo.Rules.PolicyDecision>
+    {
+        public string? DenyReason { get; }
+        public System.Collections.Generic.IReadOnlySet<string> HiddenFields { get; }
+        public bool IsDenied { get; }
+        public System.Collections.Generic.IReadOnlySet<string> ReadOnlyFields { get; }
+        public MMLib.Alvo.Expressions.CompiledExpression? TenantScope { get; }
+        public MMLib.Alvo.Expressions.CompiledExpression? Using { get; }
+        public MMLib.Alvo.Expressions.CompiledExpression? WithCheck { get; }
+        public static MMLib.Alvo.Rules.PolicyDecision Deny(string reason) { }
     }
 }
 namespace MMLib.Alvo.Schema
