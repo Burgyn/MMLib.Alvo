@@ -41,8 +41,13 @@
   `IsPackable=false`. Rule (a) applies to its Scalar dependency as well: a docs UI is
   a hosting decision, and most embedded consumers do not want the package. It is the
   only project allowed to reference more than one `MMLib.Alvo.Data.*` provider — it
-  ships both drivers and registers exactly one, chosen by configuration. Details in
-  [`host.md`](./host.md).
+  ships both drivers and registers exactly one, chosen by configuration. That pair of
+  facts is also why it cannot be a slice inside the core, which is the default this
+  document otherwise insists on: an entry point living in `MMLib.Alvo` would hand every
+  embedded consumer Scalar *and* both database drivers, to run a `Program.cs` none of
+  them reference. It also takes `Microsoft.AspNetCore.OpenApi` directly rather than
+  transitively, because a package's build targets do not travel through a
+  `ProjectReference`. Details in [`host.md`](./host.md).
 - `test/` — one `*.Tests` per shipped project (arch + public-API approval
   auto-linked), `MMLib.Alvo.Conventions.Tests` (solution-structure checks),
   `MMLib.Alvo.Api.Tests`, and the `*.Tests.Integration` projects
