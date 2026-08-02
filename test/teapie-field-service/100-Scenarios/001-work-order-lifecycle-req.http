@@ -154,8 +154,9 @@ X-Alvo-Api-Key: {{keyDispatcherNorth}}
 GET {{fsBaseUrl}}/api/work_orders/{{CreateChildA.response.body.$.id}}
 X-Alvo-Api-Key: {{keyDispatcherNorth}}
 
-### And the parent still cannot be deleted while a child references it (`onDelete: restrict`)
+### And the parent still cannot be deleted while a child references it (`onDelete: restrict`) — refused as
+### the caller's conflict it is (#138), not as an internal error
 # @name DeleteParentWithChildren
-## TEST-EXPECT-STATUS: [500]
+## TEST-EXPECT-STATUS: [409]
 DELETE {{fsBaseUrl}}/api/customers/{{CreateCustomer.response.body.$.id}}
 X-Alvo-Api-Key: {{keyAdmin}}

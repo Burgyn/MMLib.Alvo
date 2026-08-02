@@ -1,22 +1,25 @@
 #load "../_shared/Rows.csx"
 
-await tp.Test("KNOWN DEFECT: a duplicate value on a `unique` field is answered 500, where every other declared facet is a 422.", async () =>
+await tp.Test("A duplicate on a `unique` field is a 409 naming the field, like every sibling facet names its own.", async () =>
 {
     var refused = tp.Responses["DuplicateUniqueValue"];
 
-    Equal(500, (int)refused.StatusCode);
-    Equal("https://alvo.dev/errors/internal", await ProblemType(refused));
+    Equal(409, (int)refused.StatusCode);
+    Equal("https://alvo.dev/errors/conflict", await ProblemType(refused));
 
-    // The correct answer is a 409 or a 422 naming `/reference` with a `unique` code and a fix
-    // suggestion, like every sibling facet. When that lands, this test goes red and this file is
-    // the place to update — which is the whole reason it asserts the defect rather than skipping it.
+    // The half that makes it repairable, and the half a 500 could not carry: one violation, naming the
+    // field, with a stable machine-readable code and a fix suggestion — the same shape 030-Problems/001's
+    // 422 carries for every facet the framework CAN check itself.
+    Equal(new[] { "unique" }, await ViolationCodes(refused));
+    Equal(new[] { "/reference" }, await ViolationPointers(refused));
+
     var body = await BodyOf(refused);
-    False(body.TryGetProperty("violations", out _),
-        "The 500 now carries violations, so the unique constraint is being validated — replace this "
-        + "case with the 409/422 assertion it was written to be replaced by.");
+    var violation = body.GetProperty("violations").EnumerateArray().Single();
+    NotNull(violation.GetProperty("fixSuggestion").GetString());
+    NotEqual("", violation.GetProperty("fixSuggestion").GetString());
 });
 
-await tp.Test("The 500 discloses nothing about the failure — no exception, no SQL, no constraint name.", async () =>
+await tp.Test("The refusal discloses nothing about the engine — no exception, no SQL, no constraint name.", async () =>
 {
     var raw = await tp.Responses["DuplicateUniqueValue"].Content.ReadAsStringAsync();
 
@@ -24,14 +27,17 @@ await tp.Test("The 500 discloses nothing about the failure — no exception, no 
     DoesNotContain("PostgresException", raw);
     DoesNotContain("duplicate key", raw);
     DoesNotContain("_bt_check_unique", raw);
+    DoesNotContain("23505", raw);
+    DoesNotContain("IX_work_orders", raw);
     DoesNotContain("   at ", raw);
 
-    // Nor the value the caller sent, nor the column it collided on.
+    // Nor the value the caller sent. The FIELD name is named — deliberately, and it is the whole point:
+    // it is schema-owned, the caller already sent it, and the published document already declares it.
     DoesNotContain("WO-1001", raw);
-    DoesNotContain("reference", raw);
+    Contains("reference", raw);
 });
 
-await tp.Test("The identical body with a fresh unique value succeeds, so the 500 was the duplicate and nothing else.", async () =>
+await tp.Test("The identical body with a fresh unique value succeeds, so the 409 was the duplicate and nothing else.", async () =>
 {
     var created = await BodyOf(tp.Responses["SameBodyFreshReference"]);
 

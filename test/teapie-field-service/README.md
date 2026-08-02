@@ -61,41 +61,55 @@ from that, and they are visible in every file:
    caller who *can* see the rows; the 404 with the same id read by a caller who owns it; the paging
    walk with the single-request read of the same query.
 
-## The defects this suite found, and pins
+## The defects this suite found, and how they are pinned now they are fixed
 
-**Two independent problems. Do not conflate them** — a fix for the first does not touch the second,
-and the whole point of `080-Tenancy/002` is that it cannot be mistaken for one.
+**Two independent problems, and they must not be conflated** — a fix for the first did not touch the
+second, which is the whole reason `080-Tenancy/002` was written to assert a property rather than a status.
+Both are fixed; each case now pins the fixed behaviour, and each one's own comments record what it used to
+pin so a reader can tell the current claim from the history.
 
-### 1. A database constraint violation is answered `500`, not `409`
+### 1. A database constraint violation was answered `500`, not `409` (#138, fixed)
 
 The framework validates `required`, `maxLength`, `enum`, `format`, `precision`/`scale` and `ref`
-existence, each with a per-field 422 carrying a pointer, a code and a fix. A constraint the
-**database** enforces is not mapped onto `IAlvoData`'s refusal families at all, so an agent gets no
-violation, no pointer and no field name — it cannot repair the request. Two reachable shapes:
+existence, each with a per-field 422 carrying a pointer, a code and a fix. A constraint the **database**
+enforces was not mapped onto `IAlvoData`'s refusal families at all, so an agent got no violation, no
+pointer and no field name — it could not repair the request, a 500 invited a retry that could never
+succeed, and the operator was paged with a stack trace for an ordinary mistake. Both shapes now answer
+`409 alvo.dev/errors/conflict`:
 
-- `030-Problems/002` — a duplicate value on a `unique` field.
-- `100-Scenarios/001` — deleting a row a `ref` with `onDelete: restrict` still points at.
+- `030-Problems/002` — a duplicate value on a `unique` field: one violation, code `unique`, pointer
+  `/reference`, plus a fix suggestion.
+- `100-Scenarios/001` — deleting a row a `ref` with `onDelete: restrict` still points at: one violation,
+  code `referenced`, pointer `""` (RFC 6901's whole document — a DELETE has no field to change).
 
-Both cases also pin what must stay true meanwhile: the 500 leaks no exception type, SQL, constraint
-name or stack frame.
+Both cases still pin what must stay true: the refusal leaks no exception type, no SQL, no constraint or
+index name, no stack frame, and not the value the caller sent. The `restrict` refusal additionally names
+**no entity** — which of the entities that may reference this row actually holds one is a fact about data
+the caller may have no read access to.
 
-### 2. A `unique` field on a `tenancy: "scoped"` entity is unique across *all* tenants
+### 2. A `unique` field on a `tenancy: "scoped"` entity was unique across *all* tenants (#137, fixed)
 
-`DescriptorModelBuilder.ConfigureField` emits `HasIndex(field.Name).IsUnique()` with no `tenant_id`,
-whatever the entity's tenancy. So tenant B's create collides with a value only tenant A holds, and B
-learns whether A holds it — a **cross-tenant existence oracle**, one request per candidate. It is the
-one channel through which the isolation the rest of `080-Tenancy` verifies actually leaks.
+`DescriptorModelBuilder` emitted `HasIndex(field.Name).IsUnique()` with no `tenant_id`, whatever the
+entity's tenancy — and the same for a *declared* unique index. So tenant B's create collided with a value
+only tenant A held, and B learned whether A held it: a **cross-tenant existence oracle**, one request per
+candidate, and the one channel through which the isolation the rest of `080-Tenancy` verifies actually
+leaked.
 
-**Mapping the violation to a clean `409` does not close this.** `409`-versus-`201` is the same signal
-to tenant B as `500`-versus-`201`. The fix is a **tenant-scoped unique index**, and it is not a
-one-line change: the index has to be emitted after every field is configured, because EF cannot
-resolve `tenant_id` while the field loop is still running (measured — the naive in-loop version fails
-at startup with *"The property 'tenant_id' cannot be added … no property type was specified"*).
+**Mapping the violation to a clean `409` did not close this**, which is why the two were filed
+separately: `409`-versus-`201` is the same signal to tenant B as `500`-versus-`201` was. The fix is a
+**tenant-scoped unique index**, and it was not a one-line change: the index has to be emitted after every
+field is configured, because EF cannot resolve `tenant_id` while the field loop is still running
+(measured, twice — the naive in-loop version fails at startup with *"The property 'tenant_id' cannot be
+added … no property type was specified"*).
 
-`080-Tenancy/002` therefore asserts **distinguishability**, not a status. Verified by mutation: it
-goes **red** under a tenant-scoped unique index and stays **green** under a status-only change, which
-is the behaviour that keeps a partial fix from reading as a complete one. The same mutation left
-`030-Problems/002` green — the two defects really are independent.
+`080-Tenancy/002` therefore asserts **indistinguishability**, not a status: both probes answer 201 and
+their whole documents match, minus the four fields that identify the row rather than classify the request.
+It also pins the direction a careless fix would have lost — uniqueness still **holds** inside a tenant,
+409 and all — because a fix that dropped the constraint would satisfy the equality alone. While the defect
+stood, the same assertion was written as `NotEqual`, and it stayed green under a status-only change; that
+is the property that kept a partial fix from reading as a complete one.
+
+`030-Problems/002` was green through that whole change, and stayed green: the two really are independent.
 
 ## Three TeaPie behaviours worth knowing before editing
 

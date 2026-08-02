@@ -1,25 +1,26 @@
-### A DEFECT THIS CASE PINS, not a behaviour it endorses.
+### A duplicate on a `unique` field, answered as the caller's conflict it is (#138).
 ###
 ### `reference` is declared `unique`. Sending a value another row already holds is an ordinary caller
-### mistake — the same class as a missing required field or a bad enum value — and every one of those
-### is answered with a 422 naming the field. A duplicate is answered **500**, because `unique` is the
-### one declared facet the framework does not validate: it is enforced only by the database, and the
-### provider's unique-violation exception is not mapped onto `IAlvoData`'s refusal families.
+### mistake, and the framework cannot check it before the write: `unique` is the one declared facet only
+### the database knows about. It used to surface as **500 `alvo.dev/errors/internal`** — "an invariant Alvo
+### itself relies on is broken", which this is not: the caller's request conflicts with stored state, which
+### is the definition of 409.
 ###
-### The case asserts what happens TODAY, deliberately and labelled, for two reasons. It goes red the
-### day the defect is fixed, which forces this file to be updated rather than letting the fix ship
-### unnoticed. And it pins the one thing that must stay true meanwhile: the 500 discloses nothing —
-### no exception type, no SQL, no constraint name, no stack frame.
+### Three things that were wrong, and each is asserted below:
+###   1. An agent could not repair the request. There was no violation, no pointer and no fix suggestion,
+###      and the detail said only "an internal error"; the field at fault was never named.
+###   2. A 500 invites a retry that can never succeed.
+###   3. The operator was paged, with a stack trace, for an ordinary mistake.
 ###
-### Two consequences, both worth stating where the next reader will meet them:
-###   1. An agent cannot repair the request. There is no violation, no pointer and no fix suggestion,
-###      and the detail says only "an internal error"; the field at fault is not named at all.
-###   2. On a tenant-SCOPED entity a globally-unique field is a cross-tenant existence oracle. Tenant
-###      B can learn whether tenant A holds a given `reference` by watching 500 versus 201 — which is
-###      exactly the inference the 404-everywhere design elsewhere is careful to prevent. 080-Tenancy
-###      measures the same probe from tenant south.
+### What it must STILL not do is disclose the engine: no exception type, no SQL, no constraint or index
+### name, no stack frame, and not the value the caller sent. The field name is different — it is
+### schema-owned, the caller already sent it, and the published document already declares it.
+###
+### This case is about uniqueness INSIDE one tenant, which is what `unique` was declared for. The
+### cross-tenant half is `080-Tenancy/002`: the constraint is scoped to the tenant, so tenant south holding
+### this same reference is not a conflict at all.
 # @name DuplicateUniqueValue
-## TEST-EXPECT-STATUS: [500]
+## TEST-EXPECT-STATUS: [409]
 POST {{fsBaseUrl}}/api/work_orders
 X-Alvo-Api-Key: {{keyDispatcherNorth}}
 Content-Type: application/json

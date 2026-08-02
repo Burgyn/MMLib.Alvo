@@ -76,20 +76,35 @@ await tp.Test("The deleted row is gone by id, and the untouched sibling never mo
         tp.Responses["ReadUntouchedChild"].Headers.ETag.Tag);
 });
 
-await tp.Test("KNOWN DEFECT: deleting a parent a child still references is answered 500, where 409 is the answer.", async () =>
+await tp.Test("Deleting a parent a child still references is a 409 the caller can act on (#138).", async () =>
 {
-    // The same defect class 030-Problems/002 pins for `unique`: a constraint the DATABASE enforces
-    // and the framework does not map onto IAlvoData's refusal families. `onDelete: restrict` is the
-    // descriptor asking for exactly this refusal, so a caller is entitled to a 409 naming the
-    // conflict — not an internal error they cannot act on.
+    // The same class 030-Problems/002 pins for `unique`: a constraint the DATABASE enforces, which the
+    // framework cannot check before the write. `onDelete: restrict` is the descriptor ASKING for exactly
+    // this refusal, so answering 500 — "an invariant Alvo itself relies on is broken" — was the least
+    // defensible of the two.
     var refused = tp.Responses["DeleteParentWithChildren"];
 
-    Equal(500, (int)refused.StatusCode);
-    Equal("https://alvo.dev/errors/internal", await ProblemType(refused));
+    Equal(409, (int)refused.StatusCode);
+    Equal("https://alvo.dev/errors/conflict", await ProblemType(refused));
 
-    // Meanwhile: nothing about the database leaks, and the restrict really did protect the row.
+    // One violation, coded `referenced`, carrying the fix. Its pointer is the empty one — RFC 6901's
+    // whole document — because a DELETE has no field the caller could change: what has to change is the
+    // rows that point at this one.
+    Equal(new[] { "referenced" }, await ViolationCodes(refused));
+    Equal(new[] { "" }, await ViolationPointers(refused));
+
+    var body = await BodyOf(refused);
+    NotNull(body.GetProperty("violations").EnumerateArray().Single()
+        .GetProperty("fixSuggestion").GetString());
+
+    // Nothing about the database leaks, and — deliberately — not the referencing entity either: WHICH
+    // entity holds the referencing row is a fact about data this caller may have no read access to, so the
+    // refusal says only that some record still references this one.
     var raw = await refused.Content.ReadAsStringAsync();
     DoesNotContain("Npgsql", raw);
     DoesNotContain("foreign key", raw);
+    DoesNotContain("FOREIGN KEY", raw);
+    DoesNotContain("work_orders", raw);
+    DoesNotContain("FK_", raw);
     DoesNotContain("   at ", raw);
 });

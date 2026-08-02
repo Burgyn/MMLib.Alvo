@@ -1,29 +1,27 @@
-### A KNOWN DEFECT, and the one hole in this suite's tenancy story. Read this before "fixing" it.
+### The cross-tenant existence oracle, CLOSED (#137). This case used to pin the defect; it now pins the fix.
 ###
-### `work_orders.reference` is declared `unique`. The driver emits that as a plain
-### `HasIndex(field.Name).IsUnique()` — see `DescriptorModelBuilder.ConfigureField` — with **no
-### `tenant_id` in the index**, on a `tenancy: "scoped"` entity. So the constraint is unique across
-### the whole instance rather than within a tenant, and tenant B's create collides with a value only
-### tenant A holds.
+### `work_orders.reference` is declared `unique` on a `tenancy: "scoped"` entity. The driver emitted that
+### as a plain `HasIndex(field.Name).IsUnique()` with **no `tenant_id`**, so the constraint held across the
+### whole instance rather than within a tenant — and tenant south's create of a value only tenant NORTH
+### held was refused, while the same create of a free value succeeded. The two requests differ in exactly
+### one thing, so any observable difference between the answers WAS that fact, disclosed: tenant south
+### could learn whether north held a given `reference`, one request per candidate.
 ###
-### That makes it a **cross-tenant existence oracle**: tenant B learns whether tenant A holds a given
-### `reference`, one request per candidate. Everything else in 001 is careful to answer 404 precisely
-### so B cannot make that inference; this one channel gives it away.
+### **The root cause was the index, not the status code.** The neighbouring defect — `030-Problems/002`,
+### a duplicate answered 500 rather than 409 — was a *different* problem that happened to share a trigger,
+### and mapping the violation to a clean 409 did NOT close this one: 409-versus-201 is exactly the same
+### signal to tenant south as 500-versus-201 was. The fix is a tenant-scoped unique index,
+### `(tenant_id, reference)` on a scoped entity, emitted after the field loop because
+### `DescriptorToSchemaMapper` appends `tenant_id` last and EF refuses to resolve it mid-loop.
 ###
-### **The root cause is the index, not the status code.** The neighbouring defect —
-### `030-Problems/002`, a duplicate answered 500 rather than 409 — is a *different* problem that
-### happens to share a trigger, and mapping the violation to a clean 409 does NOT close this one:
-### 409-versus-201 is exactly the same signal to tenant B as 500-versus-201. The fix is a
-### tenant-scoped unique index (`HasIndex("tenant_id", field.Name)` on a scoped entity), after which
-### BOTH requests below are 201 and this case goes red so it can be rewritten as the
-### indistinguishability assertion it wants to be.
-###
-### The test below therefore asserts DISTINGUISHABILITY, not a status. A status-only change leaves it
-### green, which is correct — the leak would still be there.
+### So BOTH probes below are now **201**, and the test asserts they are **indistinguishable** — the
+### assertion this case was written to be rewritten as. Uniqueness still holds inside a tenant: that is
+### `030-Problems/002`, from tenant north, over a value north itself already holds.
 
-### Tenant south creates a work order whose `reference` only TENANT NORTH holds.
+### Tenant south creates a work order whose `reference` TENANT NORTH also holds. Accepted: the constraint
+### is scoped to the tenant, so north's data does not answer south's request.
 # @name ProbeAValueAnotherTenantHolds
-## TEST-EXPECT-STATUS: [500]
+## TEST-EXPECT-STATUS: [201]
 POST {{fsBaseUrl}}/api/work_orders
 X-Alvo-Api-Key: {{keyDispatcherSouth}}
 Content-Type: application/json
@@ -40,7 +38,8 @@ Content-Type: application/json
 }
 
 ### The identical request with a `reference` NO tenant holds. The only difference between the two is
-### whether the other tenant happens to hold the value — which is precisely the fact B must not learn.
+### whether the other tenant happens to hold the value — which is precisely the fact south must not learn,
+### and the two answers now say nothing about it.
 # @name ProbeAValueNoTenantHolds
 ## TEST-EXPECT-STATUS: [201]
 POST {{fsBaseUrl}}/api/work_orders
@@ -58,20 +57,49 @@ Content-Type: application/json
   "region_id": "{{RegionNorthId}}"
 }
 
-### The refused probe wrote nothing into tenant south
+### Tenant south now holds its OWN WO-1001, and reading it back proves the row is south's rather than a
+### view of north's: one reference, two rows, one per tenant.
 # @name SouthAfterTheProbe
 ## TEST-EXPECT-STATUS: [200]
 GET {{fsBaseUrl}}/api/work_orders?limit=100&order=reference.asc
 X-Alvo-Api-Key: {{keyDispatcherSouth}}
 
-### ...and tenant north's row is untouched by either probe
+### ...and tenant north's own WO-1001 is untouched by either probe: south's create added a row, it did not
+### overwrite north's.
 # @name NorthsRowAfterTheProbe
 ## TEST-EXPECT-STATUS: [200]
 GET {{fsBaseUrl}}/api/work_orders/{{Wo1001Id}}
 X-Alvo-Api-Key: {{keyDispatcherNorth}}
 
-### Clean up the row the second probe created, so later groups measure the set they expect
-# @name RemoveTheProbeRow
+### Uniqueness still holds INSIDE a tenant: south repeating its own new reference is refused, and refused
+### as a 409 naming the field rather than as a 500. Without this the fix would be indistinguishable from
+### having dropped the constraint altogether.
+# @name SouthRepeatsItsOwnReference
+## TEST-EXPECT-STATUS: [409]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantSouth}}",
+  "reference": "WO-9911",
+  "title": "Oracle probe",
+  "status": "scheduled",
+  "priority": 1,
+  "access_code": "ORACLE",
+  "customer_id": "{{SouthCustomerId}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+### Clean up both rows the probes created, so later groups measure the set they expect. Both, now: the
+### first probe used to be refused and left nothing behind.
+# @name RemoveTheFirstProbeRow
+## TEST-EXPECT-STATUS: [204]
+DELETE {{fsBaseUrl}}/api/work_orders/{{ProbeAValueAnotherTenantHolds.response.body.$.id}}
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
+
+###
+# @name RemoveTheSecondProbeRow
 ## TEST-EXPECT-STATUS: [204]
 DELETE {{fsBaseUrl}}/api/work_orders/{{ProbeAValueNoTenantHolds.response.body.$.id}}
 X-Alvo-Api-Key: {{keyDispatcherSouth}}
