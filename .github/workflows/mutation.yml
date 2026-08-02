@@ -77,12 +77,18 @@ name: Mutation
 # that pushed three shards past their budget on run 30292141967. From `test/` there
 # is no solution file, `test-projects` IS honoured (verified: "Analyzing 2 test
 # project(s)" for data-ef), and the paths in each config are therefore relative to
-# `test/`. The guard in the "Mutation test" step fails the run if it ever slips back
-# into solution mode — a silent 3× regression is exactly the kind of thing that
-# otherwise only shows up as a timeout months later.
+# `test/`. Measured for data-ef too, the shard whose 10-minute run became a
+# >120-minute timeout with no config change: 858 tests from `test/`, 1489 from the
+# repo root, 596 mutants either way.
 #
-# The "Mutation test" step also fails loudly on a vacuous (zero-mutant) run instead
-# of reporting a false green (stryker-net#3094).
+# scripts/assert-mutation-run enforces all of that after every shard, and its header
+# is where the reasoning lives. It asserts POSITIVELY — the run must report the number
+# of test projects the config declares, must report a mutant count, and must not be
+# vacuous — because the first version of the solution-mode check was a negative
+# `grep -q 'will mutate solution'`, which fails OPEN the moment a Stryker release
+# rewords that line. Note especially why the solution-mode check is the TEST-PROJECT
+# count and not the mutant count: solution mode leaves the mutant count untouched
+# (834 and 834, 596 and 596 above) and moves only the suite.
 #
 # READ #142 BEFORE TRUSTING A SCORE FROM THIS WORKFLOW. Measured on the same
 # versions: this runner reports mutants as Killed that demonstrably survive the
@@ -272,27 +278,20 @@ jobs:
           dotnet tool run dotnet-stryker -f "../${{ matrix.config }}" --concurrency 4 2>&1 | tee stryker-output.log
           stryker_exit="${PIPESTATUS[0]}"
 
-          # Fail loud instead of showing a false green: a run that discovered
-          # or tested zero mutants is not a passing run, it's a broken one.
-          # See stryker-net#3094 — Stryker's VSTest-based runner can regress
-          # to this on an xUnit v3 / MTP test project even with `test-runner:
-          # mtp` configured (e.g. a tool upgrade, or a new test project that
-          # isn't MTP-compatible).
-          if grep -qE '0 total mutants will be tested|unable to calculate a mutation score|Number of tests found: 0' stryker-output.log; then
-            echo "::error::Mutation run (${{ matrix.name }}) tested zero mutants (vacuous run) — see stryker-output.log above. Failing the gate instead of a false green (stryker-net#3094)."
-            exit 1
-          fi
-
-          # Fail loud on the OTHER way this gate silently stops measuring what the config
-          # says: solution mode. It discards `test-projects`, so the suite quietly becomes
-          # every test project referencing the mutated assembly — a ~3x cost increase whose
-          # only symptom is a timeout weeks later. If Stryker ever finds a solution file
-          # from here again (a stray .slnx under test/, a changed working directory), say so
-          # instead of paying for it. Checked after the run so the log is intact above.
-          if grep -q 'will mutate solution' stryker-output.log; then
-            echo "::error::Mutation run (${{ matrix.name }}) entered Stryker's solution mode, which IGNORES the config's test-projects and silently inflates the suite (see the header comment in this workflow). Fix the working directory rather than the timeout."
-            exit 1
-          fi
+          # Did this run MEASURE what the config asked for? Three positive assertions —
+          # vacuity, the test-project count, and a floor on the mutant count — live in
+          # scripts/assert-mutation-run so they can be run over a saved log by hand,
+          # which is how they were verified. Read that script's header before changing
+          # any of them; in particular it records WHY the solution-mode check is the
+          # test-project count and not the mutant count (measured: solution mode leaves
+          # the mutant count identical and moves only the test count).
+          # Deliberately run BEFORE propagating Stryker's own exit code, so a run that
+          # measured the wrong thing fails as that, not as a low score.
+          ../scripts/assert-mutation-run \
+            stryker-output.log \
+            "../${{ matrix.config }}" \
+            "${{ matrix.mutants }}" \
+            "${{ matrix.name }}" || exit 1
 
           exit "$stryker_exit"
 

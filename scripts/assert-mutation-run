@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# assert-mutation-run — decide whether a finished Stryker run actually MEASURED what
+# its config asked for. Called by .github/workflows/mutation.yml after every shard;
+# runnable by hand over a saved log, which is the point (see "Verifying this" below).
+#
+# usage: scripts/assert-mutation-run <stryker-log> <stryker-config> <expected-mutants> <shard-name>
+#
+# WHY THIS EXISTS. A mutation gate has two ways to be green, and only one of them is
+# honest. This repository has already shipped the dishonest one twice: once as a
+# vacuous run (0 mutants, `project_mutation_gate`), and once as a run that quietly
+# substituted a different test suite for the one the config named (#99 — Stryker's
+# solution mode ignores `test-projects`, so the expressions shard ran 2211 tests
+# instead of 722 and could not finish inside 120 minutes). Both reported success.
+#
+# The first version of the second guard was `grep -q 'will mutate solution'` — a
+# NEGATIVE assertion, and therefore fail-OPEN: reword that log line in any Stryker
+# release and the guard silently stops guarding, which is the same class of defect it
+# was added to catch. Everything below is a POSITIVE assertion instead: it states the
+# number the run must report, and a missing or reworded line fails the check.
+#
+# WHY NOT ASSERT THE MUTANT COUNT AGAINST SOLUTION MODE. Measured, because it is the
+# obvious idea and it does not work: solution mode changes which TEST PROJECTS run,
+# not which files are mutated. Same commit, `stryker-config.expressions.json`, both
+# modes report "4064 mutants created" and "834 total mutants will be tested"; only
+# "Number of tests found" moves (722 -> 2211). data-sqlite likewise: 38 and 38, with
+# 403 -> 783 tests. So the assertion that catches solution mode is the TEST-PROJECT
+# COUNT (check 2), and the mutant count is asserted for a different failure (check 3).
+#
+# VERIFYING THIS SCRIPT: run it over a real log from either mode, e.g.
+#   scripts/assert-mutation-run saved-solution-mode.log stryker-config.data-ef.json 596 data-ef
+# It must fail check 2 on a solution-mode log and pass on a `test/`-scoped one.
+set -uo pipefail
+
+log="${1:?usage: assert-mutation-run <log> <config> <expected-mutants> <shard-name>}"
+config="${2:?missing stryker config path}"
+expected_mutants="${3:?missing expected mutant count}"
+shard="${4:?missing shard name}"
+
+fail() {
+    echo "::error::Mutation run ($shard): $1"
+    exit 1
+}
+
+[ -f "$log" ] || fail "no Stryker log at '$log' — the run produced nothing to judge."
+[ -f "$config" ] || fail "no Stryker config at '$config'."
+
+# Stryker's progress reporter writes \r-terminated lines; normalise so line-oriented
+# matching sees them at all.
+text="$(tr '\r' '\n' < "$log")"
+
+# ---------------------------------------------------------------------------
+# Check 1 — vacuity. A run that discovered or tested zero mutants is not a passing
+# run, it is a broken one (stryker-net#3094). Kept from the original workflow step,
+# patterns unchanged, because its failure mode is different from checks 2 and 3: it
+# catches a run that measured NOTHING, they catch a run that measured the WRONG thing.
+# ---------------------------------------------------------------------------
+if printf '%s\n' "$text" | command grep -qE '0 total mutants will be tested|unable to calculate a mutation score|Number of tests found: 0'; then
+    fail "tested zero mutants (vacuous run) — see the log above. Failing the gate instead of a false green (stryker-net#3094)."
+fi
+
+# ---------------------------------------------------------------------------
+# Check 2 — the suite is the one the config named. Stryker prints "Analyzing N test
+# project(s)." only when it resolves `test-projects` itself; in solution mode it
+# prints "Stryker will mutate solution ..." and discovers test projects on its own,
+# so the line is absent and this check fails. N comes from the config rather than a
+# hand-maintained constant, so it cannot drift out of sync with what it guards.
+# ---------------------------------------------------------------------------
+declared="$(jq -r '.["stryker-config"]["test-projects"] | if . == null then "null" else length end' "$config" 2>/dev/null)"
+case "$declared" in
+    ''|null|0)
+        fail "config '$config' declares no test-projects. Stryker would fall back to the working directory, which is not a measurement anyone chose."
+        ;;
+esac
+
+if ! printf '%s\n' "$text" | command grep -qF "Analyzing $declared test project(s)."; then
+    reported="$(printf '%s\n' "$text" | command grep -oE 'Analyzing [0-9]+ test project\(s\)\.' | head -1)"
+    tests_found="$(printf '%s\n' "$text" | command grep -oE 'Number of tests found: [0-9]+' | head -1)"
+    fail "expected Stryker to analyse exactly $declared test project(s) (the number '$config' declares), but the log does not say so — it says '${reported:-<nothing>}' (${tests_found:-tests found: unknown}).
+    The usual cause is Stryker entering SOLUTION mode, which discards test-projects and substitutes every test project referencing the mutated assembly: a silent ~3x suite inflation whose only other symptom is a timeout weeks later (#99). Run from 'test/', not the repository root.
+    If a Stryker upgrade merely reworded the line, fix this assertion — do not delete it."
+fi
+
+# ---------------------------------------------------------------------------
+# Check 3 — the mutate glob still matches. Different failure from check 1: a glob that
+# stops matching after a rename or a folder move does not report zero, it reports a
+# COLLAPSED count, which the vacuity check waves through and a score cannot reveal
+# (fewer mutants, same percentage). Anchored on the matrix's measured count.
+#
+# TOLERANCE: a one-sided floor at 60 % of the declared count, not a band.
+#   - One-sided because only a collapse is a defect. More mutants than declared means
+#     more code under measurement, which is never the bug — so growth must not fail a
+#     run, or every ordinary PR that adds a line would need this file edited too.
+#   - 60 % because the declared numbers are a dated snapshot, not a contract, and
+#     ordinary drift between refreshes is single-digit percent. Losing two fifths of a
+#     600-800 mutant shard is not drift; it is a glob that stopped matching or an area
+#     that got excluded. The looseness is deliberate: check 2 is the exact one, and it
+#     can afford to be exact because it is derived from the config.
+# ---------------------------------------------------------------------------
+tested="$(printf '%s\n' "$text" | command grep -oE '[0-9]+[[:space:]]+total mutants will be tested' | command grep -oE '^[0-9]+' | head -1)"
+[ -n "$tested" ] || fail "the log never reports 'N total mutants will be tested', so there is no verdict to trust. Either the run did not reach the mutation loop, or a Stryker upgrade reworded the line — in which case fix this assertion rather than deleting it."
+
+floor=$(( expected_mutants * 60 / 100 ))
+if [ "$tested" -lt "$floor" ]; then
+    fail "tested $tested mutants, but '$config' measured $expected_mutants when this shard was last calibrated (floor $floor = 60 %).
+    A collapse this size is not ordinary drift: check the mutate globs against the files that moved. If the drop is legitimate, update the shard's 'mutants:' in .github/workflows/mutation.yml so the floor tracks reality."
+fi
+
+echo "[assert-mutation-run] $shard OK — $declared test project(s) as configured, $tested mutants tested (declared $expected_mutants, floor $floor)."

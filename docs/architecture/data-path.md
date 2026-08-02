@@ -1228,13 +1228,26 @@ shards that timed out on run 30292141967 (#99), and of `data-ef` regressing from
 past 120 without its config changing: F3's PR3/PR4 added `Api.Tests`, `Api.Tests.Integration` and `Host.Tests`,
 which reference the mutated assemblies and were therefore swept into every shard.
 
+Measured for `data-ef` specifically, the shard that regressed with no config change: **858** tests from `test/`
+against **1489** from the repo root, and **596 mutants either way**.
+
 **The previous edition of the table above was already showing this and nobody read it that way**: it recorded
 1267 tests for a config whose single `test-projects` entry is `MMLib.Alvo.Tests` (722 today, fewer then). A
-"tests found" number larger than the listed test projects can hold is the signature of the bug. Hence the
-guard in the workflow that fails a run which reports `will mutate solution`: from `test/` there is no solution
-file, `test-projects` is honoured (verified: `Analyzing 2 test project(s)` for `data-ef`), and a regression to
-the inflated shape is loud instead of turning up as a timeout weeks later. The paths inside every config are
-therefore relative to `test/`, not to the repository root.
+"tests found" number larger than the listed test projects can hold is the signature of the bug. From `test/`
+there is no solution file and `test-projects` is honoured (`Analyzing 2 test project(s)` for `data-ef`), so the
+paths inside every config are relative to `test/`, not to the repository root.
+
+`scripts/assert-mutation-run` keeps it that way, and the shape of that guard is itself a lesson. Its first
+version was `grep -q 'will mutate solution'` — a **negative** assertion, which fails **open** the moment a
+Stryker release rewords the line, i.e. the same class of defect as the vacuous run it sits next to. It now
+asserts **positively**: the run must report that it analysed exactly as many test projects as the config
+declares (derived from the config with `jq`, so it cannot drift), must report a mutant count at all, and must
+not be vacuous. Note which number catches solution mode and which does not — the mutant count is *identical*
+in both modes (834/834, 596/596), so only the **test-project count** can catch it; the mutant count is asserted
+separately, as a one-sided floor at 60 % of the calibrated figure, to catch a `mutate` glob that stops matching
+after a rename (a collapse, not a zero, so the vacuity check waves it through). Verified by running the script
+over real logs from both modes: it passes the `test/` ones and fails the solution-mode ones, including the
+`data-ef` pair above.
 
 ### `coverage-analysis: off` is a measurement, not a preference
 
