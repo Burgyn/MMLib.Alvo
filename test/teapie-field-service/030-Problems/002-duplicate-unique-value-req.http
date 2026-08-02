@@ -1,0 +1,74 @@
+### A DEFECT THIS CASE PINS, not a behaviour it endorses.
+###
+### `reference` is declared `unique`. Sending a value another row already holds is an ordinary caller
+### mistake — the same class as a missing required field or a bad enum value — and every one of those
+### is answered with a 422 naming the field. A duplicate is answered **500**, because `unique` is the
+### one declared facet the framework does not validate: it is enforced only by the database, and the
+### provider's unique-violation exception is not mapped onto `IAlvoData`'s refusal families.
+###
+### The case asserts what happens TODAY, deliberately and labelled, for two reasons. It goes red the
+### day the defect is fixed, which forces this file to be updated rather than letting the fix ship
+### unnoticed. And it pins the one thing that must stay true meanwhile: the 500 discloses nothing —
+### no exception type, no SQL, no constraint name, no stack frame.
+###
+### Two consequences, both worth stating where the next reader will meet them:
+###   1. An agent cannot repair the request. There is no violation, no pointer and no fix suggestion,
+###      and the detail says only "an internal error"; the field at fault is not named at all.
+###   2. On a tenant-SCOPED entity a globally-unique field is a cross-tenant existence oracle. Tenant
+###      B can learn whether tenant A holds a given `reference` by watching 500 versus 201 — which is
+###      exactly the inference the 404-everywhere design elsewhere is careful to prevent. 080-Tenancy
+###      measures the same probe from tenant south.
+# @name DuplicateUniqueValue
+## TEST-EXPECT-STATUS: [500]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "reference": "WO-1001",
+  "title": "Duplicate reference",
+  "status": "scheduled",
+  "priority": 3,
+  "access_code": "DUP",
+  "customer_id": "{{CustomerAcmeId}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+### The comparison that makes the point: change nothing but the unique value and the create succeeds.
+### So the 500 above is the duplicate and nothing else about the payload.
+# @name SameBodyFreshReference
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "reference": "WO-3900",
+  "title": "Duplicate reference",
+  "status": "scheduled",
+  "priority": 3,
+  "access_code": "DUP",
+  "customer_id": "{{CustomerAcmeId}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+### And the failed create left nothing behind
+# @name AfterTheDuplicate
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?reference=eq.WO-1001&limit=100
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### The comparison row is removed again, so every later group measures the seeded seven and not an
+### eighth row this case happened to leave behind.
+# @name RemoveTheComparisonRow
+## TEST-EXPECT-STATUS: [204]
+DELETE {{fsBaseUrl}}/api/work_orders/{{SameBodyFreshReference.response.body.$.id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+###
+# @name BackToTheSeededSet
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=100&order=reference.asc
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
