@@ -144,13 +144,18 @@ jobs:
       - name: Compose up + teapie test
         run: scripts/test-e2e
 
+      # if: always() so a failed e2e still publishes whatever TeaPie wrote — paired with `ignore`,
+      # not `error`, because the step above fails *before* TeaPie runs whenever the image build or
+      # `up --wait` is what broke. `error` would then add a second, misleading "No files were found"
+      # to a job whose real failure is already reported, which is exactly why "Upload paging
+      # criteria" chose `ignore` for the same always()-on-a-conditional-artifact situation.
       - name: Publish the TeaPie report
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: teapie-report
           path: artifacts/teapie/report.xml
-          if-no-files-found: error
+          if-no-files-found: ignore
 
   # Stable required status check: the branch ruleset requires "Build & test",
   # which must not change when matrix legs are added/removed. This gate passes
