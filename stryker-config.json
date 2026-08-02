@@ -2,7 +2,7 @@
   "stryker-config": {
     "project": "MMLib.Alvo.csproj",
     "test-projects": [
-      "test/MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj"
+      "MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj"
     ],
     "test-runner": "mtp",
     "coverage-analysis": "off",
@@ -16,7 +16,8 @@
       "!**/Expressions/Setup.cs",
       "!**/Rules/Setup.cs",
       "!**/Auth/Setup.cs",
-      "!**/Expressions/**"
+      "!**/Expressions/**",
+      "!**/Api/**"
     ],
     "thresholds": {
       "high": 90,

@@ -1,11 +1,13 @@
 name: Mutation
 
 # Mutation testing of the security-relevant logic. Path-filtered so it runs only
-# when a mutated project changes. Five targets run in parallel via a matrix:
+# when a mutated project changes. Six targets run in parallel via a matrix:
 #   - "security core (expressions)"       → src/MMLib.Alvo/Expressions/**
 #                        (stryker-config.expressions.json)
+#   - "security core (api)"               → src/MMLib.Alvo/Api/**
+#                        (stryker-config.api.json)
 #   - "security core (rules, auth, rest)" → the rest of src/MMLib.Alvo
-#                        (stryker-config.json). The two globs partition the project
+#                        (stryker-config.json). The three globs partition the project
 #                        exactly; see the matrix for why it is sharded at all.
 #   - "data-ef"        → the EF provider's PURE-LOGIC only: DestructiveScan,
 #                        RenamePrePass, RenameGuessSplitter, DescriptorModelBuilder,
@@ -42,12 +44,48 @@ name: Mutation
 # not the Testcontainers-backed .Tests.Integration project, which self-skips off Linux
 # and would make the run depend on Docker.
 #
-# Each config pins `test-runner: mtp` + `coverage-analysis: off` because Stryker
-# 4.16's default VSTest runner cannot discover tests in xUnit v3 / Microsoft.Testing.Platform
-# projects (our primary runner — see global.json) and its per-test coverage capture
-# under MTP is preview-quality and reports false "NoCoverage" (stryker-net#3094).
-# The "Mutation test" step below fails loudly on a vacuous (zero-mutant) run
-# instead of reporting a false green.
+# Each config pins `test-runner: mtp` because Stryker 4.16's default VSTest runner
+# cannot discover tests in xUnit v3 / Microsoft.Testing.Platform projects (our primary
+# runner — see global.json).
+#
+# WHY `coverage-analysis: off`, MEASURED rather than assumed. Under the MTP runner
+# per-test coverage is not implemented upstream (stryker-net#3516, still open), and
+# turning it on is both wrong and pointless. Measured on Stryker 4.16.0 / .NET SDK
+# 10.0.100 / xunit.v3 3.2.2, same 90 mutants of src/MMLib.Alvo.Data.Sqlite, same
+# machine, same `--concurrency 4`:
+#
+#   coverage-analysis  tested  Killed  NoCoverage  score     wall clock
+#   off                    38      38           0  100.00 %  63 s
+#   perTest                33      33           5   86.84 %  59 s
+#
+# The five extra "NoCoverage" mutants are FALSE: with coverage off the very same
+# mutants are Killed. They sit in SqliteCaseSensitiveLike.cs and SqliteSqlDialect.cs
+# — the LIKE shape and the dialect rendering this gate exists to protect — and
+# because Stryker counts NoCoverage against the score, `perTest` silently reported
+# 86.84 % for a suite that actually kills everything. It also bought nothing: 59 s
+# vs 63 s, because stryker-net#3750 shows the MTP `runTests` filter is serialised
+# under a property the platform server does not bind, so a "filtered" run silently
+# executes the whole assembly anyway. Do not re-enable this without re-measuring;
+# raw folklore is what this table replaces (it was previously only a sentence in
+# commit 2b6b340).
+#
+# WHY THE RUN HAPPENS FROM `test/` AND NOT THE REPO ROOT. When Stryker is started in
+# a directory containing MMLib.Alvo.slnx it enters solution mode and IGNORES each
+# config's `test-projects`, running every test project in the solution that
+# references the mutated assembly instead. That is not a tuning detail — measured on
+# the same commit, `stryker-config.expressions.json` discovered 2211 tests from the
+# repo root and 722 from `test/` for an identical 834 mutants, and the 1489 extra
+# tests include the Testcontainers-backed .Tests.Integration projects that every
+# config deliberately excludes. Since cost is mutants × suite, that alone is the ~3×
+# that pushed three shards past their budget on run 30292141967. From `test/` there
+# is no solution file, `test-projects` IS honoured (verified: "Analyzing 2 test
+# project(s)" for data-ef), and the paths in each config are therefore relative to
+# `test/`. The guard in the "Mutation test" step fails the run if it ever slips back
+# into solution mode — a silent 3× regression is exactly the kind of thing that
+# otherwise only shows up as a timeout months later.
+#
+# The "Mutation test" step also fails loudly on a vacuous (zero-mutant) run instead
+# of reporting a false green (stryker-net#3094).
 #
 # WHY POST-MERGE AND NOT ON THE PR: this is the one deliberate exception to the
 # repo's "the PR is the only full gate" rule. A mutation run costs ~20 minutes,
@@ -77,6 +115,7 @@ on:
       - 'src/MMLib.Alvo.Data.PostgreSql/**'
       - 'stryker-config.json'
       - 'stryker-config.expressions.json'
+      - 'stryker-config.api.json'
       - 'stryker-config.data-ef.json'
       - 'stryker-config.data-sqlite.json'
       - 'stryker-config.data-postgresql.json'
@@ -118,13 +157,12 @@ jobs:
   mutation:
     name: Stryker (${{ matrix.name }})
     runs-on: ubuntu-latest
-    # The security-core run outgrew a 40-minute budget the moment F3's PR1 landed the CEL
-    # compiler, both rule backends and the policy engine: it was cancelled at exactly 40:00
-    # with the run still in progress, which reads as a grey "cancelled" rather than as a
-    # verdict — the same silent-non-answer this workflow's own fail-loud step exists to
-    # prevent. Nothing waits on this run (it is post-merge, or dispatched on demand), so the
-    # budget is generous on purpose; a genuinely hung run still ends, just later.
-    timeout-minutes: 120
+    # PER-SHARD, ON PURPOSE. A single workflow-wide budget cannot tell "this shard grew"
+    # from "this shard was always the expensive one", and a silently rising global number
+    # hides the growth curve the timeouts on run 30292141967 made visible. Each leg
+    # therefore carries its own `timeout` with the mutant count it was sized against, and
+    # the cheap legs keep a tight one so a regression there still trips.
+    timeout-minutes: ${{ matrix.timeout }}
     strategy:
       fail-fast: false
       matrix:
@@ -132,26 +170,48 @@ jobs:
           # The security core is sharded by `mutate` glob, not because one shard is a
           # meaningful unit, but because wall-clock is this gate's whole cost: with
           # coverage-analysis off every mutant reruns the full test project, so time is
-          # mutants × suite, and F3's PR1 pushed that past two hours in one job. The two
-          # globs partition src/MMLib.Alvo exactly — `Expressions/**` in one, everything
-          # else in the other — so a file cannot be mutated twice or silently skipped. The
-          # expressions shard is the CEL lexer/parser/checker/interpreter/renderer, which is
-          # both the densest in mutants and the one whose score matters most.
+          # mutants × suite. The three globs partition src/MMLib.Alvo exactly —
+          # `Expressions/**`, `Api/**`, everything else — so a file cannot be mutated twice
+          # or silently skipped. The expressions shard is the CEL
+          # lexer/parser/checker/interpreter/renderer, which is the densest in mutants and
+          # the one whose score matters most.
+          #
+          # `mutants:` below is a MEASURED count (discovery probe, 2026-08-02, at the commit
+          # that added this comment), not an estimate — it is what sizes the budget, and it
+          # is the number to re-probe when a leg starts timing out. `Api/**` is its own leg
+          # because F3's PR3 took stryker-config.json from 478 mutants to 2159, of which
+          # 1502 are Api/**; carving it out is mechanical (the same files, split), so the
+          # score domain is unchanged.
           - name: security core (expressions)
             config: stryker-config.expressions.json
             project: src/MMLib.Alvo/MMLib.Alvo.csproj
+            mutants: 834      # suite: 722 tests
+            timeout: 180
+          - name: security core (api)
+            config: stryker-config.api.json
+            project: src/MMLib.Alvo/MMLib.Alvo.csproj
+            mutants: 1502     # suite: 722 tests — the largest leg
+            timeout: 180
           - name: security core (rules, auth, rest)
             config: stryker-config.json
             project: src/MMLib.Alvo/MMLib.Alvo.csproj
+            mutants: 657      # suite: 722 tests
+            timeout: 120
           - name: data-ef
             config: stryker-config.data-ef.json
             project: src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj
+            mutants: 596      # suite: 858 tests (two test projects)
+            timeout: 120
           - name: data-sqlite
             config: stryker-config.data-sqlite.json
             project: src/MMLib.Alvo.Data.Sqlite/MMLib.Alvo.Data.Sqlite.csproj
+            mutants: 38       # suite: 403 tests
+            timeout: 60
           - name: data-postgresql
             config: stryker-config.data-postgresql.json
             project: src/MMLib.Alvo.Data.PostgreSql/MMLib.Alvo.Data.PostgreSql.csproj
+            mutants: 16       # suite: 101 tests
+            timeout: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -180,6 +240,12 @@ jobs:
       - name: Mutation test
         if: steps.guard.outputs.run == 'true'
         shell: bash
+        # From `test/`, NOT the repo root: with MMLib.Alvo.slnx in the working directory
+        # Stryker enters solution mode and ignores each config's `test-projects`, running
+        # every test project that references the mutated assembly (measured: 2211 tests
+        # instead of 722 for the expressions shard, Testcontainers integration suites
+        # included). The header comment has the numbers. Hence `-f ../<config>` too.
+        working-directory: test
         run: |
           set -o pipefail
           # --concurrency: Stryker defaults to half the logical cores, i.e. 2 test runners on a
@@ -187,7 +253,7 @@ jobs:
           # is wall-clock. The runner has ~16 GB, comfortably more than four MTP hosts need for
           # this suite. Set on the command line rather than in the config so this reasoning has
           # somewhere to live — the config files are strict JSON with nowhere to put a comment.
-          dotnet tool run dotnet-stryker -f "${{ matrix.config }}" --concurrency 4 2>&1 | tee stryker-output.log
+          dotnet tool run dotnet-stryker -f "../${{ matrix.config }}" --concurrency 4 2>&1 | tee stryker-output.log
           stryker_exit="${PIPESTATUS[0]}"
 
           # Fail loud instead of showing a false green: a run that discovered
@@ -198,6 +264,17 @@ jobs:
           # isn't MTP-compatible).
           if grep -qE '0 total mutants will be tested|unable to calculate a mutation score|Number of tests found: 0' stryker-output.log; then
             echo "::error::Mutation run (${{ matrix.name }}) tested zero mutants (vacuous run) — see stryker-output.log above. Failing the gate instead of a false green (stryker-net#3094)."
+            exit 1
+          fi
+
+          # Fail loud on the OTHER way this gate silently stops measuring what the config
+          # says: solution mode. It discards `test-projects`, so the suite quietly becomes
+          # every test project referencing the mutated assembly — a ~3x cost increase whose
+          # only symptom is a timeout weeks later. If Stryker ever finds a solution file
+          # from here again (a stray .slnx under test/, a changed working directory), say so
+          # instead of paying for it. Checked after the run so the log is intact above.
+          if grep -q 'will mutate solution' stryker-output.log; then
+            echo "::error::Mutation run (${{ matrix.name }}) entered Stryker's solution mode, which IGNORES the config's test-projects and silently inflates the suite (see the header comment in this workflow). Fix the working directory rather than the timeout."
             exit 1
           fi
 

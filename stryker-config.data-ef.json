@@ -2,8 +2,8 @@
   "stryker-config": {
     "project": "MMLib.Alvo.Data.EntityFrameworkCore.csproj",
     "test-projects": [
-      "test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/MMLib.Alvo.Data.EntityFrameworkCore.Tests.csproj",
-      "test/MMLib.Alvo.Data.Sqlite.Tests/MMLib.Alvo.Data.Sqlite.Tests.csproj"
+      "MMLib.Alvo.Data.EntityFrameworkCore.Tests/MMLib.Alvo.Data.EntityFrameworkCore.Tests.csproj",
+      "MMLib.Alvo.Data.Sqlite.Tests/MMLib.Alvo.Data.Sqlite.Tests.csproj"
     ],
     "test-runner": "mtp",
     "coverage-analysis": "off",
