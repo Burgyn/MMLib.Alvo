@@ -1,0 +1,43 @@
+### Tenant south's own working set, created by a key with EXACTLY the rights `dispatcher-north` has.
+### That is what makes 080-Tenancy a claim about tenancy: anything either dispatcher cannot see is
+### not explainable by a difference in role, scope or rule.
+# @name CreateSouthCustomer
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/customers
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantSouth}}",
+  "name": "Southern Foods",
+  "tier": "standard",
+  "email": "hello@southernfoods.test"
+}
+
+### `regions` is global, so the SAME region row serves both tenants — the contrast that makes
+### "scoped" mean something rather than being the only behaviour on offer.
+# @name CreateSouthWorkOrder
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantSouth}}",
+  "reference": "WO-5001",
+  "title": "Chiller service",
+  "status": "scheduled",
+  "priority": 1,
+  "quoted_price": 430.00,
+  "is_emergency": false,
+  "internal_notes": "Southern tenant only.",
+  "access_code": "SOUTH-5001",
+  "customer_id": "{{CreateSouthCustomer.response.body.$.id}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+### Tenant south reads the shared reference data tenant north's admin created
+# @name SouthReadsGlobalRegions
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/regions?limit=100&order=code.asc
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
