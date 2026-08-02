@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (breaking)
 
+- **A `unique` field on a `tenancy: "scoped"` entity is now unique *within* the tenant, not across the
+  instance** (#137). It was a **cross-tenant existence oracle**: `DescriptorModelBuilder` emitted
+  `HasIndex(field).IsUnique()` with no `tenant_id` — and the same for a declared `unique` index — so
+  tenant B's create of a value only tenant A held was refused while the same create of a free value
+  succeeded. The two requests differ in exactly one thing, so the difference between the answers *was*
+  the disclosure: B learned whether A held the value, one request per candidate. That is the inference
+  the 404-everywhere rule exists to prevent, and it contradicted §0's secure-by-default. A scoped
+  entity's unique index now spans `(tenant_id, …)`; a non-scoped entity keeps instance-wide uniqueness,
+  a non-unique index is unchanged, and a descriptor that already named `tenant_id` keeps its own column
+  order. **Mapping the underlying refusal to a clean 409 did not fix this** — `409`-versus-`201` is the
+  same one-bit signal as `500`-versus-`201` was — which is why the two were separate issues.
+
+  **This changes emitted DDL.** `IX_<table>_<field>` becomes `IX_<table>_tenant_id_<field>` on a scoped
+  entity, so the next apply drops one index and creates another (`DropIndex`/`AddIndex`, neither
+  destructive, so no `AllowDestructive` is needed). The change is always in the *widening* direction —
+  the new index forbids strictly less than the old one — so no existing row can violate it and no
+  migration can fail on data. Nothing is released, which is why this was the cheap moment.
+
+- **`IAlvoSqlDialect` gained an abstract member, `DecodeConstraintViolation`.** A driver outside this
+  repo will no longer compile until it implements it. Abstract rather than a default interface member on
+  purpose: `null` means "not a constraint violation", which is a legitimate answer for every other
+  failure, so an inherited default would have a new driver silently answer `500` for every duplicate —
+  indistinguishable from correct behaviour on an engine that really reported something else.
+
+
 - **A descriptor may no longer name a field `order`, `limit`, `offset`, `after`, `select`,
   `or`, `and` or `not`.** The generated Data API's query string reserves each of these
   (`?limit=10`, `?or=(...)`, `?not.color=eq.red`), so a request could not tell a filter on
@@ -263,3 +288,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   non-allow-listed licenses), and a CodeRabbit config (`.coderabbit.yaml`) tuned to this
   project's conventions (Central Package Management, disallowed packages, XML doc and
   comment-style rules).
+
+### Fixed
+
+- **A database constraint violation is now `409`, naming the field, instead of `500 internal`** (#138).
+  A value another record already holds on a `unique` field, and a delete an `onDelete: "restrict"`
+  reference refuses, both reached the host as the provider's own exception and rendered as
+  `alvo.dev/errors/internal` — *"an invariant Alvo itself relies on is broken"*, which neither is: the
+  caller's request conflicts with stored state, which is what `409` means. Three costs, each its own
+  defect: an agent could not repair the request (no pointer, no field, no fix suggestion, in a framework
+  whose principle 4 is structured errors *with* one); a `500` invites a retry that can never succeed;
+  and the operator was paged, with a stack trace, for an ordinary caller mistake.
+
+  A new slug, `conflict`, is a second `409` beside `idempotency-conflict` by the same rule `out-of-scope`
+  is a second `403` by — the two have different fixes. One slug covers both constraint kinds, with the
+  difference in `violations`: code `unique` and pointer `/<field>` for a collision, code `referenced` and
+  the empty pointer for a `restrict` refusal (a `DELETE` has no field to change). The refusal still
+  discloses no value, no engine message and no constraint or index name, and the `restrict` case names no
+  entity either — which of the entities that may reference a row actually holds one is a fact about data
+  the caller may not be able to read. A conflict confined to framework-managed columns keeps propagating
+  as the broken invariant it is.
+
+  The engine-specific decoding lives behind the driver's own SQL seam, never in a `catch` that matches a
+  message: PostgreSQL reads SQLSTATE `23505`/`23503` plus the constraint name, SQLite the extended result
+  code `2067`/`1555`/`787` plus the columns its message names. Both are held to one inherited suite
+  (#139), which caught two real engine differences the PostgreSQL-only e2e could not have: `ExecuteDelete`
+  on SQLite loses the extended result code, and Alvo's *runtime* EF model declared no indexes at all, so
+  the constraint-name resolution PostgreSQL depends on always came back empty.
+
+- **A duplicate in an *idempotent* create no longer costs ten transactions.** The retry that converges a
+  lost key race caught any storage write failure, so a duplicate was re-attempted ten times — about
+  450 ms — before surfacing. It is no longer a `DbException`, so it leaves on the first attempt. The
+  idempotency record's own primary key is deliberately still untranslated, because losing that race is
+  what the retry exists for. (Part of #127; the rest of #127 is still open.)
