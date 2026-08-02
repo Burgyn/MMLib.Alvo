@@ -372,12 +372,47 @@ Branching on *initialized vs drifted* achieves the same DX with no environment
 magic and no hidden coupling to `ASPNETCORE_ENVIRONMENT`.
 
 **Initialization under concurrency.** Three replicas starting against an empty
-database all see "uninitialized". They are serialized by the applied-snapshot
-write, which is already an optimistic append (`expectedRevision` 0 → 1): one
-wins, the losers get a concurrency error, **re-read, observe "unchanged", and
-converge**. That convergence is a required behaviour of this design, not an
-accident — a loser that throws would turn a normal cold start of a replica set
-into a crash loop. It is a named test.
+database all see "uninitialized". One wins; the losers **re-read, re-decide, and
+converge**. That convergence is a required behaviour, not an accident — a loser
+that throws would turn a normal cold start of a replica set into a crash loop.
+
+Two things about that were wrong in this design's first draft, both found by
+measuring rather than reasoning, and the second is a bug that predates this work.
+
+**The write must be atomic, or there is nothing to converge on.** The first draft
+assumed the losers are serialized by the applied-snapshot write. They were not:
+the boot applied DDL through `ISchemaMigrator.ApplyAsync` and *then* saved the
+snapshot — two transactions, DDL first — so a loser never reached the snapshot
+write at all. It got `SQLite Error 1: 'table "depots" already exists'`. Worse,
+DDL-first leaves a window in which the tables exist and no revision row explains
+them, so a loser's re-read can legitimately see `null`.
+`EfCoreRuntimeSchemaWriter`'s own remarks already named this ordering as the wrong
+one — *"With insert-first, the only writer that reaches the DDL is the confirmed
+winner."* So the boot writes through `IRuntimeSchemaWriter.ApplyAndAppendAsync`:
+version row first as the gate, DDL and row in one transaction. The destructive
+guardrail is **restated at that call site**, because that writer deliberately
+re-evaluates no policy and dropping it would have been a silent data-loss
+regression.
+
+**`CREATE TABLE IF NOT EXISTS` is not concurrency-safe on PostgreSQL**, and stage 1
+hits that before any project-schema race can happen. The catalog check and the
+insert are not atomic, so every replica failed its *first* database call with
+`23505 duplicate key value violates unique constraint "pg_type_typname_nsp_index"`
+inside `SystemSchemaInitializer.EnsureAsync`. `IdempotencyTable`'s remarks already
+knew this on the data path (*"a duplicate-relation error on PostgreSQL … is retried
+by the caller"*); the boot had no such retry, and the one retry it did have was
+being consumed here, leaving none for the race it was for. Fixed at source: run the
+DDL, and on any `DbException` **probe whether the table now exists**
+(`SELECT 1 FROM t WHERE 1 = 0` — the one question both engines answer identically)
+and rethrow if it does not. No `SQLSTATE` and no `SqliteErrorCode` is decoded, which
+is the same "re-read rather than classify" discipline `VersionRowWriter` uses.
+
+Measured, once the ordering was atomic: the SQLite loser gets a clean
+`DescriptorConcurrencyException`, never `SQLITE_BUSY` — its own post-conflict
+re-read has to take the write lock, so it serializes behind the winner's commit.
+A **different** descriptor (a rolling deploy mid-flight) is ordinary drift with a
+non-null snapshot, so the mode governs and the default `Verify` **refuses**: a
+loser never silently adopts the winner's schema.
 
 ### How a failure surfaces
 
@@ -654,6 +689,26 @@ Numbering continues the F3 design's series, which ends at 51.
     is unauthenticated by design. The operator gets the full reason on stderr and in
     the log; the probe gets a phase. Deviating from the agent-first error rule is
     correct here because the reader of a probe response is not the operator.
+
+60. **`IRuntimeSchemaWriter` becomes mandatory for every provider at boot.** It was
+    previously resolved on demand, only by `RuntimeSchemaService` (the runtime
+    dashboard-first path). The boot now needs it for the atomic version-row-then-DDL
+    write, so a provider that implements `IAppliedSchemaStore` but not
+    `IRuntimeSchemaWriter` can no longer boot. Both in-repo drivers implement it; the
+    cost is borne by a future third-party provider, and it is a widening of the
+    implicit provider contract that `package-boundary.md` should record.
+61. **`SchemaMigrationRunner` keeps the non-atomic ordering the boot just abandoned.**
+    The CLI / Management-API path still applies DDL and *then* saves the snapshot. Left
+    deliberately: that path is a single writer by construction, so the race the boot has
+    to survive cannot arise there, and changing it would alter behaviour the CLI's tests
+    pin for no benefit. Recorded because the two apply paths now differ in a way a later
+    reader would otherwise take for an oversight — and because if the Management API
+    ever serves concurrent applies, this is the line that has to move.
+62. **The concurrency fix to `SystemSchemaInitializer` is a bug fix outside this
+    design's scope, shipped here because this design is what exposed it.** Multi-replica
+    PostgreSQL deployments could not reliably bring the system schema up at all;
+    nothing before this needed three hosts to start at once, so nothing had found it.
+    Recorded so it is not mistaken for part of the lifecycle redesign.
 
 57. **The destructive guardrail applies during *initialization*, not only during
     a mode-governed apply.** Stated as a deviation because it is stricter than
