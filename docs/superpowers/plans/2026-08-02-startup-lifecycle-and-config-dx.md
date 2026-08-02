@@ -53,6 +53,16 @@ Microsoft.Testing.Platform (MTP), xUnit v3, Shouldly, Verify (snapshot),
 - **Rings:** `scripts/test-ring0` after each task, `scripts/test-ring2` before the
   PR, `scripts/test-e2e` because the host and compose are touched.
 - **Commit after every task**, and commit before mutating anything.
+- **Running one test class — the MTP invocation.** `dotnet test <proj> --filter X`
+  **does not work** on this stack: `dotnet test` needs `--project`, and MTP rejects
+  `--filter` outright (`Unknown option '--filter'`). Use:
+  `dotnet test --project test/MMLib.Alvo.Tests -- --filter-class '*DescriptorBootPlanTests*'`
+  or `-- --filter-namespace 'MMLib.Alvo.Tests.Migrations'`. *(Measured in Task 2;
+  every `Run:` line below was corrected afterwards.)*
+- **`grep` is aliased to `ugrep` in this shell**, and `ugrep -c` reported nonsense
+  counts for a CRLF pattern (3, then 2, for a single-occurrence file). Use
+  **`command grep -c`** when confirming a mutation's edit landed, or the CRLF check
+  itself lies to you. *(Measured in Task 2.)*
 
 ## File Structure
 
@@ -155,7 +165,7 @@ public void An_unknown_mode_is_refused_at_startup_naming_the_choices()
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `dotnet test test/MMLib.Alvo.Tests --filter AlvoSchemaOptionsTests`
+Run: `dotnet test --project test/MMLib.Alvo.Tests -- --filter-class '*AlvoSchemaOptionsTests*'`
 Expected: FAIL — `AlvoSchemaOptions` / `AlvoSchemaStartupMode` do not exist.
 
 - [ ] **Step 3: Implement the enum and options**
@@ -188,13 +198,13 @@ typo**. Make that the reason in the XML docs.
 
 - [ ] **Step 4: Run to verify they pass**
 
-Run: `dotnet test test/MMLib.Alvo.Tests --filter AlvoSchemaOptionsTests`
+Run: `dotnet test --project test/MMLib.Alvo.Tests -- --filter-class '*AlvoSchemaOptionsTests*'`
 Expected: PASS. Confirm `Build succeeded` first.
 
 - [ ] **Step 5: Accept the public-API baseline**
 
-Run: `dotnet test test/MMLib.Alvo.Tests --filter PublicApi` then
-`dotnet test test/MMLib.Alvo.Abstractions.Tests --filter PublicApi`.
+Run: `dotnet test --project test/MMLib.Alvo.Tests -- --filter-class '*PublicApi*'` then
+`dotnet test --project test/MMLib.Alvo.Abstractions.Tests -- --filter-class '*PublicApi*'`.
 Both baselines move (two new public types). **Do not hand-edit them.** Let Verify
 write the `.received.` file and accept it with the repo's usual mechanism; then
 dispatch `alvo-snapshot-judge` as the Stop hook will require.
@@ -277,7 +287,7 @@ public async Task An_uncompilable_rule_is_refused_at_stage_zero()
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `dotnet test test/MMLib.Alvo.Tests --filter DescriptorBootPlanTests`
+Run: `dotnet test --project test/MMLib.Alvo.Tests -- --filter-class '*DescriptorBootPlanTests*'`
 Expected: FAIL — `DescriptorBootPlan` does not exist.
 
 - [ ] **Step 3: Implement `DescriptorBootPlan`**
@@ -300,7 +310,7 @@ byte-identical** — the CLI and the Management API still use this path.
 
 - [ ] **Step 5: Run the full existing migration suite**
 
-Run: `dotnet test test/MMLib.Alvo.Tests --filter Migration`
+Run: `dotnet test --project test/MMLib.Alvo.Tests -- --filter-class '*Migration*'`
 Expected: PASS, unchanged. This is a refactor; any behaviour change here is a bug.
 
 - [ ] **Step 6: Prove the extraction discriminates**
@@ -401,7 +411,7 @@ public void A_destructive_refusal_marks_which_step_is_destructive()
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `dotnet test test/MMLib.Alvo.Tests --filter SchemaStartupDecisionTests`
+Run: `dotnet test --project test/MMLib.Alvo.Tests -- --filter-class '*SchemaStartupDecisionTests*'`
 Expected: FAIL — the type does not exist.
 
 - [ ] **Step 3: Implement `SchemaStartupPolicy.Decide`**
@@ -413,7 +423,7 @@ refusal-message building.
 
 - [ ] **Step 4: Run to verify they pass**
 
-Run: `dotnet test test/MMLib.Alvo.Tests --filter SchemaStartupDecisionTests`
+Run: `dotnet test --project test/MMLib.Alvo.Tests -- --filter-class '*SchemaStartupDecisionTests*'`
 Expected: PASS.
 
 - [ ] **Step 5: Prove the destructive guard discriminates**
@@ -514,7 +524,7 @@ public async Task An_unchanged_restart_still_primes_the_policy_catalog()
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `dotnet test test/MMLib.Alvo.Host.Tests --filter AlvoBootService`
+Run: `dotnet test --project test/MMLib.Alvo.Host.Tests -- --filter-class '*AlvoBootService*'`
 Expected: FAIL.
 
 - [ ] **Step 3: Implement `AlvoBootService : IHostedLifecycleService`**
@@ -539,7 +549,7 @@ and `TryAddSingleton<AlvoBootState>()`.
 
 - [ ] **Step 4: Run to verify they pass**
 
-Run: `dotnet test test/MMLib.Alvo.Host.Tests --filter AlvoBootService`
+Run: `dotnet test --project test/MMLib.Alvo.Host.Tests -- --filter-class '*AlvoBootService*'`
 Expected: PASS. Assert `Build succeeded` first.
 
 - [ ] **Step 5: Prove the before-listening fact discriminates**
@@ -599,7 +609,7 @@ public async Task Three_hosts_cold_starting_against_one_empty_database_all_serve
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `dotnet test test/MMLib.Alvo.Data.Sqlite.Tests --filter ConcurrentBoot`
+Run: `dotnet test --project test/MMLib.Alvo.Data.Sqlite.Tests -- --filter-class '*ConcurrentBoot*'`
 Expected: FAIL — the losers throw `DescriptorConcurrencyException` (or a unique
 constraint violation) out of `StartingAsync`.
 
@@ -616,8 +626,8 @@ has nothing to leak.
 
 - [ ] **Step 4: Run to verify it passes, on both engines**
 
-Run: `dotnet test test/MMLib.Alvo.Data.Sqlite.Tests --filter ConcurrentBoot`
-Then: `dotnet test test/MMLib.Alvo.Data.PostgreSql.Tests.Integration --filter ConcurrentBoot`
+Run: `dotnet test --project test/MMLib.Alvo.Data.Sqlite.Tests -- --filter-class '*ConcurrentBoot*'`
+Then: `dotnet test --project test/MMLib.Alvo.Data.PostgreSql.Tests.Integration -- --filter-class '*ConcurrentBoot*'`
 (needs Docker). Expected: PASS on both. SQLite's single-writer cap makes this the
 harder engine, so do not skip it as "covered by Postgres".
 
@@ -701,7 +711,7 @@ public void MapAlvoDataApi_registers_a_data_source_even_before_the_schema_is_kno
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `dotnet test test/MMLib.Alvo.Api.Tests --filter LazyRouteMaterialisation`
+Run: `dotnet test --project test/MMLib.Alvo.Api.Tests -- --filter-class '*LazyRouteMaterialisation*'`
 Expected: FAIL — mapping currently enumerates eagerly, so a host that maps before
 priming maps nothing.
 
@@ -735,17 +745,37 @@ aspnetcore#44392.
 - [ ] **Step 5: Reduce `MapAlvoDataApi` to registration**
 
 It resolves `EntityRouteCatalog` (keep the crafted "Alvo is not registered"
-refusal), constructs the data source and adds it to `endpoints.DataSources`. The
-`ReservedQueryKeys`/`FormatCatalog` calls are **gone from here** — Task 2 moved
-them to stage 0.
+refusal), constructs the data source and adds it to `endpoints.DataSources`.
 
-- [ ] **Step 6: Update the moved refusal's test**
+**CORRECTION — Task 2 measured this and the original wording here was wrong.**
+The two checks are **not** "moved out of here"; they are **also** performed at
+stage 0, over a *different input*, and both must survive:
 
-`DataApiQueryTests.A_schema_reaching_mapping_without_validation_is_still_refused_for_a_reserved_field_name`
-currently asserts `MapAlvoDataApi()` throws. The refusal now happens at stage 0.
-**Move the assertion, do not delete it** — it is a defence-in-depth belt against a
-hostile `ISchemaRegistry`, and the design requires the refusal to stay at start
-rather than becoming a runtime 500.
+- `ReservedQueryKeys.EnsureNoneIsShadowed` at map/enumeration time inspects
+  `EntityRouteCatalog.Entities`, i.e. the **applied schema from
+  `ISchemaRegistry`**. Stage 0 inspects the **descriptor's mapped schema**.
+  Different inputs, so stage 0 is **not** a substitute: the map-side call is the
+  defence-in-depth belt against a *hostile or substituted* `ISchemaRegistry`, which
+  is exactly what
+  `DataApiQueryTests.A_schema_reaching_mapping_without_validation_is_still_refused_for_a_reserved_field_name`
+  pins. Keep it, and keep that test asserting on the map/enumeration path.
+- `FormatCatalog.Build`'s **result** is consumed here (it is the catalogue every
+  mapped endpoint matches against), so it cannot be deleted at all — it moves
+  *into the data source*, alongside the endpoint construction.
+
+The refusal must still surface as a **failed start**, not a first-request 500. Since
+enumeration is now lazy, confirm which of the two now fires at start (stage 0, over
+the descriptor) and which fires at first enumeration (over the registry), and state
+it in the XML docs. If the registry-side refusal can only fire on first enumeration,
+say so plainly in the design's deviation list rather than claiming both are
+start-time.
+
+- [ ] **Step 6: Verify the belt still discriminates**
+
+Run the existing `DataApiQueryTests` fact unchanged. Then substitute a hostile
+`FixedSchemaRegistry` declaring a field named after a reserved query key (the test
+already has that harness) and confirm the refusal still names the entity, the key,
+and `"Rename the field"`.
 
 - [ ] **Step 7: Run to verify they pass**
 
@@ -841,7 +871,7 @@ public async Task Readiness_answers_an_unauthenticated_probe()
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `dotnet test test/MMLib.Alvo.Host.Tests --filter AlvoHealth`
+Run: `dotnet test --project test/MMLib.Alvo.Host.Tests -- --filter-class '*AlvoHealth*'`
 Expected: FAIL — `/health/ready` does not exist.
 
 - [ ] **Step 3: Implement the check and the mapping**
@@ -860,7 +890,7 @@ and have the Host delegate to `MapAlvoHealth` instead of mapping its own.
 
 - [ ] **Step 4: Run to verify they pass**
 
-Run: `dotnet test test/MMLib.Alvo.Host.Tests --filter AlvoHealth`
+Run: `dotnet test --project test/MMLib.Alvo.Host.Tests -- --filter-class '*AlvoHealth*'`
 Expected: PASS.
 
 - [ ] **Step 5: Prove the status-code fact discriminates**
@@ -958,7 +988,7 @@ public void MapAlvo_maps_both_the_data_api_and_health()
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `dotnet test test/MMLib.Alvo.Api.Tests --filter MinimalRegistration`
+Run: `dotnet test --project test/MMLib.Alvo.Api.Tests -- --filter-class '*MinimalRegistration*'`
 Expected: FAIL — `MapAlvo` does not exist; `EntityRouteCatalog` is not registered
 without `AddDataApi()`.
 
@@ -1063,7 +1093,7 @@ public async Task A_configuration_refusal_leaves_the_database_untouched()
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `dotnet test test/MMLib.Alvo.Host.Tests --filter ConfigurationRefusal`
+Run: `dotnet test --project test/MMLib.Alvo.Host.Tests -- --filter-class '*ConfigurationRefusal*'`
 Expected: FAIL — today these are `FileNotFoundException` / hand-crafted throws
 from elsewhere, not `OptionsValidationException`.
 
@@ -1156,7 +1186,7 @@ green is the failure mode this step is most exposed to.
 
 - [ ] **Step 3: Confirm the docs assertion still holds**
 
-Run: `dotnet test test/MMLib.Alvo.Host.Tests --filter Docs`
+Run: `dotnet test --project test/MMLib.Alvo.Host.Tests -- --filter-class '*Docs*'`
 Expected: PASS — the OpenAPI document is generated on request, so the "docs map
 last" ordering no longer matters. If a docs test was pinning that ordering,
 replace it with the content assertion from Task 6.
