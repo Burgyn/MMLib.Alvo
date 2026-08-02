@@ -1,14 +1,11 @@
 name: Mutation
 
 # Mutation testing of the security-relevant logic. Path-filtered so it runs only
-# when a mutated project changes. Six targets run in parallel via a matrix:
+# when a mutated project changes. Five targets run in parallel via a matrix:
 #   - "security core (expressions)"       → src/MMLib.Alvo/Expressions/**
 #                        (stryker-config.expressions.json)
-#   - "security core (api)"               → src/MMLib.Alvo/Api/**
-#                        (stryker-config.api.json)
-#   - "security core (rules, auth, rest)" → the rest of src/MMLib.Alvo
-#                        (stryker-config.json). The three globs partition the project
-#                        exactly; see the matrix for why it is sharded at all.
+#   - "security core (rules, auth, rest)" → the rest of src/MMLib.Alvo EXCEPT Api/**
+#                        (stryker-config.json). See "DECLARED GAP" below for Api/**.
 #   - "data-ef"        → the EF provider's PURE-LOGIC only: DestructiveScan,
 #                        RenamePrePass, RenameGuessSplitter, DescriptorModelBuilder,
 #                        AlvoSqlIdentifier, and the data path's Internal/* composers
@@ -86,6 +83,34 @@ name: Mutation
 #
 # The "Mutation test" step also fails loudly on a vacuous (zero-mutant) run instead
 # of reporting a false green (stryker-net#3094).
+#
+# READ #142 BEFORE TRUSTING A SCORE FROM THIS WORKFLOW. Measured on the same
+# versions: this runner reports mutants as Killed that demonstrably survive the
+# suite (124/124 "Killed", 100.00 %, for two files no test in the configured test
+# project exercises; the same mutation applied by hand fails nothing in 731 tests).
+# It is not an always-red suite — with --break-on-initial-test-failure Stryker does
+# not abort. Until #142 is understood, a high score here is not evidence, and
+# `break: 80` cannot be relied on to fire. The workflow is kept running because the
+# cheap legs still exercise the plumbing and a *drop* is still informative; the
+# absolute number is not.
+#
+# DECLARED GAP: src/MMLib.Alvo/Api/** IS NOT UNDER MUTATION TODAY. It is excluded
+# from stryker-config.json and stryker-config.api.json has no matrix leg, so nothing
+# mutates the Data API's query parsing, authorization filter, idempotency or ETag
+# code. This is a deliberate, tracked decision, not an oversight, and it costs
+# nothing real:
+#   - Judged by MMLib.Alvo.Tests (what stryker-config.json did before Api/** was
+#     excluded) the score is an artefact: that project contains no test touching
+#     Api/**, yet every mutant came back Killed. That is #142's repro.
+#   - Judged by MMLib.Alvo.Api.Tests — the suite that does exercise it, and the one
+#     stryker-config.api.json now names — the measured cost is 6.3 s/mutant for
+#     1502 mutants: ~2.6 h on a 10-core dev machine, so more than that on a 4-vCPU
+#     runner. It cannot produce a verdict inside any budget under GitHub's 6 h
+#     ceiling without being sharded several ways.
+#   - Sharding it that way is premature while #142 makes the resulting scores
+#     untrustworthy, and a leg that always times out is noise, not a gate.
+# Run it on demand meanwhile: cd test && dotnet tool run dotnet-stryker
+#   -f ../stryker-config.api.json --concurrency 4
 #
 # WHY POST-MERGE AND NOT ON THE PR: this is the one deliberate exception to the
 # repo's "the PR is the only full gate" rule. A mutation run costs ~20 minutes,
@@ -170,27 +195,18 @@ jobs:
           # The security core is sharded by `mutate` glob, not because one shard is a
           # meaningful unit, but because wall-clock is this gate's whole cost: with
           # coverage-analysis off every mutant reruns the full test project, so time is
-          # mutants × suite. The three globs partition src/MMLib.Alvo exactly —
-          # `Expressions/**`, `Api/**`, everything else — so a file cannot be mutated twice
-          # or silently skipped. The expressions shard is the CEL
-          # lexer/parser/checker/interpreter/renderer, which is the densest in mutants and
-          # the one whose score matters most.
+          # mutants × suite. `Expressions/**` in one leg, everything except `Api/**` in the
+          # other, and `Api/**` in neither — see DECLARED GAP in the header.
           #
           # `mutants:` below is a MEASURED count (discovery probe, 2026-08-02, at the commit
           # that added this comment), not an estimate — it is what sizes the budget, and it
-          # is the number to re-probe when a leg starts timing out. `Api/**` is its own leg
-          # because F3's PR3 took stryker-config.json from 478 mutants to 2159, of which
-          # 1502 are Api/**; carving it out is mechanical (the same files, split), so the
-          # score domain is unchanged.
+          # is the number to re-probe when a leg starts timing out. F3's PR3 took
+          # stryker-config.json from 478 mutants to 2159; 1502 of those were `Api/**`, and
+          # excluding it leaves the 657 measured here.
           - name: security core (expressions)
             config: stryker-config.expressions.json
             project: src/MMLib.Alvo/MMLib.Alvo.csproj
             mutants: 834      # suite: 722 tests
-            timeout: 180
-          - name: security core (api)
-            config: stryker-config.api.json
-            project: src/MMLib.Alvo/MMLib.Alvo.csproj
-            mutants: 1502     # suite: 722 tests — the largest leg
             timeout: 180
           - name: security core (rules, auth, rest)
             config: stryker-config.json
@@ -305,7 +321,7 @@ jobs:
       contents: read
       issues: write
       # To read this run's PER-LEG job conclusions: `needs.mutation.result`
-      # collapses all five shards into one word, and the three failure shapes
+      # collapses every shard into one word, and the three failure shapes
       # below want telling apart, which needs the individual conclusions.
       actions: read
     steps:

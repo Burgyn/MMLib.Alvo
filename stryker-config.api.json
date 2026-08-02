@@ -2,7 +2,7 @@
   "stryker-config": {
     "project": "MMLib.Alvo.csproj",
     "test-projects": [
-      "MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj"
+      "MMLib.Alvo.Api.Tests/MMLib.Alvo.Api.Tests.csproj"
     ],
     "test-runner": "mtp",
     "coverage-analysis": "off",

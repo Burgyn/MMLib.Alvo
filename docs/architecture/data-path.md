@@ -1161,9 +1161,17 @@ string.
 
 ## Mutation-testing notes
 
-Mutation runs post-merge on `main` (`.github/workflows/mutation.yml`), across six parallel configs. Nothing
+Mutation runs post-merge on `main` (`.github/workflows/mutation.yml`), across five parallel configs. Nothing
 blocks a merge on the score, so a red run is a notification someone has to act on — which makes it worth
 knowing, before the merge, that each config is configured to answer at all.
+
+> **The absolute scores below and elsewhere in this repository are not currently evidence — see #142.**
+> Measured on Stryker 4.16.0 / .NET SDK 10.0.100 / MTP: the runner reports mutants as **Killed** that
+> demonstrably survive the suite (124/124 "Killed", 100.00 %, for two files that the configured test project
+> does not exercise at all; applying the same mutation by hand fails nothing in 731 tests). It is not an
+> always-red suite — `--break-on-initial-test-failure` does not abort. Until #142 is understood, treat a high
+> score as unproven and `break: 80` as unable to fire. Every "100.00 %" recorded in this file and in commit
+> messages predates that measurement and may be the same artefact.
 
 ### Each config was verified non-vacuous, and here is how
 
@@ -1180,20 +1188,31 @@ project resolution, the MTP runner, the initial test run — without paying for 
 
 Measured 2026-08-02 on Stryker 4.16.0 / .NET SDK 10.0.100 / xunit.v3 3.2.2:
 
-| Config | Mutated project | Tests found | Mutants to be tested |
-|---|---|---|---|
-| `stryker-config.expressions.json` | `MMLib.Alvo` (`Expressions/**`) | 722 | 834 |
-| `stryker-config.api.json` | `MMLib.Alvo` (`Api/**`) | 722 | 1502 |
-| `stryker-config.json` | `MMLib.Alvo` (the rest) | 722 | 657 |
-| `stryker-config.data-ef.json` | `MMLib.Alvo.Data.EntityFrameworkCore` | 858 | 596 |
-| `stryker-config.data-sqlite.json` | `MMLib.Alvo.Data.Sqlite` | 403 | 38 |
-| `stryker-config.data-postgresql.json` | `MMLib.Alvo.Data.PostgreSql` | 101 | 16 |
+| Config | Mutated project | Tests found | Mutants to be tested | In the matrix? |
+|---|---|---|---|---|
+| `stryker-config.expressions.json` | `MMLib.Alvo` (`Expressions/**`) | 722 | 834 | yes |
+| `stryker-config.json` | `MMLib.Alvo` (the rest, minus `Api/**`) | 722 | 657 | yes |
+| `stryker-config.data-ef.json` | `MMLib.Alvo.Data.EntityFrameworkCore` | 858 | 596 | yes |
+| `stryker-config.data-sqlite.json` | `MMLib.Alvo.Data.Sqlite` | 403 | 38 | yes |
+| `stryker-config.data-postgresql.json` | `MMLib.Alvo.Data.PostgreSql` | 101 | 16 | yes |
+| `stryker-config.api.json` | `MMLib.Alvo` (`Api/**`) | 333 | 1502 | **no — on demand** |
 
-`Api/**` is its own config because F3's PR3 took `stryker-config.json` from 478 mutants to 2159. The carve-out
-is mechanical, and the arithmetic is the proof: 657 + 1502 = 2159, so the same files are measured, only split.
-The three `MMLib.Alvo` globs (`Expressions/**`, `Api/**`, the rest) partition the project exactly.
+F3's PR3 took `stryker-config.json` from 478 mutants to 2159, of which 1502 were `Api/**`. Splitting them is
+arithmetically exact — 657 + 1502 = 2159 — but **`Api/**` has no matrix leg**, so the Data API's query parsing,
+authorization filter, idempotency and ETag code is not under mutation today. That is a declared, tracked gap
+rather than an oversight, and it costs nothing real:
 
-All six are non-vacuous. The two driver configs are small on purpose — each driver is two files of rendering
+- judged by `MMLib.Alvo.Tests` (which is what `stryker-config.json` did until `Api/**` was excluded) the score
+  is an artefact — that project contains no test touching `Api/**`, yet every mutant came back Killed; it is
+  #142's repro;
+- judged by `MMLib.Alvo.Api.Tests` — the suite that does exercise it, which `stryker-config.api.json` now names
+  — the measured cost is **6.3 s/mutant** (124 mutants in 779 s), so ~2.6 h for 1502 on a 10-core dev machine
+  and more on a 4-vCPU runner: no budget under GitHub's 6 h ceiling produces a verdict without sharding it
+  several ways;
+- sharding it that way is premature while #142 makes the resulting score untrustworthy, and a leg that always
+  times out is noise rather than a gate.
+
+The five matrix configs are non-vacuous. The two driver configs are small on purpose — each driver is two files of rendering
 — and small is the point: `TrueLiteral => "1"` mutated to `"0"` inverts a boolean inside a policy `WHERE`, and
 until PR2 the only other thing pinning those literals was an accepted Verify baseline, the one artefact a test
 can be made green with.
