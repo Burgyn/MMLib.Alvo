@@ -222,7 +222,7 @@ each of which has been observed to fail under a mutation of the stack:
 | `POST /api/owners` → 201 with `Location: /api/owners/<guid>`, and following it → 200 | Mount `simple-tasks` instead: `owners` 404s. |
 | `/api/vehicles` and `/api/inspections` → 200 | Mount `simple-tasks` instead: both 404. |
 | `/api/warehouses` → 404 | Only the Host test project's descriptor declares it; a host with a baked-in schema, or a catch-all route, answers otherwise. |
-| `select count(*) from owners` in PostgreSQL ≥ 2 | Set `Alvo__Database__Provider: sqlite`: the first three checks still pass, and this one reports `relation "owners" does not exist`. |
+| `select count(*) from owners where name = 'TeaPie Ltd'` in PostgreSQL is **exactly 1** | Set `Alvo__Database__Provider: sqlite`: the first three checks still pass, and this one reports `relation "owners" does not exist`. |
 | `docker compose config` fails without `ALVO_DEMO_KEY_SECRET` | Put a literal secret in the file: it exits 0. |
 
 Removing the volume mount altogether is the sixth, and it is the one that proves the descriptor is load-bearing
