@@ -1,0 +1,25 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "host-boot",
+  "description": "host-boot with 'city' removed — the ordinary GitOps edit that drops a field, which a restart must refuse rather than serve nothing after.",
+  "auth": {
+    "providers": ["local"],
+    "roles": ["admin"]
+  },
+  "entities": {
+    "warehouses": {
+      "description": "A storage location.",
+      "fields": {
+        "code": { "type": "string", "required": true, "unique": true, "maxLength": 20 }
+      },
+      "rules": {
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+        "create": "'admin' in @user.roles",
+        "update": "'admin' in @user.roles",
+        "delete": "'admin' in @user.roles"
+      }
+    }
+  }
+}

@@ -23,6 +23,22 @@ the descriptor applied**. A host whose apply throws never listens, and the conta
 non-zero. That is deliberate: a container reporting healthy with no schema is worse than
 one that fails to start.
 
+**The apply's result is checked, not discarded, and that is load-bearing too.** Not every
+failure to apply is a throw: a plan that is destructive while `AllowDestructive` is false comes
+back with `Applied == false` and no exception, because a caller doing a dry run wants to *read*
+the plan. On that branch the runner also skips priming the policy catalog, so `MapAlvoDataApi`
+would map zero routes — a container that reports healthy and 404s every `/api/*` call, after an
+ordinary GitOps edit that drops a field. `BuildAsync` therefore calls
+`MigrationResult.EnsureApplied()`, which turns that one outcome back into a failed start.
+
+The predicate is narrower than `!Applied`, deliberately. An **empty** plan also reports
+`Applied == false` — that is the ordinary restart, where the applied schema already matches the
+descriptor, and the runner *does* prime the catalog on it — and so does a **dry run**. Guarding
+on `!Applied` alone would fail every unchanged restart, which is the common case and a worse
+outage than the silent one. `AlvoHostRestartTests` holds both ends: two hosts over one SQLite
+file, one pair with an unchanged descriptor (must serve) and one whose descriptor drops a field
+(must refuse, naming the step).
+
 ## Configuration
 
 The framework's options (`AlvoOptions`, `AlvoApiOptions`, `AlvoAuthOptions`) are bound from

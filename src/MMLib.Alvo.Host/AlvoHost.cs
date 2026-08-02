@@ -103,11 +103,24 @@ public static class AlvoHost
     /// endpoints actually mapped, so a document route registered before the Data API's would describe an empty
     /// API.
     /// </para>
+    /// <para>
+    /// The apply's result is <em>checked</em>, not discarded. A refused destructive plan is a return value
+    /// rather than an exception (<c>MigrationResult.EnsureApplied</c>'s remarks say why), and an unchecked
+    /// one leaves the policy catalog unprimed: the host would then map zero routes, answer liveness, report
+    /// healthy, and 404 every <c>/api/*</c> call — an ordinary GitOps edit that drops a field, on the next
+    /// restart. Availability silently zero is worse than a container that fails to start, so the guard turns
+    /// it back into the failed start <c>MapAlvoLiveness</c>'s remarks already claim.
+    /// </para>
     /// </remarks>
     /// <param name="builder">The builder <see cref="CreateBuilder"/> returned.</param>
     /// <param name="ct">Cancels the descriptor apply.</param>
     /// <returns>The started-but-not-yet-running application.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
+    /// <exception cref="Migrations.DestructiveChangeNotAllowedException">
+    /// The mounted descriptor's plan was refused as destructive. The host applies with
+    /// <c>AllowDestructive: false</c> and offers no setting to change that, so this is how a descriptor
+    /// that would drop a column or a table fails the start instead of losing data.
+    /// </exception>
     public static async Task<WebApplication> BuildAsync(
         WebApplicationBuilder builder, CancellationToken ct = default)
     {
@@ -130,7 +143,8 @@ public static class AlvoHost
 
         app.MapAlvoLiveness();
 
-        await app.Services.ApplyAlvoDescriptorAsync(ct: ct).ConfigureAwait(false);
+        var migration = await app.Services.ApplyAlvoDescriptorAsync(ct: ct).ConfigureAwait(false);
+        migration.EnsureApplied();
 
         app.MapAlvoDataApi();
 

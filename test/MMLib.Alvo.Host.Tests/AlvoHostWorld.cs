@@ -29,12 +29,12 @@ internal sealed class AlvoHostWorld : IAsyncDisposable
     internal const string DefaultDescriptorFileName = "host-boot.alvo.json";
 
     private readonly WebApplication _app;
-    private readonly string _databasePath;
+    private readonly string? _ownedDatabasePath;
 
-    private AlvoHostWorld(WebApplication app, string databasePath, CapturingLoggerProvider logs)
+    private AlvoHostWorld(WebApplication app, string? ownedDatabasePath, CapturingLoggerProvider logs)
     {
         _app = app;
-        _databasePath = databasePath;
+        _ownedDatabasePath = ownedDatabasePath;
         Logs = logs;
         Client = app.GetTestClient();
     }
@@ -49,14 +49,20 @@ internal sealed class AlvoHostWorld : IAsyncDisposable
     /// rooted path — which is how a fact points at a descriptor that deliberately does not exist.
     /// </param>
     /// <param name="overrides">Configuration keys to overlay; a <see langword="null"/> value unsets one.</param>
+    /// <param name="databasePath">
+    /// A database the <em>caller</em> owns, so two worlds can be started over one file — which is the only
+    /// way to exercise a restart, the path an operator takes on every deploy. A world handed one does not
+    /// delete it; the default is a fresh file per world, deleted on disposal.
+    /// </param>
     internal static async Task<AlvoHostWorld> StartAsync(
         string descriptor = DefaultDescriptorFileName,
-        IReadOnlyDictionary<string, string?>? overrides = null)
+        IReadOnlyDictionary<string, string?>? overrides = null,
+        string? databasePath = null)
     {
         var descriptorPath = Path.IsPathRooted(descriptor) ? descriptor : DescriptorPath(descriptor);
-        var databasePath = Path.Combine(Path.GetTempPath(), $"alvo-host-tests-{Guid.NewGuid():N}.db");
+        var ownedDatabasePath = databasePath is null ? TempDatabasePath() : null;
         var logs = new CapturingLoggerProvider();
-        var settings = Settings(descriptorPath, databasePath, overrides);
+        var settings = Settings(descriptorPath, databasePath ?? ownedDatabasePath!, overrides);
 
         var builder = AlvoHost.CreateBuilder(
             [], configuration => configuration.AddInMemoryCollection(settings));
@@ -67,7 +73,24 @@ internal sealed class AlvoHostWorld : IAsyncDisposable
 
         var app = await AlvoHost.BuildAsync(builder, TestContext.Current.CancellationToken);
         await app.StartAsync(TestContext.Current.CancellationToken);
-        return new AlvoHostWorld(app, databasePath, logs);
+        return new AlvoHostWorld(app, ownedDatabasePath, logs);
+    }
+
+    /// <summary>A fresh SQLite path under the temp directory, for a caller that starts more than one world over it.</summary>
+    internal static string TempDatabasePath() =>
+        Path.Combine(Path.GetTempPath(), $"alvo-host-tests-{Guid.NewGuid():N}.db");
+
+    /// <summary>Deletes a caller-owned database, tolerating a file a refused start still holds open.</summary>
+    /// <param name="databasePath">The path <see cref="TempDatabasePath"/> returned.</param>
+    internal static void TryDeleteDatabase(string databasePath)
+    {
+        try
+        {
+            File.Delete(databasePath);
+        }
+        catch (IOException)
+        {
+        }
     }
 
     private static Dictionary<string, string?> Settings(
@@ -214,17 +237,10 @@ internal sealed class AlvoHostWorld : IAsyncDisposable
     {
         await _app.StopAsync(TestContext.Current.CancellationToken);
         await _app.DisposeAsync();
-        TryDeleteDatabase();
-    }
 
-    private void TryDeleteDatabase()
-    {
-        try
+        if (_ownedDatabasePath is { } path)
         {
-            File.Delete(_databasePath);
-        }
-        catch (IOException)
-        {
+            TryDeleteDatabase(path);
         }
     }
 }

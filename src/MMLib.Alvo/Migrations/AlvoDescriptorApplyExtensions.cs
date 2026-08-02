@@ -17,6 +17,15 @@ namespace Microsoft.Extensions.DependencyInjection;
 /// unprimed catalog denies every operation (fail-closed) — see <c>RuntimeSchemaService</c>'s remarks.
 /// </para>
 /// <para>
+/// <b>A refusal is a return value, not an exception.</b> A plan that is destructive while
+/// <c>AllowDestructive</c> is <see langword="false"/> comes back with <c>Applied == false</c> and no throw,
+/// because a caller that asked for a dry run wants to read the plan rather than catch it. A caller that
+/// wants a running backend wants the opposite and must say so: call
+/// <see cref="MigrationResult.EnsureApplied"/> on what this returns. Discarding the result is how a host
+/// ends up mapping zero routes while reporting healthy — <c>Applied == false</c> leaves the policy catalog
+/// unprimed, and <c>MapAlvoDataApi</c> reads its entity names off that.
+/// </para>
+/// <para>
 /// A new verb in <c>docs/architecture/extensibility.md</c>'s taxonomy: <c>Apply{Thing}</c> is a runtime
 /// operation on a built provider, not a registration, so none of <c>Use</c>/<c>Add</c>/<c>Enable</c>/<c>From</c>
 /// fits it. It takes <see cref="IServiceProvider"/> rather than <c>IHost</c> so a plain console host, a
@@ -29,7 +38,10 @@ public static class AlvoDescriptorApplyExtensions
     /// <param name="services">A built service provider Alvo was registered in.</param>
     /// <param name="options">How to apply — destructive changes, dry run, audit provenance. Defaults to <see cref="MigrationOptions"/>'s own defaults.</param>
     /// <param name="ct">Cancels the apply.</param>
-    /// <returns>What was planned and whether it was applied.</returns>
+    /// <returns>
+    /// What was planned and whether it was applied. Call <see cref="MigrationResult.EnsureApplied"/> on it
+    /// unless the caller is a dry run: a refused destructive plan returns rather than throws.
+    /// </returns>
     /// <exception cref="ArgumentNullException"><paramref name="services"/> is <see langword="null"/>.</exception>
     /// <exception cref="InvalidOperationException">Alvo is not registered in <paramref name="services"/>.</exception>
     public static Task<MigrationResult> ApplyAlvoDescriptorAsync(

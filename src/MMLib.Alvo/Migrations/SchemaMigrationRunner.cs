@@ -77,6 +77,9 @@ internal sealed class SchemaMigrationRunner
     /// when <see cref="MigrationOptions.DryRun"/> is <see langword="true"/>, the plan is likewise
     /// returned un-applied (<c>Applied == false</c>) — inspect <c>Plan.Steps</c>, or pass the plan
     /// to <see cref="DestructiveChangeGuard.Describe"/>, for a readable summary of what was refused.
+    /// A caller that needs the descriptor to be <em>serving</em> rather than merely planned calls
+    /// <see cref="MigrationResult.EnsureApplied"/> on the result, which turns the destructive refusal —
+    /// and only that one, not the empty plan or the dry run — into a throw.
     /// </returns>
     public async Task<MigrationResult> RunAsync(MigrationOptions options, CancellationToken ct = default)
     {
