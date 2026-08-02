@@ -21,6 +21,23 @@ public sealed class AlvoSchemaOptions
     public const string SectionName = "Alvo:Schema";
 
     /// <summary>
+    /// The environment-variable spelling of <see cref="Startup"/>, quoted verbatim by every refusal that
+    /// tells an operator how to change the mode.
+    /// </summary>
+    /// <remarks>
+    /// A constant rather than a literal per message: the bad-mode refusal and the drift refusal are built in
+    /// different types, and an operator who is told two different key names for one setting learns to trust
+    /// neither.
+    /// </remarks>
+    internal const string StartupEnvironmentVariable = "Alvo__Schema__Startup";
+
+    /// <summary>
+    /// The environment-variable spelling of <see cref="AllowDestructive"/>, quoted verbatim by the refusal
+    /// that reports a plan which would discard data.
+    /// </summary>
+    internal const string AllowDestructiveEnvironmentVariable = "Alvo__Schema__AllowDestructive";
+
+    /// <summary>
     /// Gets or sets what a boot does when the descriptor has drifted from the applied schema. Defaults to
     /// <see cref="AlvoSchemaStartupMode.Verify"/>, which refuses to start and runs no DDL.
     /// </summary>

@@ -35,7 +35,7 @@ internal sealed class AlvoSchemaOptionsConfiguration(IConfiguration? configurati
     private const string AllowDestructiveKey =
         $"{AlvoSchemaOptions.SectionName}:{nameof(AlvoSchemaOptions.AllowDestructive)}";
 
-    private const string StartupEnvironmentVariable = "Alvo__Schema__Startup";
+    private const string StartupEnvironmentVariable = AlvoSchemaOptions.StartupEnvironmentVariable;
 
     /// <inheritdoc/>
     public void Configure(AlvoSchemaOptions options)
