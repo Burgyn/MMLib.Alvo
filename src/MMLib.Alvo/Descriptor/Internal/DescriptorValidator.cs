@@ -1,4 +1,5 @@
 ﻿using Corvus.Json;
+using MMLib.Alvo.Api.Internal;
 using MMLib.Alvo.Descriptor.SchemaGen;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
@@ -169,25 +170,40 @@ internal sealed class DescriptorValidator : IDescriptorValidator
         }
 
         var entityNames = entities.EnumerateObject().Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
+        var tenancyEnabled = IsTenancyEnabled(root);
         var errors = new List<DescriptorValidationError>();
         foreach (var entity in entities.EnumerateObject())
         {
-            errors.AddRange(EntitySemanticErrors(entity, entityNames));
+            errors.AddRange(EntitySemanticErrors(entity, entityNames, tenancyEnabled));
         }
 
         return errors;
     }
 
+    /// <summary>
+    /// Whether the project turns tenancy on, which is what makes an entity that says nothing about tenancy
+    /// scoped — and therefore carry a framework-managed <c>tenant_id</c>.
+    /// </summary>
+    /// <remarks>
+    /// Read from the root here and threaded down, rather than left out, because <c>tenant_id</c>'s membership in
+    /// the managed set is a <em>project</em>-level answer for an entity that declares no <c>tenancy</c> of its
+    /// own (<c>DescriptorToSchemaMapper.ResolveTenancy</c>). Omitting it would make this pass under-report
+    /// exactly the entities a multi-tenant project is built from — the mapper would still refuse them, but with
+    /// an exception instead of a path and a fix, which is the shape a dashboard cannot show.
+    /// </remarks>
+    /// <param name="root">The descriptor's root object.</param>
+    private static bool IsTenancyEnabled(JsonElement root) =>
+        root.TryGetProperty("tenancy", out var tenancy)
+        && tenancy.ValueKind == JsonValueKind.Object
+        && tenancy.TryGetProperty("enabled", out var enabled)
+        && enabled.ValueKind == JsonValueKind.True;
+
     private static IEnumerable<DescriptorValidationError> EntitySemanticErrors(
-        JsonProperty entity, HashSet<string> entityNames)
+        JsonProperty entity, HashSet<string> entityNames, bool tenancyEnabled)
     {
-        if (DeclaresSoftDelete(entity.Value))
+        foreach (var error in Unhonoured($"/entities/{entity.Name}", entity.Value, UnhonouredFeatures.OnAnEntity))
         {
-            yield return new DescriptorValidationError(
-                $"/entities/{entity.Name}/softDelete",
-                "Soft delete is not supported yet: a delete would remove the row and reads would not exclude it.",
-                "Remove 'softDelete' or track the soft-delete implementation issue.",
-                DescriptorValidationSeverity.Error);
+            yield return error;
         }
 
         if (!entity.Value.TryGetProperty("fields", out var fields) || fields.ValueKind != JsonValueKind.Object)
@@ -195,32 +211,216 @@ internal sealed class DescriptorValidator : IDescriptorValidator
             yield break;
         }
 
+        var managed = ManagedColumnsOf(entity.Value, tenancyEnabled);
         foreach (var field in fields.EnumerateObject())
         {
-            var path = $"/entities/{entity.Name}/fields/{field.Name}";
-            if (field.Value.TryGetProperty("computed", out _))
+            foreach (var error in FieldSemanticErrors(
+                $"/entities/{entity.Name}/fields/{field.Name}", field, entityNames, managed))
             {
-                yield return new DescriptorValidationError(
-                    path,
-                    "Computed fields are not supported yet.",
-                    "Remove 'computed' or track the CEL→SQL compiler in #21.",
-                    DescriptorValidationSeverity.Error);
-            }
-
-            if (IsUnknownRef(field.Value, entityNames, out var target))
-            {
-                yield return new DescriptorValidationError(
-                    path,
-                    $"Field references unknown entity '{target}'.",
-                    $"Add an entity named '{target}', or point 'entity' at an existing one.",
-                    DescriptorValidationSeverity.Error);
+                yield return error;
             }
         }
     }
 
-    private static bool DeclaresSoftDelete(JsonElement entity) =>
-        entity.TryGetProperty("softDelete", out var softDelete)
-        && softDelete.ValueKind == JsonValueKind.True;
+    /// <summary>
+    /// The framework-managed columns this entity carries, read from its traits in the raw JSON.
+    /// </summary>
+    /// <remarks>
+    /// The trait rule itself is <see cref="AlvoManagedColumns"/>', reached through
+    /// <see cref="ManagedColumnNames.InjectedFor"/> — this only maps the three JSON flags onto it. It has to be
+    /// answered from traits rather than from a flat name list because an entity without <c>audit</c> may
+    /// legitimately declare an ordinary field called <c>created_at</c>, and refusing that would refuse a field
+    /// the framework does not manage.
+    /// </remarks>
+    /// <param name="entity">The entity object.</param>
+    /// <param name="tenancyEnabled">Whether the project turns tenancy on.</param>
+    private static IReadOnlySet<string> ManagedColumnsOf(JsonElement entity, bool tenancyEnabled) =>
+        ManagedColumnNames.InjectedFor(
+            TenancyOf(entity, tenancyEnabled),
+            audit: IsTrue(entity, "audit"),
+            softDelete: IsTrue(entity, "softDelete"));
+
+    /// <summary>
+    /// The entity's resolved tenancy, parsed from raw JSON and then <b>defaulted by the mapper's own rule</b>
+    /// rather than by a copy of it.
+    /// </summary>
+    /// <remarks>
+    /// This pass and <c>DescriptorToSchemaMapper</c> must agree exactly: this one decides whether declaring
+    /// <c>tenant_id</c> is refused, that one decides whether <c>tenant_id</c> is injected. A copied defaulting
+    /// rule — which is what this was — makes a divergence produce a descriptor the validator accepts and the
+    /// mapper then refuses with an exception, i.e. a structured error a dashboard never gets to show. Only the
+    /// <em>parsing</em> is local, because raw JSON is why this pass exists.
+    /// </remarks>
+    /// <param name="entity">The entity object.</param>
+    /// <param name="tenancyEnabled">Whether the project turns tenancy on.</param>
+    private static TenancyMode? TenancyOf(JsonElement entity, bool tenancyEnabled) =>
+        DescriptorToSchemaMapper.ResolveTenancy(DeclaredTenancyOf(entity), tenancyEnabled);
+
+    /// <summary>
+    /// The tenancy the entity declares for itself, or <see langword="null"/> when it declares none — the one
+    /// part of the question that is genuinely per-representation.
+    /// </summary>
+    /// <remarks>
+    /// An unrecognised string reads as "declares none" rather than throwing: the schema pass already refuses a
+    /// value outside the enum, and this pass runs even when that one has failed, so it must not turn a bad
+    /// value into a second, worse diagnosis.
+    /// </remarks>
+    /// <param name="entity">The entity object.</param>
+    private static TenancyMode? DeclaredTenancyOf(JsonElement entity) =>
+        entity.TryGetProperty("tenancy", out var declared) && declared.ValueKind == JsonValueKind.String
+            ? declared.GetString() switch
+            {
+                "scoped" => TenancyMode.Scoped,
+                "global" => TenancyMode.Global,
+                _ => null,
+            }
+            : null;
+
+    private static bool IsTrue(JsonElement entity, string property) =>
+        entity.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.True;
+
+    private static IEnumerable<DescriptorValidationError> FieldSemanticErrors(
+        string path, JsonProperty field, HashSet<string> entityNames, IReadOnlySet<string> managed)
+    {
+        foreach (var error in Unhonoured(path, field.Value, UnhonouredFeatures.OnAField))
+        {
+            yield return error;
+        }
+
+        if (IsUnknownRef(field.Value, entityNames, out var target))
+        {
+            yield return new DescriptorValidationError(
+                path,
+                $"Field references unknown entity '{target}'.",
+                $"Add an entity named '{target}', or point 'entity' at an existing one.",
+                DescriptorValidationSeverity.Error);
+        }
+
+        if (managed.Contains(field.Name))
+        {
+            yield return DeclaresAManagedColumn(path, field.Name);
+        }
+
+        if (ReservedQueryKeys.IsReserved(field.Name))
+        {
+            yield return ShadowsAReservedQueryParameter(path, field.Name);
+        }
+    }
+
+    /// <summary>
+    /// Reports every feature <see cref="UnhonouredFeatures"/> records as declared-and-unhonoured that this
+    /// descriptor node declares, as a structured error carrying the JSON path, the consequence and the fix.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The table is shared with the mapper, and that is the whole point of it.</b> The mapper throws for
+    /// each of these; this pass reports all of them at once with a path and a fix suggestion (§0 principle 4),
+    /// which is the only form a dashboard or a CLI <c>validate</c> can show. They were two hand-written
+    /// lists plus two more in the test files, and <c>validation</c> was silently dropped for a whole task
+    /// because a fifth <c>if</c> is an easy thing to forget.
+    /// </para>
+    /// <para>
+    /// A feature is detected here from raw JSON, before anything is parsed, because this pass runs even when
+    /// the schema pass has already failed — so it cannot depend on the descriptor being parseable. The
+    /// table's <see cref="UnhonouredFeature{T}.Path"/> is a JSON Pointer path precisely so a nested
+    /// declaration (a single <c>hooks/beforeUpdate</c> point) is found by walking it, and the pointer this
+    /// error reports is built from the same string that found it.
+    /// </para>
+    /// </remarks>
+    /// <typeparam name="T">The descriptor type the table's predicate inspects; unused here, since this pass reads JSON.</typeparam>
+    /// <param name="path">The JSON pointer of the field or entity.</param>
+    /// <param name="node">Its raw JSON.</param>
+    /// <param name="unhonoured">The table to report from.</param>
+    private static IEnumerable<DescriptorValidationError> Unhonoured<T>(
+        string path, JsonElement node, IReadOnlyList<UnhonouredFeature<T>> unhonoured)
+    {
+        foreach (var feature in unhonoured.Where(feature => Declares(node, feature.Path)))
+        {
+            yield return new DescriptorValidationError(
+                $"{path}/{feature.Path}", feature.Consequence, feature.Fix, DescriptorValidationSeverity.Error);
+        }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="node"/> declares the feature at <paramref name="featurePath"/>, walking a
+    /// slash-separated path so a nested hook point is found as precisely as a top-level key.
+    /// </summary>
+    /// <remarks>
+    /// A declaration is a present, <em>non-empty</em> value. <c>softDelete: false</c> is not a declaration —
+    /// PR2 established that, and the negative leg is asserted — and neither is <c>"beforeUpdate": []</c>, an
+    /// empty list that asks for nothing. Both would otherwise be refused for declaring a feature they
+    /// decline to use, which is a refusal an author cannot act on.
+    /// </remarks>
+    /// <param name="node">The field's or entity's raw JSON.</param>
+    /// <param name="featurePath">The table's slash-separated path.</param>
+    private static bool Declares(JsonElement node, string featurePath)
+    {
+        var current = node;
+        foreach (var segment in featurePath.Split('/'))
+        {
+            if (current.ValueKind != JsonValueKind.Object || !current.TryGetProperty(segment, out current))
+            {
+                return false;
+            }
+        }
+
+        return current.ValueKind switch
+        {
+            JsonValueKind.False or JsonValueKind.Null => false,
+            JsonValueKind.Array => current.GetArrayLength() > 0,
+            _ => true,
+        };
+    }
+
+    /// <summary>
+    /// A field whose name the Data API's query string reserves, refused at <b>apply</b> time.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The descriptor's own field grammar (<c>^[a-z][a-z0-9_]{0,62}$</c>) accepts every reserved name, so
+    /// <c>?limit=10</c> against an entity declaring a <c>limit</c> field is genuinely ambiguous. Resolving that
+    /// per request — silently preferring one reading, or refusing the request — would make a descriptor problem
+    /// look like a caller problem, against this framework's rule that a bad descriptor fails at save.
+    /// </para>
+    /// <para>
+    /// <b>Here rather than only at route mapping</b> because the descriptor is wrong whether or not the API is
+    /// mounted: an embedded host that never calls <c>MapAlvoDataApi</c> would otherwise get no refusal at all,
+    /// and would discover the collision when it first exposed the entity. The mapping-time guard stays as the
+    /// belt for a descriptor that was applied before this check existed.
+    /// </para>
+    /// <para>
+    /// The reserved list belongs to the Data API and is read from there rather than restated, which is why this
+    /// validator reaches across a feature boundary for it. One list is the point — a second copy here is how the
+    /// apply-time refusal and the parser come to disagree about which names are reserved.
+    /// </para>
+    /// </remarks>
+    private static DescriptorValidationError ShadowsAReservedQueryParameter(string path, string field) => new(
+        path,
+        $"Field name '{field}' is reserved by the Data API's query string, so a request could not tell a filter "
+        + $"on this field from the '{field}' parameter itself.",
+        $"Rename the field. The reserved names are {ReservedQueryKeys.AsList}.",
+        DescriptorValidationSeverity.Error);
+
+    /// <summary>
+    /// The refusal for a field that names a column the framework injects for this entity's traits.
+    /// </summary>
+    /// <remarks>
+    /// The sibling of <see cref="ShadowsAReservedQueryParameter"/> and deliberately shaped like it — both say
+    /// "this name is not yours to use", and both are answered here rather than at request time. The prose comes
+    /// from <see cref="ManagedColumnNames"/>, which the mapper's own refusal reads too, so a declaration cannot
+    /// be explained one way by the validator and another by the apply that follows it.
+    /// </remarks>
+    /// <param name="path">The field's JSON pointer.</param>
+    /// <param name="field">The managed column the entity declares.</param>
+    private static DescriptorValidationError DeclaresAManagedColumn(string path, string field)
+    {
+        var (consequence, fix) = ManagedColumnNames.Refusing(field);
+        return new(
+            path,
+            $"Field '{field}' is a framework-managed column and cannot be declared. {consequence}",
+            fix,
+            DescriptorValidationSeverity.Error);
+    }
 
     /// <summary>
     /// Reserved entity name for the built-in auth entity (schema: <c>entities.users</c> is

@@ -44,10 +44,18 @@ internal static class PolicyParameterPrefix
     internal const string RowLimit = "alvo_limit";
 
     /// <summary>
+    /// The single name <see cref="MMLib.Alvo.Data.AlvoQuery.Offset"/> binds to. Reserved alongside
+    /// <see cref="RowLimit"/> for the same reason every other name here is reserved: an offset marker that
+    /// collided with a policy parameter would substitute one value for another and silently change which
+    /// rows a statement returns, on the one channel a caller directly influences.
+    /// </summary>
+    internal const string RowOffset = "alvo_offset";
+
+    /// <summary>
     /// Every reserved name, for the disjointness invariant. Every <see langword="const"/> <see cref="string"/>
     /// this type declares is a reserved name and belongs here — the invariant test reflects over all of them,
     /// so a message or format constant added to this type would fail it rather than escape it.
     /// </summary>
     internal static IReadOnlyList<string> All { get; } =
-        [Using, WithCheck, TenantScope, Filter, Keyset, RowId, RowLimit];
+        [Using, WithCheck, TenantScope, Filter, Keyset, RowId, RowLimit, RowOffset];
 }

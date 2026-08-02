@@ -29,12 +29,14 @@ namespace MMLib.Alvo.Testing.Data
         public void A_repair_is_a_function_of_its_inputs_alone(MMLib.Alvo.Expressions.CelValueType type) { }
         [Xunit.MemberData("CelValueTypes", new object[0])]
         public void A_repair_wraps_its_operand_rather_than_replacing_it(MMLib.Alvo.Expressions.CelValueType type) { }
-        public void A_row_limit_clause_names_the_marker_and_carries_no_separator_of_its_own() { }
         [Xunit.InlineData(new object[] {
                 MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation.Delete})]
         [Xunit.InlineData(new object[] {
                 MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation.Update})]
         public void A_row_lock_clause_carries_no_separator_of_its_own(MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation mutation) { }
+        public void A_row_window_clause_names_the_row_count_marker_and_carries_no_separator_of_its_own() { }
+        public void A_row_window_clause_with_an_offset_names_both_markers_and_carries_no_separator_of_its_own() { }
+        public void A_row_window_clause_with_an_offset_renders_exactly_one_offset_keyword() { }
         [Xunit.InlineData(new object[] {
                 MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation.Delete})]
         [Xunit.InlineData(new object[] {
@@ -60,7 +62,7 @@ namespace MMLib.Alvo.Testing.Data
         public string RenderColumn(string columnName) { }
         public string RenderNullProjection(string storeType) { }
         public string RenderTable(MMLib.Alvo.Schema.EntitySchema entity, MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation? lockedPreImageFor) { }
-        public string RowLimitClause(string rowCountParameterMarker) { }
         public string RowLockClause(MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation mutation) { }
+        public string RowWindowClause(string rowCountParameterMarker, string? rowOffsetParameterMarker = null) { }
     }
 }

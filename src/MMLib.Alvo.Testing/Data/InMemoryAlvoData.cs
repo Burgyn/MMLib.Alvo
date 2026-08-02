@@ -76,7 +76,7 @@ public sealed class InMemoryAlvoData : IAlvoData
     }
 
     /// <inheritdoc/>
-    public Task<IReadOnlyList<AlvoRecord>> QueryAsync(AlvoQuery query, AlvoContext context, CancellationToken cancellationToken = default)
+    public Task<AlvoPage> QueryAsync(AlvoQuery query, AlvoContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(query);
         ArgumentNullException.ThrowIfNull(context);
@@ -89,6 +89,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         }
 
         AlvoFilter.EnsureWithinLimits(query.Filter);
+        AlvoQuery.EnsurePagingWindowIsSane(query);
         EnsureQueryFieldsAvailable(query, decision);
         AlvoQuery.EnsureSortKeysCanBePaged(query, FindEntity(query.Entity));
 
@@ -101,11 +102,14 @@ public sealed class InMemoryAlvoData : IAlvoData
         var visible = snapshot
             .Where(row => IsVisible(row, decision, context))
             .Where(row => AlvoFilterEvaluator.Matches(query.Filter, row));
-        var ordered = ApplySort(visible, query.Sort);
-        var paged = ApplyPaging(ordered, query.Limit, query.After);
+        var ordered = ApplySort(visible, query.Sort).ToList();
+        var (page, nextCursor) = Page(ordered, query.Limit, query.Offset, query.After);
 
-        IReadOnlyList<AlvoRecord> result = [.. paged.Select(row => Mask(row, decision.HiddenFields))];
-        return Task.FromResult(result);
+        return Task.FromResult(new AlvoPage
+        {
+            Items = [.. page.Select(row => Mask(row, decision.HiddenFields))],
+            NextCursor = nextCursor,
+        });
     }
 
     /// <inheritdoc/>
@@ -128,11 +132,13 @@ public sealed class InMemoryAlvoData : IAlvoData
 
     /// <inheritdoc/>
     public Task<AlvoRecord> CreateAsync(
-        string entity, IReadOnlyDictionary<string, object?> values, AlvoContext context, CancellationToken cancellationToken = default)
+        string entity, IReadOnlyDictionary<string, object?> values, AlvoContext context,
+        AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentNullException.ThrowIfNull(values);
         ArgumentNullException.ThrowIfNull(context);
+        AlvoIdempotency.EnsureUsableToken(idempotency, context);
         cancellationToken.ThrowIfCancellationRequested();
 
         var decision = _policy.Resolve(entity, DataOperation.Create, context);
@@ -152,15 +158,118 @@ public sealed class InMemoryAlvoData : IAlvoData
 
         lock (_gate)
         {
+            if (Replay(entity, context, idempotency) is { } replayed)
+            {
+                return Task.FromResult(replayed);
+            }
+
             RowsForLocked(entity).Add(postImage);
+            RecordIdempotencyLocked(idempotency, context, (Guid)candidate[IdField]!);
         }
 
         return Task.FromResult(Mask(postImage, decision.HiddenFields));
     }
 
+    /// <summary>
+    /// The row a replay of <paramref name="idempotency"/> answers with, or <see langword="null"/> when this key
+    /// has not been used in this scope yet.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Called with <see cref="_gate"/> held, together with the insert and the record below, so the lookup and
+    /// the write are one atomic act. That is this store's stand-in for the shipped backends' transaction plus
+    /// the record table's primary key — without it, two concurrent creates could both find no record and both
+    /// insert, which is the exact failure the inherited concurrency suite forbids.
+    /// </para>
+    /// <para>
+    /// The recorded <b>row id</b> is re-read under a freshly resolved <c>get</c> decision for the replaying
+    /// caller, never under the <c>create</c> decision the call arrived with — <c>create</c> has no stored row
+    /// to filter, so its <see cref="PolicyDecision.Using"/> is <see langword="null"/> and a shipped backend
+    /// renders that as a constant true, which returns the recorded row whoever owns it. Resolving <c>get</c>
+    /// also gets the mask right, because <c>hidden</c> is evaluated per caller.
+    /// </para>
+    /// <para>
+    /// <b>A caller who may create but not read is no longer refused for retrying.</b> When <c>get</c> is denied
+    /// outright — no policy allows it at all — the retry must not be worse than the create it replays, so this
+    /// answers with an <see cref="AlvoRecord"/> carrying only <c>id</c>, taken from <paramref name="entity"/>'s
+    /// recorded <c>RowId</c>, and performs <b>no row read</b>: the record's identity
+    /// (<see cref="AlvoIdempotency.IdentityOf"/> — key, tenant and acting user) already proves this caller
+    /// created that row, so the id disclosed is the one their own original create already gave them. This must
+    /// never fall back to reading the row under the <c>create</c> decision to build that answer — exactly the
+    /// bypass the paragraph above forbids.
+    /// </para>
+    /// <para>
+    /// A <em>configured</em> <c>get</c> whose own predicate excludes this row, or a row that has since been
+    /// deleted, still answers <see cref="AlvoRecordNotFoundException"/> like any other missing row — that
+    /// sibling case is unchanged and deliberately so; see <c>EfAlvoData.ReplayedAsync</c>'s remarks.
+    /// </para>
+    /// </remarks>
+    private AlvoRecord? Replay(string entity, AlvoContext context, AlvoIdempotency? idempotency)
+    {
+        if (idempotency is not { } token || !_idempotency.TryGetValue(IdempotencyKey(token, context), out var record))
+        {
+            return null;
+        }
+
+        if (!token.Matches(record.Fingerprint))
+        {
+            throw new AlvoIdempotencyConflictException();
+        }
+
+        var read = _policy.Resolve(entity, DataOperation.Get, context);
+        if (read.IsDenied)
+        {
+            return IdOnly(record.RowId);
+        }
+
+        var stored = RowsForLocked(entity).Find(row => IsRow(row, record.RowId));
+        return stored is not null && IsVisible(stored, read, context)
+            ? Mask(stored, read.HiddenFields)
+            : throw new AlvoRecordNotFoundException();
+    }
+
+    /// <summary>
+    /// The narrowest possible answer to a replay: <paramref name="rowId"/> and nothing else, matching
+    /// <c>EfAlvoData</c>'s own id-only answer so both implementations of this port agree on the shape a
+    /// get-denied replay returns.
+    /// </summary>
+    /// <param name="rowId">The row id the idempotency record already names.</param>
+    private static AlvoRecord IdOnly(Guid rowId) =>
+        new(new Dictionary<string, object?>(StringComparer.Ordinal) { [IdField] = rowId });
+
+    private void RecordIdempotencyLocked(AlvoIdempotency? idempotency, AlvoContext context, Guid rowId)
+    {
+        if (idempotency is { } token)
+        {
+            _idempotency[IdempotencyKey(token, context)] = new IdempotencyRecord(token.Fingerprint, rowId);
+        }
+    }
+
+    /// <summary>
+    /// A record's identity: the caller's key, qualified by the scope the port defines.
+    /// </summary>
+    /// <remarks>
+    /// The scope comes from <see cref="AlvoIdempotency.IdentityOf"/> rather than being assembled here. It was
+    /// assembled here, and identically in the EF driver, with nothing that could catch the two drifting apart —
+    /// the same situation the precondition's two rules were hoisted onto the port to avoid.
+    /// </remarks>
+    private static (string Key, string Scope) IdempotencyKey(AlvoIdempotency token, AlvoContext context) =>
+        (token.Key, AlvoIdempotency.IdentityOf(context));
+
+    /// <summary>What one used idempotency key recorded: the request it was used for, and the row it created.</summary>
+    private readonly record struct IdempotencyRecord(string Fingerprint, Guid RowId);
+
+    /// <summary>
+    /// Records by (key, scope). A value tuple of strings compares each half with
+    /// <see cref="EqualityComparer{T}.Default"/>, which for <see cref="string"/> is ordinal — the same
+    /// comparison <see cref="AlvoIdempotency.Matches"/> makes, and the only safe one for caller-supplied text.
+    /// </summary>
+    private readonly Dictionary<(string Key, string Scope), IdempotencyRecord> _idempotency = [];
+
     /// <inheritdoc/>
     public Task<AlvoRecord> UpdateAsync(
-        string entity, Guid id, IReadOnlyDictionary<string, object?> values, AlvoContext context, CancellationToken cancellationToken = default)
+        string entity, Guid id, IReadOnlyDictionary<string, object?> values, AlvoContext context,
+        AlvoPrecondition? precondition = null, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentNullException.ThrowIfNull(values);
@@ -176,6 +285,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         var schema = EnsureFieldsDeclared(entity, values);
         EnsureNoManagedColumnWrite(values, schema, isUpdate: true);
         EnsureNoReadOnlyWrite(values, decision.ReadOnlyFields);
+        AlvoPrecondition.EnsureSupported(precondition, schema);
         var stamped = AlvoAuditStamp.Applied(schema, values, context, _time, isUpdate: true);
 
         lock (_gate)
@@ -188,6 +298,7 @@ public sealed class InMemoryAlvoData : IAlvoData
                 throw new AlvoRecordNotFoundException();
             }
 
+            AlvoPrecondition.EnsureMatches(precondition, StoredVersion(schema, stored));
             var merged = Merge(stored, stamped);
             EnsureWriteAllowed(decision, merged, stored, context);
 
@@ -197,7 +308,9 @@ public sealed class InMemoryAlvoData : IAlvoData
     }
 
     /// <inheritdoc/>
-    public Task DeleteAsync(string entity, Guid id, AlvoContext context, CancellationToken cancellationToken = default)
+    public Task DeleteAsync(
+        string entity, Guid id, AlvoContext context, AlvoPrecondition? precondition = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentNullException.ThrowIfNull(context);
@@ -210,6 +323,11 @@ public sealed class InMemoryAlvoData : IAlvoData
         }
 
         EnsureNotSoftDeleted(entity);
+        var schema = FindEntity(entity);
+        if (schema is not null)
+        {
+            AlvoPrecondition.EnsureSupported(precondition, schema);
+        }
 
         lock (_gate)
         {
@@ -221,11 +339,27 @@ public sealed class InMemoryAlvoData : IAlvoData
                 throw new AlvoRecordNotFoundException();
             }
 
+            AlvoPrecondition.EnsureMatches(precondition, StoredVersion(schema, stored));
             list.RemoveAt(index);
         }
 
         return Task.CompletedTask;
     }
+
+    /// <summary>
+    /// The version <paramref name="stored"/> carries, or <see langword="null"/> when the entity keeps none —
+    /// read off the very row the write is about to change, under <see cref="_gate"/>, which is this store's
+    /// equivalent of the shipped backends' row-locked pre-image. A version read before taking the lock could
+    /// approve exactly the lost update the precondition exists to stop.
+    /// </summary>
+    /// <remarks>
+    /// An entity this store's schema does not know yields <see langword="null"/>, which
+    /// <see cref="AlvoPrecondition.EnsureMatches"/> refuses — fail-closed, like every other unknown-entity
+    /// answer here. A caller reaching this point with an unknown entity has already been refused on the write
+    /// paths, which resolve the schema first.
+    /// </remarks>
+    private static object? StoredVersion(EntitySchema? schema, AlvoRecord stored) =>
+        schema is not null && AlvoManagedColumns.VersionColumn(schema) is { } column ? stored[column] : null;
 
     /// <summary>
     /// Rejects a filter or sort key naming a field this caller may not read — either because the mask
@@ -292,7 +426,11 @@ public sealed class InMemoryAlvoData : IAlvoData
     /// a caller must not be able to tell "this field exists but is hidden from you" from "this field
     /// does not exist", and the name itself is caller-supplied text this port will not echo.
     /// </summary>
-    private const string UnavailableQueryFieldMessage = "The query references a field that is not available to this caller.";
+    /// <summary>
+    /// Read from the port, like every other refusal this reference shares with a shipped driver — a reference
+    /// that worded it differently would teach a driver author the wrong contract.
+    /// </summary>
+    private const string UnavailableQueryFieldMessage = AlvoAuthorizationException.QueryFieldUnavailable;
 
     private AlvoRecord? FindVisible(string entity, Guid id, PolicyDecision decision, AlvoContext context)
     {
@@ -341,7 +479,7 @@ public sealed class InMemoryAlvoData : IAlvoData
 
         if (!passesCheck || !passesTenantScope)
         {
-            throw new AlvoAuthorizationException("The write was rejected by policy.");
+            throw new AlvoAuthorizationException(AlvoAuthorizationException.WriteRejectedByPolicy);
         }
     }
 
@@ -505,10 +643,31 @@ public sealed class InMemoryAlvoData : IAlvoData
         }
     }
 
-    private static IEnumerable<AlvoRecord> ApplyPaging(IEnumerable<AlvoRecord> rows, int? limit, string? after)
+    /// <summary>
+    /// The paging half of <see cref="QueryAsync"/>, over the already sorted, policy-filtered set: skips past
+    /// <paramref name="after"/>'s anchor or <paramref name="offset"/>'s leading rows — <see cref="AlvoQuery.EnsurePagingWindowIsSane"/>
+    /// already refused a query naming both — then over-fetches one row past <paramref name="limit"/> so the
+    /// returned cursor can be derived from whether that extra row actually existed, never from
+    /// <c>Items.Count == limit</c>, which would mint one for a page that happened to end exactly there.
+    /// </summary>
+    private static (IReadOnlyList<AlvoRecord> Items, string? NextCursor) Page(
+        IReadOnlyList<AlvoRecord> ordered, int? limit, int? offset, string? after)
     {
-        var remaining = after is null ? rows : SkipUntilAfter(rows, after);
-        return limit is int max ? remaining.Take(max) : remaining;
+        var remaining = after is null ? ordered.AsEnumerable() : SkipUntilAfter(ordered, after);
+        if (offset is { } skip)
+        {
+            remaining = remaining.Skip(skip);
+        }
+
+        if (limit is not { } max)
+        {
+            return ([.. remaining], null);
+        }
+
+        var fetched = remaining.Take(max == int.MaxValue ? max : max + 1).ToList();
+        return fetched.Count <= max
+            ? (fetched, null)
+            : (fetched.GetRange(0, max), Cursor(fetched[max - 1]));
     }
 
     /// <summary>

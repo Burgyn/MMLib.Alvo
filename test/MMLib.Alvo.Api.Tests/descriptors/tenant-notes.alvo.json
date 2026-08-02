@@ -1,0 +1,28 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "tenant-notes",
+  "description": "One tenant-scoped entity whose rules permit EVERY caller, so the only thing that can withhold a row over HTTP is tenancy itself. A descriptor whose rules also demanded a role would let A_tenant_scoped_entity_read_with_no_tenant_context_returns_no_rows_of_any_tenant pass for the wrong reason.",
+  "tenancy": {
+    "enabled": true
+  },
+  "auth": {
+    "providers": ["local"]
+  },
+  "entities": {
+    "notes": {
+      "description": "A note belonging to exactly one tenant.",
+      "tenancy": "scoped",
+      "fields": {
+        "title": { "type": "string", "required": true, "maxLength": 120 }
+      },
+      "rules": {
+        "list": "true",
+        "get": "true",
+        "create": "true",
+        "update": "true",
+        "delete": "true"
+      }
+    }
+  }
+}

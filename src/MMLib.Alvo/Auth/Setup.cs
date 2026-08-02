@@ -4,11 +4,12 @@ using Microsoft.Extensions.Options;
 
 namespace MMLib.Alvo.Auth;
 
-/// <summary>Registers the dev API-key auth mechanism: key resolution, scope gating, and tenant resolution.</summary>
+/// <summary>Registers the dev API-key auth mechanism: key resolution, the ambient caller, scope gating, and tenant resolution.</summary>
 internal static class AuthSetup
 {
     /// <summary>
-    /// Adds the dev API-key <see cref="IAlvoContextResolver"/>, <see cref="ScopeGate"/> and
+    /// Adds the dev API-key <see cref="IAlvoContextResolver"/>, the ambient
+    /// <see cref="IAlvoContextAccessor"/>, <see cref="ScopeGate"/> and
     /// <see cref="TenantResolver"/>, plus the pre-apply <see cref="RoleCatalog"/>.
     /// <see cref="AlvoAuthOptions"/> fails fast at startup
     /// (<see cref="Internal.AlvoAuthOptionsValidator"/>) on a misconfigured dev key, rather than
@@ -35,6 +36,7 @@ internal static class AuthSetup
         services.TryAddSingleton(RoleCatalog.BuiltInOnly);
         services.TryAddSingleton<IApiKeyStore, Internal.InMemoryApiKeyStore>();
         services.TryAddSingleton<IAlvoContextResolver, Internal.ApiKeyContextResolver>();
+        services.TryAddSingleton<IAlvoContextAccessor, Internal.AlvoContextAccessor>();
         services.TryAddSingleton<ScopeGate>();
         services.TryAddSingleton<TenantResolver>();
         return services;

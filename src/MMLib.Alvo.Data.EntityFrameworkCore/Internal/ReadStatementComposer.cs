@@ -65,6 +65,9 @@ internal sealed class ReadStatementComposer
         /// <summary>The page's maximum row count, or <see langword="null"/> for no explicit limit.</summary>
         internal int? Limit { get; init; }
 
+        /// <summary>The number of leading rows to skip, or <see langword="null"/> for none.</summary>
+        internal int? Offset { get; init; }
+
         /// <summary>
         /// Whether the projection ignores the decision's field mask. <see langword="true"/> only for the
         /// pre-image a <c>WITH CHECK</c> verdict is reached over: that check evaluates the complete stored
@@ -125,7 +128,7 @@ internal sealed class ReadStatementComposer
             .Append(" WHERE ")
             .Append(string.Join(" AND ", terms.Select(term => $"({term})")))
             .Append(OrderByClause(entity, options))
-            .Append(LimitClause(parameters, options))
+            .Append(WindowClause(parameters, options))
             .Append(LockClause(options))
             .ToString();
 
@@ -150,22 +153,50 @@ internal sealed class ReadStatementComposer
             : string.Empty;
 
     private static bool RequiresTotalOrder(ReadStatementOptions options) =>
-        options.Sort.Count > 0 || options.Limit is not null || options.Anchor is not null;
+        options.Sort.Count > 0 || options.Limit is not null || options.Offset is not null || options.Anchor is not null;
 
     /// <summary>
-    /// <c>RowLimitClause</c> carries no separator of its own, like <c>RowLockClause</c>, so the separating
-    /// space is inserted here. The row count is bound, never formatted: it is caller-supplied.
+    /// <c>RowWindowClause</c> carries no separator of its own, like <c>RowLockClause</c>, so the separating
+    /// space is inserted here. Both bound values are caller-supplied and therefore never formatted into the
+    /// text.
     /// </summary>
-    private string LimitClause(Dictionary<string, BoundValue> parameters, ReadStatementOptions options)
+    /// <remarks>
+    /// Renders whenever either <see cref="ReadStatementOptions.Limit"/> or
+    /// <see cref="ReadStatementOptions.Offset"/> is set — never only when both are, because SQLite's grammar
+    /// makes <c>OFFSET</c> a sub-clause of <c>LIMIT</c> and rejects a bare one outright. An offset with no
+    /// caller-supplied limit therefore still binds a row count, <see cref="UnboundedRowCount"/>: a large
+    /// value both shipped engines accept as an ordinary <c>LIMIT</c>, standing in for "no bound" rather than
+    /// a negative sentinel PostgreSQL's own <c>LIMIT</c> refuses. One call renders the whole window — see
+    /// <see cref="IAlvoSqlDialect.RowWindowClause"/>'s remarks for why this is one member rather than two:
+    /// splitting it is what let <c>TSqlSqlDialect</c> answer each half correctly and the pair wrongly.
+    /// </remarks>
+    private string WindowClause(Dictionary<string, BoundValue> parameters, ReadStatementOptions options)
     {
-        if (options.Limit is not { } limit)
+        var limit = options.Limit ?? (options.Offset is not null ? UnboundedRowCount : (int?)null);
+        if (limit is not { } value)
         {
             return string.Empty;
         }
 
-        parameters[PolicyParameterPrefix.RowLimit] = BoundValue.FromFramework(limit);
-        return " " + _dialect.RowLimitClause(_fields.RenderParameter(PolicyParameterPrefix.RowLimit));
+        parameters[PolicyParameterPrefix.RowLimit] = BoundValue.FromFramework(value);
+
+        string? offsetMarker = null;
+        if (options.Offset is { } offset)
+        {
+            parameters[PolicyParameterPrefix.RowOffset] = BoundValue.FromFramework(offset);
+            offsetMarker = _fields.RenderParameter(PolicyParameterPrefix.RowOffset);
+        }
+
+        return " " + _dialect.RowWindowClause(_fields.RenderParameter(PolicyParameterPrefix.RowLimit), offsetMarker);
     }
+
+    /// <summary>
+    /// The row count <see cref="WindowClause"/> binds when a caller asks for <see cref="ReadStatementOptions.Offset"/>
+    /// with no explicit <see cref="ReadStatementOptions.Limit"/>. Large enough that no real page is ever
+    /// bounded by it, and small enough that it binds through the same <see langword="int"/> column
+    /// <see cref="AlvoQuery.Limit"/> itself does.
+    /// </summary>
+    private const int UnboundedRowCount = int.MaxValue;
 
     /// <summary>
     /// <c>RowLockClause</c> carries no separator of its own (see <see cref="IAlvoSqlDialect.RowLockClause"/>),

@@ -139,6 +139,8 @@ namespace MMLib.Alvo.Data
     }
     public sealed class AlvoAuthorizationException : System.Exception
     {
+        public const string QueryFieldUnavailable = "The query references a field that is not available to this caller.";
+        public const string WriteRejectedByPolicy = "The write was rejected by policy.";
         public AlvoAuthorizationException() { }
         public AlvoAuthorizationException(string message) { }
         public AlvoAuthorizationException(string message, System.Exception innerException) { }
@@ -171,6 +173,24 @@ namespace MMLib.Alvo.Data
         In = 8,
         Is = 9,
     }
+    public readonly struct AlvoIdempotency : System.IEquatable<MMLib.Alvo.Data.AlvoIdempotency>
+    {
+        public const int MaxKeyBytes = 255;
+        public AlvoIdempotency(string Key, string Fingerprint) { }
+        public string Fingerprint { get; init; }
+        public string Key { get; init; }
+        public static string TenantlessScope { get; }
+        public bool Matches(string storedFingerprint) { }
+        public static void EnsureUsableKey(string? key, MMLib.Alvo.AlvoContext context) { }
+        public static void EnsureUsableToken(MMLib.Alvo.Data.AlvoIdempotency? idempotency, MMLib.Alvo.AlvoContext context) { }
+        public static string IdentityOf(MMLib.Alvo.AlvoContext context) { }
+    }
+    public sealed class AlvoIdempotencyConflictException : System.Exception
+    {
+        public AlvoIdempotencyConflictException() { }
+        public AlvoIdempotencyConflictException(string message) { }
+        public AlvoIdempotencyConflictException(string message, System.Exception innerException) { }
+    }
     public sealed class AlvoNot : MMLib.Alvo.Data.AlvoFilter, System.IEquatable<MMLib.Alvo.Data.AlvoNot>
     {
         public AlvoNot(MMLib.Alvo.Data.AlvoFilter Filter) { }
@@ -186,6 +206,27 @@ namespace MMLib.Alvo.Data
         public AlvoOr(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoFilter> Filters) { }
         public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoFilter> Filters { get; init; }
     }
+    public sealed class AlvoPage : System.IEquatable<MMLib.Alvo.Data.AlvoPage>
+    {
+        public AlvoPage() { }
+        public required System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRecord> Items { get; init; }
+        public string? NextCursor { get; init; }
+        public long? TotalCount { get; init; }
+        public static MMLib.Alvo.Data.AlvoPage Empty { get; }
+    }
+    public readonly struct AlvoPrecondition : System.IEquatable<MMLib.Alvo.Data.AlvoPrecondition>
+    {
+        public AlvoPrecondition(System.DateTimeOffset Version) { }
+        public System.DateTimeOffset Version { get; init; }
+        public static void EnsureMatches(MMLib.Alvo.Data.AlvoPrecondition? precondition, object? storedVersion) { }
+        public static void EnsureSupported(MMLib.Alvo.Data.AlvoPrecondition? precondition, MMLib.Alvo.Schema.EntitySchema entity) { }
+    }
+    public sealed class AlvoPreconditionFailedException : System.Exception
+    {
+        public AlvoPreconditionFailedException() { }
+        public AlvoPreconditionFailedException(string message) { }
+        public AlvoPreconditionFailedException(string message, System.Exception innerException) { }
+    }
     public sealed class AlvoQuery : System.IEquatable<MMLib.Alvo.Data.AlvoQuery>
     {
         public AlvoQuery() { }
@@ -193,7 +234,9 @@ namespace MMLib.Alvo.Data
         public required string Entity { get; init; }
         public MMLib.Alvo.Data.AlvoFilter? Filter { get; init; }
         public int? Limit { get; init; }
+        public int? Offset { get; init; }
         public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoSort> Sort { get; init; }
+        public static void EnsurePagingWindowIsSane(MMLib.Alvo.Data.AlvoQuery query) { }
         public static void EnsureSortKeysCanBePaged(MMLib.Alvo.Data.AlvoQuery query, MMLib.Alvo.Schema.EntitySchema? entity) { }
     }
     public sealed class AlvoRecord : System.IEquatable<MMLib.Alvo.Data.AlvoRecord>
@@ -222,11 +265,11 @@ namespace MMLib.Alvo.Data
     }
     public interface IAlvoData
     {
-        System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord> CreateAsync(string entity, System.Collections.Generic.IReadOnlyDictionary<string, object?> values, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default);
-        System.Threading.Tasks.Task DeleteAsync(string entity, System.Guid id, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord> CreateAsync(string entity, System.Collections.Generic.IReadOnlyDictionary<string, object?> values, MMLib.Alvo.AlvoContext context, MMLib.Alvo.Data.AlvoIdempotency? idempotency = default, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task DeleteAsync(string entity, System.Guid id, MMLib.Alvo.AlvoContext context, MMLib.Alvo.Data.AlvoPrecondition? precondition = default, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord?> GetAsync(string entity, System.Guid id, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default);
-        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRecord>> QueryAsync(MMLib.Alvo.Data.AlvoQuery query, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default);
-        System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord> UpdateAsync(string entity, System.Guid id, System.Collections.Generic.IReadOnlyDictionary<string, object?> values, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoPage> QueryAsync(MMLib.Alvo.Data.AlvoQuery query, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord> UpdateAsync(string entity, System.Guid id, System.Collections.Generic.IReadOnlyDictionary<string, object?> values, MMLib.Alvo.AlvoContext context, MMLib.Alvo.Data.AlvoPrecondition? precondition = default, System.Threading.CancellationToken cancellationToken = default);
     }
 }
 namespace MMLib.Alvo.Descriptor
@@ -1011,11 +1054,13 @@ namespace MMLib.Alvo.Schema
         public static System.Collections.Generic.IReadOnlySet<string> For(MMLib.Alvo.Schema.TenancyMode? tenancy, bool audit, bool softDelete) { }
         public static bool IsCallerWritable(string column, bool isUpdate) { }
         public static string RefusalReason(string column, bool isUpdate) { }
+        public static string? VersionColumn(MMLib.Alvo.Schema.EntitySchema entity) { }
     }
     public sealed class EntitySchema : System.IEquatable<MMLib.Alvo.Schema.EntitySchema>
     {
         public EntitySchema() { }
         public bool Audit { get; init; }
+        public string? Description { get; init; }
         public required System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Schema.FieldSchema> Fields { get; init; }
         public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Schema.IndexSchema> Indexes { get; init; }
         public required string Name { get; init; }
@@ -1029,11 +1074,19 @@ namespace MMLib.Alvo.Schema
         Physical = 0,
         Dynamic = 1,
     }
+    public static class FieldClrType
+    {
+        public static System.Type Of(MMLib.Alvo.Schema.FieldSchema field) { }
+        public static System.Type Of(MMLib.Alvo.Schema.FieldType type) { }
+    }
     public sealed class FieldSchema : System.IEquatable<MMLib.Alvo.Schema.FieldSchema>
     {
         public FieldSchema() { }
         public string? ComputedExpression { get; init; }
+        public string? Description { get; init; }
         public System.Collections.Generic.IReadOnlyList<string>? EnumValues { get; init; }
+        public string? Format { get; init; }
+        public string? FormatPattern { get; init; }
         public bool Indexed { get; init; }
         public int? MaxLength { get; init; }
         public required string Name { get; init; }

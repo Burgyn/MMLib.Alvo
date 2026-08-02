@@ -66,13 +66,25 @@ public class TSqlDialectSeamTests
 
     /// <summary>
     /// T-SQL's truncation grammar differs too (<c>OFFSET … FETCH NEXT</c>, whose <c>OFFSET</c> is not
-    /// optional), which is why the limit is a default interface member rather than a shape baked into the
-    /// composer. Asserted here so the second T-SQL divergence is rehearsed alongside the first.
+    /// optional), which is why the whole window is a default interface member rather than a shape baked
+    /// into the composer. Asserted here so the second T-SQL divergence is rehearsed alongside the first.
     /// </summary>
     [Fact]
     public void A_t_sql_page_truncates_with_offset_fetch_rather_than_limit()
         => Compose(new ReadStatementComposer.ReadStatementOptions { Limit = 5 })
             .ShouldEndWith(" ORDER BY [id] OFFSET 0 ROWS FETCH NEXT @alvo_limit ROWS ONLY");
+
+    /// <summary>
+    /// The third T-SQL divergence, and the one that used to be unrepresentable: with a real caller offset
+    /// as well as a limit, the fused window names <b>both</b> markers in one clause rather than emitting a
+    /// second, conflicting <c>OFFSET</c> — the defect <c>RowWindowClause</c> exists to make impossible. Before
+    /// the fix, <c>RowLimitClause</c> alone had no way to see this offset and would have hard-coded
+    /// <c>OFFSET 0 ROWS</c> regardless, producing a silently wrong page rather than this one.
+    /// </summary>
+    [Fact]
+    public void A_t_sql_page_with_both_a_limit_and_an_offset_renders_exactly_one_offset_clause()
+        => Compose(new ReadStatementComposer.ReadStatementOptions { Limit = 5, Offset = 3 })
+            .ShouldEndWith(" ORDER BY [id] OFFSET @alvo_offset ROWS FETCH NEXT @alvo_limit ROWS ONLY");
 
     private static string Compose(ReadStatementComposer.ReadStatementOptions options)
     {

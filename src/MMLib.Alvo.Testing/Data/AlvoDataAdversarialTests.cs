@@ -64,7 +64,7 @@ public abstract class AlvoDataAdversarialTests
     {
         var fixture = await NotesFixtureAsync();
 
-        var result = await fixture.Data.QueryAsync(new AlvoQuery { Entity = "notes" }, fixture.Alice);
+        var result = (await fixture.Data.QueryAsync(new AlvoQuery { Entity = "notes" }, fixture.Alice)).Items;
 
         result.Count.ShouldBe(2);
         result.ShouldAllBe(row => Equals(row["owner_id"], fixture.Alice.User.Value));
@@ -169,7 +169,7 @@ public abstract class AlvoDataAdversarialTests
         var data = await CreateAsync(schema, descriptor, seed);
         var caller = NewContext(tenant: null);
 
-        var listed = await data.QueryAsync(new AlvoQuery { Entity = "logs" }, caller);
+        var listed = (await data.QueryAsync(new AlvoQuery { Entity = "logs" }, caller)).Items;
         listed.Count.ShouldBe(1);
 
         await Should.ThrowAsync<AlvoAuthorizationException>(() => data.DeleteAsync("logs", Guid.NewGuid(), caller));
@@ -182,7 +182,7 @@ public abstract class AlvoDataAdversarialTests
         var fixture = await DocumentsFixtureAsync();
         var acmeUser = NewContext(fixture.Acme);
 
-        var result = await fixture.Data.QueryAsync(new AlvoQuery { Entity = "documents" }, acmeUser);
+        var result = (await fixture.Data.QueryAsync(new AlvoQuery { Entity = "documents" }, acmeUser)).Items;
 
         result.Count.ShouldBe(1);
         result[0]["tenant_id"].ShouldBe(fixture.Acme.Value);
@@ -204,13 +204,13 @@ public abstract class AlvoDataAdversarialTests
 
         IReadOnlyList<AlvoRecord>? captured = null;
         await Should.ThrowAsync<AlvoAuthorizationException>(async () =>
-            captured = await fixture.Data.QueryAsync(new AlvoQuery { Entity = "documents" }, tenantless));
+            captured = (await fixture.Data.QueryAsync(new AlvoQuery { Entity = "documents" }, tenantless)).Items);
 
         captured.ShouldBeNull();
 
-        var acmeResult = await fixture.Data.QueryAsync(new AlvoQuery { Entity = "documents" }, NewContext(fixture.Acme));
-        var globexResult = await fixture.Data.QueryAsync(new AlvoQuery { Entity = "documents" }, NewContext(fixture.Globex));
-        var thirdResult = await fixture.Data.QueryAsync(new AlvoQuery { Entity = "documents" }, NewContext(fixture.Third));
+        var acmeResult = (await fixture.Data.QueryAsync(new AlvoQuery { Entity = "documents" }, NewContext(fixture.Acme))).Items;
+        var globexResult = (await fixture.Data.QueryAsync(new AlvoQuery { Entity = "documents" }, NewContext(fixture.Globex))).Items;
+        var thirdResult = (await fixture.Data.QueryAsync(new AlvoQuery { Entity = "documents" }, NewContext(fixture.Third))).Items;
 
         acmeResult.Count.ShouldBe(1);
         globexResult.Count.ShouldBe(1);
@@ -284,7 +284,7 @@ public abstract class AlvoDataAdversarialTests
         asAdmin!.Values.ContainsKey("secret").ShouldBeFalse();
         asAdmin.Values.ContainsKey("note").ShouldBeTrue();
 
-        var listedByMember = await fixture.Data.QueryAsync(new AlvoQuery { Entity = "accounts" }, member);
+        var listedByMember = (await fixture.Data.QueryAsync(new AlvoQuery { Entity = "accounts" }, member)).Items;
         listedByMember.Count.ShouldBe(2);
         listedByMember.ShouldAllBe(row => !row.Values.ContainsKey("secret") && !row.Values.ContainsKey("note"));
 
@@ -334,13 +334,13 @@ public abstract class AlvoDataAdversarialTests
         var multiRole = NewContext(tenant: null, Role.Admin);
         var nonAdmin = NewContext(tenant: null);
 
-        var listed = await data.QueryAsync(new AlvoQuery { Entity = "settings" }, multiRole);
+        var listed = (await data.QueryAsync(new AlvoQuery { Entity = "settings" }, multiRole)).Items;
         listed.Count.ShouldBe(1);
 
         var got = await data.GetAsync("settings", rowId, multiRole);
         got.ShouldNotBeNull();
 
-        var listedByNonAdmin = await data.QueryAsync(new AlvoQuery { Entity = "settings" }, nonAdmin);
+        var listedByNonAdmin = (await data.QueryAsync(new AlvoQuery { Entity = "settings" }, nonAdmin)).Items;
         listedByNonAdmin.ShouldBeEmpty();
 
         var gotByNonAdmin = await data.GetAsync("settings", rowId, nonAdmin);
@@ -358,7 +358,7 @@ public abstract class AlvoDataAdversarialTests
             Filter = new AlvoComparison("owner_id", AlvoFilterOperator.Eq, fixture.Bob.User.Value),
         };
 
-        var result = await fixture.Data.QueryAsync(query, fixture.Alice);
+        var result = (await fixture.Data.QueryAsync(query, fixture.Alice)).Items;
 
         result.ShouldBeEmpty();
     }
@@ -392,7 +392,7 @@ public abstract class AlvoDataAdversarialTests
             Row(bobPrivateRowId, ("owner_id", bob.User.Value), ("is_public", null), ("title", "Bob-private")));
         var data = await CreateAsync(schema, descriptor, seed);
 
-        var visible = await data.QueryAsync(new AlvoQuery { Entity = "posts" }, alice);
+        var visible = (await data.QueryAsync(new AlvoQuery { Entity = "posts" }, alice)).Items;
 
         visible.Count.ShouldBe(2);
         visible.ShouldContain(row => Equals(row["id"], publicRowId));
@@ -595,7 +595,7 @@ public abstract class AlvoDataAdversarialTests
             Limit = 1,
             Sort = [new AlvoSort("title", Descending: true)],
         };
-        var result = await fixture.Data.QueryAsync(query, acmeUser);
+        var result = (await fixture.Data.QueryAsync(query, acmeUser)).Items;
 
         result.Count.ShouldBe(1);
         result[0]["id"].ShouldBe(fixture.AcmeRowId);
@@ -630,7 +630,7 @@ public abstract class AlvoDataAdversarialTests
         var byNote = QueryFilteredBy(new AlvoComparison("note", AlvoFilterOperator.Eq, "internal"));
         await Should.ThrowAsync<AlvoAuthorizationException>(() => fixture.Data.QueryAsync(byNote, member));
 
-        var asAdmin = await fixture.Data.QueryAsync(byNote, admin);
+        var asAdmin = (await fixture.Data.QueryAsync(byNote, admin)).Items;
         asAdmin.Count.ShouldBe(1);
         asAdmin[0]["id"].ShouldBe(fixture.RowId);
     }
@@ -650,7 +650,7 @@ public abstract class AlvoDataAdversarialTests
         await Should.ThrowAsync<AlvoAuthorizationException>(() => fixture.Data.QueryAsync(byHidden, member));
 
         var byVisible = new AlvoQuery { Entity = "accounts", Sort = [new AlvoSort("title", Descending: true)] };
-        var sorted = await fixture.Data.QueryAsync(byVisible, member);
+        var sorted = (await fixture.Data.QueryAsync(byVisible, member)).Items;
         sorted.Count.ShouldBe(2);
         sorted[0]["title"].ShouldBe("Acct-2");
     }
@@ -697,7 +697,7 @@ public abstract class AlvoDataAdversarialTests
         var fixture = await AccountsFixtureAsync();
         var member = NewContext(tenant: null);
 
-        var atCap = await fixture.Data.QueryAsync(QueryFilteredBy(NestedFilter(AlvoFilter.MaxDepth)), member);
+        var atCap = (await fixture.Data.QueryAsync(QueryFilteredBy(NestedFilter(AlvoFilter.MaxDepth)), member)).Items;
         atCap.ShouldNotBeNull();
 
         await Should.ThrowAsync<ArgumentException>(() => fixture.Data.QueryAsync(
@@ -808,23 +808,23 @@ public abstract class AlvoDataAdversarialTests
     {
         var fixture = await NotesFixtureAsync();
 
-        var byTitle = await fixture.Data.QueryAsync(
+        var byTitle = (await fixture.Data.QueryAsync(
             new AlvoQuery
             {
                 Entity = "notes",
                 Filter = new AlvoComparison("title", AlvoFilterOperator.Is, null),
             },
-            fixture.Alice);
+            fixture.Alice)).Items;
         byTitle.ShouldBeEmpty();
 
-        var byOwner = await fixture.Data.QueryAsync(
+        var byOwner = (await fixture.Data.QueryAsync(
             new AlvoQuery
             {
                 Entity = "notes",
                 Filter = new AlvoComparison(
                     "owner_id", AlvoFilterOperator.In, new object?[] { fixture.Alice.User.Value }),
             },
-            fixture.Alice);
+            fixture.Alice)).Items;
         byOwner.Count.ShouldBe(2);
     }
 
@@ -842,7 +842,7 @@ public abstract class AlvoDataAdversarialTests
         var fixture = await AccountsFixtureAsync();
         var member = NewContext(tenant: null);
 
-        var atCap = await fixture.Data.QueryAsync(QueryFilteredBy(WideFilter(AlvoFilter.MaxTerms)), member);
+        var atCap = (await fixture.Data.QueryAsync(QueryFilteredBy(WideFilter(AlvoFilter.MaxTerms)), member)).Items;
         atCap.ShouldNotBeNull();
 
         await Should.ThrowAsync<ArgumentException>(() => fixture.Data.QueryAsync(
@@ -859,7 +859,7 @@ public abstract class AlvoDataAdversarialTests
         var fixture = await AccountsFixtureAsync();
         var member = NewContext(tenant: null);
 
-        var atCap = await fixture.Data.QueryAsync(QueryFilteredBy(InFilter(AlvoFilter.MaxInCandidates)), member);
+        var atCap = (await fixture.Data.QueryAsync(QueryFilteredBy(InFilter(AlvoFilter.MaxInCandidates)), member)).Items;
         atCap.ShouldBeEmpty();
 
         await Should.ThrowAsync<ArgumentException>(() => fixture.Data.QueryAsync(
@@ -909,8 +909,8 @@ public abstract class AlvoDataAdversarialTests
         await Should.ThrowAsync<ArgumentException>(() => fixture.Data.QueryAsync(
             new AlvoQuery { Entity = "notes", Sort = sort, After = "any-cursor" }, fixture.Alice));
 
-        var unpaged = await fixture.Data.QueryAsync(
-            new AlvoQuery { Entity = "notes", Sort = sort }, fixture.Alice);
+        var unpaged = (await fixture.Data.QueryAsync(
+            new AlvoQuery { Entity = "notes", Sort = sort }, fixture.Alice)).Items;
         unpaged.Count.ShouldBe(2);
     }
 
@@ -923,8 +923,8 @@ public abstract class AlvoDataAdversarialTests
     {
         var fixture = await NotesFixtureAsync();
 
-        var page = await fixture.Data.QueryAsync(
-            new AlvoQuery { Entity = "notes", Sort = [new AlvoSort("owner_id")], Limit = 1 }, fixture.Alice);
+        var page = (await fixture.Data.QueryAsync(
+            new AlvoQuery { Entity = "notes", Sort = [new AlvoSort("owner_id")], Limit = 1 }, fixture.Alice)).Items;
 
         page.Count.ShouldBe(1);
     }
@@ -967,7 +967,7 @@ public abstract class AlvoDataAdversarialTests
 
         IReadOnlyList<AlvoRecord>? captured = null;
         await Should.ThrowAsync<AlvoAuthorizationException>(async () =>
-            captured = await data.QueryAsync(new AlvoQuery { Entity = "ledgers" }, tenantless));
+            captured = (await data.QueryAsync(new AlvoQuery { Entity = "ledgers" }, tenantless)).Items);
 
         captured.ShouldBeNull();
         await Should.ThrowAsync<AlvoAuthorizationException>(() => data.GetAsync("ledgers", rowId, tenantless));
@@ -995,7 +995,7 @@ public abstract class AlvoDataAdversarialTests
 
         IReadOnlyList<AlvoRecord>? captured = null;
         await Should.ThrowAsync<AlvoAuthorizationException>(async () =>
-            captured = await data.QueryAsync(new AlvoQuery { Entity = "journals" }, AlvoContext.Anonymous));
+            captured = (await data.QueryAsync(new AlvoQuery { Entity = "journals" }, AlvoContext.Anonymous)).Items);
 
         captured.ShouldBeNull();
         await Should.ThrowAsync<AlvoAuthorizationException>(() => data.GetAsync("journals", rowId, AlvoContext.Anonymous));

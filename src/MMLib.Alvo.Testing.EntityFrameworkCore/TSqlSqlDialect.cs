@@ -94,14 +94,27 @@ public sealed class TSqlSqlDialect : IAlvoSqlDialect
     }
 
     /// <summary>
-    /// T-SQL spells truncation as <c>OFFSET 0 ROWS FETCH NEXT &lt;n&gt; ROWS ONLY</c> — the
-    /// <c>OFFSET</c> is not optional there, which is exactly why this member is a default interface
-    /// member a differing dialect overrides rather than a shape baked into the composer.
+    /// T-SQL spells the whole window as one clause, offset first: <c>OFFSET &lt;m&gt; ROWS FETCH NEXT
+    /// &lt;n&gt; ROWS ONLY</c> — <c>OFFSET</c> is not optional there even with no caller-supplied offset,
+    /// which is exactly why this member takes both markers together rather than being split across two
+    /// members the way an earlier revision of this port shaped it. That split let this fake answer the
+    /// limit half correctly (hard-coding <c>OFFSET 0 ROWS</c> when no real offset existed) while the *pair*
+    /// would have been wrong the moment a real offset arrived — two conflicting <c>OFFSET</c> clauses in
+    /// one statement, a silently wrong page. One member that sees both values at once makes that
+    /// unrepresentable: with no offset it renders the same literal zero the old split version hard-coded,
+    /// and with one it renders the caller's real value instead.
     /// </summary>
     /// <param name="rowCountParameterMarker">The bind-parameter reference holding the row count.</param>
-    public string RowLimitClause(string rowCountParameterMarker)
+    /// <param name="rowOffsetParameterMarker">
+    /// The bind-parameter reference holding the number of rows to skip, or <see langword="null"/> for none —
+    /// rendered as the literal <c>0</c> rather than omitted, because T-SQL's <c>FETCH</c> cannot appear
+    /// without a preceding <c>OFFSET</c>. The literal is safe to format directly: it is a framework
+    /// constant standing in for "no offset was asked for," never caller-supplied text.
+    /// </param>
+    public string RowWindowClause(string rowCountParameterMarker, string? rowOffsetParameterMarker = null)
     {
         ArgumentNullException.ThrowIfNull(rowCountParameterMarker);
-        return $"OFFSET 0 ROWS FETCH NEXT {rowCountParameterMarker} ROWS ONLY";
+        var offset = rowOffsetParameterMarker ?? "0";
+        return $"OFFSET {offset} ROWS FETCH NEXT {rowCountParameterMarker} ROWS ONLY";
     }
 }

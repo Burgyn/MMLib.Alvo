@@ -30,9 +30,9 @@ public class InMemoryAlvoDataTests
             Row(rowId, ("title", "Hello World")));
         var caller = Caller();
 
-        var likeExactCase = await data.QueryAsync(Query("items", new AlvoComparison("title", AlvoFilterOperator.Like, "Hello%")), caller, ct);
-        var likeWrongCase = await data.QueryAsync(Query("items", new AlvoComparison("title", AlvoFilterOperator.Like, "hello%")), caller, ct);
-        var ilikeWrongCase = await data.QueryAsync(Query("items", new AlvoComparison("title", AlvoFilterOperator.ILike, "hello%")), caller, ct);
+        var likeExactCase = (await data.QueryAsync(Query("items", new AlvoComparison("title", AlvoFilterOperator.Like, "Hello%")), caller, ct)).Items;
+        var likeWrongCase = (await data.QueryAsync(Query("items", new AlvoComparison("title", AlvoFilterOperator.Like, "hello%")), caller, ct)).Items;
+        var ilikeWrongCase = (await data.QueryAsync(Query("items", new AlvoComparison("title", AlvoFilterOperator.ILike, "hello%")), caller, ct)).Items;
 
         likeExactCase.Count.ShouldBe(1);
         likeWrongCase.ShouldBeEmpty();
@@ -57,7 +57,7 @@ public class InMemoryAlvoDataTests
         var pathologicalPattern = string.Concat(Enumerable.Repeat("%", 30)) + "x";
 
         var stopwatch = Stopwatch.StartNew();
-        var result = await data.QueryAsync(Query("items", new AlvoComparison("title", AlvoFilterOperator.Like, pathologicalPattern)), caller, ct);
+        var result = (await data.QueryAsync(Query("items", new AlvoComparison("title", AlvoFilterOperator.Like, pathologicalPattern)), caller, ct)).Items;
         stopwatch.Stop();
 
         result.ShouldBeEmpty();
@@ -76,7 +76,7 @@ public class InMemoryAlvoDataTests
             Row(Guid.NewGuid(), ("amount", null)));
         var caller = Caller();
 
-        var result = await data.QueryAsync(Query("items", new AlvoComparison("amount", AlvoFilterOperator.Neq, 5m)), caller, ct);
+        var result = (await data.QueryAsync(Query("items", new AlvoComparison("amount", AlvoFilterOperator.Neq, 5m)), caller, ct)).Items;
 
         result.Count.ShouldBe(1);
         result[0]["amount"].ShouldBe(7m);
@@ -98,8 +98,8 @@ public class InMemoryAlvoDataTests
             Row(Guid.NewGuid(), ("amount", null)));
         var caller = Caller();
 
-        var result = await data.QueryAsync(
-            Query("items", new AlvoNot(new AlvoComparison("amount", AlvoFilterOperator.Eq, 5m))), caller, ct);
+        var result = (await data.QueryAsync(
+            Query("items", new AlvoNot(new AlvoComparison("amount", AlvoFilterOperator.Eq, 5m))), caller, ct)).Items;
 
         result.Count.ShouldBe(1);
         result[0]["amount"].ShouldBe(10m);
@@ -163,10 +163,10 @@ public class InMemoryAlvoDataTests
             Row(twoId, ("rank", 2)));
         var caller = Caller();
 
-        var nullsFirst = await data.QueryAsync(
-            new AlvoQuery { Entity = "items", Sort = [new AlvoSort("rank", Descending: false, Nulls: AlvoNullPlacement.First)] }, caller, ct);
-        var nullsLastDescending = await data.QueryAsync(
-            new AlvoQuery { Entity = "items", Sort = [new AlvoSort("rank", Descending: true, Nulls: AlvoNullPlacement.Last)] }, caller, ct);
+        var nullsFirst = (await data.QueryAsync(
+            new AlvoQuery { Entity = "items", Sort = [new AlvoSort("rank", Descending: false, Nulls: AlvoNullPlacement.First)] }, caller, ct)).Items;
+        var nullsLastDescending = (await data.QueryAsync(
+            new AlvoQuery { Entity = "items", Sort = [new AlvoSort("rank", Descending: true, Nulls: AlvoNullPlacement.Last)] }, caller, ct)).Items;
 
         nullsFirst.Select(row => row["id"]).ShouldBe([nullRankId, oneId, twoId]);
         nullsLastDescending.Select(row => row["id"]).ShouldBe([twoId, oneId, nullRankId]);
@@ -183,8 +183,8 @@ public class InMemoryAlvoDataTests
             Row(Guid.NewGuid(), ("title", "b")));
         var caller = Caller();
 
-        var limited = await data.QueryAsync(new AlvoQuery { Entity = "items", Limit = 1 }, caller, ct);
-        var unrecognizedCursor = await data.QueryAsync(new AlvoQuery { Entity = "items", After = Guid.NewGuid().ToString() }, caller, ct);
+        var limited = (await data.QueryAsync(new AlvoQuery { Entity = "items", Limit = 1 }, caller, ct)).Items;
+        var unrecognizedCursor = (await data.QueryAsync(new AlvoQuery { Entity = "items", After = Guid.NewGuid().ToString() }, caller, ct)).Items;
 
         limited.Count.ShouldBe(1);
         unrecognizedCursor.ShouldBeEmpty();
@@ -207,10 +207,10 @@ public class InMemoryAlvoDataTests
             Row(Guid.NewGuid(), ("title", "c")));
         var caller = Caller();
 
-        var everything = await data.QueryAsync(new AlvoQuery { Entity = "items" }, caller, ct);
-        var firstPage = await data.QueryAsync(new AlvoQuery { Entity = "items", Limit = 1 }, caller, ct);
+        var everything = (await data.QueryAsync(new AlvoQuery { Entity = "items" }, caller, ct)).Items;
+        var firstPage = (await data.QueryAsync(new AlvoQuery { Entity = "items", Limit = 1 }, caller, ct)).Items;
         var issuedCursor = firstPage[0]["id"]!.ToString();
-        var secondPage = await data.QueryAsync(new AlvoQuery { Entity = "items", Limit = 1, After = issuedCursor }, caller, ct);
+        var secondPage = (await data.QueryAsync(new AlvoQuery { Entity = "items", Limit = 1, After = issuedCursor }, caller, ct)).Items;
 
         firstPage.Select(row => row["id"]).ShouldBe([everything[0]["id"]]);
         secondPage.Select(row => row["id"]).ShouldBe([everything[1]["id"]]);
@@ -251,7 +251,8 @@ public class InMemoryAlvoDataTests
         var caller = Caller();
 
         var ex = await Should.ThrowAsync<AlvoAuthorizationException>(() => data.CreateAsync(
-            "items", new Dictionary<string, object?> { ["title"] = "x", ["bogus"] = "y" }, caller, ct));
+            "items", new Dictionary<string, object?> { ["title"] = "x", ["bogus"] = "y" }, caller,
+            cancellationToken: ct));
 
         ex.Message.ShouldNotContain("bogus");
         ex.Message.ShouldNotContain("items");
@@ -271,7 +272,7 @@ public class InMemoryAlvoDataTests
         var caller = Caller();
 
         await Should.ThrowAsync<AlvoAuthorizationException>(() => data.CreateAsync(
-            "ghosts", new Dictionary<string, object?> { ["title"] = "x" }, caller, ct));
+            "ghosts", new Dictionary<string, object?> { ["title"] = "x" }, caller, cancellationToken: ct));
     }
 
     private static Dictionary<string, FieldDescriptor> StringField() => new(StringComparer.Ordinal)
