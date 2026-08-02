@@ -42,9 +42,10 @@ internal sealed record BootPlan(
 /// inside <c>MapAlvoDataApi</c>, which is a start-time failure only for as long as mapping is eager.
 /// Once routes materialise lazily, from the first request that builds the matcher, a check left there
 /// would be demoted from "the host refuses to start" to "the first request 500s" — silently, with a
-/// green suite. Running them at stage 0 is what keeps the refusal a start-time one. The map-time calls
-/// remain as the belt for a schema that reaches routing from somewhere other than this descriptor (a
-/// host's own <c>ISchemaRegistry</c>, F7's dynamic entities), which is a different input from
+/// green suite. Running them at stage 0 is what keeps the refusal a start-time one. The same calls
+/// remain in <c>AlvoEndpointDataSource</c>, where they now run on first enumeration, as the belt for a
+/// schema that reaches routing from somewhere other than this descriptor (a host's own
+/// <c>ISchemaRegistry</c>, F7's dynamic entities) — a different input from
 /// <see cref="BootPlan.Desired"/> and therefore not the same check.
 /// </para>
 /// </remarks>

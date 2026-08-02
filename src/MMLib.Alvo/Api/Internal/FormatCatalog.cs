@@ -36,12 +36,12 @@ namespace MMLib.Alvo.Api.Internal;
 ///   </item>
 /// </list>
 /// <para>
-/// <b>Compiled once per applied descriptor, at mapping time.</b> <c>MapAlvoDataApi</c> builds exactly one
-/// catalogue from the applied schema and hands it to every endpoint it maps, so no request compiles a
-/// pattern and a format shared by twenty fields is one <see cref="Regex"/>. It is captured for the lifetime
-/// of the endpoint table, which is the same lifetime the route literals and the <see cref="EntitySchema"/>
-/// the endpoints bind against already have — a descriptor re-applied at runtime cannot change any of the
-/// three, exactly as <c>EntityRouteCatalog</c> records.
+/// <b>Compiled once per applied descriptor, when the endpoint table materialises.</b>
+/// <see cref="AlvoEndpointDataSource"/> builds exactly one catalogue from the applied schema and hands it to
+/// every endpoint it maps, so no request compiles a pattern and a format shared by twenty fields is one
+/// <see cref="Regex"/>. It is captured for the lifetime of the endpoint table, which is the same lifetime the
+/// route literals and the <see cref="EntitySchema"/> the endpoints bind against already have — a descriptor
+/// re-applied at runtime cannot change any of the three, exactly as <c>EntityRouteCatalog</c> records.
 /// </para>
 /// <para>
 /// <b>An unparseable pattern is refused twice, and the second time is not redundant.</b>
@@ -50,9 +50,11 @@ namespace MMLib.Alvo.Api.Internal;
 /// mapper never built (a host with its own <c>ISchemaRegistry</c>, a hand-assembled model, F7's dynamic
 /// registry) can carry a pattern nothing checked. An earlier remark here claimed that made a bad-pattern
 /// branch unreachable; making the member public falsified it, and the branch was <see cref="Regex"/>'s own
-/// <see cref="ArgumentException"/> escaping <c>MapAlvoDataApi</c> with no mention of which format was at
-/// fault. So <see cref="Build"/> refuses at <em>catalogue-build</em> time — startup, once, naming the format
-/// — rather than at the first request that happens to reach the field.
+/// <see cref="ArgumentException"/> escaping route generation with no mention of which format was at fault. So
+/// <see cref="Build"/> refuses at <em>catalogue-build</em> time — once, naming the format — rather than at
+/// whichever request first happens to reach the field. For a <em>descriptor</em>, that refusal comes earlier
+/// still and fails the start: boot stage 0 (<c>DescriptorBootPlan</c>) builds the same catalogue over the
+/// descriptor's own mapped schema before anything is durable.
 /// </para>
 /// </remarks>
 internal sealed class FormatCatalog
@@ -132,8 +134,9 @@ internal sealed class FormatCatalog
 
     /// <summary>Compiles every format the applied schema's fields name.</summary>
     /// <remarks>
-    /// Called once, from <c>MapAlvoDataApi</c>, so a pattern this build cannot compile fails the host at
-    /// startup beside the route-mapping guards rather than per request.
+    /// Called once per endpoint table, from <see cref="AlvoEndpointDataSource"/>, beside the other schema guard
+    /// route materialisation makes — so a pattern this build cannot compile is refused once rather than per
+    /// request. The descriptor path is refused earlier, at boot stage 0.
     /// </remarks>
     /// <param name="entities">The applied schema's entities.</param>
     /// <exception cref="InvalidOperationException">
