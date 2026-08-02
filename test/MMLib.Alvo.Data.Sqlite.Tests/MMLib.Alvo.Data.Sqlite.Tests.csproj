@@ -25,4 +25,12 @@
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/PolicyPredicateParameters.cs" Link="_shared/PolicyPredicateParameters.cs" />
   </ItemGroup>
 
+  <!-- The concurrent-cold-start harness, shared with MMLib.Alvo.Data.PostgreSql.Tests.Integration. Linked for
+       the same reason DifferentialProbe is: convergence under a lost race is an engine-agnostic guarantee, and
+       two per-engine copies of the barrier and the probe counts are how the two legs stop measuring the same
+       thing. It uses Alvo's public surface only, because that project is not granted the core's internals. -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/boot/ConcurrentColdStart.cs" Link="_shared/ConcurrentColdStart.cs" />
+  </ItemGroup>
+
 </Project>

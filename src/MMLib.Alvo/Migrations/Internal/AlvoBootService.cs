@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
+using System.Data.Common;
 using System.Diagnostics.CodeAnalysis;
 
 namespace MMLib.Alvo.Migrations.Internal;
@@ -52,11 +53,18 @@ namespace MMLib.Alvo.Migrations.Internal;
 /// nothing; it sequences, carries out, and publishes. Routes are not stage 4's business either — they
 /// materialise from the primed registry at enumeration time, after this has finished.
 /// </para>
+/// <para>
+/// <b>Several replicas cold-starting against one empty database converge instead of crash-looping</b> — see
+/// <see cref="ConvergeOnWhatTheDatabaseSaysAsync"/> for the bounded single retry that makes that true, and
+/// <see cref="ApplyAsync"/> for why the write goes through <see cref="IRuntimeSchemaWriter"/> rather than
+/// <see cref="ISchemaMigrator.ApplyAsync"/> followed by <see cref="IAppliedSchemaStore.SaveAsync"/>.
+/// </para>
 /// </remarks>
 internal sealed partial class AlvoBootService : IHostedLifecycleService
 {
     private readonly DescriptorBootPlan _bootPlan;
     private readonly ISchemaMigrator _migrator;
+    private readonly IRuntimeSchemaWriter _writer;
     private readonly ISchemaIntrospector _introspector;
     private readonly IAppliedSchemaStore _store;
     private readonly IPolicyCatalogProvider _policyCatalogProvider;
@@ -66,7 +74,8 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
 
     /// <summary>Initializes a new instance of the <see cref="AlvoBootService"/> class.</summary>
     /// <param name="bootPlan">Stage 0: the descriptor, the schema it wants, and its compiled policy.</param>
-    /// <param name="migrator">Plans and applies the difference between the two schemas.</param>
+    /// <param name="migrator">Plans the difference between the two schemas.</param>
+    /// <param name="writer">Applies that plan and records it as one transaction.</param>
     /// <param name="introspector">Reports the live schema when Alvo has recorded none for this project.</param>
     /// <param name="store">The applied snapshot, whose storage is also stage 1's system schema.</param>
     /// <param name="policyCatalogProvider">Where stage 3 publishes the compiled catalog.</param>
@@ -76,6 +85,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     public AlvoBootService(
         DescriptorBootPlan bootPlan,
         ISchemaMigrator migrator,
+        IRuntimeSchemaWriter writer,
         ISchemaIntrospector introspector,
         IAppliedSchemaStore store,
         IPolicyCatalogProvider policyCatalogProvider,
@@ -85,6 +95,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     {
         ArgumentNullException.ThrowIfNull(bootPlan);
         ArgumentNullException.ThrowIfNull(migrator);
+        ArgumentNullException.ThrowIfNull(writer);
         ArgumentNullException.ThrowIfNull(introspector);
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(policyCatalogProvider);
@@ -94,6 +105,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
 
         _bootPlan = bootPlan;
         _migrator = migrator;
+        _writer = writer;
         _introspector = introspector;
         _store = store;
         _policyCatalogProvider = policyCatalogProvider;
@@ -149,13 +161,105 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         var boot = await _bootPlan.LoadAsync(ct).ConfigureAwait(false);
         var project = boot.Descriptor.Name;
 
-        var applied = await ReadAppliedSchemaAsync(project, ct).ConfigureAwait(false);
+        var (outcome, revision) = await ConvergeOnWhatTheDatabaseSaysAsync(boot, ct).ConfigureAwait(false);
+
+        _state.Ready(project, revision);
+        BootIsReady(_logger, project, outcome.ToString(), revision);
+    }
+
+    /// <summary>
+    /// Stages 1–3, and — if another replica got there first — once more, against what that replica left behind.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Three replicas cold-starting against one empty database all see "uninitialized", and only one of them
+    /// can be right.</b> They are serialized by the optimistic append inside <see cref="IRuntimeSchemaWriter"/>:
+    /// one commits revision 1, the losers are refused. A loser that threw would turn the ordinary first
+    /// deployment of a replica set into a crash loop, so it re-reads and decides again — which is a required
+    /// behaviour of this design, not a nicety.
+    /// </para>
+    /// <para>
+    /// <b>Re-deciding is not adopting.</b> The second pass runs the same
+    /// <see cref="SchemaStartupPolicy.Decide"/> over what the winner actually committed. With the same
+    /// descriptor the plan comes back empty and the loser primes and serves. With a <em>different</em>
+    /// descriptor — a rolling deploy caught mid-flight — the loser is now looking at ordinary drift and is
+    /// governed by the ordinary mode: under the default <see cref="AlvoSchemaStartupMode.Verify"/> it refuses.
+    /// Silently accepting the winner's schema would leave the process serving rules compiled against a schema
+    /// it never agreed to.
+    /// </para>
+    /// <para>
+    /// <b>At most one retry, and no lock.</b> A loop would hang a boot instead of failing it, which is strictly
+    /// worse for an operator and for an orchestrator that is already willing to restart the container. And a
+    /// lock is the shape to avoid outright: EF Core's SQLite migration lock is a table row with no timeout that
+    /// survives a killed process, so an OOM-kill mid-migration wedges every later boot until someone deletes the
+    /// row by hand. The revision check has nothing to leak.
+    /// </para>
+    /// </remarks>
+    private async Task<BootOutcome> ConvergeOnWhatTheDatabaseSaysAsync(BootPlan boot, CancellationToken ct)
+    {
+        try
+        {
+            return await DecideAndCarryOutAsync(boot, ct).ConfigureAwait(false);
+        }
+        catch (Exception lostRace) when (IsAnotherWriterGettingThereFirst(lostRace))
+        {
+            AnotherReplicaWonTheRace(_logger, boot.Descriptor.Name, lostRace.Message);
+
+            return await DecideAndCarryOutAsync(boot, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="failure"/> is the shape of another writer having got to the schema first.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b><see cref="DescriptorConcurrencyException"/> is what both shipped engines were measured to raise</b>,
+    /// because the write goes through <see cref="IRuntimeSchemaWriter"/> and the version-row insert is
+    /// therefore the gate: three replicas racing one empty SQLite file and one empty PostgreSQL database both
+    /// produced a clean optimistic-lock loss for every loser. With the write ordered the other way round — DDL
+    /// first — SQLite instead produced <c>table "…" already exists</c>, which says nothing about who won; see
+    /// <see cref="ApplyAsync"/>.
+    /// </para>
+    /// <para>
+    /// <b><see cref="DbException"/> is a belt, and an honestly unexercised one.</b>
+    /// <c>VersionRowWriter.ThrowIfConcurrencyConflictAsync</c> documents the path that reaches it: when the
+    /// insert fails on lock contention and the re-read still shows the old revision, the raw engine failure is
+    /// rethrown rather than dressed up as a conflict. On SQLite that never happened across the runs measured
+    /// here — the loser's own re-read has to take the write lock, so it serializes behind the winner's commit
+    /// and sees the new revision — but it is reachable in principle, and a different journal mode, busy
+    /// timeout or engine could reach it. It is kept because the failure it would otherwise cause is precisely
+    /// the crash loop this method exists to prevent, and the cost of being wrong is one extra bounded attempt.
+    /// </para>
+    /// <para>
+    /// Being broad is safe because of what follows rather than because of the classification: the retry
+    /// re-reads and re-decides from scratch, so a failure that was <em>not</em> a lost race reaches the same
+    /// conclusion again and this time propagates. A narrower filter would have to name provider error codes,
+    /// which is exactly the engine-specific knowledge the core must not hold.
+    /// </para>
+    /// </remarks>
+    /// <param name="failure">What the first pass threw.</param>
+    private static bool IsAnotherWriterGettingThereFirst(Exception failure) =>
+        failure is DescriptorConcurrencyException or DbException;
+
+    /// <summary>Reads what the database says, decides what that allows, and does it.</summary>
+    /// <remarks>
+    /// One pass, so the retry above is literally the same pass over a database that has meanwhile moved —
+    /// rather than a second, subtly different code path that only the losing replica ever executes.
+    /// </remarks>
+    private async Task<BootOutcome> DecideAndCarryOutAsync(BootPlan boot, CancellationToken ct)
+    {
+        var applied = await ReadAppliedSchemaAsync(boot.Descriptor.Name, ct).ConfigureAwait(false);
         var decision = await DecideAsync(boot, applied, ct).ConfigureAwait(false);
         var revision = await CarryOutAsync(boot, applied, decision, ct).ConfigureAwait(false);
 
-        _state.Ready(project, revision);
-        BootIsReady(_logger, project, decision.Outcome.ToString(), revision);
+        return new BootOutcome(decision.Outcome, revision);
     }
+
+    /// <summary>What one pass of the boot concluded.</summary>
+    /// <param name="Outcome">What stage 2 decided.</param>
+    /// <param name="AppliedRevision">The applied revision the process is serving, if any.</param>
+    private readonly record struct BootOutcome(SchemaStartupOutcome Outcome, int? AppliedRevision);
 
     /// <summary>
     /// Stage 1 and stage 2's read: the applied snapshot, over storage the driver brings up on first use.
@@ -238,24 +342,54 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     }
 
     /// <summary>
-    /// Initializes or migrates the project schema, records the new snapshot, and primes from it.
+    /// Initializes or migrates the project schema and records it as one transaction, then primes from it.
     /// </summary>
     /// <remarks>
-    /// The order is the one <see cref="SchemaMigrationRunner"/> established and must not be relaxed: the
-    /// snapshot is saved only after the DDL succeeded, and the catalog is published only after the snapshot is
-    /// saved, so nothing ever serves rules for a schema the database does not have.
+    /// <para>
+    /// <b>Through <see cref="IRuntimeSchemaWriter"/>, not <see cref="ISchemaMigrator.ApplyAsync"/> followed by
+    /// <see cref="IAppliedSchemaStore.SaveAsync"/> — and the difference is what makes a concurrent cold start
+    /// converge at all.</b> That port's own remarks state the reason: it inserts the version row first, as the
+    /// optimistic-lock gate, so the only writer that reaches the DDL is the confirmed winner. Applying first and
+    /// recording second lets every replica run the DDL, which on SQLite was <em>measured</em> to fail the losers
+    /// with <c>table "…" already exists</c> — a failure that says nothing about who won — and leaves a window in
+    /// which the database holds the schema while no revision row explains it.
+    /// </para>
+    /// <para>
+    /// The catalog is published only after that transaction commits, so nothing ever serves rules for a schema
+    /// the database does not have.
+    /// </para>
     /// </remarks>
     private async Task<int?> ApplyAsync(
         BootPlan boot, AppliedSchema? applied, SchemaStartupDecision decision, CancellationToken ct)
     {
-        var result = await _migrator.ApplyAsync(decision.Plan, MigrationOptions, ct).ConfigureAwait(false);
-        result.EnsureApplied();
+        var project = boot.Descriptor.Name;
+        RefuseToDiscardDataWhateverWasDecided(project, decision.Plan);
 
-        var revision = (applied?.Revision ?? 0) + 1;
-        var snapshot = new AppliedSchema(boot.Desired, boot.DescriptorJson, revision, DateTimeOffset.UtcNow);
-        await _store.SaveAsync(boot.Descriptor.Name, snapshot, ct).ConfigureAwait(false);
+        var candidate = new DescriptorVersion(
+            boot.Desired, boot.DescriptorJson, Revision: 0, DateTimeOffset.UtcNow);
+        var written = await _writer
+            .ApplyAndAppendAsync(project, decision.Plan, candidate, applied?.Revision ?? 0, MigrationOptions, ct)
+            .ConfigureAwait(false);
 
-        return Prime(boot, revision);
+        return Prime(boot, written.Revision);
+    }
+
+    /// <summary>The last guard before the DDL runs: a plan that discards data needs an explicit allowance.</summary>
+    /// <remarks>
+    /// <see cref="SchemaStartupPolicy.Decide"/> has already refused such a plan, so this is unreachable through
+    /// it — which is the point. <see cref="IRuntimeSchemaWriter"/> executes whatever it is handed and
+    /// deliberately re-evaluates no policy, so the guardrail that used to be
+    /// <see cref="ISchemaMigrator.ApplyAsync"/>'s has to be restated here rather than quietly dropped when the
+    /// write moved. It is the same check <see cref="RuntimeSchemaService"/> makes on the runtime path.
+    /// </remarks>
+    /// <param name="project">The project whose schema is being changed.</param>
+    /// <param name="plan">The plan stage 2 cleared for execution.</param>
+    private void RefuseToDiscardDataWhateverWasDecided(string project, MigrationPlan plan)
+    {
+        if (plan.HasDestructiveChanges && !_options.Value.AllowDestructive)
+        {
+            throw new DestructiveChangeNotAllowedException(project, plan);
+        }
     }
 
     /// <summary>
@@ -289,4 +423,20 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
             + "{AppliedRevision}.")]
     private static partial void BootIsReady(
         ILogger logger, string project, string outcome, int? appliedRevision);
+
+    /// <summary>The one record that this replica lost the cold-start race and is deciding again.</summary>
+    /// <remarks>
+    /// Information rather than warning: on a replica set this is the <em>expected</em> outcome for every
+    /// replica but one, and logging it as a warning would train an operator to ignore warnings. It is logged at
+    /// all because it is the difference between "this boot initialized the database" and "this boot found it
+    /// initialized while trying to", which no other line reports.
+    /// </remarks>
+    /// <param name="logger">The logger the boot writes through.</param>
+    /// <param name="project">The project whose schema was being brought up.</param>
+    /// <param name="reason">What the losing write reported.</param>
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "Alvo lost the schema race for project {Project} to another replica and is re-reading what "
+            + "it applied. Reason: {Reason}")]
+    private static partial void AnotherReplicaWonTheRace(ILogger logger, string project, string reason);
 }
