@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
 using System.Net;
 using System.Text.Json.Nodes;
 
@@ -178,6 +179,49 @@ public class AlvoHostBootTests
         failure.Message.ShouldContain("sqlite");
         failure.Message.ShouldContain("postgresql");
     }
+
+    /// <summary>
+    /// A credential the startup validation refuses fails the start <b>with the database untouched</b> — not
+    /// after the descriptor's DDL has already been committed against it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The schema assertion is the fact, not the throw. <c>ValidateOnStart</c> runs from
+    /// <c>app.StartAsync()</c>, which is after <see cref="AlvoHost.BuildAsync"/> has applied the descriptor,
+    /// so a host that only validated there <em>also</em> refused this start — with the migration committed.
+    /// And that is not merely untidy: the previous descriptor is destructive relative to the schema the failed
+    /// start wrote, so <c>EnsureApplied</c> refuses the rollback too and the deployment cannot boot at all.
+    /// One typo in an environment variable, one unbootable database.
+    /// </para>
+    /// <para>
+    /// An unparseable scope rather than a missing key, because "no credential at all" is a valid host
+    /// (<see cref="A_host_with_no_configured_key_grants_nobody_anything"/>) and would prove nothing.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_credential_the_startup_validation_refuses_leaves_the_database_untouched()
+    {
+        var databasePath = AlvoHostWorld.TempDatabasePath();
+
+        try
+        {
+            var failure = await Should.ThrowAsync<OptionsValidationException>(
+                () => AlvoHostWorld.StartAsync(overrides: MistypedScope(), databasePath: databasePath));
+
+            failure.Message.ShouldContain("*:reed");
+            AlvoHostWorld.TableNamesIn(databasePath).ShouldBeEmpty(
+                "the descriptor's DDL must not be committed against a database the host is about to refuse "
+                + "to boot over — rolling the deployment back does not undo it");
+        }
+        finally
+        {
+            AlvoHostWorld.TryDeleteDatabase(databasePath);
+        }
+    }
+
+    /// <summary>One dev-key scope with a typo in it — the shape a hand-written environment variable takes.</summary>
+    private static Dictionary<string, string?> MistypedScope() =>
+        new(StringComparer.Ordinal) { ["Alvo:Auth:DevKeys:0:Scopes:0"] = "*:reed" };
 
     private static Dictionary<string, string?> NoDevKeys() =>
         new(StringComparer.Ordinal)

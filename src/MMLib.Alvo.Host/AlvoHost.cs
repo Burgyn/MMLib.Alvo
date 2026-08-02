@@ -109,6 +109,11 @@ public static class AlvoHost
     /// API.
     /// </para>
     /// <para>
+    /// Every <c>ValidateOnStart</c> registration runs <em>before</em> the apply, and that ordering is the
+    /// difference between a recoverable mistake and an unbootable deployment — see
+    /// <see cref="ValidateOptions"/>.
+    /// </para>
+    /// <para>
     /// The apply's result is <em>checked</em>, not discarded. A refused destructive plan is a return value
     /// rather than an exception (<c>MigrationResult.EnsureApplied</c>'s remarks say why), and an unchecked
     /// one leaves the policy catalog unprimed: the host would then map zero routes, answer liveness, report
@@ -121,6 +126,11 @@ public static class AlvoHost
     /// <param name="ct">Cancels the descriptor apply.</param>
     /// <returns>The started-but-not-yet-running application.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
+    /// <exception cref="OptionsValidationException">
+    /// A registration that asked to be validated at startup refused its configuration — a misspelled dev-key
+    /// scope, say. Raised <em>before</em> the descriptor is applied, so a misconfigured deployment leaves the
+    /// database exactly as it found it.
+    /// </exception>
     /// <exception cref="Migrations.DestructiveChangeNotAllowedException">
     /// The mounted descriptor's plan was refused as destructive. The host applies with
     /// <c>AllowDestructive: false</c> and offers no setting to change that, so this is how a descriptor
@@ -148,6 +158,8 @@ public static class AlvoHost
 
         app.MapAlvoLiveness();
 
+        ValidateOptions(app.Services);
+
         var migration = await app.Services.ApplyAlvoDescriptorAsync(ct: ct).ConfigureAwait(false);
         migration.EnsureApplied();
 
@@ -160,6 +172,32 @@ public static class AlvoHost
 
         return app;
     }
+
+    /// <summary>
+    /// Runs every <c>ValidateOnStart</c> registration in the container, before anything touches the database.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Ordering, not tidiness.</b> <c>ValidateOnStart</c> runs from <c>app.StartAsync()</c>, which is
+    /// after <see cref="BuildAsync"/> has already applied the descriptor — nothing on the apply path resolves
+    /// any of the validated option types. So a single mistyped
+    /// <c>Alvo__Auth__DevKeys__0__Scopes__0</c> committed the migration against the production database and
+    /// <em>then</em> crash-looped, and rolling the deployment back did not recover: the previous descriptor is
+    /// destructive relative to the schema the failed start had already written, so
+    /// <c>MigrationResult.EnsureApplied</c> refuses that start too. Validating first turns that into an
+    /// ordinary failed start with nothing changed.
+    /// </para>
+    /// <para>
+    /// <b><see cref="IStartupValidator"/> rather than resolving <c>IOptions&lt;AlvoAuthOptions&gt;</c>.</b> It
+    /// is the same seam the host itself uses at start, so it runs <em>every</em> registration — auth's today,
+    /// and whatever the next option type registers — and this cannot silently stop covering one. It is
+    /// resolved with <c>GetService</c> because a composition that registered no <c>ValidateOnStart</c> at all
+    /// has no such service, and re-running it at start costs one more pass over stateless validators.
+    /// </para>
+    /// </remarks>
+    /// <param name="services">The built application's services.</param>
+    private static void ValidateOptions(IServiceProvider services) =>
+        services.GetService<IStartupValidator>()?.Validate();
 
     /// <summary>
     /// The flags the host honours when — and only when — <see cref="AlvoHostForwardedHeadersOptions.Enabled"/>

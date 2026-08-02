@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -80,17 +81,43 @@ internal sealed class AlvoHostWorld : IAsyncDisposable
     internal static string TempDatabasePath() =>
         Path.Combine(Path.GetTempPath(), $"alvo-host-tests-{Guid.NewGuid():N}.db");
 
-    /// <summary>Deletes a caller-owned database, tolerating a file a refused start still holds open.</summary>
+    /// <summary>Deletes a caller-owned database.</summary>
+    /// <remarks>
+    /// It used to swallow an <see cref="IOException"/> "tolerating a file a refused start still holds open",
+    /// and that tolerance was the visible end of a real leak: <see cref="AlvoHost.BuildAsync"/> did not
+    /// dispose the <c>WebApplication</c> it had built when the apply threw, so the connection pool kept the
+    /// file. Deleting strictly is what keeps every fact that starts over its own file measuring the fix.
+    /// </remarks>
     /// <param name="databasePath">The path <see cref="TempDatabasePath"/> returned.</param>
-    internal static void TryDeleteDatabase(string databasePath)
+    internal static void TryDeleteDatabase(string databasePath) => File.Delete(databasePath);
+
+    /// <summary>Every table name in a SQLite database, or nothing at all when the file was never created.</summary>
+    /// <remarks>
+    /// The one way to say "the failed start changed no schema" without believing the host's own report of it.
+    /// A file that does not exist is the strongest form of the same claim — nothing ever opened a connection —
+    /// so it answers empty rather than throwing.
+    /// </remarks>
+    /// <param name="databasePath">The path <see cref="TempDatabasePath"/> returned.</param>
+    internal static IReadOnlyList<string> TableNamesIn(string databasePath)
     {
-        try
+        if (!File.Exists(databasePath))
         {
-            File.Delete(databasePath);
+            return [];
         }
-        catch (IOException)
+
+        using var connection = new SqliteConnection($"Data Source={databasePath}");
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%';";
+        using var reader = command.ExecuteReader();
+
+        var names = new List<string>();
+        while (reader.Read())
         {
+            names.Add(reader.GetString(0));
         }
+
+        return names;
     }
 
     private static Dictionary<string, string?> Settings(
