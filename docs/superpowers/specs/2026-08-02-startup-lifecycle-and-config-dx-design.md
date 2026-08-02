@@ -274,9 +274,32 @@ the server listens (fact 7).
 |---|---|---|---|
 | **0 Validate** | load and JSON-Schema-validate the descriptor; map to the desired schema; compile CEL; run the reserved-name and format checks | no | always — failure is a configuration error |
 | **1 System schema** | bring the framework's own `alvo.*` tables up (`descriptor_versions`, `alvo_idempotency`, PR5's outbox) on their own chain | yes, DDL | **always**, mandated by A:508/A:515/A:555 |
+| | *(needs no code of its own today — see below)* | | |
 | **2 Project schema** | diff the descriptor against `IAppliedSchemaStore`'s snapshot and decide | yes, reads always; DDL conditionally | the **startup mode** (below) |
 | **3 Prime** | publish the policy catalog and the schema model for the descriptor stage 2 confirmed is the one in the database | no | always, if stage 2 succeeded |
 | **4 Serve** | routes materialise lazily from the primed registry on the first request (facts 1, 2, 5) | no | — |
+
+**Stage 1 needs no code of its own, and that is a finding rather than a
+shortcut.** `SystemSchemaInitializer` is `internal` to
+`MMLib.Alvo.Data.EntityFrameworkCore` and has **no port in `Abstractions`**, so
+the core cannot call it without breaking `package-boundary.md`. It does not need
+to: the system schema is owned by whichever driver implements
+`IAppliedSchemaStore`, and that driver cannot answer a single call without it —
+`EfCoreDescriptorVersionStore` routes *every* method through
+`VersionRowWriter.EnsureReadyAsync`, which runs `SystemSchemaInitializer.EnsureAsync`
+once, race-guarded. So **stage 2's read of the applied snapshot *is* stages 1 and
+2**, unconditionally, in every mode. A:508/A:515 hold — automatic at startup, on a
+chain independent of the host's own tables — with no abstraction invented for it.
+
+A port is earned the moment a driver's system schema grows a table that no store
+call touches. **PR5's outbox is the first candidate**, so this is the seam that
+work should expect to add rather than discover.
+
+One consequence, recorded rather than hidden: the design's own line that `Skip`
+should *"not read the store"* is **wrong as written**. `Skip` does read it,
+because stage 1 is unconditional and that read is the only thing that brings the
+system schema up. The read is idempotent and touches exactly the tables stage 1
+must create anyway; `Skip` still ignores what it found. Deviation 58.
 
 Options validation is **not** a stage here, because it does not need to be
 (fact 8). The framework runs every `ValidateOnStart` registration before any
@@ -441,6 +464,33 @@ tag, so a check registered without thinking lands in readiness, where the
 consequence is losing traffic rather than losing the process. Aspire's service
 defaults make the same choice for the same reason.
 
+### The readiness endpoint must not echo the failure reason
+
+Found while implementing the boot service, and it is an information-disclosure
+bug that would otherwise have shipped in the obvious implementation.
+
+`AlvoBootState.Failure` records the reason a boot was refused. For a stage 1 or
+stage 2 failure that reason is **the database provider's own message**, which
+routinely carries a **connection string** or a filesystem path. And
+`/health/ready` is **unauthenticated by design** — a probe cannot hold a
+credential, and the existing liveness fact
+`Liveness_answers_an_unauthenticated_probe` pins that shape.
+
+So whatever answers readiness reports the **phase**, and never that text:
+
+- the probe response carries `Pending` / `Ready` / `Failed` and nothing else;
+- the reason goes to the **log**, where it is already governed by the host's own
+  redaction, and to the operator-facing refusal written to stderr before the
+  process exits;
+- a fact must assert the negative — that a readiness body does **not** contain a
+  connection-string fragment — because the positive assertions (503 while pending,
+  200 when ready) all pass happily while the body leaks.
+
+This is why the change is labelled `needs-deep-review` and why
+`alvo-security-core-review` is run on it: the boot path decides *when the policy
+catalog is primed*, and an unprimed catalog denies everything, so the fail-closed
+direction is a security property rather than an implementation detail.
+
 This delivers the **schema-applied half** of §2.12's readiness bullet (A:487).
 It does **not** deliver the continuing database-reachability probe — that needs
 the port **#133** exists to design, and the core may not touch a provider
@@ -591,6 +641,20 @@ Numbering continues the F3 design's series, which ends at 51.
     registered, now gets one. No such host exists in this repository, and
     nothing is published yet, so the cost is zero today — recorded because it
     would be a breaking change after v0.1.
+58. **`Skip` reads the applied-schema store, contrary to this design's own
+    earlier wording.** Stage 1 is unconditional (A:508/A:515), and the store read
+    is what brings the system schema up, so there is nothing to skip. `Skip` still
+    ignores what the read found. Recorded because the design previously said `Skip`
+    would "not read the store", and a later reader would otherwise take the
+    implementation for a shortcut.
+59. **The readiness endpoint reports the phase only, never `AlvoBootState.Failure`.**
+    §0 principle 4 wants structured errors with fix suggestions, and this
+    deliberately withholds one from an HTTP response: a stage 1/2 failure reason is
+    the provider's message and can carry a connection string, while `/health/ready`
+    is unauthenticated by design. The operator gets the full reason on stderr and in
+    the log; the probe gets a phase. Deviating from the agent-first error rule is
+    correct here because the reader of a probe response is not the operator.
+
 57. **The destructive guardrail applies during *initialization*, not only during
     a mode-governed apply.** Stated as a deviation because it is stricter than
     A:513 literally requires — that criterion attaches the explicit flag to
