@@ -17,6 +17,12 @@ namespace MMLib.Alvo.Api
         public int MaxRequestBodyBytes { get; set; }
         public string RoutePrefix { get; set; }
     }
+    public static class AlvoHealth
+    {
+        public const string LivenessPath = "/health/live";
+        public const string ReadinessPath = "/health/ready";
+        public const string ReadyTag = "ready";
+    }
     public static class AlvoProblemTypes
     {
         public const string BaseUri = "https://alvo.dev/errors/";
@@ -133,6 +139,10 @@ namespace Microsoft.AspNetCore.Builder
     public static class AlvoDataApiEndpointRouteBuilderExtensions
     {
         public static Microsoft.AspNetCore.Routing.IEndpointRouteBuilder MapAlvoDataApi(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints) { }
+    }
+    public static class AlvoHealthEndpointRouteBuilderExtensions
+    {
+        public static Microsoft.AspNetCore.Routing.IEndpointRouteBuilder MapAlvoHealth(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints) { }
     }
 }
 namespace Microsoft.Extensions.DependencyInjection

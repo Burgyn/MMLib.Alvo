@@ -69,10 +69,15 @@ public static class AlvoServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers the boot: the state a readiness probe reads, and the hosted lifecycle service that fills it
-    /// in before the server binds.
+    /// Registers the boot: the state a readiness probe reads, the hosted lifecycle service that fills it in
+    /// before the server binds, and the health check that reports it.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// The health check is registered here rather than beside the Data API's services because what it reports on
+    /// is the boot, not the API: <c>AddAlvoHealth</c> is the readiness half of what this method publishes, and
+    /// <c>MapAlvoHealth</c> is the only thing that makes it reachable.
+    /// </para>
     /// <para>
     /// Registered as an <see cref="IHostedService"/> because that is what the host resolves; the
     /// implementation is an <see cref="IHostedLifecycleService"/>, which is how it gets to run before every
@@ -91,6 +96,7 @@ public static class AlvoServiceCollectionExtensions
     {
         services.TryAddSingleton<AlvoBootState>();
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, AlvoBootService>());
+        services.AddAlvoHealth();
     }
 
     /// <summary>

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using MMLib.Alvo.Api;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Host.Internal;
 
@@ -24,7 +25,13 @@ public static class AlvoHost
     public const string ConfigurationSection = "Alvo";
 
     /// <summary>The route a container's liveness probe calls.</summary>
-    public const string LivenessPath = "/health/live";
+    /// <remarks>
+    /// The route itself is the core's, and this forwards to <see cref="AlvoHealth.LivenessPath"/> so the two
+    /// cannot drift. <see cref="AlvoHealth.ReadinessPath"/> is deliberately <em>not</em> mirrored here: readiness
+    /// is a framework signal an embedded host reads too, and a second spelling of it in the standalone host
+    /// would be one more place for a probe path to go stale.
+    /// </remarks>
+    public const string LivenessPath = AlvoHealth.LivenessPath;
 
     /// <summary>The OpenAPI document's name, and therefore its version segment.</summary>
     public const string OpenApiDocumentName = "v1";
@@ -75,7 +82,6 @@ public static class AlvoHost
             builder.Services.Configure<ForwardedHeadersOptions>(ConfigureForwardedHeaders);
         }
 
-        builder.Services.AddHealthChecks();
         builder.Services.AddAlvoProblemDetails();
 
         if (options.Docs.Enabled)
@@ -119,7 +125,13 @@ public static class AlvoHost
     /// one leaves the policy catalog unprimed: the host would then map zero routes, answer liveness, report
     /// healthy, and 404 every <c>/api/*</c> call — an ordinary GitOps edit that drops a field, on the next
     /// restart. Availability silently zero is worse than a container that fails to start, so the guard turns
-    /// it back into the failed start <c>MapAlvoLiveness</c>'s remarks already claim.
+    /// it back into a failed start.
+    /// </para>
+    /// <para>
+    /// <c>MapAlvoHealth</c> maps liveness <em>and</em> readiness, and the host no longer owns either. Liveness
+    /// answering used to mean "the descriptor applied", because the apply happened before the server listened;
+    /// that claim now belongs to <c>/health/ready</c>, which reports what Alvo's boot published rather than
+    /// resting on an ordering.
     /// </para>
     /// </remarks>
     /// <param name="builder">The builder <see cref="CreateBuilder"/> returned.</param>
@@ -185,7 +197,7 @@ public static class AlvoHost
             app.UsePathBase(pathBase);
         }
 
-        app.MapAlvoLiveness();
+        app.MapAlvoHealth();
 
         ValidateOptions(app.Services);
 
