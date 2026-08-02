@@ -212,6 +212,23 @@ for f in "$FIXTURES"/*.txt; do
   fi
 done
 
+# Stryker's progress reporter emits \r, so the guard normalises with `tr` before
+# matching. That path is only exercised while a fixture still CONTAINS a carriage
+# return — and `scripts/** text eol=lf` in .gitattributes would strip them if the
+# `-text` override for this directory were ever dropped. Assert the bytes rather than
+# trusting the attribute, because a fixture quietly losing what it was capturing is
+# the same failure as a test quietly stopping.
+cr_total=0
+for f in "$FIXTURES"/*.txt; do
+  cr_total=$((cr_total + $(tr -cd '\r' < "$f" | command wc -c)))
+done
+if [ "$cr_total" -gt 0 ]; then
+  pass "fixtures still carry carriage returns ($cr_total), so the guard's \\r handling is exercised"
+else
+  fail "fixtures still carry carriage returns" "at least one" \
+    "none — check the scripts/fixtures/mutation-logs/*.txt -text rule in .gitattributes"
+fi
+
 # ============================================================================ total
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
