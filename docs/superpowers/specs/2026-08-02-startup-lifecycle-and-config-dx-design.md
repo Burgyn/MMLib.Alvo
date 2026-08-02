@@ -310,6 +310,23 @@ So stage 2 branches on what it finds, not only on what it was told:
 - **Drifted** — a snapshot exists and differs from the descriptor. Governed by
   the mode.
 
+**The destructive guardrail sits *before* this branch, not inside the `Apply`
+arm — and that ordering is a data-loss fix, not tidiness.** The first draft of
+this design put it inside `Apply`, which was wrong, because **"no applied
+snapshot" does not mean "empty database."** It means *Alvo has recorded no schema
+for this project*. `SchemaMigrationRunner` falls back to `ISchemaIntrospector` in
+exactly that case, so an "initialize" plan computed against an **adopted**
+database — one with pre-existing tables Alvo did not create — can legitimately
+contain drops. With the guard inside the `Apply` arm, initialization would have
+been *unguarded*, and the first boot of Alvo against someone's existing database
+could have dropped their columns while `Verify` was still the configured mode.
+
+So the evaluation order is: `Skip` → empty plan → **destructive gate** →
+uninitialized → mode. A destructive plan is refused in *every* mode, including
+during initialization, unless `AllowDestructive` is explicitly set. Found while
+implementing Task 3; pinned by
+`An_absent_snapshot_does_not_mean_an_empty_database_so_a_destructive_initialization_is_refused`.
+
 The mode, `AlvoSchemaStartup`:
 
 | Mode | On *drift* | Intended for |
@@ -574,6 +591,17 @@ Numbering continues the F3 design's series, which ends at 51.
     registered, now gets one. No such host exists in this repository, and
     nothing is published yet, so the cost is zero today — recorded because it
     would be a breaking change after v0.1.
+57. **The destructive guardrail applies during *initialization*, not only during
+    a mode-governed apply.** Stated as a deviation because it is stricter than
+    A:513 literally requires — that criterion attaches the explicit flag to
+    "DROP/column type change", without distinguishing a first apply from a later
+    one. The reason is in *Stage 2's decision* above: an absent applied snapshot
+    means Alvo recorded nothing, **not** that the database is empty, so an
+    initialization plan against an adopted database can contain drops. The cost of
+    being stricter is that adopting an existing database whose shape genuinely
+    conflicts with the descriptor now requires `AllowDestructive` on the first
+    boot — which is the right way round, because the alternative silently
+    discards someone else's columns.
 
 ## Ratification needed from the maintainer
 
