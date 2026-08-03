@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Api;
 using MMLib.Alvo.Auth;
@@ -14,10 +15,11 @@ namespace MMLib.Alvo.Host;
 /// <c>TestServer</c> instead of re-assembling an approximation of it.
 /// </summary>
 /// <remarks>
-/// <c>Program.cs</c> is deliberately three lines: everything worth a test lives here.
+/// <c>Program.cs</c> is deliberately one line: everything worth a test lives here.
 /// <see cref="CreateBuilder"/> registers, <see cref="BuildAsync"/> applies and maps — the two seams
 /// <c>docs/architecture/extensibility.md</c> rule 10 keeps orthogonal, in the one order that works
-/// (<c>MapAlvoDataApi</c> reads route literals off the applied schema).
+/// (<c>MapAlvoDataApi</c> reads route literals off the applied schema) — and <see cref="RunAsync"/> is the
+/// process itself: the three of them together, plus the refusal an operator reads and the exit code they get.
 /// </remarks>
 public static class AlvoHost
 {
@@ -44,7 +46,6 @@ public static class AlvoHost
 
     private const string AuthSection = $"{ConfigurationSection}:Auth";
     private const string ApiSection = $"{ConfigurationSection}:Api";
-    private const string ConnectionName = "Alvo";
 
     /// <summary>
     /// Registers everything the standalone host needs.
@@ -74,7 +75,7 @@ public static class AlvoHost
 
         var options = HostOptions(builder.Configuration);
 
-        builder.Services.Configure<AlvoHostOptions>(builder.Configuration.GetSection(ConfigurationSection));
+        AddHostOptions(builder);
         builder.Services.Configure<AlvoAuthOptions>(builder.Configuration.GetSection(AuthSection));
 
         if (options.ForwardedHeaders.Enabled)
@@ -92,6 +93,54 @@ public static class AlvoHost
         builder.Services.AddAlvo(alvo => Configure(alvo, options, builder.Configuration));
 
         return builder;
+    }
+
+    /// <summary>
+    /// Registers, builds, runs, and answers with the process's exit code — the whole of the container's
+    /// <c>Program.cs</c>, in one place a test can call.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A misconfigured container reads a sentence and exits deliberately (#132).</b> A mis-typed descriptor
+    /// mount used to end in an unhandled <see cref="FileNotFoundException"/> and an exit code shaped like a
+    /// segmentation fault; it now prints the path and the fix and exits
+    /// <c>78</c> (<c>EX_CONFIG</c>). Refusing to start is unchanged and deliberate — see
+    /// <c>docs/architecture/host.md</c> — because a container that reported healthy with no schema would be
+    /// strictly worse. Only <see cref="AlvoHostExit.IsConfigurationFailure"/>'s two shapes are caught; anything
+    /// else still propagates, so a genuine defect keeps the runtime's own report and crash dump.
+    /// </para>
+    /// <para>
+    /// <b>The <c>await using</c> states ownership rather than fixing a leak, and the distinction was
+    /// measured.</b> On .NET 10, <c>WebApplication.RunAsync</c> forwards to
+    /// <c>HostingAbstractionsHostExtensions.RunAsync</c>, whose <c>finally</c> already disposes the application
+    /// when <c>StartAsync</c> throws — measured here, unlike <c>app.StartAsync()</c>, which does not. That is an
+    /// implementation detail of an extension method with no API-level guarantee, and a refused boot leaking the
+    /// container would keep the database file open for the rest of the process, which is the regression
+    /// <see cref="ComposeAsync"/> exists to have fixed once already. Saying who owns the application is
+    /// cheaper than depending on the framework continuing not to need it said.
+    /// </para>
+    /// </remarks>
+    /// <param name="args">The process arguments.</param>
+    /// <returns>The exit code: <c>0</c> on a clean shutdown, <c>78</c> for a configuration the host refused.</returns>
+    public static async Task<int> RunAsync(string[] args)
+    {
+        try
+        {
+            var app = await BuildAsync(CreateBuilder(args)).ConfigureAwait(false);
+
+            await using (app.ConfigureAwait(false))
+            {
+                await app.RunAsync().ConfigureAwait(false);
+            }
+
+            return AlvoHostExit.Success;
+        }
+        catch (Exception refusal) when (AlvoHostExit.IsConfigurationFailure(refusal))
+        {
+            await Console.Error.WriteLineAsync(AlvoHostExit.Describe(refusal)).ConfigureAwait(false);
+
+            return AlvoHostExit.ConfigurationFailure;
+        }
     }
 
     /// <summary>
@@ -139,9 +188,10 @@ public static class AlvoHost
     /// <returns>The started-but-not-yet-running application.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
     /// <exception cref="OptionsValidationException">
-    /// A registration that asked to be validated at startup refused its configuration — a misspelled dev-key
-    /// scope, say. Raised <em>before</em> the descriptor is applied, so a misconfigured deployment leaves the
-    /// database exactly as it found it.
+    /// A registration that asked to be validated at startup refused its configuration — a mount path with no
+    /// descriptor at it, a PostgreSQL host with no connection string, a misspelled dev-key scope. Raised
+    /// <em>before</em> the descriptor is applied, so a misconfigured deployment leaves the database exactly as
+    /// it found it. <see cref="RunAsync"/> turns it into a printed refusal and a deliberate exit code.
     /// </exception>
     /// <exception cref="Migrations.DestructiveChangeNotAllowedException">
     /// The mounted descriptor's plan was refused as destructive. The host applies with
@@ -282,8 +332,29 @@ public static class AlvoHost
             .AddDataApi(api => configuration.GetSection(ApiSection).Bind(api));
     }
 
+    /// <summary>
+    /// Binds <see cref="AlvoHostOptions"/> and refuses a bad value at startup, before anything touches the
+    /// database.
+    /// </summary>
+    /// <remarks>
+    /// <c>ValidateOnStart</c> rather than a check at first use: <c>extensibility.md</c> rule 5, and the
+    /// acceptance criterion A:91. <see cref="AlvoHostOptionsValidation"/>'s own remarks say why the ordering
+    /// against the boot's DDL is a guarantee rather than a preference. <c>TryAddEnumerable</c>, so a host that
+    /// composed twice validates once.
+    /// </remarks>
+    /// <param name="builder">The builder being registered.</param>
+    private static void AddHostOptions(WebApplicationBuilder builder)
+    {
+        builder.Services.AddOptions<AlvoHostOptions>()
+            .Bind(builder.Configuration.GetSection(ConfigurationSection))
+            .ValidateOnStart();
+
+        builder.Services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IValidateOptions<AlvoHostOptions>, AlvoHostOptionsValidation>());
+    }
+
     private static string? ConnectionString(ConfigurationManager configuration) =>
-        configuration.GetConnectionString(ConnectionName) is { } configured
+        configuration.GetConnectionString(AlvoHostConfiguration.ConnectionName) is { } configured
         && !string.IsNullOrWhiteSpace(configured)
             ? configured
             : null;

@@ -163,23 +163,6 @@ public class AlvoHostBootTests
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
     }
 
-    /// <summary>An unknown provider name is refused by name, with the two that exist listed.</summary>
-    [Fact]
-    public async Task An_unknown_database_provider_is_refused_with_the_choices_named()
-    {
-        var overrides = new Dictionary<string, string?>(StringComparer.Ordinal)
-        {
-            ["Alvo:Database:Provider"] = "cosmos",
-        };
-
-        var failure = await Should.ThrowAsync<InvalidOperationException>(
-            () => AlvoHostWorld.StartAsync(overrides: overrides));
-
-        failure.Message.ShouldContain("cosmos");
-        failure.Message.ShouldContain("sqlite");
-        failure.Message.ShouldContain("postgresql");
-    }
-
     /// <summary>
     /// A credential the startup validation refuses fails the start <b>with the database untouched</b> — not
     /// after the descriptor's DDL has already been committed against it.

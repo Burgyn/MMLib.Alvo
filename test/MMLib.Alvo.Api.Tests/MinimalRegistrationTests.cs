@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Api.Internal;
+using MMLib.Alvo.Migrations;
 using System.Net;
 
 namespace MMLib.Alvo.Api.Tests;
@@ -71,6 +72,44 @@ public sealed class MinimalRegistrationTests
             HttpStatusCode.OK, "the Data API must serve without AddDataApi() and without an apply of its own");
         (await GetAsync(app, AlvoHealth.ReadinessPath)).ShouldBe(
             HttpStatusCode.OK, "the boot must have primed the schema, or the 200 above came from somewhere else");
+    }
+
+    /// <summary>
+    /// The half of that surface a host can forget is refused by name: <c>AddAlvo</c> with a driver and no
+    /// descriptor source names <c>FromDescriptor</c>, not an internal type.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The message is the fact, not the throw.</b> This composition has never been able to serve anything —
+    /// the boot loads and validates the descriptor before the server binds — but the way a host author found
+    /// out was <c>Unable to resolve service for type 'IDescriptorSource' while attempting to activate
+    /// 'DescriptorBootPlan'</c>: two <see langword="internal"/> types they cannot see and no call they can
+    /// make. §0 principle 4 applies to a registration mistake at least as much as to an HTTP response.
+    /// </para>
+    /// <para>
+    /// Asserted through a <em>started</em> host rather than against the constant, because where the refusal
+    /// happens is the whole change: an activation failure and a refusal are both exceptions out of
+    /// <c>StartAsync</c>, and only reading the message tells them apart.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_registration_that_forgot_FromDescriptor_is_refused_by_name()
+    {
+        await using var database = await SqliteApiEngine.Instance.CreateDatabaseAsync();
+
+        var builder = WebApplication.CreateSlimBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddAlvo(alvo => alvo.UseSqlite(ConnectionStringOf(database)));
+
+        await using var app = builder.Build();
+        app.MapAlvo();
+
+        var refusal = await Should.ThrowAsync<AlvoStartupRefusedException>(
+            () => app.StartAsync(TestContext.Current.CancellationToken));
+
+        refusal.Message.ShouldContain("FromDescriptor");
+        refusal.Message.ShouldNotContain("DescriptorBootPlan");
+        refusal.FixSuggestion.ShouldContain("FromDescriptor");
     }
 
     /// <summary>

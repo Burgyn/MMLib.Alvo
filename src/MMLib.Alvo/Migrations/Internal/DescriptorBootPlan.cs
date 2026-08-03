@@ -51,23 +51,44 @@ internal sealed record BootPlan(
 /// </remarks>
 internal sealed class DescriptorBootPlan
 {
-    private readonly IDescriptorSource _source;
+    /// <summary>
+    /// The refusal a host that attached a driver and forgot the descriptor source reads.
+    /// </summary>
+    /// <remarks>
+    /// <b>A sentence naming the call, not a dependency-injection failure naming this class.</b> Taking the
+    /// source as a required constructor dependency turned "you forgot <c>FromDescriptor</c>" into
+    /// <c>Unable to resolve service for type 'IDescriptorSource' while attempting to activate
+    /// 'DescriptorBootPlan'</c> — two <see langword="internal"/> types a host author cannot see, and no call
+    /// they can make. It is <em>optional</em> rather than validated at registration because
+    /// <c>AddAlvo</c> plus a driver, with the schema applied by the caller, is a supported composition: the
+    /// descriptor becomes required exactly here, when something asks for a boot plan.
+    /// </remarks>
+    internal const string NoDescriptorSourceFix =
+        "Call FromDescriptor(\"project.alvo.json\") inside AddAlvo(...), or register an IDescriptorSource of "
+        + "your own.";
+
+    internal const string NoDescriptorSourceMessage =
+        "Alvo cannot start: no project descriptor source is configured. " + NoDescriptorSourceFix;
+
+    private readonly IDescriptorSource? _source;
     private readonly IDescriptorValidator _validator;
     private readonly ICelCompiler _compiler;
     private readonly ILogger<DescriptorBootPlan> _logger;
 
     /// <summary>Initializes a new instance of the <see cref="DescriptorBootPlan"/> class.</summary>
-    /// <param name="source">Where the descriptor is read from.</param>
+    /// <param name="source">
+    /// Where the descriptor is read from, or <see langword="null"/> for a composition that attached none —
+    /// refused by name on the first <see cref="LoadAsync"/> rather than at activation.
+    /// </param>
     /// <param name="validator">The JSON-Schema and semantic validation the descriptor must pass.</param>
     /// <param name="compiler">The CEL compiler every rule and field flag is compiled through.</param>
     /// <param name="logger">Writes the declared-but-unhonoured warning.</param>
     public DescriptorBootPlan(
-        IDescriptorSource source,
+        IDescriptorSource? source,
         IDescriptorValidator validator,
         ICelCompiler compiler,
         ILogger<DescriptorBootPlan> logger)
     {
-        ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(validator);
         ArgumentNullException.ThrowIfNull(compiler);
         ArgumentNullException.ThrowIfNull(logger);
@@ -88,9 +109,15 @@ internal sealed class DescriptorBootPlan
     /// The mapped schema cannot be served: a field shadows a reserved query-string key, or a declared format
     /// is not a regular expression.
     /// </exception>
+    /// <exception cref="AlvoStartupRefusedException">
+    /// No descriptor source was attached — see <see cref="NoDescriptorSourceMessage"/>.
+    /// </exception>
     internal async Task<BootPlan> LoadAsync(CancellationToken ct)
     {
-        var descriptorJson = await _source.LoadAsync(ct).ConfigureAwait(false);
+        var source = _source
+            ?? throw new AlvoStartupRefusedException(NoDescriptorSourceMessage, NoDescriptorSourceFix);
+
+        var descriptorJson = await source.LoadAsync(ct).ConfigureAwait(false);
         EnsureValid(descriptorJson);
 
         var descriptor = AlvoDescriptor.Parse(descriptorJson);

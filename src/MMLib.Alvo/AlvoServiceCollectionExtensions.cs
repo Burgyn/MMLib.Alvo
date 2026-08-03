@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo;
 using MMLib.Alvo.Api;
@@ -54,7 +55,7 @@ public static class AlvoServiceCollectionExtensions
         AddSchemaOptions(services);
 
         services.TryAddSingleton<IDescriptorValidator, MMLib.Alvo.Descriptor.Internal.DescriptorValidator>();
-        services.TryAddSingleton<DescriptorBootPlan>();
+        AddBootPlan(services);
         services.TryAddSingleton<SchemaMigrationRunner>();
         services.TryAddSingleton<RuntimeSchemaService>();
         AddBoot(services);
@@ -67,6 +68,27 @@ public static class AlvoServiceCollectionExtensions
 
         return builder;
     }
+
+    /// <summary>
+    /// Registers boot stage 0, with its descriptor source resolved optionally.
+    /// </summary>
+    /// <remarks>
+    /// <b>Through a factory, for the same reason <see cref="AddSchemaOptions"/> uses one.</b> A nullable
+    /// constructor parameter is not an optional dependency to the container — only a default value or a factory
+    /// is — so taking <c>IDescriptorSource</c> the ordinary way turned a host that forgot <c>FromDescriptor</c>
+    /// into <c>Unable to resolve service for type 'IDescriptorSource' while attempting to activate
+    /// 'DescriptorBootPlan'</c>, naming two internal types instead of the call to make. The refusal belongs to
+    /// <see cref="DescriptorBootPlan.NoDescriptorSourceMessage"/>, where it can be a sentence; and it belongs at
+    /// the first load rather than at registration because <c>AddAlvo</c> plus a driver, with the schema applied
+    /// by the caller, is a supported composition the data-layer suites depend on.
+    /// </remarks>
+    /// <param name="services">The service collection.</param>
+    private static void AddBootPlan(IServiceCollection services) =>
+        services.TryAddSingleton(provider => new DescriptorBootPlan(
+            provider.GetService<IDescriptorSource>(),
+            provider.GetRequiredService<IDescriptorValidator>(),
+            provider.GetRequiredService<ICelCompiler>(),
+            provider.GetRequiredService<ILogger<DescriptorBootPlan>>()));
 
     /// <summary>
     /// Registers the boot: the state a readiness probe reads, the hosted lifecycle service that fills it in
@@ -88,7 +110,10 @@ public static class AlvoServiceCollectionExtensions
     /// <c>TryAddEnumerable</c>, so a host that called <c>AddAlvo</c> twice boots once. The boot needs a
     /// descriptor source and a database provider — the same collaborators <c>ApplyAlvoDescriptorAsync</c>
     /// needs — so a host that registered Alvo without either now fails its <em>start</em> rather than serving
-    /// nothing while reporting healthy.
+    /// nothing while reporting healthy. A missing provider is refused by <see cref="AlvoProviderValidation"/>;
+    /// a missing descriptor source is refused by <c>DescriptorBootPlan</c>, which is where it becomes required
+    /// — <c>AddAlvo</c> plus a driver, with the schema applied by the caller, is a supported composition that
+    /// the data-layer suites use and must keep working.
     /// </para>
     /// </remarks>
     /// <param name="services">The service collection.</param>
