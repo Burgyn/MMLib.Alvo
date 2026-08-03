@@ -196,8 +196,11 @@ descriptor field-name grammar (`^[a-z][a-z0-9_]{0,62}$`) admits every one of the
 `limit` is a legal descriptor and `?limit=10` would be genuinely ambiguous — a request could not tell a
 filter on such a field from the parameter itself.
 
-The ambiguity has **no correct per-request resolution**, so it is refused at **apply** instead, naming the
-entity, the field and the full list. `not` is reserved even though it is only ever a prefix: inside
+The ambiguity has **no correct per-request resolution**, so it is refused **before the server listens**
+instead — stage 0 of the boot, over the descriptor's mapped schema and with no database access — naming the
+entity, the field and the full list. The explicit apply path refuses it too, and the data source keeps a
+belt for a substituted `ISchemaRegistry` (see *Route generation happens at enumeration time*). `not` is
+reserved even though it is only ever a prefix: inside
 `or=(…)`, the member `not.eq.x` is either a negated term or a filter on a field called `not`, and nothing
 in the grammar distinguishes them.
 
@@ -647,23 +650,65 @@ an *unkeyed* create with the same violation also answers 500, just immediately. 
 a caller-triggerable amplification of a caller's own mistake, and because the fix (asking the dialect
 whether a constraint name is Alvo's own) belongs with the retry logic rather than here. Tracked in **#127**.
 
-## Route generation happens at mapping time — an unresolved F7 fork, not a chore
+## Route generation happens at *enumeration* time — half of #103 is delivered
 
-`EntityRouteCatalog` reads the applied schema from `ISchemaRegistry`, and `MapAlvoDataApi` runs **once**,
-at startup. So a host must migrate *before* it maps.
+`MapAlvoDataApi` registers **one empty `AlvoEndpointDataSource`** and returns. `EntityRouteCatalog` reads
+the applied schema from `ISchemaRegistry` on the **first enumeration** of that source — which is the first
+request that builds the matcher, not `StartAsync` (design fact 1, measured). So the ordering obligation
+"migrate before you map" is **gone**: the sequence is `register → map → boot primes → listen → first
+request materialises the routes`, and a host that maps first no longer gets an empty API. An entity the
+applied schema does not declare still has no route at all, so laziness costs nothing in the fail-closed
+direction.
 
-**A descriptor applied later at runtime changes policy and validation immediately, but cannot add a
-route.** For F3 that is fine — one descriptor at startup, and it is the fail-closed direction. For **F7's
-runtime-defined entities (*evidencie*)**, which by definition can never have a mapping-time literal, it is
-the decision the whole feature lands on. Two candidate resolutions, with the trade of each:
+Three properties of that data source are requirements rather than implementation taste:
+
+- **The endpoints are built through the real minimal-API `Map*` helpers** on a nested
+  `IEndpointRouteBuilder`. Hand-assembled `RouteEndpointBuilder` endpoints route perfectly and are
+  **invisible to ApiExplorer**, so the OpenAPI document empties while every routing fact stays green
+  (design facts 4 and 5, measured — and pinned by
+  `The_OpenApi_document_lists_every_mapped_entity_route`).
+- **The table is built once and frozen**, and that is correctness, not economy: a source that rebuilt per
+  enumeration would let the document — generated per request, enumerating afresh — advertise a
+  runtime-applied entity that the matcher, cached behind an unfired change token, does not route.
+- **`GetGroupedEndpoints` forwards to the nested sources** rather than using the base implementation,
+  because `app.MapGroup(prefix).MapAlvoDataApi()` is supported and a created row's `Location` is read off
+  the matched endpoint's combined pattern (#121).
+
+**The reserved-query-key belt now fires at first enumeration, not at start** — a deliberate move, and the
+one behavioural cost of laziness. Stage 0 of the boot still refuses a reserved field name coming from the
+*descriptor*, at start, over the descriptor's mapped schema. The belt inside the data source guards the
+different input: a host that **substituted `ISchemaRegistry`** and served entities Alvo never mapped from a
+descriptor. Keeping a copy of the check at map time was considered and rejected as worse than nothing: at
+map time the registry is the unprimed provider and returns an **empty** `SchemaModel`, so the check would
+iterate zero entities and pass **vacuously in every real host** while still passing its own test, which
+pre-registers a primed registry — a control no test can distinguish from a working one.
+
+**What is left of #103, corrected.** The lazy half is delivered; the mutable half — invalidating so an
+entity applied at *runtime* gains a route — is not, and `GetChangeToken` returns a token that never fires.
+The remaining cost is **not** what this document used to claim:
 
 | Resolution | Buys | Costs |
 |---|---|---|
-| A **mutable `EndpointDataSource`** with an `IChangeToken` | Every entity — physical or virtual — keeps a real route literal, so the OpenAPI document stays able to list exactly what is mapped, and routing keeps answering "no such entity" before authorization | Rebuilding the endpoint table at runtime, and a concurrency story for requests in flight across a rebuild |
+| A **mutable `EndpointDataSource`** with an `IChangeToken` | Every entity — physical or virtual — keeps a real route literal, and routing keeps answering "no such entity" before authorization | Rebuilding the endpoint table at runtime, a concurrency story for requests in flight across a rebuild, and — **measured, design fact 6** — the **OpenAPI document does not refresh**: routing and the document have independent caches, and invalidating the data source refreshes only routing. Document-cache invalidation is the real remaining work, and nothing has designed it |
 | A **catch-all route for virtual entities only** | No endpoint-table surgery; virtual entities are late-bound by nature | Turns a routing question into a port question for that subset, and a catch-all cannot enumerate paths for the document. Correctly **refused for physical entities**, where a literal exists |
 
-Tracked in **#103**. PR4's `MMLib.Alvo.Host` should also make migrate-then-map **explicit** rather than
-incidental: today a host that maps first gets an empty API and no diagnostic.
+This document previously stated that resolution A "keeps the OpenAPI document able to list exactly what is
+mapped". **That was measured false**: after `Invalidate()` a new entity routes (200) and is still absent
+from the document. Corrected here rather than in the issue alone, because it was the reason A looked cheap.
+Also, when the mutable half lands, the new change token must be published **before** the old one is
+cancelled — the reverse order re-enters the invalidation and overflows the stack (aspnetcore#44392).
+
+Still tracked in **#103**, narrowed to the runtime-apply case that F7's *evidencie* land on.
+
+### `AddDataApi()` is configuration, and the Data API is registered by `AddAlvo`
+
+`AddAlvo` has always called `AddAlvoApi()`, so the Data API's services were never opt-in. `AddDataApi` is
+therefore **configuration only** — it contributes an `AlvoApiOptions` configure action and registers
+nothing — additive, idempotent, and order-insensitive against `AddAlvo`. Nothing is reachable over HTTP
+until `MapAlvoDataApi()` (or `MapAlvo()`) is called, which is a separate seam by design
+(`extensibility.md` rule 10). Recorded because the startup-lifecycle design asked the maintainer to ratify
+a breaking change here and there was none to ratify: the premise was measured false and the deviation
+(56) is **withdrawn**.
 
 ## What the apply step refuses, and the line that was drawn
 

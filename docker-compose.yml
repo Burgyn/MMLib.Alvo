@@ -47,8 +47,14 @@ services:
       - "127.0.0.1:8080:8080"
     volumes:
       - ./examples/vehicle-registry/vehicles.alvo.json:/alvo/descriptor.json:ro
+    # /health/ready, not /health/live: liveness evaluates no check at all and answers 200 for any
+    # process that is up, so it is the wrong signal for "the backend is usable" even while the boot
+    # happens to run before the socket binds. Readiness is 503 until Alvo's boot has applied the
+    # descriptor and primed the policy catalog — the thing `docker compose up --wait` has always
+    # meant to wait for, and the one that stays true if a drifted descriptor is ever allowed to start
+    # un-ready instead of failing the start.
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health/live"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health/ready"]
       interval: 2s
       timeout: 3s
       retries: 30

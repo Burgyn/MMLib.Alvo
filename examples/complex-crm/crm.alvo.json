@@ -14,9 +14,9 @@
     "logoUrl": "/assets/logo.svg"
   },
   "access": {
-    "admin": "@user.role == 'manager' && @user.email.endsWith('@firma.sk')",
-    "developer": "@user.role == 'manager'",
-    "viewer": "@user.role in ['sales', 'manager', 'finance']"
+    "admin": "'manager' in @user.roles && 'finance' in @user.roles",
+    "developer": "'manager' in @user.roles",
+    "viewer": "'sales' in @user.roles || 'manager' in @user.roles || 'finance' in @user.roles"
   },
   "tenancy": {
     "enabled": true

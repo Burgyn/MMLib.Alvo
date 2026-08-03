@@ -109,8 +109,12 @@ services:
       - "127.0.0.1:${ALVO_FS_PORT:?set ALVO_FS_PORT (see examples/field-service/demo-identities.env)}:8080"
     volumes:
       - ./examples/field-service/field-service.alvo.json:/alvo/descriptor.json:ro
+    # /health/ready rather than /health/live, for the reason docker-compose.yml states: liveness
+    # evaluates no check and answers 200 for any process that is up, while readiness is 503 until the
+    # descriptor has applied and the policy catalog is primed. This stack's suite starts by seeding
+    # rows, so "healthy" has to mean the schema is there.
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health/live"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health/ready"]
       interval: 2s
       timeout: 3s
       retries: 30

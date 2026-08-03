@@ -8,36 +8,95 @@
 ## What the host is, and is not
 
 It is a `WebApplication` over the core's public seams and nothing more: configuration
-binding, one driver registration, the code-first apply, `MapAlvoDataApi`, liveness, and
-a docs UI. It is **not** the full standalone story — the dashboard, the Management API,
-the CLI and the published image are #24's remainder, in F4.
+binding and validation, one driver registration, `MapAlvo` (the two probes plus the
+generated Data API), and a docs UI. **Nothing here applies the descriptor** — that is the
+framework's boot, described below — so the standalone host is now the same shape as an
+embedded one: `AddAlvo(…)`, then `MapAlvo()`. It is **not** the full standalone story — the
+dashboard, the Management API, the CLI and the published image are #24's remainder, in F4.
 
-## The order in `BuildAsync` is load-bearing
+## The five boot stages, and why nothing in the host sequences them
 
-`MapAlvoDataApi` reads entity-name **literals** off the applied schema, so the apply must
-precede the mapping or the host maps nothing at all. The apply also primes the policy
-catalog, and an unprimed catalog denies every operation. Liveness is mapped before the
-apply so the route exists on the endpoint table either way, but the server does not listen
-until `RunAsync`, which is *after* `BuildAsync` returned — so **answering liveness proves
-the descriptor applied**. A host whose apply throws never listens, and the container exits
-non-zero. That is deliberate: a container reporting healthy with no schema is worse than
-one that fails to start.
+The boot is `AlvoBootService`, an `IHostedLifecycleService` in the **core**, and it runs in
+`StartingAsync` — before *every* `IHostedService.StartAsync`, including the one that binds
+the socket (measured: design fact 7). So the host composes a pipeline and never sequences a
+database against a route table.
 
-**The apply's result is checked, not discarded, and that is load-bearing too.** Not every
-failure to apply is a throw: a plan that is destructive while `AllowDestructive` is false comes
-back with `Applied == false` and no exception, because a caller doing a dry run wants to *read*
-the plan. On that branch the runner also skips priming the policy catalog, so `MapAlvoDataApi`
-would map zero routes — a container that reports healthy and 404s every `/api/*` call, after an
-ordinary GitOps edit that drops a field. `BuildAsync` therefore calls
-`MigrationResult.EnsureApplied()`, which turns that one outcome back into a failed start.
+| Stage | What it does | Risk |
+|---|---|---|
+| 0 | Load the descriptor, JSON-Schema-validate, parse, map to a `SchemaModel`, compile the policy catalog and the reserved-name/format checks | no database access at all |
+| 1 | Bring the framework's own `alvo.*` tables up, **unconditionally** (A:508/A:515) | idempotent DDL on Alvo's own chain |
+| 2 | Compare the descriptor against `IAppliedSchemaStore` and branch on *uninitialized* / *unchanged* / *drifted*; only *drifted* is governed by `Alvo:Schema:Startup` | the only stage that may touch the host's tables |
+| 3 | Publish the compiled policy catalog and the schema registry, and publish `AlvoBootState` | none |
+| — | Routes materialise from the primed registry at **first enumeration**, after the boot has finished | none |
 
-The predicate is narrower than `!Applied`, deliberately. An **empty** plan also reports
-`Applied == false` — that is the ordinary restart, where the applied schema already matches the
-descriptor, and the runner *does* prime the catalog on it — and so does a **dry run**. Guarding
-on `!Applied` alone would fail every unchanged restart, which is the common case and a worse
-outage than the silent one. `AlvoHostRestartTests` holds both ends: two hosts over one SQLite
-file, one pair with an unchanged descriptor (must serve) and one whose descriptor drops a field
-(must refuse, naming the step).
+Stage 1 has **no port of its own**, deliberately: the system schema is owned by whichever
+driver implements `IAppliedSchemaStore`, and that driver cannot answer a single call without
+it, so stage 2's read *is* stages 1 and 2 at once, in every mode — `Skip` included. A port is
+earned the moment a driver's system schema grows a table no store call touches (PR5's outbox
+is the first candidate).
+
+**The apply→map coupling is gone, and so is the ordering folklore that used to live here.**
+`MapAlvo` may be called before or after the schema exists: the Data API's endpoints are read
+off the applied schema at *enumeration* time rather than at map time (`data-api.md`, *Route
+generation happens at enumeration time*). Priming is the boot's job on every boot, including
+the unchanged restart, so the case that used to serve zero routes while reporting healthy
+cannot arise from ordering at all. `MigrationResult.EnsureApplied()` still exists and is
+still right — the host simply no longer calls it; it belongs to the explicit
+`ApplyAlvoDescriptorAsync` path the CLI and the Management API will use.
+
+**Options validation runs before the boot, and that is now a framework guarantee rather than
+a line of host code.** `Host.StartAsync` runs every `ValidateOnStart` registration before the
+first `StartingAsync` (measured: design fact 8), so a mis-typed mount path or driver name
+fails the start with the database exactly as it was found. `AlvoHost.ValidateOptions` — which
+called `IStartupValidator` by hand precisely because the old apply ran *before* validation —
+was therefore **deleted**, and
+`A_credential_the_startup_validation_refuses_leaves_the_database_untouched` still passes,
+which is what proves the guarantee moved rather than went missing.
+
+A boot that refuses throws out of `StartingAsync`, so the server **never binds**: there is no
+window in which the container answers anything at all with no schema. What the operator reads
+and what the process exits with is the next section.
+
+## How the process ends, and why the exit code is 78
+
+`Program.cs` is one line — `return await AlvoHost.RunAsync(args);` — because everything worth
+a test lives in `AlvoHost`: `CreateBuilder` registers, `BuildAsync` maps, and `RunAsync` is
+the process, including the refusal an operator reads and the code they get.
+
+- **A recognised configuration failure prints a sentence on stderr and exits `78`.** Exactly
+  two shapes are recognised (`AlvoHostExit.IsConfigurationFailure`):
+  `OptionsValidationException` — every option value the host or the framework refused,
+  whether by `ValidateOnStart` or by the driver selection that runs during registration — and
+  `AlvoStartupRefusedException`, the boot's own refusal (drift under `Verify`, a plan that
+  would discard data). `OptionsValidationException.Failures` are printed one per paragraph
+  rather than through `Message`, which joins them with `"; "` and runs two multi-line
+  refusals into one unreadable line: a container with two things wrong is fixable in one
+  restart.
+- **78 is `EX_CONFIG` from `sysexits.h`**, the established code for "something was found in
+  an unconfigured or misconfigured state". A bare `1` would be indistinguishable from every
+  other failure, which is exactly the information #132 says was lost; 78 lets a deployment
+  script or an orchestrator hook branch on "an operator has to change something" versus
+  "retrying might help". It also sits below the shell's reserved range (126, 127, 128+n), so
+  it cannot be misread as a signal the way the observed **139** was misread as a
+  segmentation fault.
+- **Everything else still propagates unhandled**, deliberately. A blanket `catch` would take
+  the runtime's own report and whatever crash dump the deployment configured away from every
+  genuine defect, so a named predicate is used instead and a fact asserts an unrelated
+  exception is *not* one of the two shapes.
+- **The application is disposed either way.** `BuildAsync` owns the application until it
+  returns one (a refused `Compose` disposes it, because reading
+  `IOptions<AlvoHostOptions>` is what runs the validation and a live service provider behind
+  it holds the connection pool and the database file); `RunAsync` owns it afterwards with
+  `await using`. A refused *boot* is disposed there, and since the apply moved into the host
+  lifecycle that is the only place it can be.
+
+That closes **#132**: a mis-typed mount now reads
+`Alvo cannot start: no project descriptor at /alvo/descriptor.json.` followed by the two
+fixes (`docker run -v ./project.alvo.json:/alvo/descriptor.json mmlib/alvo`, or
+`Alvo__DescriptorPath=…`), and exits 78. The refusals are written in one place
+(`AlvoHostConfiguration`) because the same wording has to be raised from two moments — the
+driver is chosen while the container is still being built, and every value is validated again
+on the built container.
 
 ## Configuration
 
@@ -61,6 +120,17 @@ The database is chosen by name, and an unknown name is refused rather than defau
 (`AlvoDatabaseSelector`). A missing connection string is defaulted **only** for SQLite: a
 PostgreSQL host with none must fail, because the alternative is quietly writing rows to a
 container-local file that vanishes with the container.
+
+**`AlvoHostOptions` is validated at startup, which discharges deviation 48 and meets A:91.**
+`AlvoHostOptionsValidation` is an `IValidateOptions<AlvoHostOptions>` registered with
+`ValidateOnStart` (through `TryAddEnumerable`, so composing twice validates once), and it reports
+*every* refusal rather than the first — a container with two things wrong is fixable in one restart.
+It checks that the descriptor is actually **at** the configured path, not merely that the path is
+non-empty: a time-of-check/time-of-use window microseconds wide, against the single likeliest way a
+first `docker run` goes wrong. The refusals name the environment spelling an operator can type
+(`Alvo__DescriptorPath`, not `Alvo:DescriptorPath`) and live as `internal` members of
+`AlvoHostConfiguration`, because the driver refusal is raised while the container is still being
+*built* and the same wording has to come out of both moments.
 
 **No default credential.** §2.14's acceptance criterion is that the image never ships a
 preset login, so the host seeds no API key. A host with none configured still starts and
@@ -95,16 +165,25 @@ because the cost is real:
 
 | Mode | On drift | What it costs |
 |---|---|---|
-| `Apply` *(default)* | applies the plan | every replica of a rolling deploy attempts the DDL, and the application needs DDL rights against its own database — what EF Core's guidance advises against |
+| `Apply` *(default)* | applies the plan | every replica of a rolling deploy attempts the DDL, and the application needs DDL rights against its own database — what EF Core's guidance advises against. Plus **#145**, below |
 | `Verify` | refuses, printing the steps and the fix | a descriptor edit does not take effect until the migration job runs |
 | `Skip` | does not read the applied snapshot at all | the schema is entirely somebody else's business |
 
 Replicas racing the same DDL **converge** rather than crash-looping (the boot's
 write is a version row first, then the DDL, in one transaction, with one bounded
-retry), so `Apply` on a replica set is not an outage. What it is instead is a
-schema that two different descriptors can take turns rewriting: a replica holding
-an older descriptor and allowed to apply will apply *it*, on its own restart. One
-writer — a migration job — is the shape that cannot do that.
+retry), so `Apply` on a replica set is not an outage.
+
+**It is, however, not the whole story, and the rest is #145.** Two replicas holding
+*different* descriptors — the ordinary state of a rolling deploy, where old and new
+pods overlap — each diff against what the other just applied and each apply. The
+always-on destructive gate catches only the subset where a plan **drops** something;
+the additive-vs-additive case (A adds `region`, B adds `city`) is refused by nothing,
+so the database ends up with **both** and therefore with a schema **no deployed
+descriptor declares**, while every replica reports `Ready`. Measured, not theorised.
+The resolution — ordering the apply from `IDescriptorVersionStore`'s append-only
+history, using the descriptor `revision` the frozen schema already carries for exactly
+this purpose — is **#145**, the next PR. Until it lands, one writer (a migration job
+plus `Verify` on the pods) is the shape that cannot get there.
 
 ```yaml
 # production: the schema is the migration job's, and the pods only serve it
@@ -154,11 +233,14 @@ removing the call from the pipeline leaves every path-base fact green. `UseForwa
 ## Docs
 
 `AddOpenApi` is called by the **host**, never by the core (`ApiSetup.AddAlvoApi` says why: serving a document
-is a hosting decision), and `Scalar.AspNetCore` renders it at `/scalar` from `/openapi/v1.json`. Two orderings
-are load-bearing and opposite: the host's document transformer registers **before** `AddAlvo`, because
-registration order is transformer order and Alvo appends to `info.description` rather than replacing it; the
-docs **routes** map **after** `MapAlvoDataApi`, because the document is generated from the endpoints actually
-mapped. `Alvo:Docs:Enabled=false` removes both routes — the UI *and* the document, because the switch is about
+is a hosting decision), and `Scalar.AspNetCore` renders it at `/scalar` from `/openapi/v1.json`. **One
+ordering is load-bearing, and it is the registration one:** the host's document transformer registers
+**before** `AddAlvo`, because registration order is transformer order and Alvo appends to `info.description`
+rather than replacing it. The docs **routes** still map after `MapAlvo`, but only because that is the order
+they read in — the document is generated per request by enumerating the endpoint data sources, so nothing
+about its content depends on when its own route was registered. (It used to be presented as load-bearing for
+the opposite reason, back when the endpoints existed only if the apply had already run.)
+`Alvo:Docs:Enabled=false` removes both routes — the UI *and* the document, because the switch is about
 publishing the API's shape at all, and a page without its document renders an error.
 
 Scalar is the only reason the Host carries a third-party package, and it is why `package-boundary.md` records
@@ -184,18 +266,57 @@ its stated reason. The issue records the resolution rule and says plainly that i
 not working, and not known-broken. It is the third of the path-base family: #121 (`Location`, fixed here),
 #130 (the document's `servers`, open), #134 (this).
 
-## Health
+## Health — two probes, and they are configured oppositely
 
-Liveness only (`/health/live`). §2.12 asks for readiness with database, cache and message-bus
-reachability; none of those probes exists as a port today, and inventing one is a port
-widening PR4 has no mandate for. Recorded as deviation 38 and filed as **#133** rather than
-approximated — the core may not touch a provider directly (§0 principle 2), so "can you reach the
-database" is a port to design, not a health check to write.
+Both routes are the **core's** (`MapAlvoHealth`, composed by `MapAlvo`), so an embedded host gets
+exactly what the container gets. The host mirrors only `/health/live` as `AlvoHost.LivenessPath`,
+forwarding to the core's constant; readiness is deliberately not re-spelled here.
 
-What liveness already proves is more than its name suggests, and what it does not is the point of
-#133: the descriptor applies *before* the server listens, so an answer here means the schema is up
-and the database was reachable **at startup** — but a database that goes away afterwards is
-invisible to it.
+| Route | Evaluates | Answers |
+|---|---|---|
+| `/health/live` | **no** health check at all | 200 for any process that is up |
+| `/health/ready` | every check tagged `ready` | **503** until Alvo's boot published `Ready`, 200 after |
+
+**Liveness evaluates nothing on purpose.** A failing liveness probe has the container killed and
+restarted, which is the wrong answer to "the migration job has not run yet" — the Kubernetes
+documentation warns that exactly this mistake cascades under load. A failing readiness probe only
+removes the pod's address from the service, which is the right consequence, so everything
+conditional lives there. The asymmetry also means a health check somebody adds later without much
+thought lands where being wrong costs traffic rather than the process.
+
+**Alvo's own contributor reports `Unhealthy`, never `Degraded`, and the fact asserts the status
+code.** The framework maps `Degraded` to **HTTP 200** and Kubernetes counts any 2xx as success, so a
+degraded gate is no gate at all — an assertion about the reported health *string* would stay green
+while the probe served 200 to a container with no schema. `Degraded` is deliberately left mapping to
+200 rather than remapped behind an option, because remapping it would make that mutation stop going
+red.
+
+**Readiness publishes the phase and nothing else** (`Pending` / `Ready` / `Failed`), and the
+`HealthReport` handed to the response writer is discarded. `AlvoBootState.Failure` is the provider's
+own message for a stage-1 or stage-2 failure — measured to carry a filesystem path today, and able
+to carry a connection string from any third-party `IAppliedSchemaStore` — and this route is
+unauthenticated by construction, because a container probe presents nothing to authenticate with.
+The operator gets the full reason on stderr and in the log (design deviation 59). The check's
+*description* and the HTTP *body* are two independent barriers, so two facts hold the line: mutating
+either one turns exactly one of them red.
+
+The check is registered through `IConfigureOptions<HealthCheckServiceOptions>` with
+`TryAddEnumerable`, not `AddCheck`: `AddCheck` is additive, a host calling `AddAlvo` twice would
+register two checks named `alvo-schema`, and `DefaultHealthCheckService` refuses to be *constructed*
+on a duplicate name — both probes would then answer 500, which an orchestrator cannot tell from "not
+ready" (design deviation 63). Neither response is cacheable, and that costs no configuration:
+`AllowCachingResponses` already defaults to `false`, which is what sends
+`Cache-Control: no-store, no-cache` on both.
+
+**`/health/ready` existing is not §2.12 being met.** §2.12 asks for readiness over database, cache
+and message-bus reachability; what exists here is the endpoint, the state machine, the tag-based
+registration seam and exactly *one* contributor to it — "the descriptor applied and the policy
+catalog is primed". The **reachability port is still owed** and stays **#133**: the core may not
+touch a provider directly (§0 principle 2), so "can you reach the database" is a port to design, not
+a health check to write. Deviation 38 is **superseded in its liveness-only part** and preserved in
+its guarantee: a boot that refuses never binds the socket, so nothing ever answers healthy with no
+schema. What is still missing is the *continuing* answer — a database that goes away after boot is
+invisible to both routes.
 
 ## A 500 is Alvo's own refusal here (#119)
 
@@ -205,13 +326,14 @@ Alvo's generated routes** is logged with its stack trace and answered with
 caller. Embedded hosts register neither and keep answering their own way, which is why the registration is
 opt-in rather than part of `AddAlvo`.
 
-The scope matters here too, even though this host is almost all Alvo: a failure on `/health/live`, on the
+The scope matters here too, even though this host is almost all Alvo: a failure on either probe, on the
 docs routes, or before routing matched anything is declined by the handler and rendered by the framework's
 own problem-details writer. And a request this host's web server would not read — a body over Kestrel's
 `MaxRequestBodySize`, an upload the client truncated — is answered at *that* status under
 `https://alvo.dev/errors/unreadable-request`, not as a 500.
 
-`UseExceptionHandler` is the **first** middleware in `BuildAsync`, before liveness and before the Data API: a
+`UseExceptionHandler` is the **first** middleware in `Compose`, before `MapAlvo` and therefore before both the
+probes and the Data API: a
 middleware only sees what runs after it, and a failure that got past that line would be rendered by the
 framework with an RFC 9110 status-code URI in `type`.
 
@@ -261,8 +383,11 @@ pipeline hands in the real MinVer version once #24 ships an image.
 `examples/vehicle-registry/vehicles.alvo.json` mounted at `/alvo/descriptor.json:ro` and port 8080 published.
 The image ships **no** credential: `ALVO_DEMO_KEY_SECRET` is required with compose's `:?` form, so the stack
 refuses to start rather than inventing one. `docker compose up --wait --wait-timeout 60` is the acceptance form
-of §2.14's "working backend within 60 s", and it means something because the host does not listen until the
-descriptor has applied.
+of §2.14's "working backend within 60 s", and it means something because the stack's `healthcheck` probes
+**`/health/ready`**: healthy is the boot's own "descriptor applied, catalog primed" signal rather than "a
+process is listening". Both stacks probe readiness for that reason. Liveness would also be *true* only after
+the boot today — the boot runs before the socket binds — but it is documented as unconditional, so building a
+deployment gate on it would be building on a coincidence.
 
 The cost of `:?` is that **every** compose command interpolates the file, `down` included: tearing the stack
 down in a shell that has forgotten the variable fails the same way starting it does. Keep it exported, or put
@@ -289,10 +414,10 @@ each of which has been observed to fail under a mutation of the stack:
 | `docker compose config` fails without `ALVO_DEMO_KEY_SECRET` | Put a literal secret in the file: it exits 0. |
 
 Removing the volume mount altogether is the sixth, and it is the one that proves the descriptor is load-bearing
-rather than decorative: the host refuses to start with `Could not find file '/alvo/descriptor.json'`, the
-container never reports healthy, and `docker compose up --wait` exits non-zero. The *contract* there is right
-and stays; what an operator sees is not — an unhandled `FileNotFoundException` and a 139 exit, filed as
-**#132** against #24, because a mis-typed mount is the likeliest way a first `docker run` goes wrong.
+rather than decorative: the container never reports healthy and `docker compose up --wait` exits non-zero. The
+contract was always right; what an operator saw was not — an unhandled `FileNotFoundException` and a 139 exit.
+**#132 is closed**: the refusal now names the path and the two fixes and the process exits **78**
+(`EX_CONFIG`) — see *How the process ends*.
 
 One thing the mutations turned up that is not about the stack at all: mounting `simple-tasks` answers **401**
 on `/api/tasks` with the same dev key that works against `vehicle-registry`. The key names `admin` and
@@ -327,7 +452,19 @@ Liveness alone would pass against any container, so it is not the gate. Three fa
 | --- | --- | --- |
 | A real row created over the published port and re-read through the `Location` the server advertised | `002-Owners` | Mount `simple-tasks`: `/api/owners` 404s and the suite fails at the create. |
 | `/api/warehouses` 404s, in the API **and** absent from the document's `paths` | `003-Descriptor/001`, `004-Docs/001` | Point the request at `/api/owners` instead: 200, and the suite fails. |
-| Exactly one `owners` row named `TeaPie Ltd` in **PostgreSQL** | `scripts/test-e2e` | Set `Alvo__Database__Provider: sqlite`: **all 20 TeaPie tests still pass** and only this fails. |
+| Exactly one `owners` row named `TeaPie Ltd` in **PostgreSQL** | `scripts/test-e2e` | Set `Alvo__Database__Provider: sqlite`: **every TeaPie test still passes** and only this fails. |
+
+`001-Health` carries both probes now: `001-liveness` asserts 200 and claims nothing more, and
+`002-readiness` asserts `/health/ready` is 200 **and** that the body is the phase — `Ready`, with no
+connection-string fragment in it. Readiness is also what the stack's `healthcheck` waits on, so `up --wait`
+returning at all is itself the deployment-level form of the same assertion.
+
+**The e2e is the only gate that builds the image, and it is the only one that would have caught the defect it
+did.** The `sdk:10.0-alpine` tag resolves to a *newer* SDK than `global.json` pins locally (10.0.302 against
+10.0.100), and the newer analyzer set refused `AlvoBootService`'s boot log line under `CA1873` — an argument
+evaluated whether or not the level is enabled. Every ring was green; the image would not compile, so no stack
+could start at all. The lesson is recorded rather than only fixed: a Release publish under a rolled-forward SDK
+is a different build from `dotnet build`, and this script is where the difference surfaces.
 
 The third one is why it is a shell assertion rather than a TeaPie test: PostgreSQL publishes no host port, so
 it is `docker compose exec postgres psql`, not HTTP. **A suite without it is decorative** — the SQLite mutation
@@ -359,14 +496,18 @@ PR4 starts `[20] Standalone run (Docker) + embedded run`; F4 finishes it. Still 
 - the **dashboard** and the **Management API**, and with them the dashboard-first source of truth;
 - the **`alvo` CLI** (`alvo apply vehicles.alvo.json`) — one of the descriptor's doors that PR4 does not open
   (`PLAN.md` §2: Docker mount = CLI apply = Management API = `FromDescriptor()` = admin UI export);
-- **readiness** with database / cache / message-bus reachability (§2.12, **#133**), and the rest of §2.12 —
-  OpenTelemetry, rate limiting (**#112**), usage metering;
+- the **reachability half of readiness** — database / cache / message bus (§2.12, **#133**). `/health/ready`,
+  its state machine and its tag-based registration seam now exist, with one contributor; the *port* does not,
+  and §2.12 is not met until it does. Plus the rest of §2.12 — OpenTelemetry, rate limiting (**#112**), usage
+  metering;
 - the **full compose stack** (MinIO, MailHog) once storage and email exist;
 - an operator-facing **`ALVO_*` environment vocabulary**, if the CLI work shows it earns its keep — and it
   has to be settled **before the image is published**, because after that the env names are a breaking
-  change (deviation 39);
-- a first-run experience worth the name: **#132** (a mis-typed descriptor mount) is the first thing an
-  operator hits, and it is currently a stack trace.
+  change (deviation 39). `Alvo__Schema__Startup` and `Alvo__Schema__AllowDestructive` join that set;
+- the **upgrade/downgrade contract between the NuGet version and the system-schema version** (A:555). Stage 1
+  creates the current `alvo.*` tables idempotently and carries no version contract, so a container rolled back
+  to an older image against a newer system schema is undefined. Recorded as design deviation 55, deferred here
+  deliberately — it has no task in the startup-lifecycle plan.
 
 Not #24's, but on the same deployment path: **#130** (the document's `servers`) and **#134** (Scalar behind a
 path base) both have to be answered before "run it behind your ingress" is a claim this project can make.

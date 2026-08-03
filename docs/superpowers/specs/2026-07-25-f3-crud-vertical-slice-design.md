@@ -156,7 +156,12 @@ needed anyway once #36 adds real providers.
 Strong typing is only real if it is handled at every boundary:
 
 - a `JsonConverter` for each — otherwise they serialize as `{"Value":"…"}`;
-- an EF value converter on `tenant_id` / `created_by` / `updated_by`;
+- ~~an EF value converter on `tenant_id` / `created_by` / `updated_by`~~ — **wrong, and it was never
+  built.** Corrected while closing #74: `FieldClrType` maps `uuid` to `Guid`, and `AlvoAuditStamp`
+  writes `Guid?` (`Actor(context)`), so the wrapper never enters the EF model at all and a converter
+  would be dead code. There is no `ValueConverter` anywhere in `src/`, deliberately. The boundary
+  that *does* need handling is the next bullet — the compiled predicate's parameter binding, where
+  `@user.id` really would reach ADO.NET as the wrapper;
 - **parameter binding in the compiled predicate** — `@user.id` must reach ADO.NET
   as a `Guid`, not as the wrapper, or the provider fails on an unknown type;
 - `TryParse` for route and query-string binding.
@@ -1116,13 +1121,19 @@ record for the standalone host.
    working backend with *no* configuration (SQLite) while compose runs PostgreSQL; exactly one is
    *registered*, chosen by `Alvo:Database:Provider`, and an unknown name is refused by name. Recorded in
    `package-boundary.md`'s *Current projects*, which the design asked to be updated when PR4 landed.
-38. **Health is liveness only.** §2.12 asks for readiness with database, cache and message-bus reachability;
-   no port answers "can you reach the database" cheaply, and adding one is a port widening PR4 has no mandate
-   for. What PR4 has instead is stronger than it looks: the host applies the descriptor **before** it listens,
-   so answering `/health/live` at all proves the descriptor applied, and a host whose apply failed exits
-   non-zero rather than reporting healthy with no schema. What is missing is the *continuing* answer — a
-   database that goes away after boot is invisible to liveness. Filed as **#133**, which is where the
-   reachability port gets designed; the rest of §2.12 is F4's, with #24's remainder.
+38. **Health is liveness only.** ~~§2.12 asks for readiness with database, cache and message-bus
+   reachability; no port answers "can you reach the database" cheaply, and adding one is a port widening PR4
+   has no mandate for.~~ **SUPERSEDED in its liveness-only part by the startup-lifecycle PR** (design
+   `2026-08-02-startup-lifecycle-and-config-dx-design.md`, deviation 54): `/health/ready` now exists beside
+   `/health/live`, with a state machine, a tag-based registration seam and exactly one contributor — "the
+   descriptor applied and the policy catalog is primed". `MapAlvoLiveness` and the Host-side
+   `AlvoHostEndpoints` were **deleted**, because their whole documented rationale ("answering liveness proves
+   the descriptor applied") stopped being the contract: liveness now evaluates no check at all and answers for
+   any process that is up. The **guarantee** this deviation rested on is preserved — a boot that refuses throws
+   out of `StartingAsync`, so the socket never binds and nothing answers healthy with no schema. What is still
+   owed is unchanged and still **#133**: the *reachability* port. §2.12 is **not** met by the endpoint
+   existing, and a database that goes away after boot remains invisible to both routes. The rest of §2.12 is
+   F4's, with #24's remainder.
 39. **Container configuration uses .NET's standard `Section__Key` environment spelling, not §X.1's
    `ALVO_*` names.** The spec sketches `ALVO_ADMIN_EMAIL`, `ALVO_ADMIN__PATH`, `ALVO_SCRIPTS_ALLOW_UI_EDIT`;
    PR4 uses `Alvo__DescriptorPath`, `Alvo__Database__Provider`, `ConnectionStrings__Alvo`. Reason: those
@@ -1210,6 +1221,13 @@ worked around.
    failure an `IValidateOptions<AlvoHostOptions>` would have rendered as a structured refusal naming the
    path it could not find. Recorded here rather than fixed, because the fix belongs with #132 in F4 — but
    recorded, so a later reader can tell a deferred decision from an oversight.
+
+   **DISCHARGED by the startup-lifecycle PR.** `AlvoHostOptionsValidation` is an
+   `IValidateOptions<AlvoHostOptions>` registered with `ValidateOnStart` (via `TryAddEnumerable`), reporting
+   every refusal rather than the first, naming the environment spelling an operator can type, and asserting the
+   descriptor is actually *at* the configured path. `extensibility.md` rule 5 and A:91 are met, and **#132 is
+   closed** with a printed sentence plus exit `78` (`EX_CONFIG`). Details in `docs/architecture/host.md`,
+   *Configuration* and *How the process ends*.
 
 49. **`ProblemResultFactory.Internal()` takes no argument, where the plan specified
    `Internal(string detail)`.** The detail is a baked-in constant instead, and the reasoning is in the
