@@ -48,6 +48,78 @@ internal static partial class EventLog
     internal static partial void ActionExecuted(
         ILogger logger, string hook, string action, Guid eventId, string eventType);
 
+    /// <summary>One delivery attempt that failed, written once per attempt rather than once per event.</summary>
+    /// <remarks>
+    /// The entry means "this attempt failed and the entry was handed back", so a retried event writes one of
+    /// these per attempt — which is what makes the count comparable with <c>alvo.events.failed</c>. Nothing
+    /// classifies the failure: a 500, a 404, a DNS failure and a timeout are indistinguishable at delivery from
+    /// an endpoint whose deploy is thirty seconds out, so the exception is carried as itself and the ceiling
+    /// decides when to stop.
+    /// </remarks>
+    /// <param name="logger">The logger the dispatcher writes through.</param>
+    /// <param name="eventId">The event's id — the join key to its <c>alvo_outbox</c> row.</param>
+    /// <param name="eventType">The event type, such as <c>entity.deals.updated</c>.</param>
+    /// <param name="attempts">How many times the entry has been claimed, including this attempt.</param>
+    /// <param name="failure">The failure exactly as it was thrown, stack trace and all.</param>
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Alvo failed to deliver event {EventId} of type {EventType} on attempt {Attempts}. The entry "
+            + "was handed back and is claimed again on a later tick.")]
+    internal static partial void ActionFailed(
+        ILogger logger, Guid eventId, string eventType, int attempts, Exception failure);
+
+    /// <summary>The one loud line an abandoned event gets, because this build has no dead-letter queue.</summary>
+    /// <remarks>
+    /// At the ceiling the entry stops being claimed and is neither deleted nor moved: it stays in
+    /// <c>alvo_outbox</c> with <c>dispatched_at</c> unset, so it is countable and inspectable. That is the whole
+    /// stand-in for a queue (7.1 owns the real one), which is why abandonment has to be <em>loud</em> — an
+    /// operator who never sees this line has no other signal that an event was given up on.
+    /// </remarks>
+    /// <param name="logger">The logger the dispatcher writes through.</param>
+    /// <param name="eventId">The event's id — the join key to the row that is still there to inspect.</param>
+    /// <param name="eventType">The event type, such as <c>entity.deals.updated</c>.</param>
+    /// <param name="attempts">The attempt count that reached the ceiling.</param>
+    [LoggerMessage(
+        Level = LogLevel.Error,
+        Message = "Alvo gave up on event {EventId} of type {EventType} after {Attempts} attempts. It is no "
+            + "longer claimed and was not deleted: the alvo_outbox row is still there, with dispatched_at "
+            + "unset, so it can be inspected and — once the cause is fixed — released by hand.")]
+    internal static partial void PoisonEvent(ILogger logger, Guid eventId, string eventType, int attempts);
+
+    /// <summary>The pump ended on something other than a shutdown, and the host was left running.</summary>
+    /// <remarks>
+    /// <c>HostOptions.BackgroundServiceExceptionBehavior</c> defaults to <c>StopHost</c> and, from .NET 11,
+    /// <c>RunAsync</c>/<c>StopAsync</c> also throw and the process exits non-zero — so a failure escaping
+    /// <c>ExecuteAsync</c> would take down a host serving HTTP over one queue entry. The failure is contained
+    /// instead, and this line is the whole notification: nothing restarts the pump, so a process that logs this
+    /// serves requests and delivers no events until it is restarted.
+    /// </remarks>
+    /// <param name="logger">The logger the dispatcher writes through.</param>
+    /// <param name="failure">The failure exactly as it was thrown, stack trace and all.</param>
+    [LoggerMessage(
+        Level = LogLevel.Error,
+        Message = "Alvo's outbox dispatcher stopped and will not restart in this process. The host keeps "
+            + "serving requests, and no event is delivered until it is restarted.")]
+    internal static partial void DispatcherStopped(ILogger logger, Exception failure);
+
+    /// <summary>A hook's condition threw, so the hook was not selected.</summary>
+    /// <remarks>
+    /// Debug, because the loud version of this is one line per event and per hook — exactly the noise the
+    /// execution-log criterion exists to prevent — and because a condition compiled in the
+    /// <c>Condition</c> profile when the descriptor was applied cannot fail on an author's mistake. It is an
+    /// internal invariant, recorded so it is diagnosable rather than invisible.
+    /// </remarks>
+    /// <param name="logger">The logger the dispatcher writes through.</param>
+    /// <param name="hook">The hook's own JSON pointer.</param>
+    /// <param name="eventId">The event whose subscription was being decided.</param>
+    /// <param name="failure">The failure the evaluator threw.</param>
+    [LoggerMessage(
+        Level = LogLevel.Debug,
+        Message = "Alvo could not evaluate after-hook {Hook}'s condition for event {EventId}, so the hook was "
+            + "not selected.")]
+    internal static partial void ConditionRefusedTheHook(
+        ILogger logger, string hook, Guid eventId, Exception failure);
+
     /// <summary>The development mail provider's one line, which is the whole message.</summary>
     /// <remarks>
     /// The word <em>development</em> is load-bearing and pinned by a fact: the failure mode this provider has

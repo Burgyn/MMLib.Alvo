@@ -3582,6 +3582,78 @@ git commit -m "feat(events): run after-hook webhook and email actions, with metr
 
 ### Task 9: The dispatcher — gated on `AlvoBootState`, containing every failure
 
+**DONE.** 11 facts in `MMLib.Alvo.Tests.Events.OutboxDispatcherTests`, 13 in `EventSubscriptionsTests`, 5 new
+`SettledAsync` facts in `AlvoBootStateTests`, and 6 end-to-end facts in
+`MMLib.Alvo.Host.Tests.Events.OutboxDispatcherTests` over a real write, a real claim and a real (failing)
+delivery. ring0 green at 2 526 tests. `AlvoEventOptions` is the only public surface added — `SettledAsync`
+stayed internal and does **not** appear in the moved core baseline.
+
+**The one finding that changed where a fact lives, and it is a vacuity finding.** This task's Step 2 specified
+the readiness fact against a running host, with `HoldTheBootAtStageThree` + `RegisterTheDispatcherFirst`. **That
+shape is structurally vacuous and cannot be fixed by ordering the registrations.** `AlvoBootService` is an
+`IHostedLifecycleService` that does *all* of its work in `StartingAsync` (`AlvoBootService.cs:122`), and the host
+runs **every** service's `StartingAsync` before **any** service's `StartAsync` — so holding the boot mid-flight
+holds the whole `StartAsync` phase with it and the dispatcher's `ExecuteAsync` has not begun at all. The fact
+would pass because the pump never ran, which is precisely the failure a background-service test invites, and no
+registration order changes it. The gate is therefore pinned in the **core** suite, where the pump really is
+running while the state is `Pending`: `The_pump_claims_nothing_before_the_boot_reports_ready` starts the service,
+waits fifteen poll intervals, asserts **zero claims**, then publishes `Ready` and waits for all three events to
+be dispatched — so the "it did not run" half and the "it was alive" half are one fact. The ordering half the
+plan wanted is met by construction rather than by a flag: there is no registration and no boot service in that
+fact at all. The host suite says so in its own remarks, so the absence there reads as a decision.
+
+**What the gate is actually worth, since the standalone host's ordering already settles it.** An unprimed
+`PolicyCatalog` knows no entity, so every event would match no hook, count as `filtered` and be **retired** —
+silent, permanent loss that no retry recovers, because a filtered event is deliberately not retried. That is why
+the gate is not decoration on .NET 10: it covers the boot that *refused* (`A_boot_that_refused_leaves_the_pump_claiming_nothing`),
+an embedded host that primes on its own schedule, and any future change that moves priming out of the startup
+phase. `A_batch_with_no_primed_catalog_retires_nothing` pins the fail-closed direction one layer deeper: the
+invariant throws, the entry is **released** rather than marked dispatched, and the refusal names the catalog.
+
+**Seven deliberate deviations from this task as written, each for a reason in the code:**
+
+1. **Registration lives in a new `src/MMLib.Alvo/Events/Setup.cs` (`AddAlvoEvents`)**, called from `AddAlvo`,
+   not inline in `AlvoServiceCollectionExtensions`. Every other feature in the core registers that way
+   (`Auth/Setup.cs`, `Rules/Setup.cs`, `Expressions/Setup.cs`, `Api`), and §0 principle 9 is vertical slice —
+   the alternative was the ninth feature's registrations in a file that already reads as a table of contents.
+2. **`AlvoEventOptionsConfiguration` replaces `AlvoEventOptionsValidation`, and it binds as well as validates.**
+   The plan's snippet registered `ValidateDataAnnotations()` and *nothing that binds the section*, so
+   `Alvo:Events:*` would have had no effect at all — and the refusal has to quote the key an operator sets, which
+   makes the binder's key set and the validator's key set one list or two lists that drift. This is exactly
+   `AlvoSchemaOptionsConfiguration`'s shape and reason, including the optional `IConfiguration` through a factory
+   (never `BuildServiceProvider`), so a plain console host embedding Alvo still gets the defaults.
+3. **`ValidateDataAnnotations()` is not called.** A `[Range]` message names the property and not the
+   configuration key, so it would add a second, worse message to every refusal for one mistake. Global
+   Constraints allow either that or `IValidateOptions<T>`; this takes the second, and every refusal names the
+   key, its `Alvo__…` environment spelling, and a value that would have worked.
+4. **`EventSubscriptions.Matching` takes an `ILogger`.** The specified signature had none and the specified
+   behaviour ("logged once at Debug") is unreachable without one.
+5. **`EventLog` gained a fourth entry, `ConditionRefusedTheHook` (Debug)**, beside the three Task 8 assigned
+   here. Task 8's note lists what must land, not a cap, and this is the plan's own "diagnosable without becoming
+   the per-event noise the whole criterion is about".
+6. **The event type's third segment is parsed against a table in the core, not against a shared constant.** The
+   emitting `OutboxEventFactory.Suffix` is `internal` to the EF driver and unreachable from the core, so sharing
+   the vocabulary would mean widening a port for three string literals. The pairing is held **behaviourally** by
+   Task 10's end-to-end criteria, which drive a real write through a real dispatcher; an unparseable type selects
+   **nothing** (five `[Theory]` rows), which is the fail-closed direction if they ever disagree.
+7. **`PumpOneBatchAsync` is `internal` from the start**, because Task 10 Step 3 needs exactly that for a
+   deterministic drain, and every fact here that does not need the loop drives it directly rather than sleeping.
+
+**One thing this task deliberately does not do.** No counter is asserted here. The three increments are written
+(`Dispatched` after the retirement, `Filtered` once per event, `Failed` once per attempt) but observing them
+needs the `RecordingMeterListener` **Task 10 owns**, and a second listener written here would be the thing that
+makes the execution-log criterion count twice. `ActionExecuted` is likewise written only by the executor — Task 8's
+instruction, honoured.
+
+**Provider obligation this task creates, stated the way deviation 60 states `IRuntimeSchemaWriter`'s.** The
+dispatcher **requires `IOutboxStore` to resolve**, so from this commit a database provider must supply that port
+to get a running host. `AddRelationalProvider` registers it, so no shipped provider is affected; the cost falls on
+a non-EF or dynamic-storage provider (F7), which would otherwise discover it as a DI failure at startup. It is
+recorded in `OutboxDispatcher`'s own remarks, and **Task 13 owns adding it to
+`docs/architecture/package-boundary.md`'s "What a database provider must implement to boot" list** — that file is
+untouched here on purpose.
+
+
 Three hosting facts shape this task and none of them is optional. `BackgroundService.ExecuteAsync`
 runs **entirely** off the startup thread on .NET 10, so readiness cannot be expressed by ordering.
 `BackgroundServiceExceptionBehavior` defaults to `StopHost`, so one poison event would take down a
@@ -3627,7 +3699,7 @@ host serving HTTP. The host **blocks in `StopAsync`** for up to 30 s waiting for
   internal Task<AlvoBootPhase> SettledAsync(CancellationToken cancellationToken);
   ```
 
-- [ ] **Step 1: Write the failing `AlvoBootState` and subscription tests**
+- [x] **Step 1: Write the failing `AlvoBootState` and subscription tests**
 
 ```csharp
 // MMLib.Alvo.Tests/Migrations/AlvoBootStateTests.cs
@@ -3727,7 +3799,7 @@ public void A_condition_that_throws_selects_nothing_rather_than_everything()
         .ShouldBeEmpty();
 ```
 
-- [ ] **Step 2: Write the failing dispatcher tests**
+- [x] **Step 2: Write the failing dispatcher tests**
 
 ```csharp
 // MMLib.Alvo.Host.Tests/Events/OutboxDispatcherTests.cs
@@ -3838,7 +3910,7 @@ dotnet test --project test/MMLib.Alvo.Host.Tests -- --filter-class '*OutboxDispa
 ```
 Expected: FAIL — `SettledAsync` and `OutboxDispatcher` do not exist.
 
-- [ ] **Step 4: Implement `SettledAsync`, then the dispatcher**
+- [x] **Step 4: Implement `SettledAsync`, then the dispatcher**
 
 On `AlvoBootState`, beside the existing snapshot publication:
 
@@ -3939,7 +4011,7 @@ services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, OutboxDisp
 `PollInterval` (a lease shorter than the poll interval would re-claim an in-flight entry on the very
 next tick, which is a duplicate delivery per tick rather than at-least-once).
 
-- [ ] **Step 5: Run to verify they pass**
+- [x] **Step 5: Run to verify they pass**
 
 Run:
 ```
@@ -3949,7 +4021,7 @@ dotnet test --project test/MMLib.Alvo.Host.Tests -- --filter-class '*OutboxDispa
 ```
 Expected: PASS. Assert `Build succeeded` first.
 
-- [ ] **Step 6: Prove the two hosting facts discriminate**
+- [x] **Step 6: Prove the two hosting facts discriminate**
 
 Two mutations, restored immediately. These are the ones the .NET 10 change makes non-obvious:
 
@@ -3963,7 +4035,7 @@ Two mutations, restored immediately. These are the ones the .NET 10 change makes
 
 Confirm each edit landed with `command grep -c`.
 
-- [ ] **Step 7: Accept the core baseline, ring0, commit**
+- [x] **Step 7: Accept the core baseline, ring0, commit**
 
 ```bash
 dotnet test --project test/MMLib.Alvo.Tests -- --filter-class '*PublicApi*'
@@ -4529,6 +4601,11 @@ repository say what shipped — including the four things it deliberately does n
 - Modify: `docs/architecture/data-path.md:1480-1493` (the PR5 forward-looking section)
 - Modify: `docs/architecture/extensibility.md` (the two new ports)
 - Modify: `.claude/skills/alvo-dotnet-conventions/SKILL.md`
+- Modify: `docs/architecture/package-boundary.md` — "What a database provider must implement to boot" gains
+  **`IOutboxStore`**: Task 9's dispatcher requires it to resolve, so a provider without it can no longer boot.
+  Word it as deviation 60 words `IRuntimeSchemaWriter`'s widening — both in-repo drivers get it from
+  `AddRelationalProvider`, so the cost falls on a future non-EF or dynamic-storage provider, which would
+  otherwise meet it as a DI failure at startup rather than as a documented obligation.
 - Modify: `docs/PLAN.md`
 - Modify: `README.md` (the descriptor feature table's hooks/events rows, if it carries them)
 

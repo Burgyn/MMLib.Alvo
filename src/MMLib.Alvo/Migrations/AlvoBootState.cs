@@ -138,10 +138,68 @@ public sealed class AlvoBootState
             .Refusing(reason));
     }
 
+    /// <summary>
+    /// The phase this boot finished on, awaited — completing as soon as the boot is no longer
+    /// <see cref="AlvoBootPhase.Pending"/>, and already completed if it finished before this was called.
+    /// </summary>
+    /// <param name="cancellationToken">A token that abandons the wait; the host's stopping token, in practice.</param>
+    /// <returns>The settled phase: <see cref="AlvoBootPhase.Ready"/> or <see cref="AlvoBootPhase.Failed"/>.</returns>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled first.</exception>
+    /// <remarks>
+    /// <para>
+    /// <b>This exists because .NET 10 made readiness inexpressible as registration order.</b>
+    /// <c>BackgroundService.ExecuteAsync</c> now runs <em>entirely</em> off the startup thread, so "this must not
+    /// run before the schema is primed" cannot be arranged by registering the boot first, and
+    /// <c>await Task.Yield()</c> as a first line is dead code. A background service has to <em>wait</em>, and
+    /// this is the only member it can wait on.
+    /// </para>
+    /// <para>
+    /// <b><see langword="internal"/> on purpose.</b> Only the outbox dispatcher needs it, and a public awaitable
+    /// would foreclose the state's shape for #141 — with several projects in one host, "settled" is a question
+    /// per project, and shipping the process-wide answer as public API would have to keep answering it.
+    /// </para>
+    /// <para>
+    /// <b>A failed boot settles too, and the caller is expected to check which phase it got.</b> Completing only
+    /// on <see cref="AlvoBootPhase.Ready"/> would leave every waiter hanging on a refused boot, which turns one
+    /// refusal into a shutdown that waits out its timeout.
+    /// </para>
+    /// </remarks>
+    internal Task<AlvoBootPhase> SettledAsync(CancellationToken cancellationToken) =>
+        _settled.Task.WaitAsync(cancellationToken);
+
     private BootSnapshot Current => Volatile.Read(ref _snapshot);
 
+    /// <summary>
+    /// Installs a new snapshot and, if it settled the boot, releases everything waiting on
+    /// <see cref="SettledAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// The completion happens <b>after</b> the interlocked update, never before, so a waiter that wakes reads a
+    /// settled snapshot rather than the one it was waiting to leave. <c>TrySetResult</c> because the boot
+    /// publishes more than once — a project's readiness after another's, or a refusal after a readiness — and
+    /// only the first settled phase is the one a waiter acted on.
+    /// </remarks>
     private void Publish(Func<BootSnapshot, BootSnapshot> transition)
-        => ImmutableInterlocked.Update(ref _snapshot, transition);
+    {
+        ImmutableInterlocked.Update(ref _snapshot, transition);
+
+        if (Current.Phase is not AlvoBootPhase.Pending)
+        {
+            _settled.TrySetResult(Current.Phase);
+        }
+    }
+
+    /// <summary>
+    /// The one completion every <see cref="SettledAsync"/> waiter shares.
+    /// </summary>
+    /// <remarks>
+    /// <c>RunContinuationsAsynchronously</c> is load-bearing rather than defensive: without it a waiter's
+    /// continuation runs <em>inline on the boot's own thread</em>, inside <c>StartingAsync</c> — so the
+    /// dispatcher's pump would begin on the boot thread and block the very start it was written to stay out of,
+    /// which is the coupling this whole mechanism exists to remove.
+    /// </remarks>
+    private readonly TaskCompletionSource<AlvoBootPhase> _settled =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     /// <summary>Everything the state reports, as one value published atomically.</summary>
     /// <param name="Projects">What each project that has published something reached.</param>

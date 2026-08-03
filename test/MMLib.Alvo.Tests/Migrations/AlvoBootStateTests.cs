@@ -149,4 +149,90 @@ public sealed class AlvoBootStateTests
 
         state.AppliedRevision.ShouldBe(2);
     }
+
+    /// <summary>
+    /// The readiness signal a background service can await, rather than a phase it has to poll.
+    /// </summary>
+    /// <remarks>
+    /// .NET 10 runs all of <c>BackgroundService.ExecuteAsync</c> off the startup thread, so "not before the
+    /// schema is primed" is inexpressible as registration order and <c>await Task.Yield()</c> as a first line is
+    /// dead code. The state has to be awaited, and this member is internal on purpose: only the dispatcher needs
+    /// it, and a public awaitable would foreclose the state's shape for #141.
+    /// </remarks>
+    [Fact]
+    public async Task Settled_completes_when_a_project_reports_ready()
+    {
+        var state = new AlvoBootState();
+        var settled = state.SettledAsync(TestContext.Current.CancellationToken);
+        settled.IsCompleted.ShouldBeFalse("a pending boot has settled on nothing yet");
+
+        state.Ready(Project, appliedRevision: 1);
+
+        (await settled).ShouldBe(AlvoBootPhase.Ready);
+    }
+
+    /// <summary>
+    /// A refused boot settles too, so a waiter learns the answer instead of hanging on it.
+    /// </summary>
+    /// <remarks>
+    /// Completing only on <see cref="AlvoBootPhase.Ready"/> would leave the dispatcher parked forever on a host
+    /// whose boot refused — and because the host blocks in <c>StopAsync</c> waiting for <c>ExecuteAsync</c>, that
+    /// parked wait would turn one refusal into a shutdown that waits out its 30-second timeout.
+    /// </remarks>
+    [Fact]
+    public async Task Settled_completes_with_failed_when_the_boot_refused()
+    {
+        var state = new AlvoBootState();
+        state.Failed("stage 0 refused");
+
+        (await state.SettledAsync(TestContext.Current.CancellationToken)).ShouldBe(AlvoBootPhase.Failed);
+    }
+
+    [Fact]
+    public async Task Settled_returns_immediately_when_the_boot_already_finished()
+    {
+        var state = new AlvoBootState();
+        state.Ready(Project, appliedRevision: 1);
+
+        state.SettledAsync(TestContext.Current.CancellationToken).IsCompleted.ShouldBeTrue(
+            "a boot that finished before anyone asked must not make the asker wait for a second publication");
+        (await state.SettledAsync(TestContext.Current.CancellationToken)).ShouldBe(AlvoBootPhase.Ready);
+    }
+
+    /// <summary>
+    /// The wait observes its own token, which is what keeps a shutdown from waiting out the host's 30-second
+    /// <c>ShutdownTimeout</c> while the boot never settles.
+    /// </summary>
+    [Fact]
+    public async Task Settled_observes_its_cancellation_token_so_shutdown_never_waits_thirty_seconds()
+    {
+        var state = new AlvoBootState();
+        using var cancellation = new CancellationTokenSource();
+        var settled = state.SettledAsync(cancellation.Token);
+
+        await cancellation.CancelAsync();
+
+        await Should.ThrowAsync<OperationCanceledException>(() => settled);
+    }
+
+    /// <summary>
+    /// A waiter that wakes reads a <em>settled</em> snapshot: the completion is published after the interlocked
+    /// update, never before.
+    /// </summary>
+    /// <remarks>
+    /// The failure this rules out is a race nothing else would catch — a dispatcher woken by the completion,
+    /// reading <see cref="AlvoBootState.Phase"/> as still Pending, and treating a primed catalog as absent.
+    /// </remarks>
+    [Fact]
+    public async Task A_waiter_that_wakes_reads_the_phase_the_wait_reported()
+    {
+        var state = new AlvoBootState();
+        var observed = state.SettledAsync(TestContext.Current.CancellationToken)
+            .ContinueWith(settled => (settled.Result, state.Phase), TestContext.Current.CancellationToken,
+                TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+
+        state.Ready(Project, appliedRevision: 1);
+
+        (await observed).ShouldBe((AlvoBootPhase.Ready, AlvoBootPhase.Ready));
+    }
 }

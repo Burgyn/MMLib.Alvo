@@ -43,6 +43,12 @@ internal static class CelFixtures
 
     internal static ICelCompiler Compiler { get; } = new CelCompiler();
 
+    /// <summary>
+    /// The product's own evaluator, so a fact about "the condition was false" is a fact about the engine that
+    /// will judge it in production rather than about a substitute that answered false.
+    /// </summary>
+    internal static IPredicateEvaluator Evaluator { get; } = new PredicateEvaluator();
+
     /// <summary>The tenant every Acme-tenant context (<see cref="Alice"/>, <see cref="AcmeUser"/>, ...) acts in.</summary>
     internal static TenantId AcmeTenant => Alice.Tenant!.Value;
 
