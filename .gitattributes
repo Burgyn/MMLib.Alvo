@@ -18,3 +18,12 @@ scripts/** text eol=lf
 # Verify snapshots must stay LF on every platform — Verify rejects a verified
 # file containing a carriage return (Windows would otherwise check it out CRLF).
 *.verified.txt text eol=lf
+
+# Captured Stryker output, kept as evidence for scripts/test-assert-mutation-run.
+# NOT normalised: the carriage returns are part of what the tool actually emitted
+# (its progress reporter writes \r), and the guard's own \r handling is one of the
+# things these fixtures exercise. `scripts/** text eol=lf` above would rewrite them
+# to LF and silently retire that case — the same "the test quietly stopped testing"
+# failure the guard itself exists to prevent. -text also keeps them byte-identical
+# to the capture, which is what their provenance headers claim.
+scripts/fixtures/mutation-logs/*.txt -text

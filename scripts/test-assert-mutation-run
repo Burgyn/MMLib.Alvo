@@ -1,0 +1,432 @@
+#!/usr/bin/env bash
+# Tests for scripts/assert-mutation-run — the guard that decides whether a finished
+# Stryker run actually measured what its config asked for.
+#
+# Run: scripts/test-assert-mutation-run
+#
+# WHY THIS EXISTS. The guard's whole job is "do not trust a green signal", so a guard
+# nobody tests is the same shape as the defects it was written for. Its first version
+# was a negative `grep -q 'will mutate solution'` that would have failed OPEN on any
+# Stryker rewording; the positive assertions that replaced it are only worth something
+# if the fail-closed behaviour is still there after the next edit. That is what the
+# "reworded" cases below pin.
+#
+# Fixtures are REAL Stryker output, captured from both working directories and
+# committed under scripts/fixtures/mutation-logs/*.txt with provenance headers. They are the
+# only way to exercise the branch that catches a genuine regression: the data-ef pair
+# is the shard that ran in 10 minutes and then timed out with no config change, and the
+# expressions pair is the case that documents why the guard asserts the TEST-PROJECT
+# count rather than the mutant count (identical 834 mutants in both modes).
+#
+# Perturbations — a reworded log line, a collapsed mutant count, ordinary drift — are
+# derived from a fixture HERE, with sed, rather than committed as extra files, so that
+# every committed fixture stays real captured output and each perturbation is visible
+# as the one-line change it is.
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+GUARD="$ROOT/scripts/assert-mutation-run"
+FIXTURES="$ROOT/scripts/fixtures/mutation-logs"
+TMP_ROOT="$(mktemp -d)"
+trap 'rm -rf "$TMP_ROOT"' EXIT
+
+PASS=0
+FAIL=0
+
+pass() { PASS=$((PASS + 1)); printf '  ok   %s\n' "$1"; }
+fail() {
+  FAIL=$((FAIL + 1))
+  printf '  FAIL %s\n' "$1"
+  printf '       expected: %s\n' "$2"
+  printf '       actual:   %s\n' "$3"
+}
+
+# Every case is the same shape: run the guard, assert the exit status, and for a
+# failure assert WHICH check tripped — otherwise a guard that fails for the wrong
+# reason (or for an unrelated crash) would still look like a pass here.
+GUARD_OUT=""
+run_guard() { # <log> <config> <expected-mutants> <expected-tests>
+  GUARD_OUT="$("$GUARD" "$1" "$2" "$3" "$4" "test-shard" 2>&1)"
+  return $?
+}
+
+assert_ok() { # <label> <log> <config> <expected-mutants> <expected-tests>
+  local label="$1"; shift
+  if run_guard "$@"; then
+    pass "$label"
+  else
+    fail "$label" "exit 0 (guard accepts the run)" "exit non-zero: $GUARD_OUT"
+  fi
+}
+
+assert_rejected() { # <label> <needle proving which check tripped> <log> <config> <expected-mutants> <expected-tests>
+  local label="$1" needle="$2"; shift 2
+  if run_guard "$@"; then
+    fail "$label" "non-zero exit (guard rejects the run)" "exit 0: $GUARD_OUT"
+    return
+  fi
+  case "$GUARD_OUT" in
+    *"$needle"*) pass "$label" ;;
+    *) fail "$label" "rejection mentioning '$needle'" "$GUARD_OUT" ;;
+  esac
+}
+
+# Rejection fingerprints, one per check, so a case cannot pass by tripping the wrong one.
+VACUOUS="tested zero mutants"
+WRONG_SUITE="expected Stryker to analyse exactly"
+NO_MUTANT_LINE="never reports 'N total mutants will be tested'"
+COLLAPSED="A collapse this size is not ordinary drift"
+NO_TEST_PROJECTS="declares no test-projects"
+NO_LOG="no Stryker log at"
+
+# A perturbation that silently matches nothing would leave the fixture untouched, and
+# the `assert_ok` drift/growth cases would then pass against an UNCHANGED fixture —
+# green for the wrong reason. So refuse to produce a copy identical to its source.
+#
+# The result comes back in DERIVED, not on stdout, and a no-op RETURNS non-zero rather
+# than calling `exit`. Both matter. The first version printed the path and was invoked
+# inside a command substitution — but `exit` there only leaves the SUBSHELL, so the suite
+# carried on with an empty path, the guard tripped its own usage check, and the case went
+# red for entirely the wrong reason while the comment promised an abort that never
+# happened. A check that looks like it works is this branch's own subject matter. The
+# contract is now `derive ... || exit 1` on its own line at every call site, which the
+# "derive aborts" cases below verify both behaviourally and structurally.
+DERIVED=""
+derive() { # <fixture> <sed-expression> -> sets DERIVED; non-zero if sed changed nothing
+  local out
+  out="$(mktemp "$TMP_ROOT/derived.XXXXXX")"
+  command sed "$2" "$FIXTURES/$1" > "$out"
+  if cmp -s "$FIXTURES/$1" "$out"; then
+    DERIVED=""
+    printf 'derive: sed %s matched nothing in %s — the case it feeds would prove nothing\n' \
+      "$2" "$1" >&2
+    return 1
+  fi
+  DERIVED="$out"
+}
+
+EXPR_CFG="$ROOT/stryker-config.expressions.json"
+EF_CFG="$ROOT/stryker-config.data-ef.json"
+
+[ -x "$GUARD" ] || { printf 'guard not executable: %s\n' "$GUARD"; exit 1; }
+
+# ============================================== the suite is the configured one
+# Check 2. Real logs, both working directories, for two different shards.
+
+echo "check 2 — the run used the test projects the config declares"
+
+assert_ok "scoped run (expressions, 1 project, 722 tests) is accepted" \
+  "$FIXTURES/expressions-scoped.txt" "$EXPR_CFG" 834 722
+
+assert_rejected "solution mode (expressions, 2211 tests) is rejected" "$WRONG_SUITE" \
+  "$FIXTURES/expressions-solution-mode.txt" "$EXPR_CFG" 834 722
+
+# The pair above is the whole argument for check 2 being the test-project count: both
+# logs report 834 mutants tested, so no assertion on the mutant count could separate
+# them. Pin that premise rather than trusting the comment.
+for f in expressions-scoped expressions-solution-mode; do
+  tested="$(tr '\r' '\n' < "$FIXTURES/$f.txt" \
+    | command grep -oE '[0-9]+[[:space:]]+total mutants will be tested' \
+    | command grep -oE '^[0-9]+' | head -1)"
+  if [ "$tested" = "834" ]; then
+    pass "$f reports 834 mutants (a mutant-count check could not tell the modes apart)"
+  else
+    fail "$f reports 834 mutants" "834" "$tested"
+  fi
+done
+
+assert_ok "scoped run (data-ef, 2 projects, 858 tests) is accepted" \
+  "$FIXTURES/data-ef-scoped.txt" "$EF_CFG" 596 858
+
+assert_rejected "solution mode (data-ef, 1489 tests) is rejected — the real regression" "$WRONG_SUITE" \
+  "$FIXTURES/data-ef-solution-mode.txt" "$EF_CFG" 596 858
+
+# The rejection has to be actionable, so it must quote the inflated suite it saw.
+if run_guard "$FIXTURES/data-ef-solution-mode.txt" "$EF_CFG" 596 858; then
+  fail "data-ef rejection names the inflated test count" "non-zero exit" "exit 0"
+else
+  case "$GUARD_OUT" in
+    *"1489"*) pass "data-ef rejection names the inflated test count (1489)" ;;
+    *) fail "data-ef rejection names the inflated test count (1489)" "message containing 1489" "$GUARD_OUT" ;;
+  esac
+fi
+
+# ==================================================================== fail-closed
+# The property the original negative grep did not have: a line that stops matching
+# because a Stryker release reworded it must FAIL, never silently pass.
+
+echo "fail-closed — a reworded Stryker log line must not disarm a check"
+
+derive expressions-scoped.txt 's/Analyzing 1 test project(s)./Resolved 1 test project for mutation./' || exit 1
+assert_rejected "reworded 'Analyzing N test project(s).' is rejected" "$WRONG_SUITE" \
+  "$DERIVED" \
+  "$EXPR_CFG" 834 722
+
+derive expressions-scoped.txt 's/834   total mutants will be tested/834   mutants queued for testing/' || exit 1
+assert_rejected "reworded 'N total mutants will be tested' is rejected" "$NO_MUTANT_LINE" \
+  "$DERIVED" \
+  "$EXPR_CFG" 834 722
+
+# ================================================================ oversized log
+# THE case that the 3-5 KB fixtures cannot express, and the reason it is here: the guard
+# used to match with `printf '%s\n' "$text" | grep -q PATTERN`, which under
+# `set -o pipefail` returns 141 — not 0 — whenever grep matches early and exits while
+# printf is still writing. Every fixture fits the 64 KiB pipe buffer, so the suite was
+# green while the guard would have rejected all five shards on the first real run,
+# reporting that the log did not contain a line it quoted back in the same message.
+# A real Stryker log is hundreds of KB with "Analyzing N test project(s)." near the top.
+
+echo "oversized log — the pipe-buffer trap that small fixtures cannot show"
+
+big="$(mktemp "$TMP_ROOT/big.XXXXXX")"
+{
+  cat "$FIXTURES/expressions-scoped.txt"
+  # Progress output, which is what makes a real log large and lands AFTER discovery.
+  i=0
+  while [ "$i" -lt 6000 ]; do
+    echo "[00:00:00 INF] progress noise line $i emitted after discovery, as a real run does"
+    i=$((i + 1))
+  done
+} > "$big"
+
+big_bytes="$(command wc -c < "$big" | tr -d ' ')"
+if [ "$big_bytes" -gt 65536 ]; then
+  pass "the oversized fixture exceeds one pipe buffer ($big_bytes bytes)"
+else
+  fail "the oversized fixture exceeds one pipe buffer" ">65536 bytes" "$big_bytes"
+fi
+
+assert_ok "a scoped run in a >64 KiB log is still accepted" \
+  "$big" "$EXPR_CFG" 834 722
+
+# =========================================================================== vacuity
+# Check 1, kept from the original workflow step: a run that measured nothing.
+
+echo "check 1 — a run that tested nothing is not a passing run"
+
+assert_rejected "a run that tested no mutants is rejected" "$VACUOUS" \
+  "$FIXTURES/vacuous-run.txt" "$EXPR_CFG" 834 722
+
+# The vacuous fixture trips two of check 1's alternatives at once. Strip the
+# "unable to calculate a mutation score" line so the ZERO-MUTANT alternative has to
+# fire on its own — it is the one that was written as `0 total mutants will be tested`,
+# with a single space, and could therefore never match Stryker's column-padded
+# "0     total mutants will be tested". A dead alternative inside a live check is
+# invisible until the live one stops applying.
+derive vacuous-run.txt '/unable to calculate a mutation score/d' || exit 1
+assert_rejected "a zero-mutant run is rejected on the count alone (padded columns)" "$VACUOUS" \
+  "$DERIVED" \
+  "$EXPR_CFG" 834 722
+
+# ============================================================== mutant-count floor
+# Check 3, for the failure a count CAN catch: a mutate glob that stops matching
+# reports a collapsed count rather than zero, which check 1 waves through.
+
+echo "check 3 — the mutate glob still matches (one-sided floor at 60%)"
+
+derive expressions-scoped.txt 's/834   total mutants will be tested/400   total mutants will be tested/' || exit 1
+assert_rejected "a collapse to 400 of 834 (floor 500) is rejected" "$COLLAPSED" \
+  "$DERIVED" \
+  "$EXPR_CFG" 834 722
+
+derive expressions-scoped.txt 's/834   total mutants will be tested/800   total mutants will be tested/' || exit 1
+assert_ok "ordinary drift down to 800 of 834 is accepted" \
+  "$DERIVED" \
+  "$EXPR_CFG" 834 722
+
+derive expressions-scoped.txt 's/834   total mutants will be tested/1200  total mutants will be tested/' || exit 1
+assert_ok "growth to 1200 of 834 is accepted (the floor is one-sided on purpose)" \
+  "$DERIVED" \
+  "$EXPR_CFG" 834 722
+
+# ================================================================ suite-size floor
+# Check 4. Check 2 catches the suite being SUBSTITUTED (solution mode inflates it);
+# this catches it being GUTTED — "the adversarial suite stopped biting", the failure
+# mutation testing exists for. Deleting half the tests leaves the project count and the
+# mutant count untouched, so checks 1-3 all pass, and per #142 the score cannot be
+# relied on either.
+
+echo "check 4 — the suite did not shrink (one-sided floor at 60%)"
+
+derive expressions-scoped.txt 's/Number of tests found: 722/Number of tests found: 300/' || exit 1
+assert_rejected "a suite gutted from 722 to 300 tests is rejected" "lost two fifths of its tests" \
+  "$DERIVED" \
+  "$EXPR_CFG" 834 722
+
+derive expressions-scoped.txt 's/Number of tests found: 722/Number of tests found: 700/' || exit 1
+assert_ok "ordinary test-count drift 722 -> 700 is accepted" \
+  "$DERIVED" \
+  "$EXPR_CFG" 834 722
+
+derive expressions-scoped.txt 's/Number of tests found: 722/Number of tests found: 1500/' || exit 1
+assert_ok "a grown suite 722 -> 1500 is accepted (adding tests is never the bug)" \
+  "$DERIVED" \
+  "$EXPR_CFG" 834 722
+
+derive expressions-scoped.txt 's/Number of tests found: 722/Discovered 722 tests/' || exit 1
+assert_rejected "a reworded 'Number of tests found' is rejected" "size of the suite behind this verdict is unknown" \
+  "$DERIVED" \
+  "$EXPR_CFG" 834 722
+
+# ===================================================================== bad inputs
+# A guard that cannot read its own inputs must say so rather than wave the run
+# through — these are the paths where "no evidence" could be mistaken for "no problem".
+
+echo "inputs — missing or unusable inputs fail rather than pass"
+
+assert_rejected "a missing log is rejected" "$NO_LOG" \
+  "$TMP_ROOT/does-not-exist.txt" "$EXPR_CFG" 834 722
+
+no_tp_cfg="$TMP_ROOT/no-test-projects.json"
+jq 'del(.["stryker-config"]["test-projects"])' "$EXPR_CFG" > "$no_tp_cfg"
+assert_rejected "a config declaring no test-projects is rejected" "$NO_TEST_PROJECTS" \
+  "$FIXTURES/expressions-scoped.txt" "$no_tp_cfg" 834 722
+
+# A non-numeric calibration figure reaches `$(( ))`, which trips `set -u` — and on
+# bash 3.2 the script then exits 0, i.e. the guard fails OPEN on a typo in the matrix.
+assert_rejected "a non-numeric mutant count is rejected, not silently accepted" "must be a whole number" \
+  "$FIXTURES/expressions-scoped.txt" "$EXPR_CFG" "eight-hundred" 722
+
+assert_rejected "a non-numeric test count is rejected, not silently accepted" "must be a whole number" \
+  "$FIXTURES/expressions-scoped.txt" "$EXPR_CFG" 834 "seven-twenty-two"
+
+# `$(( 0834 ))` is octal in bash: a leading zero either computes a silently wrong floor
+# (010 -> 8) or aborts on a digit >= 8. Neither may pass as a calibration figure.
+assert_rejected "a leading-zero mutant count is rejected (bash reads it as octal)" "leading zero" \
+  "$FIXTURES/expressions-scoped.txt" "$EXPR_CFG" 0834 722
+
+assert_rejected "a leading-zero test count is rejected (bash reads it as octal)" "leading zero" \
+  "$FIXTURES/expressions-scoped.txt" "$EXPR_CFG" 834 0722
+
+# 010 would quietly become 8 rather than erroring, which is the dangerous direction: a
+# floor of 8 accepts almost anything.
+assert_rejected "a leading zero with only octal digits is still rejected" "leading zero" \
+  "$FIXTURES/expressions-scoped.txt" "$EXPR_CFG" 010 722
+
+# A zero floor is a check that cannot fail, so it must not be accepted either.
+assert_rejected "a zero calibration figure is rejected" "leading zero" \
+  "$FIXTURES/expressions-scoped.txt" "$EXPR_CFG" 0 722
+
+# ================================================================== derive aborts
+# The harness's own fail-open path. `derive` used to `exit 1` from inside a command
+# substitution, which leaves only the subshell: the suite continued, an empty path
+# reached the guard, and the case went red on the guard's usage check instead of on the
+# no-op it was meant to catch — red for the wrong reason, with a comment claiming an
+# abort that never ran. Two assertions, because the behaviour and the calling convention
+# can each regress on their own.
+
+echo "derive — a perturbation that changes nothing aborts the suite"
+
+# Behavioural: a no-op sed must report failure and leave no path behind.
+if derive expressions-scoped.txt 's/no such text anywhere in this fixture/x/' 2>/dev/null; then
+  fail "derive returns non-zero when its sed matches nothing" "non-zero return" "returned 0"
+elif [ -n "$DERIVED" ]; then
+  fail "derive returns non-zero when its sed matches nothing" "empty DERIVED" "DERIVED=$DERIVED"
+else
+  pass "derive returns non-zero and clears DERIVED when its sed matches nothing"
+fi
+
+# Structural: every call site must propagate it. Re-wrapping one in a command
+# substitution would silently restore the subshell, and no behavioural test can see that
+# from in here. Matching on `derive <fixture>.txt` keeps this from matching its own
+# source: the pattern text below is not itself a fixture name.
+offenders=""
+while IFS= read -r line; do
+  case "$line" in
+    *:'#'*) continue ;;                       # a comment mentioning a call
+    *:derive\ *"|| exit 1") continue ;;       # the required hoisted form
+    *:if\ derive\ *) continue ;;              # the behavioural probe just above
+    '') continue ;;
+    *) offenders="$offenders
+    $line" ;;
+  esac
+done <<EOF
+$(command grep -nE 'derive [a-z-]+\.txt ' "$0")
+EOF
+
+if [ -n "$offenders" ]; then
+  fail "every derive call site propagates the abort" \
+    "each one 'derive ... || exit 1' on its own line" "$offenders"
+else
+  hoisted="$(command grep -cE '^derive [a-z-]+\.txt .* \|\| exit 1$' "$0")"
+  if [ "$hoisted" -gt 0 ]; then
+    pass "all $hoisted derive call sites are 'derive ... || exit 1', so the abort propagates"
+  else
+    fail "derive call sites propagate failure" "at least one 'derive ... || exit 1'" "none found"
+  fi
+fi
+
+# End to end: a copy of this suite with one perturbation neutered must ABORT, not carry
+# on to the summary line. This is the assertion the original could not make.
+neutered="$TMP_ROOT/neutered.sh"
+command sed "s|'/unable to calculate a mutation score/d'|'/no such line/d'|" "$0" > "$neutered"
+chmod +x "$neutered"
+if "$neutered" >"$TMP_ROOT/neutered.out" 2>&1; then
+  fail "a neutered perturbation aborts the whole suite" "non-zero exit" "exit 0"
+elif command grep -q 'passed, .* failed' "$TMP_ROOT/neutered.out"; then
+  fail "a neutered perturbation aborts the whole suite" \
+    "abort before the summary" "reached the summary: $(command tail -1 "$TMP_ROOT/neutered.out")"
+else
+  pass "a neutered perturbation aborts the whole suite before it can report a result"
+fi
+
+# ======================================================================= provenance
+# Fixtures are evidence; evidence without provenance is decoration. Every one has to
+# say what produced it, when, and at which commit (the discipline of
+# docs/superpowers/specs/evidence/).
+
+echo "fixtures — each carries its provenance"
+
+# These fixtures are captured console output committed to a PUBLIC repository, and
+# Stryker echoes absolute paths — the worktree root, and the --output directory as a
+# file:// URL in the report footer, console-wrapped across several lines. One of those
+# footers shipped a local path containing the maintainer's OS username and worktree
+# layout while the file's own header claimed such paths had been replaced by /repo. A
+# capture is only as safe as the last person who remembered to scrub it, so assert it
+# instead of remembering.
+for f in "$FIXTURES"/*.txt; do
+  name="$(basename "$f")"
+  if leaked="$(command grep -nE '/Users/|/home/[a-z]|/private/tmp|C:\\\\Users' "$f")"; then
+    fail "$name contains no machine-specific absolute path" \
+      "every path scrubbed to /repo" "$leaked"
+  else
+    pass "$name leaks no machine-specific absolute path"
+  fi
+done
+
+for f in "$FIXTURES"/*.txt; do
+  name="$(basename "$f")"
+  head_text="$(command head -20 "$f")"
+  missing=""
+  case "$head_text" in *"Produced by:"*) ;; *) missing="$missing Produced-by" ;; esac
+  case "$head_text" in *"Captured:"*) ;; *) missing="$missing Captured" ;; esac
+  case "$head_text" in *"Stryker 4.16.0"*) ;; *) missing="$missing Stryker-version" ;; esac
+  if [ -z "$missing" ]; then
+    pass "$name states how, when and on what it was captured"
+  else
+    fail "$name states how, when and on what it was captured" "all present" "missing:$missing"
+  fi
+done
+
+# Stryker's progress reporter emits \r, so the guard normalises with `tr` before
+# matching. That path is only exercised while a fixture still CONTAINS a carriage
+# return — and `scripts/** text eol=lf` in .gitattributes would strip them if the
+# `-text` override for this directory were ever dropped. Assert the bytes rather than
+# trusting the attribute, because a fixture quietly losing what it was capturing is
+# the same failure as a test quietly stopping.
+# Per FILE, not summed: the two data-ef captures contain no \r of their own, so a total
+# would stay green while three of five fixtures were silently normalised.
+for f in expressions-scoped expressions-solution-mode vacuous-run; do
+  crs="$(tr -cd '\r' < "$FIXTURES/$f.txt" | command wc -c | tr -d ' ')"
+  if [ "$crs" -gt 0 ]; then
+    pass "$f.txt still carries $crs carriage returns (the guard's \\r handling stays exercised)"
+  else
+    fail "$f.txt still carries carriage returns" "at least one" \
+      "none — check the scripts/fixtures/mutation-logs/*.txt -text rule in .gitattributes"
+  fi
+done
+
+# ============================================================================ total
+
+printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
+[ "$FAIL" -eq 0 ]

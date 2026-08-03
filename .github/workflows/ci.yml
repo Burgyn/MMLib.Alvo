@@ -158,19 +158,52 @@ jobs:
           path: artifacts/teapie/report*.xml
           if-no-files-found: ignore
 
+  # The repository's shell scripts have their own suites, and until now nothing ran
+  # them: `scripts/test-hooks` has existed since the snapshot-judge gate landed and was
+  # referenced only from CLAUDE.md, so a broken hook would have been found by a human
+  # tripping over it. `scripts/test-assert-mutation-run` made that untenable — it guards
+  # the mutation gate against measuring the wrong thing, and its own first review found
+  # the guard fail-open in five places, including a `printf | grep -q` SIGPIPE (exit 141)
+  # under `pipefail` that would have failed every shard on the first real run. A guard
+  # nothing tests is the defect it exists to prevent.
+  #
+  # Its own job rather than a ring: the rings are dotnet test tiers and `test-hooks`
+  # would change what ring1 means for everyone. Linux only — both suites are bash, and
+  # the matrix's Windows leg cannot run them.
+  scripts:
+    name: Script suites
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # Needs nothing but git (test-hooks builds throwaway repos) and jq
+      # (test-assert-mutation-run reads the expected test-project count out of the
+      # Stryker config, so the assertion cannot drift from what it guards). Both are
+      # preinstalled on ubuntu-latest; no dotnet setup, so this job stays seconds long.
+      - name: Claude Code hook suite
+        run: bash scripts/test-hooks
+
+      - name: Mutation-run guard suite
+        run: bash scripts/test-assert-mutation-run
+
   # Stable required status check: the branch ruleset requires "Build & test",
   # which must not change when matrix legs are added/removed. This gate passes
   # only if every matrix leg AND the e2e job succeeded — folding e2e in here
   # rather than adding a fifth required check keeps the ruleset untouched (only
   # the maintainer can edit it), and an e2e nothing requires is an e2e that rots.
+  # The script suites fold in for the same reason.
   build-and-test:
     name: Build & test
-    needs: [build-test, e2e]
+    needs: [build-test, e2e, scripts]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Require all matrix legs and the e2e to pass
+      - name: Require all matrix legs, the e2e and the script suites to pass
         run: |
           if [ "${{ needs.build-test.result }}" != "success" ]; then
             echo "One or more Build & test matrix legs failed."
@@ -180,7 +213,11 @@ jobs:
             echo "The compose + TeaPie e2e failed."
             exit 1
           fi
-          echo "All Build & test matrix legs and the e2e passed."
+          if [ "${{ needs.scripts.result }}" != "success" ]; then
+            echo "A shell script suite failed (scripts/test-hooks or scripts/test-assert-mutation-run)."
+            exit 1
+          fi
+          echo "All Build & test matrix legs, the e2e and the script suites passed."
 
   brief-freshness:
     name: Brief freshness
