@@ -20,6 +20,22 @@ internal enum SchemaStartupOutcome
 
     /// <summary>Refuse to start, printing <see cref="SchemaStartupDecision.Refusal"/>.</summary>
     Refuse,
+
+    /// <summary>
+    /// Serve nothing and report not ready, without stopping the process: this descriptor is older than the one
+    /// the database is on, so applying it would rewrite a newer schema with an older one (#145).
+    /// </summary>
+    /// <remarks>
+    /// <b>Distinct from <see cref="Refuse"/> because the two failures are different in kind, and the right
+    /// response to them differs.</b> A destructive or <see cref="AlvoSchemaStartupMode.Verify"/> refusal is an
+    /// authoring or configuration error that only a human changes, so failing the start loudly — and exiting
+    /// 78 — is the fastest feedback. An out-of-order boot is a <em>position in a deployment</em>: the pod is
+    /// not misconfigured, it is behind, which is exactly what a readiness probe expresses. Standing down
+    /// publishes <see cref="AlvoBootPhase.Failed"/> and lets an orchestrator drain the pod instead of
+    /// restart-looping a container no restart can fix — the same reasoning as the startup design's deviation
+    /// 65. Nothing is primed, so the process can answer 403 and 404 and nothing else.
+    /// </remarks>
+    StandDown,
 }
 
 /// <summary>Stage 2's verdict: what to do, the plan to do it with, and why not, if the answer is "not".</summary>
@@ -30,7 +46,8 @@ internal enum SchemaStartupOutcome
 /// </param>
 /// <param name="Refusal">
 /// The operator-readable refusal, naming the steps and the setting that would allow them. Non-<c>null</c> if
-/// and only if <paramref name="Outcome"/> is <see cref="SchemaStartupOutcome.Refuse"/>.
+/// and only if <paramref name="Outcome"/> is <see cref="SchemaStartupOutcome.Refuse"/> or
+/// <see cref="SchemaStartupOutcome.StandDown"/>.
 /// </param>
 /// <param name="Fix">
 /// The actionable lines of <paramref name="Refusal"/> on their own — what
@@ -76,6 +93,12 @@ internal readonly record struct SchemaStartupDecision(
 /// is genuinely somebody else's business is unaffected.
 /// </para>
 /// <para>
+/// <b>The ordering verdict is an <em>input</em>, not something this decides.</b> Answering "is my descriptor
+/// older than the one the database is on?" needs the append-only history, i.e. a store call — so
+/// <see cref="DescriptorHistoryOrder"/> answers it and the answer is passed in. That keeps the whole decision
+/// table a unit test, which is the property the rest of this type exists to preserve.
+/// </para>
+/// <para>
 /// Being pure — no store, no migrator, no clock — is the point: the whole decision table is a unit test, and
 /// the boot service is left with nothing to decide, only to carry out.
 /// </para>
@@ -86,9 +109,18 @@ internal static class SchemaStartupPolicy
     /// <param name="applied">The snapshot the store reports, or <c>null</c> when it has none.</param>
     /// <param name="plan">The plan from the current (or introspected) schema to the descriptor's.</param>
     /// <param name="options">The configured startup mode and destructive allowance.</param>
+    /// <param name="outOfOrder">
+    /// Why this descriptor is older than the one the database is on, or <see langword="null"/> when it is not —
+    /// see <see cref="DescriptorHistoryOrder"/>. <see langword="null"/> is also what a caller that has not
+    /// asked passes, which is deliberate: the ordering gate protects the <em>apply</em>, and a caller with
+    /// nothing to apply is not required to pay an O(N) history read to be told so.
+    /// </param>
     /// <returns>The verdict, carrying <paramref name="plan"/> and a refusal when the answer is no.</returns>
     internal static SchemaStartupDecision Decide(
-        AppliedSchema? applied, MigrationPlan plan, AlvoSchemaOptions options)
+        AppliedSchema? applied,
+        MigrationPlan plan,
+        AlvoSchemaOptions options,
+        OutOfOrderBoot? outOfOrder = null)
     {
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(options);
@@ -101,6 +133,11 @@ internal static class SchemaStartupPolicy
         if (options.Startup is AlvoSchemaStartupMode.Skip)
         {
             return applied is null ? RefusedForAnUnverifiableSkip(plan) : Unchanged(plan);
+        }
+
+        if (outOfOrder is not null)
+        {
+            return StoodDown(plan, outOfOrder);
         }
 
         if (plan.HasDestructiveChanges && !options.AllowDestructive)
@@ -120,6 +157,28 @@ internal static class SchemaStartupPolicy
 
     private static SchemaStartupDecision Unchanged(MigrationPlan plan)
         => new(SchemaStartupOutcome.Unchanged, plan, Refusal: null);
+
+    /// <summary>
+    /// The verdict for a descriptor the database has already moved on from: do not apply, do not serve, and do
+    /// not stop the process.
+    /// </summary>
+    /// <remarks>
+    /// <b>Decided before the destructive gate, which narrows the startup design's deviation 57 without
+    /// weakening it.</b> Both gates refuse the same boot — the plan back from a newer schema is a drop — so
+    /// nothing becomes appliable that was not; what changes is which of the two true things the operator is
+    /// told. "You are running an older descriptor than the database (revision 1 versus revision 2)" is the
+    /// diagnosis for a rollback crash-loop that "destructive change refused" has been failing to give, and it
+    /// is the sole reason the ordering gate is worth having ahead of a gate that would refuse anyway.
+    /// </remarks>
+    /// <param name="plan">The plan that would have run.</param>
+    /// <param name="outOfOrder">Why this descriptor is older than the applied one.</param>
+    private static SchemaStartupDecision StoodDown(MigrationPlan plan, OutOfOrderBoot outOfOrder)
+    {
+        var fix = string.Join(Environment.NewLine, outOfOrder.Fixes);
+
+        return new SchemaStartupDecision(
+            SchemaStartupOutcome.StandDown, plan, BuildRefusal(outOfOrder.Headline, plan, fix), fix);
+    }
 
     private static SchemaStartupDecision Refused(
         AppliedSchema? applied, MigrationPlan plan, AlvoSchemaOptions options)

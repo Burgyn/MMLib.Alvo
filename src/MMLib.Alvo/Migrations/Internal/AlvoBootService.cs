@@ -67,6 +67,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     private readonly IRuntimeSchemaWriter _writer;
     private readonly ISchemaIntrospector _introspector;
     private readonly IAppliedSchemaStore _store;
+    private readonly IDescriptorVersionStore _history;
     private readonly IPolicyCatalogProvider _policyCatalogProvider;
     private readonly AlvoBootState _state;
     private readonly IOptions<AlvoSchemaOptions> _options;
@@ -78,6 +79,10 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     /// <param name="writer">Applies that plan and records it as one transaction.</param>
     /// <param name="introspector">Reports the live schema when Alvo has recorded none for this project.</param>
     /// <param name="store">The applied snapshot, whose storage is also stage 1's system schema.</param>
+    /// <param name="history">
+    /// The project's append-only descriptor history, read to decide whether this process is holding a
+    /// descriptor the database has already moved on from — see <see cref="AmIAnOlderPodAsync"/>.
+    /// </param>
     /// <param name="policyCatalogProvider">Where stage 3 publishes the compiled catalog.</param>
     /// <param name="state">What the boot publishes for a readiness probe to read.</param>
     /// <param name="options">The startup mode and destructive allowance, already validated by the host.</param>
@@ -88,6 +93,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         IRuntimeSchemaWriter writer,
         ISchemaIntrospector introspector,
         IAppliedSchemaStore store,
+        IDescriptorVersionStore history,
         IPolicyCatalogProvider policyCatalogProvider,
         AlvoBootState state,
         IOptions<AlvoSchemaOptions> options,
@@ -98,6 +104,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         ArgumentNullException.ThrowIfNull(writer);
         ArgumentNullException.ThrowIfNull(introspector);
         ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(history);
         ArgumentNullException.ThrowIfNull(policyCatalogProvider);
         ArgumentNullException.ThrowIfNull(state);
         ArgumentNullException.ThrowIfNull(options);
@@ -108,6 +115,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         _writer = writer;
         _introspector = introspector;
         _store = store;
+        _history = history;
         _policyCatalogProvider = policyCatalogProvider;
         _state = state;
         _options = options;
@@ -153,8 +161,16 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
 
     /// <summary>The five stages, in the one order that keeps each at its own risk level.</summary>
     /// <remarks>
+    /// <para>
     /// A refusal is recorded on <see cref="AlvoBootState"/> by the stage that raises it, so the catch in
     /// <see cref="StartingAsync"/> does not overwrite a project-scoped failure with a project-less one.
+    /// </para>
+    /// <para>
+    /// <b>A stand-down returns here without publishing <see cref="AlvoBootState.Ready"/>.</b> It is the one
+    /// outcome that neither serves nor stops the process, so the boot has to end without either — see
+    /// <see cref="StandDown"/>. Publishing Ready first and overwriting it after would leave a window in which a
+    /// readiness probe reads Ready for a project that will never serve.
+    /// </para>
     /// </remarks>
     private async Task BootAsync(CancellationToken ct)
     {
@@ -162,6 +178,10 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         var project = boot.Descriptor.Name;
 
         var (outcome, revision) = await ConvergeOnWhatTheDatabaseSaysAsync(boot, ct).ConfigureAwait(false);
+        if (outcome is SchemaStartupOutcome.StandDown)
+        {
+            return;
+        }
 
         _state.Ready(project, revision);
         RecordWhatTheBootDid(project, outcome, revision);
@@ -220,9 +240,15 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     /// <em>drop</em> of it, and the destructive gate refuses a drop in every mode. So the schema does not
     /// oscillate: the replica holding the subset descriptor cannot start at all, which is the concrete shape
     /// of the reason a production deployment sets <see cref="AlvoSchemaStartupMode.Verify"/> and applies from
-    /// a migration job instead — and the same mechanism that makes a descriptor rollback unbootable under
-    /// <see cref="AlvoSchemaStartupMode.Apply"/>. Ordering the two descriptors against each other, rather than
-    /// letting the race decide, is #145.
+    /// a migration job instead.
+    /// </para>
+    /// <para>
+    /// <b>What the race can no longer decide is <em>which generation</em> of the descriptor wins</b> —
+    /// <see cref="AmIAnOlderPodAsync"/> answers that from the append-only history before the plan is judged, so
+    /// a replica holding a descriptor the database has already moved on from stands down instead of applying
+    /// its own over a newer one (#145). That closes the cases the destructive gate cannot see, because they
+    /// discard nothing: an index or constraint added one way and dropped the other, and a pair of declared
+    /// renames pointing at each other.
     /// </para>
     /// <para>
     /// <b>At most one retry, and no lock.</b> A loop would hang a boot instead of failing it, which is strictly
@@ -326,8 +352,46 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     {
         var current = applied?.Schema ?? await _introspector.IntrospectAsync(ct).ConfigureAwait(false);
         var plan = await _migrator.PlanAsync(current, boot.Desired, MigrationOptions, ct).ConfigureAwait(false);
+        var outOfOrder = await AmIAnOlderPodAsync(boot, plan, ct).ConfigureAwait(false);
 
-        return SchemaStartupPolicy.Decide(applied, plan, _options.Value);
+        return SchemaStartupPolicy.Decide(applied, plan, _options.Value, outOfOrder);
+    }
+
+    /// <summary>
+    /// Whether this process is holding a descriptor the database has already moved on from — the ordering the
+    /// <see cref="AlvoSchemaStartupMode.Apply"/> default otherwise leaves to a race (#145).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Not asked when there is nothing to apply, and that is what keeps an ordinary restart cheap.</b>
+    /// <see cref="IDescriptorVersionStore.ListAsync"/> reads the whole history, which is O(N) in a project's
+    /// applied revisions, so paying it on the most common boot in existence — a restart over an unchanged
+    /// descriptor — to be told something the empty plan already implies would be a real tax for nothing. The
+    /// gate governs the <em>apply</em>: a boot that changes no schema cannot be the one that rewrites a newer
+    /// schema with an older one.
+    /// </para>
+    /// <para>
+    /// <b>Read here rather than reusing the applied snapshot.</b> <see cref="ReadAppliedSchemaAsync"/> returns
+    /// only the current row, and the question is whether <em>this</em> descriptor is somewhere behind it — which
+    /// only the history can answer. Deriving the current snapshot from <c>history[^1]</c> instead, and dropping
+    /// the other read, was considered and declined: that read is also stage 1, and every probe count measured
+    /// against it in the concurrency facts is pinned to the port it goes through.
+    /// </para>
+    /// </remarks>
+    /// <param name="boot">Stage 0's descriptor and the JSON it was loaded from.</param>
+    /// <param name="plan">The plan stage 2 is about to judge.</param>
+    /// <param name="ct">Cancellation token.</param>
+    private async Task<OutOfOrderBoot?> AmIAnOlderPodAsync(
+        BootPlan boot, MigrationPlan plan, CancellationToken ct)
+    {
+        if (plan.IsEmpty)
+        {
+            return null;
+        }
+
+        var history = await _history.ListAsync(boot.Descriptor.Name, ct).ConfigureAwait(false);
+
+        return DescriptorHistoryOrder.Check(boot.Descriptor, boot.DescriptorJson, history);
     }
 
     /// <summary>Stages 2 and 3: do what was decided, and prime from the descriptor that was accepted.</summary>
@@ -338,6 +402,11 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         if (decision.Outcome is SchemaStartupOutcome.Refuse)
         {
             RefuseTheBoot(boot.Descriptor.Name, decision);
+        }
+
+        if (decision.Outcome is SchemaStartupOutcome.StandDown)
+        {
+            return StandDown(boot.Descriptor.Name, decision);
         }
 
         return decision.Outcome is SchemaStartupOutcome.Unchanged
@@ -369,6 +438,50 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         BootRefused(_logger, refusal);
 
         throw new AlvoStartupRefusedException(refusal, decision.Fix ?? string.Empty);
+    }
+
+    /// <summary>
+    /// Records that this process is behind the database, primes nothing, and lets the start finish.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The one outcome that neither serves nor stops the process, and the difference from
+    /// <see cref="RefuseTheBoot"/> is the whole point.</b> A destructive or
+    /// <see cref="AlvoSchemaStartupMode.Verify"/> refusal is a configuration or authoring error that only a
+    /// human resolves, so it throws and the host exits 78 — the loudest, fastest feedback there is. An
+    /// out-of-order boot is a position in a deployment: this pod is not misconfigured, it is behind, and
+    /// exiting turns that into a crash loop an orchestrator will retry forever over a condition no restart can
+    /// fix. So the phase goes to <see cref="AlvoBootPhase.Failed"/>, readiness answers 503, liveness keeps
+    /// answering 200, and the pod is drained rather than killed — the shape the startup design's deviation 65
+    /// established for a schema the Data API cannot route.
+    /// </para>
+    /// <para>
+    /// <b>Nothing is primed, and that is the safety property rather than an omission.</b> An unprimed
+    /// <see cref="IPolicyCatalogProvider"/> denies every operation and an unprimed
+    /// <c>ISchemaRegistry</c> materialises an empty route table, so a process that stood down can answer 403
+    /// and 404 and nothing else. Standing down therefore does not depend on nobody routing to it.
+    /// </para>
+    /// <para>
+    /// Logged at <see cref="LogLevel.Critical"/> through the same call a refusal uses: this is where the design
+    /// promises an operator finds the reason, because <see cref="AlvoBootState.Failure"/> is deliberately
+    /// withheld from the readiness body (deviation 59) and — unlike a refusal — nothing here writes to stderr
+    /// on the way out.
+    /// </para>
+    /// </remarks>
+    /// <param name="project">The project whose boot stood down.</param>
+    /// <param name="decision">Stage 2's verdict, carrying the operator-readable reason.</param>
+    /// <returns>
+    /// No applied revision, ever: this process primed from nothing, so there is nothing for it to report
+    /// serving.
+    /// </returns>
+    private int? StandDown(string project, SchemaStartupDecision decision)
+    {
+        var refusal = decision.Refusal ?? UnexplainedRefusal;
+
+        _state.Failed(project, refusal);
+        BootRefused(_logger, refusal);
+
+        return null;
     }
 
     /// <summary>

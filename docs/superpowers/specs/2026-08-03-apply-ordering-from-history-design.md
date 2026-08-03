@@ -215,6 +215,16 @@ only on a boot that would change the schema, and N counts *applied* revisions fo
 one project — a number that grows per schema-changing deploy, not per request. A
 project at 250 revisions pays 50 ms of a boot that is already running DDL.
 
+**One consequence of reading N rows instead of one, recorded rather than papered
+over.** `EfCoreDescriptorVersionStore.ReadVersion` deserializes every row it
+returns and throws on a row it cannot read, so a boot that previously touched
+only the current row can now be stopped by a corrupt *older* one. It is narrow —
+the row would have to hold unreadable `schema_json` or an unparseable timestamp,
+i.e. something no build wrote — and tolerating it belongs to the driver, where
+skipping a row silently would be a worse answer than failing. The descriptor-JSON
+parse the ordering check adds raises nothing new: `ListAsync` has already
+deserialized that row's schema by the time the check sees it.
+
 **The narrower query is surfaced, not taken.** `SELECT revision, descriptor_json`
 without the schema JSON, or a stored canonical digest compared instead of the
 JSON, would cut both halves — and both are **port changes** to

@@ -165,7 +165,7 @@ because the cost is real:
 
 | Mode | On drift | What it costs |
 |---|---|---|
-| `Apply` *(default)* | applies the plan | every replica of a rolling deploy attempts the DDL, and the application needs DDL rights against its own database — what EF Core's guidance advises against. Plus a descriptor **rollback** that cannot boot, and **#145**, both below |
+| `Apply` *(default)* | applies the plan | every replica of a rolling deploy attempts the DDL, and the application needs DDL rights against its own database — what EF Core's guidance advises against. Plus a descriptor **rollback** that cannot be applied — though a pod holding an older descriptor now stands down as not-ready instead of crash-looping (**#145**) — both below |
 | `Verify` | refuses, printing the steps and the fix | a descriptor edit does not take effect until the migration job runs |
 | `Skip` | reads the applied snapshot — that read is also what brings the framework's own tables up — and ignores whatever drift it found | the schema is entirely somebody else's business. Refused in one state only: Alvo has recorded nothing **and** the live schema does not match the descriptor, i.e. nothing has verified the schema exists |
 
@@ -199,10 +199,11 @@ earlier version of this section got it wrong:
   `Ready`, and the one holding the older descriptor serves rules compiled against a
   schema the database now has more than (`ConcurrentColdStart.DriftedDescriptor`, both
   engines).
-- **The pod holding the older descriptor cannot take its turn back — it crash-loops.**
-  Reverting means dropping the newer column, and the destructive gate refuses that in
-  every mode. So the schema does not oscillate; the subset pod simply cannot start, by
-  exactly the mechanism the rollback paragraph above describes.
+- **The pod holding the older descriptor cannot take its turn back.** Reverting means
+  dropping the newer column, and the destructive gate refuses that in every mode. So the
+  schema does not oscillate; the subset pod simply cannot serve, by exactly the mechanism
+  the rollback paragraph above describes. It used to *crash-loop* over that refusal; it
+  now stands down as not-ready with a diagnostic naming both revisions (#145, below).
 - **The additive-vs-additive case is refused, not merged.** A adds `region`, B adds
   `city`: B's plan against A's applied snapshot *drops* `region`, which is destructive, so
   B refuses and the database ends on one descriptor's schema. Measured by
@@ -213,11 +214,30 @@ earlier version of this section got it wrong:
   nothing can reach it, because reaching it needs a plan that adds without dropping and no
   such plan exists for either descriptor.
 
-The resolution — ordering the apply from `IDescriptorVersionStore`'s append-only history,
-using the descriptor `revision` the frozen schema already carries for exactly this
-purpose — is **#145**, the next PR: it turns "the newest artifact to boot wins, and the
-older one crash-loops" into an ordered decision with a diagnostic. Until it lands, one
-writer (a migration job plus `Verify` on the pods) is the shape that cannot get there.
+**#145 is the resolution, and it has landed**: the apply is now ordered from
+`IDescriptorVersionStore`'s append-only history. Before it decides anything a boot would
+change the schema with, it asks whether *this* descriptor's canonical content is in the
+history at a revision older than the current one — and if it is, the process **stands
+down**: it starts, primes nothing, reports **not ready**, and logs a refusal naming the
+revision it is against the revision the database is at. So an orchestrator drains the pod
+rather than restart-looping it, and the two costs above change shape:
+
+- the pod holding the older descriptor no longer crash-loops, and no longer reports the
+  wrong problem (it used to say "destructive change refused", which sends an operator to
+  discard data to recover from being one deploy behind);
+- the changes the destructive gate cannot see — an index or constraint added one way and
+  dropped the other, a pair of declared renames pointing at each other — no longer
+  oscillate, because the older pod is stopped before it reaches the DDL at all.
+
+It does **not** make a rollback appliable: the plan back is still a drop and the
+always-on destructive gate still refuses it. What it fixes is which of the two true
+things the operator is told. The declared `revision`, if a repository maintains it, is
+honoured as an override in one direction only — it can say "you are older", never "you
+are newer" — so a decorative counter nobody bumps changes nothing. Design:
+`docs/superpowers/specs/2026-08-03-apply-ordering-from-history-design.md`.
+
+One writer (a migration job plus `Verify` on the pods) remains the shape that cannot get
+into any of this in the first place.
 
 ```yaml
 # production: the schema is the migration job's, and the pods only serve it

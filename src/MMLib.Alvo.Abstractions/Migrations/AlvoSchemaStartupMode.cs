@@ -62,13 +62,21 @@ public enum AlvoSchemaStartupMode
     /// <see cref="Verify"/> plus a migration job.
     /// </para>
     /// <para>
-    /// <b>And one cost is sharper than either of those: a descriptor <em>rollback</em> may not be able to
-    /// boot.</b> This mode advances the applied schema with no operator decision, so redeploying the previous
-    /// descriptor plans a drop of whatever the forward deploy added — and the always-on destructive gate
-    /// refuses it, so every replica exits instead of starting. The way back is
+    /// <b>And one cost is sharper than either of those: a descriptor <em>rollback</em> cannot boot.</b> This
+    /// mode advances the applied schema with no operator decision, so redeploying the previous descriptor plans
+    /// a drop of whatever the forward deploy added. The way back is
     /// <c>AlvoSchemaOptions.AllowDestructive</c> on the rollback, accepting the loss of what the new column
     /// holds, or applying the older descriptor from a migration job. Under <see cref="Verify"/> the operator
     /// chose the forward apply knowingly and can plan the way back; under this mode nobody chose it.
+    /// </para>
+    /// <para>
+    /// <b>What it no longer costs is a crash loop.</b> A process whose descriptor the database has already moved
+    /// on from is recognised as such — from the append-only descriptor history, not from a counter anybody
+    /// maintains — and <em>stands down</em>: it starts, reports not ready, and names the revision it is against
+    /// the revision the database is at, so an orchestrator drains it instead of restarting it forever over a
+    /// destructive-plan refusal that never explained which artifact was behind. That also closes the changes no
+    /// destructive gate can see, because they discard nothing: an index or constraint added one way and dropped
+    /// the other, and a pair of declared renames pointing at each other.
     /// </para>
     /// </remarks>
     Apply = 1,
