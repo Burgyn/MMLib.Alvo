@@ -3639,6 +3639,37 @@ invariant throws, the entry is **released** rather than marked dispatched, and t
 7. **`PumpOneBatchAsync` is `internal` from the start**, because Task 10 Step 3 needs exactly that for a
    deterministic drain, and every fact here that does not need the loop drives it directly rather than sleeping.
 
+**What the mutations found, including two verdicts on a green one.** Sixteen one-sided mutations, each
+restored: the readiness gate reduced to a `boot.Phase` read (red — that is the pre-.NET-10 shape, and the fact
+tells the two apart), the settled phase ignored (red on the refused-boot fact), the blanket `catch` removed
+(red), the contained failure rethrown (red in five facts across both suites), the cancellation filter dropped
+(red), the idle wait's token dropped (red **after exactly 30 s**, which is the measurement), a failed attempt
+retired instead of released (red), the poison threshold off by one (red), a filtered event not retired (red), a
+throwing condition selecting the hook (red), the pre-image dropped (red), the batch-size floor and the
+lease-versus-interval rule weakened (each red). **Two green ones, with different verdicts.** (1) Publishing the
+completion *before* the interlocked snapshot swap stayed green over three runs — a **hole in that fact I cannot
+close deterministically**: the completion source is deliberately
+`RunContinuationsAsynchronously`, so a waiter always resumes through the thread pool and the ordering window is
+nanoseconds against microseconds of dispatch. The ordering is held by the code and its remarks, not by a fact,
+and that is now written down rather than assumed. (2) Swapping `Filtered` and `Dispatched` stayed green, which is
+a **deliberately delegated gap**: no fact here reads a counter, because the listener that reads them is Task 10's
+`RecordingMeterListener` and a second one written here is exactly how the execution-log criterion comes to count
+twice. Until Task 10 lands, the counter direction is unpinned — its own facts (`filtered` == 100, `dispatched` ==
+0/1) are what close it.
+
+**One fact got stronger because a mutation exposed how it fails.** Making `SettledAsync` check its token once
+instead of observing it left `Settled_observes_its_cancellation_token_so_shutdown_never_waits_thirty_seconds`
+**hanging for five minutes** rather than failing: the boot never settles in that fact, so an unobserved token
+leaves the task incomplete forever. A hang is a timed-out CI job, not a named failure, so the await is now bounded
+by a five-second `WaitAsync` — and under the same mutation the fact fails in five seconds.
+
+**One correction to Task 10's own plan text, measured here.** Its mutation 2 expects that passing
+`previous: null` makes `changed(status)` read as *changed*, so "the second update fires". Measured: with no
+pre-image this build's interpreter answers `changed(...)` as **false**, so dropping the pre-image made the
+*positive* fact (`A_hook_whose_condition_holds_is_selected`) go red while the "already won, must not fire" fact
+stayed green. The mutation is killed either way — but Task 10 should expect its **first** assertion to move, not
+its second.
+
 **One thing this task deliberately does not do.** No counter is asserted here. The three increments are written
 (`Dispatched` after the retirement, `Filtered` once per event, `Failed` once per attempt) but observing them
 needs the `RecordingMeterListener` **Task 10 owns**, and a second listener written here would be the thing that

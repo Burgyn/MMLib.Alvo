@@ -203,6 +203,12 @@ public sealed class AlvoBootStateTests
     /// The wait observes its own token, which is what keeps a shutdown from waiting out the host's 30-second
     /// <c>ShutdownTimeout</c> while the boot never settles.
     /// </summary>
+    /// <remarks>
+    /// The bounded <c>WaitAsync</c> is there so that a wait which <em>ignores</em> the token fails this fact
+    /// instead of hanging it: the boot never settles here, so an unobserved token leaves the task incomplete
+    /// forever, and a hang is a timed-out CI job rather than a named failure. Measured — a version of this
+    /// without the bound hung for five minutes under exactly that mutation.
+    /// </remarks>
     [Fact]
     public async Task Settled_observes_its_cancellation_token_so_shutdown_never_waits_thirty_seconds()
     {
@@ -212,8 +218,15 @@ public sealed class AlvoBootStateTests
 
         await cancellation.CancelAsync();
 
-        await Should.ThrowAsync<OperationCanceledException>(() => settled);
+        await Should.ThrowAsync<OperationCanceledException>(
+            () => settled.WaitAsync(_cancellationBudget, TestContext.Current.CancellationToken));
     }
+
+    /// <summary>
+    /// How long a cancelled wait may take to report itself — long enough not to be flaky, short enough that a
+    /// wait which ignores its token fails rather than hangs.
+    /// </summary>
+    private static readonly TimeSpan _cancellationBudget = TimeSpan.FromSeconds(5);
 
     /// <summary>
     /// A waiter that wakes reads a <em>settled</em> snapshot: the completion is published after the interlocked
