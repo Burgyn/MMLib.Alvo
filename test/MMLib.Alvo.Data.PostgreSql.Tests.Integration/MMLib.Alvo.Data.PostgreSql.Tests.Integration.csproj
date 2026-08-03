@@ -52,9 +52,19 @@
        same question. -->
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/AlvoEventCriteriaWorld.cs" Link="_shared/AlvoEventCriteriaWorld.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/DispatchedEventCollection.cs" Link="_shared/DispatchedEventCollection.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/OutboxTallyProbe.cs" Link="_shared/OutboxTallyProbe.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/RecordingEventLog.cs" Link="_shared/RecordingEventLog.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/RecordingMeterListener.cs" Link="_shared/RecordingMeterListener.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/RecordingWebhookReceiver.cs" Link="_shared/RecordingWebhookReceiver.cs" />
+  </ItemGroup>
+
+  <!-- The 10 000-event chaos criterion, shared with MMLib.Alvo.Data.Sqlite.Tests — see the same link there. The
+       suite itself is linked, not only its world, so neither engine can be asked an easier question. -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/OutboxChaosCriteriaTests.cs" Link="_shared/OutboxChaosCriteriaTests.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/OutboxChaosWorld.cs" Link="_shared/OutboxChaosWorld.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/ChaosWebhookReceiver.cs" Link="_shared/ChaosWebhookReceiver.cs" />
   </ItemGroup>
 
   <!-- The container-creation mechanics every Testcontainers-backed PostgreSQL fixture in this repository

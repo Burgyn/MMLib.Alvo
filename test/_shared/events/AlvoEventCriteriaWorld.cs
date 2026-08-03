@@ -1,23 +1,13 @@
-﻿using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
+﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 using MMLib.Alvo.Data;
-using MMLib.Alvo.Data.EntityFrameworkCore;
-using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Schema;
 using MMLib.Alvo.Testing.Events;
 
-using System.Data.Common;
-using System.Globalization;
-
 using Xunit;
-
-// EF1001 matches on a namespace ending in ".Internal", so here it flags Alvo's OWN internals — both driver
-// test projects are granted them by InternalsVisibleTo — rather than an Entity Framework internal API.
-#pragma warning disable EF1001
 
 namespace MMLib.Alvo.Tests.Events;
 
@@ -42,6 +32,11 @@ namespace MMLib.Alvo.Tests.Events;
 /// <b>The drain is the dispatcher's own <c>PumpOneBatchAsync</c>, bounded, and it throws on giving up.</b> A
 /// drain that slept and hoped would make every assertion after it an under-count, and a drain that gave up
 /// quietly would turn a stuck queue into a passing absence.
+/// </para>
+/// <para>
+/// The tally is <see cref="OutboxTallyProbe"/>'s, shared with the chaos criterion rather than restated here: two
+/// copies of "what is pending and what is retired" is how one criterion's anti-vacuity check comes to disagree
+/// with the other's.
 /// </para>
 /// </remarks>
 internal sealed class AlvoEventCriteriaWorld : IAlvoEventWorld
@@ -111,8 +106,7 @@ internal sealed class AlvoEventCriteriaWorld : IAlvoEventWorld
     }
 
     /// <inheritdoc/>
-    public async Task<AlvoOutboxTally> TallyAsync() =>
-        new(await CountAsync(Undelivered), await CountAsync(Retired));
+    public Task<AlvoOutboxTally> TallyAsync() => _tally.TallyAsync();
 
     /// <summary>
     /// Disposes the meter listener, and nothing else: the container and the database belong to the fixture that
@@ -139,10 +133,10 @@ internal sealed class AlvoEventCriteriaWorld : IAlvoEventWorld
     {
         _project = project;
         _data = data;
-        _services = services;
         _receiver = receiver;
         _log = log;
         _meter = meter;
+        _tally = new OutboxTallyProbe(services);
         _dispatcher = services.GetServices<IHostedService>().OfType<OutboxDispatcher>().Single();
     }
 
@@ -179,35 +173,6 @@ internal sealed class AlvoEventCriteriaWorld : IAlvoEventWorld
     }
 
     /// <summary>
-    /// How many outbox rows satisfy <paramref name="predicate"/>, read on a connection of this world's own so
-    /// nothing here can be mistaken for the write path's transaction.
-    /// </summary>
-    /// <param name="predicate">
-    /// One of the two constants below — the queue's state machine, never anything caller-supplied.
-    /// </param>
-    private async Task<int> CountAsync(string predicate)
-    {
-        using var db = _services.GetRequiredService<AlvoDataContextFactory>().Create();
-        var connection = db.Database.GetDbConnection();
-        await RelationalSqlBatch.OpenAsync(connection, Ct);
-
-        var command = connection.CreateCommand();
-        await using (command.ConfigureAwait(false))
-        {
-            command.CommandText = $"SELECT COUNT(*) FROM {_tableName} WHERE {predicate}";
-            var count = await command.ExecuteScalarAsync(Ct);
-
-            return Convert.ToInt32(count, CultureInfo.InvariantCulture);
-        }
-    }
-
-    private const string SchemaPrefix = "alvo";
-
-    private const string Undelivered = "dispatched_at IS NULL";
-
-    private const string Retired = "dispatched_at IS NOT NULL";
-
-    /// <summary>
     /// How many claims a drain may take before it gives up. Generous against the largest criterion here (102
     /// events over a batch size of 100) and still bounded, so a queue whose entries keep being released fails
     /// in seconds instead of looping forever.
@@ -216,12 +181,11 @@ internal sealed class AlvoEventCriteriaWorld : IAlvoEventWorld
 
     private readonly AlvoEventProject _project;
     private readonly IAlvoData _data;
-    private readonly IServiceProvider _services;
     private readonly RecordingWebhookReceiver _receiver;
     private readonly RecordingEventLog _log;
     private readonly RecordingMeterListener _meter;
     private readonly OutboxDispatcher _dispatcher;
-    private readonly string _tableName = OutboxTable.NameFor(SchemaPrefix);
+    private readonly OutboxTallyProbe _tally;
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 }

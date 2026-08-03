@@ -4346,6 +4346,93 @@ git commit -m "test(events): pin the transition and execution-log criteria on bo
 
 ### Task 11: The 10k-event chaos criterion
 
+**DONE.** Green on both engines, with identical numbers everywhere except elapsed — `accepted=10000
+distinct=10000 attempts=10526 refused=526 abandoned=20 entries over 2 claims claims=108 cap-hit=False
+pending=0 retired=10000`. **N stayed 10 000.**
+
+**The budget, measured.** SQLite: run **27.4 s**, seed 0.2 s, whole test 28 s. PostgreSQL: run **2.7 s**,
+seed 1.6 s, whole test 10 s including the container. Both legs together ≈ 38 s, against the plan's own
+120 s rule and `ci.yml`'s 20-minute ring2 ceiling, so neither `Restarts` nor `BatchSize` nor `EventCount`
+had to move and the PostgreSQL leg stays inside `build-test` rather than becoming a job outside the
+branch ruleset.
+
+**Why SQLite is ten times slower than PostgreSQL here, and why Q8 did not predict it.** The shipped
+dispatcher retires **one entry per statement**, so a run is ~11 000 autocommit writes (10 526 marks +
+526 releases + 108 claims) at ~2.5 ms each — one durable commit, one fsync. Q8 measured *batched* marks
+("claimed+marked 10000 rows in 0.30 s over 101 round trips"), which is why its 0.37 s is a floor that
+omits the dominating cost rather than a prediction. Nothing in a test may fix it: the plan forbids
+touching the shared SQLite registration, and a batched `MarkDispatchedAsync` is a product change with its
+own ordering and crash-window questions.
+
+**The cost lands on ring0, which the task did not consider.** `MMLib.Alvo.Data.Sqlite.Tests` is a
+`*.Tests` module, so the SQLite leg runs in ring0 — after every small step and in every `pre-commit`. The
+module goes from ~7 s to **35 s** and ring0's wall clock from ~24 s to **40 s** (modules run in parallel,
+so Sqlite.Tests becomes the critical path rather than adding 28 s). Recorded rather than moved: it is the
+leg that gates a merge, because the PostgreSQL one self-skips where Docker runs Windows containers.
+
+**Seven deliberate deviations from this task as written.**
+
+1. **The two legs are `MMLib.Alvo.Data.Sqlite.Tests` and `MMLib.Alvo.Data.PostgreSql.Tests.Integration`,
+   with the suite itself linked from `test/_shared/events/`** — Task 10's arrangement, not
+   `MMLib.Alvo.Api.Tests.Integration`. The criterion is over `IOutboxStore` and the dispatcher, not over
+   HTTP, and its seed reaches `OutboxTable.InsertAsync` + `OutboxEventFactory`, which
+   `MMLib.Alvo.Testing` (Abstractions-only) cannot see. **No public-API baseline moved**, which is the
+   other half of the trade: the suite is a test-project type, so a third-party provider cannot inherit
+   it — and could not anyway, because the seed is a driver internal.
+2. **"2 restarts" became "2 abandoned claims", and the wording is the point.** Disposing and recreating
+   the dispatcher recreates an object whose claimant string is a static; what has to be recovered is a
+   *claim nobody will ever finish*. So the world claims a batch as `dead-replica`, never delivers,
+   retires or releases it, and moves the clock past the lease. Calling that a restart would over-claim
+   what an in-process harness proves — Task 12 owns the process kill, and the suite says so.
+3. **`ClaimOneAndReleaseAsync` also asserts the claimed envelope carries the field the hook's condition
+   reads**, not merely that it deserializes. A payload that parses but has no `status` would leave every
+   event filtered and the failure would name the wrong cause.
+4. **Delivery is a set comparison plus an exact acceptance count plus `filtered == 0`.** The set rules
+   out ten thousand redeliveries of one entry; `accepted == 10 000` pins the stronger-than-guarantee
+   property that no entry is claimed twice mid-flight (spike Q4's failure mode); `filtered == 0` is the
+   one silent loss the tally cannot see, since a filtered event is retired without delivery and never
+   retried.
+5. **Both event suites now share one xUnit collection per assembly** (`DispatchedEventCollection`). The
+   event counters are process-wide statics and both suites assert them by value, so adding a second
+   dispatching class would have made Task 10's `dispatched == 1` read this run's ten thousand,
+   irreproducibly. This is a latent flake this task would have *created*, not one it found.
+6. **The world calls `IOutboxStore.EnsureAsync`** — the one line of `PumpUntilStoppedAsync` that driving
+   `PumpOneBatchAsync` directly skips. Measured: without it the seed fails with
+   `no such table: alvo_outbox`, because the fixture's migrator does not create the outbox table and
+   Task 10's world only got one as a side effect of the `IAlvoData` write path.
+7. **The tally is one shared `OutboxTallyProbe`**, used by both criteria worlds instead of two copies of
+   "what is pending and what is retired".
+
+**Six mutations, each restored immediately.**
+
+1. **Skip one `MarkDispatchedAsync` (delivery 5 000 of 10 000)** → **RED**, on the dispatched counter and
+   `accepted=10001`, *not* on the tally: the un-retired entry outlived its claim, the next clock advance
+   made it claimable, and it was delivered a **second** time. The criterion catches a dropped retirement
+   as a duplicate delivery.
+2. **The same drop at delivery 9 999** — after the last clock advance → **RED** on the tally,
+   `pending=1 retired=9999`. The two together are one dropped event out of ten thousand, caught from two
+   different sides depending on whether a lease expiry follows it.
+3. **`ClaimAsync` silently returns one fewer row per claim** → **RED**, `41 never were`, `pending=41`.
+4. **`ReleaseAsync` as a no-op** → **RED**, `186 never were`, `pending=186` — the failure path, not the
+   happy one.
+5. **The harness never advances past the lease** → **RED**, exactly **20** lost, which is exactly what
+   the two abandoned claims took. It is the lease that recovers them and nothing else.
+6. **`FailEvery = 100_000`** → **RED** on the chaos floor, `refused=0`.
+
+**One mutation the plan predicted wrongly, and it was a hole.** Seeding **10** events instead of 10 000
+left the queued-count check, the delivered set and the tally all **green** — every one of them is written
+in terms of `EventCount` and shrinks with it. What caught it was the chaos floor, and only by arithmetic
+luck (`10 / (20 * 2) == 0`, so `refused > 0` failed at `refused=0`); at `EventCount = 5_000` nothing would
+have failed and the fact's name, its docs and its published line would all still have said ten thousand.
+**Verdict: a hole, and closed rather than recorded** — one assertion pins `EventCount` to `10_000` and
+fails in 43 ms, so reducing N is now a deliberate edit on the line that names the criterion instead of a
+silent one.
+
+**`artifacts/criteria/events.md`** gets one appended line per run — the same mechanism and the same
+reasoning as `paging.md` — and `ci.yml` publishes it into the run summary and uploads it **per matrix OS**
+rather than Linux-only, because the SQLite leg runs on both runners while the PostgreSQL leg self-skips on
+Windows.
+
 `baas-analyza.md:676`'s first number: a 10 000-event chaos run **loses no event**, on SQLite and
 PostgreSQL. Modelled on `test/MMLib.Alvo.Api.Tests.Integration/PagingPerformanceTests.cs`, which is
 the repo's own answer to how a numeric criterion is written so it cannot pass vacuously: **assert the

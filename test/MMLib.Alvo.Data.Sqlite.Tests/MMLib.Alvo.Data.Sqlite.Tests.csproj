@@ -43,9 +43,21 @@
        no event subsystem, where these types would be uninstantiated internal classes. -->
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/AlvoEventCriteriaWorld.cs" Link="_shared/AlvoEventCriteriaWorld.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/DispatchedEventCollection.cs" Link="_shared/DispatchedEventCollection.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/OutboxTallyProbe.cs" Link="_shared/OutboxTallyProbe.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/RecordingEventLog.cs" Link="_shared/RecordingEventLog.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/RecordingMeterListener.cs" Link="_shared/RecordingMeterListener.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/RecordingWebhookReceiver.cs" Link="_shared/RecordingWebhookReceiver.cs" />
+  </ItemGroup>
+
+  <!-- The 10 000-event chaos criterion, shared with MMLib.Alvo.Data.PostgreSql.Tests.Integration. The suite
+       itself is linked, not only its world: "no event is lost" is one criterion measured on two engines, so a
+       per-engine copy of the seed, the chaos or any single assertion would let one engine be asked an easier
+       question than the other. -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/OutboxChaosCriteriaTests.cs" Link="_shared/OutboxChaosCriteriaTests.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/OutboxChaosWorld.cs" Link="_shared/OutboxChaosWorld.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/ChaosWebhookReceiver.cs" Link="_shared/ChaosWebhookReceiver.cs" />
   </ItemGroup>
 
   <!-- The concurrent-cold-start harness, shared with MMLib.Alvo.Data.PostgreSql.Tests.Integration. Linked for

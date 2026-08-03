@@ -9,6 +9,11 @@ namespace MMLib.Alvo.Data.PostgreSql.Tests.Integration;
 /// The transition and execution-log acceptance criteria over a real PostgreSQL engine — the criterion "green on
 /// SQLite <em>and</em> PostgreSQL", proved rather than assumed. Inherits every fact unchanged.
 /// </summary>
+/// <remarks>
+/// It belongs to <see cref="DispatchedEventCollection"/> together with <see cref="PostgreSqlOutboxChaosTests"/>,
+/// because both assert process-wide event counters by value and xUnit would otherwise run them at once.
+/// </remarks>
+[Collection(DispatchedEventCollection.Name)]
 public sealed class PostgreSqlAlvoEventCriteriaTests : AlvoEventCriteriaTests, IAsyncLifetime
 {
     private readonly PostgreSqlAlvoDataFixture _fixture = new();
