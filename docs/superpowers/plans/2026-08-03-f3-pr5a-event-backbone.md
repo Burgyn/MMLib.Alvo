@@ -4867,6 +4867,88 @@ git commit -m "test(events): prove crash recovery and mid-action repeat against 
 
 ### Task 13: The docs of record, the doc-drift, and the obligations PR5b inherits
 
+**DONE.** `docs/architecture/events.md` is new; `data-path.md`, `data-api.md`, `extensibility.md`,
+`host.md`, `package-boundary.md`, `PLAN.md` and `alvo-dotnet-conventions/SKILL.md` were corrected;
+`SqlTextConfinedToRendererArchitectureTests` was widened. ring2 green: `Build succeeded` (0 warnings,
+0 errors), **2 532** tests in ring0/ring1 (2 526 passed, 6 skipped) plus **1 + 16 + 184 + 2** across the
+four affected `*.Tests.Integration` projects, 0 failed anywhere, **210 s** wall clock. Both chaos legs
+appended their line to `artifacts/criteria/events.md` with this build's numbers, identical to Task 11's.
+
+**Five claims on the debt list were verified against the code, and four of them moved:**
+
+1. **`data-path.md:139-140`'s *"PR5 adds LINQ to this package"* was true drift and is corrected** — the
+   approach changed, not the constraint. The paragraph is kept (a *future* LINQ addition still pays that
+   cost) with the change of approach recorded and `The_outbox_claim_is_raw_sql_and_never_linq_over_the_context`
+   named as what holds the line.
+2. **`package-boundary.md:153`'s *"PR5's outbox is the first candidate"* was paid, and the same stale
+   prediction sits in `host.md:35` too** — the debt list named one location; there were two. Both
+   corrected, and the `IOutboxStore` boot obligation is recorded in deviation 60's words. A third bullet
+   was added deliberately: `IEmailSender` is *not* a boot obligation, which is what makes the distinction
+   readable rather than implied.
+3. **The Wolverine drift was real.** Corrected, keeping Wolverine as the in-process-mediator alternative
+   to MediatR (which is what that section is about) and closing the outbox half against deviation 1.
+   **One over-claim in the plan's own Step 3 was not repeated:** it says *"`IEventDispatcher`/`IOutboxStore`
+   leave Wolverine available as an adapter package"*, and **`IEventDispatcher` does not exist** — no match
+   in `src/`. The skill and `events.md` name `IOutboxStore` only, and `events.md` says plainly that the
+   base design's `IEventDispatcher` was never shipped.
+4. **The arch-test gap was real and the widening is green *and* discriminating.**
+   `_scannedDirectories` gained `src/MMLib.Alvo/Events` and `src/MMLib.Alvo.Abstractions/Events`; nothing
+   turned red. Proved non-vacuous by a one-sided mutation — a `"SELECT id FROM x WHERE y IS NOT NULL AND z"`
+   constant placed in `AlvoEventMetrics.cs` turns the fact **RED** naming that file; restored immediately.
+   Scanning each project wholesale was measured and **rejected**: `Api/Internal/DataApiParameters.cs`,
+   `DataApiDocumentation.cs` and `Descriptor/Internal/UnhonouredFeatures.cs` trip the connective rule on
+   filter-grammar prose and a refusal message, and weakening the rule to admit them would cost more than
+   the directory list costs.
+5. **Task 1's DONE note is accurate: #149–#152 all exist** — `spike.txt`'s own footer says only #149 was
+   created, and that footer is now stale rather than wrong. #150 already carries Q1's same-millisecond
+   amendment, as the footer asked.
+
+**Two instructions in this task could not be honoured as written, and both are decisions rather than
+omissions:**
+
+- **`README.md` carries no descriptor feature table** — the step was conditional (*"if it carries them"*)
+  and the condition is false, so it is untouched. (Its *Packages* table is stale for an unrelated reason:
+  it still says `MMLib.Alvo.Abstractions` has "no source yet". Out of this PR's scope; not fixed.)
+- **`PLAN.md` has no `#22` to record obligations beside.** It is a phase map that links milestones, not
+  issues, and its own header forbids growing it (*"must never grow to the point of eating an agent's
+  context"*, *"Nothing here duplicates issue detail"*). The obligation list therefore lives in
+  `events.md` and in GitHub issues — which is what `PLAN.md` points at. `PLAN.md` got exactly one edit,
+  at the layer it does own: the **CEL/JSONata invariant** now states *how* the in-transaction ban is
+  enforced today (vacuously, proven by an absence test) and that the real, **architectural** ban test is
+  owed by whoever ships the evaluator.
+
+**Three stale claims were found outside the debt list, and two were corrected because this PR made them
+literally false.** `data-api.md:729` said *"the **six** `entity.hooks.*` points, refused one per point"* —
+three now — and the sentence after it predicted PR5's shrinking in the future tense; both fixed, and the
+four refusals PR5a *added* (raw JSONata, `bodyFile`, and the three unimplemented action types) were added
+to the same table. Its `templates`/`webhooks` warn line now says both are **partially** honoured. The
+third — `UnhonouredFeatures.cs`' fictional `simple-tasks`/`completed_at` citation — was deliberately
+**not** touched: it sits in the `before*` half, and the addendum's own PR5b DoD line owns it. It is
+recorded in `events.md`'s inheritance list so it cannot leave with this plan.
+
+**One citation both authorities share is off by one, and `events.md` corrects it rather than repeating it.**
+The addendum and this plan cite `baas-analyza.md:676-680` for the numeric criteria; **`:676` is a blank
+line.** The §3 block is `:677-684` — `:678` carries all three of PR5a's numbers (both crash halves *and*
+the 10k chaos run) and `:679` the transition criterion. And the **execution-log / counter** criterion is
+**not in that block at all**: it comes from §3.3's Directus argument and the base design's
+*"nearly free if designed in"* reasoning, promoted into the DoD by the addendum. `events.md` states each
+with its real line, and says which one has none.
+
+**One thing the pre-PR checklist asks for that the code does not do, stated rather than papered over.**
+The checklist says the dispatcher's `AlvoContext` is *"`System(tenant)` with a real tenant, never
+`Anonymous`"*. It is `AlvoContext.System(tenant: **null**)`. The load-bearing half holds — it is `System`
+and never `Anonymous`, so it can hold an idempotency key — but there is no tenant, and the consequence is
+fail-closed and silent: an after-hook condition comparing `@tenant.id` resolves against a null tenant and
+`CelInterpreter`'s null rule makes the comparison `false`, so such a hook never fires. Recorded in
+`events.md`, *The dispatcher*, and in the new issue below.
+
+**Issues:** filed **#153** — *"A template cannot resolve `@tenant.id` or `@user.roles`, and the PR5 design's
+own table promised `@tenant.id`"* — with the public-API/wire-format/outbox-compatibility cost and the CEL
+condition consequence written out; this task's debt list required it and the plan named no issue for it.
+Commented on **#114** (three of the six hook refusals are lifted; the narrowed partition fact; the
+`simple-tasks` citation rides with PR5b) and **#120** (after-hook deliveries now happen; automation
+references, signing, projection, JSONata and the DLQ do not, each with its owner).
+
 An over-claim in a document is more expensive than a gap, so this task's whole job is to make the
 repository say what shipped — including the four things it deliberately does not do.
 
@@ -4887,7 +4969,7 @@ repository say what shipped — including the four things it deliberately does n
 - Consumes: every decision D1–D7, deviations 58–78, and the four issue numbers from Task 1 Step 6.
 - Produces: no code.
 
-- [ ] **Step 1: Write `docs/architecture/events.md`**
+- [x] **Step 1: Write `docs/architecture/events.md`**
 
 Sections, in this order, each stating the decision *and* its cost:
 
@@ -4950,7 +5032,7 @@ Sections, in this order, each stating the decision *and* its cost:
    `secretRef`; no SMTP and no mail service in compose; no DLQ or redelivery UI; no per-endpoint field
    projection; no `dataref`. Each with the issue or the PR that owns it.
 
-- [ ] **Step 2: Replace `data-path.md`'s forward-looking PR5 section**
+- [x] **Step 2: Replace `data-path.md`'s forward-looking PR5 section**
 
 `data-path.md:1480-1493` currently predicts this work. Rewrite it as what shipped: the four emit
 sites, the transaction seam honoured, the `SaveChanges`-interceptor trap **closed and proven by a
@@ -4966,7 +5048,7 @@ and a pointer to `events.md`. Then update two nearby claims that this PR made st
   `claimed_at` and `dispatched_at` all go through `StoredInstant.Text`, and the envelope enforces the
   same rule at its own boundary because `StoredInstant` is `internal` to the driver.
 
-- [ ] **Step 3: Fix the Wolverine doc-drift**
+- [x] **Step 3: Fix the Wolverine doc-drift**
 
 `.claude/skills/alvo-dotnet-conventions/SKILL.md`'s licensing section says *"If you need a
 mediator/outbox pattern, **Wolverine** is the suggested alternative"*. The base design's deviation 1
@@ -4975,7 +5057,7 @@ rejected that for the outbox: Alvo owns the outbox, the core takes no foreign de
 package**. Two answers in the repo is the drift; correct the skill to say so, keeping Wolverine named
 as the in-process-mediator alternative to MediatR, which is what that section is actually about.
 
-- [ ] **Step 4: Record the obligations PR5b and F7 inherit**
+- [x] **Step 4: Record the obligations PR5b and F7 inherit**
 
 In `docs/PLAN.md`, beside `#22`, and in `events.md`'s last section — so neither the addendum nor this
 plan is the only place they live:
@@ -5015,7 +5097,7 @@ plan is the only place they live:
 - **F7's partitioned claim** (**#150**, which also carries Q1's same-millisecond finding and the
   cross-process half `AlvoEventId` does not close) and **`dataref`** (**#151**).
 
-- [ ] **Step 5: Regenerate nothing, and check the freshness gate**
+- [x] **Step 5: Regenerate nothing, and check the freshness gate**
 
 This PR touches no file under `docs/product/`, so the brief-freshness gate must not fire. Confirm:
 
@@ -5023,7 +5105,7 @@ Run: `scripts/check-brief-freshness`
 Expected: OK. If it fires, a `docs/product/` file was edited by mistake — revert that edit rather
 than regenerating the brief.
 
-- [ ] **Step 6: ring0 + commit**
+- [x] **Step 6: ring0 + commit**
 
 ```bash
 scripts/test-ring0

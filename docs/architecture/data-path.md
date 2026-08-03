@@ -3,16 +3,18 @@
 How an Alvo read or write becomes one SQL statement, and the decisions that shape it. Written during F3 PR2
 (#20).
 
-> **Status: complete for PR2**, with the PR3 port widenings folded in where they closed a deferral.
-> Everything below describes what the code does today. Where a decision was deliberately deferred it says
-> so and names the phase that owns it — see *What later work inherits* at the end, which is the one place a
-> PR3, PR5 or F7 author should start.
+> **Status: complete for PR2**, with the PR3 port widenings folded in where they closed a deferral and the
+> PR5a outbox resolved where it closed a prediction. Everything below describes what the code does today.
+> Where a decision was deliberately deferred it says so and names the phase that owns it — see *What later
+> work inherits* at the end, which is the one place a PR3, PR5b or F7 author should start.
 >
-> **Sibling record:** this file owns the **port and the SQL**. `docs/architecture/data-api.md` owns the
+> **Sibling records:** this file owns the **port and the SQL**. `docs/architecture/data-api.md` owns the
 > **HTTP layer** PR3 added — the URL grammar and its allow-lists, the status/`type`-slug catalogue, the
-> `ETag` spelling, and Position A (what the framework publishes and what it treats as confidential). The
-> two are deliberately split along the port boundary, so a decision about a wire format lives there and a
-> decision about a statement lives here.
+> `ETag` spelling, and Position A (what the framework publishes and what it treats as confidential).
+> `docs/architecture/events.md` owns the **event backbone** PR5a added — the CloudEvents envelope,
+> `alvo_outbox`, the claim protocol, the ordering guarantee and the after-hook pipeline. All three are
+> deliberately split along the port boundary, so a decision about a wire format lives in the first, a
+> decision about a delivered event in the second, and a decision about a statement here.
 
 ## One statement, one `WHERE`
 
@@ -118,7 +120,7 @@ The model also configures **no foreign keys and no navigations**. F2's `Descript
 physical relationships; here a `Ref` field is simply a `uuid` column, and relation embedding is not part of
 this query path.
 
-### `UseRelationalNulls()` is on, and PR5 is the first PR its cost binds
+### `UseRelationalNulls()` is on, and its cost is a constraint on future LINQ
 
 Both drivers register their provider with `UseRelationalNulls()` — `AlvoSqliteBuilderExtensions` and
 `AlvoPostgreSqlBuilderExtensions`, one line each, now with a remark at the call site. What it does is switch
@@ -136,12 +138,21 @@ statement.
 **The cost, which is a constraint on future code rather than a behaviour today.** EF's own documentation says
 it plainly: with this option "your LINQ queries no longer have the same meaning as they do in C#". Today the
 data path composes almost no LINQ over the root — the row-id match on the write path is the exception, and
-`id` is non-nullable — so nothing in this package currently depends on the difference. **PR5 adds LINQ to this
-package** (the outbox claim and dispatch queries), and it is the first place the constraint bites: a
-predicate over a nullable column there has to be written the way SQL reads it, `x != null && x != y` rather
+`id` is non-nullable — so nothing in this package currently depends on the difference. A predicate over a
+nullable column written in LINQ would have to be spelled the way SQL reads it, `x != null && x != y` rather
 than `x != y`. Turning the option off is not the escape hatch it looks like, because that would reintroduce
 the two-contracts problem above; the escape hatch is to write those queries against SQL semantics and say so
 where they are written.
+
+**This paragraph predicted that PR5 would be the first PR the cost binds, and it was not — the approach
+changed rather than the constraint.** PR5's outbox claim, mark and release are **raw SQL**
+(`Internal/OutboxTable.cs`), where the three-valued predicates `claimed_at IS NULL` and
+`dispatched_at IS NULL` carry SQL's own semantics natively, so the constraint is met **by construction**
+instead of by whoever edits the file next remembering it. `ChangeTrackerReachTests`'
+`The_outbox_claim_is_raw_sql_and_never_linq_over_the_context` is what holds that line, over both
+`OutboxTable.cs` and `EfCoreOutboxStore.cs`. The change of approach is recorded rather than the paragraph
+deleted: the cost above is still exactly what a *future* LINQ addition to this package pays, and the outbox
+is the precedent for paying it by construction instead. See [`events.md`](./events.md), *The claim*.
 
 ## Identifiers are quoted by one helper, and there is no database schema
 
@@ -385,6 +396,14 @@ weight:
 4. Normalisation makes SQLite's ordering correct **by construction**. Under refusal it would be correct only
    because no non-UTC row exists — an invariant every future write path (PR5's outbox, F7's dynamic driver)
    would have to remember.
+
+**PR5's outbox honours it, and the forward reference is closed.** `alvo_outbox`'s `created_at`, `claimed_at`
+and `dispatched_at` all go through `StoredInstant.Text`, and `created_at` is rendered from the envelope's own
+`time` — which is the write's audit instant and the instant embedded in the event id, so one write reads the
+clock once and three places agree. `StoredInstant` is `internal` to this driver and unreachable from
+`Abstractions`, so the envelope enforces the same rule at its own boundary instead of trusting it:
+`AlvoEvent.Time` refuses a value whose `Offset` is not `TimeSpan.Zero`, with a message naming
+`ToUniversalTime()`. See [`events.md`](./events.md), *The outbox*.
 
 **Deliberately not covered: `date`.** `PredicateParameterBinder.AsDate` keeps its own rule — the calendar date
 the caller wrote, read at the offset they wrote it with. Normalising one to UTC would shift the day for any
@@ -1479,17 +1498,46 @@ work — Alvo has no hosted-service seam yet — and it belongs with whatever sh
 bolted onto a request path. `docs/product/baas-analyza.md` puts cron and retention in the scheduling
 component, which is where the issue is filed.
 
-### PR5 — outbox, events and hooks (#22)
+### PR5a — the outbox (#22, the durable half) — **shipped**
 
-- **The transaction is already the right seam.** `EfAlvoData`'s update path opens
-  `db.Database.BeginTransactionAsync()`; `transaction.GetDbTransaction()` yields the real provider
-  `DbTransaction`, so an outbox insert can ride the same transaction as the data change without a second
-  connection or a distributed transaction.
-- **`ExecuteUpdate`/`ExecuteDelete` do not go through the change tracker, so they fire no `SaveChanges`
-  interceptor.** This is the trap: the idiomatic EF place to hang an outbox is a `SaveChangesInterceptor`, and
-  on this data path it would silently never fire for an update or a delete — the two operations that most need
-  an event. PR5's hooks and outbox must be sequenced **explicitly on the transaction**, never hung off
-  `SaveChanges`.
+This section used to predict this work. What it predicted held, and both halves are now facts rather than
+guidance. The subsystem's own record is [`events.md`](./events.md); what belongs *here* is only what it did to
+this data path.
+
+- **The transaction was the right seam, and it is the seam.** `EfAlvoData` has four emit sites — the create
+  path, the idempotent recorded create, the update path and the delete path — and each is inside the
+  transaction that write already opened. All four go through one private `EmitAsync`, which builds the envelope
+  with `OutboxEventFactory.For` and hands it to `OutboxTable.InsertAsync` on `db.Database.GetDbConnection()`
+  with `command.Transaction = transaction.GetDbTransaction()`, so the event and the row commit together or not
+  at all — no second connection, no distributed transaction. The emit is **last** at every site, after the
+  write's own re-read succeeded, so an event never describes a row the write did not produce.
+  `AlvoDataOutboxTests`, which both drivers inherit, is where that is proved, including the two facts a
+  rollback answers: `A_write_the_engine_refuses_leaves_no_outbox_row` and
+  `An_insert_on_a_rolled_back_transaction_leaves_no_row`.
+- **The `SaveChanges`-interceptor trap is closed, and a mutation is why that is a fact rather than a warning.**
+  The idiomatic EF place to hang an outbox is a `SaveChangesInterceptor`, and on this data path it would
+  silently never fire for an update or a delete — the two operations that most need an event — because
+  `ExecuteUpdate`/`ExecuteDelete` do not go through the change tracker. The emit is therefore sequenced
+  **explicitly on the transaction** at each site, and the suite covers update and delete first
+  (`An_update_emits_exactly_one_event_carrying_both_images`,
+  `A_delete_emits_exactly_one_event_carrying_the_pre_image`). Deleting either emit turns those facts red,
+  which is the evidence the warning became a constraint the tests hold.
+- **What makes the insert atomic is the *connection*; `command.Transaction` is the contract, not the
+  mechanism.** Measured: deleting that assignment leaves every outbox fact green on both shipped engines,
+  because a SQLite and a PostgreSQL transaction both belong to the connection. It stays because ADO.NET's own
+  contract requires it — `SqlCommand` throws when a connection has an open transaction the command does not
+  name — and because the seam is a claim about which transaction the row rides. The mutation that *is* caught
+  is the one that moves the insert onto a connection of its own.
+- **What the outbox added to this package's own guards.** `OutboxTable.cs` and `EfCoreOutboxStore.cs` are in
+  `ChangeTrackerReachTests._sqlComposingFiles`, and the same class's
+  `The_outbox_claim_is_raw_sql_and_never_linq_over_the_context` keeps both files off LINQ over the context —
+  which is what closes the `UseRelationalNulls()` cost by construction (see that section above). The outbox
+  table's name is in `SystemSchemaInitializer.FrameworkTableNames`, so a re-apply plans no `DROP` for it. No
+  change-tracker write was added anywhere.
+- **Still owed by PR5b:** before-hooks. They run *inside* the write, and the create path as built cannot
+  satisfy their DoD line — `AuthorizedCandidate` runs before `BeginTransactionAsync`, so a hook placed where
+  the candidate is built has nothing to roll back. That is a correction to the F3 design, not a deferral, and
+  it is recorded in [`events.md`](./events.md)'s inheritance list.
 
 ### F7 — dynamic (metadata-driven) entities
 

@@ -87,12 +87,32 @@ extension method in its own package, never an edit to `AddAlvo`/`IAlvoBuilder`.
    Options carry infrastructure only. Upholds the invariant "descriptor ≠ infra
    config".
 7. **Idempotent registration** — `TryAdd*` everywhere; a provider selected twice is
-   not a duplicate.
+   not a duplicate. **This covers hosted services too:** PR5a's outbox dispatcher is
+   registered with `TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, …>())`
+   rather than `AddHostedService<T>()`, which appends unconditionally — a host that
+   called `AddAlvo` twice would otherwise run two dispatchers over one queue and
+   break per-entity-key ordering exactly as two replicas do.
 8. **Fail-fast on a missing/ambiguous provider** — a startup `IValidateOptions`
    asserts required ports have a provider and rejects invalid combinations, with a
    structured error ("register a database provider: call UseSqlite() or
    UsePostgreSql()"). No silent provider default in core (core must not drag a
    provider); a zero-config default is supplied by the standalone Host, not core.
+   - **One recorded exception, and the distinction it draws.** PR5a's `IEmailSender`
+     *does* have an in-core default — `ConsoleEmailSender`, registered with
+     `TryAddSingleton`, so a host with a real mail provider registers its own and
+     takes mail over. The rule's purpose is that **core must not drag a provider**,
+     and a console sender drags nothing (`ILogger` only). What makes it safe is that
+     the default is not silent: its own log line names itself a *development*
+     provider, and a fact pins that word. Read the rule as: an in-core default is
+     allowed when it takes no dependency **and** announces that it is a stand-in.
+     There is no honest default for a database, which is why that one stays fail-fast.
+   - **A required port with no default is a boot obligation, and it belongs in
+     `package-boundary.md`.** PR5a's `IOutboxStore` is one: the dispatcher takes it as
+     a constructor dependency and is always registered, so a provider without it
+     cannot boot. Widening the *implicit* provider contract is a documented act, not a
+     DI failure someone discovers — see
+     [`package-boundary.md`](./package-boundary.md), *What a database provider must
+     implement to boot*.
 9. **Explicit, documented lifetimes** for every port registration (thread-safe
    singletons per the DI guidelines).
 10. **Endpoints are a separate seam** — `MapAlvo(this IEndpointRouteBuilder)` is
@@ -143,7 +163,21 @@ extension method in its own package, never an edit to `AddAlvo`/`IAlvoBuilder`.
   `IOptionsSnapshot<T>` avoided on hot paths (scoped, slow).
 - **Capability model** (§1.2): a provider may declare capabilities (transactional
   outbox, presigned upload, …); the framework degrades gracefully when one is
-  absent. The named pattern for provider feature-detection.
+  absent. The named pattern for provider feature-detection. **The transactional
+  outbox turned out not to be one of them**, and that is worth recording as the first
+  test of this bullet: the outbox is not something a provider may or may not offer —
+  the event backbone's whole guarantee is that the event commits with the row, so
+  `IOutboxStore` is a boot requirement rather than a capability to degrade around.
+  Capability detection is for a *better* path, never for a correctness guarantee.
+- **A network-egress collaborator takes its `HttpClient` by name, never by
+  construction.** `WebhookDelivery` resolves `IHttpClientFactory.CreateClient(
+  WebhookDelivery.HttpClientName)`, and the core registers only
+  `AddHttpClient(name)` with no configuration of its own. So a host owns the handler,
+  the timeout and any resilience policy for Alvo's outbound deliveries by configuring
+  that one name — `services.AddHttpClient("MMLib.Alvo.Events.Webhook").Add…` — without
+  the framework owning any of them, and without a second seam being invented for it.
+  Same reasoning as the options pattern: the extension point is a name a host already
+  knows how to configure.
 
 ## Pitfalls (banned)
 
