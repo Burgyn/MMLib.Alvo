@@ -15,3 +15,10 @@
 // two internals above and nothing further. A separate name is unavoidable: InternalsVisibleTo names an
 // assembly, and the two legs are two assemblies because ring0 must stay Docker-free.
 [assembly: InternalsVisibleTo("MMLib.Alvo.Api.Tests.Integration")]
+
+// The PostgreSQL leg of the event acceptance criteria, for the same reason and on the same terms: the criteria
+// are "green on SQLite + Postgres", the world is one linked source file (test/_shared/events), and it reaches
+// exactly three internals — OutboxDispatcher.PumpOneBatchAsync for a deterministic drain, WebhookDelivery's
+// named-client constant, and EventLog.ActionExecuted's name. Everything else it touches is public surface. The
+// two legs are two assemblies because ring0 must stay Docker-free.
+[assembly: InternalsVisibleTo("MMLib.Alvo.Data.PostgreSql.Tests.Integration")]

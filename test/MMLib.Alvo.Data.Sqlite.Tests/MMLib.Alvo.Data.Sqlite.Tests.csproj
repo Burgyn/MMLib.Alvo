@@ -35,6 +35,19 @@
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/OutboxStoreWorld.cs" Link="_shared/OutboxStoreWorld.cs" />
   </ItemGroup>
 
+  <!-- The world the two event acceptance criteria run over, shared with
+       MMLib.Alvo.Data.PostgreSql.Tests.Integration. Linked for the same reason the outbox facts are: both
+       criteria are engine-agnostic by construction, and a per-engine copy of the drain, the tally or the
+       probes is how the two legs stop being asked the same question. They live under _shared/events rather
+       than at test/_shared, whose *.cs glob every test project compiles — including ones with no engine and
+       no event subsystem, where these types would be uninstantiated internal classes. -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/AlvoEventCriteriaWorld.cs" Link="_shared/AlvoEventCriteriaWorld.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/RecordingEventLog.cs" Link="_shared/RecordingEventLog.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/RecordingMeterListener.cs" Link="_shared/RecordingMeterListener.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/RecordingWebhookReceiver.cs" Link="_shared/RecordingWebhookReceiver.cs" />
+  </ItemGroup>
+
   <!-- The concurrent-cold-start harness, shared with MMLib.Alvo.Data.PostgreSql.Tests.Integration. Linked for
        the same reason DifferentialProbe is: convergence under a lost race is an engine-agnostic guarantee, and
        two per-engine copies of the barrier and the probe counts are how the two legs stop measuring the same

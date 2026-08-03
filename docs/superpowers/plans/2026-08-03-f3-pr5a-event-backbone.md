@@ -4083,6 +4083,73 @@ git commit -m "feat(events): dispatch the outbox from a background service gated
 
 ### Task 10: The transition fact, and the execution-log / counter criterion
 
+**DONE.** Four facts in `AlvoEventCriteriaTests`, inherited unchanged by both drivers: 4/4 green on SQLite and
+4/4 green on a real PostgreSQL container. ring0 green at 2 530 tests. Two baselines moved and both are
+additive: `MMLib.Alvo.Testing`'s public surface (the suite, `IAlvoEventWorld`, `IAlvoEventMeter` and four
+records) and `MMLib.Alvo`'s, by exactly one `InternalsVisibleTo` line.
+
+**Task 9's corrected prediction held, measured.** Passing `previous: null` to the evaluator turns the
+transition fact red on its **first** assertion (`AlvoEventCriteriaTests.cs:68`, the delivery that *must*
+happen), not on its second — with no pre-image this build's interpreter answers `changed(...)` **false**, so
+the positive control disappears rather than the absence being violated. The plan's own text expected the
+opposite and is wrong; Task 9's note is right.
+
+**Task 9's delegated counter gap is closed.** Swapping `Filtered` and `Dispatched` in `OutboxDispatcher.Counted`
+— the mutation that stayed green through Task 9 because nothing read a counter — now turns two facts red:
+`filtered` reads 1 where 101 is asserted and `dispatched` reads 2 where 1 is. The direction is pinned by value,
+on the one `RecordingMeterListener` this task owns; no second listener was added anywhere.
+
+**Six deliberate deviations from this task as written, each for a reason that was measured:**
+
+1. **The N non-matching events are *updates*, not creates.** The plan's `CreateAsync(status: "draft", vin: …)`
+   ×100 would match no hook *point* at all, so the whole criterion would be answered before any condition ran —
+   and its own mutation 1 (build the Directus defect on purpose) would not go red on them. 100 updates that
+   change `plate` reach `afterUpdate` and are turned away by `changed(status)` alone, which is what makes the
+   fact about the **subscription** step. Measured: under mutation 1 the fact reports **202** execution-log
+   entries (101 update events × the 2 declared hooks) against the 1 the criterion allows.
+2. **The entity declares two `afterUpdate` hooks, on two different transitions and two different endpoints.**
+   With one hook, "one counter increment per event" and "one per hook" are the same number, and mutation 3 is
+   unmeasurable. With two, the per-hook variant reports **302** filtered against 101. The second endpoint's own
+   URL is what lets a delivery say *which* hook produced it.
+3. **The plan's `ShouldBeEmpty()` on the execution log became `ShouldHaveSingleItem()`, with the positive
+   control inside the same fact.** 100 filtered updates, the create, *and* one approval in one world and one
+   drain: the absence and the presence are then one measurement, and "zero log rows" can no longer pass because
+   nothing ran. `A_transition_to_a_different_value_does_not_fire` got the same treatment — it now delivers an
+   approval after the rejection, in the same world.
+4. **Every fact tallies the outbox before and after the drain** (`AlvoOutboxTally`), which the plan did not
+   ask for. "Zero log rows" also passes when no event was ever written or nothing was ever claimed; the tally
+   is what rules both out. It is not decoration: dropping `MarkDispatchedAsync` turns three of the four facts
+   red on the tally alone, with the deliveries and the counters unchanged.
+5. **`test/_shared/events/`, not `test/_shared/`.** `test/Directory.Build.props` compiles `_shared/*.cs` into
+   **every** test project, including ones with no engine and no event subsystem, where these four types would be
+   uninstantiated internal classes. The `ef/`, `boot/`, `api/` and `postgres/` subdirectories exist for exactly
+   this reason and say so in the csproj comments.
+6. **`MMLib.Alvo` grants `InternalsVisibleTo` to `MMLib.Alvo.Data.PostgreSql.Tests.Integration`**, on the terms
+   `MMLib.Alvo.Api.Tests.Integration`'s grant already states: the criteria are "green on SQLite + Postgres", the
+   world is one linked source file, and it reaches exactly three internals —
+   `OutboxDispatcher.PumpOneBatchAsync` (a deterministic drain), `WebhookDelivery.HttpClientName`, and
+   `nameof(EventLog.ActionExecuted)` for the log filter. The two legs are two assemblies because ring0 must stay
+   Docker-free. The plan also named the wrong baseline path: `MMLib.Alvo.Testing`'s is
+   `test/MMLib.Alvo.Tests/PublicApi.MMLib.Alvo.Testing.verified.txt`, verified by
+   `TestingLibraryPublicApiTests`, because that project opts the shared gate out.
+
+**What the suite deliberately does not substitute.** The write path is `IAlvoData` over a real engine, the queue
+is the real `alvo_outbox`, the subscription decision and the action are the dispatcher's own, the descriptor is
+compiled by `PolicyCatalog.Build`, and the only thing stood in for is the socket under the **named**
+`HttpClient` (`ConfigurePrimaryHttpMessageHandler`, so the factory, the named configuration and the content type
+all stay in play). The logging minimum level is `Trace`, because a level filter that dropped
+`ActionExecuted` would make "no execution-log entry" true for the loudest possible wrong reason.
+
+**One mutation was one-sided in a way worth recording.** Under the counter swap, the two facts whose worlds
+happen to hold one non-matching and one matching event still read `dispatched == 1` — the swap is invisible to
+them by arithmetic, not by weakness. The two facts that assert `filtered` by value are what kill it, which is
+why the criterion asserts both counters rather than only the one it is about.
+
+**One restatement is deliberate and fail-loud.** The meter and the two instrument names are restated in the
+suite, because the core's `AlvoEventMetrics` is `internal` and `MMLib.Alvo.Testing` is Abstractions-only. Drift
+cannot pass silently: every one of the three is asserted somewhere with a **non-zero** expected count, and a
+listener on a meter nobody publishes answers zero.
+
 Two of `baas-analyza.md:676-680`'s acceptance criteria, end to end over the real write path on both
 engines. The addendum moved both into PR5a deliberately: the transition test is a `Condition`-profile
 expression on an after-hook, which 5a ships, and deferring it *"would leave 5a's whole point — that

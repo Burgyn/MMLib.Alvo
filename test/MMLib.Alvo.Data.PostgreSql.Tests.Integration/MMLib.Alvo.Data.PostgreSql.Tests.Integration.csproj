@@ -47,6 +47,16 @@
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/OutboxStoreWorld.cs" Link="_shared/OutboxStoreWorld.cs" />
   </ItemGroup>
 
+  <!-- The world the two event acceptance criteria run over, shared with MMLib.Alvo.Data.Sqlite.Tests — see the
+       same link there. A per-engine copy of the drain or the tally is how the two legs stop being asked the
+       same question. -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/AlvoEventCriteriaWorld.cs" Link="_shared/AlvoEventCriteriaWorld.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/RecordingEventLog.cs" Link="_shared/RecordingEventLog.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/RecordingMeterListener.cs" Link="_shared/RecordingMeterListener.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/RecordingWebhookReceiver.cs" Link="_shared/RecordingWebhookReceiver.cs" />
+  </ItemGroup>
+
   <!-- The container-creation mechanics every Testcontainers-backed PostgreSQL fixture in this repository
        needs, shared with MMLib.Alvo.Api.Tests.Integration's PostgresApiEngine — a second copy of the image
        tag and the lazy-build discipline is exactly how the two would quietly drift apart. -->

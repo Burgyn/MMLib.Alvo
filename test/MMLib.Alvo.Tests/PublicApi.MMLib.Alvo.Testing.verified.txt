@@ -331,6 +331,61 @@ namespace MMLib.Alvo.Testing.Data
 }
 namespace MMLib.Alvo.Testing.Events
 {
+    public abstract class AlvoEventCriteriaTests
+    {
+        protected const string DispatchedCounter = "alvo.events.dispatched";
+        protected const string Entity = "vehicles";
+        protected const string EventMeterName = "MMLib.Alvo.Events";
+        protected const string FilteredCounter = "alvo.events.filtered";
+        protected AlvoEventCriteriaTests() { }
+        protected static MMLib.Alvo.Testing.Events.AlvoEventProject Project { get; }
+        public System.Threading.Tasks.Task A_hundred_events_matching_nothing_produce_no_action_log_and_one_counter_each() { }
+        public System.Threading.Tasks.Task A_matched_event_writes_exactly_one_action_log_entry_naming_the_hook() { }
+        public System.Threading.Tasks.Task A_transition_to_a_value_the_condition_does_not_name_does_not_fire() { }
+        public System.Threading.Tasks.Task An_approval_transition_fires_exactly_once_and_a_second_approval_does_not() { }
+        protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Testing.Events.IAlvoEventWorld> WorldAsync();
+    }
+    public sealed class AlvoEventDelivery : System.IEquatable<MMLib.Alvo.Testing.Events.AlvoEventDelivery>
+    {
+        public AlvoEventDelivery(string Url, string Body) { }
+        public string Body { get; init; }
+        public string Url { get; init; }
+    }
+    public sealed class AlvoEventLogEntry : System.IEquatable<MMLib.Alvo.Testing.Events.AlvoEventLogEntry>
+    {
+        public AlvoEventLogEntry(string Name, string Message) { }
+        public string Message { get; init; }
+        public string Name { get; init; }
+    }
+    public sealed class AlvoEventProject : System.IEquatable<MMLib.Alvo.Testing.Events.AlvoEventProject>
+    {
+        public AlvoEventProject(MMLib.Alvo.Schema.SchemaModel Schema, MMLib.Alvo.Descriptor.AlvoDescriptor Descriptor, MMLib.Alvo.AlvoContext Caller, string Entity, string MeterName) { }
+        public MMLib.Alvo.AlvoContext Caller { get; init; }
+        public MMLib.Alvo.Descriptor.AlvoDescriptor Descriptor { get; init; }
+        public string Entity { get; init; }
+        public string MeterName { get; init; }
+        public MMLib.Alvo.Schema.SchemaModel Schema { get; init; }
+    }
+    public sealed class AlvoOutboxTally : System.IEquatable<MMLib.Alvo.Testing.Events.AlvoOutboxTally>
+    {
+        public AlvoOutboxTally(int Pending, int Retired) { }
+        public int Pending { get; init; }
+        public int Retired { get; init; }
+    }
+    public interface IAlvoEventMeter
+    {
+        long CountOf(string instrumentName);
+    }
+    public interface IAlvoEventWorld : System.IAsyncDisposable
+    {
+        System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Testing.Events.AlvoEventLogEntry> ActionLogEntries { get; }
+        System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Testing.Events.AlvoEventDelivery> Deliveries { get; }
+        MMLib.Alvo.Testing.Events.IAlvoEventMeter Metrics { get; }
+        System.Threading.Tasks.Task<System.Guid> CreateAsync(string status);
+        System.Threading.Tasks.Task DrainAsync();
+        System.Threading.Tasks.Task<MMLib.Alvo.Testing.Events.AlvoOutboxTally> TallyAsync();
+        System.Threading.Tasks.Task UpdateAsync(System.Guid id, string? status = null, string? plate = null);
+    }
     public interface IOutboxStoreWorld : System.IAsyncDisposable
     {
         MMLib.Alvo.Events.IOutboxStore Store { get; }

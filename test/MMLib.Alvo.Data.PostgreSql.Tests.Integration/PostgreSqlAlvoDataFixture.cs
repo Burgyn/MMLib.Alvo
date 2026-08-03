@@ -50,13 +50,19 @@ public sealed class PostgreSqlAlvoDataFixture : IAsyncLifetime
     /// <summary>Creates a database, migrates <paramref name="schema"/> into it and primes the policy catalog.</summary>
     /// <param name="schema">The schema to migrate and compile the rules against.</param>
     /// <param name="descriptor">The descriptor whose rules are compiled; a permissive minimal one by default.</param>
-    public async Task<PostgreSqlAlvoDataHost> StartAsync(SchemaModel schema, AlvoDescriptor? descriptor = null)
+    /// <param name="configure">
+    /// Applied to the collection <em>after</em> <c>AddAlvo</c> and before the provider is built, for a caller
+    /// that has to reach a seam only a host owns — a logging provider, or the primary handler of a named
+    /// <c>HttpClient</c>. The twin of the SQLite fixture's own parameter, for the same reason.
+    /// </param>
+    public async Task<PostgreSqlAlvoDataHost> StartAsync(
+        SchemaModel schema, AlvoDescriptor? descriptor = null, Action<IServiceCollection>? configure = null)
     {
         ArgumentNullException.ThrowIfNull(schema);
         Assert.SkipUnless(Available, "Docker is unavailable on this platform, so the PostgreSQL engine cannot be started.");
 
         var (connectionString, database) = await CreateDatabaseAsync();
-        var services = BuildProvider(connectionString);
+        var services = BuildProvider(connectionString, configure);
         await MigrateAsync(services, schema);
 
         var capture = NewCapture(database);
@@ -77,11 +83,12 @@ public sealed class PostgreSqlAlvoDataFixture : IAsyncLifetime
         return capture;
     }
 
-    private ServiceProvider BuildProvider(string connectionString)
+    private ServiceProvider BuildProvider(string connectionString, Action<IServiceCollection>? configure)
     {
         var builder = new FixtureAlvoBuilder(new ServiceCollection());
         builder.UsePostgreSql(connectionString);
         builder.Services.AddAlvo();
+        configure?.Invoke(builder.Services);
 
         var services = builder.Services.BuildServiceProvider();
         _providers.Add(services);
