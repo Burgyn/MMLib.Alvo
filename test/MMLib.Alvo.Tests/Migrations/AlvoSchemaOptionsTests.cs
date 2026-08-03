@@ -7,9 +7,10 @@ namespace MMLib.Alvo.Tests.Migrations;
 
 /// <summary>
 /// <see cref="AlvoSchemaOptions"/> — the one setting that decides whether a boot is allowed to run DDL
-/// over a database that already has a schema. Two properties of it are load-bearing: the default is the
-/// mode that touches nothing, and a value nobody meant to write is refused at startup rather than read as
-/// that default.
+/// over a database that already has a schema. Three properties of it are load-bearing: a host that says
+/// nothing gets <see cref="AlvoSchemaStartupMode.Apply"/>, a value that went <em>missing</em> still lands on
+/// <see cref="AlvoSchemaStartupMode.Verify"/>, and a value nobody meant to write is refused at startup rather
+/// than read as either.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -27,20 +28,39 @@ namespace MMLib.Alvo.Tests.Migrations;
 /// </remarks>
 public class AlvoSchemaOptionsTests
 {
+    /// <summary>
+    /// Apply is the default, so the loop the product exists for — edit the descriptor, restart, it works —
+    /// needs no configuration on the second run either.
+    /// </summary>
+    /// <remarks>
+    /// Exempting initialization from the mode saves only the <em>first</em> run; the run after the first edit
+    /// is drift. The destructive allowance is asserted beside it because that is what keeps this default
+    /// honest: applying on boot never means discarding data on boot.
+    /// </remarks>
     [Fact]
-    public void Verify_is_the_default_so_an_embedded_host_never_runs_ddl_it_did_not_ask_for()
+    public void Apply_is_the_default_so_an_edited_descriptor_still_works_on_the_next_restart()
     {
-        new AlvoSchemaOptions().Startup.ShouldBe(AlvoSchemaStartupMode.Verify);
+        new AlvoSchemaOptions().Startup.ShouldBe(AlvoSchemaStartupMode.Apply);
         new AlvoSchemaOptions().AllowDestructive.ShouldBeFalse();
     }
 
     /// <summary>
-    /// <c>Verify == 0</c> matters: a mis-bound or absent configuration value lands on the safe mode,
-    /// exactly as <c>default(Role)</c> lands on anon.
+    /// The enum's zero stays <c>Verify</c> even though the property's default is <c>Apply</c>, so a value that
+    /// goes missing lands on the mode that touches nothing.
     /// </summary>
+    /// <remarks>
+    /// The two are deliberately different and the assertion pins both halves. Zero is where an uninitialized
+    /// field, a <c>default(AlvoSchemaStartupMode)</c> or a silent fallback ends up, and losing a value must
+    /// never be how a process earns the right to rewrite a schema; the property's initializer is where a host
+    /// that <em>chose</em> to say nothing ends up. Reading one off the other — "make the default match the
+    /// enum" — would forfeit whichever guarantee it collapsed.
+    /// </remarks>
     [Fact]
-    public void The_default_enum_value_is_the_safe_one()
-        => default(AlvoSchemaStartupMode).ShouldBe(AlvoSchemaStartupMode.Verify);
+    public void The_enum_zero_stays_Verify_even_though_the_configured_default_is_Apply()
+    {
+        default(AlvoSchemaStartupMode).ShouldBe(AlvoSchemaStartupMode.Verify);
+        new AlvoSchemaOptions().Startup.ShouldNotBe(default);
+    }
 
     [Fact]
     public void The_mode_binds_from_configuration_case_insensitively()
@@ -59,16 +79,16 @@ public class AlvoSchemaOptionsTests
         => Resolve(("Alvo:Schema:AllowDestructive", "true")).AllowDestructive.ShouldBeTrue();
 
     [Fact]
-    public void An_absent_section_leaves_the_safe_default()
-        => Resolve().Startup.ShouldBe(AlvoSchemaStartupMode.Verify);
+    public void An_absent_section_leaves_the_configured_default()
+        => Resolve().Startup.ShouldBe(AlvoSchemaStartupMode.Apply);
 
     /// <summary>
-    /// An empty environment variable is a shell accident, not a choice, so it reads as absent — and
-    /// "absent" lands on <see cref="AlvoSchemaStartupMode.Verify"/>, the mode that touches nothing.
+    /// An empty environment variable is a shell accident, not a choice, so it reads as absent — and lands
+    /// where absent lands, rather than being refused as a typo.
     /// </summary>
     [Fact]
     public void A_blank_mode_reads_as_absent_rather_than_as_a_typo()
-        => Resolve(("Alvo:Schema:Startup", "  ")).Startup.ShouldBe(AlvoSchemaStartupMode.Verify);
+        => Resolve(("Alvo:Schema:Startup", "  ")).Startup.ShouldBe(AlvoSchemaStartupMode.Apply);
 
     [Fact]
     public void An_unknown_mode_is_refused_at_startup_naming_the_choices()

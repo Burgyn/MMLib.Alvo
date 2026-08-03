@@ -354,22 +354,60 @@ The mode, `AlvoSchemaStartup`:
 
 | Mode | On *drift* | Intended for |
 |---|---|---|
-| `Verify` *(core default)* | refuse, printing the structured diff | production; an embedded host inside someone else's application |
-| `Apply` | apply it, still refusing a destructive plan unless `AllowDestructive` | the dev loop, and the standalone image |
+| `Verify` | refuse, printing the structured diff | production, together with a migration job |
+| `Apply` *(the default)* | apply it, still refusing a destructive plan unless `AllowDestructive` | the dev loop, the standalone image, and anything else that has not opted out |
 | `Skip` | do not read the store, do not prime from it | a host whose schema is owned entirely by a migration job |
 
-**`Verify` is the core's default, and `Apply` is the standalone image's setting**
-— written visibly in the image's own `appsettings.json`, not hidden in code.
-That is precisely A:530 / S:91's "the image is a pre-wired host over the same
-NuGet, not a different product": the *mechanism* lives in the core, the *policy*
-differs by distribution.
+**`Apply` is the default — the maintainer overruled this design's `Verify`, and
+the argument won on the merits.** Recorded here in full, because the reasoning is
+what a later reader needs, not the outcome alone (deviation 53, rewritten):
+
+- **`Verify` breaks the loop the product exists for** — edit descriptor, restart,
+  works. The "initialization is exempt" carve-out below only saves the **first**
+  run; the second run, after the first edit, is drift, and refusing there is
+  refusing exactly when somebody is working.
+- **The protection was never in the mode.** The destructive gate is separate and
+  always on (deviation 57), so `Apply` cannot drop a column or a table without an
+  explicit `AllowDestructive` — including during initialization. What `Apply`
+  actually permits is **additive** DDL, and a host that had the rights for that on
+  run 1 has them on run 2.
+- **The "someone else's database" framing was wrong.** The developer wrote
+  `.FromDescriptor(...)` and pointed Alvo at that database deliberately; this is
+  not an uninvited migration of a stranger's schema.
+
+**The cost is documented, not hidden.** A production replica set on a rolling
+deploy has *every* replica attempt DDL — they converge rather than crash-loop
+(*Initialization under concurrency*, below), but they all try, and two replicas
+holding two descriptors while both are allowed to apply will take turns rewriting
+the schema. The application also needs DDL rights in production, which is what EF
+Core's guidance advises against. So **production sets `Verify` and applies from a
+migration job**, and `docs/architecture/host.md` says so — an **opt-out**, not an
+opt-in. That is the honest trade: the common case is configured for the developer,
+and the operator of a replica set has one setting to change.
+
+**The enum's zero stays `Verify` while the property's default is `Apply`, and the
+two differ on purpose.** Zero is where a value that went *missing* lands — an
+uninitialized field, `default(AlvoSchemaStartupMode)`, a silent fallback — and
+losing a value must never be how a process earns the right to rewrite a schema.
+The property initializer is where a host that *chose* to say nothing lands.
+Collapsing them in either direction forfeits one of the two guarantees; both
+halves are pinned by
+`AlvoSchemaOptionsTests.The_enum_zero_stays_Verify_even_though_the_configured_default_is_Apply`.
+
+The image's `appsettings.json` therefore sets **nothing**: with `Apply` as the
+core default there is no policy left for the image to state, and A:553 never
+depended on the setting anyway — a bare `docker run` starts against an empty
+database, which is *initialization*, exempt from the mode in every mode but
+`Skip`. A duplicate `Alvo:Schema:Startup: Apply` line would have been a second
+source of truth that no fact compares against the first.
 
 An **environment-gated** default (`Apply` in Development, `Verify` otherwise) was
-considered and rejected. It reads well, but the container runs in Production by
-default, so the image would silently take the `Verify` branch and fail A:553's
-60-second criterion — the exact class of surprise the maintainer is objecting to.
-Branching on *initialized vs drifted* achieves the same DX with no environment
-magic and no hidden coupling to `ASPNETCORE_ENVIRONMENT`.
+considered and rejected, and remains rejected under the new default for the same
+reason: the container runs in Production by default, so the image would silently
+take the `Verify` branch and drift-refuse a restart after an edit, which is the
+exact class of surprise this section is about. Branching on *initialized vs
+drifted* plus one explicit setting achieves the DX with no environment magic and
+no hidden coupling to `ASPNETCORE_ENVIRONMENT`.
 
 **Initialization under concurrency.** Three replicas starting against an empty
 database all see "uninitialized". One wins; the losers **re-read, re-decide, and
@@ -411,8 +449,15 @@ Measured, once the ordering was atomic: the SQLite loser gets a clean
 `DescriptorConcurrencyException`, never `SQLITE_BUSY` — its own post-conflict
 re-read has to take the write lock, so it serializes behind the winner's commit.
 A **different** descriptor (a rolling deploy mid-flight) is ordinary drift with a
-non-null snapshot, so the mode governs and the default `Verify` **refuses**: a
-loser never silently adopts the winner's schema.
+non-null snapshot, so the mode governs: under `Verify` the loser **refuses**, and
+under the default `Apply` it **applies its own descriptor over the winner's**.
+Either way it re-decides; a loser never silently adopts the winner's schema and
+serves rules compiled against something it never agreed to. Measured after the
+default flip: with no mode configured, both replicas of the two-descriptor race
+serve and the history becomes `[1, 2]` — which is why
+`A_loser_holding_a_different_descriptor_refuses_rather_than_adopting_the_winners_schema`
+now names `Verify` explicitly on both engines instead of leaning on the default,
+and why the *taking turns* hazard is stated in the mode section above.
 
 ### How a failure surfaces
 
@@ -680,13 +725,21 @@ Numbering continues the F3 design's series, which ends at 51.
     conditional is the **project** schema, which A:510 locates at build/deploy
     or at an explicit runtime apply. The maintainer's objection is honoured for
     the half the sources leave open, and the half they mandate is kept.
-53. **`Verify` is the default, and initialization is exempt from it.** No source
-    states this split; it is derived. Reason: A:553 (60 s, zero config) and
-    S:157 (dev run with no configuration) are unreachable under a blanket
-    `Verify`, while a blanket `Apply` is the production anti-pattern. Branching
-    on *uninitialized vs drifted* satisfies both, because the hazard the sources
-    and EF's guidance describe is migrating an existing database, not creating
-    an empty one.
+53. **`Apply` is the default, and initialization is exempt from the mode
+    entirely.** No source states either split; both are derived. The exemption's
+    reason is unchanged: A:553 (60 s, zero config) and S:157 (dev run with no
+    configuration) are unreachable under a blanket `Verify`, because the hazard the
+    sources and EF's guidance describe is migrating an existing database, not
+    creating an empty one. **The default itself was changed by the maintainer after
+    this design shipped `Verify`, and the argument won on the merits** — the
+    exemption saves only the first run, the destructive gate (deviation 57) is
+    separate and always on so `Apply` can only add, and the host pointed Alvo at
+    that database on purpose. The cost — every replica of a rolling deploy
+    attempting DDL, and the application needing DDL rights in production — is
+    published rather than absorbed: `Verify` plus a migration job is the documented
+    production posture in `docs/architecture/host.md`, i.e. an **opt-out**. The
+    enum's zero stays `Verify` so a *lost* value still lands on the mode that
+    touches nothing; see *Stage 2's decision* for the full reasoning.
 54. **`/health/ready` reports schema-applied, not reachability.** §2.12 (A:487)
     asks for readiness over DB, cache and message-bus reachability. This design
     supplies the endpoint, the state machine and the registration seam, and
@@ -769,11 +822,15 @@ Numbering continues the F3 design's series, which ends at 51.
 
 Flagged rather than decided silently, per the brief.
 
-1. **`Verify` as the core default (deviation 53).** The alternative is `Apply`,
-   which keeps today's behaviour for every caller and makes the standalone image
-   need no setting — at the cost that an embedded Alvo inside someone's ERP would
-   perform DDL on their database on boot by default. I recommend `Verify`; it is
-   the reversible direction.
+1. ~~**`Verify` as the core default (deviation 53).**~~ **Ratified as `Apply`, and
+   the design was wrong.** The maintainer overruled `Verify` at Task 10 and the
+   argument stands: the exemption saved only the first run, the destructive gate is
+   separate and always on, and the developer pointed Alvo at that database
+   deliberately. Implemented as `AlvoSchemaOptions.Startup = Apply` with the enum's
+   zero left at `Verify`. What is left to ratify is the *disclosure* rather than the
+   default: `docs/architecture/host.md` now tells a production deployment to set
+   `Verify` and apply from a migration job, and says plainly that this is an
+   opt-out. See deviation 53 and *Stage 2's decision*.
 2. **Drift under `Verify` fails the start, rather than starting un-ready.**
    Failing the start keeps #132's stated contract and deviation 38's guarantee
    literally. Starting un-ready would give a rolling deployment a better story —

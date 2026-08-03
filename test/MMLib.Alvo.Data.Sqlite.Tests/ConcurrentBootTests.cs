@@ -65,15 +65,23 @@ public sealed class ConcurrentBootTests : IDisposable
     /// </summary>
     /// <remarks>
     /// A rolling deploy can put two descriptors on the same database at the same moment, and whichever wins,
-    /// the loser is now looking at drift under the default <c>Verify</c>. Silently accepting the winner's
-    /// schema would make the process serve rules compiled against a schema it never agreed to, which is the
-    /// failure mode the whole startup mode exists to prevent — so the loser's second decision is the same
-    /// decision any drifting boot makes, and it refuses.
+    /// the loser is now looking at ordinary drift. Silently accepting the winner's schema would make the
+    /// process serve rules compiled against a schema it never agreed to, which is the failure mode the whole
+    /// startup mode exists to prevent — so the loser's second decision is the same decision any drifting boot
+    /// makes.
+    /// <para>
+    /// <c>Verify</c> is configured explicitly, because it is the mode whose decision this fact is about and it
+    /// is no longer the default. Under the default <c>Apply</c> the loser applies its own descriptor over the
+    /// winner's instead — still a decision rather than adoption, but a different one, and a fact that named no
+    /// mode would have quietly become a fact about that.
+    /// </para>
     /// </remarks>
     [Fact]
     public async Task A_loser_holding_a_different_descriptor_refuses_rather_than_adopting_the_winners_schema()
     {
-        var race = await RaceAsync([ConcurrentColdStart.Descriptor, ConcurrentColdStart.DriftedDescriptor]);
+        var race = await RaceAsync(
+            [ConcurrentColdStart.Descriptor, ConcurrentColdStart.DriftedDescriptor],
+            AlvoSchemaStartupMode.Verify);
 
         race.Replicas.Count(replica => replica.Serving).ShouldBe(
             1, "two descriptors cannot both be the schema of one database");
@@ -88,11 +96,13 @@ public sealed class ConcurrentBootTests : IDisposable
         refused.AppliedSchemaReads.ShouldBe(2, "the refusal must be reached by re-reading, not by guessing");
     }
 
-    private Task<ColdStartRace> RaceAsync(IReadOnlyList<string> descriptorPerReplica) =>
+    private Task<ColdStartRace> RaceAsync(
+        IReadOnlyList<string> descriptorPerReplica, AlvoSchemaStartupMode? startup = null) =>
         ConcurrentColdStart.RaceAsync(
             alvo => alvo.UseSqlite($"Data Source={_databasePath}"),
             descriptorPerReplica,
-            TestContext.Current.CancellationToken);
+            TestContext.Current.CancellationToken,
+            startup);
 
     public void Dispose()
     {

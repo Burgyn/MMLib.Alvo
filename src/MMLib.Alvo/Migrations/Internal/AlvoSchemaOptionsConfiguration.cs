@@ -16,8 +16,9 @@ namespace MMLib.Alvo.Migrations.Internal;
 /// <see cref="IValidateOptions{TOptions}"/> can run — with a message that names the key and the bad value
 /// but cannot name the three modes; and an out-of-range <em>number</em> is not refused at all, because
 /// <c>Enum.Parse</c> accepts <c>"42"</c> and binds it to a mode that does not exist. So this type parses the
-/// raw text itself, leaves an unparseable value on the safe default, and lets
-/// <see cref="Validate(string?, AlvoSchemaOptions)"/> produce the whole refusal in one place.
+/// raw text itself, leaves a value it cannot read on the property's own default rather than inventing one, and
+/// lets <see cref="Validate(string?, AlvoSchemaOptions)"/> produce the whole refusal in one place — which is
+/// what makes the unreadable value a failed start rather than a silent mode change either way.
 /// </para>
 /// <para>
 /// <see cref="IConfiguration"/> is resolved <b>optionally</b> (the constructor takes a nullable instance
@@ -71,8 +72,8 @@ internal sealed class AlvoSchemaOptionsConfiguration(IConfiguration? configurati
 
     /// <summary>
     /// A blank value reads as absent rather than as a typo: an environment variable set to nothing is a
-    /// shell accident, and reading it as absent lands on <see cref="AlvoSchemaStartupMode.Verify"/>, the
-    /// mode that touches nothing.
+    /// shell accident, and "the operator set nothing" is the same statement as "the operator set nothing at
+    /// all" — so it lands on <see cref="AlvoSchemaOptions.Startup"/>'s default rather than on a refusal.
     /// </summary>
     private static bool IsAbsent(string? configured) => string.IsNullOrWhiteSpace(configured);
 
@@ -99,8 +100,8 @@ internal sealed class AlvoSchemaOptionsConfiguration(IConfiguration? configurati
         $"'{configured}' is not an Alvo schema startup mode. Set {StartupKey} (as an environment variable, "
         + $"{StartupEnvironmentVariable}) to one of: "
         + $"{nameof(AlvoSchemaStartupMode.Verify)} — refuse to start when the descriptor has drifted from "
-        + "the schema applied to this database, and run no DDL (the default); "
+        + "the schema applied to this database, and run no DDL (what production wants, with a migration job); "
         + $"{nameof(AlvoSchemaStartupMode.Apply)} — apply the drift on boot, still refusing a destructive "
-        + "plan; "
+        + "plan (the default); "
         + $"{nameof(AlvoSchemaStartupMode.Skip)} — never touch the project schema.";
 }

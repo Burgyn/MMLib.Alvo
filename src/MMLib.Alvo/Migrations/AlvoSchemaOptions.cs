@@ -6,9 +6,19 @@
 /// </summary>
 /// <remarks>
 /// <para>
-/// Both defaults are the ones that touch nothing: <see cref="AlvoSchemaStartupMode.Verify"/> and no
-/// destructive allowance. A host that wants a boot to apply its descriptor says so, in configuration or in
-/// code; a host that says nothing gets a process that reads the database and refuses to change it.
+/// <b>A host that says nothing gets <see cref="AlvoSchemaStartupMode.Apply"/> and no destructive
+/// allowance</b> — the descriptor is applied on boot, and no boot in any mode may discard data without
+/// <see cref="AllowDestructive"/>. The two halves are deliberately separate: the mode decides whether a
+/// process may bring the database up to the descriptor, and the allowance decides whether it may throw
+/// anything away doing so. Only the first is defaulted permissively.
+/// </para>
+/// <para>
+/// <b>Applying by default is the loop the product exists for</b> — edit the descriptor, restart, it works.
+/// The alternative default, <see cref="AlvoSchemaStartupMode.Verify"/>, breaks it on the <em>second</em> run:
+/// the first run is an initialization, which no mode governs, but the run after the first edit is drift, and
+/// that is precisely when somebody is working. Its cost is stated where it is paid — a production replica set
+/// wants <see cref="AlvoSchemaStartupMode.Verify"/> and a migration job
+/// (<c>docs/architecture/host.md</c>) — so production is an opt-out rather than the dev loop being an opt-in.
 /// </para>
 /// <para>
 /// In an environment variable the keys are spelled with a double underscore for the separator —
@@ -39,9 +49,18 @@ public sealed class AlvoSchemaOptions
 
     /// <summary>
     /// Gets or sets what a boot does when the descriptor has drifted from the applied schema. Defaults to
-    /// <see cref="AlvoSchemaStartupMode.Verify"/>, which refuses to start and runs no DDL.
+    /// <see cref="AlvoSchemaStartupMode.Apply"/>, which brings the database up to the descriptor and still
+    /// refuses any step that would discard data.
     /// </summary>
-    public AlvoSchemaStartupMode Startup { get; set; } = AlvoSchemaStartupMode.Verify;
+    /// <remarks>
+    /// <b>This default is deliberately <em>not</em> <c>default(AlvoSchemaStartupMode)</c>, which is
+    /// <see cref="AlvoSchemaStartupMode.Verify"/>.</b> The two answer different questions: the zero value is
+    /// where a value that went <em>missing</em> lands, and it must be the mode that touches nothing; this
+    /// initializer is where a host that deliberately said nothing lands, and that host pointed Alvo at its own
+    /// database on purpose. Anything that collapses the two — reading the property's default off the enum, or
+    /// moving <see cref="AlvoSchemaStartupMode.Apply"/> to zero to "match" — loses one of the two guarantees.
+    /// </remarks>
+    public AlvoSchemaStartupMode Startup { get; set; } = AlvoSchemaStartupMode.Apply;
 
     /// <summary>
     /// Gets or sets whether a boot may apply a plan that drops or narrows something — the guardrail that

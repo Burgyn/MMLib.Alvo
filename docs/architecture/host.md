@@ -74,6 +74,48 @@ That assertion reads the files **through `ConfigurationBuilder.AddJsonFile`**, n
 `JsonNode`: the binder is case-insensitive and a `JsonNode` indexer is not, so a lowercase
 `"alvo"` or `"auth"` would otherwise bind a working credential past a green fact.
 
+## The startup mode, and what production should set
+
+`Alvo:Schema:Startup` (`Alvo__Schema__Startup`) decides what a boot may do when the
+mounted descriptor no longer matches the schema already applied to the database.
+**It defaults to `Apply`**, in the core and therefore in this image too — the image
+sets nothing, because there is no longer a policy of its own to state.
+
+That default is for the loop the product exists for: edit the descriptor, restart,
+it works. Initialization is exempt from the mode in every mode but `Skip`, so a
+bare `docker run` against an empty database works whatever this is set to; the
+default is what makes the *second* run — the one after the first edit — work too.
+It never means "lose data on boot": a plan that drops or narrows anything is
+refused in every mode, including during initialization, unless
+`Alvo__Schema__AllowDestructive=true`.
+
+**A production deployment should set `Verify` and apply the descriptor from a
+migration job**, and this is an **opt-out rather than an opt-in** — stated plainly
+because the cost is real:
+
+| Mode | On drift | What it costs |
+|---|---|---|
+| `Apply` *(default)* | applies the plan | every replica of a rolling deploy attempts the DDL, and the application needs DDL rights against its own database — what EF Core's guidance advises against |
+| `Verify` | refuses, printing the steps and the fix | a descriptor edit does not take effect until the migration job runs |
+| `Skip` | does not read the applied snapshot at all | the schema is entirely somebody else's business |
+
+Replicas racing the same DDL **converge** rather than crash-looping (the boot's
+write is a version row first, then the DDL, in one transaction, with one bounded
+retry), so `Apply` on a replica set is not an outage. What it is instead is a
+schema that two different descriptors can take turns rewriting: a replica holding
+an older descriptor and allowed to apply will apply *it*, on its own restart. One
+writer — a migration job — is the shape that cannot do that.
+
+```yaml
+# production: the schema is the migration job's, and the pods only serve it
+environment:
+  Alvo__Schema__Startup: Verify
+```
+
+A value the mode cannot be read as fails the start naming all three modes, and an
+empty value reads as "not set" rather than as a typo, because an environment
+variable set to nothing is a shell accident.
+
 ## Behind a reverse proxy
 
 `Alvo:PathBase` calls `UsePathBase`; `Alvo:ForwardedHeaders:Enabled` calls `UseForwardedHeaders` with

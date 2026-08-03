@@ -34,8 +34,8 @@ public class AlvoBootServiceTests
     }
 
     /// <summary>
-    /// A first boot over an empty database initializes it — in the default <c>Verify</c> mode — and publishes
-    /// the revision it wrote, which is what readiness compares against.
+    /// A first boot over an empty database initializes it — in no configured mode at all — and publishes the
+    /// revision it wrote, which is what readiness compares against.
     /// </summary>
     [Fact]
     public async Task A_successful_boot_publishes_the_applied_revision()
@@ -140,9 +140,14 @@ public class AlvoBootServiceTests
     }
 
     /// <summary>
-    /// The same drift under the default <c>Verify</c> refuses, naming the step and the setting that would
-    /// allow it — the non-vacuity control for the fact above.
+    /// The same drift under <c>Verify</c> refuses, naming the step and the setting that would allow it — the
+    /// non-vacuity control for the fact above.
     /// </summary>
+    /// <remarks>
+    /// The mode is configured explicitly because <c>Apply</c> is the default: a version of this fact that
+    /// relied on the default would have flipped meaning with it and gone green by applying the drift it exists
+    /// to see refused.
+    /// </remarks>
     [Fact]
     public async Task The_same_drift_under_Verify_refuses_and_names_the_setting_that_would_apply_it()
     {
@@ -153,7 +158,7 @@ public class AlvoBootServiceTests
             await InitializeAsync(databasePath);
 
             await using var refused = await AlvoBootWorld.TryStartAsync(
-                AlvoBootWorld.AddedFieldDescriptorFileName, databasePath);
+                AlvoBootWorld.AddedFieldDescriptorFileName, databasePath, AlvoSchemaStartupMode.Verify);
 
             var refusal = refused.StartFailure.ShouldBeOfType<AlvoStartupRefusedException>();
             refusal.FixSuggestion.ShouldContain("Alvo__Schema__Startup=Apply");

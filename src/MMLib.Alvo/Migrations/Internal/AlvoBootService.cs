@@ -183,9 +183,13 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     /// <see cref="SchemaStartupPolicy.Decide"/> over what the winner actually committed. With the same
     /// descriptor the plan comes back empty and the loser primes and serves. With a <em>different</em>
     /// descriptor — a rolling deploy caught mid-flight — the loser is now looking at ordinary drift and is
-    /// governed by the ordinary mode: under the default <see cref="AlvoSchemaStartupMode.Verify"/> it refuses.
-    /// Silently accepting the winner's schema would leave the process serving rules compiled against a schema
-    /// it never agreed to.
+    /// governed by the ordinary mode: under <see cref="AlvoSchemaStartupMode.Verify"/> it refuses, and under
+    /// the default <see cref="AlvoSchemaStartupMode.Apply"/> it applies its <em>own</em> descriptor over the
+    /// winner's. Either way it never silently serves the winner's schema, which would leave the process
+    /// running rules compiled against a schema it never agreed to. Two replicas holding two descriptors and
+    /// both allowed to apply will take turns rewriting the schema, which is the concrete shape of the reason
+    /// a production deployment sets <see cref="AlvoSchemaStartupMode.Verify"/> and applies from a migration
+    /// job instead.
     /// </para>
     /// <para>
     /// <b>At most one retry, and no lock.</b> A loop would hang a boot instead of failing it, which is strictly

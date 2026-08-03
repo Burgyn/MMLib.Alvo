@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Schema;
@@ -152,15 +153,22 @@ internal static class ConcurrentColdStart
     /// The descriptor JSON each replica boots. Its length is the number of replicas.
     /// </param>
     /// <param name="ct">A token to cancel the race.</param>
+    /// <param name="startup">
+    /// The startup mode every replica is configured with, or <see langword="null"/> to configure none and let
+    /// the product's own default stand. A fact about what a <em>mode</em> does must name it: the default is
+    /// <see cref="AlvoSchemaStartupMode.Apply"/>, so a drift fact that named no mode would silently become a
+    /// fact about applying.
+    /// </param>
     internal static async Task<ColdStartRace> RaceAsync(
         Action<IAlvoBuilder> connectToTheOneDatabase,
         IReadOnlyList<string> descriptorPerReplica,
-        CancellationToken ct)
+        CancellationToken ct,
+        AlvoSchemaStartupMode? startup = null)
     {
         var descriptorFiles = descriptorPerReplica.Select(WriteToATemporaryFile).ToList();
         using var startTogether = new Barrier(descriptorPerReplica.Count);
         var replicas = descriptorFiles
-            .Select((file, index) => Replica.Build(connectToTheOneDatabase, file, index, startTogether))
+            .Select((file, index) => Replica.Build(connectToTheOneDatabase, file, index, startTogether, startup))
             .ToList();
 
         try
@@ -210,10 +218,15 @@ internal static class ConcurrentColdStart
         internal IServiceProvider Services => host.Services;
 
         internal static Replica Build(
-            Action<IAlvoBuilder> connectToTheOneDatabase, string descriptorFile, int index, Barrier startTogether)
+            Action<IAlvoBuilder> connectToTheOneDatabase,
+            string descriptorFile,
+            int index,
+            Barrier startTogether,
+            AlvoSchemaStartupMode? startup)
         {
             var probe = new BootProbe(startTogether);
             var builder = Host.CreateEmptyApplicationBuilder(new HostApplicationBuilderSettings());
+            builder.Configuration.AddInMemoryCollection(Settings(startup));
             builder.Services.AddAlvo(alvo =>
             {
                 connectToTheOneDatabase(alvo);
@@ -223,6 +236,24 @@ internal static class ConcurrentColdStart
 
             return new Replica(builder.Build(), index, probe);
         }
+
+        /// <summary>
+        /// The mode as configuration, spelled the way a container spells it, or nothing at all.
+        /// </summary>
+        /// <remarks>
+        /// The builder is <em>empty</em> on purpose — no environment-variable source — so this collection is
+        /// the only thing that can decide the mode, and a stray <c>Alvo__Schema__Startup</c> in the shell
+        /// cannot change what a replica measures.
+        /// </remarks>
+        /// <param name="startup">The mode to configure, or <see langword="null"/> for none.</param>
+        private static Dictionary<string, string?> Settings(AlvoSchemaStartupMode? startup) =>
+            startup is null
+                ? []
+                : new Dictionary<string, string?>(StringComparer.Ordinal)
+                {
+                    [$"{AlvoSchemaOptions.SectionName}:{nameof(AlvoSchemaOptions.Startup)}"] =
+                        startup.Value.ToString(),
+                };
 
         internal async Task<ColdStartOutcome> StartAsync(CancellationToken ct)
         {

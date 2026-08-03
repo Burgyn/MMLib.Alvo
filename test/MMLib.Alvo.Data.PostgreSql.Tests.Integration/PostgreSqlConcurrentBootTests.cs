@@ -80,12 +80,19 @@ public sealed class PostgreSqlConcurrentBootTests : IClassFixture<PostgresFixtur
     /// Converging is re-deciding, not adopting: a replica that loses while holding a <em>different</em>
     /// descriptor refuses rather than serving the winner's schema.
     /// </summary>
+    /// <remarks>
+    /// <c>Verify</c> is configured explicitly, because it is the mode whose decision this fact is about and it
+    /// is no longer the default. Under the default <c>Apply</c> the loser applies its own descriptor over the
+    /// winner's instead — still a decision rather than adoption, but a different one.
+    /// </remarks>
     [Fact]
     public async Task A_loser_holding_a_different_descriptor_refuses_rather_than_adopting_the_winners_schema()
     {
         EnsureEngineAvailable();
 
-        var race = await RaceAsync([ConcurrentColdStart.Descriptor, ConcurrentColdStart.DriftedDescriptor]);
+        var race = await RaceAsync(
+            [ConcurrentColdStart.Descriptor, ConcurrentColdStart.DriftedDescriptor],
+            AlvoSchemaStartupMode.Verify);
 
         race.Replicas.Count(replica => replica.Serving).ShouldBe(
             1, "two descriptors cannot both be the schema of one database");
@@ -100,11 +107,13 @@ public sealed class PostgreSqlConcurrentBootTests : IClassFixture<PostgresFixtur
         refused.AppliedSchemaReads.ShouldBe(2, "the refusal must be reached by re-reading, not by guessing");
     }
 
-    private Task<ColdStartRace> RaceAsync(IReadOnlyList<string> descriptorPerReplica) =>
+    private Task<ColdStartRace> RaceAsync(
+        IReadOnlyList<string> descriptorPerReplica, AlvoSchemaStartupMode? startup = null) =>
         ConcurrentColdStart.RaceAsync(
             alvo => alvo.UsePostgreSql(_connectionString),
             descriptorPerReplica,
-            TestContext.Current.CancellationToken);
+            TestContext.Current.CancellationToken,
+            startup);
 
     private static void EnsureEngineAvailable() =>
         Assert.SkipUnless(
