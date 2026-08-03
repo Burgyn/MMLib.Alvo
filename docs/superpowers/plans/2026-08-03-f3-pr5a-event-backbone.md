@@ -3269,6 +3269,84 @@ git commit -m "feat(events): compile after-hooks into the policy catalog and ref
 
 ### Task 8: The action executor — `webhook` and `email`, and nothing else
 
+**DONE.** 17 facts in `EventActionExecutorTests` plus 2 real-socket facts in `WebhookDeliveryTests`;
+ring0 green at 2 488 tests. `IEmailSender` + `AlvoMailMessage` are the only public surface added, and the
+core's baseline did not move — everything else is `internal`.
+
+**The two judgement calls, decided:**
+
+1. **A failed delivery is retried, and nothing is classified.** A 500, a 404, a 503, a connection refused,
+   a DNS failure and a timeout all throw and all get identical treatment. Nothing at delivery time can tell a
+   permanently wrong endpoint from one whose deployment is thirty seconds from finishing, and a per-status
+   "permanent" verdict needs somewhere to route the abandoned event — which 7.1 owns and this build does not
+   have. **The ceiling lives in exactly one place**: the `maxAttempts` the dispatcher passes to
+   `IOutboxStore.ClaimAsync`, whose subquery filters `attempts < @max_attempts`. It is reachable *because*
+   `ReleaseAsync` deliberately does not roll the count back, so `WebhookDelivery` adds no retry of its own —
+   an inner loop would be a second invisible multiplier and would hold a claimed entry past its lease while
+   sleeping. **"Abandoned" is observable, not silent**: at the ceiling the entry stops being claimed but is
+   never deleted or moved, so it sits in `alvo_outbox` with `dispatched_at IS NULL` and is countable and
+   inspectable, `alvo.events.failed` has one increment per attempt, and Task 9's `PoisonEvent` is the loud
+   Error line naming the event id and type. **One conversion is deliberate**: `HttpClient` reports *its own*
+   timeout as `OperationCanceledException`, the same type the host's shutdown raises, so `WebhookDelivery`
+   turns a timeout into a `TimeoutException` when the caller's token is *not* cancelled. Leaving the two
+   indistinguishable is how a slow receiver reads as a shutdown and silently ends the pump; both directions
+   are pinned by a fact.
+2. **The action log records descriptor coordinates and event identity, and never a rendered value.**
+   `ActionExecuted` carries the hook's JSON pointer, the action `type`, the event id and the event type — and
+   not the rendered body, the recipient, the subject or the endpoint URL. The reasoning is D7's, taken one
+   step further: the envelope carries the **unmasked** post-image, and D7 accepted that disclosure on the
+   ground that the endpoint is *declared in the same descriptor by the same author* as the `hidden` rule.
+   A log line has no such author. Logging the rendered value would take a `hidden` field out of the one place
+   the design accepted it going and put it into whatever ships logs, which nobody declared and no author
+   chose — so the ground D7 stands on does not extend to the log, and the log stops at the join key. The event
+   id is that key: the payload is stored once, in the `alvo_outbox` row, under that table's retention rather
+   than a log pipeline's. **`ConsoleEmailSender` is the one deliberate exception and not an exception to the
+   rule** — for a console provider the log *is* the mailbox, and a redacted body would deliver nowhere and
+   report nothing. That is exactly why its line has to say `development`, which a fact pins.
+
+**Six deliberate deviations from this task as written, each for a reason in the code:**
+
+1. **`CompiledAction` gained the resolved `WebhookEndpoint`**, instead of `WebhookDelivery` resolving the URL
+   "from the primed descriptor's `webhooks.endpoints`" as this task's Step 3 said. There **is no primed
+   descriptor** at run time — only the primed `PolicyCatalog` — so a delivery-time lookup would have needed a
+   second, independently primed holder, which is precisely R11's failure and would let an action post one
+   apply's URL while rendering another apply's templates. Task 7's own doctrine already settled it:
+   *"everything is resolved here so that nothing is resolved at delivery."* `A_webhook_action_posts_to_the_url_its_endpoint_declared`
+   is the behavioural half.
+2. **The action-type vocabulary moved out of `AfterHookCompiler` into a new
+   `Events/Internal/ActionVocabulary.cs`** (`ActionType.NameOf` plus `ActionSlot`). Adding the executor as a
+   second consumer of `AfterHookCompiler.ActionTypeName` turned R11's structural fact
+   `The_hook_compiler_is_reached_from_the_policy_catalog_builder_and_nowhere_else` **red** — it allows exactly
+   two files to mention the type. The fact was left exactly as coarse as Task 7 wrote it and the mapping was
+   extracted instead: a guard that can be narrowed to fit new code is not a guard, and the mapping was never
+   the compiler's work — it is the descriptor's vocabulary, which is why the slot names belong beside it.
+   One file more than this task listed.
+3. **`ActionSlot` is a shared authority for the template-dictionary keys**, read by the executor and written
+   by the compiler, because two spellings of a key fail neither the build nor the apply: the slot simply has
+   no entry, and the executor renders an empty recipient or posts the canonical envelope where a payload was
+   declared — a wrong delivery that looks exactly like a successful one.
+4. **`EventLog` carries only the two entries this task writes.** `ActionFailed`, `PoisonEvent` and
+   `DispatcherStopped` land in the same file **in Task 9**, with their callers and their facts; declaring them
+   here would be unreferenced code with untested wording, which is the opposite of the point.
+5. **The executor writes `ActionExecuted`, not the dispatcher** — it is the one place that knows an action
+   *ran*, and the entry goes after the await, which is what makes `An_action_that_failed_writes_no_execution_log_entry`
+   true. **Task 9 must not log it a second time**, or the execution-log criterion counts every action twice.
+6. **`CapturingLogger` was widened rather than a second `RecordingLoggerProvider` added** — its own remarks
+   argue exactly that, and `Warnings` is now a view over `Entries`, so no existing fact changed meaning.
+
+**One mutation came back green and the test was not at fault.** Renaming `ActionSlot.To` to `"recipient"`
+left all 17 facts passing, because the constant feeds **both** the compiler's write and the executor's read —
+a symmetric rename is invisible *by construction*, which is the single-authority property working rather than
+a hole in the suite. The discriminating mutation has to be **one-sided**: making the executor read a literal
+`"recipient"` while the compiler still writes `to` turns both recipient facts red.
+
+**Two facts carry no mutation of their own, deliberately.**
+`A_webhook_receives_the_unmasked_record_and_that_is_documented` is D7's named pin and there is no masking code
+to mutate — it exists so that the disclosure is a decision on the record; it does go red when the endpoint
+stops being carried. `Every_event_counter_is_published_on_the_one_meter_under_its_documented_name` is a naming
+pin, because the increments are Task 9's; it discriminates against a renamed instrument and against a counter
+created on a second meter, which is the failure that would make Task 10's listener silently read zero.
+
 Decision D5: PR5a's after-hook action set is `webhook` + `email`-to-console. `email` is not optional
 — `templates.subject`/`body` and `email.to` are the only slots that exercise the template engine's
 plain-string sugar, and deviation 64's consequence is unreachable without them.
@@ -3317,7 +3395,7 @@ plain-string sugar, and deviation 64's consequence is unreachable without them.
   `EventActionExecutor` throws on a delivery failure; the dispatcher (Task 9) is what contains it.
   That split is deliberate: an executor that swallowed a failure could never be retried.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```csharp
 // MMLib.Alvo.Tests/Events/EventActionExecutorTests.cs
@@ -3434,12 +3512,12 @@ public async Task The_console_sender_writes_the_whole_message_and_names_itself_a
 `test/MMLib.Alvo.Api.Tests/Events/WebhookDeliveryTests.cs` adds one fact over a real loopback
 `HttpListener` proving the content type is `application/json` and the method is `POST`.
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `dotnet test --project test/MMLib.Alvo.Tests -- --filter-class '*EventActionExecutorTests*'`
 Expected: FAIL — `EventActionExecutor` does not exist.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `EventActionExecutor.ExecuteAsync` is a three-arm switch, one private method per arm, plus the
 default arm which throws `InvalidOperationException` naming the type — unreachable from a
@@ -3471,7 +3549,7 @@ stand-in), `DispatcherStopped` (Error).
 `ConsoleEmailSender`'s single log line must contain the word `development` — pinned by the fact
 above — because the failure mode this provider has is an operator believing mail is being sent.
 
-- [ ] **Step 4: Run to verify they pass**
+- [x] **Step 4: Run to verify they pass**
 
 Run:
 ```
@@ -3480,14 +3558,14 @@ dotnet test --project test/MMLib.Alvo.Api.Tests -- --filter-class '*WebhookDeliv
 ```
 Expected: PASS. Assert `Build succeeded` first.
 
-- [ ] **Step 5: Prove the retry contract discriminates**
+- [x] **Step 5: Prove the retry contract discriminates**
 
 **Swallow the failure** in `WebhookDelivery` (replace `EnsureSuccessStatusCode()` with nothing) and
 confirm `A_refused_delivery_throws_so_the_dispatcher_can_retry_it` goes **red**. Restore. This is the
 one mutation that matters here: an executor that cannot fail makes at-least-once delivery a claim
 with nothing behind it, and every downstream chaos assertion would pass over it.
 
-- [ ] **Step 6: Accept the baselines, ring0, commit**
+- [x] **Step 6: Accept the baselines, ring0, commit**
 
 ```bash
 dotnet test --project test/MMLib.Alvo.Abstractions.Tests -- --filter-class '*PublicApi*'

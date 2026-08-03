@@ -198,15 +198,31 @@ internal sealed record CompiledAfterHook(
 /// parsed and resolved against the entity's schema.
 /// </summary>
 /// <remarks>
+/// <para>
 /// The templates are keyed by the slot they came from — <c>to</c>, <c>subject</c>, <c>body</c>,
 /// <c>payload</c>, <c>data</c> — and a slot the action left unset has no entry, so a consumer reads
-/// "declared" off the dictionary rather than off a nullable per slot.
+/// "declared" off the dictionary rather than off a nullable per slot. <c>ActionSlot</c> is the one authority
+/// on those keys, shared with the executor that reads them.
+/// </para>
+/// <para>
+/// <b><see cref="Endpoint"/> is resolved here rather than looked up at delivery, and that is the same
+/// decision R11 made for the hooks themselves.</b> There is no primed <em>descriptor</em> anywhere at run
+/// time — only the primed catalog — so a delivery-time lookup would need a second independently primed
+/// holder, which is exactly what would let an action deliver to one apply's URL while rendering another
+/// apply's templates. Carrying the endpoint on the compiled action makes the URL, the condition and the
+/// templates come from one apply by construction.
+/// </para>
 /// </remarks>
 /// <param name="Action">The parsed action exactly as the descriptor declared it.</param>
 /// <param name="Templates">Every template the action declares, keyed by slot name.</param>
+/// <param name="Endpoint">
+/// The endpoint a <c>webhook</c> action resolved from <c>webhooks.endpoints</c>; <see langword="null"/> for
+/// every other action type.
+/// </param>
 internal sealed record CompiledAction(
     AutomationAction Action,
-    IReadOnlyDictionary<string, AlvoTemplate> Templates);
+    IReadOnlyDictionary<string, AlvoTemplate> Templates,
+    WebhookEndpoint? Endpoint);
 
 /// <summary>
 /// The compiled <c>USING</c>/<c>WITH CHECK</c> pair for one operation. Exactly Postgres's

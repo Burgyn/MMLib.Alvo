@@ -66,43 +66,11 @@ internal static class AfterHookCompiler
             : new EntityAfterHooks(afterCreate, afterUpdate, afterDelete);
     }
 
-    /// <summary>
-    /// One action's <c>type</c> discriminator, spelled exactly as the frozen <c>$defs/action</c> does.
-    /// </summary>
-    /// <remarks>
-    /// The one mapping, so a refusal cannot name an action by a spelling no descriptor can carry.
-    /// <c>UnhonouredJsonataTests.Every_action_type_the_frozen_schema_declares_is_named</c> ties every arm to
-    /// <c>schema/project.schema.json</c> itself, which is what makes the set right rather than merely unchanged.
-    /// </remarks>
-    /// <param name="action">The parsed action.</param>
-    /// <exception cref="ArgumentOutOfRangeException"><paramref name="action"/> is a shape this mapping was never taught.</exception>
-    internal static string ActionTypeName(AutomationAction action) => action switch
-    {
-        WebhookAction => WebhookType,
-        EmailAction => EmailType,
-        FunctionAction => FunctionType,
-        EntityUpdateAction => EntityUpdateType,
-        HttpCallAction => HttpCallType,
-        _ => throw new ArgumentOutOfRangeException(
-            nameof(action), action, "Unmapped action shape; name its 'type' discriminator here."),
-    };
-
     private const string AfterCreatePoint = "afterCreate";
     private const string AfterUpdatePoint = "afterUpdate";
     private const string AfterDeletePoint = "afterDelete";
 
-    private const string WebhookType = "webhook";
-    private const string EmailType = "email";
-    private const string FunctionType = "function";
-    private const string EntityUpdateType = "entity.update";
-    private const string HttpCallType = "http.call";
-
-    private const string ToSlot = "to";
-    private const string DataSlot = "data";
-    private const string SubjectSlot = "subject";
-    private const string BodySlot = "body";
     private const string BodyFileSlot = "bodyFile";
-    private const string PayloadSlot = "payload";
     private const string EndpointSlot = "endpoint";
     private const string TemplateSlot = "template";
     private const string TypeSlot = "type";
@@ -173,7 +141,7 @@ internal static class AfterHookCompiler
 
     private static CompiledAction? RefuseAction(AutomationAction action, string path, AfterHookScope scope)
     {
-        var refusal = UnhonouredFeatures.UnhonouredAction(ActionTypeName(action));
+        var refusal = UnhonouredFeatures.UnhonouredAction(ActionType.NameOf(action));
         scope.Errors.Add(Error($"{path}/{TypeSlot}", refusal.Consequence, refusal.Fix));
 
         return null;
@@ -181,7 +149,7 @@ internal static class AfterHookCompiler
 
     private static CompiledAction? CompileWebhook(WebhookAction webhook, string path, AfterHookScope scope)
     {
-        if (!scope.Endpoints.ContainsKey(webhook.Endpoint))
+        if (!scope.Endpoints.TryGetValue(webhook.Endpoint, out var endpoint))
         {
             scope.Errors.Add(UndeclaredReference(
                 $"{path}/{EndpointSlot}", webhook.Endpoint, "webhooks.endpoints", scope.Endpoints.Keys));
@@ -190,8 +158,8 @@ internal static class AfterHookCompiler
 
         var templates = new Dictionary<string, AlvoTemplate>(StringComparer.Ordinal);
 
-        return AddTransformSlot(templates, PayloadSlot, webhook.Payload, $"{path}/{PayloadSlot}", scope)
-            ? new CompiledAction(webhook, templates)
+        return AddTransformSlot(templates, ActionSlot.Payload, webhook.Payload, $"{path}/{ActionSlot.Payload}", scope)
+            ? new CompiledAction(webhook, templates, endpoint)
             : null;
     }
 
@@ -205,11 +173,11 @@ internal static class AfterHookCompiler
         }
 
         var templates = new Dictionary<string, AlvoTemplate>(StringComparer.Ordinal);
-        var recipient = AddSugarSlot(templates, ToSlot, email.To, $"{path}/{ToSlot}", scope);
-        var data = AddTransformSlot(templates, DataSlot, email.Data, $"{path}/{DataSlot}", scope);
+        var recipient = AddSugarSlot(templates, ActionSlot.To, email.To, $"{path}/{ActionSlot.To}", scope);
+        var data = AddTransformSlot(templates, ActionSlot.Data, email.Data, $"{path}/{ActionSlot.Data}", scope);
         var body = AddMessageTemplate(templates, email.Template, message, scope);
 
-        return recipient && data && body ? new CompiledAction(email, templates) : null;
+        return recipient && data && body ? new CompiledAction(email, templates, Endpoint: null) : null;
     }
 
     /// <summary>
@@ -227,9 +195,9 @@ internal static class AfterHookCompiler
             return false;
         }
 
-        var subject = AddSugarSlot(templates, SubjectSlot, message.Subject, $"{path}/{SubjectSlot}", scope);
+        var subject = AddSugarSlot(templates, ActionSlot.Subject, message.Subject, $"{path}/{ActionSlot.Subject}", scope);
 
-        return AddSugarSlot(templates, BodySlot, message.Body, $"{path}/{BodySlot}", scope) && subject;
+        return AddSugarSlot(templates, ActionSlot.Body, message.Body, $"{path}/{ActionSlot.Body}", scope) && subject;
     }
 
     /// <summary>

@@ -787,6 +787,17 @@ namespace MMLib.Alvo.Events
         public static MMLib.Alvo.Events.AlvoEvent Read(string json) { }
         public static string Write(MMLib.Alvo.Events.AlvoEvent @event) { }
     }
+    public sealed class AlvoMailMessage : System.IEquatable<MMLib.Alvo.Events.AlvoMailMessage>
+    {
+        public AlvoMailMessage(string To, string Subject, string Body) { }
+        public string Body { get; init; }
+        public string Subject { get; init; }
+        public string To { get; init; }
+    }
+    public interface IEmailSender
+    {
+        System.Threading.Tasks.Task SendAsync(MMLib.Alvo.Events.AlvoMailMessage message, System.Threading.CancellationToken cancellationToken = default);
+    }
     public interface IOutboxStore
     {
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.OutboxEntry>> ClaimAsync(string claimant, int batchSize, int maxAttempts, System.TimeSpan lease, System.Threading.CancellationToken cancellationToken = default);

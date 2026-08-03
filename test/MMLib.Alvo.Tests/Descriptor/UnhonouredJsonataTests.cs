@@ -154,7 +154,7 @@ public class UnhonouredJsonataTests
             ignoreOrder: true,
             "read from the frozen schema — if this changed, the schema changed and the action switch owes it "
             + "a visit");
-        EveryActionShape().Select(AfterHookCompiler.ActionTypeName).ShouldBe(declared, ignoreOrder: true);
+        EveryActionShape().Select(ActionType.NameOf).ShouldBe(declared, ignoreOrder: true);
     }
 
     /// <summary>
