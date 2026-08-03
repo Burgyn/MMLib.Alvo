@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Migrations;
+﻿using Microsoft.AspNetCore.TestHost;
+using MMLib.Alvo.Migrations;
 
 namespace MMLib.Alvo.Host.Tests;
 
@@ -162,6 +163,115 @@ public class AlvoBootServiceTests
 
             var refusal = refused.StartFailure.ShouldBeOfType<AlvoStartupRefusedException>();
             refusal.FixSuggestion.ShouldContain("Alvo__Schema__Startup=Apply");
+        }
+        finally
+        {
+            AlvoHostWorld.TryDeleteDatabase(databasePath);
+        }
+    }
+
+    /// <summary>
+    /// <c>Skip</c> over a database Alvo has recorded nothing for, and whose schema is not there either, refuses —
+    /// rather than reporting <c>Ready</c> over a schema nothing verified.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The scenario is an operator who set <c>Skip</c> because "the migration job owns the schema" and whose job
+    /// never ran. Serving published <c>Ready</c> with <c>AppliedRevision</c> null — the phase and the revision
+    /// contradicting each other — so every replica answered 200 to a readiness probe, traffic was routed, and
+    /// every request died at the SQL layer.
+    /// </para>
+    /// <para>
+    /// End to end rather than only in <c>SchemaStartupDecisionTests</c>, because the decision is not the defect:
+    /// the boot service publishing <c>Ready</c> from what the decision returned is, and only a real boot exercises
+    /// that.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task Skip_over_a_database_alvo_has_recorded_nothing_for_refuses_rather_than_reporting_ready()
+    {
+        await using var refused = await AlvoBootWorld.TryStartAsync(startup: AlvoSchemaStartupMode.Skip);
+
+        var refusal = refused.StartFailure.ShouldBeOfType<AlvoStartupRefusedException>(
+            "Skip must not serve a schema nothing has verified");
+        refusal.FixSuggestion.ShouldContain("Alvo__Schema__Startup=Verify");
+        refused.BootState.Phase.ShouldBe(AlvoBootPhase.Failed);
+        refused.BootState.AppliedRevision.ShouldBeNull();
+    }
+
+    /// <summary>
+    /// What <c>Skip</c> is <em>for</em>: a recorded schema is served as it stands, the drift the boot read is
+    /// ignored, and no DDL runs.
+    /// </summary>
+    /// <remarks>
+    /// The revision staying at 1 while the descriptor asks for a second field is the whole fact — under
+    /// <c>Apply</c> the same start writes revision 2 (<see cref="A_drift_applied_on_boot_advances_the_applied_revision"/>)
+    /// and under <c>Verify</c> it refuses. It is also the end-to-end half of deviation 58: the snapshot was read,
+    /// or there would be no revision to publish, and what it found was ignored.
+    /// </remarks>
+    [Fact]
+    public async Task Skip_serves_the_recorded_schema_and_ignores_the_drift_it_read()
+    {
+        var databasePath = AlvoHostWorld.TempDatabasePath();
+
+        try
+        {
+            await InitializeAsync(databasePath);
+
+            await using var skipped = await AlvoBootWorld.StartAsync(
+                AlvoBootWorld.AddedFieldDescriptorFileName, databasePath, AlvoSchemaStartupMode.Skip);
+
+            skipped.BootState.Phase.ShouldBe(AlvoBootPhase.Ready);
+            skipped.BootState.AppliedRevision.ShouldBe(
+                1, "Skip applies nothing, so the recorded revision is the one it serves");
+            skipped.PrimedEntities.ShouldContain("warehouses");
+        }
+        finally
+        {
+            AlvoHostWorld.TryDeleteDatabase(databasePath);
+        }
+    }
+
+    /// <summary>
+    /// A refused boot binds <b>no</b> socket even under <c>HostOptions.ServicesStartConcurrently</c> — the one
+    /// supported option that could plausibly have let a host start degraded.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Measured because it was claimed to be the other way round.</b> That option flips the host's
+    /// <c>abortOnFirstException</c> to <see langword="false"/>, which does mean every <em>service</em> in a phase
+    /// gets its turn — so the reading that the start then continues into the <c>IHostedService.StartAsync</c> that
+    /// binds the socket is a natural one. It is wrong: <c>Host.StartAsync</c> calls its own <c>LogAndRethrow</c>
+    /// after <em>each</em> phase, so collected <c>StartingAsync</c> exceptions abort the start before the web host
+    /// service is ever started (.NET 10; the fixture's client cannot be created, which for
+    /// <see cref="TestServer"/> is the spelling of "the server was never started").
+    /// </para>
+    /// <para>
+    /// It is worth pinning rather than deleting, because it is the <em>only</em> composition that could break the
+    /// strong end of deviation 38's guarantee, and because it says what the readiness barrier is and is not for:
+    /// not for a refused boot, which cannot serve at all, but for a state published <em>after</em> a successful
+    /// boot — a route table that refuses the applied schema is today's reachable one.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_refused_boot_binds_no_socket_even_when_services_start_concurrently()
+    {
+        var databasePath = AlvoHostWorld.TempDatabasePath();
+
+        try
+        {
+            await InitializeAsync(databasePath);
+
+            await using var refused = await AlvoBootWorld.TryStartAsync(
+                AlvoBootWorld.DroppedFieldDescriptorFileName,
+                databasePath,
+                startServicesConcurrently: true);
+
+            refused.StartFailure.ShouldNotBeNull("the destructive descriptor must still refuse the start");
+            refused.BootState.Phase.ShouldBe(AlvoBootPhase.Failed);
+            refused.ServerIsListening.ShouldBeFalse(
+                "a refused start must not leave a bound socket, whichever way the host was told to start its "
+                + "services");
         }
         finally
         {

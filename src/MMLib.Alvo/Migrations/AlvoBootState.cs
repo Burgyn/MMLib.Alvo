@@ -44,6 +44,19 @@ public enum AlvoBootPhase
 /// route traffic to a process that can only 403.
 /// </para>
 /// <para>
+/// <b>A published failure is terminal for the process, and that is a decision rather than an oversight.</b>
+/// <see cref="Phase"/> short-circuits on <see cref="Failure"/>, so no later <see cref="Ready"/> can restore the
+/// phase and nothing clears it. Every path that records one either stops the start or freezes the route table it
+/// was recording about, so "recovered, and ready again" is not a state this process can reach — and a state
+/// machine that allowed it would have to define what a half-recovered boot serves, which nothing here can
+/// answer. A restart builds a new singleton, which is the intended way out.
+/// <c>AlvoBootStateTests.A_published_failure_is_terminal_even_if_a_project_later_reports_ready</c> pins it, so
+/// the one-directionality is a documented property rather than an accident of the expression's order.
+/// <b>#141 is where it has to change</b>: <see cref="Failure"/> is a single string while the collection is
+/// project-keyed, so with several projects in one host one project's refusal masks every other project's
+/// readiness — the right conservative answer for one project and the wrong one for several.
+/// </para>
+/// <para>
 /// <b>Thread safety is an immutable snapshot published by an interlocked swap, not three volatile fields.</b>
 /// The three members must be mutually consistent — a probe that read <see cref="Phase"/> as Ready and then
 /// <see cref="AppliedRevision"/> as absent would report a state that never existed — and only a single-reference
@@ -65,8 +78,8 @@ public sealed class AlvoBootState
 
     /// <summary>
     /// Gets the applied schema revision the boot primed from, or <see langword="null"/> when it has none —
-    /// nothing booted yet, the boot refused, the mode was <see cref="AlvoSchemaStartupMode.Skip"/> over a
-    /// database Alvo has recorded no schema for, or (#141) more than one project is booted and there is no one
+    /// nothing booted yet, the boot refused, the boot adopted a database whose live schema already matched the
+    /// descriptor so there was nothing to record, or (#141) more than one project is booted and there is no one
     /// revision to report.
     /// </summary>
     /// <remarks>

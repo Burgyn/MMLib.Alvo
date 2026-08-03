@@ -1,6 +1,9 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+﻿using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using MMLib.Alvo.Api.Internal;
 using MMLib.Alvo.Migrations;
+using MMLib.Alvo.Schema;
 using System.Net;
 
 namespace MMLib.Alvo.Api.Tests;
@@ -219,6 +222,44 @@ public class AlvoHealthTests
         readiness.CacheControl.ShouldNotBeNull().ShouldContain("no-store");
     }
 
+    /// <summary>
+    /// A schema the Data API refuses to route costs the pod its <b>readiness</b> and not its <b>process</b> —
+    /// liveness keeps answering 200, which is what <see cref="AlvoHealth.LivenessPath"/> promises nothing anyone
+    /// registers can change.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>An <c>EndpointDataSource</c> is enumerated through the composite of every source the application
+    /// registered, so this is not a Data API concern at all.</b> When <c>AlvoEndpointDataSource</c> refused a
+    /// hostile schema by <em>throwing</em>, the first request to build the matcher — a probe, typically —
+    /// re-raised that refusal for every route in the application, forever: <c>/health/live</c> answered 500, the
+    /// container was killed, and it was restart-looped for a schema no restart could fix. Kubernetes' own docs
+    /// warn that exactly this mistake cascades under load.
+    /// </para>
+    /// <para>
+    /// Both halves are asserted, because either alone is satisfiable the wrong way: liveness 200 would also hold
+    /// if the guard had simply been deleted, and readiness 503 would also hold for a boot that never ran. The
+    /// world's own check pins that this boot reached <c>Ready</c>, so the <c>Failed</c> below can only have been
+    /// published by the route materialisation.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_schema_that_cannot_be_routed_fails_readiness_and_leaves_liveness_answering()
+    {
+        await using var world = await AlvoHealthWorld.StartAsync(new AlvoHealthWorldSetup(
+            Register: services => services.AddSingleton<ISchemaRegistry>(new RegistryShadowingAReservedKey()),
+            MapTheDataApi: true));
+
+        var liveness = await world.ProbeAsync(AlvoHealth.LivenessPath);
+        var readiness = await world.ProbeAsync(AlvoHealth.ReadinessPath);
+
+        liveness.Status.ShouldBe(
+            HttpStatusCode.OK, "a schema Alvo will not route must not get the container killed");
+        readiness.Status.ShouldBe(HttpStatusCode.ServiceUnavailable);
+        readiness.Body.ShouldBe(nameof(AlvoBootPhase.Failed));
+        world.BootState.Failure.ShouldNotBeNull().ShouldContain(ReservedQueryKeys.Limit);
+    }
+
     private const string SecretPassword = "pa55w0rd-Sup3rS3cret";
 
     private const string SecretHost = "alvo-db.internal";
@@ -253,6 +294,27 @@ public class AlvoHealthTests
         entry.Exception?.ToString() ?? string.Empty,
         .. entry.Data.Select(item => $"{item.Key}={item.Value}"),
     ];
+
+    /// <summary>
+    /// An applied schema that never passed descriptor validation, declaring a field the query string reserves —
+    /// the substituted-registry shape the route-materialisation belt exists for.
+    /// </summary>
+    private sealed class RegistryShadowingAReservedKey : ISchemaRegistry
+    {
+        private readonly SchemaModel _schema = new([
+            new EntitySchema
+            {
+                Name = "widgets",
+                Fields =
+                [
+                    new FieldSchema { Name = "id", Type = FieldType.Uuid },
+                    new FieldSchema { Name = ReservedQueryKeys.Limit, Type = FieldType.Integer },
+                ],
+            },
+        ]);
+
+        public SchemaModel GetSchema() => _schema;
+    }
 
     /// <summary>
     /// A store that fails the way a driver whose exception message carries its connection string would.

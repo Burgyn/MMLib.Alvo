@@ -8,6 +8,8 @@ public sealed class SchemaStartupDecisionTests
 {
     private const string StartupApplyFix = "Alvo__Schema__Startup=Apply";
 
+    private const string StartupVerifyFix = "Alvo__Schema__Startup=Verify";
+
     private const string AllowDestructiveFix = "Alvo__Schema__AllowDestructive=true";
 
     [Theory]
@@ -21,9 +23,37 @@ public sealed class SchemaStartupDecisionTests
         decision.Refusal.ShouldBeNull();
     }
 
+    /// <summary>
+    /// The one <c>Skip</c> state nothing has verified: Alvo has recorded no schema <em>and</em> the live schema
+    /// does not match the descriptor — the shape of a migration job that never ran.
+    /// </summary>
+    /// <remarks>
+    /// Serving here published <c>Ready</c> with no applied revision at all, so every replica answered 200 to a
+    /// readiness probe while every request died at the SQL layer — the exact state readiness exists to prevent.
+    /// The refusal has to name a way out, or an operator whose schema is genuinely somebody else's business is
+    /// stuck.
+    /// </remarks>
     [Fact]
-    public void Skip_never_touches_the_database_even_when_uninitialized()
-        => Decide(applied: null, NonEmptyPlan, AlvoSchemaStartupMode.Skip)
+    public void Skip_refuses_when_nothing_has_verified_the_schema_it_would_report_ready_over()
+    {
+        var decision = Decide(applied: null, NonEmptyPlan, AlvoSchemaStartupMode.Skip);
+
+        decision.Outcome.ShouldBe(SchemaStartupOutcome.Refuse);
+
+        var fix = decision.Fix.ShouldNotBeNull();
+        fix.ShouldContain(StartupVerifyFix);
+        fix.ShouldContain(StartupApplyFix);
+        decision.Refusal.ShouldNotBeNull().ShouldContain("Skip");
+    }
+
+    /// <summary>
+    /// The composition that must keep working: a database somebody else's migrations brought up, whose live
+    /// schema already matches the descriptor. Nothing is recorded, and nothing needs to be — the empty plan
+    /// <em>is</em> the verification.
+    /// </summary>
+    [Fact]
+    public void Skip_serves_an_adopted_database_whose_live_schema_already_matches()
+        => Decide(applied: null, EmptyPlan, AlvoSchemaStartupMode.Skip)
             .Outcome.ShouldBe(SchemaStartupOutcome.Unchanged);
 
     [Fact]

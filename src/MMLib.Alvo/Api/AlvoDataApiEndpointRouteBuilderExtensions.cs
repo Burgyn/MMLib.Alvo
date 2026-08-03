@@ -1,8 +1,10 @@
 ﻿using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Api;
 using MMLib.Alvo.Api.Internal;
+using MMLib.Alvo.Migrations;
 
 namespace Microsoft.AspNetCore.Builder;
 
@@ -48,6 +50,14 @@ public static class AlvoDataApiEndpointRouteBuilderExtensions
     /// deviation in the design rather than presented as a start-time guarantee it is not.
     /// </para>
     /// <para>
+    /// <b>And for that input the refusal costs Alvo its readiness, not the host its matcher.</b> A schema neither
+    /// guard will route leaves this source with an <em>empty</em> endpoint table and records the reason on
+    /// <c>AlvoBootState</c>, so <c>/health/ready</c> reports <c>Failed</c> while <c>/health/live</c> keeps
+    /// answering. Throwing out of an <c>EndpointDataSource</c> instead — which is what this did — took down the
+    /// composite the framework matches <em>every</em> request through, liveness included, and a failing liveness
+    /// probe is how a pod gets killed and restart-looped for a schema no restart can fix.
+    /// </para>
+    /// <para>
     /// Every mapped endpoint carries the API-key context filter, so this surface has no path to
     /// <c>IAlvoData</c> that skips the authorization seam.
     /// </para>
@@ -69,7 +79,9 @@ public static class AlvoDataApiEndpointRouteBuilderExtensions
             catalog,
             services.GetRequiredService<IOptions<AlvoApiOptions>>().Value,
             services.GetRequiredService<AlvoContextFilterFactory>(),
-            services));
+            services,
+            services.GetRequiredService<AlvoBootState>(),
+            services.GetRequiredService<ILogger<AlvoEndpointDataSource>>()));
 
         return endpoints;
     }

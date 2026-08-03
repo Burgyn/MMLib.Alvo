@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Schema;
 
@@ -80,6 +81,12 @@ internal sealed class AlvoBootWorld : IAsyncDisposable
     /// <summary>How many times anything read the descriptor during this world's lifetime.</summary>
     internal int DescriptorReads => _descriptorSource.Reads;
 
+    /// <summary>
+    /// Whether the server is bound <em>now</em>, after the start returned — the question a fact about a refused
+    /// start has to ask, since <see cref="ServerWasListeningDuringBoot"/> only reports what the boot itself saw.
+    /// </summary>
+    internal bool ServerIsListening => BootObservingDescriptorSource.CanServeARequest(_app.Services);
+
     /// <summary>Every entity the primed schema registry reports — empty when nothing primed.</summary>
     /// <remarks>
     /// The registry is what route generation reads its literals off and what a data port validates field
@@ -114,13 +121,20 @@ internal sealed class AlvoBootWorld : IAsyncDisposable
     /// <param name="descriptor">The descriptor file name under this project's <c>descriptors/</c> output.</param>
     /// <param name="databasePath">A database the caller owns, so two worlds can be started over one file.</param>
     /// <param name="startup">The startup mode, written into configuration exactly as the container spells it.</param>
+    /// <param name="startServicesConcurrently">
+    /// Whether the host is configured with <see cref="HostOptions.ServicesStartConcurrently"/>, which is a real
+    /// supported knob and the one composition under which a refused boot does <em>not</em> stop the server from
+    /// binding.
+    /// </param>
     internal static async Task<AlvoBootWorld> TryStartAsync(
         string descriptor = DefaultDescriptorFileName,
         string? databasePath = null,
-        AlvoSchemaStartupMode? startup = null)
+        AlvoSchemaStartupMode? startup = null,
+        bool startServicesConcurrently = false)
     {
         var ownedDatabasePath = databasePath is null ? AlvoHostWorld.TempDatabasePath() : null;
-        var builder = Builder(descriptor, databasePath ?? ownedDatabasePath!, startup);
+        var builder = Builder(
+            descriptor, databasePath ?? ownedDatabasePath!, startup, startServicesConcurrently);
         var app = builder.Build();
         var descriptorSource = (BootObservingDescriptorSource)app.Services.GetRequiredService<IDescriptorSource>();
 
@@ -136,7 +150,10 @@ internal sealed class AlvoBootWorld : IAsyncDisposable
     }
 
     private static WebApplicationBuilder Builder(
-        string descriptor, string databasePath, AlvoSchemaStartupMode? startup)
+        string descriptor,
+        string databasePath,
+        AlvoSchemaStartupMode? startup,
+        bool startServicesConcurrently = false)
     {
         var builder = WebApplication.CreateSlimBuilder();
         builder.WebHost.UseTestServer();
@@ -144,6 +161,11 @@ internal sealed class AlvoBootWorld : IAsyncDisposable
         builder.Services.AddAlvo(alvo => alvo
             .UseSqlite($"Data Source={databasePath}")
             .FromDescriptor(AlvoHostWorld.DescriptorPath(descriptor)));
+
+        if (startServicesConcurrently)
+        {
+            builder.Services.Configure<HostOptions>(host => host.ServicesStartConcurrently = true);
+        }
 
         ObserveTheDescriptorRead(builder.Services);
 
@@ -204,11 +226,11 @@ internal sealed class AlvoBootWorld : IAsyncDisposable
         public Task<string> LoadAsync(CancellationToken ct = default)
         {
             Reads++;
-            ServerWasListening |= CanServeARequest();
+            ServerWasListening |= CanServeARequest(services);
             return inner.LoadAsync(ct);
         }
 
-        private bool CanServeARequest()
+        internal static bool CanServeARequest(IServiceProvider services)
         {
             var server = (TestServer)services.GetRequiredService<IServer>();
             try

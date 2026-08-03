@@ -55,8 +55,15 @@ internal sealed record ColdStartOutcome(
 /// The revisions the descriptor-versions table holds afterwards. The whole point of the optimistic append is
 /// that three replicas initializing one empty database leave <c>[1]</c>, not <c>[1, 2, 3]</c>.
 /// </param>
+/// <param name="AppliedFields">
+/// Every field the applied snapshot declares afterwards, sorted. The revisions say how many descriptors were
+/// recorded; only this says whose schema the database actually ends on — the difference between "one descriptor
+/// won" and "the database holds the union of two".
+/// </param>
 internal sealed record ColdStartRace(
-    IReadOnlyList<ColdStartOutcome> Replicas, IReadOnlyList<int> RecordedRevisions);
+    IReadOnlyList<ColdStartOutcome> Replicas,
+    IReadOnlyList<int> RecordedRevisions,
+    IReadOnlyList<string> AppliedFields);
 
 /// <summary>
 /// N replicas of one embedded Alvo, each in its own container, cold-starting against <b>one</b> database at
@@ -145,6 +152,41 @@ internal static class ConcurrentColdStart
         }
         """;
 
+    /// <summary>
+    /// The same project with a <em>different</em> nullable field added — the divergent-additive rolling deploy: one
+    /// pod adds <c>region</c>, this one adds <c>city</c>, and neither declares the other's field.
+    /// </summary>
+    /// <remarks>
+    /// This is the descriptor that decides whether "the database ends up with <b>both</b> columns, a schema no
+    /// deployed descriptor declares" is reachable. It is not: whichever replica loses is looking at a snapshot
+    /// carrying the winner's field, which its own descriptor does not declare, so its plan <em>drops</em> it — and
+    /// the always-on destructive gate refuses a drop in every mode.
+    /// </remarks>
+    internal const string DivergentDescriptor = """
+        {
+          "apiVersion": "alvo.dev/v1",
+          "name": "cold-start",
+          "description": "A sibling revision that adds a different field from the one the other pod adds.",
+          "auth": { "providers": ["local"], "roles": ["admin"] },
+          "entities": {
+            "depots": {
+              "description": "A depot.",
+              "fields": {
+                "code": { "type": "string", "required": true, "unique": true, "maxLength": 20 },
+                "city": { "type": "string", "maxLength": 40 }
+              },
+              "rules": {
+                "list": "'authenticated' in @user.roles",
+                "get": "'authenticated' in @user.roles",
+                "create": "'admin' in @user.roles",
+                "update": "'admin' in @user.roles",
+                "delete": "'admin' in @user.roles"
+              }
+            }
+          }
+        }
+        """;
+
     /// <summary>Cold-starts one replica per descriptor, all against the same database, at the same instant.</summary>
     /// <param name="connectToTheOneDatabase">
     /// Selects the provider and the connection every replica shares — the engine leg's only contribution.
@@ -175,7 +217,10 @@ internal static class ConcurrentColdStart
         {
             var outcomes = await Task.WhenAll(replicas.Select(replica => Task.Run(() => replica.StartAsync(ct), ct)));
 
-            return new ColdStartRace(outcomes, await ReadTheHistoryAsync(replicas[0], ct));
+            return new ColdStartRace(
+                outcomes,
+                await ReadTheHistoryAsync(replicas[0], ct),
+                await ReadTheAppliedFieldsAsync(replicas[0], ct));
         }
         finally
         {
@@ -186,6 +231,21 @@ internal static class ConcurrentColdStart
 
             descriptorFiles.ForEach(TryDelete);
         }
+    }
+
+    /// <summary>The fields the schema the database ended on declares, read through the applied snapshot.</summary>
+    /// <param name="replica">Any replica — they all share the one database.</param>
+    /// <param name="ct">A token to cancel the read.</param>
+    private static async Task<IReadOnlyList<string>> ReadTheAppliedFieldsAsync(
+        Replica replica, CancellationToken ct)
+    {
+        var applied = await replica.Services.GetRequiredService<IAppliedSchemaStore>().GetCurrentAsync(Project, ct);
+
+        return applied is null
+            ? []
+            : [.. applied.Schema.Entities
+                .SelectMany(entity => entity.Fields.Select(field => $"{entity.Name}.{field.Name}"))
+                .Order(StringComparer.Ordinal)];
     }
 
     private static async Task<IReadOnlyList<int>> ReadTheHistoryAsync(Replica replica, CancellationToken ct) =>

@@ -145,6 +145,12 @@ internal sealed class AlvoHealthWorld : IAsyncDisposable
 
         var app = builder.Build();
         app.MapAlvoHealth();
+
+        if (setup.MapTheDataApi)
+        {
+            app.MapAlvoDataApi();
+        }
+
         await app.StartAsync(TestContext.Current.CancellationToken);
 
         var world = new AlvoHealthWorld(database, app);
@@ -203,9 +209,15 @@ internal sealed class AlvoHealthWorld : IAsyncDisposable
 /// <see cref="AlvoBootPhase.Failed"/> probe response can be observed from.
 /// </param>
 /// <param name="Register">Anything registered after <c>AddAlvo</c> — a second <c>AddAlvo</c>, a health check of the host's own.</param>
+/// <param name="MapTheDataApi">
+/// Whether the host also maps the Data API. Off by default, because a probe reaches none of it — and on for the
+/// one fact that needs it: the Data API's endpoint data source is enumerated through the <em>same</em> composite
+/// the probes are matched through, so a source that refuses a schema by throwing takes liveness down with it.
+/// </param>
 internal sealed record AlvoHealthWorldSetup(
     bool RunTheBoot = true,
-    Action<IServiceCollection>? Register = null);
+    Action<IServiceCollection>? Register = null,
+    bool MapTheDataApi = false);
 
 /// <summary>Everything a fact can assert about a probe's answer.</summary>
 /// <param name="Status">The status code — the only thing an orchestrator reads.</param>

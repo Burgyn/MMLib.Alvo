@@ -37,9 +37,15 @@ public sealed class AlvoBootStateTests
     }
 
     /// <summary>
-    /// A boot that read no snapshot at all — <see cref="AlvoSchemaStartupMode.Skip"/> over a database Alvo
-    /// has never recorded — is still Ready. Readiness is "this process primed", not "a revision exists".
+    /// A boot that found no snapshot to prime from — an adopted database whose live schema already matched the
+    /// descriptor, so there was nothing to apply and nothing to record — is still Ready. Readiness is "this
+    /// process primed", not "a revision exists".
     /// </summary>
+    /// <remarks>
+    /// It is <em>not</em> <see cref="AlvoSchemaStartupMode.Skip"/> over an unrecorded database, which used to be
+    /// this fact's stated example: that state is now refused by <c>SchemaStartupPolicy</c>, because under Skip
+    /// nothing diffs the live schema and Ready would then mean "nobody checked".
+    /// </remarks>
     [Fact]
     public void A_project_that_primed_without_a_snapshot_is_still_Ready()
     {
@@ -108,6 +114,29 @@ public sealed class AlvoBootStateTests
 
         state.Phase.ShouldBe(AlvoBootPhase.Ready);
         state.AppliedRevision.ShouldBeNull();
+    }
+
+    /// <summary>
+    /// A published failure is <b>terminal for the process</b>: nothing clears it, so no later success can restore
+    /// the phase. Documented as behaviour rather than left as an accident of the expression's order.
+    /// </summary>
+    /// <remarks>
+    /// Every path that records a failure either stops the start or freezes the empty route table it was recording
+    /// about, so there is no such thing here as recovering and becoming servable again — a restart builds a new
+    /// state, which is the intended way out. The direction matters: the alternative (clearing the reason on a
+    /// later <see cref="AlvoBootState.Ready"/>) would let a process that refused a schema report Ready while
+    /// serving nothing, which is what readiness exists to prevent.
+    /// </remarks>
+    [Fact]
+    public void A_published_failure_is_terminal_even_if_a_project_later_reports_ready()
+    {
+        var state = new AlvoBootState();
+
+        state.Failed(Project, "the descriptor does not match the applied schema");
+        state.Ready(Project, appliedRevision: 1);
+
+        state.Phase.ShouldBe(AlvoBootPhase.Failed);
+        state.Failure.ShouldNotBeNull();
     }
 
     [Fact]

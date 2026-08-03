@@ -1,10 +1,12 @@
 ﻿using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using MMLib.Alvo.Api.Internal;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Schema;
 using System.Net;
 using System.Text.Json.Nodes;
@@ -274,6 +276,14 @@ public sealed class DataApiQueryTests
     /// (<c>DescriptorBootPlanTests</c>); for a substituted registry, first enumeration is the earliest anything
     /// can see the hostile schema at all.
     /// </para>
+    /// <para>
+    /// <b>And the refusal is <em>recorded</em>, not thrown, which is the second thing this fact had to change.</b>
+    /// Throwing out of an <c>EndpointDataSource</c> broke the composite the framework matches every request
+    /// through — <c>/health/live</c> included — so a hostile registry got the container killed and restart-looped.
+    /// What is asserted instead is both halves of the fail-closed answer: the table materialises <em>empty</em>, so
+    /// no route exists, and <c>AlvoBootState</c> carries the reason with the phase Failed, so readiness reports it
+    /// and an orchestrator drains the pod instead of restarting it.
+    /// </para>
     /// </remarks>
     [Fact]
     public void A_schema_reaching_route_materialisation_without_validation_is_still_refused_for_a_reserved_field_name()
@@ -299,28 +309,29 @@ public sealed class DataApiQueryTests
         using var app = builder.Build();
         app.MapAlvoDataApi();
 
-        var refusal = Should.Throw<InvalidOperationException>(() => MaterialiseRoutes(app));
-        refusal.Message.ShouldContain("widgets");
-        refusal.Message.ShouldContain(ReservedQueryKeys.Limit);
-        refusal.Message.ShouldContain("Rename the field");
+        MaterialiseRoutes(app).ShouldBeEmpty("a schema the belt refused must produce no route at all");
+
+        var state = app.Services.GetRequiredService<AlvoBootState>();
+        state.Phase.ShouldBe(AlvoBootPhase.Failed);
+
+        var refusal = state.Failure.ShouldNotBeNull();
+        refusal.ShouldContain("widgets");
+        refusal.ShouldContain(ReservedQueryKeys.Limit);
+        refusal.ShouldContain("Rename the field");
     }
 
     /// <summary>
-    /// Builds the mapped endpoint table, which is what the first request to arrive does.
+    /// Builds the mapped endpoint table, which is what the first request to arrive does, and returns what it
+    /// produced.
     /// </summary>
     /// <remarks>
-    /// Read off <see cref="IEndpointRouteBuilder.DataSources"/> rather than by sending a request, because the
-    /// claim is that the schema is refused <em>before any route exists</em> — a request would be answered 404 by
-    /// a table that never built, which is the same answer a working belt produces.
+    /// Read off <see cref="IEndpointRouteBuilder.DataSources"/> rather than by sending a request, because a
+    /// request cannot tell the two outcomes apart: a refused schema and a schema with no such entity both answer
+    /// 404 from routing. The endpoint list can.
     /// </remarks>
     /// <param name="app">The application whose mapped routes to materialise.</param>
-    private static void MaterialiseRoutes(WebApplication app)
-    {
-        foreach (var source in ((IEndpointRouteBuilder)app).DataSources)
-        {
-            _ = source.Endpoints;
-        }
-    }
+    private static IReadOnlyList<Endpoint> MaterialiseRoutes(WebApplication app) =>
+        [.. ((IEndpointRouteBuilder)app).DataSources.SelectMany(source => source.Endpoints)];
 
     /// <summary>An applied schema handed straight to route generation, with no descriptor behind it.</summary>
     /// <param name="schema">The schema to answer with.</param>

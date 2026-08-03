@@ -1,7 +1,9 @@
 ﻿using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Primitives;
+using MMLib.Alvo.Migrations;
 
 namespace MMLib.Alvo.Api.Internal;
 
@@ -41,6 +43,19 @@ namespace MMLib.Alvo.Api.Internal;
 /// overflows the stack (aspnetcore#44392).
 /// </para>
 /// <para>
+/// <b>A schema this source refuses to route costs Alvo its readiness, not the host its matcher.</b> The two
+/// schema guards below (<see cref="ReservedQueryKeys"/>, <see cref="FormatCatalog"/>) used to throw out of
+/// <see cref="Endpoints"/> — and an <see cref="EndpointDataSource"/> is enumerated through the <em>composite</em>
+/// of every source the application registered, so one throwing source took down the whole matcher: every request
+/// answered 500, <c>/health/live</c> among them, for the life of the process. A failing liveness probe has the
+/// container killed and restart-looped, which is the exact outcome <see cref="AlvoHealth.LivenessPath"/> promises
+/// nothing anyone registers can cause. So a refusal now records itself on <see cref="AlvoBootState"/> (readiness
+/// turns <see cref="AlvoBootPhase.Failed"/>, so an orchestrator drains the pod) and installs an <b>empty</b>
+/// endpoint table. Nothing is weakened in the fail-closed direction — a refused schema still has no route at
+/// all, and the refusal is logged at <see cref="LogLevel.Critical"/> naming the field — and the refusal for a
+/// <em>descriptor</em> is still a start-time one, raised by boot stage 0 before anything is durable.
+/// </para>
+/// <para>
 /// <b>Thread safety.</b> <see cref="Endpoints"/> is read concurrently — by the matcher and by OpenAPI document
 /// generation — so the whole materialised table is published as one immutable snapshot: it is fully constructed
 /// before the reference is installed under <see cref="_gate"/> and read back with <c>Volatile.Read</c>,
@@ -48,20 +63,22 @@ namespace MMLib.Alvo.Api.Internal;
 /// contents above the load of the reference itself. One reference publication rather than two fields, because
 /// the endpoint list and the data sources it was flattened from must never be observed apart. The lock is taken
 /// only on the first enumeration; every later read is one volatile load, so no request ever queues behind
-/// another's materialisation. A build that throws installs nothing, so the refusal is raised again — identically
-/// — on the next enumeration rather than leaving a half-built table behind.
+/// another's materialisation. A refused build installs the empty table rather than nothing, so the schema is
+/// judged exactly once and no second enumeration can reach a different answer.
 /// </para>
 /// <para>
 /// <b>Constructed per <c>MapAlvoDataApi</c> call, never as a process singleton</b>, so serving several projects
 /// from one host (#141, parked) needs a second data source rather than a different design here.
 /// </para>
 /// </remarks>
-internal sealed class AlvoEndpointDataSource : EndpointDataSource
+internal sealed partial class AlvoEndpointDataSource : EndpointDataSource
 {
     private readonly EntityRouteCatalog _catalog;
     private readonly AlvoApiOptions _options;
     private readonly AlvoContextFilterFactory _filters;
     private readonly IServiceProvider _services;
+    private readonly AlvoBootState _boot;
+    private readonly ILogger<AlvoEndpointDataSource> _logger;
     private readonly string _prefix;
     private readonly Lock _gate = new();
     private RouteTable? _routes;
@@ -78,21 +95,29 @@ internal sealed class AlvoEndpointDataSource : EndpointDataSource
     /// <param name="options">The API options every mapped endpoint reads its paging and payload bounds from.</param>
     /// <param name="filters">Builds the authorization filter each mapped endpoint carries.</param>
     /// <param name="services">The application's services, which the mapped delegates resolve their arguments from.</param>
+    /// <param name="boot">Where a schema that cannot be routed is recorded, so readiness reports it.</param>
+    /// <param name="logger">Where that refusal is written for the operator who has to read it.</param>
     internal AlvoEndpointDataSource(
         EntityRouteCatalog catalog,
         AlvoApiOptions options,
         AlvoContextFilterFactory filters,
-        IServiceProvider services)
+        IServiceProvider services,
+        AlvoBootState boot,
+        ILogger<AlvoEndpointDataSource> logger)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(filters);
         ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(boot);
+        ArgumentNullException.ThrowIfNull(logger);
 
         _catalog = catalog;
         _options = options;
         _filters = filters;
         _services = services;
+        _boot = boot;
+        _logger = logger;
         _prefix = RoutePrefix.Normalize(options.RoutePrefix);
     }
 
@@ -133,11 +158,60 @@ internal sealed class AlvoEndpointDataSource : EndpointDataSource
 
         lock (_gate)
         {
-            var routes = _routes ?? Build();
+            var routes = _routes ?? BuildOrRefuseToRoute();
             Volatile.Write(ref _routes, routes);
             return routes;
         }
     }
+
+    /// <summary>
+    /// The endpoint table, or an empty one plus a recorded refusal when the schema cannot be routed at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Only <see cref="InvalidOperationException"/> is treated as a refusal, because that is what both guards
+    /// raise and nothing else here is expected to: a reserved field name
+    /// (<see cref="ReservedQueryKeys.EnsureNoneIsShadowed(System.Collections.Generic.IEnumerable{Schema.EntitySchema})"/>)
+    /// and a <c>format</c> that is not a regular expression (<see cref="FormatCatalog.Build"/>). Anything else —
+    /// a defect in route generation — still propagates, because turning an unknown failure into "no routes"
+    /// would hide it behind a 404.
+    /// </para>
+    /// <para>
+    /// The refusal is recorded on <see cref="AlvoBootState"/> rather than thrown for the reason the type's remarks
+    /// give: throwing out of an <see cref="EndpointDataSource"/> breaks the composite every probe is matched
+    /// through, and readiness is the signal that means "this pod cannot serve" without also meaning "kill this
+    /// container".
+    /// </para>
+    /// </remarks>
+    private RouteTable BuildOrRefuseToRoute()
+    {
+        try
+        {
+            return Build();
+        }
+        catch (InvalidOperationException refusal)
+        {
+            _boot.Failed(refusal.Message);
+            TheSchemaCannotBeRouted(_logger, refusal.Message);
+
+            return RouteTable.NothingIsRoutable;
+        }
+    }
+
+    /// <summary>The record of an applied schema the Data API refused to build routes for.</summary>
+    /// <remarks>
+    /// Critical, because the consequence is permanent for this process: the table is frozen empty, so every Data
+    /// API request 404s until the schema is fixed and the process restarted. Reachable only for a schema that
+    /// never passed descriptor validation — a substituted <c>ISchemaRegistry</c>, a schema applied by an older
+    /// build, F7's dynamic entities.
+    /// </remarks>
+    /// <param name="logger">The logger this source writes through.</param>
+    /// <param name="refusal">The refusal, naming the entity and the field.</param>
+    [LoggerMessage(
+        Level = LogLevel.Critical,
+        Message = "Alvo cannot route the applied schema, so the Data API has no endpoints and readiness reports "
+            + "Failed. {Refusal}")]
+    private static partial void TheSchemaCannotBeRouted(ILogger logger, string refusal);
 
     /// <summary>
     /// Maps one entity's five routes for every entity the applied schema declares, and flattens what the
@@ -176,6 +250,9 @@ internal sealed class AlvoEndpointDataSource : EndpointDataSource
     /// <param name="Endpoints">Every endpoint those sources produced, flattened.</param>
     private sealed record RouteTable(IReadOnlyList<EndpointDataSource> Sources, IReadOnlyList<Endpoint> Endpoints)
     {
+        /// <summary>What a refused schema materialises to: no sources, no endpoints, nothing reachable.</summary>
+        internal static RouteTable NothingIsRoutable { get; } = new([], []);
+
         /// <summary>Snapshots what one <see cref="NestedRouteBuilder"/> was mapped onto.</summary>
         /// <param name="inner">The builder the <c>Map*</c> calls wrote into.</param>
         internal static RouteTable Of(NestedRouteBuilder inner)

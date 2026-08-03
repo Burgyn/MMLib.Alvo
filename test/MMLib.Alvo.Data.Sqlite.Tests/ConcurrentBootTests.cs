@@ -96,6 +96,48 @@ public sealed class ConcurrentBootTests : IDisposable
         refused.AppliedSchemaReads.ShouldBe(2, "the refusal must be reached by re-reading, not by guessing");
     }
 
+    /// <summary>
+    /// The divergent-additive rolling deploy — one pod adds <c>region</c>, the other adds <c>city</c>, both under
+    /// the default <c>Apply</c> — ends on <b>one</b> descriptor's schema, never on the union of the two.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This measures a hazard that was published as measured and is not reachable.</b> The claim (this
+    /// repository's own <c>docs/architecture/host.md</c> and #145) was that neither plan drops anything, so both
+    /// apply and the database ends up with both columns — a schema no deployed descriptor declares. It does not:
+    /// the loser diffs its own descriptor against a snapshot carrying the winner's field, which it does not
+    /// declare, so its plan drops it, and the always-on destructive gate refuses a drop in <em>every</em> mode.
+    /// </para>
+    /// <para>
+    /// The applied field list is the assertion that distinguishes the two stories — the revision history alone
+    /// cannot, because <c>[1]</c> is also what a hypothetical single merged apply would leave. What is really
+    /// reachable under <c>Apply</c>, and what #145 is about, is the <em>superset</em> case: a descriptor that is a
+    /// strict superset applies over the other and the pod holding the subset then refuses at its next start.
+    /// </para>
+    /// <para>
+    /// No mode is configured, so this is the product's own default. Which replica wins is decided by the race, so
+    /// every assertion here is symmetric in the two descriptors.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task Two_replicas_adding_different_fields_end_on_one_descriptors_schema_not_the_union()
+    {
+        var race = await RaceAsync([ConcurrentColdStart.DriftedDescriptor, ConcurrentColdStart.DivergentDescriptor]);
+
+        race.Replicas.Count(replica => replica.Serving).ShouldBe(
+            1, "the loser's own descriptor drops the winner's field, which no mode allows");
+        race.RecordedRevisions.ShouldBe([1]);
+        race.AppliedFields.ShouldContain("depots.code");
+        race.AppliedFields.Count(field => field is "depots.region" or "depots.city").ShouldBe(
+            1,
+            "the database must end on one descriptor's schema; holding both fields would be a schema no deployed "
+            + $"descriptor declares. Applied: {string.Join(", ", race.AppliedFields)}");
+
+        var refused = race.Replicas.Single(replica => !replica.Serving);
+        refused.Failure.ShouldBeOfType<AlvoStartupRefusedException>(refused.Explain())
+            .Message.ShouldContain("destructive");
+    }
+
     private Task<ColdStartRace> RaceAsync(
         IReadOnlyList<string> descriptorPerReplica, AlvoSchemaStartupMode? startup = null) =>
         ConcurrentColdStart.RaceAsync(

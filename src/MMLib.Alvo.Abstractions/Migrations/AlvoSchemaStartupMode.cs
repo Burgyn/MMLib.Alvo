@@ -65,8 +65,24 @@ public enum AlvoSchemaStartupMode
     Apply = 1,
 
     /// <summary>
-    /// Never touch the project schema: do not read the applied snapshot, do not initialize, do not apply.
-    /// For a host whose schema is owned entirely by a separate migration job.
+    /// Never <em>change</em> the project schema: do not initialize and do not apply. For a host whose schema is
+    /// owned entirely by a separate migration job.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>It does read the applied snapshot, and that read cannot be skipped.</b> The store's own tables are the
+    /// framework's system schema, which the driver brings up on its first call and which every mode needs; the
+    /// read is idempotent and touches nothing else. Skip then <em>ignores</em> whatever drift it found — so a
+    /// descriptor that no longer matches a recorded schema still serves, destructive difference or not
+    /// (<c>docs/superpowers/specs/2026-08-02-startup-lifecycle-and-config-dx-design.md</c>, deviation 58).
+    /// </para>
+    /// <para>
+    /// <b>One Skip state is refused rather than served: no recorded snapshot <em>and</em> a live schema that
+    /// does not match the descriptor.</b> That is the state in which nothing at all has confirmed the schema
+    /// exists — typically the migration job that owns it has not run — and starting would report the process
+    /// ready while every request failed at the database. An adopted database whose live schema already matches
+    /// the descriptor is not that state, and still serves.
+    /// </para>
+    /// </remarks>
     Skip = 2,
 }

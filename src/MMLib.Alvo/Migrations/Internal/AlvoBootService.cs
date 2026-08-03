@@ -158,13 +158,39 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     /// </remarks>
     private async Task BootAsync(CancellationToken ct)
     {
-        var boot = await _bootPlan.LoadAsync(ct).ConfigureAwait(false);
+        var boot = await LoadTheDescriptorAsync(ct).ConfigureAwait(false);
         var project = boot.Descriptor.Name;
 
         var (outcome, revision) = await ConvergeOnWhatTheDatabaseSaysAsync(boot, ct).ConfigureAwait(false);
 
         _state.Ready(project, revision);
-        BootIsReady(_logger, project, outcome, revision);
+        RecordWhatTheBootDid(project, outcome, revision);
+    }
+
+    /// <summary>Stage 0, with its refusal recorded before it propagates.</summary>
+    /// <remarks>
+    /// <b>A stage-0 refusal has no project name, and it must still leave the phase
+    /// <see cref="AlvoBootPhase.Failed"/> rather than <see cref="AlvoBootPhase.Pending"/></b> — which is what
+    /// <see cref="AlvoBootState.Failed(string)"/> exists for and what its remarks require. Recorded here, at the
+    /// stage that raises it, for the same reason stage 2's refusal is recorded in
+    /// <see cref="RefuseTheBoot"/>: the catch in <see cref="StartingAsync"/> rethrows an
+    /// <see cref="AlvoStartupRefusedException"/> untouched so that it cannot overwrite a project-scoped refusal
+    /// with a project-less one, and a stage-0 refusal that nothing recorded therefore left an embedded host
+    /// unable to tell "no descriptor configured" from "the boot has not run".
+    /// </remarks>
+    private async Task<BootPlan> LoadTheDescriptorAsync(CancellationToken ct)
+    {
+        try
+        {
+            return await _bootPlan.LoadAsync(ct).ConfigureAwait(false);
+        }
+        catch (AlvoStartupRefusedException refusal)
+        {
+            _state.Failed(refusal.Message);
+            BootRefused(_logger, refusal.Message);
+
+            throw;
+        }
     }
 
     /// <summary>
@@ -207,7 +233,8 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         }
         catch (Exception lostRace) when (IsAnotherWriterGettingThereFirst(lostRace))
         {
-            AnotherReplicaWonTheRace(_logger, boot.Descriptor.Name, lostRace.Message);
+            var conflict = lostRace.GetType().Name;
+            AnotherReplicaWonTheRace(_logger, boot.Descriptor.Name, conflict);
 
             return await DecideAndCarryOutAsync(boot, ct).ConfigureAwait(false);
         }
@@ -313,10 +340,18 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
 
     /// <summary>Records the refusal for a probe to read, then stops the start.</summary>
     /// <remarks>
+    /// <para>
     /// The state is written <em>before</em> the throw, so the phase is <see cref="AlvoBootPhase.Failed"/> for
     /// anything that can still read it. Nothing can, on the strong path — a refused boot never reaches
     /// <c>StartedAsync</c>, so the server never binds — and that redundancy is the point: readiness must be
     /// structurally incapable of reporting Ready for a schema that was refused, not merely unreachable.
+    /// </para>
+    /// <para>
+    /// It is also <em>logged</em>, and that is not decoration: <see cref="AlvoBootState.Failure"/> is deliberately
+    /// withheld from the readiness body (design deviation 59), so the log is where the design and
+    /// <c>MapAlvoHealth</c>'s own remarks promise an operator finds the reason. Without this call the promise was
+    /// only true for a standalone host reading stderr.
+    /// </para>
     /// </remarks>
     [DoesNotReturn]
     private void RefuseTheBoot(string project, SchemaStartupDecision decision)
@@ -324,6 +359,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         var refusal = decision.Refusal ?? UnexplainedRefusal;
 
         _state.Failed(project, refusal);
+        BootRefused(_logger, refusal);
 
         throw new AlvoStartupRefusedException(refusal, decision.Fix ?? string.Empty);
     }
@@ -411,6 +447,32 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         "Alvo cannot start: the project schema was refused and no reason was recorded. This is a defect in "
         + "Alvo itself — please report it with the descriptor that produced it.";
 
+    /// <summary>
+    /// Records the boot's outcome at the level that outcome deserves — <see cref="LogLevel.Warning"/> for the one
+    /// that used DDL rights on a database somebody was already running.
+    /// </summary>
+    /// <remarks>
+    /// <b>An <em>applied drift</em> is not the same event as an initialize or a no-op restart, and levelling them
+    /// together hid the one an operator has to see.</b> Initializing an empty database and priming an unchanged
+    /// one are routine; rewriting the schema of a database that already held one is the cost of the
+    /// <see cref="AlvoSchemaStartupMode.Apply"/> default being paid, and a production deployment that meant to set
+    /// <see cref="AlvoSchemaStartupMode.Verify"/> and did not has exactly one chance to notice — this line.
+    /// </remarks>
+    /// <param name="project">The project that booted.</param>
+    /// <param name="outcome">What stage 2 decided.</param>
+    /// <param name="revision">The applied revision the process is serving, if any.</param>
+    private void RecordWhatTheBootDid(string project, SchemaStartupOutcome outcome, int? revision)
+    {
+        if (outcome is SchemaStartupOutcome.Apply)
+        {
+            BootAppliedTheDrift(_logger, project, revision);
+
+            return;
+        }
+
+        BootIsReady(_logger, project, outcome, revision);
+    }
+
     /// <summary>The one record of what a boot did, as a compile-time-generated <c>LoggerMessage</c> delegate.</summary>
     /// <remarks>
     /// <para>
@@ -437,19 +499,52 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     private static partial void BootIsReady(
         ILogger logger, string project, SchemaStartupOutcome outcome, int? appliedRevision);
 
+    /// <summary>The record of a boot that brought a database somebody was already running up to the descriptor.</summary>
+    /// <param name="logger">The logger the boot writes through.</param>
+    /// <param name="project">The project that booted.</param>
+    /// <param name="appliedRevision">The revision the apply wrote.</param>
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Alvo applied the descriptor's drift to project {Project}'s schema on startup and is serving "
+            + "applied revision {AppliedRevision}. This process holds DDL rights against its own database; a "
+            + "production deployment sets Alvo__Schema__Startup=Verify and applies from a migration job.")]
+    private static partial void BootAppliedTheDrift(ILogger logger, string project, int? appliedRevision);
+
+    /// <summary>The record of a refused boot, which is where an operator is promised the reason.</summary>
+    /// <remarks>
+    /// Critical rather than error: the process is about to stop, and this line is the only place the refusal is
+    /// readable for an <em>embedded</em> host — a standalone one also gets it on stderr. The reason may carry a
+    /// provider's own message, which is why it goes to the log (governed by the host's redaction) and never to
+    /// the anonymous readiness body.
+    /// </remarks>
+    /// <param name="logger">The logger the boot writes through.</param>
+    /// <param name="refusal">The operator-readable refusal, fix lines included.</param>
+    [LoggerMessage(Level = LogLevel.Critical, Message = "{Refusal}")]
+    private static partial void BootRefused(ILogger logger, string refusal);
+
     /// <summary>The one record that this replica lost the cold-start race and is deciding again.</summary>
     /// <remarks>
+    /// <para>
     /// Information rather than warning: on a replica set this is the <em>expected</em> outcome for every
     /// replica but one, and logging it as a warning would train an operator to ignore warnings. It is logged at
     /// all because it is the difference between "this boot initialized the database" and "this boot found it
     /// initialized while trying to", which no other line reports.
+    /// </para>
+    /// <para>
+    /// <b>The conflict's <em>type</em>, never its message.</b> The lost race is diagnosed from a
+    /// <see cref="DbException"/> that any third-party driver may raise, and that message is the class of text
+    /// deviation 59 keeps off the probe; Information is the level most aggressively shipped to an aggregator, so
+    /// it is the last place to put one. The type answers the only question this line asks — was it the optimistic
+    /// gate or the engine — and a failure that was <em>not</em> a lost race propagates from the retry with its
+    /// message intact.
+    /// </para>
     /// </remarks>
     /// <param name="logger">The logger the boot writes through.</param>
     /// <param name="project">The project whose schema was being brought up.</param>
-    /// <param name="reason">What the losing write reported.</param>
+    /// <param name="conflict">The exception type the losing write reported.</param>
     [LoggerMessage(
         Level = LogLevel.Information,
         Message = "Alvo lost the schema race for project {Project} to another replica and is re-reading what "
-            + "it applied. Reason: {Reason}")]
-    private static partial void AnotherReplicaWonTheRace(ILogger logger, string project, string reason);
+            + "it applied. Conflict: {Conflict}")]
+    private static partial void AnotherReplicaWonTheRace(ILogger logger, string project, string conflict);
 }
