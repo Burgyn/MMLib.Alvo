@@ -260,6 +260,50 @@ public class DescriptorToSchemaMapperTests
     public static TheoryData<string> EveryExampleMarkedNotRunnable() => [.. AlvoExamples.NotRunnable()];
 
     /// <summary>
+    /// <b>No shipped example declares an <c>after*</c> hook</b>, which is what makes PR5a's removal of the
+    /// three <c>after*</c> entries from <see cref="UnhonouredFeatures"/> safe for the example corpus.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The hazard is specific and it is created by shrinking that table: <c>complex-crm</c> ships five
+    /// expressions that do not compile, four of them inside its <c>hooks</c> block, and all of them are
+    /// invisible today because the hook point is refused before anything is compiled. The day a hook entry
+    /// leaves, the example's refusal reason silently changes from a structured unhonoured-feature error to a
+    /// CEL syntax error — and <see cref="Every_example_marked_not_runnable_really_is_refused"/> keeps passing,
+    /// because it asserts only that <em>an</em> <see cref="InvalidDataException"/> was thrown.
+    /// </para>
+    /// <para>
+    /// PR5a is safe from that only because the corpus declares <c>beforeCreate</c> and <c>beforeUpdate</c> and
+    /// nothing else, so the example stays refused by the two <c>before*</c> entries that remain. That is a
+    /// measured property of the tree rather than an assumption, which is what this fact records; the example's
+    /// own five fixes and the strengthening of the refusal-reason assertion belong to the PR that lifts a
+    /// <c>before*</c> refusal.
+    /// </para>
+    /// <para>
+    /// Driven off the tree rather than off <c>complex-crm</c> by name, so a <em>new</em> example declaring an
+    /// after-hook fails this the moment it is added.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void No_shipped_example_declares_an_after_hook_so_pr5a_exposes_none_of_their_cel_defects()
+    {
+        var hooks = AlvoExamples.Descriptors()
+            .Select(path => AlvoDescriptor.Parse(File.ReadAllText(path)))
+            .SelectMany(descriptor => descriptor.Entities.Values)
+            .Select(entity => entity.Hooks)
+            .OfType<EntityHooks>()
+            .ToList();
+
+        hooks.ShouldNotBeEmpty(
+            "at least one example must declare hooks, or this fact passes by covering nothing — it is "
+            + "complex-crm today");
+        hooks.ShouldAllBe(
+            hook => hook.AfterCreate == null && hook.AfterUpdate == null && hook.AfterDelete == null,
+            "an example declaring an after-hook is now compiled rather than refused, so its expressions are "
+            + "exposed and this PR's scope changed");
+    }
+
+    /// <summary>
     /// The negative leg for the whole guard: a field and an entity declaring <b>none</b> of the table's
     /// features map without complaint, so the theories above are about the features rather than about the
     /// mapper refusing everything.

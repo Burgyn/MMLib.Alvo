@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Schema;
@@ -121,12 +122,91 @@ public sealed class PolicyCatalog
 /// <param name="Operations">The compiled <c>USING</c>/<c>WITH CHECK</c> pair for every <see cref="DataOperation"/>.</param>
 /// <param name="Hidden">The compiled <c>hidden</c> flag for every field that declares one, keyed by field name.</param>
 /// <param name="ReadOnly">The compiled <c>readOnly</c> flag for every field that declares one, keyed by field name.</param>
+/// <param name="AfterHooks">The compiled <c>after*</c> hooks, or <see cref="EntityAfterHooks.None"/> when the entity declares none.</param>
 internal sealed record EntityPolicy(
     TenancyMode? Tenancy,
     CompiledExpression? TenantScope,
     IReadOnlyDictionary<DataOperation, OperationPolicy> Operations,
     IReadOnlyDictionary<string, FieldMask> Hidden,
-    IReadOnlyDictionary<string, FieldMask> ReadOnly);
+    IReadOnlyDictionary<string, FieldMask> ReadOnly,
+    EntityAfterHooks AfterHooks);
+
+/// <summary>
+/// One entity's compiled <c>after*</c> hooks, one list per hook point.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>They ride the policy catalog rather than a catalog of their own</b>, because
+/// <see cref="EntitySchema"/> and <see cref="SchemaModel"/> carry no hooks and a second, independently primed
+/// holder would mean a hook compiled against a different schema revision than the rules judging the same
+/// write — the failure <see cref="IPolicyCatalogProvider"/>'s remarks were written to prevent.
+/// </para>
+/// <para>
+/// <b>The condition is part of the subscription, not the run's first step.</b> Each
+/// <see cref="CompiledAfterHook"/> carries its condition, so an event that matches nothing is filtered
+/// <em>before</em> any execution entry exists — one counter increment and no log row. Evaluating the condition
+/// as an action's first step is the documented Directus defect: thousands of execution-log entries for runs
+/// that abort immediately.
+/// </para>
+/// </remarks>
+/// <param name="AfterCreate">The hooks declared under <c>hooks.afterCreate</c>, in declaration order.</param>
+/// <param name="AfterUpdate">The hooks declared under <c>hooks.afterUpdate</c>, in declaration order.</param>
+/// <param name="AfterDelete">The hooks declared under <c>hooks.afterDelete</c>, in declaration order.</param>
+internal sealed record EntityAfterHooks(
+    IReadOnlyList<CompiledAfterHook> AfterCreate,
+    IReadOnlyList<CompiledAfterHook> AfterUpdate,
+    IReadOnlyList<CompiledAfterHook> AfterDelete)
+{
+    /// <summary>The one instance every entity declaring no after-hook shares, so no consumer null-checks.</summary>
+    internal static EntityAfterHooks None { get; } = new([], [], []);
+
+    /// <summary>The hooks one write operation's event selects.</summary>
+    /// <remarks>
+    /// A read operation selects none: the frozen schema declares no <c>afterList</c>/<c>afterGet</c> point and
+    /// no event is emitted for a read, so the answer is "no hooks" rather than a throw on an operation this
+    /// subsystem is simply not about.
+    /// </remarks>
+    /// <param name="operation">The operation the event was emitted for.</param>
+    internal IReadOnlyList<CompiledAfterHook> For(DataOperation operation) => operation switch
+    {
+        DataOperation.Create => AfterCreate,
+        DataOperation.Update => AfterUpdate,
+        DataOperation.Delete => AfterDelete,
+        _ => [],
+    };
+}
+
+/// <summary>
+/// One compiled after-hook: where it was declared, the condition that gates it, and the action it runs.
+/// </summary>
+/// <param name="Path">
+/// The hook's own JSON pointer, such as <c>/entities/deals/hooks/afterUpdate/0</c> — carried so a log line or a
+/// metric can name the hook an author wrote rather than an index into a list they cannot see.
+/// </param>
+/// <param name="Condition">
+/// The compiled <see cref="CelProfile.Condition"/> expression gating the hook, or <see langword="null"/> when
+/// it declares none and therefore always fires.
+/// </param>
+/// <param name="Action">The compiled action, with every template already parsed and validated.</param>
+internal sealed record CompiledAfterHook(
+    string Path,
+    CompiledExpression? Condition,
+    CompiledAction Action);
+
+/// <summary>
+/// One compiled action: the parsed descriptor action, plus every <c>{{…}}</c> template it declares, already
+/// parsed and resolved against the entity's schema.
+/// </summary>
+/// <remarks>
+/// The templates are keyed by the slot they came from — <c>to</c>, <c>subject</c>, <c>body</c>,
+/// <c>payload</c>, <c>data</c> — and a slot the action left unset has no entry, so a consumer reads
+/// "declared" off the dictionary rather than off a nullable per slot.
+/// </remarks>
+/// <param name="Action">The parsed action exactly as the descriptor declared it.</param>
+/// <param name="Templates">Every template the action declares, keyed by slot name.</param>
+internal sealed record CompiledAction(
+    AutomationAction Action,
+    IReadOnlyDictionary<string, AlvoTemplate> Templates);
 
 /// <summary>
 /// The compiled <c>USING</c>/<c>WITH CHECK</c> pair for one operation. Exactly Postgres's

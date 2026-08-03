@@ -59,8 +59,20 @@ namespace MMLib.Alvo.Descriptor.Internal;
 /// thing this table's shape cannot.
 /// </para>
 /// <para>
+/// <b>Two entries are now <em>partially</em> honoured, and the wording carries that rather than the entry
+/// leaving.</b> An after-hook does render a <c>templates</c> entry and does post to a <c>webhooks</c>
+/// endpoint, so "nothing renders a template" and "no event is ever delivered" stopped being true — but the
+/// same two blocks are still dead from <c>automation</c>, which is where most descriptors reference them.
+/// Deleting the entries would have been the larger lie. What replaced them names both halves, and the
+/// <c>webhooks</c> line names the absence an author is likeliest to assume away: a delivery that happens is
+/// <b>unsigned</b> — <c>secretRef</c> is not read, no Standard Webhooks HMAC header is sent — and
+/// unprojected. An unsigned delivery an author believes is signed is a security absence, which is exactly
+/// the misattribution this table exists for.
+/// </para>
+/// <para>
 /// Entries leave as subsystems land, exactly as <see cref="UnhonouredFeatures"/>' do: the PR that
-/// implements webhooks deletes the <c>webhooks</c> entry, and the warning stops naming it.
+/// implements webhooks <em>from automation</em>, signs the delivery and reads a <c>bodyFile</c> deletes these
+/// two entries, and the warning stops naming them.
 /// </para>
 /// </remarks>
 internal static partial class UnhonouredSubsystems
@@ -84,11 +96,16 @@ internal static partial class UnhonouredSubsystems
         new(
             "templates",
             descriptor => descriptor.Templates is { Count: > 0 },
-            "nothing renders a template, because the automation actions that would reference one never run"),
+            "a template referenced by an after-hook 'email' action is rendered, but one referenced only from an "
+            + "automation rule is not, because no rule is evaluated yet — and a 'bodyFile' is not read on either "
+            + "path"),
         new(
             "webhooks",
             descriptor => descriptor.Webhooks?.Endpoints is { Count: > 0 },
-            "no event is ever delivered to the endpoint — which looks exactly like an endpoint that is down"),
+            "an endpoint an after-hook posts to is delivered to, but one referenced only from an automation rule "
+            + "never receives anything; and no delivery is signed — 'secretRef' is not read and no Standard "
+            + "Webhooks HMAC header is sent, so a receiver cannot yet verify the sender (7.1), nor is the "
+            + "payload projected per endpoint (#152)"),
         new(
             "functions",
             descriptor => descriptor.Functions is { Count: > 0 },

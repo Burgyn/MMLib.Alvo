@@ -2804,6 +2804,53 @@ git commit -m "feat(events): add the {{...}} template engine and the JSONata slo
 
 ### Task 7: After-hooks compiled into the `PolicyCatalog`, and every refusal at apply
 
+**DONE.** Step 6 ran first and cleared the gate: the whole `examples/` tree declares hooks on
+`complex-crm` only, and there `contacts.beforeCreate` and `deals.beforeUpdate` — **zero** occurrences of
+`afterCreate`/`afterUpdate`/`afterDelete` in the file — so removing the three `after*` entries leaves the
+example refused by the two `before*` entries and exposes none of its five uncompilable expressions. The
+fact is driven off the tree rather than off `complex-crm` by name, so a *new* example declaring an
+after-hook fails it.
+
+**Five deliberate deviations from this task as written, each for a reason in the code:**
+
+1. **Error pointers keep the repository's leading slash** — `/entities/deals/hooks/afterUpdate/0/action/payload`,
+   not `entities/…`. Every other apply-time refusal in the tree is spelled with one
+   (`PolicyCatalogBuilder`'s `/entities/{name}/rules/{op}`, `DescriptorValidator`'s
+   `/entities/{name}/fields/{name}`), and two spellings of a JSON Pointer in one error list is a defect.
+   `EntityBuild` gained a `Path` property so the prefix has one authority.
+2. **`EntityAfterHooks.For` takes `DataOperation`, not `OutboxOperation`.** `OutboxOperation` is
+   `internal` to `MMLib.Alvo.Data.EntityFrameworkCore` and unreachable from the core — this is a compile
+   constraint, not a preference. `DataOperation` is the core's own operation enum, public in
+   `Abstractions`, and a read operation selects no hooks rather than throwing.
+3. **A message template's `subject`/`body`/`bodyFile` are refused at `/templates/{name}/…`, not under the
+   hook.** That is the file position an author edits, and one template may be referenced from several
+   entities — in which case it is validated once per referencing entity, against that entity's schema.
+   `bodyFile` is refused **per reference**: a template nothing references keeps its
+   `UnhonouredSubsystems` warning.
+4. **`AlvoTemplate.TryParse` was added** (Task 6's file). A malformed placeholder is unreachable in a
+   `$defs/jsonata` slot — the classifier rejects it first — but reachable in a *sugar* slot, which asks
+   the classifier nothing. Without it, `email.to: "{{new.owner_email}"` was an unhandled
+   `ArgumentException` at apply: an authoring mistake reported as a framework crash.
+5. **The absence fact's allow-list is `JsonataSlot.cs`, `UnhonouredFeatures.cs` and
+   `AfterHookCompiler.cs`, with comments stripped**, not the two files this plan named. Three files
+   mention JSONata in *code* after this task, and `AutomationAction.cs`/`AlvoTemplate.cs` mention it only
+   in XML docs — stripping comments is what keeps the fact about code, since a refusal's whole job is to
+   name the feature it refuses.
+
+**Two extra pins this task earned.** `UnhonouredFeaturesTests.Every_unhonoured_slot_is_pinned` is a new
+Verify baseline over the three `UnhonouredSlot`s, because they carry no path and therefore no
+table-driven theory can be written over them at all — and every fact about them asserts equality with
+the property that owns the words, so nothing else would notice a wording change.
+`UnhonouredJsonataTests.Every_action_type_the_frozen_schema_declares_is_named` anchors the action switch
+to `$defs/action`'s five `const` values, so a sixth action type fails rather than being silently accepted.
+
+**One existing fact had to be narrowed, and it said so itself.**
+`DescriptorValidatorTests.The_unhonoured_table_covers_every_hook_point_the_schema_declares` asserted the
+table covered *exactly* the schema's six points; it is now
+`Every_hook_point_the_schema_declares_is_either_refused_or_honoured`, a partition (refused ∪ honoured =
+declared, nothing in both, nothing in neither). That keeps the anchor's strength — a point dropped from
+the table without being implemented lands in neither half — while letting each point leave on its own day.
+
 R11 is the constraint that shapes this task: `EntitySchema`/`SchemaModel` carry **no hooks**, and
 rules live on the separately-primed `PolicyCatalog`. A hook catalog must join **that** priming, not
 become a fourth priming site — two independently primed holders means a hook compiled against a
@@ -2864,7 +2911,7 @@ different schema revision than the rules judging the same write.
   }
   ```
 
-- [ ] **Step 1: Write the failing tests — the refusals first**
+- [x] **Step 1: Write the failing tests — the refusals first**
 
 ```csharp
 // MMLib.Alvo.Tests/Descriptor/UnhonouredJsonataTests.cs
@@ -3024,7 +3071,7 @@ public void A_webhook_action_naming_an_undeclared_endpoint_is_refused_at_apply()
         .ShouldHaveSingleItem().Message.ShouldContain("no-such-endpoint");
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run:
 ```
@@ -3033,7 +3080,7 @@ dotnet test --project test/MMLib.Alvo.Tests -- --filter-class '*UnhonouredJsonat
 ```
 Expected: FAIL — `AfterHookCompiler` and `EntityPolicy.AfterHooks` do not exist.
 
-- [ ] **Step 3: Add the refusal wording to `UnhonouredFeatures`**
+- [x] **Step 3: Add the refusal wording to `UnhonouredFeatures`**
 
 A third shape in the same file, because the two existing ones are keyed on *a declared key's
 presence* and this one is keyed on *a declared string's syntax*, which no path predicate can express:
@@ -3094,7 +3141,7 @@ it — three entries leave, three stay, and no author of a `before*` hook sees a
 **Do not touch** the `simple-tasks`/`completed_at` citation at `:114-119`: deviation 77 assigns that
 correction to the PR that lifts a `before*` refusal, which is PR5b.
 
-- [ ] **Step 4: Reword the two subsystem warnings that stopped being true**
+- [x] **Step 4: Reword the two subsystem warnings that stopped being true**
 
 `templates` and `webhooks` are now honoured **from an after-hook** and unhonoured **from
 automation**, so their current consequences (`"nothing renders a template, because the automation
@@ -3120,7 +3167,7 @@ handled, and `UnhonouredSubsystems` exists exactly for the case where absence is
 Update `UnhonouredSubsystemsTests`' expected wording — that suite asserts **which blocks the line
 names** (`:115-120`), so it will fail until the new text is pinned, which is the tie working.
 
-- [ ] **Step 5: Implement `AfterHookCompiler` and thread it through the builder**
+- [x] **Step 5: Implement `AfterHookCompiler` and thread it through the builder**
 
 `Compile` walks the three `after*` lists, and per hook: compiles `condition` through
 `compiler.Compile(source, CelProfile.Condition, schema)`, then compiles the action. Action
@@ -3156,7 +3203,7 @@ private static EntityPolicy BuildEntity(EntityDescriptor? descriptor, EntityBuil
 (`$"entities/{name}"`) if it does not already carry them. Nothing else changes: one pass, one
 priming site, one set of errors — which is R11 discharged.
 
-- [ ] **Step 6: Prove the example's refusal reason did not silently change**
+- [x] **Step 6: Prove the example's refusal reason did not silently change**
 
 The hazard deviation 76 describes — a CEL syntax error standing in for a feature refusal — is
 created the moment `UnhonouredFeatures` shrinks. PR5a shrinks it, so PR5a must show the hazard did
@@ -3188,7 +3235,7 @@ public void The_only_example_with_hooks_declares_no_after_hooks_so_pr5a_exposes_
 }
 ```
 
-- [ ] **Step 7: Run to verify they pass, and prove the refusals discriminate**
+- [x] **Step 7: Run to verify they pass, and prove the refusals discriminate**
 
 Run:
 ```
@@ -3209,7 +3256,7 @@ Then three mutations, restored immediately:
    `The_after_hook_catalog_is_reachable_from_the_one_primed_policy_catalog` goes **red**, which is
    R11's structural fact proving it is not vacuous.
 
-- [ ] **Step 8: ring0 + commit**
+- [x] **Step 8: ring0 + commit**
 
 ```bash
 scripts/test-ring0
@@ -4524,6 +4571,18 @@ plan is the only place they live:
   `AlvoContext.System(tenant)`, never `Anonymous`.
 - **The `complex-crm` corrections and the refusal-reason strengthening** (deviation 76), safe to defer
   because Task 7 Step 6 pins that the example declares no after-hooks.
+- **`@tenant.id` and `@user.roles` cannot resolve in a template, and the addendum's own table promises
+  both** (its *"the provenance the envelope carries"* row names `@user.id` **and** `@tenant.id`).
+  Measured in Task 6: `AlvoEvent` carries `authid` and *no* tenant attribute and *no* roles, so
+  `TemplatePlaceholder.Roots` is `new`, `old`, `event`, `@user` and both names are refused **by name**
+  — `@tenant.id` because answering it from the row's own `tenant_id` would answer a different question
+  (which tenant the *row* belongs to, not which tenant the *caller* was in, and a
+  `AlvoContext.System` write has no tenant at all), `@user.roles` because the envelope carries
+  authentication and never authorization. Giving `@tenant.id` a real answer is a **public-API and
+  wire-format** change — a new attribute on `AlvoEvent` plus its `AlvoEventJson` member and the
+  outbox payloads already written — so it is deliberately not a PR5a fix. Whoever takes it owns the
+  compatibility question for rows written by this build. `#37` tracks the identity-claim half
+  (`@user.claims`, which is what an `email` recipient actually needs).
 - **F7's partitioned claim** (**#150**, which also carries Q1's same-millisecond finding and the
   cross-process half `AlvoEventId` does not close) and **`dataref`** (**#151**).
 

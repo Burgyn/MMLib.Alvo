@@ -41,21 +41,6 @@
       Path: hooks/beforeDelete,
       Consequence: Lifecycle hooks are not supported yet, so the 'beforeDelete' hooks on this entity never run and every delete proceeds as if they were not declared: a before-hook runs inside the write transaction and may reject or mutate the payload, so the write is neither vetted nor patched — a field the hook was meant to set stays permanently null, exactly as an unmaintained 'rollup' column does.,
       Fix: Remove the 'beforeDelete' hooks, or track the hooks pipeline in #22. Refusing per hook point rather than per 'hooks' block is deliberate: each one is lifted the day it starts working, so declaring the others costs you nothing once 'beforeDelete' lands.
-    },
-    {
-      Path: hooks/afterCreate,
-      Consequence: Lifecycle hooks are not supported yet, so the 'afterCreate' hooks on this entity never run and every create proceeds as if they were not declared: an after-hook runs post-commit from the outbox, so the effect simply never happens — and nothing in the row's own state records that it did not.,
-      Fix: Remove the 'afterCreate' hooks, or track the hooks pipeline in #22. Refusing per hook point rather than per 'hooks' block is deliberate: each one is lifted the day it starts working, so declaring the others costs you nothing once 'afterCreate' lands.
-    },
-    {
-      Path: hooks/afterUpdate,
-      Consequence: Lifecycle hooks are not supported yet, so the 'afterUpdate' hooks on this entity never run and every update proceeds as if they were not declared: an after-hook runs post-commit from the outbox, so the effect simply never happens — and nothing in the row's own state records that it did not.,
-      Fix: Remove the 'afterUpdate' hooks, or track the hooks pipeline in #22. Refusing per hook point rather than per 'hooks' block is deliberate: each one is lifted the day it starts working, so declaring the others costs you nothing once 'afterUpdate' lands.
-    },
-    {
-      Path: hooks/afterDelete,
-      Consequence: Lifecycle hooks are not supported yet, so the 'afterDelete' hooks on this entity never run and every delete proceeds as if they were not declared: an after-hook runs post-commit from the outbox, so the effect simply never happens — and nothing in the row's own state records that it did not.,
-      Fix: Remove the 'afterDelete' hooks, or track the hooks pipeline in #22. Refusing per hook point rather than per 'hooks' block is deliberate: each one is lifted the day it starts working, so declaring the others costs you nothing once 'afterDelete' lands.
     }
   ]
 }

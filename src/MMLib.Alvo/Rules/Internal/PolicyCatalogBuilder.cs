@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Internal;
@@ -33,11 +34,14 @@ internal static class PolicyCatalogBuilder
         var errorList = new List<DescriptorValidationError>();
         var roles = RoleCatalog.FromDescriptor(descriptor);
         var entities = new Dictionary<string, EntityPolicy>(StringComparer.Ordinal);
+        var references = new ProjectReferences(
+            descriptor.Templates ?? _emptyTemplates,
+            descriptor.Webhooks?.Endpoints ?? _emptyEndpoints);
 
         foreach (var entitySchema in schema.Entities)
         {
             var entityDescriptor = descriptor.Entities.GetValueOrDefault(entitySchema.Name);
-            var build = new EntityBuild(entitySchema, compiler, roles, errorList);
+            var build = new EntityBuild(entitySchema, compiler, roles, references, errorList);
             entities[entitySchema.Name] = BuildEntity(entityDescriptor, build);
         }
 
@@ -55,17 +59,39 @@ internal static class PolicyCatalogBuilder
 
     /// <summary>
     /// The inputs one entity's whole compilation needs, bundled so every helper below reads as "compile
-    /// this source at this path" instead of re-threading four arguments that never vary within an entity.
+    /// this source at this path" instead of re-threading five arguments that never vary within an entity.
     /// </summary>
     /// <param name="Schema">The entity every expression is type-checked against.</param>
     /// <param name="Compiler">The CEL compiler every expression goes through.</param>
     /// <param name="Roles">The project's declared roles, for validating role literals.</param>
+    /// <param name="References">The project-level blocks an after-hook action may name.</param>
     /// <param name="Errors">The shared accumulator every problem is appended to.</param>
     private sealed record EntityBuild(
-        EntitySchema Schema, ICelCompiler Compiler, RoleCatalog Roles, List<DescriptorValidationError> Errors)
+        EntitySchema Schema,
+        ICelCompiler Compiler,
+        RoleCatalog Roles,
+        ProjectReferences References,
+        List<DescriptorValidationError> Errors)
     {
         public string Name => Schema.Name;
+
+        /// <summary>The entity's own JSON pointer, the prefix every problem on it is reported under.</summary>
+        public string Path => $"/entities/{Name}";
     }
+
+    /// <summary>
+    /// The project-level blocks an entity's after-hook actions resolve names against, hoisted out of the
+    /// per-entity loop because they are the same for every entity in one descriptor.
+    /// </summary>
+    /// <param name="Templates">The descriptor's <c>templates</c>, or empty when it declares none.</param>
+    /// <param name="Endpoints">The descriptor's <c>webhooks.endpoints</c>, or empty when it declares none.</param>
+    private sealed record ProjectReferences(
+        IReadOnlyDictionary<string, MessageTemplate> Templates,
+        IReadOnlyDictionary<string, WebhookEndpoint> Endpoints);
+
+    private static readonly Dictionary<string, MessageTemplate> _emptyTemplates = new(StringComparer.Ordinal);
+
+    private static readonly Dictionary<string, WebhookEndpoint> _emptyEndpoints = new(StringComparer.Ordinal);
 
     private static EntityPolicy BuildEntity(EntityDescriptor? descriptor, EntityBuild build)
     {
@@ -74,8 +100,25 @@ internal static class PolicyCatalogBuilder
         var fields = descriptor?.Fields ?? new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal);
         var hidden = CompileFieldFlags("hidden", fields, field => field.Hidden, build);
         var readOnly = CompileFieldFlags("readOnly", fields, field => field.ReadOnly, build);
-        return new EntityPolicy(build.Schema.Tenancy, tenantScope, operations, hidden, readOnly);
+        var afterHooks = CompileAfterHooks(descriptor, build);
+        return new EntityPolicy(build.Schema.Tenancy, tenantScope, operations, hidden, readOnly, afterHooks);
     }
+
+    /// <summary>
+    /// Compiles the entity's <c>after*</c> hooks in this same pass, against this same schema, appending to this
+    /// same error list — which is the whole of R11: one priming site, never a second holder that could be
+    /// primed from a different schema revision than the rules judging the same write.
+    /// </summary>
+    private static EntityAfterHooks CompileAfterHooks(EntityDescriptor? descriptor, EntityBuild build) =>
+        AfterHookCompiler.Compile(
+            descriptor?.Hooks,
+            new AfterHookScope(
+                build.Schema,
+                build.Compiler,
+                build.References.Templates,
+                build.References.Endpoints,
+                build.Path,
+                build.Errors));
 
     /// <summary>
     /// Compiles the five nullable rule strings into the per-operation <c>USING</c>/<c>WITH CHECK</c>
@@ -144,7 +187,7 @@ internal static class PolicyCatalogBuilder
     };
 
     private static CompiledExpression? CompileOperationRule(DataOperation operation, string? source, EntityBuild build) =>
-        source is null ? null : CompileRuleExpression(source, $"/entities/{build.Name}/rules/{operation.ToWireName()}", build);
+        source is null ? null : CompileRuleExpression(source, $"{build.Path}/rules/{operation.ToWireName()}", build);
 
     /// <summary>
     /// Synthesizes the tenant scope for a tenant-scoped entity by compiling
@@ -154,7 +197,7 @@ internal static class PolicyCatalogBuilder
     /// </summary>
     private static CompiledExpression? SynthesizeTenantScope(EntityBuild build) =>
         build.Schema.Tenancy == TenancyMode.Scoped
-            ? CompileRuleExpression(TenantScopeSource, $"/entities/{build.Name}/tenancy", build)
+            ? CompileRuleExpression(TenantScopeSource, $"{build.Path}/tenancy", build)
             : null;
 
     /// <summary>
@@ -278,7 +321,7 @@ internal static class PolicyCatalogBuilder
     /// </remarks>
     private static bool IsFlaggable(string fieldName, string flagName, EntityBuild build)
     {
-        var path = $"/entities/{build.Name}/fields/{fieldName}/{flagName}";
+        var path = $"{build.Path}/fields/{fieldName}/{flagName}";
 
         if (string.Equals(fieldName, RowKeyField, StringComparison.Ordinal))
         {
@@ -361,7 +404,7 @@ internal static class PolicyCatalogBuilder
             return flag.Boolean == true ? FieldMask.Always : null;
         }
 
-        var path = $"/entities/{build.Name}/fields/{fieldName}/{flagName}";
+        var path = $"{build.Path}/fields/{fieldName}/{flagName}";
         var compiled = CompileRuleExpression(flag.Expression!, path, build);
         if (compiled is null)
         {

@@ -55,6 +55,35 @@ internal sealed record AlvoTemplate(IReadOnlyList<AlvoTemplateSegment> Segments)
         return new AlvoTemplate([.. Scan(source)]);
     }
 
+    /// <summary>Attempts to parse a template, returning the refusal as data rather than as an exception.</summary>
+    /// <param name="source">The template's source text.</param>
+    /// <param name="template">The parsed template, when <paramref name="source"/> is well formed.</param>
+    /// <param name="refusal">Why it is not, when it is not; <see langword="null"/> on success.</param>
+    /// <remarks>
+    /// <see cref="Parse"/> throws, because a template that reaches rendering has already been validated and a
+    /// malformed one there is a broken invariant. The apply path is the opposite case: a malformed template is
+    /// an ordinary authoring mistake that has to become a <c>DescriptorValidationError</c> beside every other
+    /// problem in the descriptor, so it needs the refusal as a value. The wording is
+    /// <see cref="Malformed"/>'s either way, so there is one message and not two.
+    /// </remarks>
+    internal static bool TryParse(string source, out AlvoTemplate? template, out string? refusal)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        try
+        {
+            template = Parse(source);
+            refusal = null;
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            template = null;
+            refusal = MalformedMessage(source);
+            return false;
+        }
+    }
+
     /// <summary>The inner text of each placeholder, trimmed, in source order.</summary>
     internal IReadOnlyList<string> Placeholders =>
         [.. Segments.Where(segment => segment.IsPlaceholder).Select(segment => segment.Text)];
@@ -116,11 +145,16 @@ internal sealed record AlvoTemplate(IReadOnlyList<AlvoTemplateSegment> Segments)
     private static bool IsWellFormed(string? inner) =>
         inner is not null && !inner.AsSpan().IsWhiteSpace() && !inner.AsSpan().ContainsAny('{', '}');
 
-    private static ArgumentException Malformed(string source) => new(
+    private static ArgumentException Malformed(string source) => new(MalformedMessage(source), nameof(source));
+
+    /// <summary>
+    /// The one wording for a malformed template, shared by the throwing and the try-parse paths so a reader
+    /// never meets two descriptions of the same mistake.
+    /// </summary>
+    private static string MalformedMessage(string source) =>
         $"'{source}' is not a well-formed template: every {PlaceholderOpen} must be closed by "
         + $"{PlaceholderClose}, and a placeholder's inner text is non-empty and carries no brace. An "
-        + "unclosed placeholder would otherwise be delivered to the endpoint as literal text.",
-        nameof(source));
+        + "unclosed placeholder would otherwise be delivered to the endpoint as literal text.";
 
     /// <summary>
     /// One value's text form. A timestamp is the framework's own round-trip form and a boolean is the JSON
