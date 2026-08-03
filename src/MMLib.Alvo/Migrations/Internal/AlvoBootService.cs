@@ -164,7 +164,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         var (outcome, revision) = await ConvergeOnWhatTheDatabaseSaysAsync(boot, ct).ConfigureAwait(false);
 
         _state.Ready(project, revision);
-        BootIsReady(_logger, project, outcome.ToString(), revision);
+        BootIsReady(_logger, project, outcome, revision);
     }
 
     /// <summary>
@@ -413,9 +413,18 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
 
     /// <summary>The one record of what a boot did, as a compile-time-generated <c>LoggerMessage</c> delegate.</summary>
     /// <remarks>
+    /// <para>
     /// Source-generated because <c>CA1848</c> is an error in this repository. Logged at information level, and
     /// naming the outcome, because "the restart applied nothing and primed" and "the boot initialized the
     /// database" are the two events an operator reading a container's first ten lines is trying to tell apart.
+    /// </para>
+    /// <para>
+    /// The outcome is passed as the <see cref="SchemaStartupOutcome"/> itself rather than as
+    /// <c>outcome.ToString()</c>: <c>CA1873</c> refuses an argument that is evaluated whether or not the level
+    /// is enabled, and the generated code formats the value only when it logs. That rule ships in a newer SDK
+    /// than <c>global.json</c> pins, so it is the <b>image build</b> — Alpine's <c>sdk:10.0-alpine</c>, and
+    /// therefore <c>scripts/test-e2e</c> — that fails on it, with every local ring green.
+    /// </para>
     /// </remarks>
     /// <param name="logger">The logger the boot writes through.</param>
     /// <param name="project">The project that booted.</param>
@@ -426,7 +435,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         Message = "Alvo booted project {Project}: schema {Outcome}, serving applied revision "
             + "{AppliedRevision}.")]
     private static partial void BootIsReady(
-        ILogger logger, string project, string outcome, int? appliedRevision);
+        ILogger logger, string project, SchemaStartupOutcome outcome, int? appliedRevision);
 
     /// <summary>The one record that this replica lost the cold-start race and is deciding again.</summary>
     /// <remarks>
