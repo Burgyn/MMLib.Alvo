@@ -15,11 +15,17 @@ namespace MMLib.Alvo.Host;
 /// <c>TestServer</c> instead of re-assembling an approximation of it.
 /// </summary>
 /// <remarks>
+/// <para>
 /// <c>Program.cs</c> is deliberately one line: everything worth a test lives here.
-/// <see cref="CreateBuilder"/> registers, <see cref="BuildAsync"/> applies and maps — the two seams
-/// <c>docs/architecture/extensibility.md</c> rule 10 keeps orthogonal, in the one order that works
-/// (<c>MapAlvoDataApi</c> reads route literals off the applied schema) — and <see cref="RunAsync"/> is the
+/// <see cref="CreateBuilder"/> registers, <see cref="BuildAsync"/> maps — the two seams
+/// <c>docs/architecture/extensibility.md</c> rule 10 keeps orthogonal — and <see cref="RunAsync(string[])"/> is the
 /// process itself: the three of them together, plus the refusal an operator reads and the exit code they get.
+/// </para>
+/// <para>
+/// <b>Nothing here applies the descriptor.</b> The boot owns that, from the host lifecycle, before the server
+/// binds — so the host composes a pipeline and never sequences a database against a route table. The
+/// standalone host is consequently the same shape as an embedded one: <c>AddAlvo</c>, then <c>MapAlvo</c>.
+/// </para>
 /// </remarks>
 public static class AlvoHost
 {
@@ -60,8 +66,8 @@ public static class AlvoHost
     /// <para>
     /// The docs registration comes <em>before</em> <c>AddAlvo</c> for a different reason: registration order is
     /// document-transformer order, and Alvo's transformer appends to <c>info.description</c> rather than
-    /// replacing it, so the host's own <c>info</c> has to be written first. The docs <em>routes</em> map after
-    /// the Data API's — see <see cref="BuildAsync"/>. The two orderings are opposite and both deliberate.
+    /// replacing it, so the host's own <c>info</c> has to be written first. This is the docs ordering that is
+    /// load-bearing; the one their <em>routes</em> map in is not — see <see cref="BuildAsync"/>.
     /// </para>
     /// </remarks>
     /// <param name="args">The process arguments, bound as a configuration source by ASP.NET Core.</param>
@@ -110,23 +116,53 @@ public static class AlvoHost
     /// else still propagates, so a genuine defect keeps the runtime's own report and crash dump.
     /// </para>
     /// <para>
+    /// The work is the overload below, over the builder <see cref="CreateBuilder"/> makes; this method is that
+    /// one composition and nothing else, so the entry point a container runs and the entry point a fact runs
+    /// cannot come apart.
+    /// </para>
+    /// </remarks>
+    /// <param name="args">The process arguments.</param>
+    /// <returns>The exit code: <c>0</c> on a clean shutdown, <c>78</c> for a configuration the host refused.</returns>
+    public static Task<int> RunAsync(string[] args) => RunAsync(() => CreateBuilder(args));
+
+    /// <summary>
+    /// The process, over a builder somebody else assembles.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A factory rather than a built builder, so registration stays inside the <c>try</c>.</b>
+    /// <see cref="CreateBuilder"/> chooses the driver while the container is still being assembled and refuses
+    /// an unknown name there, before any of this runs; that refusal is owed the same printed sentence and the
+    /// same exit code as one raised at start, and calling the factory here is what keeps it one <c>catch</c>
+    /// rather than two.
+    /// </para>
+    /// <para>
     /// <b>The <c>await using</c> states ownership rather than fixing a leak, and the distinction was
     /// measured.</b> On .NET 10, <c>WebApplication.RunAsync</c> forwards to
     /// <c>HostingAbstractionsHostExtensions.RunAsync</c>, whose <c>finally</c> already disposes the application
     /// when <c>StartAsync</c> throws — measured here, unlike <c>app.StartAsync()</c>, which does not. That is an
     /// implementation detail of an extension method with no API-level guarantee, and a refused boot leaking the
     /// container would keep the database file open for the rest of the process, which is the regression
-    /// <see cref="ComposeAsync"/> exists to have fixed once already. Saying who owns the application is
-    /// cheaper than depending on the framework continuing not to need it said.
+    /// <see cref="Compose"/> exists to have fixed once already on the build side. Saying who owns the
+    /// application is cheaper than depending on the framework continuing not to need it said.
+    /// </para>
+    /// <para>
+    /// <b>This is also where a refused <em>boot</em> is disposed, and since the apply moved into the host
+    /// lifecycle it is the only place that can be.</b> <see cref="BuildAsync"/> returns before anything starts,
+    /// so the application a drifted descriptor refuses is one this method already owns — which is why
+    /// <c>A_refused_restart_disposes_the_application_it_had_already_built</c> is written against this overload
+    /// rather than against a fixture that starts an application nobody owns.
     /// </para>
     /// </remarks>
-    /// <param name="args">The process arguments.</param>
+    /// <param name="build">Assembles the builder to run — <see cref="CreateBuilder"/>, or a test's own.</param>
     /// <returns>The exit code: <c>0</c> on a clean shutdown, <c>78</c> for a configuration the host refused.</returns>
-    public static async Task<int> RunAsync(string[] args)
+    internal static async Task<int> RunAsync(Func<WebApplicationBuilder> build)
     {
+        ArgumentNullException.ThrowIfNull(build);
+
         try
         {
-            var app = await BuildAsync(CreateBuilder(args)).ConfigureAwait(false);
+            var app = await BuildAsync(build()).ConfigureAwait(false);
 
             await using (app.ConfigureAwait(false))
             {
@@ -144,7 +180,7 @@ public static class AlvoHost
     }
 
     /// <summary>
-    /// Builds the application, applies the mounted descriptor, and maps the generated Data API.
+    /// Builds the application and maps Alvo's HTTP surface onto it.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -159,47 +195,32 @@ public static class AlvoHost
     /// alone. See <c>docs/architecture/host.md</c>, "Behind a reverse proxy".
     /// </para>
     /// <para>
-    /// The docs routes map <em>last</em>, after <c>MapAlvoDataApi</c>: the document is generated from the
-    /// endpoints actually mapped, so a document route registered before the Data API's would describe an empty
-    /// API.
+    /// <b>There is no apply here and no ordering left to get wrong.</b> <c>MapAlvo</c> maps the probes and the
+    /// Data API, whose routes materialise from the schema Alvo's boot primed before the server bound — so the
+    /// host neither runs DDL nor has to map after it. What used to guard that sequence, and is now the boot's,
+    /// is the <em>whole</em> reason a refused descriptor is a failed start: see
+    /// <c>MMLib.Alvo.Migrations.AlvoStartupRefusedException</c> and <c>RunAsync</c>'s exit code.
     /// </para>
     /// <para>
-    /// Every <c>ValidateOnStart</c> registration runs <em>before</em> the apply, and that ordering is the
-    /// difference between a recoverable mistake and an unbootable deployment — see
-    /// <see cref="ValidateOptions"/>.
-    /// </para>
-    /// <para>
-    /// The apply's result is <em>checked</em>, not discarded. A refused destructive plan is a return value
-    /// rather than an exception (<c>MigrationResult.EnsureApplied</c>'s remarks say why), and an unchecked
-    /// one leaves the policy catalog unprimed: the host would then map zero routes, answer liveness, report
-    /// healthy, and 404 every <c>/api/*</c> call — an ordinary GitOps edit that drops a field, on the next
-    /// restart. Availability silently zero is worse than a container that fails to start, so the guard turns
-    /// it back into a failed start.
-    /// </para>
-    /// <para>
-    /// <c>MapAlvoHealth</c> maps liveness <em>and</em> readiness, and the host no longer owns either. Liveness
-    /// answering used to mean "the descriptor applied", because the apply happened before the server listened;
-    /// that claim now belongs to <c>/health/ready</c>, which reports what Alvo's boot published rather than
-    /// resting on an ordering.
+    /// The docs routes still map after <c>MapAlvo</c>, but only because that is the order they read in. The
+    /// document is generated per request by enumerating the endpoint data sources, so nothing about its content
+    /// depends on when its route was registered. The ordering that <em>is</em> load-bearing runs the other way
+    /// and lives in <see cref="CreateBuilder"/>: registration order is document-transformer order.
     /// </para>
     /// </remarks>
     /// <param name="builder">The builder <see cref="CreateBuilder"/> returned.</param>
-    /// <param name="ct">Cancels the descriptor apply.</param>
-    /// <returns>The started-but-not-yet-running application.</returns>
+    /// <returns>The built-but-not-yet-started application.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
     /// <exception cref="OptionsValidationException">
-    /// A registration that asked to be validated at startup refused its configuration — a mount path with no
-    /// descriptor at it, a PostgreSQL host with no connection string, a misspelled dev-key scope. Raised
-    /// <em>before</em> the descriptor is applied, so a misconfigured deployment leaves the database exactly as
-    /// it found it. <see cref="RunAsync"/> turns it into a printed refusal and a deliberate exit code.
+    /// The host's own options were refused — a mount path with no descriptor at it, an unknown driver name, a
+    /// PostgreSQL host with no connection string. Reading <c>IOptions&lt;AlvoHostOptions&gt;</c> is what runs
+    /// <see cref="AlvoHostOptionsValidation"/>, and composition reads it as its first act, so a misconfigured
+    /// deployment is refused here, before anything is started and therefore before any DDL.
+    /// <see cref="RunAsync(string[])"/> turns it into a printed refusal and a deliberate exit code. Refusals raised by
+    /// <em>starting</em> the application — the boot's own, and every other <c>ValidateOnStart</c> registration
+    /// — surface from <c>StartAsync</c> instead.
     /// </exception>
-    /// <exception cref="Migrations.DestructiveChangeNotAllowedException">
-    /// The mounted descriptor's plan was refused as destructive. The host applies with
-    /// <c>AllowDestructive: false</c> and offers no setting to change that, so this is how a descriptor
-    /// that would drop a column or a table fails the start instead of losing data.
-    /// </exception>
-    public static async Task<WebApplication> BuildAsync(
-        WebApplicationBuilder builder, CancellationToken ct = default)
+    public static async Task<WebApplication> BuildAsync(WebApplicationBuilder builder)
     {
         ArgumentNullException.ThrowIfNull(builder);
 
@@ -207,7 +228,7 @@ public static class AlvoHost
 
         try
         {
-            return await ComposeAsync(app, ct).ConfigureAwait(false);
+            return Compose(app);
         }
         catch
         {
@@ -221,17 +242,20 @@ public static class AlvoHost
     /// can fail has exactly one owner responsible for disposing it.
     /// </summary>
     /// <remarks>
-    /// <b>Split out because a refused start used to leak the whole application.</b>
-    /// <c>WebApplicationBuilder.Build()</c> creates a full service provider; if the apply or
-    /// <c>EnsureApplied</c> then threw, nothing disposed it, and the store's connection pool kept the
-    /// database file open for the rest of the process. That leak was visible in this repository's own suite
-    /// long before it was named — the host fixture's database cleanup swallowed an <c>IOException</c>
-    /// "tolerating a file a refused start still holds open" — and in a container it is the difference between
-    /// a clean non-zero exit and a process holding a socket and a file while the orchestrator restarts it.
+    /// <b>Split out because a refused composition would otherwise leak the whole application.</b>
+    /// <c>WebApplicationBuilder.Build()</c> creates a full service provider, and reading
+    /// <c>IOptions&lt;AlvoHostOptions&gt;</c> below is what runs <see cref="AlvoHostOptionsValidation"/> — so a
+    /// container with a mistyped mount path throws from the first line of this method, with a live service
+    /// provider behind it. Nothing disposing it would keep the store's connection pool, and the database file,
+    /// open for the rest of the process. That leak was visible in this repository's own suite long before it was
+    /// named — the host fixture's database cleanup swallowed an <c>IOException</c> "tolerating a file a refused
+    /// start still holds open" — and in a container it is the difference between a clean non-zero exit and a
+    /// process holding a socket and a file while the orchestrator restarts it. A refusal raised by
+    /// <em>starting</em> the application is <see cref="RunAsync(string[])"/>'s to own, not this method's, and it owns it
+    /// with <c>await using</c>.
     /// </remarks>
     /// <param name="app">The application <see cref="BuildAsync"/> built.</param>
-    /// <param name="ct">Cancels the descriptor apply.</param>
-    private static async Task<WebApplication> ComposeAsync(WebApplication app, CancellationToken ct)
+    private static WebApplication Compose(WebApplication app)
     {
         var options = app.Services.GetRequiredService<IOptions<AlvoHostOptions>>().Value;
 
@@ -247,14 +271,7 @@ public static class AlvoHost
             app.UsePathBase(pathBase);
         }
 
-        app.MapAlvoHealth();
-
-        ValidateOptions(app.Services);
-
-        var migration = await app.Services.ApplyAlvoDescriptorAsync(ct: ct).ConfigureAwait(false);
-        migration.EnsureApplied();
-
-        app.MapAlvoDataApi();
+        app.MapAlvo();
 
         if (options.Docs.Enabled)
         {
@@ -263,32 +280,6 @@ public static class AlvoHost
 
         return app;
     }
-
-    /// <summary>
-    /// Runs every <c>ValidateOnStart</c> registration in the container, before anything touches the database.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <b>Ordering, not tidiness.</b> <c>ValidateOnStart</c> runs from <c>app.StartAsync()</c>, which is
-    /// after <see cref="BuildAsync"/> has already applied the descriptor — nothing on the apply path resolves
-    /// any of the validated option types. So a single mistyped
-    /// <c>Alvo__Auth__DevKeys__0__Scopes__0</c> committed the migration against the production database and
-    /// <em>then</em> crash-looped, and rolling the deployment back did not recover: the previous descriptor is
-    /// destructive relative to the schema the failed start had already written, so
-    /// <c>MigrationResult.EnsureApplied</c> refuses that start too. Validating first turns that into an
-    /// ordinary failed start with nothing changed.
-    /// </para>
-    /// <para>
-    /// <b><see cref="IStartupValidator"/> rather than resolving <c>IOptions&lt;AlvoAuthOptions&gt;</c>.</b> It
-    /// is the same seam the host itself uses at start, so it runs <em>every</em> registration — auth's today,
-    /// and whatever the next option type registers — and this cannot silently stop covering one. It is
-    /// resolved with <c>GetService</c> because a composition that registered no <c>ValidateOnStart</c> at all
-    /// has no such service, and re-running it at start costs one more pass over stateless validators.
-    /// </para>
-    /// </remarks>
-    /// <param name="services">The built application's services.</param>
-    private static void ValidateOptions(IServiceProvider services) =>
-        services.GetService<IStartupValidator>()?.Validate();
 
     /// <summary>
     /// The flags the host honours when — and only when — <see cref="AlvoHostForwardedHeadersOptions.Enabled"/>

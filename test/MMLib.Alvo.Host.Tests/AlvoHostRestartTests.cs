@@ -62,10 +62,18 @@ public class AlvoHostRestartTests
     /// A descriptor that drops a field fails the restart, and says which step it refused.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The message assertion is the fact, not the throw. A start that failed for an unrelated reason — a
     /// descriptor the fixture mistyped, a missing file — satisfies "it threw" just as well, and this fact
     /// would then pass while proving nothing about the refusal. Data is safe either way; what this pins is
     /// that availability is not silently zero instead.
+    /// </para>
+    /// <para>
+    /// <b>The mechanism moved and the assertion did not.</b> The refusal used to be a
+    /// <c>DestructiveChangeNotAllowedException</c> out of the host's own eager apply; it is now the boot's
+    /// <see cref="AlvoStartupRefusedException"/> out of <c>StartAsync</c>, written for the operator who reads
+    /// it. Both name the step, which is what this fact has always been about.
+    /// </para>
     /// </remarks>
     [Fact]
     public async Task A_descriptor_that_drops_a_field_fails_the_restart_and_names_the_step()
@@ -76,7 +84,7 @@ public class AlvoHostRestartTests
         {
             await CreateWarehouseAsync(databasePath);
 
-            var failure = await Should.ThrowAsync<DestructiveChangeNotAllowedException>(
+            var failure = await Should.ThrowAsync<AlvoStartupRefusedException>(
                 () => AlvoHostWorld.StartAsync(DroppedFieldDescriptor, overrides: null, databasePath: databasePath));
 
             failure.Message.ShouldContain("DropField");
@@ -93,10 +101,19 @@ public class AlvoHostRestartTests
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <c>builder.Build()</c> creates a full service provider before anything can fail, and the apply is what
-    /// fails; a version of <see cref="AlvoHost.BuildAsync"/> that let the exception out without disposing left
-    /// the store's connection pool holding this file for the rest of the process. In a container it is a
-    /// process holding a socket and a file handle while the orchestrator restarts it.
+    /// <c>builder.Build()</c> creates a full service provider before anything can fail, and the boot is what
+    /// fails; a host that let the refusal out without disposing left the store's connection pool holding this
+    /// file for the rest of the process. In a container it is a process holding a socket and a file handle
+    /// while the orchestrator restarts it.
+    /// </para>
+    /// <para>
+    /// <b>Asserted through <see cref="AlvoHost.RunAsync(Func{WebApplicationBuilder})"/>, because that is now
+    /// the only thing that can own the application.</b> The refusal used to come out of <c>BuildAsync</c>,
+    /// whose <c>catch</c> disposed; the boot service raises it from <c>StartAsync</c> instead, and neither
+    /// <c>Host.StartAsync</c> nor the fixture owns what it started. Writing the fixture's start as a
+    /// <c>try</c>/<c>DisposeAsync</c> would turn this into a fact about the fixture's cleanup — measured and
+    /// refused twice before, and the reason <c>AlvoHostWorld</c> stops at the builder here. The exit code is
+    /// asserted beside the probe so the disposal claim cannot be made about a host that quietly started.
     /// </para>
     /// <para>
     /// The claim is asserted on the <em>container</em>, not on <c>File.Delete</c>, because deleting an open
@@ -117,13 +134,17 @@ public class AlvoHostRestartTests
         {
             await CreateWarehouseAsync(databasePath);
 
-            await Should.ThrowAsync<DestructiveChangeNotAllowedException>(
-                () => AlvoHostWorld.StartAsync(
+            var exitCode = await AlvoHost
+                .RunAsync(() => AlvoHostWorld.BuilderFor(
                     DroppedFieldDescriptor,
-                    overrides: null,
-                    databasePath: databasePath,
-                    configure: builder => probe = DisposalProbe.RegisteredOn(builder)));
+                    databasePath,
+                    builder => probe = DisposalProbe.RegisteredOn(builder)))
+                .WaitAsync(_theRefusalMustNotHang, TestContext.Current.CancellationToken);
 
+            exitCode.ShouldBe(
+                78,
+                "the restart must be refused and reported, or the disposal claim below is about a host that "
+                + "started perfectly well");
             probe.ShouldNotBeNull("the fixture must really have registered the probe");
             probe.Disposed.ShouldBeTrue(
                 "a refused start must dispose the application it built, or the connection pool keeps the "
@@ -134,6 +155,12 @@ public class AlvoHostRestartTests
             AlvoHostWorld.TryDeleteDatabase(databasePath);
         }
     }
+
+    /// <summary>
+    /// How long a refused run may take before the fact is a hang rather than a failure — a run that started
+    /// successfully would otherwise wait for a shutdown signal that never comes.
+    /// </summary>
+    private static readonly TimeSpan _theRefusalMustNotHang = TimeSpan.FromSeconds(60);
 
     /// <summary>Boots once over <paramref name="databasePath"/>, writes one row, and stops.</summary>
     private static async Task CreateWarehouseAsync(string databasePath)

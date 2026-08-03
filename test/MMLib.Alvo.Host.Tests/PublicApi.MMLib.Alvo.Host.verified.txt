@@ -13,7 +13,7 @@ namespace MMLib.Alvo.Host
         public const string OpenApiDocumentName = "v1";
         public const string OpenApiDocumentPath = "/openapi/v1.json";
         public const string ScalarPath = "/scalar";
-        public static System.Threading.Tasks.Task<Microsoft.AspNetCore.Builder.WebApplication> BuildAsync(Microsoft.AspNetCore.Builder.WebApplicationBuilder builder, System.Threading.CancellationToken ct = default) { }
+        public static System.Threading.Tasks.Task<Microsoft.AspNetCore.Builder.WebApplication> BuildAsync(Microsoft.AspNetCore.Builder.WebApplicationBuilder builder) { }
         public static Microsoft.AspNetCore.Builder.WebApplicationBuilder CreateBuilder(string[] args, System.Action<Microsoft.Extensions.Configuration.IConfigurationBuilder>? configureConfiguration = null) { }
         public static System.Threading.Tasks.Task<int> RunAsync(string[] args) { }
     }
