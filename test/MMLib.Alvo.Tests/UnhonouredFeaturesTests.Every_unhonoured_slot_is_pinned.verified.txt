@@ -4,6 +4,11 @@
     Consequence: JSONata transformations are not evaluated yet: the action still runs, but with Alvo's canonical event envelope as its body instead of the transformation declared here — a delivery that succeeded carrying data you did not declare, which is indistinguishable from a bug in the consumer.,
     Fix: Use a '{{...}}' template instead (e.g. "{{new.title}}"), which this build does render, or remove the transformation and accept the canonical envelope. A partial JSONata implementation is deliberately not offered: silently producing a different payload for the part it does not implement costs more than this refusal. Tracked in #149.
   },
+  EmailData: {
+    Feature: email.data,
+    Consequence: An 'email' action's 'data' is not rendered: it is validated when the descriptor is applied and then read by nothing, so the mail goes out with the referenced template's own subject and body and the values declared here are silently dropped — a message that was delivered without the data you declared, which is indistinguishable from a template bug.,
+    Fix: Move the values into the template's 'subject'/'body' as '{{...}}' placeholders over 'new'/'old'/'event'/'@user.id', which this build does render, or remove 'data'. A 'data.*' placeholder root is new surface and lands with the PR that reads it.
+  },
   TemplateBodyFile: {
     Feature: bodyFile,
     Consequence: A template's 'bodyFile' is not read yet: nothing in this build resolves a path inside a descriptor bundle, so an after-hook rendering this template would send a message with an empty body rather than fail.,

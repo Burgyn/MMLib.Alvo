@@ -78,9 +78,17 @@ internal static class OutboxTable
     /// </para>
     /// <para>
     /// <c>claimed_at</c>, <c>claimed_by</c> and <c>dispatched_at</c> are the only nullable columns, and their
-    /// nullability is the queue's whole state machine: unclaimed is <c>claimed_at IS NULL</c> and undelivered
-    /// is <c>dispatched_at IS NULL</c>. Both read as SQL <c>NULL</c> semantics rather than as a sentinel
-    /// value, which is what lets the claim be one portable statement.
+    /// nullability is the queue's whole state machine: never-touched is <c>claimed_at IS NULL</c> and
+    /// undelivered is <c>dispatched_at IS NULL</c>. Both read as SQL <c>NULL</c> semantics rather than as a
+    /// sentinel value, which is what lets the claim be one portable statement.
+    /// </para>
+    /// <para>
+    /// <b><c>claimed_by</c> is what distinguishes the two waiting states, so it is load-bearing rather than
+    /// informational.</b> With it set, <c>claimed_at</c> is when the current claim <em>started</em> and the row
+    /// is recoverable only once the lease has run out — the crash-recovery path. With it <see langword="null"/>
+    /// and <c>claimed_at</c> set, the row was <em>released</em> and <c>claimed_at</c> is the instant it becomes
+    /// claimable again — the retry backoff. One column, two meanings, and the holder's name is the discriminator
+    /// rather than a second timestamp column no engine would need.
     /// </para>
     /// </remarks>
     internal static string Ddl(string tableName) =>
@@ -241,6 +249,16 @@ internal static class OutboxTable
     /// come back. <see cref="EfCoreOutboxStore"/> sorts what it read.
     /// </para>
     /// <para>
+    /// <b>Why the claimability predicate has three branches.</b> A never-touched row has
+    /// <c>claimed_at IS NULL</c>. A <em>released</em> row has <c>claimed_by IS NULL</c> and <c>claimed_at</c>
+    /// holding the instant it may be retried, so it is compared against <c>@now</c>. A <em>held</em> row has
+    /// <c>claimed_by</c> set and <c>claimed_at</c> holding when the claim began, so it is compared against
+    /// <c>@stale_before</c> — the lease. The released branch compares <em>inclusively</em>, because a release with
+    /// no backoff stamps the present instant and the port promises it is claimable at once. Comparing a released row against the lease would make every failed
+    /// delivery wait out a five-minute crash-recovery window; comparing a held row against <c>@now</c> would
+    /// re-claim an entry that is still in flight, which is a duplicate delivery per tick.
+    /// </para>
+    /// <para>
     /// <b>Why there is no <c>SKIP LOCKED</c>.</b> It skips the <b>row</b>, not the <b>key</b>, so it delivers
     /// neither global nor per-entity-key ordering; with exactly one dispatcher it buys nothing, and a new
     /// <see cref="IAlvoSqlDialect"/> member would be a public-API change in a driver package for a seam F7 will
@@ -253,14 +271,30 @@ internal static class OutboxTable
         UPDATE {tableName} SET claimed_at = @claimed_at, claimed_by = @claimed_by,
                                attempts = attempts + 1
          WHERE dispatched_at IS NULL
-           AND (claimed_at IS NULL OR claimed_at < @stale_before)
+           AND {Claimable}
            AND id IN (SELECT id FROM {tableName}
                        WHERE dispatched_at IS NULL
                          AND attempts < @max_attempts
-                         AND (claimed_at IS NULL OR claimed_at < @stale_before)
+                         AND {Claimable}
                        ORDER BY id
                        LIMIT @batch)
         RETURNING id, event_type, partition_key, payload, attempts
+        """;
+
+    /// <summary>
+    /// When an undelivered row may be taken: never claimed at all, released and past its backoff, or held on a
+    /// lease that has run out.
+    /// </summary>
+    /// <remarks>
+    /// One constant used in both halves of <see cref="ClaimSql"/>, because the outer <c>WHERE</c> repeating the
+    /// subquery's predicate is the statement's whole correctness (see the remarks above) and two spellings of it
+    /// is how the outer copy comes to be the weaker one.
+    /// </remarks>
+    private const string Claimable =
+        """
+        (claimed_at IS NULL
+                 OR (claimed_by IS NULL AND claimed_at <= @now)
+                 OR (claimed_by IS NOT NULL AND claimed_at < @stale_before))
         """;
 
     /// <summary>Retires one entry of <paramref name="tableName"/>: it was delivered.</summary>
@@ -273,14 +307,26 @@ internal static class OutboxTable
     internal static string MarkDispatchedSql(string tableName) =>
         $"UPDATE {tableName} SET dispatched_at = @dispatched_at WHERE id = @id";
 
-    /// <summary>Hands one entry of <paramref name="tableName"/> back, claimable again immediately.</summary>
+    /// <summary>
+    /// Hands one entry of <paramref name="tableName"/> back, claimable again once the stamped instant passes.
+    /// </summary>
     /// <param name="tableName">The table name, already prefixed by <see cref="NameFor"/>.</param>
     /// <remarks>
+    /// <para>
     /// <c>attempts</c> is deliberately untouched: releasing is how a dispatcher says it could not deliver, and
     /// resetting the count would make the attempt ceiling unreachable and retry a poison event forever.
+    /// </para>
+    /// <para>
+    /// <b><c>claimed_by</c> is cleared and <c>claimed_at</c> is stamped forward, and the pairing is the
+    /// backoff.</b> Clearing the holder is what moves the row into the released state <see cref="ClaimSql"/>
+    /// compares against <c>@now</c> rather than against the lease; <c>claimed_at</c> then carries when it may be
+    /// retried. Setting <c>claimed_at = NULL</c> instead — the obvious spelling — makes the row claimable on the
+    /// dispatcher's very next iteration, and the idle wait runs only after an <em>empty</em> claim, so one
+    /// restarting receiver spends the whole attempt ceiling in milliseconds.
+    /// </para>
     /// </remarks>
     internal static string ReleaseSql(string tableName) =>
-        $"UPDATE {tableName} SET claimed_at = NULL, claimed_by = NULL WHERE id = @id";
+        $"UPDATE {tableName} SET claimed_at = @claimed_at, claimed_by = NULL WHERE id = @id";
 
     /// <summary>How many delivery attempts a freshly written event has had.</summary>
     private const int UndeliveredAttempts = 0;

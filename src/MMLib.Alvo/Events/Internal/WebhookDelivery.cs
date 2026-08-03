@@ -1,6 +1,4 @@
-﻿using MMLib.Alvo.Descriptor;
-
-using System.Text;
+﻿using System.Text;
 
 namespace MMLib.Alvo.Events.Internal;
 
@@ -10,7 +8,7 @@ namespace MMLib.Alvo.Events.Internal;
 /// <remarks>
 /// <para>
 /// <b>What is deliberately absent, so a reader does not assume it.</b> The delivery is <b>unsigned</b> —
-/// <see cref="WebhookEndpoint.SecretRef"/> is never read, and no Standard Webhooks
+/// a declared endpoint's <c>secretRef</c> is never read, and no Standard Webhooks
 /// <c>webhook-id</c>/<c>webhook-timestamp</c>/<c>webhook-signature</c> header is sent, so a receiver cannot
 /// yet verify the sender. It is also <b>unprojected</b>: the body is the whole envelope or the whole rendered
 /// template, with no per-endpoint field selection. Signing belongs to the webhook-management work and
@@ -34,7 +32,15 @@ namespace MMLib.Alvo.Events.Internal;
 /// tell a permanently wrong endpoint from one whose deployment is thirty seconds from finishing. The bound is
 /// the attempt ceiling the dispatcher passes to the outbox claim, not a per-status rule here — a status-based
 /// "permanent" verdict would need somewhere to put the abandoned event, and this build has no dead-letter
-/// queue to put it in.
+/// queue to put it in. What makes that survivable is the <em>backoff</em>: a released entry is not claimable
+/// again until <c>attempts × PollInterval</c> has passed, so the ceiling cannot be spent in milliseconds on a
+/// receiver that is restarting.
+/// </para>
+/// <para>
+/// <b>Nothing this type writes names the endpoint's URL — only <see cref="WebhookTarget.Name"/>.</b>
+/// <c>secretRef</c> is never read and no signature is sent, so a secret embedded in the URL is the only
+/// authentication an author has; the reasoning is <see cref="WebhookTarget"/>'s and this type must not be
+/// edited back into interpolating <see cref="WebhookTarget.Url"/>.
 /// </para>
 /// </remarks>
 /// <param name="clients">The factory the named client is resolved from, so a host owns the handler and its timeout.</param>
@@ -46,8 +52,8 @@ internal sealed class WebhookDelivery(IHttpClientFactory clients)
     /// </summary>
     internal const string HttpClientName = "MMLib.Alvo.Events.Webhook";
 
-    /// <summary>POSTs <paramref name="body"/> to <paramref name="endpoint"/>, throwing unless it succeeded.</summary>
-    /// <param name="endpoint">The endpoint as the descriptor declared it, resolved when the hook was compiled.</param>
+    /// <summary>POSTs <paramref name="body"/> to <paramref name="target"/>, throwing unless it succeeded.</summary>
+    /// <param name="target">The endpoint's name and validated URL, both resolved when the hook was compiled.</param>
     /// <param name="body">The request body — the canonical envelope, or the action's rendered <c>payload</c>.</param>
     /// <param name="cancellationToken">A token to cancel the delivery; cancelled when the host is shutting down.</param>
     /// <exception cref="HttpRequestException">The endpoint refused the delivery, or could not be reached.</exception>
@@ -58,13 +64,13 @@ internal sealed class WebhookDelivery(IHttpClientFactory clients)
     /// nothing re-checks that the result is JSON — the template engine renders text, so an author who writes
     /// <c>{{new.title}}</c> as a whole payload sends a bare string under a JSON content type.
     /// </remarks>
-    internal async Task PostAsync(WebhookEndpoint endpoint, string body, CancellationToken cancellationToken)
+    internal async Task PostAsync(WebhookTarget target, string body, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(endpoint);
+        ArgumentNullException.ThrowIfNull(target);
         ArgumentNullException.ThrowIfNull(body);
 
         using var content = new StringContent(body, Encoding.UTF8, AlvoEvent.DataContentType);
-        using var response = await PostAsync(endpoint, content, cancellationToken).ConfigureAwait(false);
+        using var response = await PostAsync(target, content, cancellationToken).ConfigureAwait(false);
 
         response.EnsureSuccessStatusCode();
     }
@@ -79,22 +85,30 @@ internal sealed class WebhookDelivery(IHttpClientFactory clients)
     /// look like a shutdown and silently end the pump. The caller's own token still cancels as a cancellation.
     /// </remarks>
     private async Task<HttpResponseMessage> PostAsync(
-        WebhookEndpoint endpoint, StringContent content, CancellationToken cancellationToken)
+        WebhookTarget target, StringContent content, CancellationToken cancellationToken)
     {
         try
         {
             return await clients.CreateClient(HttpClientName)
-                .PostAsync(new Uri(endpoint.Url), content, cancellationToken)
+                .PostAsync(target.Url, content, cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (OperationCanceledException cancelled) when (!cancellationToken.IsCancellationRequested)
         {
-            throw TimedOut(endpoint, cancelled);
+            throw TimedOut(target, cancelled);
         }
     }
 
-    private static TimeoutException TimedOut(WebhookEndpoint endpoint, Exception cancelled) => new(
-        $"Delivering to webhook endpoint '{endpoint.Url}' did not complete inside the "
+    /// <summary>
+    /// The timeout, named by the endpoint an author declared rather than by the URL it resolved to.
+    /// </summary>
+    /// <remarks>
+    /// The dispatcher logs this exception at Warning with the exception attached, so anything interpolated here
+    /// reaches the log pipeline. <see cref="WebhookTarget.Name"/> is the key an author acts on and carries no
+    /// credential; the URL's path and query routinely are one.
+    /// </remarks>
+    private static TimeoutException TimedOut(WebhookTarget target, Exception cancelled) => new(
+        $"Delivering to webhook endpoint '{target.Name}' did not complete inside the "
         + $"'{HttpClientName}' client's timeout. The event is retried until it reaches the configured "
         + "attempt ceiling; raise the timeout by configuring that named client if the endpoint is "
         + "legitimately slow.",

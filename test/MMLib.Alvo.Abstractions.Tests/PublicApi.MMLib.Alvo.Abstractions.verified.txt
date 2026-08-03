@@ -803,7 +803,7 @@ namespace MMLib.Alvo.Events
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.OutboxEntry>> ClaimAsync(string claimant, int batchSize, int maxAttempts, System.TimeSpan lease, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task EnsureAsync(System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task MarkDispatchedAsync(System.Guid id, System.Threading.CancellationToken cancellationToken = default);
-        System.Threading.Tasks.Task ReleaseAsync(System.Guid id, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task ReleaseAsync(System.Guid id, System.TimeSpan retryAfter, System.Threading.CancellationToken cancellationToken = default);
     }
     public sealed class OutboxEntry : System.IEquatable<MMLib.Alvo.Events.OutboxEntry>
     {

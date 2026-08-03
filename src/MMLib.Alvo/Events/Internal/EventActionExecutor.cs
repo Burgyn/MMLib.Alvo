@@ -108,7 +108,7 @@ internal sealed class EventActionExecutor(
     private void Executed(CompiledAfterHook hook, AlvoEvent @event) => EventLog.ActionExecuted(
         logger, hook.Path, ActionType.NameOf(hook.Action.Action), @event.Id, @event.Type);
 
-    private static WebhookEndpoint EndpointOf(CompiledAfterHook hook) =>
+    private static WebhookTarget EndpointOf(CompiledAfterHook hook) =>
         hook.Action.Endpoint ?? throw UnresolvedEndpoint(hook);
 
     /// <summary>
@@ -123,6 +123,7 @@ internal sealed class EventActionExecutor(
 
     private static InvalidOperationException UnresolvedEndpoint(CompiledAfterHook hook) => new(
         $"After-hook '{hook.Path}' is a webhook action with no resolved endpoint. An endpoint is resolved "
-        + "from 'webhooks.endpoints' when the descriptor is applied, and an unknown name is refused there, so "
-        + "reaching this point means the policy catalog was built by hand rather than from a descriptor.");
+        + "from 'webhooks.endpoints' when the descriptor is applied — where an unknown name, a relative URL "
+        + "and a non-HTTPS one are all refused — so reaching this point means the policy catalog was built by "
+        + "hand rather than from a descriptor.");
 }

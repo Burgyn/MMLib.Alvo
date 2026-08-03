@@ -187,10 +187,17 @@ internal sealed record EntityAfterHooks(
 /// The compiled <see cref="CelProfile.Condition"/> expression gating the hook, or <see langword="null"/> when
 /// it declares none and therefore always fires.
 /// </param>
+/// <param name="Required">
+/// Which caller values <paramref name="Condition"/> reads, measured once at apply. Only <c>@user.id</c> can
+/// appear — <c>@tenant.id</c> and <c>@user.roles</c> are refused for an after-hook, because the envelope
+/// carries neither — so this is the gate for "the condition asks who acted and this event records nobody",
+/// which resolves the reference to the reserved all-zero id and would otherwise compare a row against it.
+/// </param>
 /// <param name="Action">The compiled action, with every template already parsed and validated.</param>
 internal sealed record CompiledAfterHook(
     string Path,
     CompiledExpression? Condition,
+    RequiredContext Required,
     CompiledAction Action);
 
 /// <summary>
@@ -210,7 +217,10 @@ internal sealed record CompiledAfterHook(
 /// time — only the primed catalog — so a delivery-time lookup would need a second independently primed
 /// holder, which is exactly what would let an action deliver to one apply's URL while rendering another
 /// apply's templates. Carrying the endpoint on the compiled action makes the URL, the condition and the
-/// templates come from one apply by construction.
+/// templates come from one apply by construction. It is a <see cref="WebhookTarget"/> and not the declared
+/// <see cref="WebhookEndpoint"/> for two reasons that both belong to apply time: the URL is parsed and its
+/// scheme checked <em>there</em>, and the endpoint's <em>name</em> travels with it so nothing downstream has
+/// to name the URL — see <see cref="WebhookTarget"/>'s own remarks for why that matters.
 /// </para>
 /// </remarks>
 /// <param name="Action">The parsed action exactly as the descriptor declared it.</param>
@@ -222,7 +232,7 @@ internal sealed record CompiledAfterHook(
 internal sealed record CompiledAction(
     AutomationAction Action,
     IReadOnlyDictionary<string, AlvoTemplate> Templates,
-    WebhookEndpoint? Endpoint);
+    WebhookTarget? Endpoint);
 
 /// <summary>
 /// The compiled <c>USING</c>/<c>WITH CHECK</c> pair for one operation. Exactly Postgres's

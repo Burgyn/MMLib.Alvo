@@ -81,6 +81,7 @@ public class UnhonouredFeaturesTests
         var slots = new
         {
             UnhonouredFeatures.RawJsonata,
+            UnhonouredFeatures.EmailData,
             UnhonouredFeatures.TemplateBodyFile,
             Actions = _unrunnableActionTypes
                 .Select(UnhonouredFeatures.UnhonouredAction)

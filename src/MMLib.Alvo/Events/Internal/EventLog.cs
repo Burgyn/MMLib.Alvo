@@ -11,15 +11,30 @@ namespace MMLib.Alvo.Events.Internal;
 /// the rule below is a property of the <em>set</em> of lines rather than of any one of them.
 /// </para>
 /// <para>
-/// <b>No line in this subsystem carries a rendered value.</b> An action log entry names the hook's own JSON
-/// pointer, the action type, and the event's id and type — descriptor coordinates and event identity, and
-/// nothing that came out of a row. The reason is <see cref="AlvoEventData"/>'s: the envelope carries the
-/// <em>unmasked</em> post-image, so a rendered webhook payload or email body can contain a <c>hidden</c>
-/// field. Logging the rendered value would take that field out of the one place the design accepted it going
-/// — a descriptor-declared endpoint, chosen by the same author as the <c>hidden</c> rule — and put it into
-/// whatever ships logs, which nobody declared and no author chose. The event id is the join key: an operator
-/// who needs the payload reads the <c>alvo_outbox</c> row, where it is stored once and governed by that
-/// table's retention rather than by a log pipeline's.
+/// <b>No line in this subsystem carries a rendered value, and none carries an endpoint's URL.</b> An action
+/// log entry names the hook's own JSON pointer, the action type, and the event's id and type — descriptor
+/// coordinates and event identity, and nothing that came out of a row. The reason is
+/// <see cref="AlvoEventData"/>'s: the envelope carries the <em>unmasked</em> post-image, so a rendered webhook
+/// payload or email body can contain a <c>hidden</c> field. Logging the rendered value would take that field
+/// out of the one place the design accepted it going — a descriptor-declared endpoint, chosen by the same
+/// author as the <c>hidden</c> rule — and put it into whatever ships logs, which nobody declared and no author
+/// chose. The event id is the join key: an operator who needs the payload reads the <c>alvo_outbox</c> row,
+/// where it is stored once.
+/// </para>
+/// <para>
+/// <b>That last sentence used to say "governed by that table's retention rather than by a log pipeline's",
+/// and <c>alvo_outbox</c> has no retention.</b> Nothing deletes a row, and the payload holds the complete
+/// unmasked post- and pre-image of every write for every entity and tenant — so the join key points at an
+/// unbounded permanent store, not at a governed one. The rule above still holds, for the reason it always
+/// did: a log pipeline's read set is wider still, and one more copy in it is strictly worse. But the
+/// justification is now "one copy rather than two", not "one governed copy". Retention is filed as issue #154.
+/// </para>
+/// <para>
+/// <b><see cref="ActionFailed"/> carries the exception, so anything a delivery interpolates into a message
+/// reaches the pipeline.</b> That is why <c>WebhookTarget</c> exists and why nothing in the delivery path names
+/// an endpoint's URL: <c>secretRef</c> is never read and no signature is sent, so a secret in the URL is the
+/// only authentication an author has. Pinned by
+/// <c>EventActionExecutorTests.No_log_line_carries_a_webhook_url_that_could_be_a_secret</c>.
 /// </para>
 /// <para>
 /// <b><see cref="EmailSentToConsole"/> is the one deliberate exception, and it is not an exception to the
@@ -119,6 +134,22 @@ internal static partial class EventLog
             + "not selected.")]
     internal static partial void ConditionRefusedTheHook(
         ILogger logger, string hook, Guid eventId, Exception failure);
+
+    /// <summary>A hook's condition reads <c>@user.id</c> and the event records no actor, so it was not selected.</summary>
+    /// <remarks>
+    /// Debug for <see cref="ConditionRefusedTheHook"/>'s reasons, and separate from it because the cause is
+    /// different and actionable: an anonymous write carries no <c>authid</c>, so a hook comparing a row against
+    /// <c>@user.id</c> has nothing to compare it with. Refusing rather than comparing against the reserved
+    /// all-zero id is the same direction the policy engine's required-context gate takes for a rule.
+    /// </remarks>
+    /// <param name="logger">The logger the dispatcher writes through.</param>
+    /// <param name="hook">The hook's own JSON pointer.</param>
+    /// <param name="eventId">The event whose subscription was being decided.</param>
+    [LoggerMessage(
+        Level = LogLevel.Debug,
+        Message = "Alvo did not select after-hook {Hook} for event {EventId}: its condition reads '@user.id' and "
+            + "the event records no actor, so the comparison has no caller to resolve against.")]
+    internal static partial void ConditionHasNoActorToRead(ILogger logger, string hook, Guid eventId);
 
     /// <summary>The development mail provider's one line, which is the whole message.</summary>
     /// <remarks>

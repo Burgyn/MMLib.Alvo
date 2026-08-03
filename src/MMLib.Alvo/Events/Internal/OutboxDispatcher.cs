@@ -49,6 +49,16 @@ namespace MMLib.Alvo.Events.Internal;
 /// tidy is the edit that would undo it.
 /// </para>
 /// <para>
+/// <b>There is no dispatcher-wide caller, and that is a correction rather than a simplification.</b> A hook
+/// condition's <c>@user.id</c> is resolved per event from the envelope's own <c>authid</c> by
+/// <see cref="EventSubscriptions"/>, because the actor an author means is the one who made the change and not
+/// whoever happens to be draining the queue. A shared <see cref="AlvoContext.System"/> answered both
+/// <c>@user.id</c> and <c>@user.roles</c> with the framework's own identity — so
+/// <c>new.owner_id != @user.id</c> never matched and <c>'admin' in @user.roles</c> always did — and answered
+/// <c>@tenant.id</c> with <see langword="null"/>, which the interpreter's null rule turns into "every tenant"
+/// under a negation. The two references an envelope cannot answer are now refused when the hook is compiled.
+/// </para>
+/// <para>
 /// <b>It requires <see cref="IOutboxStore"/> to resolve, which widens what a database provider owes.</b> Every
 /// relational provider already registers one (<c>AddRelationalProvider</c>), so no shipped provider is affected
 /// today; a provider that is not built on that registration — the dynamic-entity driver F7 brings, or any
@@ -178,7 +188,7 @@ internal sealed class OutboxDispatcher(
     private async Task DeliverAsync(OutboxEntry entry, CancellationToken stoppingToken)
     {
         var @event = AlvoEventJson.Read(entry.Payload);
-        var hooks = EventSubscriptions.Matching(Catalog, @event, evaluator, _context, logger);
+        var hooks = EventSubscriptions.Matching(Catalog, @event, evaluator, logger);
 
         foreach (var hook in hooks)
         {
@@ -191,27 +201,57 @@ internal sealed class OutboxDispatcher(
     }
 
     /// <summary>
-    /// Hands the entry back for a later claim, and says so loudly once it has reached the ceiling.
+    /// Hands the entry back for a later claim, <b>after a backoff</b>, and says so loudly once it has reached
+    /// the ceiling.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The attempt count is not rolled back by <see cref="IOutboxStore.ReleaseAsync"/>, which is what makes the
     /// ceiling reachable at all. Past it the entry is simply never claimed again — not deleted, not moved — so
     /// "abandoned" stays observable: the row keeps <c>dispatched_at IS NULL</c>, <c>alvo.events.failed</c> has
     /// one increment per attempt, and <see cref="EventLog.PoisonEvent"/> is the Error line naming it. That is
     /// this build's whole stand-in for a dead-letter queue (7.1 owns the real one).
+    /// </para>
+    /// <para>
+    /// <b>The backoff is what makes the ceiling a bound on <em>time</em> and not only on count.</b> The idle
+    /// wait in <see cref="PumpUntilStoppedAsync"/> runs only when a claim came back <em>empty</em>, so without a
+    /// per-entry backoff a released entry is claimable on the very next iteration and a receiver that is
+    /// restarting burns all <see cref="AlvoEventOptions.MaxAttempts"/> attempts in milliseconds — permanently
+    /// abandoning an event this build has no queue to recover it from, and hitting the receiver with the whole
+    /// batch at line rate on the way. That directly defeats <c>WebhookDelivery</c>'s own justification for not
+    /// classifying failures: it declines to distinguish a permanently wrong endpoint from one thirty seconds
+    /// from finishing, so it has to survive the thirty seconds.
+    /// </para>
     /// </remarks>
     private async Task AbandonAttemptAsync(OutboxEntry entry, Exception failure, CancellationToken stoppingToken)
     {
         AlvoEventMetrics.Failed.Add(1);
         EventLog.ActionFailed(logger, entry.Id, entry.Type, entry.Attempts, failure);
 
-        await store.ReleaseAsync(entry.Id, stoppingToken).ConfigureAwait(false);
+        await store.ReleaseAsync(entry.Id, RetryAfter(entry), stoppingToken).ConfigureAwait(false);
 
         if (entry.Attempts >= options.Value.MaxAttempts)
         {
             EventLog.PoisonEvent(logger, entry.Id, entry.Type, entry.Attempts);
         }
     }
+
+    /// <summary>How long this entry waits before it is claimable again: one poll interval per attempt so far.</summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="AlvoEventOptions.PollInterval"/> is the unit rather than a knob of its own, because it already
+    /// means "how long the pump waits before looking again" — the queue's own tick. Multiplying by the attempt
+    /// count makes the wait grow linearly, which is the cheap half of every published webhook retry schedule
+    /// (Standard Webhooks' reference schedule steps 5 s → 5 m → 30 m), and it bounds the ceiling in time: at the
+    /// shipped defaults ten attempts span at least 1+2+…+9 = 45 seconds, comfortably past a receiver's restart.
+    /// </para>
+    /// <para>
+    /// It is not exponential, and that is deliberate: nothing here classifies a failure, so a large multiplier
+    /// would push a genuinely transient 503 out by hours for the same reason it would push out a permanently
+    /// wrong endpoint. Real per-status scheduling belongs with the dead-letter queue that can absorb it (7.1).
+    /// </para>
+    /// </remarks>
+    private TimeSpan RetryAfter(OutboxEntry entry) => entry.Attempts * options.Value.PollInterval;
 
     private static Counter<long> Counted(int matchedHooks) =>
         matchedHooks == 0 ? AlvoEventMetrics.Filtered : AlvoEventMetrics.Dispatched;
@@ -237,16 +277,4 @@ internal sealed class OutboxDispatcher(
     /// replica rather than to "something".
     /// </summary>
     private static readonly string _claimant = $"{Environment.MachineName}:{Environment.ProcessId}";
-
-    /// <summary>
-    /// The caller a hook condition's <c>@user</c>/<c>@tenant</c> resolve against: the framework itself, with no
-    /// tenant.
-    /// </summary>
-    /// <remarks>
-    /// Explicit rather than an ambient accessor, because there is no request scope here — that is exactly the
-    /// case <see cref="AlvoContext"/>'s own remarks name. No tenant, because the envelope carries which
-    /// <em>caller</em> acted and never which tenant they acted in, and answering <c>@tenant.id</c> from the
-    /// row's own <c>tenant_id</c> would answer a different question.
-    /// </remarks>
-    private static readonly AlvoContext _context = AlvoContext.System(tenant: null);
 }

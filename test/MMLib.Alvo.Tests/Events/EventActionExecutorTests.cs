@@ -186,7 +186,57 @@ public sealed class EventActionExecutorTests : IDisposable
         var failure = await Should.ThrowAsync<TimeoutException>(
             () => Subject(receiver).ExecuteAsync(WebhookHook(), SampleEvent(), Cancellation));
 
-        failure.Message.ShouldContain(EndpointUrl);
+        failure.Message.ShouldContain(EndpointName);
+    }
+
+    /// <summary>
+    /// <b>A slow endpoint's URL never reaches a log line — only the endpoint's <em>name</em> does.</b> This build
+    /// reads no <c>secretRef</c> and sends no signature, so a secret embedded in the URL is the only
+    /// authentication an author has, and the dispatcher logs a failed attempt at Warning with the exception
+    /// attached.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The absence is asserted only after the same run has proved the URL was present.</b> The secret-shaped
+    /// segment is checked in the URL the delivery was actually posted to first, so "not in the log" cannot pass
+    /// because the value was never in play — which is the way an absence fact goes vacuous. The
+    /// <em>failure</em> path is the one that mattered: the action log deliberately carries no URL, and until the
+    /// timeout message was reworded, the failure path carried the whole one, scheme, path and query included.
+    /// </para>
+    /// <para>
+    /// <b>What is read is the message <em>and</em> the attached exception</b>, because that is what a log
+    /// pipeline ships: <c>ActionFailed</c>'s own template names the event and the attempt, and the endpoint
+    /// arrives only through the exception the dispatcher passes it. Asserting over the rendered message alone
+    /// would have declared the URL absent while it was two fields away.
+    /// </para>
+    /// <para>
+    /// The whole log is read, at every level and through the real <c>LoggerMessage</c> delegates, rather than one
+    /// line: a rule about what this subsystem does not disclose is a property of the set of lines it writes.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task No_log_line_carries_a_webhook_url_that_could_be_a_secret()
+    {
+        var receiver = new RecordingWebhookReceiver
+        {
+            Throws = new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout.",
+                new TimeoutException()),
+        };
+        var hook = SecretUrlHook();
+
+        var failure = await Should.ThrowAsync<TimeoutException>(
+            () => Subject(receiver).ExecuteAsync(hook, SampleEvent(), Cancellation));
+        EventLog.ActionFailed(
+            _loggers.CreateLogger<OutboxDispatcher>(), Guid.NewGuid(), "entity.deals.updated", 1, failure);
+
+        receiver.Targets.ShouldHaveSingleItem().AbsoluteUri.ShouldContain(
+            SecretSegment, Case.Sensitive, "the positive control: the secret really was on the wire this run");
+
+        var shipped = Shipped();
+        shipped.ShouldNotBeEmpty("the dispatcher's own failure line must have been written");
+        shipped.ShouldAllBe(line => !line.Contains(SecretSegment, StringComparison.Ordinal));
+        shipped.ShouldAllBe(line => !line.Contains(SecretUrl, StringComparison.Ordinal));
+        shipped.ShouldContain(line => line.Contains(EndpointName, StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -306,6 +356,7 @@ public sealed class EventActionExecutorTests : IDisposable
         var hook = new CompiledAfterHook(
             HookPath,
             Condition: null,
+            RequiredContext.None,
             new CompiledAction(
                 new FunctionAction { Name = "recalculate" },
                 new Dictionary<string, AlvoTemplate>(StringComparer.Ordinal),
@@ -337,8 +388,20 @@ public sealed class EventActionExecutorTests : IDisposable
             ["alvo.events.dispatched", "alvo.events.filtered", "alvo.events.failed"]);
     }
 
+    /// <summary>
+    /// Everything the run would hand a log pipeline: each entry's rendered message together with the exception
+    /// attached to it, which is where a delivery failure's own words travel.
+    /// </summary>
+    private IReadOnlyList<string> Shipped() =>
+        [.. _logs.Entries.Select(entry => $"{entry.Message} {entry.Exception}")];
+
     private const string EndpointUrl = "https://example.test/hook";
     private const string EndpointName = "crm-sync";
+
+    /// <summary>The path segment that stands in for the credential a Slack/Teams/Zapier webhook URL carries.</summary>
+    private const string SecretSegment = "T00000000-B11111111-Kd7xQ2vSecretToken";
+
+    private const string SecretUrl = $"https://hooks.example.test/services/{SecretSegment}";
     private const string TemplateName = "deal-won";
     private const string HookPath = "/entities/deals/hooks/afterUpdate/0";
 
@@ -355,6 +418,13 @@ public sealed class EventActionExecutorTests : IDisposable
     private static CompiledAfterHook WebhookHook(string? payload = null) =>
         Hook(new WebhookAction { Endpoint = EndpointName, Payload = payload });
 
+    /// <summary>
+    /// One hook compiled against an endpoint whose URL carries its credential in the path, which is how a
+    /// Slack, Teams, Zapier or Make endpoint is actually shaped.
+    /// </summary>
+    private static CompiledAfterHook SecretUrlHook() =>
+        Hook(new WebhookAction { Endpoint = EndpointName }, url: SecretUrl);
+
     private static CompiledAfterHook EmailHook(string to, string? subject = null, string? body = null) =>
         Hook(new EmailAction { Template = TemplateName, To = to }, subject, body);
 
@@ -362,39 +432,42 @@ public sealed class EventActionExecutorTests : IDisposable
     /// Compiles one hook through the real apply path, so every template and the endpoint come from the
     /// compiler rather than from this suite.
     /// </summary>
-    private static CompiledAfterHook Hook(AutomationAction action, string? subject = null, string? body = null)
+    private static CompiledAfterHook Hook(
+        AutomationAction action, string? subject = null, string? body = null, string url = EndpointUrl)
     {
-        PolicyCatalog.TryBuild(Descriptor(action, subject, body), Schema, CelFixtures.Compiler, out var catalog, out var errors)
+        PolicyCatalog.TryBuild(
+            Descriptor(action, subject, body, url), Schema, CelFixtures.Compiler, out var catalog, out var errors)
             .ShouldBeTrue($"expected a clean build, got: {string.Join("; ", errors.Select(e => $"{e.Path}: {e.Message}"))}");
 
         catalog.ShouldNotBeNull().TryGetEntity("deals", out var policy).ShouldBeTrue();
         return policy.AfterHooks.For(DataOperation.Update).ShouldHaveSingleItem();
     }
 
-    private static AlvoDescriptor Descriptor(AutomationAction action, string? subject, string? body) => new()
-    {
-        ApiVersion = "alvo.dev/v1",
-        Name = "test",
-        Entities = new Dictionary<string, EntityDescriptor>(StringComparer.Ordinal)
+    private static AlvoDescriptor Descriptor(AutomationAction action, string? subject, string? body, string url) =>
+        new()
         {
-            ["deals"] = new()
+            ApiVersion = "alvo.dev/v1",
+            Name = "test",
+            Entities = new Dictionary<string, EntityDescriptor>(StringComparer.Ordinal)
             {
-                Fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal),
-                Hooks = new EntityHooks { AfterUpdate = [new AfterHook { Action = action }] },
+                ["deals"] = new()
+                {
+                    Fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal),
+                    Hooks = new EntityHooks { AfterUpdate = [new AfterHook { Action = action }] },
+                },
             },
-        },
-        Templates = new Dictionary<string, MessageTemplate>(StringComparer.Ordinal)
-        {
-            [TemplateName] = new() { Subject = subject, Body = body },
-        },
-        Webhooks = new Webhooks
-        {
-            Endpoints = new Dictionary<string, WebhookEndpoint>(StringComparer.Ordinal)
+            Templates = new Dictionary<string, MessageTemplate>(StringComparer.Ordinal)
             {
-                [EndpointName] = new() { Url = EndpointUrl, SecretRef = "crm-sync-secret" },
+                [TemplateName] = new() { Subject = subject, Body = body },
             },
-        },
-    };
+            Webhooks = new Webhooks
+            {
+                Endpoints = new Dictionary<string, WebhookEndpoint>(StringComparer.Ordinal)
+                {
+                    [EndpointName] = new() { Url = url, SecretRef = "crm-sync-secret" },
+                },
+            },
+        };
 
     private static SchemaModel Schema { get; } = new([
         new EntitySchema

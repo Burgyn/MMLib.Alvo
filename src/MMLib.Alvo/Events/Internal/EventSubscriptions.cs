@@ -4,6 +4,8 @@ using MMLib.Alvo.Data;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Rules;
 
+using System.Globalization;
+
 namespace MMLib.Alvo.Events.Internal;
 
 /// <summary>
@@ -29,6 +31,23 @@ namespace MMLib.Alvo.Events.Internal;
 /// direction: an unrecognised type is a queue entry from a build that spoke a different grammar, and running
 /// every hook on it would be strictly worse than running none.
 /// </para>
+/// <para>
+/// <b>A condition's <c>@user.id</c> is answered from the <em>envelope</em>, not from whoever is dispatching.</b>
+/// The caller is built per event out of <see cref="AlvoEvent.AuthId"/>, which is the credential that made the
+/// change and the only actor an author can mean — so <c>new.owner_id != @user.id</c> ("don't notify whoever
+/// just changed it") compares two real values instead of comparing a row against the framework's own reserved
+/// id, which is what a shared <c>AlvoContext.System</c> made it do: never matching in the positive form, and
+/// always matching in the negated one. The other two references cannot be answered from an envelope at all and
+/// are refused when the hook is compiled (<see cref="AfterHookCompiler"/>), which is what makes building the
+/// caller here a complete answer rather than a partial one: <see cref="EnvelopeProvenance"/> holds the rule.
+/// </para>
+/// <para>
+/// <b>An event that records no actor selects no hook that asks who acted.</b> An anonymous write carries no
+/// <c>authid</c>, and the reserved all-zero <c>UserId</c> means "no identity" rather than a caller who owns the
+/// all-zero rows — so <see cref="CompiledAfterHook.Required"/> gates the hook out instead of letting the
+/// comparison run against it. Exactly the <see cref="RequiredContext"/> gate the policy engine applies to a
+/// rule, in the same direction: refuse upstream rather than fold an absent operand into a verdict.
+/// </para>
 /// </remarks>
 internal static class EventSubscriptions
 {
@@ -36,20 +55,17 @@ internal static class EventSubscriptions
     /// <param name="catalog">The primed policy catalog the hooks were compiled into.</param>
     /// <param name="event">The event, as the outbox stored it.</param>
     /// <param name="evaluator">The evaluator every condition is judged by.</param>
-    /// <param name="context">The caller conditions resolve <c>@user</c>/<c>@tenant</c> against.</param>
-    /// <param name="logger">Where a condition that threw is recorded, at Debug.</param>
+    /// <param name="logger">Where a condition that threw, or one with no actor to read, is recorded at Debug.</param>
     /// <returns>The matching hooks; empty when the event matched nothing at all.</returns>
     internal static IReadOnlyList<CompiledAfterHook> Matching(
         PolicyCatalog catalog,
         AlvoEvent @event,
         IPredicateEvaluator evaluator,
-        AlvoContext context,
         ILogger logger)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(@event);
         ArgumentNullException.ThrowIfNull(evaluator);
-        ArgumentNullException.ThrowIfNull(context);
 
         if (!TryReadSubscription(@event.Type, out var entity, out var operation)
             || !catalog.TryGetEntity(entity, out var policy))
@@ -57,8 +73,34 @@ internal static class EventSubscriptions
             return [];
         }
 
-        return [.. policy.AfterHooks.For(operation).Where(hook => Selects(hook, @event, evaluator, context, logger))];
+        var caller = CallerOf(@event);
+
+        return [.. policy.AfterHooks.For(operation).Where(hook => Selects(hook, @event, evaluator, caller, logger))];
     }
+
+    /// <summary>
+    /// The caller one event's conditions resolve <c>@user.id</c> against: the credential the envelope records.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="AlvoContext.Anonymous"/> when the envelope records nobody, which is what an anonymous write
+    /// emits — and <see cref="CompiledAfterHook.Required"/> is what keeps a condition reading <c>@user.id</c>
+    /// from being decided against the reserved all-zero id it carries.
+    /// </para>
+    /// <para>
+    /// <b>No tenant and only <see cref="Role.Anon"/>, and neither is observable.</b> <c>@tenant.id</c> and
+    /// <c>@user.roles</c> are refused when the hook is compiled, so nothing a condition can name reads either —
+    /// which is why this can be honest about carrying neither instead of borrowing the dispatcher's own
+    /// <see cref="AlvoContext.System"/> identity, whose <see cref="Role.Admin"/> made
+    /// <c>'admin' in @user.roles</c> true for every event.
+    /// </para>
+    /// </remarks>
+    private static AlvoContext CallerOf(AlvoEvent @event) =>
+        UserId.TryParse(@event.AuthId, CultureInfo.InvariantCulture, out var actor)
+            ? new AlvoContext { User = actor, Roles = _noRoles }
+            : AlvoContext.Anonymous;
+
+    private static readonly IReadOnlySet<Role> _noRoles = new HashSet<Role> { Role.Anon };
 
     /// <summary>
     /// Whether <paramref name="hook"/>'s condition holds for <paramref name="event"/>. A hook declaring none
@@ -81,6 +123,12 @@ internal static class EventSubscriptions
         if (hook.Condition is null)
         {
             return true;
+        }
+
+        if (hook.Required.IsMissingFrom(context))
+        {
+            EventLog.ConditionHasNoActorToRead(logger, hook.Path, @event.Id);
+            return false;
         }
 
         try

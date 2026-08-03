@@ -48,6 +48,14 @@ namespace MMLib.Alvo.Tests.Events;
 /// mid-batch, not the death itself; killing a process is Task 12's harness, and this world must not be read as
 /// doing it.
 /// </para>
+/// <para>
+/// <b>The clock also advances one poll interval per claimed batch, and without that this criterion cannot pass at
+/// all.</b> A refused delivery is now handed back with a backoff, so a released entry is unclaimable until that
+/// backoff has elapsed <em>on this clock</em> — and a clock that only moved at an abandonment would strand every
+/// redelivery, which is exactly what it did when the backoff landed (186 of 10 000 events pending, measured). One
+/// tick per batch is the conservative stand-in for what a real pump spends: a hundred real deliveries cannot cost
+/// less than one poll interval.
+/// </para>
 /// </remarks>
 internal sealed class OutboxChaosWorld : IAsyncDisposable
 {
@@ -131,7 +139,7 @@ internal sealed class OutboxChaosWorld : IAsyncDisposable
 
         var entry = claimed[0];
         var @event = AlvoEventJson.Read(entry.Payload);
-        await _store.ReleaseAsync(entry.Id, Ct);
+        await _store.ReleaseAsync(entry.Id, TimeSpan.Zero, Ct);
 
         return @event;
     }
@@ -173,6 +181,8 @@ internal sealed class OutboxChaosWorld : IAsyncDisposable
             {
                 break;
             }
+
+            _clock.Advance(_options.PollInterval);
         }
 
         return await FinishAsync(stopwatch.Elapsed, claims);

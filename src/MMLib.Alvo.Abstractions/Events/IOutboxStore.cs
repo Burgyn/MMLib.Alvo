@@ -44,8 +44,18 @@ public sealed record OutboxEntry(Guid Id, string Type, string PartitionKey, stri
 /// <b>The claim protocol, in the order it happens.</b> <see cref="ClaimAsync"/> takes the oldest undelivered
 /// entries, stamps them with the caller's name and the current instant, and counts the attempt.
 /// <see cref="MarkDispatchedAsync"/> retires an entry for good. <see cref="ReleaseAsync"/> hands one back for
-/// an immediate retry. Nothing else recovers a claim a process took and then died holding: that is the
-/// lease, and it is why <see cref="ClaimAsync"/> takes one rather than reading a configured value.
+/// a later retry, no sooner than the backoff it is given. Nothing else recovers a claim a process took and then
+/// died holding: that is the lease, and it is why <see cref="ClaimAsync"/> takes one rather than reading a
+/// configured value.
+/// </para>
+/// <para>
+/// <b>An entry is therefore in one of two waiting states, and an implementation must tell them apart.</b> A
+/// <em>held</em> entry — claimed and not yet answered for — becomes claimable again only once its
+/// <em>lease</em> expires, which is the crash-recovery path. A <em>released</em> entry becomes claimable once
+/// its own backoff has passed, and its lease is irrelevant because nobody is holding it. Collapsing the two
+/// into "claimable immediately on release" is what lets one restarting receiver spend an event's whole attempt
+/// ceiling in milliseconds; collapsing them the other way makes every failed delivery wait out a lease sized
+/// for crash recovery.
 /// </para>
 /// <para>
 /// <b>The claim filters undelivered entries, never a high-water mark.</b> Ids are minted per process
@@ -121,13 +131,33 @@ public interface IOutboxStore
     /// </remarks>
     Task MarkDispatchedAsync(Guid id, CancellationToken cancellationToken = default);
 
-    /// <summary>Hands <paramref name="id"/> back, claimable again immediately.</summary>
+    /// <summary>
+    /// Hands <paramref name="id"/> back, claimable again once <paramref name="retryAfter"/> has passed.
+    /// </summary>
     /// <param name="id">The entry's id.</param>
+    /// <param name="retryAfter">
+    /// How long the entry stays unclaimable. <see cref="TimeSpan.Zero"/> means "claimable immediately", which is
+    /// what a caller handing an entry straight back with no failed delivery behind it asks for.
+    /// </param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <remarks>
+    /// <para>
     /// The attempt count is <b>not</b> rolled back. Releasing is how a dispatcher says "I could not deliver
     /// this", and an implementation that reset the count would make the ceiling in
     /// <see cref="ClaimAsync"/> unreachable — the poison entry would be retried forever.
+    /// </para>
+    /// <para>
+    /// <b><paramref name="retryAfter"/> is what makes the ceiling a bound on time and not only on count.</b>
+    /// Without it a released entry is claimable on the caller's very next claim, so a receiver that is
+    /// restarting exhausts <c>maxAttempts</c> in milliseconds and the event is abandoned permanently — and this
+    /// build has no dead-letter queue to recover it from. An implementation that ignores the parameter is
+    /// therefore not merely imprecise: it removes the only thing that lets a delivery survive a redeploy.
+    /// </para>
+    /// <para>
+    /// It is measured from the implementation's <em>own</em> clock rather than passed as an instant, for the
+    /// reason <see cref="ClaimAsync"/> takes a lease rather than reading one: the store is what stamps the row,
+    /// so the store is what must read the clock the stamp is compared against.
+    /// </para>
     /// </remarks>
-    Task ReleaseAsync(Guid id, CancellationToken cancellationToken = default);
+    Task ReleaseAsync(Guid id, TimeSpan retryAfter, CancellationToken cancellationToken = default);
 }

@@ -59,17 +59,34 @@ public class UnhonouredJsonataTests
         => Should.NotThrow(() => Apply(Webhook(payload: "{{new.title}}")));
 
     /// <summary>
-    /// The brace-free JSONata expression the classifier's second clause exists for: <c>records.id</c> is a
-    /// valid placeholder-free template and would otherwise be delivered as its own source text.
+    /// <c>email.data</c> is refused as a <b>dead slot</b>, whatever it carries — the classifier never sees it.
     /// </summary>
-    [Fact]
-    public void A_raw_jsonata_email_data_is_refused_at_apply()
+    /// <remarks>
+    /// <para>
+    /// The slot was compiled, its placeholders resolved against the entity's schema, and then read by nothing:
+    /// the executor renders only <c>to</c>, <c>subject</c> and <c>body</c>, and no <c>data.*</c> placeholder root
+    /// exists for either to reach it with. So an author following the schema's own doc comment got a clean apply
+    /// and a silently discarded value — the identical failure mode raw JSONata is refused for, at an
+    /// implementation rate of zero.
+    /// </para>
+    /// <para>
+    /// Both spellings are asserted, and that is the point of the theory rather than decoration: a template
+    /// <em>and</em> a brace-free JSONata expression get the same refusal, because the reason is the slot and not
+    /// its contents. A fact over the JSONata spelling alone would keep passing if the template spelling started
+    /// compiling into a value nothing renders again.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData("records.id")]
+    [InlineData("{{new.title}}")]
+    public void An_email_data_slot_is_refused_at_apply_whatever_it_carries(string data)
     {
-        var refusal = Should.Throw<DescriptorValidationException>(() => Apply(Email(data: "records.id")));
+        var refusal = Should.Throw<DescriptorValidationException>(() => Apply(Email(data: data)));
 
         var error = refusal.Result.Errors.ShouldHaveSingleItem();
         error.Path.ShouldBe("/entities/deals/hooks/afterUpdate/0/action/data");
-        error.Message.ShouldBe(UnhonouredFeatures.RawJsonata.Consequence);
+        error.Message.ShouldBe(UnhonouredFeatures.EmailData.Consequence);
+        error.FixSuggestion.ShouldBe(UnhonouredFeatures.EmailData.Fix);
     }
 
     /// <summary>

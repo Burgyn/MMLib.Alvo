@@ -179,6 +179,33 @@ internal static class UnhonouredFeatures
         + "than this refusal. Tracked in #149.");
 
     /// <summary>
+    /// An <c>email</c> action's <c>data</c> slot: compiled and validated, and then read by nothing.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Refused because it was a dead slot, which is worse than an unimplemented one.</b> The compiler parsed
+    /// it, resolved every placeholder against the entity's schema and stored the result, and the executor renders
+    /// only <c>to</c>, <c>subject</c> and <c>body</c> — there is no <c>data.*</c> placeholder root for a subject
+    /// or a body to reach it with. So an author following the schema's own doc comment got a clean apply and a
+    /// silently discarded value.
+    /// </para>
+    /// <para>
+    /// That is the identical failure mode <see cref="RawJsonata"/> is refused for — the action still runs and the
+    /// message is not the one the author declared — at an implementation rate of zero. Adding a <c>data.*</c>
+    /// root instead would be new placeholder surface, which belongs to the PR that has a use for it.
+    /// </para>
+    /// </remarks>
+    internal static UnhonouredSlot EmailData { get; } = new(
+        "email.data",
+        "An 'email' action's 'data' is not rendered: it is validated when the descriptor is applied and then "
+        + "read by nothing, so the mail goes out with the referenced template's own subject and body and the "
+        + "values declared here are silently dropped — a message that was delivered without the data you "
+        + "declared, which is indistinguishable from a template bug.",
+        "Move the values into the template's 'subject'/'body' as '{{...}}' placeholders over 'new'/'old'/"
+        + "'event'/'@user.id', which this build does render, or remove 'data'. A 'data.*' placeholder root is "
+        + "new surface and lands with the PR that reads it.");
+
+    /// <summary>
     /// A message template whose body lives in a bundle file, refused for the hook that would have rendered it.
     /// </summary>
     /// <remarks>

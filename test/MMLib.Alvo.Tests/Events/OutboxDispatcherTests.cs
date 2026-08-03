@@ -160,6 +160,60 @@ public sealed class OutboxDispatcherTests : IDisposable
     }
 
     /// <summary>
+    /// <b>Each failed attempt is handed back with a growing backoff, so the attempt ceiling bounds
+    /// <em>time</em> and not only a count.</b>
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The idle wait runs only when a claim came back <b>empty</b>, and a release used to make the entry
+    /// claimable on the very next iteration — so a receiver restarting for thirty seconds burned all ten attempts
+    /// in milliseconds and the event was abandoned permanently, with no dead-letter queue to recover it from.
+    /// That directly defeats the delivery's own stated reason for not classifying failures: it declines to tell a
+    /// permanently wrong endpoint from one thirty seconds from finishing, so it has to survive the thirty
+    /// seconds.
+    /// </para>
+    /// <para>
+    /// The backoffs are asserted as the exact sequence rather than as "not zero", because the interesting
+    /// mutations are the ones that keep a backoff and stop it growing: a constant one leaves the total linear in
+    /// the ceiling instead of quadratic, and the shipped-default assertion below is what turns that into a number
+    /// a reader can weigh against a deploy.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task Every_failed_attempt_is_handed_back_with_a_backoff_that_grows()
+    {
+        var store = StoreWith(WonDeal());
+        await using var pump = await StartAsync(
+            store, Ready, options => options.MaxAttempts = 4, HttpStatusCode.ServiceUnavailable);
+
+        await UntilAsync(() => Errors.Count == 1, "the poison event to be given up on");
+
+        store.Backoffs.ShouldBe([_pollInterval, 2 * _pollInterval, 3 * _pollInterval, 4 * _pollInterval]);
+    }
+
+    /// <summary>
+    /// What that backoff is worth at the <b>shipped defaults</b>: ten attempts cannot be spent in less than
+    /// forty-five seconds, which is the restart the delivery declines to distinguish.
+    /// </summary>
+    /// <remarks>
+    /// An arithmetic fact over the defaults rather than a timed one, because the alternative is a test that
+    /// really waits forty-five seconds. It is here rather than in a comment because the number is the whole
+    /// justification for not classifying a failure, and a later edit to either default silently changes it.
+    /// </remarks>
+    [Fact]
+    public void The_shipped_defaults_spread_the_attempt_ceiling_over_at_least_forty_five_seconds()
+    {
+        var defaults = new AlvoEventOptions();
+
+        var total = Enumerable.Range(1, defaults.MaxAttempts - 1).Sum(attempt => attempt * defaults.PollInterval.Ticks);
+
+        TimeSpan.FromTicks(total).ShouldBeGreaterThanOrEqualTo(
+            TimeSpan.FromSeconds(45),
+            $"MaxAttempts={defaults.MaxAttempts} at PollInterval={defaults.PollInterval} must outlast a receiver "
+            + "restart, because nothing at delivery time can tell a restart from a permanently wrong endpoint");
+    }
+
+    /// <summary>
     /// The poison event stops occupying the pump once it hits the ceiling, so events queued behind it are still
     /// delivered. PR5a's stand-in for a dead-letter queue is an attempt ceiling plus a loud log (7.1 owns the
     /// queue), and this is what makes the stand-in adequate rather than merely present.
@@ -517,6 +571,7 @@ public sealed class OutboxDispatcherTests : IDisposable
         private readonly List<ClaimRequest> _claims = [];
         private readonly List<Guid> _dispatched = [];
         private readonly List<Guid> _released = [];
+        private readonly List<TimeSpan> _backoffs = [];
         private readonly Lock _gate = new();
         private int _ensureCount;
 
@@ -532,6 +587,9 @@ public sealed class OutboxDispatcherTests : IDisposable
         internal IReadOnlyList<Guid> DispatchedIds => Snapshot(_dispatched);
 
         internal IReadOnlyList<Guid> ReleasedIds => Snapshot(_released);
+
+        /// <summary>The backoff each release was given, in order — the retry spacing the dispatcher chose.</summary>
+        internal IReadOnlyList<TimeSpan> Backoffs => Snapshot(_backoffs);
 
         /// <summary>The only entry, for the facts that queue exactly one.</summary>
         internal FakeEntry OnlyEntry
@@ -600,12 +658,13 @@ public sealed class OutboxDispatcherTests : IDisposable
             return Task.CompletedTask;
         }
 
-        public Task ReleaseAsync(Guid id, CancellationToken cancellationToken = default)
+        public Task ReleaseAsync(Guid id, TimeSpan retryAfter, CancellationToken cancellationToken = default)
         {
             lock (_gate)
             {
                 _entries.Single(candidate => candidate.Id == id).Claimed = false;
                 _released.Add(id);
+                _backoffs.Add(retryAfter);
             }
 
             return Task.CompletedTask;

@@ -196,6 +196,7 @@ internal sealed class OutboxStoreWorld : IOutboxStoreWorld
             command.CommandText = OutboxTable.ClaimSql(_tableName);
             RelationalSqlBatch.AddParameter(command, "@claimed_at", StoredInstant.Text(_clock.GetUtcNow()));
             RelationalSqlBatch.AddParameter(command, "@claimed_by", "racer");
+            RelationalSqlBatch.AddParameter(command, "@now", StoredInstant.Text(_clock.GetUtcNow()));
             RelationalSqlBatch.AddParameter(
                 command, "@stale_before", StoredInstant.Text(_clock.GetUtcNow() - _raceLease));
             RelationalSqlBatch.AddParameter(command, "@max_attempts", RaceMaxAttempts);

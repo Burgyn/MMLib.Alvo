@@ -218,6 +218,117 @@ public class AfterHookCompilerTests
     }
 
     /// <summary>
+    /// The two caller references an event envelope cannot answer are refused <b>by name</b> in an after-hook
+    /// condition, exactly as a template refuses them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The positive form and the negated one are both asserted, because they failed in opposite directions
+    /// and only one of them looked like a denial.</b> <c>@tenant.id</c> resolved to <see langword="null"/> for
+    /// the dispatcher, and the interpreter's null rule collapses every comparison — <c>!=</c> included — to
+    /// <see langword="false"/>, so <c>!(@tenant.id == 'x')</c> was <b>true</b>: a hook reading "every tenant
+    /// except ours" delivered every tenant's unmasked row to an external endpoint. <c>@user.roles</c> resolved to
+    /// a value and was worse for it: the dispatcher's own <c>admin</c> role, so <c>'admin' in @user.roles</c> was
+    /// true for every event whoever wrote the row.
+    /// </para>
+    /// <para>
+    /// A refusal at apply is the fix rather than a documented caveat, and it is the call issue #153 already made
+    /// for the template half. <c>@user.id</c> is deliberately <em>not</em> refused: the envelope carries
+    /// <c>authid</c>, so it can be answered — resolve what you can answer, refuse what you cannot.
+    /// </para>
+    /// <para>
+    /// <b>The <c>@tenant.id</c> cases compare against a <em>column</em> and not a string literal, because a
+    /// literal is unreachable:</b> <c>@tenant.id</c> is typed <c>Uuid</c>, so <c>@tenant.id == 'acme'</c> is
+    /// already refused by the CEL type checker as <c>Cannot compare String to Uuid</c> and never reaches this
+    /// refusal at all. The reachable — and realistic — shape is a row's own tenant column against the caller's,
+    /// which is exactly how a rule writes it.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData("new.tenant_id == @tenant.id", "@tenant.id")]
+    [InlineData("!(new.tenant_id == @tenant.id)", "@tenant.id")]
+    [InlineData("'admin' in @user.roles", "@user.roles")]
+    [InlineData("!('admin' in @user.roles)", "@user.roles")]
+    public void A_condition_naming_provenance_the_envelope_lacks_is_refused_at_apply(string condition, string name)
+    {
+        var error = CompileErrors(AfterUpdate(Webhook(), condition)).ShouldHaveSingleItem();
+
+        error.Path.ShouldBe("/entities/deals/hooks/afterUpdate/0/condition");
+        error.Message.ShouldContain(name);
+        error.FixSuggestion.ShouldNotBeNull().ShouldNotBeEmpty();
+    }
+
+    /// <summary>
+    /// The non-vacuity control for the refusal above: <c>@user.id</c> <b>is</b> answerable from the envelope's
+    /// <c>authid</c>, so a condition reading it compiles and is carried with its actor requirement recorded.
+    /// </summary>
+    /// <remarks>
+    /// Without this, "provenance is refused" would also hold for a build that refused every <c>@</c> reference in
+    /// a condition — which would delete the most useful after-hook condition there is.
+    /// </remarks>
+    [Fact]
+    public void A_condition_reading_user_id_compiles_and_records_that_it_needs_an_actor()
+    {
+        var hook = Compile(AfterUpdate(Webhook(), condition: "new.owner_id != @user.id"))
+            .AfterUpdate.ShouldHaveSingleItem();
+
+        hook.Condition.ShouldNotBeNull();
+        hook.Required.UserId.ShouldBeTrue();
+        hook.Required.TenantId.ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// A condition reading no caller value at all records no requirement, so nothing gates it.
+    /// </summary>
+    [Fact]
+    public void A_condition_reading_no_caller_value_records_no_requirement()
+        => Compile(AfterUpdate(Webhook(), condition: "changed(stage)"))
+            .AfterUpdate.ShouldHaveSingleItem().Required.ShouldBe(RequiredContext.None);
+
+    /// <summary>
+    /// A webhook endpoint's URL is parsed and its scheme checked at <b>apply</b>, not at delivery.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The schema's <c>"format": "uri"</c> is an annotation and asserts nothing, so before this the only check
+    /// was <c>new Uri(...)</c> inside the delivery — a <c>UriFormatException</c> per attempt, retried to the
+    /// ceiling and abandoned, which an author reads as an endpoint outage rather than as the typo it is. It is
+    /// also the endpoint mistake an author is most likely to make.
+    /// </para>
+    /// <para>
+    /// Cleartext is refused for a different reason: the body is the record's complete unmasked image, the
+    /// delivery is unsigned, and the slot's own description says <em>HTTPS target</em> — so an on-path observer,
+    /// who is nobody's author, would read what decision D7 bounded to a declared endpoint.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData("/hooks/crm")]
+    [InlineData("example.test/hook")]
+    [InlineData("http://example.test/hook")]
+    public void An_endpoint_url_that_could_never_deliver_is_refused_at_apply(string url)
+        => CompileErrors(AfterUpdate(Webhook()), endpointUrl: url)
+            .ShouldHaveSingleItem().Path.ShouldBe("/webhooks/endpoints/crm-sync/url");
+
+    /// <summary>
+    /// The one cleartext carve-out, and the control that keeps the refusal above about the <em>scheme</em>
+    /// rather than about the string <c>http</c>: a loopback host has no network to observe, and
+    /// <c>http://127.0.0.1:port/hook</c> is the shape a local receiver — including this repository's own
+    /// end-to-end suites — uses.
+    /// </summary>
+    [Theory]
+    [InlineData("http://localhost:5000/hook")]
+    [InlineData("http://127.0.0.1:5000/hook")]
+    [InlineData("https://example.test/hook")]
+    public void A_deliverable_endpoint_url_is_carried_as_a_resolved_target(string url)
+    {
+        var endpoint = Compile(AfterUpdate(Webhook()), endpointUrl: url)
+            .AfterUpdate.ShouldHaveSingleItem().Action.Endpoint.ShouldNotBeNull();
+
+        endpoint.Name.ShouldBe("crm-sync");
+        endpoint.Url.ShouldBe(new Uri(url));
+    }
+
+    /// <summary>
     /// A refused hook leaves no compiled hook behind, so a catalog is never built holding a half-compiled
     /// action — the same all-or-nothing the rule slots keep.
     /// </summary>
@@ -252,22 +363,28 @@ public class AfterHookCompilerTests
                 ["/entities/deals/hooks/afterUpdate/0/condition", "/entities/deals/hooks/afterUpdate/1/action/endpoint"],
                 ignoreOrder: true);
 
-    private static EntityAfterHooks Compile(EntityHooks? hooks, string? body = null)
+    private static EntityAfterHooks Compile(
+        EntityHooks? hooks, string? body = null, string endpointUrl = DeclaredEndpointUrl)
     {
-        PolicyCatalog.TryBuild(Descriptor(hooks, body), Schema, CelFixtures.Compiler, out var catalog, out var errors)
+        PolicyCatalog.TryBuild(
+            Descriptor(hooks, body, endpointUrl), Schema, CelFixtures.Compiler, out var catalog, out var errors)
             .ShouldBeTrue($"expected a clean build, got: {string.Join("; ", errors.Select(e => $"{e.Path}: {e.Message}"))}");
 
         catalog.ShouldNotBeNull().TryGetEntity("deals", out var policy).ShouldBeTrue();
         return policy.AfterHooks;
     }
 
-    private static IReadOnlyList<DescriptorValidationError> CompileErrors(EntityHooks hooks, string? body = null)
+    private static IReadOnlyList<DescriptorValidationError> CompileErrors(
+        EntityHooks hooks, string? body = null, string endpointUrl = DeclaredEndpointUrl)
     {
-        PolicyCatalog.TryBuild(Descriptor(hooks, body), Schema, CelFixtures.Compiler, out _, out var errors)
+        PolicyCatalog.TryBuild(
+            Descriptor(hooks, body, endpointUrl), Schema, CelFixtures.Compiler, out _, out var errors)
             .ShouldBeFalse("this fixture is written to be refused");
 
         return errors;
     }
+
+    private const string DeclaredEndpointUrl = "https://example.test/hook";
 
     private static EntityHooks AfterUpdate(AutomationAction action, string? condition = null) =>
         At("afterUpdate", action, condition);
@@ -307,7 +424,8 @@ public class AfterHookCompilerTests
         string template = "deal-won", string to = "ops@firma.sk", string? data = null) =>
         new() { Template = template, To = to, Data = data };
 
-    private static AlvoDescriptor Descriptor(EntityHooks? hooks, string? body = null) => new()
+    private static AlvoDescriptor Descriptor(
+        EntityHooks? hooks, string? body = null, string endpointUrl = DeclaredEndpointUrl) => new()
     {
         ApiVersion = "alvo.dev/v1",
         Name = "test",
@@ -327,7 +445,7 @@ public class AfterHookCompilerTests
         {
             Endpoints = new Dictionary<string, WebhookEndpoint>(StringComparer.Ordinal)
             {
-                ["crm-sync"] = new() { Url = "https://example.test/hook", SecretRef = "crm-sync-secret" },
+                ["crm-sync"] = new() { Url = endpointUrl, SecretRef = "crm-sync-secret" },
             },
         },
     };
@@ -343,6 +461,8 @@ public class AfterHookCompilerTests
                 new FieldSchema { Name = "title", Type = FieldType.String, MaxLength = 200 },
                 new FieldSchema { Name = "stage", Type = FieldType.Enum, EnumValues = ["lead", "won", "lost"] },
                 new FieldSchema { Name = "owner_email", Type = FieldType.String, MaxLength = 200 },
+                new FieldSchema { Name = "owner_id", Type = FieldType.Uuid },
+                new FieldSchema { Name = "tenant_id", Type = FieldType.Uuid },
             ],
         },
     ]);

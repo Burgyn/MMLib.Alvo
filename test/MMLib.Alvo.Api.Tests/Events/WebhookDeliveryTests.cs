@@ -6,7 +6,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Net.Http.Headers;
 
 using MMLib.Alvo.Data;
-using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Events.Internal;
 
@@ -102,14 +101,20 @@ public class WebhookDeliveryTests
     {
         private readonly WebApplication _app;
 
-        private LoopbackReceiver(WebApplication app, WebhookEndpoint endpoint)
+        private LoopbackReceiver(WebApplication app, WebhookTarget endpoint)
         {
             _app = app;
             Endpoint = endpoint;
         }
 
-        /// <summary>The endpoint a delivery posts to, spelled the way a descriptor spells one.</summary>
-        internal WebhookEndpoint Endpoint { get; }
+        /// <summary>
+        /// The endpoint a delivery posts to, in the resolved shape the hook compiler hands the delivery.
+        /// </summary>
+        /// <remarks>
+        /// Cleartext over a loopback address, which is the one non-HTTPS shape
+        /// <c>AfterHookCompiler</c> accepts and the reason that carve-out exists: there is no network to observe.
+        /// </remarks>
+        internal WebhookTarget Endpoint { get; }
 
         /// <summary>The method of the request that arrived.</summary>
         internal string? Method { get; private set; }
@@ -137,9 +142,7 @@ public class WebhookDeliveryTests
             });
 
             await app.StartAsync();
-            receiver = new LoopbackReceiver(
-                app,
-                new WebhookEndpoint { Url = $"{app.Urls.First()}/hook", SecretRef = "unread-in-this-build" });
+            receiver = new LoopbackReceiver(app, new WebhookTarget("loopback", new Uri($"{app.Urls.First()}/hook")));
 
             return receiver;
         }

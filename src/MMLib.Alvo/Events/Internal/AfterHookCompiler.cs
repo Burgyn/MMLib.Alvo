@@ -1,8 +1,10 @@
 ﻿using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Descriptor.Internal;
 using MMLib.Alvo.Expressions;
+using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Internal;
 using MMLib.Alvo.Rules;
+using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Events.Internal;
@@ -71,9 +73,12 @@ internal static class AfterHookCompiler
     private const string AfterDeletePoint = "afterDelete";
 
     private const string BodyFileSlot = "bodyFile";
+    private const string ConditionSlot = "condition";
     private const string EndpointSlot = "endpoint";
+    private const string EndpointsBlock = "endpoints";
     private const string TemplateSlot = "template";
     private const string TypeSlot = "type";
+    private const string UrlSlot = "url";
 
     private static List<CompiledAfterHook> CompilePoint(
         string point, IReadOnlyList<AfterHook>? declared, AfterHookScope scope)
@@ -98,7 +103,7 @@ internal static class AfterHookCompiler
 
     private static CompiledAfterHook? CompileHook(AfterHook hook, string path, AfterHookScope scope)
     {
-        var condition = CompileCondition(hook.Condition, $"{path}/condition", scope);
+        var condition = CompileCondition(hook.Condition, $"{path}/{ConditionSlot}", scope);
         if (hook.Condition is not null && condition is null)
         {
             return null;
@@ -106,13 +111,15 @@ internal static class AfterHookCompiler
 
         var action = CompileAction(hook.Action, $"{path}/action", scope);
 
-        return action is null ? null : new CompiledAfterHook(path, condition, action);
+        return action is null
+            ? null
+            : new CompiledAfterHook(path, condition, ActorRead(condition), action);
     }
 
     /// <summary>
     /// Compiles a hook condition in the <see cref="CelProfile.Condition"/> profile — the only profile where
     /// <c>old.</c>, <c>new.</c> and <c>changed(field)</c> are legal, which is what an after-hook condition is
-    /// written in.
+    /// written in — and then refuses the two caller references the <em>envelope</em> cannot answer.
     /// </summary>
     private static CompiledExpression? CompileCondition(string? source, string path, AfterHookScope scope)
     {
@@ -122,14 +129,89 @@ internal static class AfterHookCompiler
         }
 
         var result = scope.Compiler.Compile(source, CelProfile.Condition, scope.Schema);
-        if (result.IsSuccess)
+        if (!result.IsSuccess)
         {
-            return result.Expression;
+            scope.Errors.AddRange(result.Errors.Select(error => Error(path, error.Message, error.FixSuggestion)));
+            return null;
         }
 
-        scope.Errors.AddRange(result.Errors.Select(error => Error(path, error.Message, error.FixSuggestion)));
-        return null;
+        return HonoursTheEnvelope(result.Expression!, path, scope) ? result.Expression : null;
     }
+
+    /// <summary>
+    /// Refuses <c>@tenant.id</c> and <c>@user.roles</c> in an after-hook condition, by name, exactly as
+    /// <see cref="TemplatePlaceholder"/> refuses them in a template.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This closes an asymmetry rather than documenting one.</b> Both names compile in the
+    /// <see cref="CelProfile.Condition"/> profile and both resolve against a post-commit context that cannot
+    /// answer them, in opposite and equally silent directions. <c>@tenant.id</c> resolves to
+    /// <see langword="null"/>, and the interpreter's null rule collapses <em>every</em> comparison — including
+    /// <c>!=</c> — to <see langword="false"/>, so <c>changed(status) &amp;&amp; !(@tenant.id == 'internal')</c>
+    /// reads as "every tenant except ours" and fires for <b>every</b> tenant, delivering the unmasked row to an
+    /// external endpoint. <c>@user.roles</c> resolves to a non-null value and is worse for it: it answers with
+    /// the <em>dispatcher's</em> role set, so <c>'admin' in @user.roles</c> is true for every event whoever
+    /// wrote the row.
+    /// </para>
+    /// <para>
+    /// <b>It is refused here and not in <see cref="CelTypeChecker"/>'s profile table</b>, because the reason is
+    /// the envelope's and not the profile's: PR5b's before-hooks compile in the same profile and run inside the
+    /// request, where both names have a real caller to resolve against. A profile-level ban would forbid them
+    /// there too, for a reason that does not apply.
+    /// </para>
+    /// </remarks>
+    private static bool HonoursTheEnvelope(CompiledExpression condition, string path, AfterHookScope scope)
+    {
+        var refusals = _unanswerable
+            .Where(reference => PolicyCatalogBuilder.ReferencesContextValue(condition.Root, reference.Value))
+            .Select(reference => Error(path, Unanswerable(reference), reference.Fix))
+            .ToList();
+
+        scope.Errors.AddRange(refusals);
+
+        return refusals.Count == 0;
+    }
+
+    private static string Unanswerable(UnanswerableReference reference) =>
+        $"This after-hook condition reads '{reference.Name}', which an after-hook cannot answer: "
+        + $"{reference.Why}. The condition is evaluated after the write has committed, against the event "
+        + "envelope, so a comparison against it is decided by the absence of the value rather than by the "
+        + "value — silently, and not always in the denying direction.";
+
+    /// <summary>
+    /// The two caller references an event envelope cannot answer, with the words
+    /// <see cref="EnvelopeProvenance"/> holds for both this refusal and the template one.
+    /// </summary>
+    private static readonly UnanswerableReference[] _unanswerable =
+    [
+        new(
+            CelContextValue.TenantId,
+            "@tenant.id",
+            EnvelopeProvenance.NoTenant,
+            EnvelopeProvenance.InsteadOfTenant($"new.{AlvoManagedColumns.TenantId}")),
+        new(
+            CelContextValue.UserRoles,
+            "@user.roles",
+            EnvelopeProvenance.NoRoles,
+            EnvelopeProvenance.InsteadOfRoles),
+    ];
+
+    /// <summary>
+    /// Which caller values the condition reads, so the dispatcher can refuse to select a hook whose condition
+    /// needs an actor the envelope did not carry.
+    /// </summary>
+    /// <remarks>
+    /// Only <c>@user.id</c> can survive <see cref="HonoursTheEnvelope"/>, so this is the same
+    /// <see cref="RequiredContext"/> gate the policy engine applies to a rule — one shape for "this predicate
+    /// reads an operand the caller may not have", rather than a second ad-hoc check.
+    /// </remarks>
+    private static RequiredContext ActorRead(CompiledExpression? condition) =>
+        condition is null
+            ? RequiredContext.None
+            : new RequiredContext(
+                TenantId: false,
+                UserId: PolicyCatalogBuilder.ReferencesContextValue(condition.Root, CelContextValue.UserId));
 
     private static CompiledAction? CompileAction(AutomationAction action, string path, AfterHookScope scope) =>
         action switch
@@ -156,11 +238,58 @@ internal static class AfterHookCompiler
             return null;
         }
 
+        var target = ResolveTarget(webhook.Endpoint, endpoint, scope);
         var templates = new Dictionary<string, AlvoTemplate>(StringComparer.Ordinal);
+        var payload = AddTransformSlot(
+            templates, ActionSlot.Payload, webhook.Payload, $"{path}/{ActionSlot.Payload}", scope);
 
-        return AddTransformSlot(templates, ActionSlot.Payload, webhook.Payload, $"{path}/{ActionSlot.Payload}", scope)
-            ? new CompiledAction(webhook, templates, endpoint)
-            : null;
+        return target is not null && payload ? new CompiledAction(webhook, templates, target) : null;
+    }
+
+    /// <summary>
+    /// Turns a declared endpoint into the <see cref="WebhookTarget"/> a delivery uses, refusing a URL that is
+    /// not an absolute HTTPS one <b>here</b> rather than at delivery.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The schema's <c>"format": "uri"</c> is an annotation, not an assertion</b> — nothing in the frozen
+    /// schema rejects <c>/hooks/crm</c> or <c>htp://x</c>. Left to delivery, a malformed URL is a
+    /// <see cref="UriFormatException"/> per attempt, retried to the ceiling and abandoned, which an author reads
+    /// as an endpoint outage rather than as the typo it is. It is also the endpoint mistake an author is most
+    /// likely to make, which is precisely the case apply-time resolution exists for.
+    /// </para>
+    /// <para>
+    /// <b><c>http</c> is refused rather than warned, and the carve-out is loopback only.</b> The body is the
+    /// unmasked record — <c>hidden</c> fields included — the delivery is unsigned, and the schema's own
+    /// description of the slot says <em>HTTPS target</em>; cleartext is the one combination where decision D7's
+    /// "bounded by who declares what" premise fails outright, because an on-path observer is nobody's author.
+    /// A warning would describe a tolerance the apply path does not have, which is the argument
+    /// <see cref="UnhonouredFeatures"/> already records for every one of its own entries. The exception is a
+    /// <see cref="Uri.IsLoopback"/> host: there is no network to observe, and <c>http://localhost:5000/hook</c>
+    /// is the shape a local receiver and this repository's own end-to-end suites use.
+    /// </para>
+    /// </remarks>
+    private static WebhookTarget? ResolveTarget(string name, WebhookEndpoint endpoint, AfterHookScope scope)
+    {
+        var path = $"/webhooks/{EndpointsBlock}/{name}/{UrlSlot}";
+        if (!Uri.TryCreate(endpoint.Url, UriKind.Absolute, out var url))
+        {
+            scope.Errors.Add(Error(path, NotAnAbsoluteUrl(endpoint.Url), AbsoluteUrlFix));
+            return null;
+        }
+
+        return IsDeliverable(url) ? new WebhookTarget(name, url) : RefuseCleartext(path, url, scope);
+    }
+
+    private static bool IsDeliverable(Uri url) =>
+        string.Equals(url.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal)
+        || (string.Equals(url.Scheme, Uri.UriSchemeHttp, StringComparison.Ordinal) && url.IsLoopback);
+
+    private static WebhookTarget? RefuseCleartext(string path, Uri url, AfterHookScope scope)
+    {
+        scope.Errors.Add(Error(path, NotHttps(url.Scheme), NotHttpsFix));
+
+        return null;
     }
 
     private static CompiledAction? CompileEmail(EmailAction email, string path, AfterHookScope scope)
@@ -174,10 +303,34 @@ internal static class AfterHookCompiler
 
         var templates = new Dictionary<string, AlvoTemplate>(StringComparer.Ordinal);
         var recipient = AddSugarSlot(templates, ActionSlot.To, email.To, $"{path}/{ActionSlot.To}", scope);
-        var data = AddTransformSlot(templates, ActionSlot.Data, email.Data, $"{path}/{ActionSlot.Data}", scope);
+        var data = RefuseEmailData(email.Data, $"{path}/{ActionSlot.Data}", scope);
         var body = AddMessageTemplate(templates, email.Template, message, scope);
 
         return recipient && data && body ? new CompiledAction(email, templates, Endpoint: null) : null;
+    }
+
+    /// <summary>
+    /// Refuses <c>email.data</c>, because nothing renders it: it was compiled, validated and stored under
+    /// <see cref="ActionSlot.Data"/>, and <c>EventActionExecutor</c> reads only <c>to</c>, <c>subject</c> and
+    /// <c>body</c>.
+    /// </summary>
+    /// <remarks>
+    /// A slot that compiles cleanly and is then discarded is the exact failure mode a partial JSONata evaluator
+    /// is refused for (<see cref="UnhonouredFeatures.RawJsonata"/>) — the action still runs and the body is not
+    /// the one the author declared — except that the honoured fraction here is zero. A <c>data.*</c> placeholder
+    /// root would be new surface and is PR5b's, so the slot is refused by name until something reads it.
+    /// </remarks>
+    private static bool RefuseEmailData(string? source, string path, AfterHookScope scope)
+    {
+        if (source is null)
+        {
+            return true;
+        }
+
+        var refusal = UnhonouredFeatures.EmailData;
+        scope.Errors.Add(Error(path, refusal.Consequence, refusal.Fix));
+
+        return false;
     }
 
     /// <summary>
@@ -263,6 +416,24 @@ internal static class AfterHookCompiler
     private static string? Refusal(string placeholder, EntitySchema entity) =>
         TemplatePlaceholder.TryResolve(placeholder, entity, out var refusal) ? null : refusal;
 
+    private static string NotAnAbsoluteUrl(string url) =>
+        $"'{url}' is not an absolute URL, so no delivery to this endpoint could ever be attempted. It is "
+        + "refused when the descriptor is applied rather than at delivery, where it would be one failed attempt "
+        + "per retry until the event hit the attempt ceiling and was abandoned.";
+
+    private const string AbsoluteUrlFix =
+        "Give the endpoint an absolute HTTPS URL, such as 'https://example.com/hooks/crm'. The schema's "
+        + "\"format\": \"uri\" is an annotation and asserts nothing, so this is the only place the URL is checked.";
+
+    private static string NotHttps(string scheme) =>
+        $"This endpoint's URL uses '{scheme}', and a delivery carries the record's complete unmasked image — "
+        + "'hidden' fields included — with no signature and no field projection. Over cleartext that image is "
+        + "readable by anyone on the path, who is not the author the disclosure decision is bounded by.";
+
+    private const string NotHttpsFix =
+        "Use an 'https' URL. A cleartext 'http' URL is accepted only for a loopback host (localhost, 127.0.0.1, "
+        + "[::1]), which is the local-receiver shape and has no network to observe.";
+
     private const string MalformedTemplateFix =
         "Close every '{{' with a '}}' and put a single root-and-member placeholder inside each pair. It is "
         + "refused here rather than shipped as literal text, which is what an unclosed placeholder would "
@@ -317,3 +488,18 @@ internal sealed record AfterHookScope(
     IReadOnlyDictionary<string, WebhookEndpoint> Endpoints,
     string EntityPath,
     List<DescriptorValidationError> Errors);
+
+/// <summary>
+/// One caller reference an after-hook condition may name and an event envelope cannot answer, and the words
+/// its refusal is built from.
+/// </summary>
+/// <remarks>
+/// A table rather than two <c>if</c> blocks for the reason <see cref="UnhonouredFeatures"/> is a table: the
+/// wording, the detection and the fix belong to one entry, so a third unanswerable reference cannot be added
+/// to the walk without the message that explains it.
+/// </remarks>
+/// <param name="Value">The compiled node kind the walk looks for.</param>
+/// <param name="Name">How the reference is spelled in CEL, for the message an author reads.</param>
+/// <param name="Why">Why the envelope cannot answer it — <see cref="EnvelopeProvenance"/>'s words.</param>
+/// <param name="Fix">What to do instead, and where a real answer is tracked.</param>
+internal sealed record UnanswerableReference(CelContextValue Value, string Name, string Why, string Fix);

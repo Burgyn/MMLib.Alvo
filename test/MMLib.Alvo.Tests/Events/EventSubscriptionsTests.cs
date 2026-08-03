@@ -105,7 +105,7 @@ public sealed class EventSubscriptionsTests : IDisposable
     [Fact]
     public void A_condition_that_throws_selects_nothing_rather_than_everything()
         => EventSubscriptions
-            .Matching(CatalogConditionedOnWinning, Updated("won", "lead"), new ThrowingEvaluator(), Context, _logger)
+            .Matching(CatalogConditionedOnWinning, Updated("won", "lead"), new ThrowingEvaluator(), _logger)
             .ShouldBeEmpty();
 
     /// <summary>
@@ -118,7 +118,7 @@ public sealed class EventSubscriptionsTests : IDisposable
         var @event = Updated("won", "lead");
 
         EventSubscriptions.Matching(
-            CatalogConditionedOnWinning, @event, new ThrowingEvaluator(), Context, _logger).ShouldBeEmpty();
+            CatalogConditionedOnWinning, @event, new ThrowingEvaluator(), _logger).ShouldBeEmpty();
 
         var line = _logger.Entries.ShouldHaveSingleItem();
         line.Level.ShouldBe(LogLevel.Debug);
@@ -127,12 +127,62 @@ public sealed class EventSubscriptionsTests : IDisposable
         line.Exception.ShouldNotBeNull();
     }
 
+    /// <summary>
+    /// A condition's <c>@user.id</c> is the <b>envelope's</b> actor, not the process draining the queue.
+    /// </summary>
+    /// <remarks>
+    /// The most ordinary after-hook condition there is — "notify the owner unless the owner is who changed it" —
+    /// and against a dispatcher-wide <c>AlvoContext.System</c> it could not work: the positive form never matched
+    /// and the negated form always did, because the comparison was against the framework's own reserved id. Both
+    /// directions are asserted from one envelope so neither can pass by accident.
+    /// </remarks>
+    [Theory]
+    [InlineData(Actor, false)]
+    [InlineData(Bystander, true)]
+    public void A_conditions_user_id_is_the_envelopes_actor_and_not_the_dispatcher(string owner, bool selected)
+    {
+        var matched = Matching(CatalogConditionedOnAnotherActor, OwnedBy(owner, actedBy: Actor));
+
+        matched.Count.ShouldBe(selected ? 1 : 0, $"owner_id '{owner}' against an actor of '{Actor}'");
+    }
+
+    /// <summary>
+    /// An event that records no actor selects no hook that asks who acted — rather than comparing the row
+    /// against the reserved all-zero id, which means "no identity" and never a caller who owns those rows.
+    /// </summary>
+    [Fact]
+    public void A_hook_reading_user_id_is_not_selected_when_the_event_records_no_actor()
+    {
+        var @event = OwnedBy(Bystander, actedBy: null);
+
+        Matching(CatalogConditionedOnAnotherActor, @event).ShouldBeEmpty();
+
+        var line = _logger.Entries.ShouldHaveSingleItem();
+        line.Level.ShouldBe(LogLevel.Debug);
+        line.Message.ShouldContain("@user.id");
+        line.Message.ShouldContain(@event.Id.ToString());
+    }
+
+    /// <summary>
+    /// The gate is on the reference and not on the event: a hook whose condition never names <c>@user.id</c> is
+    /// selected for an actorless event exactly as before.
+    /// </summary>
+    /// <remarks>
+    /// The non-vacuity control for the fact above — without it, "not selected" would also hold if the gate
+    /// refused every hook on an anonymous write.
+    /// </remarks>
+    [Fact]
+    public void A_hook_that_never_reads_user_id_is_still_selected_for_an_actorless_event()
+        => Matching(CatalogWithAHookOnEveryPoint, OwnedBy(Bystander, actedBy: null))
+            .ShouldHaveSingleItem().Path.ShouldContain("afterUpdate");
+
     private readonly CapturingLogger _logger = new();
 
-    private static AlvoContext Context { get; } = AlvoContext.System(tenant: null);
+    private const string Actor = "019000aa-0000-7000-8000-00000000a001";
+    private const string Bystander = "019000aa-0000-7000-8000-00000000b002";
 
     private IReadOnlyList<CompiledAfterHook> Matching(PolicyCatalog catalog, AlvoEvent @event) =>
-        EventSubscriptions.Matching(catalog, @event, CelFixtures.Evaluator, Context, _logger);
+        EventSubscriptions.Matching(catalog, @event, CelFixtures.Evaluator, _logger);
 
     /// <summary>
     /// The schema every catalog below is compiled against.
@@ -153,6 +203,11 @@ public sealed class EventSubscriptionsTests : IDisposable
     private static PolicyCatalog CatalogConditionedOnWinning { get; } = Catalog(new EntityHooks
     {
         AfterUpdate = [Hook("changed(stage) && new.stage == 'won'")],
+    });
+
+    private static PolicyCatalog CatalogConditionedOnAnotherActor { get; } = Catalog(new EntityHooks
+    {
+        AfterUpdate = [Hook("new.owner_id != @user.id")],
     });
 
     private static AfterHook Hook(string? condition = null) =>
@@ -196,8 +251,18 @@ public sealed class EventSubscriptionsTests : IDisposable
         [
             new FieldSchema { Name = "id", Type = FieldType.Uuid },
             new FieldSchema { Name = "stage", Type = FieldType.Enum, EnumValues = ["lead", "won", "lost"] },
+            new FieldSchema { Name = "owner_id", Type = FieldType.Uuid },
         ],
     };
+
+    /// <summary>One update of a deal, saying who owns the row and which credential changed it.</summary>
+    /// <param name="owner">The row's <c>owner_id</c>.</param>
+    /// <param name="actedBy">The envelope's <c>authid</c>, or <see langword="null"/> for an anonymous write.</param>
+    private static AlvoEvent OwnedBy(string owner, string? actedBy) => Event(
+        "entity.deals.updated",
+        record: Record(("owner_id", Guid.Parse(owner))),
+        oldRecord: Record(("owner_id", Guid.Parse(owner))),
+        authId: actedBy);
 
     private static AlvoEvent Updated(string stage, string was) => Event(
         "entity.deals.updated",
@@ -209,7 +274,8 @@ public sealed class EventSubscriptionsTests : IDisposable
         string type,
         AlvoRecord? record = null,
         AlvoRecord? oldRecord = null,
-        IReadOnlyList<string>? changed = null) => new()
+        IReadOnlyList<string>? changed = null,
+        string? authId = null) => new()
         {
             Id = Guid.Parse("019000aa-0000-7000-8000-0000000000d1"),
             Source = AlvoEvent.DefaultSource,
@@ -218,6 +284,7 @@ public sealed class EventSubscriptionsTests : IDisposable
             Subject = "deals/019000aa-0000-7000-8000-0000000000ff",
             PartitionKey = "deals:019000aa-0000-7000-8000-0000000000ff",
             AuthType = AlvoEventAuthType.ApiKey,
+            AuthId = authId,
             CorrelationId = "019000aa-0000-7000-8000-0000000000c0",
             Data = new AlvoEventData
             {

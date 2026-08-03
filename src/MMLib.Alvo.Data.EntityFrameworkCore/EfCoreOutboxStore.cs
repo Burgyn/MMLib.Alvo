@@ -102,8 +102,23 @@ public sealed class EfCoreOutboxStore : IOutboxStore
             cancellationToken);
 
     /// <inheritdoc/>
-    public Task ReleaseAsync(Guid id, CancellationToken cancellationToken = default) =>
-        ExecuteAsync(OutboxTable.ReleaseSql(_tableName), _ => { }, id, cancellationToken);
+    /// <remarks>
+    /// <paramref name="retryAfter"/> is stamped into <c>claimed_at</c> while <c>claimed_by</c> is cleared, which
+    /// is the released state <see cref="OutboxTable.ClaimSql"/> compares against the current instant rather than
+    /// against a lease. <see cref="TimeSpan.Zero"/> therefore stamps the present and the entry is claimable at
+    /// once, which is what the port promises for it.
+    /// </remarks>
+    public Task ReleaseAsync(Guid id, TimeSpan retryAfter, CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(retryAfter.Ticks);
+
+        return ExecuteAsync(
+            OutboxTable.ReleaseSql(_tableName),
+            command => RelationalSqlBatch.AddParameter(
+                command, "@claimed_at", StoredInstant.Text(_time.GetUtcNow() + retryAfter)),
+            id,
+            cancellationToken);
+    }
 
     private async Task<IReadOnlyList<OutboxEntry>> ClaimBatchAsync(
         string claimant, int batchSize, int maxAttempts, TimeSpan lease, CancellationToken ct)
@@ -119,6 +134,7 @@ public sealed class EfCoreOutboxStore : IOutboxStore
                 command.CommandText = OutboxTable.ClaimSql(_tableName);
                 RelationalSqlBatch.AddParameter(command, "@claimed_at", StoredInstant.Text(now));
                 RelationalSqlBatch.AddParameter(command, "@claimed_by", claimant);
+                RelationalSqlBatch.AddParameter(command, "@now", StoredInstant.Text(now));
                 RelationalSqlBatch.AddParameter(command, "@stale_before", StoredInstant.Text(now - lease));
                 RelationalSqlBatch.AddParameter(command, "@max_attempts", maxAttempts);
                 RelationalSqlBatch.AddParameter(command, "@batch", batchSize);

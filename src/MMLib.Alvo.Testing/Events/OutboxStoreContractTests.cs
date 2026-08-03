@@ -118,16 +118,55 @@ public abstract class OutboxStoreContractTests
         (await world.Store.ClaimAsync(Claimant, batchSize: 1, MaxAttempts, _lease, Ct)).ShouldBeEmpty();
     }
 
-    /// <summary>A release is the fast path back: no caller waits out a lease it already gave up on.</summary>
+    /// <summary>
+    /// A release with a backoff really holds the entry for that long, and the backoff is measured against the
+    /// <b>current instant</b> rather than against the lease.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The two halves are what make this fact bite in both directions. The claim <em>before</em> the clock moves
+    /// must come back empty, or the backoff does nothing and one restarting receiver spends an event's whole
+    /// attempt ceiling in milliseconds. The claim after it must succeed on a clock that has moved by the backoff
+    /// and by <b>far less than the lease</b>, or a released entry is waiting out a crash-recovery window it does
+    /// not need — which would make every failed delivery five minutes late at the shipped defaults.
+    /// </para>
+    /// <para>
+    /// The attempt count is asserted too, because the release must not roll it back: that is what keeps the
+    /// ceiling reachable at all.
+    /// </para>
+    /// </remarks>
     [Fact]
-    public async Task A_released_entry_is_claimable_immediately_without_waiting_for_the_lease()
+    public async Task A_released_entry_is_held_for_its_backoff_and_not_for_the_lease()
     {
         EnsureEngineAvailable();
         await using var world = await WorldAsync();
         var ids = await world.SeedAsync(count: 1);
         await world.Store.ClaimAsync(Claimant, batchSize: 1, MaxAttempts, _lease, Ct);
 
-        await world.Store.ReleaseAsync(ids[0], Ct);
+        await world.Store.ReleaseAsync(ids[0], _backoff, Ct);
+        var tooSoon = await world.Store.ClaimAsync(Claimant, batchSize: 1, MaxAttempts, _lease, Ct);
+
+        world.Advance(_backoff + TimeSpan.FromSeconds(1));
+        var reclaimed = await world.Store.ClaimAsync(Claimant, batchSize: 1, MaxAttempts, _lease, Ct);
+
+        tooSoon.ShouldBeEmpty($"a backoff of {_backoff} must hold the entry for that long");
+        reclaimed.ShouldHaveSingleItem().Attempts.ShouldBe(2);
+        _backoff.ShouldBeLessThan(_lease, "the fact would not distinguish the backoff from the lease otherwise");
+    }
+
+    /// <summary>
+    /// A release with <see cref="TimeSpan.Zero"/> is claimable at once — the shape a caller handing an entry
+    /// straight back with no failed delivery behind it asks for, and the one the port promises.
+    /// </summary>
+    [Fact]
+    public async Task A_release_with_no_backoff_is_claimable_at_once()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        var ids = await world.SeedAsync(count: 1);
+        await world.Store.ClaimAsync(Claimant, batchSize: 1, MaxAttempts, _lease, Ct);
+
+        await world.Store.ReleaseAsync(ids[0], TimeSpan.Zero, Ct);
 
         (await world.Store.ClaimAsync(Claimant, batchSize: 1, MaxAttempts, _lease, Ct))
             .ShouldHaveSingleItem();
@@ -137,6 +176,10 @@ public abstract class OutboxStoreContractTests
     /// This build's stand-in for a DLQ is an attempt ceiling plus a loud log: past the ceiling the entry
     /// stops being claimed, so one poison event cannot occupy the pump forever.
     /// </summary>
+    /// <remarks>
+    /// The clock moves past each attempt's backoff, because that is the only way the ceiling is reachable at all
+    /// now — which is the point: reaching it takes <em>time</em> and not merely a loop.
+    /// </remarks>
     [Fact]
     public async Task An_entry_past_the_attempt_ceiling_is_no_longer_claimed()
     {
@@ -147,7 +190,7 @@ public abstract class OutboxStoreContractTests
         foreach (var _ in Enumerable.Range(0, MaxAttempts))
         {
             await world.Store.ClaimAsync(Claimant, batchSize: 1, MaxAttempts, _lease, Ct);
-            await world.Store.ReleaseAsync(ids[0], Ct);
+            await world.Store.ReleaseAsync(ids[0], TimeSpan.Zero, Ct);
         }
 
         (await world.Store.ClaimAsync(Claimant, batchSize: 1, MaxAttempts, _lease, Ct)).ShouldBeEmpty();
@@ -178,6 +221,11 @@ public abstract class OutboxStoreContractTests
     private const string Claimant = "worker-1";
 
     private static readonly TimeSpan _lease = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// A retry backoff far shorter than <see cref="_lease"/>, so the backoff fact can tell the two apart.
+    /// </summary>
+    private static readonly TimeSpan _backoff = TimeSpan.FromSeconds(10);
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 }

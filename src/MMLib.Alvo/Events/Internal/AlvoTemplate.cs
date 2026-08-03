@@ -187,15 +187,17 @@ internal readonly record struct AlvoTemplateSegment(string Text, bool IsPlacehol
 /// cannot be missing from the message that lists them.
 /// </para>
 /// <para>
-/// <b>Two names the design's own table promises and this build refuses.</b> The addendum lists
-/// <c>@user.id</c> and <c>@tenant.id</c> as "the provenance the envelope carries", and the envelope carries
-/// only the first: <see cref="AlvoEvent"/> has <c>authid</c> and no tenant attribute at all. So
-/// <c>@tenant.id</c> is refused <em>by name</em> — it is a real Alvo CEL context reference, so "unknown
-/// root" would misdescribe why it fails. Resolving it from the row's own <c>tenant_id</c> was rejected:
-/// <c>@tenant.id</c> asks which tenant the <em>caller</em> was in, and a write made as
-/// <c>AlvoContext.System</c> has no tenant while the row it wrote has one — answering a different question
-/// with a plausible value is the defect this refusal exists to prevent. <c>@user.roles</c> is refused for
-/// the same reason and one more: the envelope carries authentication, never authorization.
+/// <b>Two names the design's own table promises and this build refuses</b>, in the words
+/// <see cref="EnvelopeProvenance"/> holds for both halves of the rule. The addendum lists <c>@user.id</c> and
+/// <c>@tenant.id</c> as "the provenance the envelope carries", and the envelope carries only the first:
+/// <see cref="AlvoEvent"/> has <c>authid</c> and no tenant attribute at all. So <c>@tenant.id</c> is refused
+/// <em>by name</em> — it is a real Alvo CEL context reference, so "unknown root" would misdescribe why it
+/// fails. Resolving it from the row's own <c>tenant_id</c> was rejected: <c>@tenant.id</c> asks which tenant
+/// the <em>caller</em> was in, and a write made as <c>AlvoContext.System</c> has no tenant while the row it
+/// wrote has one — answering a different question with a plausible value is the defect this refusal exists to
+/// prevent. <c>@user.roles</c> is refused for the same reason and one more: the envelope carries
+/// authentication, never authorization. <see cref="AfterHookCompiler"/> refuses the same two names in a CEL
+/// condition, for the same reasons and out of the same constants.
 /// </para>
 /// <para>
 /// <b>Where the two halves differ.</b> <see cref="TryResolve"/> sees the schema, so it can tell an
@@ -265,6 +267,7 @@ internal static class TemplatePlaceholder
     private const char RootSeparator = '.';
 
     private const string IdMember = "id";
+    private const string RolesMember = "roles";
     private const string TypeMember = "type";
     private const string TimeMember = "time";
     private const string SubjectMember = "subject";
@@ -342,21 +345,25 @@ internal static class TemplatePlaceholder
 
     private static string EventPlaceholder(string member) => $"{EventRoot}{RootSeparator}{member}";
 
-    private static string? UnknownUserMember(string placeholder, string member) =>
-        member == IdMember
-            ? null
-            : $"{Quoted(placeholder)} cannot be resolved: an event carries only the id of the credential "
-                + $"that acted, so '{UserRoot}{RootSeparator}{IdMember}' is the one '{UserRoot}' member a "
-                + "template can read. For a recipient, use a field on the record such as "
-                + $"{Quoted($"{NewRoot}{RootSeparator}owner_email")}; an identity claim Alvo does not yet "
-                + "carry is tracked in issue #37.";
+    private static string? UnknownUserMember(string placeholder, string member) => member switch
+    {
+        IdMember => null,
+        RolesMember => RolesAreNotOnTheEnvelope(placeholder),
+        _ => $"{Quoted(placeholder)} cannot be resolved: an event carries only the id of the credential "
+            + $"that acted, so '{UserRoot}{RootSeparator}{IdMember}' is the one '{UserRoot}' member a "
+            + "template can read. For a recipient, use a field on the record such as "
+            + $"{Quoted($"{NewRoot}{RootSeparator}owner_email")} — which makes the recipient "
+            + "caller-controlled, so a real mail provider has to validate it (see AlvoMailMessage.To); an "
+            + "identity claim Alvo does not yet carry is tracked in issue #37.",
+    };
+
+    private static string RolesAreNotOnTheEnvelope(string placeholder) =>
+        $"{Quoted(placeholder)} cannot be resolved: {EnvelopeProvenance.NoRoles}. "
+        + EnvelopeProvenance.InsteadOfRoles;
 
     private static string TenantIsNotOnTheEnvelope(string placeholder) =>
-        $"{Quoted(placeholder)} cannot be resolved: the event envelope carries no tenant attribute, so "
-        + "nothing at delivery time knows which tenant the caller was in. On a tenant-scoped entity, use the "
-        + $"row's own {Quoted($"{NewRoot}{RootSeparator}{AlvoManagedColumns.TenantId}")} instead — it answers "
-        + "which tenant the row belongs to, which is a different question and the only one the envelope can "
-        + "answer.";
+        $"{Quoted(placeholder)} cannot be resolved: {EnvelopeProvenance.NoTenant}. "
+        + EnvelopeProvenance.InsteadOfTenant($"{NewRoot}{RootSeparator}{AlvoManagedColumns.TenantId}");
 
     private static string UnknownRoot(string placeholder) =>
         $"{Quoted(placeholder)} names no root Alvo can resolve. {AvailableRoots}";
