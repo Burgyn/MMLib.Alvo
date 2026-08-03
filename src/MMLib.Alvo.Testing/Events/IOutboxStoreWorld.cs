@@ -36,6 +36,13 @@ public interface IOutboxStoreWorld : IAsyncDisposable
     /// </summary>
     /// <param name="count">How many entries to append.</param>
     /// <returns>The appended ids, ascending — the order the queue is claimed in.</returns>
+    /// <remarks>
+    /// <b>Append them in an order that is not their id order</b> — reverse is simplest. Appended ascending, an
+    /// engine's physical row order equals the queue order, so a store that never sorted its claimed batch
+    /// still answers in order and <see cref="OutboxStoreContractTests"/>'s sorting fact passes on luck.
+    /// Measured: with ascending seeding, deleting the shipped store's in-process re-sort left every fact green
+    /// on both engines.
+    /// </remarks>
     Task<IReadOnlyList<Guid>> SeedAsync(int count);
 
     /// <summary>Appends one undelivered entry carrying <paramref name="id"/> exactly.</summary>

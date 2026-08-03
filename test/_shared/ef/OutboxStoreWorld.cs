@@ -72,16 +72,27 @@ internal sealed class OutboxStoreWorld : IOutboxStoreWorld
     public void Advance(TimeSpan duration) => _clock.Advance(duration);
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// The entries are appended in <b>reverse</b> mint order, which is the arrangement
+    /// <see cref="OutboxTableFacts.The_engine_orders_minted_ids_the_way_they_were_minted"/> already uses and
+    /// for the same reason: appended ascending, an engine's physical row order equals the id order, so
+    /// <c>RETURNING</c> comes back sorted whether or not anything sorted it. Measured — with ascending
+    /// seeding, deleting the store's in-process re-sort left every fact green on both engines; with reverse
+    /// seeding it goes red on both.
+    /// </remarks>
     public async Task<IReadOnlyList<Guid>> SeedAsync(int count)
     {
-        var ids = new List<Guid>(count);
-        for (var index = 0; index < count; index++)
+        var ids = MintedIds(count);
+        foreach (var id in ids.Reverse())
         {
-            ids.Add(await AppendAsync(AlvoEventId.Create(_clock.GetUtcNow())));
+            await AppendAsync(id);
         }
 
         return ids;
     }
+
+    private IReadOnlyList<Guid> MintedIds(int count) =>
+        [.. Enumerable.Range(0, count).Select(_ => AlvoEventId.Create(_clock.GetUtcNow()))];
 
     /// <inheritdoc/>
     public Task<Guid> SeedWithExplicitIdAsync(Guid id) => AppendAsync(id);

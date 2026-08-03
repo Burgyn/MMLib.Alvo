@@ -43,10 +43,18 @@ public abstract class OutboxStoreContractTests
     /// process. Without that, "in order" above would hold only by luck.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Measured, not merely documented: spike Q3 reports <c>RETURNING already sorted: False</c> for SQLite
-    /// <em>and</em> PostgreSQL. The batch is <see cref="UnsortedReturningBatchSize"/> entries because that is
-    /// the size at which deleting the store's re-sort makes this fact fail — a smaller batch can come back
-    /// ordered by accident.
+    /// <em>and</em> PostgreSQL.
+    /// </para>
+    /// <para>
+    /// <b>What makes this fact bite is <see cref="IOutboxStoreWorld.SeedAsync"/> appending out of id order,
+    /// not the batch size.</b> Measured while proving it: with the entries appended <em>ascending</em>, an
+    /// engine's physical row order equals the queue order and deleting the shipped store's re-sort left this
+    /// fact green on both engines at <see cref="UnsortedReturningBatchSize"/> entries; with them appended in
+    /// reverse it goes red on both. That is why the obligation is written on the world's own member rather
+    /// than left as a batch size to tune.
+    /// </para>
     /// </remarks>
     [Fact]
     public async Task A_claim_is_sorted_in_process_because_returning_order_is_arbitrary()

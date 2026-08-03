@@ -77,6 +77,7 @@ public class OutboxClaimSqlTests
     /// deliver every row twice.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Under <c>READ COMMITTED</c>, PostgreSQL's EvalPlanQual re-check re-evaluates the <b>outer</b>
     /// <c>WHERE</c> against the row the winner just updated — and nothing else. A subquery-only predicate is
     /// not part of that re-check, so the loser's <c>id IN (…)</c> still holds and it re-claims rows that are
@@ -84,17 +85,29 @@ public class OutboxClaimSqlTests
     /// 10"</em>. This fact is a shape assertion rather than a behaviour one because it is the one that
     /// survives in a project with no database; the behaviour is pinned on PostgreSQL by
     /// <c>PostgreSqlOutboxStoreTests.A_second_claimant_claims_nothing_rather_than_the_same_rows</c>.
+    /// </para>
+    /// <para>
+    /// <b>The split is asserted to have found a separator before the prefix is read, and that is the whole
+    /// difference between this fact and a vacuous one.</b> Deleting the outer predicates also deletes the
+    /// <c>AND</c> in front of the subquery, so a plain <c>Split(…)[0]</c> hands back the <em>entire</em>
+    /// statement — whose subquery still carries both predicates — and the fact passes over exactly the
+    /// mutation it exists to catch. Measured: with the outer <c>WHERE</c> reduced to <c>id IN (subquery)</c>,
+    /// the prefix-only version stayed green while PostgreSQL's two-claimant fact went red.
+    /// </para>
     /// </remarks>
     [Fact]
     public void The_outer_where_repeats_the_claimability_predicate_it_is_not_redundant()
     {
-        var outerWhere = OutboxTable.ClaimSql(TableName).Split("AND id IN (")[0];
+        var clauses = OutboxTable.ClaimSql(TableName).Split(OuterWhereSeparator);
 
-        outerWhere.ShouldContain("dispatched_at IS NULL");
-        outerWhere.ShouldContain("claimed_at IS NULL");
+        clauses.Length.ShouldBe(
+            2, $"the subquery must be one more '{OuterWhereSeparator}' on a non-empty outer WHERE");
+        clauses[0].ShouldContain("dispatched_at IS NULL");
+        clauses[0].ShouldContain("claimed_at IS NULL");
     }
 
     private const string TableName = "alvo_outbox";
+    private const string OuterWhereSeparator = "AND id IN (";
 
     private static readonly TimeSpan _matchTimeout = TimeSpan.FromSeconds(5);
 }
