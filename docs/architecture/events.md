@@ -341,8 +341,12 @@ emission. `FOR UPDATE SKIP LOCKED` is **not** the fix: it skips the row, not the
 flatly as *"per-entity-key ordering, partitioned by primary key"* — `baas-analyza.md:656` had hedged it
 (*"ak sa dá"* — if possible) and the design dropped the hedge. The addendum's deviation 72 restored the
 hedge but with only the **first** condition. Q1 is what added the second, and every place in this subsystem
-that states the guarantee at all states **both** halves of it — `AlvoEvent`, `AlvoEventId`, `IOutboxStore`,
-`AlvoEventOptions` and `EfAlvoData`'s emit remarks. If you find one that states only the first, it is wrong.
+that states the guarantee at all states **both** halves of it — `AlvoEvent`, `AlvoEventId`, `IOutboxStore`
+and `AlvoEventOptions`. If you find one that states only the first, it is wrong. **`EfAlvoData`'s emit
+remarks were listed here as a fifth and state neither**: they state the one-instant rule and never mention
+ordering, which is fine — the guarantee is not the emit site's to make — but citing them was the same class
+of citation defect this document corrects twice elsewhere, so the list now names the four places that really
+carry it.
 
 ## After-hooks
 
@@ -394,10 +398,20 @@ is about.
 | Action | PR5a | Notes |
 |---|---|---|
 | `webhook` | **runs** | one POST to the endpoint the descriptor declared, resolved at compile time |
-| `email` | **runs** | `IEmailSender`, with **only** a console dev provider — no SMTP, no mail service in compose |
+| `email` | **runs** | `IEmailSender`, with **only** a console dev provider — no SMTP, no mail service in compose; `email.data` is **refused at apply** (see below) |
 | `entity.update` | refused at apply | PR5b's |
 | `function` | refused at apply | frozen into `$defs/action`; out of scope for all of PR5 |
 | `http.call` | refused at apply | same |
+
+**`email.data` was a dead slot, and a dead slot is worse than an unimplemented one.** `CompileEmail`
+parsed it, resolved every placeholder against the entity's schema and stored it under `ActionSlot.Data`; the
+executor renders only `to`, `subject` and `body`, and no `data.*` placeholder root exists for either to reach
+it with. So an author following the schema's own doc comment got a clean apply and a silently discarded
+value — the *exact* failure mode this document cites as the reason a partial JSONata evaluator is refused,
+except that the implementation rate was **0 %** and it was not refused. It is now a named
+`UnhonouredFeatures` entry, refused whatever it carries (template spelling included, which is the theory's
+second case). Adding a `data.*` root instead would be new placeholder surface and belongs to the PR that
+reads it.
 
 `email` is not optional. `templates.subject`/`body` and `email.to` are the only slots that exercise the
 template engine's plain-string sugar, and deviation 64's consequence (`{{@user.email}}` is refused, never
@@ -429,16 +443,32 @@ believes is signed is a security absence, which is exactly the misattribution th
 
 ### The unmasked record, and why that disclosure is accepted
 
-`data.record` and `data.old_record` are the complete images with **no `hidden` mask applied**. Three
-reasons, in order of weight:
+`data.record` and `data.old_record` are the complete images with **no `hidden` mask applied**. D7 is two
+separable decisions that were written as one, and only the second of them is retirable — so they are split
+here, because a **#152** or 7.1 reader has to be able to tell which half their work closes.
+
+**The unmasked *envelope* is permanent, for two reasons that no later PR removes.**
 
 1. An after-hook condition reading `old.commission_note` or `changed(commission_note)` must see every
    field, and `hidden` is a per-caller **read** mask rather than a data classification.
 2. A masked post-image would be worse than incomplete: every masked field would read as moved on every
    update, so `data.changed` would report changes that never happened.
-3. The consequence is bounded by who declares what. An after-hook `webhook` delivers hidden fields to an
-   endpoint declared **in the same descriptor by the same author** as the `hidden` rule — never
-   caller-supplied, and a template can never render into a URL.
+
+**The unmasked *delivery body* is what #152 closes**, and it rests on one reason only: the consequence is
+bounded by who declares what. An after-hook `webhook` delivers hidden fields to an endpoint declared **in
+the same descriptor by the same author** as the `hidden` rule. Per-endpoint field projection retires
+exactly this half and leaves the two above untouched.
+
+`webhooks.endpoints` is **never caller-supplied** — that sentence is about the webhook endpoint and about
+nothing else in the action set. It is *not* true of `email.to`: that slot takes `{{...}}` placeholders and
+`AlvoTemplate`'s own remarks suggest `{{new.owner_email}}`, so **anyone who can write a record chooses the
+recipient of framework-sent mail carrying that record's data**. It is inert today only because
+`ConsoleEmailSender` sends nothing, which is exactly why it is written down here rather than met by the SMTP
+PR: the person adding a real sender inherits a caller-controlled recipient and needs to know it. Two
+adjacent consequences of the same fact, recorded and not fixed: `To: ""` is still reachable through a
+template that renders empty or a NULL column, and `AlvoMailMessage.To` is unvalidated rendered row text
+reaching a host's SMTP implementation, which is CRLF header injection in any sender that does not validate
+it — named in `IEmailSender`'s own remarks while the port is new.
 
 It is pinned by a **named** fact rather than a paragraph
 (`A_webhook_receives_the_unmasked_record_and_that_is_documented`, plus
@@ -449,9 +479,47 @@ engine). Per-endpoint field projection is **#152**.
 the hook's JSON pointer, the action `type`, the event id and the event type — and **not** the rendered
 body, the recipient, the subject or the endpoint URL. A log line has no author who declared it: logging
 the rendered value would take a `hidden` field out of the one place the design accepted it going and put
-it into whatever ships logs, which nobody declared. The payload is stored once, in the `alvo_outbox` row,
-under that table's retention rather than a log pipeline's. `ConsoleEmailSender` is the one deliberate
-exception and not an exception to the rule — for a console provider the log *is* the mailbox.
+it into whatever ships logs, which nobody declared. The payload is stored once, in the `alvo_outbox` row —
+**without any retention today** (see below). `ConsoleEmailSender` is the one deliberate exception and not an
+exception to the rule — for a console provider the log *is* the mailbox.
+
+**The *failure* path used to break that rule, and it was the worse half.** `WebhookDelivery`'s
+`TimeoutException` interpolated the whole `endpoint.Url` — scheme, host, path and query — and the dispatcher
+logs a failed attempt at **Warning with the exception attached**. Since `secretRef` is never read and no
+HMAC is sent, a secret embedded in the URL is the only authentication an author has, and that is how a
+Slack, Teams, Zapier or Make endpoint actually works: `https://hooks.slack.com/services/T…/B…/XXXX` *is* the
+bearer token. One slow receiver put it in the log pipeline, whose read set is far wider than "whoever
+declared the endpoint" — the premise the paragraph above rests on. So the compiled action now carries a
+`WebhookTarget` (**name** plus validated `Uri`), and every message this subsystem writes names the
+**endpoint's name**, which is the author's own vocabulary and the key they act on.
+`No_log_line_carries_a_webhook_url_that_could_be_a_secret` asserts the absence *after* the same run has
+proved the secret-shaped segment really was on the wire, over the message **and** the attached exception —
+because that is what a pipeline ships. What is still disclosed, and accepted: `HttpRequestException` carries
+framework-supplied `host:port` on a DNS or connection failure. The host is not the secret; the path and the
+query are.
+
+**The endpoint's URL is validated at apply, and cleartext is refused.** `schema/project.schema.json`'s
+`"format": "uri"` is an annotation and asserts nothing, so a relative or malformed URL used to become a
+`UriFormatException` *per delivery attempt* — retried to the ceiling and abandoned, read by an author as an
+endpoint outage rather than as the typo it is, and it is the endpoint mistake an author is most likely to
+make. `AfterHookCompiler` now parses the URL at apply, refuses a non-absolute one, and refuses a non-`https`
+scheme **except for a loopback host**. `http` is refused rather than warned because the body is the complete
+unmasked image, the delivery is unsigned, and the slot's own description says *HTTPS target* — cleartext is
+the one combination where "bounded by who declares what" fails outright, since an on-path observer is
+nobody's author; and a warning would describe a tolerance the apply path does not have, which is
+`UnhonouredFeatures`' own recorded argument for every entry being an error. The loopback carve-out is
+deliberate and narrow: there is no network to observe, and `http://127.0.0.1:port/hook` is the shape a local
+receiver — including this repository's own loopback delivery suite — uses.
+
+**`alvo_outbox` has no retention, and that is a disclosure in its own right.** Nothing deletes a row
+(`grep "DELETE FROM" src/` returns nothing), and the payload carries the complete **unmasked** post- *and*
+pre-image of every create, update and delete, for every entity and every tenant. So one
+`SELECT payload FROM alvo_outbox` — or a nightly backup, or a read-replica credential — returns the whole
+edit history of a `hidden` field. D7's ground covers **one declared endpoint**; it does not cover an
+unbounded permanent store, for the same reason it does not cover a log line: nobody declared the DBA. The
+omission is also asymmetric — this branch names exactly this growth for `alvo_idempotency` (**#115**) and
+exactly this absence for the execution log. Filed as **#154**: a `dispatched_at`-based prune, carrying the
+disclosure argument rather than only the disk-space one.
 
 ## Templates, and why JSONata is refused rather than approximated
 
@@ -484,6 +552,24 @@ Both plausible naive rules fail open, in opposite directions, and the shipped ex
   placeholder-free template and deliver the literal string `records.id`. The
   **at-least-one-placeholder** clause catches that. There is no reason to declare a *transform* that is a
   constant.
+
+**The no-bare-brace clause is load-bearing for *injection*, not only for classification — do not lose it in
+#149.** A `payload` template renders row text straight into author-written text and nothing escapes it, so
+the only thing standing between a row value and a restructured JSON body is that clause: it refuses any
+payload containing `{` outside a placeholder, so a payload template **cannot be a JSON object** and a row
+value cannot forge a sibling member. What remains reachable, and is named rather than fixed:
+
+- `[` and `]` are not braces, so `["{{new.a}}", "{{new.b}}"]` *is* a legal template, and a value containing
+  `", "` forges **array elements**.
+- A bare or quoted string payload posted under `application/json` becomes **invalid** JSON, not restructured
+  JSON, when a value carries a `"`, a `\` or a newline. `WebhookDelivery`'s own remarks already name the
+  bare-string case; the quoted case is the same defect one character further on.
+
+Neither is a `hidden`-field disclosure — the receiver is the declared endpoint either way — so both are
+malformed-body bugs rather than authorization ones, which is why they are recorded here and left to the PR
+that gives the payload slot a real evaluator. **A #149 implementation that evaluates JSONata must produce
+JSON by construction (serialize a value), never by interpolating rendered text into author-written text.**
+If it renders text at all, the no-bare-brace clause has to survive with it.
 
 **The asymmetry with the plain-string sugar slots is deliberate** and comes from the schema's own typing.
 In `email.to`, `entity.update.recordId`, `templates.subject`/`body` and string values inside
@@ -556,13 +642,40 @@ shutdown ends the pump in milliseconds instead of turning a clean stop into a ha
 claimed when the shutdown arrives is left claimed: its **lease** is what recovers it, which is the same
 mechanism that covers a process that died.
 
-**The dispatcher's caller is `AlvoContext.System(tenant: null)`** — explicit, never an ambient accessor,
-because there is no request scope here. It is `System` and never `Anonymous`, which matters because an
-anonymous actor cannot hold an idempotency key. It carries **no tenant**, deliberately: the envelope
-records which *caller* acted and never which tenant they acted in. The consequence is fail-closed and
-worth knowing — an after-hook condition comparing `@tenant.id` resolves against a null tenant, and the
-interpreter's null rule makes any comparison against it **`false`**, so such a hook never fires. Silent
-but denying, never matching "any tenant".
+**There is no dispatcher-wide caller, and the claim that there was one was wrong in both directions.** A
+hook condition's `@user.id` is resolved **per event, from the envelope's own `authid`**
+(`EventSubscriptions.CallerOf`), because the actor an author means is the credential that made the change
+and not whoever happens to be draining the queue. The two references an envelope cannot answer are refused
+when the hook is compiled. What a shared `AlvoContext.System(tenant: null)` actually did:
+
+| Reference | Resolved to | Consequence |
+|---|---|---|
+| `@user.id` | the framework's reserved id | `new.owner_id != @user.id` **never matched**; `!(new.owner_id == @user.id)` **always** did |
+| `@user.roles` | the dispatcher's own `{ admin }` | `'admin' in @user.roles` was **true for every event**, whoever wrote the row |
+| `@tenant.id` | `null` | every comparison **`false`** — including `!=` — so a negation reads as "every tenant" |
+
+The `@tenant.id` line is the one this document previously described as *"silent but denying, never matching
+'any tenant'"*. **That is true of the positive form only.** `Compare` returns `false` when either operand is
+null for *every* operator, and `Not` negates the collapsed boolean — so
+`changed(status) && !(new.tenant_id == @tenant.id)`, written to mean "every tenant except ours", was
+**`true`** and delivered every tenant's unmasked row to the endpoint. Fail-**open**, not fail-closed.
+(The literal `@tenant.id == 'internal'` is unreachable for an unrelated reason: `@tenant.id` is typed
+`Uuid`, so the CEL type checker refuses the string comparison first. The reachable shape is a row's own
+tenant column, which is how a rule writes it anyway.)
+
+So `AfterHookCompiler` now refuses `@tenant.id` and `@user.roles` in an after-hook condition **by name**,
+in the same words `TemplatePlaceholder` refuses them in a template — one authority,
+`EnvelopeProvenance`. The rule is symmetric and states itself: **resolve what the envelope can answer,
+refuse what it cannot.** The refusal lives at the *after-hook* compile site and **not** in
+`CelTypeChecker`'s profile table, because the reason belongs to the envelope and not to the profile: PR5b's
+before-hooks compile in the same `Condition` profile and run inside the request, where both names have a
+real caller to resolve against.
+
+One consequence of resolving `@user.id`: an **anonymous** write carries no `authid` at all, and the reserved
+all-zero `UserId` means "no identity" rather than a caller who owns the all-zero rows. So a hook whose
+condition reads `@user.id` is **not selected** for such an event, gated by the same `RequiredContext` shape
+the policy engine applies to a rule, and recorded at Debug (`ConditionHasNoActorToRead`) — refuse upstream
+rather than fold an absent operand into a verdict.
 
 ### The execution log is logs plus metrics, not a table
 
@@ -587,6 +700,40 @@ simply stops being claimed — **not deleted, not moved** — so it sits in `alv
 `dispatched_at IS NULL`, countable and inspectable; `alvo.events.failed` has one increment per attempt;
 and `PoisonEvent` is a loud Error line naming the event id and type. A real dead-letter queue with a
 redelivery UI is **7.1**.
+
+**A count is not a bound unless there is a backoff, and there was not one.** `Task.Delay(PollInterval)`
+runs **only** when a claim came back empty, and `ReleaseSql` set `claimed_at = NULL`, so a released entry was
+claimable on the very next iteration: a receiver restarting for thirty seconds burned all ten attempts in
+milliseconds and the event was abandoned **permanently** — no DLQ, no redelivery UI, recoverable only by
+hand-editing `alvo_outbox` — while hitting the receiver with the whole batch at line rate on the way. That
+directly defeats the delivery's own stated reason for not classifying failures: it declines to tell a
+permanently wrong endpoint from one *thirty seconds from finishing*, so it has to survive the thirty seconds.
+
+So `IOutboxStore.ReleaseAsync` takes a **`retryAfter`**, and the queue now distinguishes its two waiting
+states with the column it already had:
+
+| State | `claimed_by` | `claimed_at` means | Claimable when |
+|---|---|---|---|
+| never claimed | `NULL` | — (`NULL`) | always |
+| **released** | `NULL` | retry **not before** | `claimed_at <= @now` |
+| **held** | set | when the claim *started* | `claimed_at < @stale_before` (the lease) |
+
+No new column and no new statement — the claim's predicate grows one branch, repeated in the outer `WHERE`
+for Q4's reason and shared as one constant so the two copies cannot diverge. Comparing a released row
+against the lease would make every failed delivery wait out a five-minute crash-recovery window; comparing a
+held row against `@now` would re-claim an entry still in flight, which is a duplicate delivery per tick.
+
+The dispatcher asks for `attempts × PollInterval`: the poll interval is already the queue's own tick, so
+linear growth needs no new option, and at the shipped defaults ten attempts span **at least 45 seconds**
+(1+2+…+9) — asserted as a fact over the defaults rather than left in a comment, because the number *is* the
+justification for not classifying a failure. It is deliberately not exponential: nothing here classifies a
+failure, so a large multiplier would push a transient 503 out by hours for the same reason it would push out
+a permanently wrong endpoint. Per-status scheduling belongs with the queue that can absorb it (7.1).
+
+One consequence for the chaos criterion, stated rather than discovered: its clock is a fake one that
+previously moved only at an abandoned claim, so the backoff stranded 186 of 10 000 events on the first run.
+`OutboxChaosWorld` now advances it one poll interval per claimed batch — the conservative stand-in for what a
+real pump spends, since a hundred real deliveries cannot cost less than one tick.
 
 `ClaimLease` (default 5 minutes) is refused at startup unless it **outlasts** `PollInterval`: a lease
 shorter than the interval re-claims an entry that is still in flight on the very next tick, which is a
@@ -614,6 +761,10 @@ Each line with the issue or the PR that owns it.
 | **A DLQ and a redelivery UI** | 7.1 |
 | **Per-endpoint field projection** on a delivery | **#152** |
 | **`dataref`** for an envelope over 64 KB | **#151** |
+| **Retention / pruning of `alvo_outbox`** — rows are never deleted, and the payload holds every entity's and tenant's unmasked images forever | **#154** |
+| **Validation of a rendered `email.to`** — the recipient is caller-controlled row text, unchecked; inert only because the shipped sender delivers nowhere | **#155** |
+| **Reserving the framework's own table names** against an entity declaration (they are excluded from introspection, not reserved) | **#156** |
+| **`email.data`** — refused at apply, because nothing rendered it | the PR that gives `email` a `data.*` placeholder root |
 | **Bulk coalescing** (`entity.orders.created.batch`) | unscheduled; the base design places it with automation, and `baas-analyza.md:682` is its criterion. Every write emits its own event today |
 
 **This PR does not close #22.** It closes PR5a's half; #22 closes when PR5b merges.
@@ -686,6 +837,30 @@ these live.
   before `BeginTransactionAsync`, so a hook placed where the candidate is built has nothing to roll back.
 - **F7's partitioned claim** (**#150**, which also carries Q1's same-millisecond finding and the
   cross-process half `AlvoEventId` does not close), and **`dataref`** (**#151**).
+- **Six things recorded and deliberately not fixed**, each because the fix is larger than the PR that found
+  it and none is reachable as a disclosure today:
+  - **The `hidden` mask on a create/update *response* is an in-memory post-filter only.** Correct today, but
+    two gates became one, so the recommended replacement is a **named two-user fact** (one caller who may see
+    the field, one who may not, over one row) rather than a second engine.
+  - **Envelope size × batch is unbounded in process memory.** **#151** covers only the 64 KB *wire* rule and
+    `dataref`; a batch of 100 large envelopes is a separate, in-process question.
+  - **`To: ""` is still reachable** — an empty template render, or a NULL column — and reads as a broken mail
+    server. Named in `AlvoMailMessage`'s remarks.
+  - **`AlvoMailMessage.To` is unvalidated rendered row text** reaching a host's SMTP implementation: CRLF
+    header injection in any sender that concatenates it into a header. One paragraph on the port's own
+    remarks, written while the port is new; filed with the `To: ""` half as **#155**.
+  - **Framework table names are excluded from introspection but not *reserved* against an entity
+    declaration.** Nothing stops a descriptor declaring an entity that maps onto `alvo_outbox`. Filed as
+    **#156**.
+  - **Conditions are type-checked against CLR types at apply and evaluated against the JSON view at
+    delivery.** The recommended pin is **one fact per scalar family** (number, boolean, timestamp, uuid,
+    string) driven end to end through a real engine, so a family whose JSON round trip changes shape fails by
+    name.
+- **PR5b owes the "a network call must be inexpressible in a before-hook" guarantee**, and nothing structural
+  holds it now that `IEmailSender` is a **public singleton port**: a before-hook running in the write
+  transaction could resolve it and send mail mid-transaction. The guarantee has to become an *architectural*
+  fact — nothing on the in-transaction path can reach a network port — for the same reason the JSONata ban's
+  real test must be architectural rather than behavioural.
 
 ## What a provider owes, and where the port is
 
@@ -736,9 +911,16 @@ core is `internal`.
 | N events matching nothing → zero log rows, one counter each | same suite; measured **101** filtered against **1** action-log entry, with the positive control in the same fact |
 | the readiness gate | `OutboxDispatcherTests.The_pump_claims_nothing_before_the_boot_reports_ready` — in the **core** suite, because the host-suite shape is structurally vacuous (every `StartingAsync` runs before any `StartAsync`) |
 | an exception in the loop does not stop the host | `OutboxDispatcherTests`, both suites |
-| 10 000 events lose nothing | `OutboxChaosCriteriaTests` — `accepted=10000 distinct=10000 attempts=10526 refused=526 abandoned=20 claims=108 pending=0 retired=10000`, identical on both engines; one line per run in `artifacts/criteria/events.md` |
+| 10 000 events lose nothing, **with the retry backoff in force** | `OutboxChaosCriteriaTests` — `accepted=10000 distinct=10000 attempts=10526 refused=526 abandoned=20 claims=108 pending=0 retired=10000`, identical on both engines; one line per run in `artifacts/criteria/events.md`. The world advances its fake clock one poll interval per batch, without which the backoff strands the redeliveries (measured: 186 pending) |
 | kill between commit and publish → delivered after restart; kill mid-action → the action repeats | `KilledHostRecoveryTests`, against a real child process, exit code **137** on Unix / **-1** on Windows — neither reachable by the host's own exits (0, 78) |
 | what the in-process harness does **not** prove | `OutboxRecoveryTests`' own name and remarks; the two files exist separately so neither can be mistaken for the other |
+| **no log line carries a webhook URL** that could be a secret | `EventActionExecutorTests.No_log_line_carries_a_webhook_url_that_could_be_a_secret` — the absence is asserted only after the same run proved the secret-shaped segment was on the wire, over the message **and** the attached exception |
+| **`@tenant.id`/`@user.roles` are refused** in an after-hook condition, positive and negated form alike | `AfterHookCompilerTests.A_condition_naming_provenance_the_envelope_lacks_is_refused_at_apply`, with `A_condition_reading_user_id_compiles_and_records_that_it_needs_an_actor` as the control that keeps it from being "refuse every `@`" |
+| a condition's **`@user.id` is the envelope's actor**, and an actorless event selects no hook that reads it | `EventSubscriptionsTests` — three facts, including the non-vacuity control that a hook reading no caller value is still selected |
+| **`email.data` is refused** whatever it carries | `UnhonouredJsonataTests.An_email_data_slot_is_refused_at_apply_whatever_it_carries` (both spellings) + the `UnhonouredFeatures` slot baseline |
+| an endpoint **URL is validated at apply**: absolute, and `https` unless loopback | `AfterHookCompilerTests`, two theories — the refusals and the deliverable-shapes control |
+| a released entry is **held for its backoff and not for the lease**, and a zero backoff is claimable at once | `OutboxStoreContractTests` (2 facts), green on SQLite and on a real PostgreSQL container |
+| the backoff **grows** per attempt, and the shipped defaults spread the ceiling over ≥ 45 s | `OutboxDispatcherTests`, two facts — the second is arithmetic over the defaults so no test waits 45 s |
 
 **Where the numeric criteria live, with the citation corrected.** The addendum and PR5a's plan both cite
 `baas-analyza.md:676-680`; **`:676` is a blank line.** The §3 acceptance-criteria block is `:677-684`, and

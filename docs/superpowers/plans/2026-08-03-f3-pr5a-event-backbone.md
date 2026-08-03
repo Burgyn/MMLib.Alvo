@@ -5131,16 +5131,23 @@ git commit -m "docs(events): record the event backbone, its ordering condition, 
 - [ ] **Every moved `*.verified.*` baseline has an `alvo-snapshot-judge` verdict.** Four are expected:
       `PublicApi.MMLib.Alvo.Abstractions`, `PublicApi.MMLib.Alvo`,
       `PublicApi.MMLib.Alvo.Data.EntityFrameworkCore`, `PublicApi.MMLib.Alvo.Testing`, plus Task 2's
-      envelope snapshot. **No baseline was hand-edited.**
+      envelope snapshot. **No baseline was hand-edited.** The consolidated fix round moves four more:
+      the three public-API ones again (`IOutboxStore.ReleaseAsync` gained a `retryAfter`, and
+      `OutboxStoreContractTests` gained two facts and lost one) and
+      `UnhonouredFeaturesTests.Every_unhonoured_slot_is_pinned` (the new `email.data` slot).
 - [ ] **The `alvo-security-core-review` checklist**, run against the whole diff. This PR touches the
       rule engine's compile pass (after-hook conditions), the policy catalog's priming, and a new
       network egress path — the checklist's own territory. Three findings to look for specifically:
       D7's unmasked disclosure is *named and tested*; `EventSubscriptions` fails **closed** when a
-      condition throws; and the dispatcher's `AlvoContext` is `System(tenant)` with a real tenant,
-      never `Anonymous`.
+      condition throws; and a hook condition's `@user.id` resolves from the **envelope's** `authid`
+      while `@tenant.id`/`@user.roles` are refused at apply — **superseding this checklist's original
+      third item**, which asked for a dispatcher-wide `AlvoContext.System`. See *The consolidated fix
+      round* below for why that arrangement was wrong in three separate directions.
 - [ ] **A security review** of the diff (injection, authz, insecure data handling), paired with the
       checklist above. The webhook URL comes from the descriptor and never from a caller — confirm
-      that end to end, including that a template can never render *into* a URL.
+      that end to end, including that a template can never render *into* a URL. **Note the scope of
+      that sentence:** it is true of the webhook endpoint and *not* of `email.to`, which is
+      caller-controlled row text (#155).
 - [ ] **`alvo-plan-guard`** dispatched as the last check: drift from `docs/PLAN.md`, violated §0
       principles, shortcuts in the security core. Read-only and advisory.
 - [ ] **A `workflow_dispatch` mutation run, green**, before merge. Mutation runs post-merge on `main`,
@@ -5157,6 +5164,48 @@ git commit -m "docs(events): record the event backbone, its ordering condition, 
       harness does **not** prove.
 - [ ] **This PR does not close #22.** It closes PR5a's half; #22 closes when PR5b merges (deviation
       78). Say so in the body, or the issue closes with before-hooks and automation unshipped.
+
+---
+
+## The consolidated fix round
+
+One round, after Tasks 1–13, against three read-only reviews (`alvo-plan-guard`, a `/code-review high`
+substitute, a `/security-review` substitute). Recorded here because six of the findings change behaviour the
+tasks above describe, and two of them are corrections to claims *this plan and `events.md` made*.
+
+| # | Finding | Verdict |
+|---|---|---|
+| A1 | `WebhookDelivery`'s `TimeoutException` interpolated the full `endpoint.Url`, and the dispatcher logs it at Warning with the exception attached. With no `secretRef` read and no HMAC, a secret in the URL is the only authentication an author has. | **Fixed.** A compiled action carries a `WebhookTarget` (name + validated `Uri`); every message names the **name**. `No_log_line_carries_a_webhook_url_that_could_be_a_secret` asserts the absence over message *and* attached exception, after the same run proved the secret was on the wire. |
+| A2 | `!(@tenant.id == …)` is **`true`** under a tenant-less context — `Compare` returns `false` for every operator on a null operand and `Not` negates it — so a hook meaning "every tenant except ours" fires for every tenant. This plan and `events.md` both called that arrangement *"silent but denying"*; that is the positive form only. | **Fixed**, and the review's own example corrected: `@tenant.id == 'internal'` is unreachable (`Uuid` vs `String` is refused by the type checker first). The reachable shape is `!(new.tenant_id == @tenant.id)`. Refused **by name** at the after-hook compile site — not in `CelTypeChecker`'s profile table, because PR5b's before-hooks share the profile and have a real caller. |
+| A2′ | **Found while fixing A2, and in neither review:** `@user.roles` resolved to the *dispatcher's own* `{ admin }`, so `'admin' in @user.roles` was true for **every** event whoever wrote the row. A fail-open by resolution rather than by the null rule. | **Fixed** — refused by name, out of the same `EnvelopeProvenance` constants the template half already used. |
+| A3 | `@user.id` named two principals in one hook: the envelope's `authid` in a template, the framework's reserved id in the condition. | **Fixed asymmetrically, as asked.** Resolved from the envelope (`EventSubscriptions.CallerOf`); the two the envelope cannot answer are refused. An actorless event selects no hook reading `@user.id`, gated by the same `RequiredContext` shape the policy engine uses for a rule. |
+| A4 | `email.data` was compiled, validated, stored under `ActionSlot.Data` — and read by nothing. | **Fixed.** A named `UnhonouredFeatures.EmailData` refusal, for **any** contents, template spelling included. No `data.*` placeholder root was added. |
+| A5 | An endpoint's URL was never validated at apply; `"format": "uri"` asserts nothing. | **Fixed.** Absolute and `https` at apply, with a **loopback** carve-out for `http` — narrow, justified (no network to observe), and the shape this repository's own loopback delivery suite uses. |
+| A6 | The attempt ceiling was consumed in a hot loop: the idle wait runs only on an *empty* claim, and release nulled `claimed_at`. | **Fixed**, with the port widened (`ReleaseAsync(id, retryAfter, ct)`) and the claim's predicate grown one branch — `claimed_by` distinguishes *released* (compare against `@now`) from *held* (compare against the lease). No new column, no new statement. `attempts × PollInterval`; ≥ 45 s over ten attempts at the defaults. |
+| B1 | `alvo_outbox` has no retention, and two places justified a decision by citing it. | **Fixed** (both sentences reworded) and **filed as #154**. |
+| B2 | D7's three reasons justify two separable decisions. | **Fixed** — the section is split, so a #152 reader can tell which half their work retires. |
+| B3 | `email.to` is caller-controlled, and it is the recommended pattern. | **Fixed** (the *"never caller-supplied"* sentence is scoped to the webhook endpoint) and **filed as #155**, with the `To: ""` and CRLF halves. |
+| B4 | Two reviews disagreed about structured-body injection. | **Both partly right; the security review is closer.** `JsonataSlot`'s no-bare-brace clause makes a payload template unable to be a JSON *object*, so a row value cannot forge a sibling **member** — plan-guard's "restructure the body" is unreachable in that form. But plan-guard is right that nothing escapes: `[`/`]` are not braces, so an array payload forges **elements**, and a bare or quoted string payload becomes **invalid** JSON on a quote, backslash or newline. Recorded in `JsonataSlot`'s own remarks that the clause is load-bearing for injection, with the obligation on #149. |
+| B5 | `events.md` listed five places stating both ordering conditions; `EfAlvoData`'s emit remarks state neither. | **Fixed** — the citation now names the four that really carry it, and says why the emit site does not. |
+| C | Six findings recorded and not fixed (response-mask post-filter, envelope size × batch, `To: ""`, `AlvoMailMessage.To` validation, unreserved framework table names, CLR-vs-JSON condition typing) plus PR5b's owed architectural fact that a network call is inexpressible in a before-hook — now that `IEmailSender` is a public singleton port, nothing structural holds it. | **Noted** in `events.md` *What PR5b and F7 inherit*; two of them filed (**#155**, **#156**). |
+
+**Every new fact was mutated, and every mutation went red.** One per fact: the timeout message names the URL
+again; the provenance refusal is skipped; only `@tenant.id` is refused; the caller is `AlvoContext.System`
+again; the missing-actor gate is removed; `email.data` refuses raw JSONata only; any scheme is deliverable; a
+relative URL is accepted; the dispatcher asks for no backoff; the backoff stops growing; `ReleaseSql` nulls
+`claimed_at` again; a released row is compared against the lease; and the shipped `MaxAttempts` default is
+lowered. Two mutations had to be respelled to satisfy the warnings-as-errors analysers (an unused field, an
+always-true expression) — recorded because "the mutation would not build" is not evidence that a fact fails to
+discriminate.
+
+**One re-measurement, and one latent hole it exposed.** The retry backoff strands redeliveries on the chaos
+criterion's *fake* clock, which previously moved only at an abandoned claim: the first run left **186 of
+10 000** events pending. `OutboxChaosWorld` now advances it one poll interval per claimed batch — the
+conservative stand-in for what a real pump spends — and both engines are back to
+`pending=0 retired=10000 claims=108`. Separately, adding a bind parameter to the claim showed that
+`OutboxStoreWorld` builds its own claim command, so a parameter the product binds and the race world does not
+is a **PostgreSQL-only** failure: `OutboxClaimSqlTests`' shape assertions cannot see an unbound parameter, and
+only the two-claimant fact on a real engine caught it.
 
 ---
 
