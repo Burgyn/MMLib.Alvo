@@ -165,25 +165,59 @@ because the cost is real:
 
 | Mode | On drift | What it costs |
 |---|---|---|
-| `Apply` *(default)* | applies the plan | every replica of a rolling deploy attempts the DDL, and the application needs DDL rights against its own database — what EF Core's guidance advises against. Plus **#145**, below |
+| `Apply` *(default)* | applies the plan | every replica of a rolling deploy attempts the DDL, and the application needs DDL rights against its own database — what EF Core's guidance advises against. Plus a descriptor **rollback** that cannot boot, and **#145**, both below |
 | `Verify` | refuses, printing the steps and the fix | a descriptor edit does not take effect until the migration job runs |
-| `Skip` | does not read the applied snapshot at all | the schema is entirely somebody else's business |
+| `Skip` | reads the applied snapshot — that read is also what brings the framework's own tables up — and ignores whatever drift it found | the schema is entirely somebody else's business. Refused in one state only: Alvo has recorded nothing **and** the live schema does not match the descriptor, i.e. nothing has verified the schema exists |
 
 Replicas racing the same DDL **converge** rather than crash-looping (the boot's
 write is a version row first, then the DDL, in one transaction, with one bounded
 retry), so `Apply` on a replica set is not an outage.
 
-**It is, however, not the whole story, and the rest is #145.** Two replicas holding
-*different* descriptors — the ordinary state of a rolling deploy, where old and new
-pods overlap — each diff against what the other just applied and each apply. The
-always-on destructive gate catches only the subset where a plan **drops** something;
-the additive-vs-additive case (A adds `region`, B adds `city`) is refused by nothing,
-so the database ends up with **both** and therefore with a schema **no deployed
-descriptor declares**, while every replica reports `Ready`. Measured, not theorised.
-The resolution — ordering the apply from `IDescriptorVersionStore`'s append-only
-history, using the descriptor `revision` the frozen schema already carries for exactly
-this purpose — is **#145**, the next PR. Until it lands, one writer (a migration job
-plus `Verify` on the pods) is the shape that cannot get there.
+**The cost the table understates, and it is the sharper one: a rollback may not be
+able to boot.** A forward deploy under `Apply` advances the applied snapshot with no
+operator action and no decision. Rolling the descriptor *back* — redeploying the
+previous artifact, the first thing anyone does — then plans a `DropField` against the
+schema the forward deploy wrote, the always-on destructive gate refuses it, and **every
+pod exits 78 in a crash loop.** Under `Verify` the operator chose that forward apply
+knowingly and can plan the way back; under `Apply` they never chose it. Recovering means
+`Alvo__Schema__AllowDestructive=true` on the rollback — accepting the loss of whatever
+the new column now holds — or applying the older descriptor from a migration job. This
+is pinned (`AlvoHostRestartTests.A_descriptor_that_drops_a_field_fails_the_restart_and_names_the_step`)
+and `AlvoHostBootTests` states the shape in its own words: *"the previous descriptor is
+destructive relative to the schema the failed start wrote, so rolling the deployment back
+does not recover. One typo in an environment variable, one unbootable database."* It does
+not change the default; it is the cost the default carries, and it is the strongest
+argument on the record for setting `Verify` in production.
+
+**A rolling deploy holding two descriptors is the other cost, and the rest is #145.**
+Two replicas holding *different* descriptors — old and new pods overlapping — each diff
+against what the other just applied. What that actually produces was **measured**, and an
+earlier version of this section got it wrong:
+
+- **A descriptor that only adds over what the other applied wins the database.** The
+  history becomes `[1, 2]` and the schema is the newer descriptor's; both pods report
+  `Ready`, and the one holding the older descriptor serves rules compiled against a
+  schema the database now has more than (`ConcurrentColdStart.DriftedDescriptor`, both
+  engines).
+- **The pod holding the older descriptor cannot take its turn back — it crash-loops.**
+  Reverting means dropping the newer column, and the destructive gate refuses that in
+  every mode. So the schema does not oscillate; the subset pod simply cannot start, by
+  exactly the mechanism the rollback paragraph above describes.
+- **The additive-vs-additive case is refused, not merged.** A adds `region`, B adds
+  `city`: B's plan against A's applied snapshot *drops* `region`, which is destructive, so
+  B refuses and the database ends on one descriptor's schema. Measured by
+  `ConcurrentBootTests.Two_replicas_adding_different_fields_end_on_one_descriptors_schema_not_the_union`,
+  which asserts the applied field list and not merely the revision history. **This
+  corrects a claim published here and in #145** that the database ends up with *both*
+  columns — a schema no deployed descriptor declares. That was theorised, and it is wrong:
+  nothing can reach it, because reaching it needs a plan that adds without dropping and no
+  such plan exists for either descriptor.
+
+The resolution — ordering the apply from `IDescriptorVersionStore`'s append-only history,
+using the descriptor `revision` the frozen schema already carries for exactly this
+purpose — is **#145**, the next PR: it turns "the newest artifact to boot wins, and the
+older one crash-loops" into an ordered decision with a diagnostic. Until it lands, one
+writer (a migration job plus `Verify` on the pods) is the shape that cannot get there.
 
 ```yaml
 # production: the schema is the migration job's, and the pods only serve it
@@ -291,6 +325,23 @@ while the probe served 200 to a container with no schema. `Degraded` is delibera
 200 rather than remapped behind an option, because remapping it would make that mutation stop going
 red.
 
+**What readiness is for, given that a refused boot never listens.** The refusal is the strong end of
+the guarantee and it is not going anywhere, so readiness earns its place on the states published
+*after* a boot succeeded. There is a reachable one today: an applied schema the Data API refuses to
+route — a substituted `ISchemaRegistry`, a schema applied by an older build, F7's dynamic entities —
+is recorded on `AlvoBootState` when the endpoint table materialises, which is *after* the server is
+listening. Readiness reports `Failed`, the orchestrator drains the pod, and `/health/live` keeps
+answering 200 so nothing kills a container for a schema no restart can fix. That refusal used to be
+*thrown* out of `EndpointDataSource.Endpoints`, which the matcher enumerates through the composite of
+every source in the application: liveness answered 500 too, permanently.
+
+One host option was checked as a *second* candidate and does **not** qualify:
+`HostOptions.ServicesStartConcurrently` flips the host's `abortOnFirstException` to `false`, which
+reads like "the start continues and binds the socket", but `Host.StartAsync` rethrows after **each**
+phase, so a refused `StartingAsync` still aborts before the web host service is started. Measured
+(`AlvoBootServiceTests.A_refused_boot_binds_no_socket_even_when_services_start_concurrently`) and kept
+as a fact, because it is the only composition that could have broken the strong end.
+
 **Readiness publishes the phase and nothing else** (`Pending` / `Ready` / `Failed`), and the
 `HealthReport` handed to the response writer is discarded. `AlvoBootState.Failure` is the provider's
 own message for a stage-1 or stage-2 failure — measured to carry a filesystem path today, and able
@@ -299,6 +350,15 @@ unauthenticated by construction, because a container probe presents nothing to a
 The operator gets the full reason on stderr and in the log (design deviation 59). The check's
 *description* and the HTTP *body* are two independent barriers, so two facts hold the line: mutating
 either one turns exactly one of them red.
+
+**The body is `text/plain` carrying the bare phase word, and that is a decision rather than an
+omission** — this framework publishes RFC 7807 for every other refusal, so the shape is worth
+recording. One writer answers both the 200 and the 503, and a *problem* document describes a problem,
+so `application/problem+json` would be wrong for half of what it answers. A JSON object
+(`{"phase":"Pending"}`) leaks no more than the word does, but it advertises a contract for a body
+whose only consumer — an orchestrator's `httpGet` probe — reads the status code and ignores the body
+entirely. A probe response is not an API response; if a dashboard ever needs the phase structurally,
+that is an authenticated diagnostic endpoint and not this one.
 
 The check is registered through `IConfigureOptions<HealthCheckServiceOptions>` with
 `TryAddEnumerable`, not `AddCheck`: `AddCheck` is additive, a host calling `AddAlvo` twice would

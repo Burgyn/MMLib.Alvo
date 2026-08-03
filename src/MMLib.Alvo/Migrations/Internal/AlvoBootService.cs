@@ -211,11 +211,18 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     /// descriptor — a rolling deploy caught mid-flight — the loser is now looking at ordinary drift and is
     /// governed by the ordinary mode: under <see cref="AlvoSchemaStartupMode.Verify"/> it refuses, and under
     /// the default <see cref="AlvoSchemaStartupMode.Apply"/> it applies its <em>own</em> descriptor over the
-    /// winner's. Either way it never silently serves the winner's schema, which would leave the process
-    /// running rules compiled against a schema it never agreed to. Two replicas holding two descriptors and
-    /// both allowed to apply will take turns rewriting the schema, which is the concrete shape of the reason
-    /// a production deployment sets <see cref="AlvoSchemaStartupMode.Verify"/> and applies from a migration
-    /// job instead.
+    /// winner's <em>if that plan adds only</em>. Either way it never silently serves the winner's schema, which
+    /// would leave the process running rules compiled against a schema it never agreed to.
+    /// </para>
+    /// <para>
+    /// <b>They do not, however, take turns rewriting the schema — measured, and the opposite of what this
+    /// remark used to say.</b> A loser whose descriptor lacks a field the winner applied plans a
+    /// <em>drop</em> of it, and the destructive gate refuses a drop in every mode. So the schema does not
+    /// oscillate: the replica holding the subset descriptor cannot start at all, which is the concrete shape
+    /// of the reason a production deployment sets <see cref="AlvoSchemaStartupMode.Verify"/> and applies from
+    /// a migration job instead — and the same mechanism that makes a descriptor rollback unbootable under
+    /// <see cref="AlvoSchemaStartupMode.Apply"/>. Ordering the two descriptors against each other, rather than
+    /// letting the race decide, is #145.
     /// </para>
     /// <para>
     /// <b>At most one retry, and no lock.</b> A loop would hang a boot instead of failing it, which is strictly

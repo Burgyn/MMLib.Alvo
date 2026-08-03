@@ -61,6 +61,15 @@ public enum AlvoSchemaStartupMode
     /// production, which is what EF Core's own guidance advises against. Production wants
     /// <see cref="Verify"/> plus a migration job.
     /// </para>
+    /// <para>
+    /// <b>And one cost is sharper than either of those: a descriptor <em>rollback</em> may not be able to
+    /// boot.</b> This mode advances the applied schema with no operator decision, so redeploying the previous
+    /// descriptor plans a drop of whatever the forward deploy added — and the always-on destructive gate
+    /// refuses it, so every replica exits instead of starting. The way back is
+    /// <c>AlvoSchemaOptions.AllowDestructive</c> on the rollback, accepting the loss of what the new column
+    /// holds, or applying the older descriptor from a migration job. Under <see cref="Verify"/> the operator
+    /// chose the forward apply knowingly and can plan the way back; under this mode nobody chose it.
+    /// </para>
     /// </remarks>
     Apply = 1,
 

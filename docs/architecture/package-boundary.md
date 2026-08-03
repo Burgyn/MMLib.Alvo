@@ -138,11 +138,20 @@ left to be discovered by a third party.
   converge instead of crash-looping. So a provider without it can no longer boot at all.
   Both in-repo drivers implement it; the cost falls on a future third-party provider, and it
   is a widening of the **implicit** provider contract (startup-lifecycle design deviation 60).
-- **Stage 1 — the framework's own `alvo.*` tables — has no port**, deliberately. The system
-  schema is owned by whichever driver implements `IAppliedSchemaStore`, and that driver cannot
-  answer a single call without it, so the boot's applied-snapshot read *is* stage 1. A port is
-  **earned** the moment a driver's system schema grows a table no store call touches — PR5's
-  outbox is the first candidate.
+- **Stage 1 — the framework's own `alvo.*` tables — has no port, so bringing that storage up is
+  a *requirement* on `IAppliedSchemaStore`.** Stated prescriptively, because the core now depends
+  on it: an implementation **must** bring its own storage up, idempotently and race-safely, on its
+  first call, and `GetCurrentAsync` must answer `null` for a project it has no snapshot for rather
+  than fail because its tables do not exist yet. The boot's applied-snapshot read *is* stage 1, in
+  every mode, and there is nothing else the core can call — `SystemSchemaInitializer` is `internal`
+  to the EF driver and the core depends on `MMLib.Alvo.Abstractions` alone. A driver that does not
+  honour this fails closed rather than silently (the read throws, the boot records the failure and
+  stops the start), which is why it is a documented requirement and not a compile-time one. Two
+  further obligations fall out of the same read: it must be **idempotent** (a boot may perform it
+  twice — once before the schema write, once more after losing the race) and it must be **safe from
+  several processes at once**, which is exactly where the shipped EF driver had a real bug (a
+  `CREATE TABLE IF NOT EXISTS` race on PostgreSQL). A port is **earned** the moment a driver's
+  system schema grows a table no store call touches — PR5's outbox is the first candidate.
 - **The two apply paths differ on purpose.** `SchemaMigrationRunner` (the CLI /
   Management-API path) keeps applying the DDL and *then* saving the snapshot: that path is a
   single writer by construction, so the race the boot has to survive cannot arise there, and
