@@ -16,8 +16,13 @@ outbox insert each, on `transaction.GetDbTransaction()` — never a `SaveChanges
 `Abstractions` (which may take no new external dependency), serialized by hand, with
 `CloudNative.CloudEvents` used **test-only** as a conformance oracle. A new `IOutboxStore` port —
 earned, per `package-boundary.md`, because the outbox is the first driver system-schema table no
-store call touches — carries claim/mark/release; the claim is one portable raw-SQL statement
-(`UPDATE … WHERE id IN (SELECT … ORDER BY … LIMIT n) RETURNING …`), never a high-water mark. The
+store call touches — carries claim/mark/release; the claim is one portable raw-SQL statement whose
+outer `WHERE` **repeats** the subquery's `claimed_at IS NULL`
+(`UPDATE … WHERE dispatched_at IS NULL AND (claimed_at IS NULL OR …) AND id IN (SELECT … ORDER BY …
+LIMIT n) RETURNING …`), never a high-water mark. The outer predicate is not redundant: spike Q4
+measured that without it two claimants deliver **every** row twice. The envelope's `id` is minted by
+a monotonic UUIDv7 generator, because `Guid.CreateVersion7()` alone inverts 49.9 % of
+same-millisecond pairs (spike Q1). The
 dispatcher is a `BackgroundService` that awaits `AlvoBootState` (ordering cannot express readiness on
 .NET 10) and lets nothing escape `ExecuteAsync` (`BackgroundServiceExceptionBehavior` defaults to
 `StopHost`). After-hook conditions are compiled into the **`PolicyCatalog`** — one priming site — and
@@ -49,6 +54,10 @@ Every task's requirements implicitly include this section.
 - The write seam is `docs/architecture/data-path.md:1481-1493` (*"The transaction is already the
   right seam"*). Measured evidence for this PR lands in
   `docs/superpowers/specs/evidence/2026-08-03-f3-pr5a-events/`.
+- **`…/evidence/2026-08-03-f3-pr5a-events/spike.txt` has been captured and outranks this plan
+  wherever the two disagree.** It refuted two things this plan asserted — D1's monotonicity claim and
+  D2's claim statement — and both are amended above. Do not re-derive a measured answer from
+  reasoning, and do not restore a shape the spike measured broken.
 - **Out of scope — PR5b:** before-hooks, the `CelProfile.Mutate` profile, automation (`event` +
   `schedule` triggers), `entity.update`, cron, `Publish`, wildcard subscription matching, the
   `complex-crm` example's five broken expressions, and
@@ -135,7 +144,7 @@ Every task's requirements implicitly include this section.
   and `extensions/correlation.md` on `main`. Adopt them; **state that provenance in the XML docs**,
   or a reader checking the v1.0.2 registry concludes they were invented.
 - Intermediaries MUST forward events ≤ 64 KB (`:510-512`). The registered escape is `dataref`, which
-  this PR documents and does not implement.
+  this PR documents and does not implement (**#151**).
 
 **Hosting (.NET 10)**
 
@@ -147,19 +156,73 @@ Every task's requirements implicitly include this section.
 - The host **blocks in `StopAsync`** waiting for `ExecuteAsync`, with a 30 s `ShutdownTimeout`, so
   the loop observes its cancellation token promptly. `ServicesStartConcurrently` stays `false`.
 
-**Ordering — do not repeat the base design's over-claim**
+**Ordering — do not repeat the base design's over-claim, and do not repeat this plan's own first one**
 
 - Exactly **one dispatcher** in F3. `FOR UPDATE SKIP LOCKED` skips the **row**, not the **key**, so
   it delivers neither global nor per-entity-key ordering (deviation 72; `baas-analyza.md:656`'s
   hedge, which the base design dropped).
-- **Per-entity-key ordering holds only while exactly one dispatcher runs.** There is no distributed
-  lock, so PR5a cannot detect a second instance: two replicas break the guarantee **silently**. That
-  is a documented deployment constraint.
+- **The guarantee, in the only wording this plan may use** — every doc, XML doc, test message and PR
+  body says it with **both** conditions, because the first draft of this plan stated only the first
+  and spike Q1 measured that the second is where it actually breaks:
+
+  > **Per-entity-key ordering holds with one dispatcher *and* no two events for one key inside the
+  > same millisecond.**
+
+  The **in-process** half of the millisecond condition is closed by the monotonic generator below,
+  so within one process the guarantee reduces to "one dispatcher". Across processes it does not:
+  two hosts minting inside one millisecond still interleave (**#150**).
+- **The `id` is minted by a monotonic UUIDv7 generator, never `Guid.CreateVersion7()` directly.**
+  Measured (Q1): `Guid.CreateVersion7()` has no monotonic counter — it fills everything below the
+  48-bit millisecond with fresh random data, so **49.9 %** of adjacent same-millisecond pairs sort
+  backwards (49 839 inversions over 100 000; 99 961 of those pairs shared a millisecond). Bumping
+  the random tail whenever the millisecond repeats measured **0 inversions over 100 000** and costs
+  **no DDL change**. `AlvoEventId.Create` (Task 2) is the one entry point.
+- **There is no distributed lock**, so PR5a cannot detect a second instance: two replicas break the
+  guarantee **silently**. That is a documented deployment constraint, filed as **#150**.
 - **`partition_key` is written from the first migration** even though nothing reads it in F3, so
   F7's partitioned claim is additive. It is named after the registered `partitionkey` attribute so
   the column and the attribute cannot drift.
 - **The claim filters `dispatched_at IS NULL`, never a high-water mark** — PostgreSQL sequences
   commit out of order (R2), so a watermark drops a row silently.
+
+**Engine facts — measured in Task 1's spike (`spike.txt`), not guessed**
+
+Each of these corrects something a source document or an earlier draft of this plan asserted. Cite
+the question, not the reasoning, wherever the plan leans on one.
+
+- **`ORDER BY` inside `UPDATE` is refused by *both* engines**, and the parser names `ORDER`, not
+  `limit`: SQLite `'near "ORDER": syntax error'`, PostgreSQL `42601 syntax error at or near "ORDER"`
+  (Q3). So the subquery `LIMIT` is a **portability** constraint, not a SQLite workaround, and R4's
+  recorded message text was wrong about which token fails.
+- **`RETURNING` comes back unsorted on both engines** — `RETURNING already sorted: False` for
+  SQLite *and* PostgreSQL (Q3). The in-process re-sort is load-bearing in fact, not only on paper.
+- **`SERIAL` is silently *accepted* by SQLite** as an unrecognised column type, yielding a nullable
+  column that never increments (Q6). A "portable `SERIAL`" therefore passes CI and loses ordering in
+  production. Nobody may reach for it; `OutboxTableTests` asserts its absence for this reason.
+- **Each engine refuses the other's identity spelling** — SQLite refuses `… AS IDENTITY`,
+  PostgreSQL refuses `AUTOINCREMENT` (Q6). `SystemSchemaInitializer.cs:15-17`'s "no per-engine
+  branching" invariant survives only because there is no sequence column at all.
+- **UUID text ordering agrees with .NET's ordinal sort on both engines** under
+  `datcollate=en_US.utf8`, in both the `'D'` and `'N'` spellings, and also under `COLLATE "C"`,
+  `COLLATE "POSIX"` and a native `uuid` column (Q2). **No collation-spelling fallback is needed** and
+  D1's `"N"` fallback is withdrawn. It holds because every UUID text form is fixed width with its
+  punctuation at fixed positions — a property of fixed-width keys, not of that locale.
+- **`Guid`'s default byte order is not time-sortable** (`ToByteArray()`: 5 050 inversions of 9 999;
+  `ToByteArray(bigEndian: true)`: 4 993, i.e. the same as the text form) (Q1). The id is therefore
+  safe as `TEXT` and would be unsafe as a `BLOB` written from `ToByteArray()`.
+- **`created_at` is disqualified by a wide margin** (Q7): 10 000 successive `GetUtcNow()` reads
+  produce **495** distinct `"O"` stamps with tie runs of 26, and **3** distinct values at
+  millisecond precision.
+- **R5's premise is corrected and the WAL stop-condition did *not* trigger** (Q5). It is not true
+  that there is "no `Default Timeout` anywhere": `Microsoft.Data.Sqlite`'s `DefaultTimeout` is
+  **30 s** and its retry loop covers `BEGIN`, which is what already makes the shipped registration
+  correct — a second writer waited ~1 s and then succeeded, in both directions. **Do not change the
+  shared SQLite registration.** WAL does **not** fix the read-then-write shape; it converts the
+  failure into an unretryable `SQLITE_BUSY_SNAPSHOT` (`Extended=517`) on the *dispatcher*, and
+  `journal_mode=WAL` is **persistent in the database file**, so it is not revertible by redeploy.
+  The constraint therefore lands on the **dispatcher**: the claim is a **single write statement** on
+  an autocommit connection, or the first statement of a write-first transaction — **never** a read
+  followed by a write inside one transaction.
 
 **Shell and tooling traps — measured, not guessed**
 
@@ -236,7 +299,7 @@ Each line is followed by the task that owns it.
 - **Wildcard subscription (`entity.orders.*`) and its tenant scoping.** After-hooks are declared per
   entity per hook point, so PR5a evaluates no pattern at all. The matcher belongs to
   `automation.trigger.event` = PR5b. Recorded in Task 13.
-- **`dataref` / the 64 KB forwarding rule.** Documented in Task 2's remarks and filed as an issue in
+- **`dataref` / the 64 KB forwarding rule.** Documented in Task 2's remarks and filed as **#151** in
   Task 1; not implemented, because Alvo's outbox is not an intermediary and no wire hop in F3 is
   bound by the rule.
 - **`complex-crm`'s five broken expressions and the refusal-reason strengthening** (deviation 76).
@@ -247,12 +310,22 @@ Each line is followed by the task that owns it.
 
 ---
 
-## Decisions this plan makes, and what Task 1's spike is allowed to change
+## Decisions this plan makes, and what Task 1's spike changed
 
 Six decisions the addendum leaves to the plan. Each is stated with its cost; the three marked
-**measured** are settled by Task 1's evidence and nothing downstream may assume them earlier.
+**measured** were settled by Task 1's evidence, which has **run** — `spike.txt` is now the authority
+over this section wherever the two disagree.
 
-**D1 — There is no `sequence` column. The ordering key is `id`, a UUIDv7. (measured: Q1, Q2, Q6, Q7)**
+Two decisions came back changed, and both amendments are ratified:
+
+- **D1's portability half survived; its monotonicity half did not.** UUIDv7 stays; a monotonic
+  generator is added, and the ordering language is corrected everywhere (Q1).
+- **D2's claim SQL was wrong** — as first written it delivers every row **twice** under two
+  claimants, so its stated cost ("slow, not incorrect") was false. The one-line fix measured clean
+  in the same run and is adopted verbatim (Q4).
+
+**D1 — There is no `sequence` column. The ordering key is `id`, a *monotonic* UUIDv7.
+(measured: Q1, Q2, Q6, Q7 — amended after the spike)**
 
 R1 is real: `AUTOINCREMENT` vs `IDENTITY` is per-engine DDL, and
 `SystemSchemaInitializer.cs:15-17` states *"identical on SQLite and PostgreSQL … no per-engine
@@ -260,36 +333,74 @@ branching"* as an invariant with **zero** precedent for breaking it. Falling bac
 `created_at TEXT` is worse — the audit stamp binds **one instant per write**
 (`data-path.md:354`), so ties are structural, not merely likely.
 
-The third option neither document names: `Guid.CreateVersion7()` (.NET 9+) is time-ordered in its
-most-significant 48 bits, and its standard string form sorts lexicographically in time order. Store
-it as the primary key and order by it. That gives a monotonic ordering key with **identical ANSI
-DDL**, no invariant break, no new port, and — the part that matters — **no integer watermark for
-anyone to be tempted by**, which closes R2 by construction rather than by discipline.
+The third option neither document names: a UUIDv7 primary key (.NET 9+ mints one with
+`Guid.CreateVersion7()`), time-ordered in its most-significant 48 bits, whose standard string form
+sorts lexicographically in time order. Store it as the primary key and order by it. That gives an
+ordering key with **identical ANSI DDL**, no invariant break, no new port, and — the part that
+matters — **no integer watermark for anyone to be tempted by**, which closes R2 by construction
+rather than by discipline.
 
-Cost, stated: cross-process monotonicity is only to the millisecond, and within one millisecond two
-processes interleave arbitrarily. That is exactly the guarantee level a single-dispatcher,
-at-least-once design already has, and the plan never claims more.
+**What the spike confirmed.** Portability, in full: identical ANSI DDL on both engines, each engine
+refusing the other's identity spelling (Q6); text ordering matching .NET's ordinal sort on both
+engines in both spellings, under `en_US.utf8` as well as `COLLATE "C"`/`"POSIX"` and a native `uuid`
+column (Q2) — so the `"N"` fallback this decision once carried is **withdrawn**, not merely unused;
+and `created_at` disqualified at 3 distinct values per 10 000 at millisecond precision (Q7).
 
-**Spike gate:** Q1 measures inversions over 100 000 successive `CreateVersion7()` calls; Q2 measures
-that SQLite (BINARY) and PostgreSQL (its container's default collation) order the stored text
-identically to .NET's ordinal sort. If Q2 disagrees, the column and the envelope's `id` both switch
-to `Guid.ToString("N")` (32 lowercase hex chars, no punctuation, fixed width — collation-neutral),
-in that order of preference over `COLLATE "C"`, which is per-engine SQL. Q6 records the
-identity-column DDL actually being tried and refused, with the engine's own error text, so the
-rejection is evidence rather than reasoning. Q7 records the clock-tie rate that rules out
-`created_at`.
+**What the spike refuted, and the amendment.** `Guid.CreateVersion7()` is **not** monotonic: it has
+no counter and fills everything below the millisecond with fresh random bits, so **49.9 %** of
+adjacent same-millisecond pairs sort backwards (49 839 inversions over 100 000). The claim that
+same-millisecond order was merely *unguaranteed* was wrong — it is a coin flip.
 
-**D2 — `IAlvoSqlDialect` is not widened. There is no `SKIP LOCKED`. (measured: Q3, Q4)**
+The amendment, measured green in the same run at **0 inversions over 100 000** and costing **no DDL
+change**: an in-process **monotonic** generator that reuses the last emitted millisecond and
+increments the random tail whenever the clock's millisecond does not advance. It lives in
+`Abstractions` as `AlvoEventId` (Task 2), for three reasons:
+
+1. **The write path must reach it, and the write path is a different assembly.** The id is minted in
+   `OutboxEventFactory` inside `MMLib.Alvo.Data.EntityFrameworkCore`, which sees only
+   `Abstractions`' public surface — `Abstractions` grants `InternalsVisibleTo` to `MMLib.Alvo` and
+   `MMLib.Alvo.Tests` only. A generator in the core, or `internal` anywhere, is unreachable from the
+   emit sites.
+2. **The ordering contract belongs to the envelope, not to one driver.** `id` *is* the queue order;
+   a driver-local generator would have to be re-derived by the next `IOutboxStore` implementation,
+   and the failure mode of forgetting — plain `CreateVersion7()` — is invisible from outside, since
+   both spellings produce a valid v7 id. One authority in `Abstractions` makes it unforgettable.
+3. **It is testable on its own**, with no database, no host and no clock injection: monotonicity is
+   observable through the public API, and `Create(DateTimeOffset)` — the shape
+   `Guid.CreateVersion7(DateTimeOffset)` already established in the BCL — makes the
+   same-millisecond and backwards-clock cases deterministic. That overload is not a test seam: the
+   emit sites pass the write's own audit instant, so the envelope's `time`, the row's `created_at`
+   and the id's embedded millisecond are **one** instant (`data-path.md`, *Every timestamp is one
+   instant*).
+
+Cost, stated: the generator closes the **in-process** half only. Two processes minting inside one
+millisecond still interleave, so the guarantee is *one dispatcher **and** no two events for one key
+in one millisecond* — the wording every artifact must use — with the cross-process half filed as
+**#150**. A second, smaller cost: a process-wide lock on the mint path (nanoseconds, on a path that
+is already doing I/O) and a `Create(DateTimeOffset)` whose returned millisecond is the **later** of
+the requested one and the last one already minted, which is what keeps the total order intact and is
+documented on the member.
+
+Recorded because it decides how the column may ever be typed (Q1): `Guid`'s **default** byte order
+is not time-sortable (5 050 inversions of 9 999 from `ToByteArray()`), so the id is safe as `TEXT`
+and would be unsafe as a `BLOB`. And a bonus the generator buys for free: a backwards clock step,
+which Q1 measured reorders the queue by the size of the step, cannot reorder anything **within** one
+process, because the last emitted millisecond never moves backwards.
+
+**D2 — `IAlvoSqlDialect` is not widened. There is no `SKIP LOCKED`. (measured: Q3, Q4 — the
+statement is amended)**
 
 `SKIP LOCKED` exists to let *several* claimants work one queue. PR5a has exactly one dispatcher
 (deviation 72), so it buys nothing, and adding a member to a public port in a driver package is a
 public-API change that a later F7 design would have to live with. The claim is therefore **one
-portable statement** owned by the driver:
+portable statement** owned by the driver — **this text, which is the spike's, verbatim:**
 
 ```sql
-UPDATE {outbox}
-   SET claimed_at = @claimed_at, claimed_by = @claimed_by, attempts = attempts + 1
- WHERE id IN (SELECT id FROM {outbox}
+UPDATE {outbox} SET claimed_at = @claimed_at, claimed_by = @claimed_by,
+                    attempts = attempts + 1
+ WHERE dispatched_at IS NULL
+   AND (claimed_at IS NULL OR claimed_at < @stale_before)
+   AND id IN (SELECT id FROM {outbox}
                WHERE dispatched_at IS NULL
                  AND attempts < @max_attempts
                  AND (claimed_at IS NULL OR claimed_at < @stale_before)
@@ -298,16 +409,28 @@ UPDATE {outbox}
 RETURNING id, event_type, partition_key, payload, attempts
 ```
 
-`UPDATE … LIMIT` is **not** available: R4 measured `SQLite Error 1: 'near "limit": syntax error'`
-(`SQLITE_ENABLE_UPDATE_DELETE_LIMIT` unset in the bundled `e_sqlite3`), so the `LIMIT` goes in the
-subquery. `RETURNING` order is **documented as arbitrary** on both engines → the result is re-sorted
-in process by `id`, ordinally.
+**The outer `WHERE` is load-bearing, not redundant — do not "simplify" it away.** This plan's first
+draft had the outer `WHERE` be nothing but `id IN (subquery)`, and Q4 measured what that costs:
+*"A claimed 10, B claimed 10, overlap 10 (must be 0); rows with attempts > 1: 10"* — **every row
+delivered twice, and `attempts` incremented twice.** The mechanism is PostgreSQL's `READ COMMITTED`
+EvalPlanQual re-check: when B's block on A's row locks clears, B re-evaluates **only its own outer
+`WHERE`** against the updated row. The subquery's `claimed_at IS NULL` was already evaluated and is
+not part of that re-check, so B's outer `id IN (…)` still holds and B re-claims A's rows. Repeating
+the predicate in the outer `WHERE` puts the invariant where EvalPlanQual can see it: *"A claimed 10,
+B claimed 0, overlap 0; rows with attempts > 1: 0"*. Both engines accept the statement (Q3, *"the
+Q4 variant — ACCEPTED"* on SQLite and PostgreSQL). The subquery still chooses **which** rows; the
+outer `WHERE` re-validates that they are still claimable at the moment of the write.
 
-Cost, stated: with no `SKIP LOCKED`, a second dispatcher on PostgreSQL **blocks** on the first's
-row locks rather than skipping them. Q4 measures that this is *safe* — after the block clears, the
-loser re-evaluates `claimed_at IS NULL` under READ COMMITTED and claims nothing, so a second
-instance is slow, not incorrect. If Q4 shows otherwise, that is a blocking finding: stop and take
-it back to the maintainer before Task 5 proceeds.
+`UPDATE … ORDER BY … LIMIT` is **not** available on **either** engine — the parser names `ORDER`
+(SQLite `'near "ORDER": syntax error'`, PostgreSQL `42601`), correcting R4 on both counts — so the
+`ORDER BY` and the `LIMIT` go in the subquery. `RETURNING` order is arbitrary in **measured** fact
+on both engines, not only on paper (`RETURNING already sorted: False` twice), so the result is
+re-sorted in process by `id`, ordinally.
+
+Cost, stated: with no `SKIP LOCKED`, a second dispatcher on PostgreSQL **blocks** on the first's row
+locks rather than skipping them, and then claims nothing (Q4, with the amended statement). So a
+second instance is slow, not incorrect — a claim this decision may make **only** because the outer
+predicate is there. Ordering is a separate matter and still breaks with two dispatchers (**#150**).
 
 **D3 — The envelope is hand-written in `Abstractions`; the SDK is test-only. (settled)**
 
@@ -358,7 +481,7 @@ after-hook `webhook` delivers hidden fields to the declared endpoint. It is acce
 endpoint is declared in the same descriptor by the same author as the `hidden` rule — never
 caller-supplied — and it is pinned by a **named** fact rather than a paragraph
 (Task 8, `A_webhook_receives_the_unmasked_record_and_that_is_documented`), with per-endpoint field
-projection filed as an issue in Task 1.
+projection filed as **#152** in Task 1.
 
 ---
 
@@ -369,6 +492,7 @@ projection filed as an issue in Task 1.
 | File | Responsibility |
 |---|---|
 | `AlvoEvent.cs` | `AlvoEvent` + `AlvoEventData`: the hand-written CloudEvents 1.0.2 envelope and its `data` payload. Public. Guards `Time.Offset == TimeSpan.Zero`. |
+| `AlvoEventId.cs` | The **monotonic** UUIDv7 generator every event id is minted by (D1, spike Q1). Public, because the emit sites live in a different assembly. |
 | `AlvoEventAttributes.cs` | The **one** authority on wire attribute names and which of them are extensions. Public; the conformance oracle iterates it. |
 | `AlvoEventJson.cs` | Hand-written `Write`/`Read` over `Utf8JsonWriter`/`JsonDocument`. Flat top-level extensions; `snake_case` only inside `data`. Public. |
 | `IOutboxStore.cs` | `IOutboxStore` + `OutboxEntry`: the claim/mark/release port the dispatcher depends on. Public. |
@@ -421,6 +545,14 @@ projection filed as an issue in Task 1.
 
 ### Task 1: The de-risking spike, and the follow-up issues
 
+**DONE** — commit `dabca3b`. The evidence is
+`docs/superpowers/specs/evidence/2026-08-03-f3-pr5a-events/spike.txt` and **it outranks this plan**
+wherever the two disagree. The spike program was deleted in the same commit. The four issues exist:
+**#149** JSONata evaluator · **#150** per-entity-key ordering (F7; it also carries Q1's monotonicity
+finding) · **#151** `dataref` over 64 KB · **#152** per-endpoint field projection. Two decisions came
+back changed — see D1 and D2 above, both amended, both ratified. The steps below are kept as the
+record of what was measured and how.
+
 Nothing in Tasks 2–13 may assume an answer this task did not measure. The spike is throwaway: it
 must not survive the task. What survives is
 `docs/superpowers/specs/evidence/2026-08-03-f3-pr5a-events/spike.txt` — verbatim captured output
@@ -437,7 +569,7 @@ with a provenance header — and four filed issues.
 - Produces: no shipped surface. Its output is the evidence file plus the four issue numbers Task 7,
   Task 8 and Task 13 reference.
 
-- [ ] **Step 1: Scaffold the spike and answer Q1, Q6 and Q7 — the ordering key**
+- [x] **Step 1: Scaffold the spike and answer Q1, Q6 and Q7 — the ordering key**
 
 The spike is one `Program.cs` with one method per question, each printing a banner and a verdict
 line. Q1, Q6 and Q7 need no container.
@@ -508,7 +640,13 @@ Expected: Q1 reports **0** inversions for at least one of the two spellings; Q6 
 REFUSING the `IDENTITY` form (and accepting `AUTOINCREMENT`, which PostgreSQL refuses — the pair is
 the point); Q7 reports a tie run > 1, which is what disqualifies `created_at` as the ordering key.
 
-- [ ] **Step 2: Q2 and Q3 — cross-engine text ordering, and the portable claim statement**
+**Measured — the Q1 expectation was falsified.** Both spellings inverted about half their adjacent
+pairs (49 839 and 49 898 over 100 000), because `Guid.CreateVersion7()` carries no monotonic counter.
+The spelling is a Q2 question, not a Q1 one. The monotonic wrapper measured **0 inversions over
+100 000** and is now D1's amendment. Q6 and Q7 landed as expected, plus one trap worth its own line:
+SQLite **accepts** `SERIAL` as an unrecognised column type and never increments it.
+
+- [x] **Step 2: Q2 and Q3 — cross-engine text ordering, and the portable claim statement**
 
 Both engines, same shuffled input, same assertions.
 
@@ -562,7 +700,13 @@ re-run Q2 with `"N"` in the same session and record both); Q3 shows `UPDATE … 
 SQLite with the exact message R4 predicts, the portable statement returning 10 rows on both, and
 `RETURNING` order **not** guaranteed sorted.
 
-- [ ] **Step 3: Q4 and Q5 — two claimants, and the dispatcher as a second SQLite writer**
+**Measured:** Q2 is `True` on both engines in both spellings, and also under `COLLATE "C"`,
+`COLLATE "POSIX"` and a native `uuid` column, under `datcollate=en_US.utf8` — so the `"N"` fallback is
+**withdrawn**, not merely unused. Q3 refused the statement on **both** engines and named **`ORDER`**,
+not `limit`, which corrects R4 twice; and `RETURNING already sorted: False` on both, so the in-process
+re-sort is load-bearing in fact.
+
+- [x] **Step 3: Q4 and Q5 — two claimants, and the dispatcher as a second SQLite writer**
 
 ```csharp
 static async Task Q4_TwoClaimantsOnPostgres(string connectionString)
@@ -628,7 +772,20 @@ claim and whether a **dispatcher-connection-only** `Default Timeout` fixes it.
 > behaviour change for every existing SQLite consumer (register R5) and it is the maintainer's call,
 > not this plan's. Record it in the evidence file, report it, and do not start Task 5.
 
-- [ ] **Step 4: Q8 and Q9 — the two budgets ring2 has to absorb**
+**Measured — Q4 was the blocking finding instead, and the WAL stop-condition did not trigger.**
+
+- **Q4 failed as the plan wrote it:** B claimed the same 10 rows and `attempts` reached 2 on all of
+  them. The one-line fix — repeat `claimed_at IS NULL` in the **outer** `WHERE` — measured clean, and
+  D2 now carries that statement verbatim. Task 5 must not use the original.
+- **Q5 cleared:** the shipped registration is correct as it stands (`DefaultTimeout` 30 s, whose
+  retry loop covers `BEGIN`), a second writer waits ~1 s and succeeds in both directions, and an
+  explicit `PRAGMA busy_timeout=5000` changes nothing measurable. **Do not touch the shared SQLite
+  registration.** The one shape that reaches R5's mechanism is a `DEFERRED` transaction that reads
+  and then writes; WAL turns that into an unretryable `SQLITE_BUSY_SNAPSHOT` on the dispatcher rather
+  than fixing it, and `journal_mode=WAL` persists in the database file. The constraint therefore
+  lands on Task 5's and Task 9's shapes, not on any registration.
+
+- [x] **Step 4: Q8 and Q9 — the two budgets ring2 has to absorb**
 
 Q8: insert 10 000 rows through one transaction per 1 000, then run the portable claim to
 exhaustion at `batch = 100`, on both engines. Print insert seconds, claim seconds, and total. Q9:
@@ -641,7 +798,11 @@ Expected: Q8 well under a minute per engine; Q9's publish-once-plus-two-boots un
 decision rule:** if Q9's total exceeds 120 s, Task 12 ships the in-process fact **only**, with the
 disclosure its own name carries, and the child-process harness is filed as an issue instead.
 
-- [ ] **Step 5: Write the evidence file, verbatim, with a provenance header**
+**Measured:** Q8 is 0.37 s (SQLite) and 0.51 s (PostgreSQL) for the storage floor, and Q9's budget is
+**6.0 s** — publish 3.2 s + boots 1.6 s and 1.3 s, with exit code 137 confirming a real SIGKILL. So
+the 120 s fallback does **not** apply and Task 12 ships the child-process harness.
+
+- [x] **Step 5: Write the evidence file, verbatim, with a provenance header**
 
 Concatenate the captured output into
 `docs/superpowers/specs/evidence/2026-08-03-f3-pr5a-events/spike.txt`, prefixed exactly in the shape
@@ -664,7 +825,7 @@ Then add a **Verdicts** block at the end: one line per question, each either con
 in *Decisions this plan makes* or naming the fallback that now applies. Nothing paraphrased —
 paste the measured lines.
 
-- [ ] **Step 6: Open the four follow-up issues, and record their numbers**
+- [x] **Step 6: Open the four follow-up issues, and record their numbers**
 
 Later tasks quote these numbers in refusal messages, so they must exist now.
 
@@ -685,8 +846,13 @@ EOF
 
 gh issue create --title "Per-entity-key ordering: partition the outbox claim (F7)" --body "$(cat <<'EOF'
 PR5a ships exactly one dispatcher (design addendum deviation 72, R3). Per-entity-key ordering holds
-only while one dispatcher runs, and PR5a cannot detect a second instance — two replicas break the
-guarantee silently.
+while one dispatcher runs AND no two events for one key land in the same millisecond, and PR5a cannot
+detect a second instance — two replicas break the guarantee silently.
+
+Spike Q1 (measured) is why the second condition is in that sentence: `ORDER BY id` over a UUIDv7 is
+exact only above the millisecond, and `Guid.CreateVersion7()` inverts 49.9% of adjacent
+same-millisecond pairs. `AlvoEventId`'s monotonic wrapper closes that within one process (0 inversions
+over 100 000); two processes minting inside one millisecond still interleave, which is this issue's.
 
 `partition_key` is already written on every outbox row from the first migration, so the partitioned
 claim is additive. `FOR UPDATE SKIP LOCKED` is NOT the answer: it skips the row, not the key.
@@ -720,7 +886,20 @@ EOF
 
 Record the four numbers in the evidence file's Verdicts block. **Tasks 7, 8 and 13 quote them.**
 
-- [ ] **Step 7: Delete the spike, and commit**
+**The four numbers, which every later task must use:**
+
+| Issue | Title | Quoted by |
+|---|---|---|
+| **#149** | JSONata evaluator for the four `$defs/jsonata` action slots | Task 7's refusal message |
+| **#150** | Per-entity-key ordering: partition the outbox claim (F7) | Tasks 5, 13; the ordering wording everywhere |
+| **#151** | Outbox: `dataref` (claim-check) for an envelope over 64 KB | Task 2's remarks, Task 13 |
+| **#152** | Per-endpoint field projection for webhook and email deliveries | Task 8 (D7), Task 13 |
+
+`#150` additionally carries Q1's finding: the ordering it owns is **already** broken by a
+same-millisecond tie on **one** dispatcher, not only by a second replica — and the in-process half of
+that is what `AlvoEventId` closes, so what remains on `#150` is the cross-process half.
+
+- [x] **Step 7: Delete the spike, and commit**
 
 ```bash
 git rm -r spike/MMLib.Alvo.Events.Spike
@@ -739,11 +918,13 @@ second implementation nobody maintains.
 
 **Files:**
 - Create: `src/MMLib.Alvo.Abstractions/Events/AlvoEvent.cs`
+- Create: `src/MMLib.Alvo.Abstractions/Events/AlvoEventId.cs`
 - Create: `src/MMLib.Alvo.Abstractions/Events/AlvoEventAttributes.cs`
 - Create: `src/MMLib.Alvo.Abstractions/Events/AlvoEventJson.cs`
 - Modify: `Directory.Packages.props`
 - Modify: `test/MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj`
 - Test: `test/MMLib.Alvo.Abstractions.Tests/Events/AlvoEventTests.cs`
+- Test: `test/MMLib.Alvo.Abstractions.Tests/Events/AlvoEventIdTests.cs`
 - Test: `test/MMLib.Alvo.Abstractions.Tests/Events/AlvoEventJsonTests.cs`
 - Test: `test/MMLib.Alvo.Tests/Events/CloudEventsConformanceTests.cs`
 - Modify: `test/MMLib.Alvo.Abstractions.Tests/PublicApi.MMLib.Alvo.Abstractions.verified.txt`
@@ -809,6 +990,12 @@ second implementation nobody maintains.
       public static string Write(AlvoEvent @event);
       public static AlvoEvent Read(string json);
   }
+
+  public static class AlvoEventId
+  {
+      public static Guid Create();
+      public static Guid Create(DateTimeOffset timestamp);
+  }
   ```
   `AuthType` values are the three constants `AlvoEventAuthType.ApiKey = "apikey"`,
   `System = "system"`, `Anonymous = "anon"` on a public static class in the same file.
@@ -839,6 +1026,86 @@ public void An_event_accepts_a_utc_time()
 public void The_payload_version_defaults_to_the_current_one_so_no_producer_can_forget_it()
     => Sample().PayloadVersion.ShouldBe(AlvoEvent.CurrentPayloadVersion);
 ```
+
+```csharp
+// Abstractions/Events/AlvoEventIdTests.cs — D1's amendment. Every number here is spike Q1's.
+// Guid.CreateVersion7() inverted 49 839 of 100 000 adjacent pairs; the wrapper measured 0.
+[Fact]
+public void A_hundred_thousand_successive_ids_sort_in_the_order_they_were_minted()
+{
+    var ids = Enumerable.Range(0, Samples).Select(_ => AlvoEventId.Create().ToString()).ToList();
+
+    Inversions(ids).ShouldBe(
+        0,
+        $"ORDER BY id is the outbox queue order, so an inversion is a delivery out of order. "
+        + $"Guid.CreateVersion7() alone measured 49 839 over {Samples} (spike Q1).");
+}
+
+// The non-vacuity control for the fact above: it proves nothing unless the run really hit the
+// repeated-millisecond path, which is the only path the wrapper changes.
+[Fact]
+public void The_run_really_exercises_the_repeated_millisecond_path()
+{
+    var ids = Enumerable.Range(0, Samples).Select(_ => AlvoEventId.Create()).ToList();
+
+    MillisecondsOf(ids).Distinct().Count().ShouldBeLessThan(
+        Samples / 100,
+        "spike Q1 measured 39 distinct millisecond stamps over 100 000 mints; if this run spread "
+        + "across a stamp per id, no pair shared a millisecond and the fact above is vacuous");
+}
+
+// Deterministic where the loop above is statistical: one fixed timestamp, so the repeated-millisecond
+// branch is the only branch taken. Guid.CreateVersion7(fixed) fails this half the time (Q1: 515/999).
+[Fact]
+public void Two_ids_minted_in_one_millisecond_sort_in_the_order_they_were_minted()
+{
+    var fixedInstant = new DateTimeOffset(2026, 8, 3, 12, 0, 0, TimeSpan.Zero);
+
+    var first = AlvoEventId.Create(fixedInstant).ToString();
+    var second = AlvoEventId.Create(fixedInstant).ToString();
+
+    string.CompareOrdinal(first, second).ShouldBeLessThan(0);
+}
+
+// Q1 measured that a backwards clock step reorders the queue by the size of the step. It cannot,
+// within one process, because the last emitted millisecond never moves backwards.
+[Fact]
+public void A_backwards_clock_step_cannot_reorder_ids_within_one_process()
+{
+    var now = DateTimeOffset.UtcNow;
+
+    var before = AlvoEventId.Create(now).ToString();
+    var afterTheClockWentBack = AlvoEventId.Create(now - TimeSpan.FromSeconds(5)).ToString();
+
+    string.CompareOrdinal(before, afterTheClockWentBack).ShouldBeLessThan(0);
+}
+
+[Fact]
+public void An_id_is_still_a_uuid_version_7_with_the_rfc_variant()
+{
+    var bytes = AlvoEventId.Create().ToByteArray(bigEndian: true);
+
+    (bytes[6] & 0xF0).ShouldBe(0x70);
+    (bytes[8] & 0xC0).ShouldBe(0x80);
+}
+
+// Q1: Guid's DEFAULT byte order is not time-sortable (5 050 inversions of 9 999), which is why the
+// outbox stores the id as TEXT and never as a BLOB written from ToByteArray().
+[Fact]
+public void The_text_form_sorts_like_the_big_endian_bytes_and_not_like_the_default_ones()
+{
+    var ids = Enumerable.Range(0, 1_000).Select(_ => AlvoEventId.Create()).ToList();
+
+    Inversions([.. ids.Select(id => Convert.ToHexString(id.ToByteArray(bigEndian: true)))]).ShouldBe(0);
+    Inversions([.. ids.Select(id => Convert.ToHexString(id.ToByteArray()))]).ShouldBeGreaterThan(0);
+}
+
+private const int Samples = 100_000;
+```
+
+`Inversions` counts adjacent pairs where `string.CompareOrdinal(previous, next) >= 0`;
+`MillisecondsOf` reads the 48-bit stamp out of each id's big-endian bytes. Both are private helpers in
+the test class, mirroring the spike's own two loops so the numbers quoted above stay comparable.
 
 ```csharp
 // Abstractions/Events/AlvoEventJsonTests.cs
@@ -1001,8 +1268,54 @@ verbatim, or a reader checking the v1.0.2 registry concludes the names were inve
 cannot drift. `PayloadVersion`'s docs record deviation 69: it duplicates what the spec assigns to
 `type` + `dataschema`, kept because an in-process subscriber switching on an integer is cheaper than
 parsing a URI, and recorded here rather than discovered by whoever notices the two can disagree.
-Add a `<remarks>` paragraph on `AlvoEvent` itself naming the 64 KB forwarding rule and the
-`dataref` issue from Task 1.
+Add a `<remarks>` paragraph on `AlvoEvent` itself naming the 64 KB forwarding rule and **#151**.
+
+`AlvoEventId` is the monotonic generator D1's amendment adds. It takes the BCL's own v7 mint as its
+candidate — so the timestamp packing, the version and the variant bits stay the BCL's business — and
+fixes only the ordering:
+
+```csharp
+public static Guid Create() => Create(DateTimeOffset.UtcNow);
+
+public static Guid Create(DateTimeOffset timestamp)
+{
+    Span<byte> candidate = stackalloc byte[GuidByteCount];
+    Guid.CreateVersion7(timestamp).TryWriteBytes(candidate, bigEndian: true, out _);
+
+    lock (_gate)
+    {
+        return NextInOrder(candidate);
+    }
+}
+
+private static Guid NextInOrder(ReadOnlySpan<byte> candidate)
+{
+    var milliseconds = MillisecondsOf(candidate);
+
+    if (milliseconds > _lastMilliseconds)
+    {
+        return Remember(milliseconds, TailOf(candidate));
+    }
+
+    return _lastTail < TailCeiling
+        ? Remember(_lastMilliseconds, _lastTail + UInt128.One)
+        : Remember(_lastMilliseconds + 1, TailOf(candidate));
+}
+```
+
+`Remember` stores the pair and composes the id; `MillisecondsOf`/`TailOf` read the 48-bit stamp and
+the **74-bit** tail (the four low bits of byte 6, byte 7, the six low bits of byte 8, bytes 9–15 —
+i.e. everything that is neither the timestamp nor the version nor the variant nibble); `Compose`
+writes them back, so incrementing can never corrupt the version or the variant. The saturation arm
+exists because a 74-bit counter cannot overflow in practice but *can* be reasoned about wrongly if
+the branch is missing.
+
+Its XML docs carry three things a later reader would otherwise re-litigate: the measured reason it
+exists (`spike.txt` Q1 — 49.9 % of same-millisecond pairs invert without it, 0 with it); that
+`Create(DateTimeOffset)` returns an id whose embedded millisecond is the **later** of the requested
+one and the last already minted, because a total order outranks an exact stamp, and that the emit
+sites pass the write's own audit instant so `time`, `created_at` and the id agree; and that the
+guarantee is **in-process** — two processes minting inside one millisecond still interleave (#150).
 
 - [ ] **Step 4: Run to verify they pass**
 
@@ -1015,7 +1328,13 @@ Expected: PASS, and the Verify snapshot accepted. Confirm `Build succeeded` firs
 
 - [ ] **Step 5: Prove the conformance facts discriminate**
 
-Three mutations, each restored immediately:
+Four mutations, each restored immediately:
+
+0. **Replace `AlvoEventId.Create`'s body with `Guid.CreateVersion7(timestamp)`** — the exact code D1
+   originally specified. `A_hundred_thousand_successive_ids_sort_in_the_order_they_were_minted` must
+   go **red**, and `Two_ids_minted_in_one_millisecond_sort_in_the_order_they_were_minted` must go red
+   or flake, which is the point: this is the mutation that proves the wrapper is doing work rather
+   than wrapping.
 
 1. Rename `AlvoEventAttributes.PayloadVersion` from `"payloadversion"` to `"payload_version"` →
    `Every_extension_name_is_one_the_cloudevents_sdk_itself_accepts` **and** the Verify snapshot go
@@ -1101,7 +1420,9 @@ public void The_ddl_is_identical_ansi_portable_with_no_per_engine_branching()
             Case.Insensitive,
             "SystemSchemaInitializer's stated invariant is identical ANSI-portable DDL on both "
             + "engines with no per-engine branching (:15-17); the ordering key is a UUIDv7 id "
-            + "instead (plan decision D1, spike Q1/Q6)");
+            + "instead (plan decision D1, spike Q1/Q6). SERIAL is in this list even though SQLite "
+            + "ACCEPTS it: SQLite parses it as an unrecognised column type and gives a nullable "
+            + "column that never increments, so it would pass CI and lose ordering in production");
     }
 }
 
@@ -1206,11 +1527,19 @@ internal static string Ddl(string tableName) =>
 The type-level `<remarks>` must carry four paragraphs, each of which is a decision a later reader
 would otherwise re-litigate:
 
-- **Why `id` is the ordering key and there is no `sequence`.** `Guid.CreateVersion7()` is
-  time-ordered in its high 48 bits and its stored text sorts lexicographically in time order, so the
-  primary key *is* the queue order — with identical ANSI DDL on both engines, honouring
-  `SystemSchemaInitializer`'s stated invariant (`:15-17`), which an `AUTOINCREMENT`/`IDENTITY` column
-  would break with zero precedent in this repository. Measured: `spike.txt` Q1, Q2, Q6, Q7.
+- **Why `id` is the ordering key and there is no `sequence`.** A UUIDv7 is time-ordered in its high
+  48 bits and its stored text sorts lexicographically in time order on both engines, so the primary
+  key *is* the queue order — with identical ANSI DDL, honouring `SystemSchemaInitializer`'s stated
+  invariant (`:15-17`), which an `AUTOINCREMENT`/`IDENTITY` column would break with zero precedent in
+  this repository (each engine refuses the other's spelling — measured, Q6). Two consequences of the
+  same measurement belong in this paragraph, because both are invisible from the DDL: the id is
+  minted by **`AlvoEventId.Create`**, never `Guid.CreateVersion7()`, since the latter inverts 49.9 %
+  of same-millisecond pairs (Q1); and the column is `TEXT` rather than a `BLOB`, since `Guid`'s
+  default byte order is not time-sortable (Q1). Measured: `spike.txt` Q1, Q2, Q6, Q7.
+- **Why `SERIAL` is in the forbidden list even though SQLite does not reject it.** SQLite **accepts**
+  `seq SERIAL` as an unrecognised column type and silently gives a nullable column that never
+  increments (Q6). A "portable `SERIAL`" therefore passes every SQLite test in CI and loses ordering
+  in production, which is why the absence is asserted rather than assumed.
 - **Why there is no high-water mark, ever.** PostgreSQL sequences commit out of order — a
   transaction can take 100 and commit after another took 101 and committed — so "processed up to N"
   drops a row silently. The claim filters `dispatched_at IS NULL`. Having no monotonic integer at all
@@ -1601,7 +1930,7 @@ internal static AlvoEvent For(
 
     return new AlvoEvent
     {
-        Id = Guid.CreateVersion7(),
+        Id = AlvoEventId.Create(now),
         Source = AlvoEvent.DefaultSource,
         Type = $"entity.{entity.Name}.{Suffix(operation)}",
         Time = now,
@@ -1620,6 +1949,13 @@ internal static AlvoEvent For(
 }
 ```
 
+- `Id` comes from **`AlvoEventId.Create(now)`** and never from `Guid.CreateVersion7()`: the id is the
+  outbox's queue order, and the plain BCL mint inverts 49.9 % of same-millisecond pairs (D1, spike
+  Q1). Passing `now` — the write's own audit instant — makes the envelope's `time`, the row's
+  `created_at` and the id's embedded millisecond one instant instead of three clock reads. Add a fact
+  in `OutboxEventFactoryTests` that two events minted for one entity inside one millisecond sort in
+  emit order, so a future edit back to `Guid.CreateVersion7()` fails here too and not only in
+  `AlvoEventIdTests`.
 - `Suffix` is a three-arm switch returning `"created"`/`"updated"`/`"deleted"` — each matching
   `$defs/eventPattern`'s third segment `[a-z]+`.
 - `AuthTypeOf` reads the context: the reserved system user id → `System`; `AlvoContext.Anonymous`'s
@@ -1907,10 +2243,11 @@ public void The_claim_filters_the_dispatch_flag_and_never_a_high_water_mark()
     sql.ShouldNotContain(">", "a high-water mark on a monotonic key drops a row silently (R2)");
 }
 
-// R4, measured: SQLITE_ENABLE_UPDATE_DELETE_LIMIT is unset in the bundled e_sqlite3, so
-// `UPDATE … LIMIT` does not compile. The LIMIT belongs in the subquery.
+// Measured on BOTH engines (Q3), which corrects R4: the parser dies on ORDER, not on limit, and
+// PostgreSQL refuses the same statement — so this is portability, not a SQLite workaround.
+// SQLITE_ENABLE_UPDATE_DELETE_LIMIT is also unset in the bundled e_sqlite3.
 [Fact]
-public void The_limit_is_in_the_subquery_because_sqlite_has_no_update_limit()
+public void The_order_by_and_limit_are_in_the_subquery_because_neither_engine_allows_them_in_update()
 {
     var sql = OutboxTable.ClaimSql("alvo_outbox");
 
@@ -1929,7 +2266,59 @@ public void The_claim_takes_no_row_lock_hint_because_one_dispatcher_needs_none()
     sql.ShouldNotContain("SKIP LOCKED");
     sql.ShouldNotContain("FOR UPDATE");
 }
+
+/// <summary>
+/// Spike Q4: the outer <c>WHERE</c> must repeat the subquery's claimability predicate, or two
+/// claimants deliver every row twice.
+/// </summary>
+/// <remarks>
+/// Under <c>READ COMMITTED</c>, PostgreSQL's EvalPlanQual re-check re-evaluates the <b>outer</b>
+/// <c>WHERE</c> against the row the winner just updated — and nothing else. A subquery-only predicate
+/// is not part of that re-check, so the loser's <c>id IN (…)</c> still holds and it re-claims rows
+/// that are already claimed: measured as <em>"A claimed 10, B claimed 10, overlap 10; rows with
+/// attempts &gt; 1: 10"</em>. This fact is a shape assertion rather than a behaviour one because it is
+/// the one that survives in a project with no database; the behaviour is pinned on PostgreSQL by
+/// <c>PostgreSqlOutboxStoreTests.A_second_claimant_claims_nothing_rather_than_the_same_rows</c>.
+/// </remarks>
+[Fact]
+public void The_outer_where_repeats_the_claimability_predicate_it_is_not_redundant()
+{
+    var outerWhere = OutboxTable.ClaimSql("alvo_outbox").Split("AND id IN (")[0];
+
+    outerWhere.ShouldContain("dispatched_at IS NULL");
+    outerWhere.ShouldContain("claimed_at IS NULL");
+}
 ```
+
+```csharp
+// Data.PostgreSql.Tests.Integration/PostgreSqlOutboxStoreTests.cs — the fact the SHAPE cannot prove.
+// This is the spike's Q4 harness, kept: it is the only fact in the suite that would have caught D2's
+// original statement, and a shape assertion cannot notice a row claimed twice.
+[Fact]
+public async Task A_second_claimant_claims_nothing_rather_than_the_same_rows()
+{
+    await using var world = await WorldAsync();
+    await world.SeedAsync(count: 10);
+
+    var (first, second) = await world.TwoConcurrentClaimsAsync(batchSize: 10);
+
+    first.Count.ShouldBe(10);
+    second.ShouldBeEmpty(
+        "no SKIP LOCKED means the loser BLOCKS and then re-checks; with the claimability predicate "
+        + "only in the subquery it re-claimed all 10 and attempts reached 2 on every row (spike Q4)");
+    (await world.MaxAttemptsAsync()).ShouldBe(1);
+}
+```
+
+`TwoConcurrentClaimsAsync` is the spike's Q4 harness, kept as a test: two `NpgsqlConnection`s on the
+container's database, each running **`OutboxTable.ClaimSql`** — the production statement, reachable
+because the driver grants `InternalsVisibleTo` to this project — inside its own explicit transaction.
+A's transaction stays open, B's claim is started and asserted to be **blocked**, A commits, then B is
+awaited. Two connections with explicit transactions rather than two `EfCoreOutboxStore` calls, because
+the store issues one autocommit statement per call and therefore has no window a test can hold open:
+the race must be constructed, or the fact is a coin toss. `MaxAttemptsAsync` reads `MAX(attempts)`,
+which is the half of Q4's finding that survives even when the overlap looks empty — a double claim
+increments `attempts` whether or not both callers see the rows.
 
 - [ ] **Step 2: Run to verify they fail**
 
@@ -1940,16 +2329,25 @@ dotnet test --project test/MMLib.Alvo.Data.Sqlite.Tests -- --filter-class '*Sqli
 ```
 Expected: FAIL — `IOutboxStore` does not exist.
 
-- [ ] **Step 3: Check the spike's Q5 verdict, then implement**
+- [ ] **Step 3: Implement — the Q5 gate is already resolved**
 
-**Gate.** Re-read `spike.txt`'s Q5 verdict before writing a line:
+**The gate cleared, and the branch it chose was the first one: implement as written, change no
+registration.** Measured (Q5): the shipped SQLite registration carries `journal_mode=delete`,
+`busy_timeout=0` **and** `Microsoft.Data.Sqlite`'s `DefaultTimeout = 30 s`, whose retry loop covers
+`BEGIN` — so a second writer waits (~1 s in the harness) and then succeeds, in both directions, and an
+explicit `PRAGMA busy_timeout=5000` changes nothing measurable. R5's claim that there is "no
+`Default Timeout` anywhere" was wrong, which is why the shipped configuration was already correct.
 
-- *Q5 shows the claim succeeds under the shipped SQLite configuration* → implement as written.
-- *Q5 shows `SQLITE_BUSY` and a dispatcher-connection-only `Default Timeout=<n>` fixes it* → set that
-  on `EfCoreOutboxStore`'s **own** connection string only, with a `<remarks>` naming the measurement,
-  and add a fact that the shared registration is untouched.
-- *Q5 shows only `journal_mode=WAL` on the shared registration works* → **stop**. That is a behaviour
-  change for every existing SQLite consumer (R5) and the maintainer's call. Report and do not proceed.
+Two things that follow, and they are constraints on **this** task rather than on the registration:
+
+- **Do not set a `Default Timeout`, a `busy_timeout` or a `journal_mode` anywhere** — not on
+  `EfCoreOutboxStore`'s own connection string either. Nothing measured needs one.
+- **Never read then write inside one transaction.** That is the single shape that reaches R5's
+  mechanism: under WAL it fails unretryably with `SQLITE_BUSY_SNAPSHOT` (`Extended=517`) after
+  burning the whole 30 s loop, and in the shipped journal mode it fails the *other* party — the
+  request path. WAL moves whose write fails; it does not fix it, and `journal_mode=WAL` persists in
+  the database file, so it is not a redeploy away from being undone. Each `EfCoreOutboxStore` member
+  therefore opens a connection and issues **one** statement.
 
 `OutboxTable` gains `ClaimSql(tableName)` as a member (so the arch tests above can read it without a
 database), plus `MarkDispatchedSql` and `ReleaseSql`:
@@ -1957,9 +2355,11 @@ database), plus `MarkDispatchedSql` and `ReleaseSql`:
 ```csharp
 internal static string ClaimSql(string tableName) =>
     $"""
-    UPDATE {tableName}
-       SET claimed_at = @claimed_at, claimed_by = @claimed_by, attempts = attempts + 1
-     WHERE id IN (SELECT id FROM {tableName}
+    UPDATE {tableName} SET claimed_at = @claimed_at, claimed_by = @claimed_by,
+                           attempts = attempts + 1
+     WHERE dispatched_at IS NULL
+       AND (claimed_at IS NULL OR claimed_at < @stale_before)
+       AND id IN (SELECT id FROM {tableName}
                    WHERE dispatched_at IS NULL
                      AND attempts < @max_attempts
                      AND (claimed_at IS NULL OR claimed_at < @stale_before)
@@ -1969,23 +2369,45 @@ internal static string ClaimSql(string tableName) =>
     """;
 ```
 
-Its `<remarks>` records four things, each measured or cited:
+This is D2's **amended** statement, from `spike.txt` Q4, verbatim. The version without the outer
+`dispatched_at`/`claimed_at` predicates — which is what this plan's first draft specified — is
+measured broken; do not restore it.
 
+Its `<remarks>` records five things, each measured or cited:
+
+- **Why the outer `WHERE` repeats the subquery's predicate.** It is the whole correctness of the
+  statement, not a belt on a brace. Measured (Q4) without it: *"A claimed 10, B claimed 10, overlap
+  10 (must be 0); rows with attempts > 1: 10"* — two claimants deliver **every** row twice. Under
+  `READ COMMITTED`, PostgreSQL's EvalPlanQual re-check runs the **outer** `WHERE` again against the
+  row the winner just updated, and nothing else; the subquery's `claimed_at IS NULL` was evaluated
+  before the block and is not re-checked. With the predicate repeated: *"A claimed 10, B claimed 0,
+  overlap 0; rows with attempts > 1: 0"*. Anyone tempted to call it redundant is reading the subquery
+  as if it re-ran.
 - **Why raw SQL and not LINQ.** `UseRelationalNulls()` is on in both drivers and *"PR5 is the first
   PR its cost binds"* (`data-path.md:121-145`): a LINQ predicate over a nullable column would have to
   be written `x != null && x < y` against C#'s reading of the same text. Raw SQL has SQL's semantics
   natively, so the constraint is met by construction rather than by whoever edits this next
   remembering it. The arch fact below holds the line.
-- **Why the `LIMIT` is in the subquery.** R4, measured: `SQLite Error 1: 'near "limit": syntax error'`
-  — `SQLITE_ENABLE_UPDATE_DELETE_LIMIT` is unset in the bundled `e_sqlite3`.
-- **Why the result is re-sorted in process.** `RETURNING`'s row order is documented as arbitrary on
-  both engines, so `ORDER BY` in the subquery decides *which* rows, never in what order they come
-  back.
+- **Why the `ORDER BY` and the `LIMIT` are in the subquery.** Measured on **both** engines (Q3), which
+  corrects R4 twice: it is not a SQLite quirk, and the parser names `ORDER`, not `limit` — SQLite
+  `'near "ORDER": syntax error'`, PostgreSQL `42601 syntax error at or near "ORDER"`. The bundled
+  `e_sqlite3` also confirms `SQLITE_ENABLE_UPDATE_DELETE_LIMIT` is unset.
+- **Why the result is re-sorted in process.** `RETURNING`'s row order is arbitrary in measured fact on
+  both engines — `RETURNING already sorted: False` for SQLite *and* PostgreSQL (Q3) — so `ORDER BY` in
+  the subquery decides *which* rows, never in what order they come back.
 - **Why there is no `SKIP LOCKED`.** It skips the **row**, not the **key**, so it delivers neither
   global nor per-entity-key ordering (deviation 72); with exactly one dispatcher it buys nothing, and
   a new `IAlvoSqlDialect` member would be a public-API change in a driver package for a seam F7 will
-  design properly. Spike Q4 measured that a second claimant blocks and then claims **nothing**, so
-  the absence is safe rather than merely cheap.
+  design properly. Spike Q4 measured that a second claimant blocks and then claims **nothing** —
+  **with the amended statement**, and every row twice without it.
+
+One shape constraint from Q5, which belongs on `ClaimAsync` rather than on any registration: the claim
+must be **one write statement** on an autocommit connection (or the first statement of a write-first
+transaction) and must never be preceded by a read inside the same transaction. Measured: a `DEFERRED`
+read-then-write transaction is the one shape that reaches R5's mechanism, and under WAL it fails
+unretryably with `SQLITE_BUSY_SNAPSHOT` (`Extended=517`) after burning the full 30 s retry loop.
+`EfCoreOutboxStore` opens a connection per member and issues one statement, which satisfies this by
+construction — say so, or the next edit wraps the pair in a transaction to be tidy.
 
 `EfCoreOutboxStore` is a public sealed class taking `RelationalConnectionFactory`, `AlvoOptions` and
 `TimeProvider`; each member opens a connection, calls the matching `OutboxTable` statement, and
@@ -2032,7 +2454,14 @@ Expected: PASS on both. Assert `Build succeeded` first.
 
 - [ ] **Step 5: Prove the claim facts discriminate**
 
-Three mutations, restored immediately:
+Four mutations, restored immediately:
+
+0. **Delete the outer `dispatched_at IS NULL AND (claimed_at IS NULL OR …)`**, leaving `WHERE id IN
+   (subquery)` — D2's original statement. Confirm
+   `The_outer_where_repeats_the_claimability_predicate_it_is_not_redundant` **and**
+   `A_second_claimant_claims_nothing_rather_than_the_same_rows` go **red** on PostgreSQL. This is the
+   one mutation whose result is already known from outside the suite: the spike measured it as
+   overlap 10 of 10 with `attempts` at 2, so a green run here means the *test* is wrong, not the SQL.
 
 1. **Replace `dispatched_at IS NULL AND attempts < @max_attempts AND (claimed_at IS NULL OR …)` with
    `id > @high_water`.** Confirm
@@ -2568,7 +2997,7 @@ internal static UnhonouredSlot RawJsonata { get; } = new(
     "Use a '{{...}}' template instead (e.g. \"{{new.title}}\"), which this build does render, or "
     + "remove the transformation and accept the canonical envelope. A partial JSONata "
     + "implementation is deliberately not offered: silently producing a different payload for the "
-    + "part it does not implement costs more than this refusal. Tracked in <#jsonata-issue>.");
+    + "part it does not implement costs more than this refusal. Tracked in #149.");
 
 internal static UnhonouredSlot UnhonouredAction(string type) => new(
     type,
@@ -2581,7 +3010,7 @@ internal static UnhonouredSlot UnhonouredAction(string type) => new(
 *specifically* does not happen — `function` names that no function runs on any trigger it declares
 and that the F4 action set requires it (`alvo-specifikacia.md:330`, deviation 66); `http.call` names
 that no request is made and `headersSecretRef` is never read; `entity.update` names that no record is
-written and that it lands with automation. `<#jsonata-issue>` is the real number from Task 1 Step 6.
+written and that it lands with automation. The number is **#149**, from Task 1 Step 6.
 
 Then **remove the three `after*` entries** from `HookPoints()`, keeping the three `before*` ones:
 
@@ -2853,7 +3282,7 @@ public async Task A_refused_delivery_throws_so_the_dispatcher_can_retry_it()
 /// <c>changed(commission_note)</c> must see every field — <c>hidden</c> is a per-caller read mask,
 /// not a data classification — and because the endpoint is declared in the same descriptor by the
 /// same author as the <c>hidden</c> rule, never caller-supplied. Per-endpoint field projection is
-/// filed as its own issue. This fact exists so the disclosure is a decision on the record: if it
+/// filed as #152. This fact exists so the disclosure is a decision on the record: if it
 /// ever becomes wrong, this is the test that has to change, deliberately.
 /// </remarks>
 [Fact]
@@ -3280,6 +3709,13 @@ private async Task PumpUntilStoppedAsync(CancellationToken stoppingToken)
     }
 }
 ```
+
+**One shape rule from spike Q5, on this loop.** `PumpOneBatchAsync` may not open a transaction that
+reads before it writes: that is the single shape that reaches R5's SQLite mechanism, and under WAL it
+fails unretryably (`SQLITE_BUSY_SNAPSHOT`, `Extended=517`) after burning the full 30 s retry loop,
+while in the shipped journal mode it fails the *request path* instead. Claim, mark and release are each
+one autocommit statement through `IOutboxStore`, and nothing here wraps them in a transaction to be
+tidy. The shipped SQLite registration needs no change for this — measured — and must not get one.
 
 `PumpOneBatchAsync` claims, then per entry: deserialize, `EventSubscriptions.Matching`, and either
 increment `Filtered` **once** and `MarkDispatchedAsync` (no execution-log entry — D6), or run every
@@ -3782,7 +4218,9 @@ public sealed class OutboxRecoveryTests
 
 - [ ] **Step 2: Check the spike's Q9 verdict, then write the child-process facts**
 
-**Gate.** Re-read `spike.txt`'s Q9 verdict:
+**Gate — already resolved: build the harness.** Q9 measured **6.0 s** (publish 3.2 s + boots 1.6 s and
+1.3 s), with exit code **137** confirming the kill was a real SIGKILL and not a graceful `StopAsync`.
+The 120 s fallback below does not apply and is kept only as the record of the rule.
 
 - *Q9's publish-plus-two-boots total is ≤ 120 s* → build the harness as below.
 - *Q9's total exceeds 120 s* → **do not build it.** Ship Step 1's facts only, add one paragraph to
@@ -3918,17 +4356,33 @@ Sections, in this order, each stating the decision *and* its cost:
    `extensions/authcontext.md` and `extensions/correlation.md` on `main`); why `record`, `old_record`
    and the changed list live inside `data`; deviation 69's `payloadversion` duplication; the 64 KB
    forwarding rule and the `dataref` issue.
-2. **The outbox.** The column list; why there is no `sequence` and why `id` is a UUIDv7, citing
-   `spike.txt` Q1/Q2/Q6/Q7; why the claim filters `dispatched_at IS NULL` and never a high-water mark
-   (R2); why the `LIMIT` is in the subquery (R4, measured); why `RETURNING` is re-sorted in process;
-   why there is no `SKIP LOCKED` and no new `IAlvoSqlDialect` member (Q4); why the claim is raw SQL
-   rather than LINQ under `UseRelationalNulls()`.
-3. **The ordering guarantee, with its condition in the same sentence.** Verbatim, because the base
-   design over-claims it (`:574-577`):
+2. **The outbox.** The column list; why there is no `sequence` and why `id` is a **monotonic** UUIDv7
+   minted through `AlvoEventId`, citing `spike.txt` Q1/Q2/Q6/Q7; why the claim filters
+   `dispatched_at IS NULL` and never a high-water mark (R2); why the `ORDER BY` and the `LIMIT` are in
+   the subquery — refused by **both** engines, naming `ORDER` (Q3, correcting R4); why `RETURNING` is
+   re-sorted in process (measured unsorted on both engines, Q3); **why the outer `WHERE` repeats the
+   claimability predicate** and what happened without it (Q4: overlap 10 of 10, `attempts` at 2); why
+   there is no `SKIP LOCKED` and no new `IAlvoSqlDialect` member; why the claim is raw SQL rather than
+   LINQ under `UseRelationalNulls()`; and three traps recorded so they are not re-run: SQLite silently
+   accepts `SERIAL` (Q6), `Guid`'s default byte order is not sortable so the column is `TEXT` (Q1),
+   and `journal_mode=WAL` is neither needed nor revertible (Q5).
+3. **The ordering guarantee, with both of its conditions in the same sentence.** Verbatim, because
+   the base design over-claims it (`:574-577`) and this plan's own first draft stated only the first
+   condition:
 
    > There is **no global ordering** (§3.3 calls it expensive and brittle). **Per-entity-key ordering
-   > holds while exactly one dispatcher runs**, and only then. Delivery is **at-least-once**
-   > regardless, so every after-side action must be idempotent or deduplicated by event id.
+   > holds while exactly one dispatcher runs *and* no two events for one key are written inside the
+   > same millisecond** — and only then. Delivery is **at-least-once** regardless, so every
+   > after-side action must be idempotent or deduplicated by event id.
+   >
+   > **Why the millisecond is part of the guarantee.** The queue order *is* `ORDER BY id`, and the id
+   > is a UUIDv7 whose ordering is exact only above the millisecond. `Guid.CreateVersion7()` fills
+   > everything below it with fresh random bits, and **49.9 %** of adjacent same-millisecond pairs
+   > sort backwards (measured: `spike.txt` Q1). Alvo therefore mints ids through `AlvoEventId`, which
+   > reuses the last emitted millisecond and increments the random tail — **0 inversions over
+   > 100 000** — so **within one process** the condition is met and the guarantee reduces to "one
+   > dispatcher". Across processes it does not: two hosts minting inside one millisecond still
+   > interleave (#150).
    >
    > **Operational constraint PR5a cannot enforce.** There is no distributed lock, so the dispatcher
    > cannot detect a second instance. Two replicas of the standalone image break the per-entity-key
@@ -4005,7 +4459,8 @@ plan is the only place they live:
   `AlvoContext.System(tenant)`, never `Anonymous`.
 - **The `complex-crm` corrections and the refusal-reason strengthening** (deviation 76), safe to defer
   because Task 7 Step 6 pins that the example declares no after-hooks.
-- **F7's partitioned claim** (the issue from Task 1) and **`dataref`** (likewise).
+- **F7's partitioned claim** (**#150**, which also carries Q1's same-millisecond finding and the
+  cross-process half `AlvoEventId` does not close) and **`dataref`** (**#151**).
 
 - [ ] **Step 5: Regenerate nothing, and check the freshness gate**
 
@@ -4059,7 +4514,9 @@ git commit -m "docs(events): record the event backbone, its ordering condition, 
       cannot lose a row *because nothing tests it*) and `JsonataSlot.cs` (the classifier's two
       clauses).
 - [ ] **The PR body** states, in its own words and not only by reference: the ordering guarantee
-      **and its one-dispatcher condition**; that per-entity-key ordering breaks silently on two
+      **and both of its conditions** — one dispatcher *and* no two events for one key in one
+      millisecond, with the in-process half closed by `AlvoEventId` and the cross-process half filed
+      as #150; that per-entity-key ordering breaks silently on two
       replicas; that JSONata is refused rather than partially implemented; that `email` is
       console-only; that D7 discloses hidden fields to a declared endpoint; and which crash fact the
       harness does **not** prove.
@@ -4080,11 +4537,24 @@ nor either DoD list, which is a **gap in the addendum**, and Task 13 Step 4 reco
 ruling it owes so it cannot be lost.
 
 **2. Placeholder scan.** No `TBD`, no "add appropriate error handling", no "similar to Task N", no
-step that says what without showing how. Two places name a *decision rule* rather than an answer, and
-both are deliberate and bounded: Task 5 Step 3's SQLite-configuration gate and Task 12 Step 2's
-harness gate. Each names its measured trigger, its two named branches, and — for the one outcome that
-is the maintainer's call, not this plan's (`journal_mode=WAL` on the shared registration) — an
-explicit stop. `<#jsonata-issue>` in Task 7 Step 3 is filled from Task 1 Step 6, which runs first.
+step that says what without showing how. Two places named a *decision rule* rather than an answer, and
+**both are now resolved by Task 1's measurements**: Task 5 Step 3's SQLite-configuration gate cleared
+on its first branch (implement as written, change no registration — the `journal_mode=WAL` stop
+condition did not trigger), and Task 12 Step 2's harness gate cleared at a 6.0 s budget, so the
+harness ships. Task 7 Step 3's issue number is **#149**, filled from Task 1 Step 6, which ran first;
+`#150`, `#151` and `#152` are filled the same way.
+
+**2a. What the spike changed after this self-review was first written.** Recorded here because a
+reader comparing the plan against its own review would otherwise find the review stale:
+
+- **D1's monotonicity claim was refuted and amended** — `Guid.CreateVersion7()` inverts 49.9 % of
+  same-millisecond pairs, so `AlvoEventId` (Task 2) is added and the ordering wording gains its second
+  condition everywhere. D1's portability half became evidence rather than reasoning, and its `"N"`
+  fallback is withdrawn as unnecessary.
+- **D2's claim SQL was measured wrong and is amended** — the outer `WHERE` now repeats the
+  claimability predicate, Task 5 carries the spike's text verbatim, and the shape fact plus a
+  PostgreSQL two-claimant fact hold the line. D2's stated cost ("slow, not incorrect") was false for
+  the original statement and is true only for the amended one.
 
 **3. Type consistency.** Checked across tasks: `AlvoEvent`/`AlvoEventData`/`AlvoEventAttributes`/
 `AlvoEventJson` (Task 2) are used unchanged in Tasks 3–12. `OutboxEntry` is declared in Task 5 and
@@ -4103,7 +4573,8 @@ Recorded here so a reviewer can judge them as decisions:
 - **No `sequence` column at all** (D1), where the addendum treats `sequence` as present-but-unsurfaced
   and R1 frames the question as "which per-engine DDL". The third option — a UUIDv7 primary key — was
   in neither document, and it satisfies `SystemSchemaInitializer`'s invariant instead of breaking it.
-  Gated on spike Q1/Q2/Q6/Q7.
+  Gated on spike Q1/Q2/Q6/Q7, and **amended by them**: the key is monotonic only because
+  `AlvoEventId` makes it so, which is the part neither document nor the first draft of this plan saw.
 - **The CloudEvents SDK is test-only**, where the addendum allows a core-side mapper (D3). Nothing in
   PR5a needs the SDK at run time, and `package-boundary.md` says a dependency is earned.
 - **The claim is raw SQL, not LINQ** (D2), where `data-path.md:121-145` and the register both expect
