@@ -916,6 +916,32 @@ second implementation nobody maintains.
 
 ### Task 2: The envelope in `Abstractions`, and the CloudEvents conformance oracle
 
+**DONE.** Four decisions this task had to make that the plan did not specify, recorded so they are
+decisions rather than accidents:
+
+1. **`AlvoEventAttributes.Standard`** joins `Extensions`. The oracle's strongest fact is that Alvo's
+   *standard* attribute names are the SDK's own — which is what catches `datacontentype` and every
+   other near-miss a hand-written writer can ship — and that fact needs the list to exist on the
+   authority rather than in the test.
+2. **The default HTML-safe JSON encoder is kept.** `System.Text.Json`'s default escapes `<`, `>`, `&`
+   and `+`, so a webhook body and a dashboard rendering of a stored payload are safe by default; the
+   visible cost is `+` inside timestamps in the pinned snapshot. The escaping is lossless and a named
+   fact says so, so the alternative buys readability only.
+3. **`AlvoEventJson.Read` returns JSON's view of a row, not the row's CLR types** — a `uuid` field
+   reads back as its text. Named and pinned rather than discovered: the read side's consumer evaluates
+   CEL and renders templates over the textual view anyway, and the authoritative typed record lives on
+   the write path, where the schema is in scope. A value the *writer* does not recognise is refused
+   with the field named, never stringified through `ToString()`.
+4. **`AlvoEventData` implements `Equals`/`GetHashCode` by hand.** The compiler-generated equality
+   compares `Changed` by reference, so the round-trip fact would have rested on identity.
+
+Step 5's mutation 0 also caught a defect in **this task's own tests**: because the generator's state is
+process-wide, the 100 000-mint fact passed under the mutation whenever an earlier test in the class had
+already pushed the last millisecond into the future. The facts now derive their starting instant from a
+freshly minted id instead of the clock, and the forced-repeat run asserts that all 100 000 ids share
+one millisecond as its own non-vacuity control. Recorded because it is the exact failure mode this
+project keeps paying for: a fact that passes without reaching the path it names.
+
 **Files:**
 - Create: `src/MMLib.Alvo.Abstractions/Events/AlvoEvent.cs`
 - Create: `src/MMLib.Alvo.Abstractions/Events/AlvoEventId.cs`
@@ -1000,7 +1026,7 @@ second implementation nobody maintains.
   `AuthType` values are the three constants `AlvoEventAuthType.ApiKey = "apikey"`,
   `System = "system"`, `Anonymous = "anon"` on a public static class in the same file.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```csharp
 // Abstractions/Events/AlvoEventTests.cs
@@ -1196,12 +1222,12 @@ public Task One_real_envelope_is_pinned_verbatim()
     => Verify(AlvoEventJson.Write(SampleEnvelopeWithAFixedClockAndFixedIds()));
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `dotnet test --project test/MMLib.Alvo.Abstractions.Tests -- --filter-namespace 'MMLib.Alvo.Abstractions.Tests.Events'`
 Expected: FAIL — `AlvoEvent` does not exist.
 
-- [ ] **Step 3: Add the test-only package, then implement**
+- [x] **Step 3: Add the test-only package, then implement**
 
 ```xml
 <!-- Directory.Packages.props — test-only: the CloudEvents conformance oracle. Apache-2.0.
@@ -1317,7 +1343,7 @@ one and the last already minted, because a total order outranks an exact stamp, 
 sites pass the write's own audit instant so `time`, `created_at` and the id agree; and that the
 guarantee is **in-process** — two processes minting inside one millisecond still interleave (#150).
 
-- [ ] **Step 4: Run to verify they pass**
+- [x] **Step 4: Run to verify they pass**
 
 Run:
 ```
@@ -1326,7 +1352,7 @@ dotnet test --project test/MMLib.Alvo.Tests -- --filter-class '*CloudEventsConfo
 ```
 Expected: PASS, and the Verify snapshot accepted. Confirm `Build succeeded` first.
 
-- [ ] **Step 5: Prove the conformance facts discriminate**
+- [x] **Step 5: Prove the conformance facts discriminate**
 
 Four mutations, each restored immediately:
 
@@ -1347,7 +1373,7 @@ Four mutations, each restored immediately:
 Confirm each edit landed with `command grep -c` (not bare `grep` — it is `ugrep` here and miscounts
 CRLF).
 
-- [ ] **Step 6: Accept the public-API baseline, ring0, commit**
+- [x] **Step 6: Accept the public-API baseline, ring0, commit**
 
 ```bash
 dotnet test --project test/MMLib.Alvo.Abstractions.Tests -- --filter-class '*PublicApi*'
