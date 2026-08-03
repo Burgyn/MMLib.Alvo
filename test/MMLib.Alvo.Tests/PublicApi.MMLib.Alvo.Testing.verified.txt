@@ -252,6 +252,21 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task Paging_over_a_utc_timestamp_key_neither_skips_nor_repeats_a_row() { }
         public System.Threading.Tasks.Task Paging_over_sub_second_timestamps_keeps_instant_order() { }
     }
+    public abstract class AlvoDataOutboxTests
+    {
+        protected AlvoDataOutboxTests() { }
+        public System.Threading.Tasks.Task A_create_emits_exactly_one_event() { }
+        public System.Threading.Tasks.Task A_delete_emits_exactly_one_event_carrying_the_pre_image() { }
+        public System.Threading.Tasks.Task A_denied_write_emits_nothing() { }
+        public System.Threading.Tasks.Task A_replayed_idempotent_create_emits_no_second_event() { }
+        public System.Threading.Tasks.Task A_write_the_engine_refuses_leaves_no_outbox_row() { }
+        public System.Threading.Tasks.Task An_events_record_carries_a_hidden_field_unmasked_and_that_is_the_documented_disclosure() { }
+        public System.Threading.Tasks.Task An_update_emits_exactly_one_event_carrying_both_images() { }
+        public System.Threading.Tasks.Task Every_event_carries_the_caller_the_write_was_performed_as() { }
+        public System.Threading.Tasks.Task The_events_time_equals_the_rows_own_audit_instant() { }
+        public System.Threading.Tasks.Task Two_concurrent_idempotent_creates_on_one_key_emit_exactly_one_event() { }
+        protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Testing.Data.IAlvoDataOutboxWorld> WorldAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor);
+    }
     public abstract class AlvoDataPagingTests
     {
         protected AlvoDataPagingTests() { }
@@ -287,6 +302,11 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task The_policy_predicate_is_bound_inside_the_where_clause_of_one_statement() { }
         public System.Threading.Tasks.Task The_tenant_scope_is_bound_inside_the_same_where_clause() { }
         public System.Threading.Tasks.Task The_update_statement_itself_carries_the_policy_predicate() { }
+    }
+    public interface IAlvoDataOutboxWorld
+    {
+        MMLib.Alvo.Data.IAlvoData Data { get; }
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.AlvoEvent>> EventsAsync();
     }
     public interface IDifferentialProbe : System.IAsyncDisposable
     {

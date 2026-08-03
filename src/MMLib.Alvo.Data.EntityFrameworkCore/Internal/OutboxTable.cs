@@ -149,6 +149,19 @@ internal static class OutboxTable
     /// the idiomatic EF placement would silently emit on create only.
     /// </para>
     /// <para>
+    /// <b>What actually makes the insert atomic with the write is the <em>connection</em>, and
+    /// <c>command.Transaction</c> is the contract rather than the mechanism.</b> Measured while proving the
+    /// write sites emit: deleting <c>command.Transaction = transaction</c> leaves every outbox fact green on
+    /// both shipped engines, because a SQLite transaction and a PostgreSQL one both belong to the connection,
+    /// so any statement on that connection is already inside it. The assignment stays because ADO.NET's own
+    /// contract requires it — <c>SqlCommand</c> (the Azure SQL driver this family plans to add) throws when a
+    /// connection has an open transaction the command does not name — and because the seam is a claim about
+    /// which transaction the row rides, not a hope. The mutation that <em>is</em> caught is the one that moves
+    /// the insert onto a connection of its own; that leaves an orphan event behind a rolled-back write, and
+    /// <c>AlvoDataOutboxTests.Two_concurrent_idempotent_creates_on_one_key_emit_exactly_one_event</c> is the
+    /// fact that sees it.
+    /// </para>
+    /// <para>
     /// <c>created_at</c> is rendered by <see cref="StoredInstant.Text"/> from the envelope's own
     /// <see cref="AlvoEvent.Time"/>, which is the write's audit instant and the instant
     /// <see cref="AlvoEventId.Create(DateTimeOffset)"/> embedded in the id — one instant, three places, rather

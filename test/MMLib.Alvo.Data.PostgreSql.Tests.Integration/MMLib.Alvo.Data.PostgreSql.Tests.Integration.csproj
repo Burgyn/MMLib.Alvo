@@ -43,6 +43,7 @@
   <!-- The outbox table's engine facts, shared with MMLib.Alvo.Data.Sqlite.Tests — see the same link there. -->
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/OutboxTableFacts.cs" Link="_shared/OutboxTableFacts.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/AlvoDataOutboxWorld.cs" Link="_shared/AlvoDataOutboxWorld.cs" />
   </ItemGroup>
 
   <!-- The container-creation mechanics every Testcontainers-backed PostgreSQL fixture in this repository

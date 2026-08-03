@@ -1721,7 +1721,7 @@ transaction, at each of the four sites, and the tests cover update and delete fi
   `protected abstract Task<IAlvoDataOutboxWorld> WorldAsync();` — the same shape
   `AlvoDataAdversarialTests` already uses, so both engines inherit one suite.
 
-- [ ] **Step 1: Write the failing factory tests**
+- [x] **Step 1: Write the failing factory tests**
 
 ```csharp
 // EntityFrameworkCore.Tests/OutboxEventFactoryTests.cs — pure, no database
@@ -1803,7 +1803,7 @@ public void The_events_time_is_the_writes_own_instant_never_a_second_clock_read(
 }
 ```
 
-- [ ] **Step 2: Write the failing per-engine suite — update and delete FIRST**
+- [x] **Step 2: Write the failing per-engine suite — update and delete FIRST**
 
 ```csharp
 // src/MMLib.Alvo.Testing/Data/AlvoDataOutboxTests.cs
@@ -1934,7 +1934,7 @@ beside `IStatementProbe`/`IDifferentialProbe` in `src/MMLib.Alvo.Testing/Data/`.
 reads the raw `payload` column and returns `AlvoEventJson.Read` of each, ordered by `id` — never a
 second copy of the serializer.
 
-- [ ] **Step 3: Run to verify they fail**
+- [x] **Step 3: Run to verify they fail**
 
 Run:
 ```
@@ -1943,7 +1943,7 @@ dotnet test --project test/MMLib.Alvo.Data.Sqlite.Tests -- --filter-class '*Sqli
 ```
 Expected: FAIL — `OutboxEventFactory` does not exist and no site emits.
 
-- [ ] **Step 4: Implement the factory, then the four sites**
+- [x] **Step 4: Implement the factory, then the four sites**
 
 `OutboxEventFactory.For` is four short private helpers plus one composition:
 
@@ -2032,7 +2032,7 @@ caller. `_outboxTable` is a new readonly field, `OutboxTable.NameFor(options.Sch
 `WriteAsync` and `EraseAsync` change signature to return the images they already have. Do not add a
 second read anywhere: every image this task needs is already in hand, which is why the seam is cheap.
 
-- [ ] **Step 5: Run to verify they pass, on both engines**
+- [x] **Step 5: Run to verify they pass, on both engines**
 
 Run:
 ```
@@ -2042,7 +2042,7 @@ dotnet test --project test/MMLib.Alvo.Data.PostgreSql.Tests.Integration -- --fil
 ```
 Expected: PASS. Assert `Build succeeded` first.
 
-- [ ] **Step 6: Prove the interceptor trap is really closed**
+- [x] **Step 6: Prove the interceptor trap is really closed**
 
 Two mutations, restored immediately. The first is the one this whole task exists for:
 
@@ -2055,7 +2055,7 @@ Two mutations, restored immediately. The first is the one this whole task exists
 2. **Move `EmitAsync` after `transaction.CommitAsync`** on the create path. Confirm
    `A_write_the_engine_refuses_leaves_no_outbox_row` goes **red**. Restore.
 
-- [ ] **Step 7: Accept the `Testing` baseline, ring0, commit**
+- [x] **Step 7: Accept the `Testing` baseline, ring0, commit**
 
 ```bash
 dotnet test --project test/MMLib.Alvo.Data.Sqlite.Tests -- --filter-class '*PublicApi*'
@@ -2068,6 +2068,45 @@ git add src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/ src/MMLib.Alvo.Testing
         test/MMLib.Alvo.Data.PostgreSql.Tests.Integration/
 git commit -m "feat(events): emit an outbox event on the same transaction as every write"
 ```
+
+**What Task 4 changed from this plan as written, and why — measured, not preferred**
+
+1. **The suite owns the entity; the world is a store plus a reader.** `WorldAsync()` became
+   `WorldAsync(SchemaModel, AlvoDescriptor)` and `IAlvoDataOutboxWorld` is `Data` +
+   `EventsAsync()` — no `CreateVehicleAsync`/`ClearOutboxAsync`. Reason: the descriptor decides
+   whether a fact can fail (the `unique` field, `audit`, the `hidden` field, a rule anonymous fails),
+   and `AlvoDataConstraintTests`/`AlvoDataConcurrencyTests` already put it in the shipped suite so *"the
+   subclass supplies a store and nothing else"*. Dropping `ClearOutboxAsync` also removed a test-only
+   write to a framework table: every fact asserts the whole ordered sequence instead, which is the
+   stronger question. The per-engine world implementation is linked from `test/_shared/ef/` for the
+   reason `OutboxTableFacts` is.
+2. **`A_write_the_engine_refuses_leaves_no_outbox_row` cannot see the transaction, and one added fact
+   can.** With the emit last, *nothing* on the create path can fail after it — the duplicate-`vin`
+   refusal comes out of `SaveChanges`, before the emit — so that fact discriminates "emits before the
+   write succeeded", not "rides the transaction". The atomicity leg is therefore
+   **`Two_concurrent_idempotent_creates_on_one_key_emit_exactly_one_event`**: the loser of the
+   idempotency-key race has already emitted when the record's primary key refuses its write. Measured:
+   moving the emit onto its own connection leaves that fact — and only that fact — red, with two events
+   for one row.
+3. **The idempotent create emits *before* the idempotency record**, not after it. Measured, as a
+   two-mutation combination: emit-after-record plus emit-on-its-own-connection leaves the whole suite
+   **green**, so the ordering is what makes the atomicity claim observable at all.
+4. **The write path's re-reads are `unmasked: true`, and D7 is pinned by a named fact.** A masked
+   post-image is not merely incomplete: every `hidden` field compares unequal to its own stored value,
+   so `changed` would report it as moved on every update. `Unmasked()` reads without the null
+   projection and `RecordMaterializer` masks what the caller is returned. Pinned by
+   `An_events_record_carries_a_hidden_field_unmasked_and_that_is_the_documented_disclosure` (#152).
+5. **The instant is threaded through a private `WriteInstant : TimeProvider`** rather than by widening
+   `AlvoAuditStamp.Applied` with an instant overload — the need is this driver's, the port stays frozen.
+6. **`command.Transaction` is the contract, not the mechanism.** Measured: deleting
+   `command.Transaction = transaction` leaves every fact green on *both* engines, because a transaction
+   belongs to the connection on SQLite and on PostgreSQL alike. It stays (ADO.NET requires it, and
+   `SqlCommand` throws without it), and `OutboxTable`'s remarks now say so, so nobody reads the green as
+   permission to drop it.
+7. **`EnsureOutboxTableAsync` is load-bearing, not belt-and-braces.** The fixtures' `ISchemaMigrator`
+   apply does **not** reach `SystemSchemaInitializer` (only a descriptor version write does), so without
+   the write path's own ensure the first emit fails with *no such table: alvo_outbox*. That is exactly
+   the "two creators, one DDL string" arrangement Task 3's remarks promised.
 
 ---
 
@@ -2697,7 +2736,7 @@ public void A_rendered_value_is_never_itself_treated_as_a_template()
         .ShouldBe("{{@user.id}}");
 ```
 
-- [ ] **Step 3: Run to verify they fail**
+- [x] **Step 3: Run to verify they fail**
 
 Run: `dotnet test --project test/MMLib.Alvo.Tests -- --filter-namespace 'MMLib.Alvo.Tests.Events'`
 Expected: FAIL — neither type exists.
@@ -3665,7 +3704,7 @@ public async Task A_batch_size_of_zero_is_refused_at_startup_naming_the_key_and_
 }
 ```
 
-- [ ] **Step 3: Run to verify they fail**
+- [x] **Step 3: Run to verify they fail**
 
 Run:
 ```
@@ -4320,7 +4359,7 @@ the SQLite path, the descriptor path, the webhook endpoint URL and `Alvo:Events:
 receiver is an `HttpListener` on a free loopback port; with `KillOnFirstDelivery` it records the body
 and then kills the child **before** responding.
 
-- [ ] **Step 3: Run to verify they fail**
+- [x] **Step 3: Run to verify they fail**
 
 Run: `dotnet test --project test/MMLib.Alvo.Host.Tests -- --filter-namespace 'MMLib.Alvo.Host.Tests.Events'`
 Expected: FAIL.

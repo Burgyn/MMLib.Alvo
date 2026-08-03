@@ -50,6 +50,7 @@ internal sealed class EfAlvoData : IAlvoData
     private readonly AlvoDataContextFactory _contexts;
     private readonly TimeProvider _time;
     private readonly string _idempotencyTable;
+    private readonly string _outboxTable;
 
     internal EfAlvoData(
         IPolicyEngine policy,
@@ -76,6 +77,7 @@ internal sealed class EfAlvoData : IAlvoData
         _contexts = contexts;
         _time = time;
         _idempotencyTable = IdempotencyTable.NameFor(options.SchemaPrefix);
+        _outboxTable = OutboxTable.NameFor(options.SchemaPrefix);
     }
 
     /// <inheritdoc/>
@@ -166,16 +168,23 @@ internal sealed class EfAlvoData : IAlvoData
             : await CreatedAsync(entity, values, decision, context, cancellationToken);
     }
 
-    /// <summary>One ordinary create: the authorized candidate, inserted and re-read inside one transaction.</summary>
+    /// <summary>
+    /// One ordinary create: the authorized candidate, inserted, re-read and emitted inside one transaction.
+    /// </summary>
     private async Task<AlvoRecord> CreatedAsync(
         string entity, IReadOnlyDictionary<string, object?> values, PolicyDecision decision, AlvoContext context,
         CancellationToken cancellationToken)
     {
         using var db = _contexts.Create();
-        var (schema, candidate) = AuthorizedCandidate(db, entity, values, decision, context);
+        var now = _time.GetUtcNow();
+        var (schema, candidate) = AuthorizedCandidate(db, entity, values, decision, context, now);
+        await EnsureOutboxTableAsync(db, cancellationToken);
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var stored = await InsertAsync(db, schema, decision, context, candidate, cancellationToken);
+        await EmitAsync(
+            db, transaction, schema, OutboxOperation.Created, context, now, Unmasked(stored), preImage: null,
+            cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
         return RecordMaterializer.ToRecord(stored, decision.HiddenFields);
@@ -192,13 +201,13 @@ internal sealed class EfAlvoData : IAlvoData
     /// </remarks>
     private (EntitySchema Schema, Dictionary<string, object> Candidate) AuthorizedCandidate(
         AlvoDataContext db, string entity, IReadOnlyDictionary<string, object?> values, PolicyDecision decision,
-        AlvoContext context)
+        AlvoContext context, DateTimeOffset now)
     {
         var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
         WritePayloadGuard.EnsureWritable(values, schema, decision, isUpdate: false);
 
-        var candidate = Candidate(db.Rows(entity).EntityType, Stamped(schema, values, context, isUpdate: false));
-        EnsureWriteAllowed(decision, RecordMaterializer.ToRecord(candidate, _noMask), previous: null, context);
+        var candidate = Candidate(db.Rows(entity).EntityType, Stamped(schema, values, context, now, isUpdate: false));
+        EnsureWriteAllowed(decision, Unmasked(candidate), previous: null, context);
 
         return (schema, candidate);
     }
@@ -315,8 +324,10 @@ internal sealed class EfAlvoData : IAlvoData
         AlvoIdempotency token, CancellationToken cancellationToken)
     {
         using var db = _contexts.Create();
-        var (schema, candidate) = AuthorizedCandidate(db, entity, values, decision, context);
+        var now = _time.GetUtcNow();
+        var (schema, candidate) = AuthorizedCandidate(db, entity, values, decision, context, now);
         await EnsureIdempotencyTableAsync(db, cancellationToken);
+        await EnsureOutboxTableAsync(db, cancellationToken);
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var records = new IdempotencyScope(
@@ -325,23 +336,44 @@ internal sealed class EfAlvoData : IAlvoData
         var recorded = await records.FindAsync(cancellationToken);
         var result = recorded is { } record
             ? await ReplayedAsync(db, schema, context, record, token, cancellationToken)
-            : await RecordedCreateAsync(db, schema, decision, context, candidate, records, cancellationToken);
+            : await RecordedCreateAsync(
+                db, transaction, schema, decision, context, candidate, records, now, cancellationToken);
 
         await transaction.CommitAsync(cancellationToken);
         return result;
     }
 
     /// <summary>
-    /// Inserts the row and records the key against it, in that order and in one transaction. The record's
-    /// primary key is the concurrency control: a rival that already committed one for this key makes this
-    /// insert fail, which is what <see cref="ReplayableCreateAsync"/> turns into a replay.
+    /// Inserts the row, emits its event, and records the key against it — in that order and in one
+    /// transaction. The record's primary key is the concurrency control: a rival that already committed one
+    /// for this key makes that last insert fail, which is what <see cref="ReplayableCreateAsync"/> turns into
+    /// a replay.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The event is written before the record, and that ordering is the one place the atomicity claim is
+    /// observable on a production path.</b> The record's primary key is the only write here that a rival can
+    /// make fail <em>after</em> the event exists, so emitting first is what makes "the row and its event
+    /// commit together or not at all" a fact a test can reach: the loser rolls the pair back and its retry
+    /// answers as a replay, so two clients racing one key produce one row and one event. Emitted after the
+    /// record instead, the loser would never have emitted at all and an outbox row that did not ride the
+    /// transaction would look identical to one that did.
+    /// </para>
+    /// <para>
+    /// The instant is the write's own, threaded in rather than read again here: the row's audit stamp, the
+    /// event's <c>time</c> and the record's <c>created_at</c> are one instant.
+    /// </para>
+    /// </remarks>
     private async Task<AlvoRecord> RecordedCreateAsync(
-        AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context,
-        Dictionary<string, object> candidate, IdempotencyScope records, CancellationToken cancellationToken)
+        AlvoDataContext db, IDbContextTransaction transaction, EntitySchema schema, PolicyDecision decision,
+        AlvoContext context, Dictionary<string, object> candidate, IdempotencyScope records, DateTimeOffset now,
+        CancellationToken cancellationToken)
     {
         var stored = await InsertAsync(db, schema, decision, context, candidate, cancellationToken);
-        await records.InsertAsync((Guid)candidate[AlvoDataContext.IdColumn], _time.GetUtcNow(), cancellationToken);
+        await EmitAsync(
+            db, transaction, schema, OutboxOperation.Created, context, now, Unmasked(stored), preImage: null,
+            cancellationToken);
+        await records.InsertAsync((Guid)candidate[AlvoDataContext.IdColumn], now, cancellationToken);
 
         return RecordMaterializer.ToRecord(stored, decision.HiddenFields);
     }
@@ -507,6 +539,10 @@ internal sealed class EfAlvoData : IAlvoData
     /// been checked against. It cannot come back empty for a row the caller was just allowed to write, so a
     /// missing row is an invariant violation rather than a "not found".
     /// </para>
+    /// <para>
+    /// <b>Read unmasked, then masked in memory for the caller</b> — see <see cref="Unmasked"/> for why the
+    /// write path is the one read that cannot use the null projection.
+    /// </para>
     /// </remarks>
     private async Task<Dictionary<string, object>> InsertAsync(
         AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context,
@@ -517,7 +553,7 @@ internal sealed class EfAlvoData : IAlvoData
             () => db.SaveChangesAsync(cancellationToken), _dialect, db.Rows(schema.Name).EntityType, schema);
 
         var id = (Guid)candidate[AlvoDataContext.IdColumn];
-        return await SingleAsync(db, schema, decision, context, id, lockFor: null, cancellationToken)
+        return await SingleAsync(db, schema, decision, context, id, lockFor: null, cancellationToken, unmasked: true)
             ?? throw new InvalidOperationException(
                 "The row this create just inserted could not be read back inside its own transaction.");
     }
@@ -579,9 +615,15 @@ internal sealed class EfAlvoData : IAlvoData
         WritePayloadGuard.EnsureWritable(values, schema, decision, isUpdate: true);
         AlvoPrecondition.EnsureSupported(precondition, schema);
 
+        var now = _time.GetUtcNow();
+        await EnsureOutboxTableAsync(db, cancellationToken);
+
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var postImage = await WriteAsync(
-            db, schema, decision, context, id, Stamped(schema, values, context, isUpdate: true), precondition,
+        var (preImage, postImage) = await WriteAsync(
+            db, schema, decision, context, id, Stamped(schema, values, context, now, isUpdate: true), precondition,
+            cancellationToken);
+        await EmitAsync(
+            db, transaction, schema, OutboxOperation.Updated, context, now, Unmasked(postImage), preImage,
             cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
@@ -598,9 +640,32 @@ internal sealed class EfAlvoData : IAlvoData
     /// so a create rule reading <c>created_by == @user.id</c> is satisfied by the stamp rather than by
     /// something the caller claimed.
     /// </remarks>
-    private IReadOnlyDictionary<string, object?> Stamped(
-        EntitySchema schema, IReadOnlyDictionary<string, object?> values, AlvoContext context, bool isUpdate) =>
-        AlvoAuditStamp.Applied(schema, values, context, _time, isUpdate);
+    /// <param name="schema">The entity being written.</param>
+    /// <param name="values">The caller's own payload.</param>
+    /// <param name="context">The caller the write is performed as.</param>
+    /// <param name="now">The write's own instant, read once by the site and shared with the emit.</param>
+    /// <param name="isUpdate">Whether this is an update rather than a create.</param>
+    private static IReadOnlyDictionary<string, object?> Stamped(
+        EntitySchema schema, IReadOnlyDictionary<string, object?> values, AlvoContext context, DateTimeOffset now,
+        bool isUpdate) =>
+        AlvoAuditStamp.Applied(schema, values, context, new WriteInstant(now), isUpdate);
+
+    /// <summary>
+    /// The write's own instant, in the shape <see cref="AlvoAuditStamp.Applied"/> takes it.
+    /// </summary>
+    /// <remarks>
+    /// One write is one instant (<c>docs/architecture/data-path.md</c>, <em>Every timestamp is one
+    /// instant</em>), and this write now has a second reader of it: the event it emits carries the same
+    /// <c>time</c> the audit stamp recorded, and the same millisecond is embedded in the event's id. So the
+    /// clock is read once at the site and handed to the stamp through this, rather than the stamp and the emit
+    /// each reading it. The alternative — widening the port's <see cref="AlvoAuditStamp.Applied"/> with an
+    /// instant overload — would be a public contract change for a need that is entirely this driver's.
+    /// </remarks>
+    /// <param name="instant">The instant every read of this clock answers.</param>
+    private sealed class WriteInstant(DateTimeOffset instant) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => instant;
+    }
 
     /// <inheritdoc/>
     public async Task DeleteAsync(
@@ -617,23 +682,30 @@ internal sealed class EfAlvoData : IAlvoData
         EnsureNotSoftDeleted(schema);
         AlvoPrecondition.EnsureSupported(precondition, schema);
 
+        var now = _time.GetUtcNow();
+        await EnsureOutboxTableAsync(db, cancellationToken);
+
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        await EraseAsync(db, schema, decision, context, id, precondition, cancellationToken);
+        var preImage = await EraseAsync(db, schema, decision, context, id, precondition, cancellationToken);
+        await EmitAsync(
+            db, transaction, schema, OutboxOperation.Deleted, context, now, postImage: null, preImage,
+            cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
 
     /// <summary>
     /// The body of one delete, inside the caller's transaction: the locked pre-image, then the
-    /// policy-carrying <c>DELETE</c>.
+    /// policy-carrying <c>DELETE</c>. Returns the pre-image, which is the whole of what the event carries.
     /// </summary>
     /// <remarks>
     /// <para>
     /// A delete has no <c>WITH CHECK</c> — there is no post-image to check — so it needs no verdict over the
-    /// pre-image, and this read exists for the <b>shape</b> rather than for a decision: PR5's outbox row and a
-    /// <c>record.deleted</c> event both need the row image, and an in-transaction before-hook needs something
-    /// to run over. Without the transaction, PR5's outbox row could not ride the same <c>DbTransaction</c> at
-    /// all — on SQLite a second connection writing while this one holds a write transaction on the same file
-    /// gets <c>SQLITE_BUSY</c>, so the happy path would deadlock rather than merely lose atomicity.
+    /// pre-image, and this read exists for the <b>shape</b> rather than for a decision: the outbox row and its
+    /// <c>entity.{entity}.deleted</c> event both need the row image, and an in-transaction before-hook needs
+    /// something to run over. Without the transaction, the outbox row could not ride the same
+    /// <c>DbTransaction</c> at all — on SQLite a second connection writing while this one holds a write
+    /// transaction on the same file gets <c>SQLITE_BUSY</c>, so the happy path would deadlock rather than
+    /// merely lose atomicity.
     /// </para>
     /// <para>
     /// It also gives <see cref="PreImageMutation.Delete"/> — and therefore PostgreSQL's <c>FOR UPDATE</c> —
@@ -647,7 +719,7 @@ internal sealed class EfAlvoData : IAlvoData
     /// successful pre-image read means a concurrent writer got there first.
     /// </para>
     /// </remarks>
-    private async Task EraseAsync(
+    private async Task<AlvoRecord> EraseAsync(
         AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context,
         Guid id, AlvoPrecondition? precondition, CancellationToken cancellationToken)
     {
@@ -667,6 +739,8 @@ internal sealed class EfAlvoData : IAlvoData
         {
             throw new AlvoRecordNotFoundException();
         }
+
+        return Unmasked(stored);
     }
 
     /// <summary>
@@ -696,7 +770,12 @@ internal sealed class EfAlvoData : IAlvoData
     /// The body of one update, inside the caller's transaction: the locked unmasked pre-image, the merged
     /// post-image's verdict, the policy-carrying write, and the re-read that produces what is returned.
     /// </summary>
-    private async Task<Dictionary<string, object>> WriteAsync(
+    /// <remarks>
+    /// Both images leave with the result, because both are already in hand and the event needs both — the
+    /// pre-image the <c>WITH CHECK</c> verdict was reached over, and the post-image the caller is answered
+    /// with. That is what makes the emit cost this path no extra read.
+    /// </remarks>
+    private async Task<(AlvoRecord PreImage, Dictionary<string, object> PostImage)> WriteAsync(
         AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context,
         Guid id, IReadOnlyDictionary<string, object?> values, AlvoPrecondition? precondition,
         CancellationToken cancellationToken)
@@ -706,7 +785,7 @@ internal sealed class EfAlvoData : IAlvoData
             ?? throw new AlvoRecordNotFoundException();
         AlvoPrecondition.EnsureMatches(precondition, StoredVersion(schema, stored));
 
-        var preImage = RecordMaterializer.ToRecord(stored, _noMask);
+        var preImage = Unmasked(stored);
         EnsureWriteAllowed(decision, Merge(preImage, values), preImage, context);
 
         if (await AffectedAsync(db, schema, decision, context, id, values, cancellationToken) == 0)
@@ -714,8 +793,11 @@ internal sealed class EfAlvoData : IAlvoData
             throw new AlvoRecordNotFoundException();
         }
 
-        return await SingleAsync(db, schema, decision, context, id, lockFor: null, cancellationToken)
+        var postImage = await SingleAsync(
+            db, schema, decision, context, id, lockFor: null, cancellationToken, unmasked: true)
             ?? throw new AlvoRecordNotFoundException();
+
+        return (preImage, postImage);
     }
 
     /// <summary>
@@ -912,6 +994,87 @@ internal sealed class EfAlvoData : IAlvoData
         return rows.FromSqlRaw(
             statement.Sql, new PredicateParameterBinder(db).Bind(rows.EntityType, statement.Parameters));
     }
+
+    /// <summary>
+    /// Appends the event this write produced to the outbox, <b>on the write's own transaction</b>, so the row
+    /// and its event commit together or not at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Sequenced explicitly here, never hung off <c>SaveChanges</c>.</b> The idiomatic EF place for an
+    /// outbox is a <c>SaveChangesInterceptor</c>, and on this data path it would silently emit on create only:
+    /// an update is an <c>ExecuteUpdate</c> and a delete an <c>ExecuteDelete</c> over the policy-carrying root,
+    /// and neither goes anywhere near the change tracker, so neither fires an interceptor
+    /// (<c>docs/architecture/data-path.md</c>). Those are the two operations that most need an event.
+    /// </para>
+    /// <para>
+    /// <b>Emitted last at every site, after the write's own re-read has succeeded</b>, so an event never
+    /// describes a row the write did not produce — and inside the transaction, so a refused write leaves no
+    /// event behind. The one exception to "last" is the idempotent create, for the reason
+    /// <see cref="RecordedCreateAsync"/> records.
+    /// </para>
+    /// </remarks>
+    private Task EmitAsync(
+        AlvoDataContext db, IDbContextTransaction transaction, EntitySchema schema, OutboxOperation operation,
+        AlvoContext context, DateTimeOffset now, AlvoRecord? postImage, AlvoRecord? preImage,
+        CancellationToken cancellationToken) =>
+        OutboxTable.InsertAsync(
+            db.Database.GetDbConnection(),
+            transaction.GetDbTransaction(),
+            _outboxTable,
+            OutboxEventFactory.For(schema, operation, context, now, postImage, preImage),
+            cancellationToken);
+
+    /// <summary>
+    /// Ensures the outbox table exists, once per process and <b>before</b> the write transaction begins.
+    /// </summary>
+    /// <remarks>
+    /// The same arrangement — and the same reasoning — as <see cref="EnsureIdempotencyTableAsync"/>: nothing
+    /// calls <see cref="SystemSchemaInitializer"/> on the data path, so a host whose schema never came through
+    /// a descriptor apply would otherwise have no outbox exactly when every write needs one. Outside the
+    /// transaction, because inside it the DDL is a serialization point that hides the row-level control the
+    /// concurrency actually rests on, and because a memo about a statement that later rolled back would be a
+    /// lie. Unlike the idempotency table, <em>every</em> write reaches this one.
+    /// </remarks>
+    private async Task EnsureOutboxTableAsync(AlvoDataContext db, CancellationToken cancellationToken)
+    {
+        if (_outboxTableEnsured)
+        {
+            return;
+        }
+
+        var connection = db.Database.GetDbConnection();
+        await RelationalSqlBatch.OpenAsync(connection, cancellationToken);
+        await OutboxTable.EnsureAsync(connection, _outboxTable, cancellationToken);
+        _outboxTableEnsured = true;
+    }
+
+    /// <inheritdoc cref="EnsureOutboxTableAsync"/>
+    private volatile bool _outboxTableEnsured;
+
+    /// <summary>
+    /// A stored row as the framework itself sees it, with no <c>hidden</c> mask applied.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Two callers need this, and for the same reason: a policy verdict reached over a masked pre-image would
+    /// be reached over <see langword="null"/>s, and an event carrying a masked post-image would report every
+    /// masked field as changed on every update. So the write path's own re-reads ask for the unmasked row
+    /// (<c>ReadStatementComposer</c>'s <c>Unmasked</c> option) and the mask is applied here, in memory, to what
+    /// the caller is <em>returned</em> — which is the gate <see cref="RecordMaterializer"/> describes as the
+    /// one that still holds when the null projection was never applied.
+    /// </para>
+    /// <para>
+    /// The cost is stated rather than hidden: on the write path a masked value does leave the table, into this
+    /// process and into the event. That is decision D7 of the event backbone — <c>hidden</c> is a per-caller
+    /// read mask, not a data classification — and its consequence for deliveries is tracked as issue #152. It
+    /// does not widen what a <em>caller</em> can read: every response is still built through
+    /// <see cref="RecordMaterializer.ToRecord"/> with that caller's own hidden set.
+    /// </para>
+    /// </remarks>
+    /// <param name="row">The stored row, as the re-read returned it.</param>
+    private static AlvoRecord Unmasked(Dictionary<string, object> row) =>
+        RecordMaterializer.ToRecord(row, _noMask);
 
     /// <summary>
     /// The empty mask: a row a policy decision is <em>reached over</em> is never masked, only a row this data
