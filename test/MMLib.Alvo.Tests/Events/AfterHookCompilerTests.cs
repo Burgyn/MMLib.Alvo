@@ -426,29 +426,29 @@ public class AfterHookCompilerTests
 
     private static AlvoDescriptor Descriptor(
         EntityHooks? hooks, string? body = null, string endpointUrl = DeclaredEndpointUrl) => new()
-    {
-        ApiVersion = "alvo.dev/v1",
-        Name = "test",
-        Entities = new Dictionary<string, EntityDescriptor>(StringComparer.Ordinal)
         {
-            ["deals"] = new()
+            ApiVersion = "alvo.dev/v1",
+            Name = "test",
+            Entities = new Dictionary<string, EntityDescriptor>(StringComparer.Ordinal)
             {
-                Fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal),
-                Hooks = hooks,
+                ["deals"] = new()
+                {
+                    Fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal),
+                    Hooks = hooks,
+                },
             },
-        },
-        Templates = new Dictionary<string, MessageTemplate>(StringComparer.Ordinal)
-        {
-            ["deal-won"] = new() { Subject = "Deal won: {{new.title}}", Body = body ?? "{{new.title}} closed." },
-        },
-        Webhooks = new Webhooks
-        {
-            Endpoints = new Dictionary<string, WebhookEndpoint>(StringComparer.Ordinal)
+            Templates = new Dictionary<string, MessageTemplate>(StringComparer.Ordinal)
             {
-                ["crm-sync"] = new() { Url = endpointUrl, SecretRef = "crm-sync-secret" },
+                ["deal-won"] = new() { Subject = "Deal won: {{new.title}}", Body = body ?? "{{new.title}} closed." },
             },
-        },
-    };
+            Webhooks = new Webhooks
+            {
+                Endpoints = new Dictionary<string, WebhookEndpoint>(StringComparer.Ordinal)
+                {
+                    ["crm-sync"] = new() { Url = endpointUrl, SecretRef = "crm-sync-secret" },
+                },
+            },
+        };
 
     private static SchemaModel Schema { get; } = new([
         new EntitySchema
