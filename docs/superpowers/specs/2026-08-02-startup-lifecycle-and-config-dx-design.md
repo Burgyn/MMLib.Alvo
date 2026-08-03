@@ -630,10 +630,12 @@ builder.Services.AddAlvo(alvo => alvo
 app.MapAlvo();
 ```
 
-- **`AddDataApi()` becomes default-on.** It is the point of the framework; a
-  registration that has to be asked for is a trap, not a choice.
-  `AddDataApi(configure)` stays, for configuring it. This is what S:157's
-  "**one entry point for the whole framework**" asks for.
+- **`AddDataApi()` becomes configuration-only** — and the Data API was *already*
+  registered by `AddAlvo`, which this design initially got wrong (deviation 56,
+  withdrawn). So S:157's "**one entry point for the whole framework**" was already
+  satisfied for registration; what this task removed was a redundant second
+  `AddAlvoApi()` call inside `AddDataApi` and the docs that described it as
+  load-bearing.
 - **`MapAlvo()`** maps the Data API plus health. It is not an invention — it is
   the spec's own name (S:167). `MapAlvoDataApi()` and `MapAlvoHealth()` stay
   public for a host that wants the pieces, exactly as `MapControllers` coexists
@@ -697,11 +699,16 @@ Numbering continues the F3 design's series, which ends at 51.
     downgrades. Recorded because A:555 is an acceptance criterion and this design
     touches the exact mechanism — deferred to the issue that publishes the image
     (#24), not silently skipped.
-56. **`AddDataApi()` becoming default-on is a public-API behaviour change.** A
-    host that called `AddAlvo(...)` without it, and relied on no Data API being
-    registered, now gets one. No such host exists in this repository, and
-    nothing is published yet, so the cost is zero today — recorded because it
-    would be a breaking change after v0.1.
+56. **~~`AddDataApi()` becoming default-on is a public-API behaviour change.~~
+    WITHDRAWN — the premise was false.** Measured at Task 8: `AddAlvo` has **always**
+    called `AddAlvoApi()` (`origin/main`, `AlvoServiceCollectionExtensions.cs:57`), so
+    the Data API's services were registered by `AddAlvo` before this branch existed.
+    Nothing became default-on; no host's container changes; the full fast suite shows
+    no test changing behaviour. What actually changed is narrower: `AddDataApi` no
+    longer *registers* anything, only configures. That can affect only a caller holding
+    a hand-rolled `IAlvoBuilder`, and none can exist — `AlvoBuilder` is `internal`.
+    Recorded as withdrawn rather than deleted, because this design asked the maintainer
+    to ratify a breaking change that is not one.
 58. **`Skip` reads the applied-schema store, contrary to this design's own
     earlier wording.** Stage 1 is unconditional (A:508/A:515), and the store read
     is what brings the system schema up, so there is nothing to skip. `Skip` still
@@ -773,7 +780,9 @@ Flagged rather than decided silently, per the brief.
    the pod is inspectable rather than crash-looping, and the readiness probe
    already exists to express it. I recommend failing the start now, because it is
    the behaviour every existing test pins, and revisiting it when #133 lands.
-3. **`AddDataApi()` default-on (deviation 56).** Cheap now, breaking later.
+3. ~~**`AddDataApi()` default-on (deviation 56).** Cheap now, breaking later.~~
+   **Withdrawn — nothing to ratify.** Measured at Task 8: `AddAlvo` always registered
+   the Data API, so this was never a behaviour change. See deviation 56.
 4. **The `Alvo__Schema__Startup` environment name.** Deviation 39 already flagged
    that the whole `Alvo__*` spelling wants confirming before the image is
    published, and this adds one more key to that set.
