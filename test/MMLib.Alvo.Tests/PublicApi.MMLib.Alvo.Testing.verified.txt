@@ -329,6 +329,30 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord> UpdateAsync(string entity, System.Guid id, System.Collections.Generic.IReadOnlyDictionary<string, object?> values, MMLib.Alvo.AlvoContext context, MMLib.Alvo.Data.AlvoPrecondition? precondition = default, System.Threading.CancellationToken cancellationToken = default) { }
     }
 }
+namespace MMLib.Alvo.Testing.Events
+{
+    public interface IOutboxStoreWorld : System.IAsyncDisposable
+    {
+        MMLib.Alvo.Events.IOutboxStore Store { get; }
+        void Advance(System.TimeSpan duration);
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<System.Guid>> SeedAsync(int count);
+        System.Threading.Tasks.Task<System.Guid> SeedWithExplicitIdAsync(System.Guid id);
+    }
+    public abstract class OutboxStoreContractTests
+    {
+        protected OutboxStoreContractTests() { }
+        public System.Threading.Tasks.Task A_claim_is_sorted_in_process_because_returning_order_is_arbitrary() { }
+        public System.Threading.Tasks.Task A_claim_returns_the_oldest_undispatched_entries_in_order() { }
+        public System.Threading.Tasks.Task A_claim_whose_lease_expired_is_claimed_again() { }
+        public System.Threading.Tasks.Task A_claimed_entry_is_not_claimed_twice_while_its_lease_holds() { }
+        public System.Threading.Tasks.Task A_dispatched_entry_is_never_claimed_again() { }
+        public System.Threading.Tasks.Task A_released_entry_is_claimable_immediately_without_waiting_for_the_lease() { }
+        public System.Threading.Tasks.Task An_entry_past_the_attempt_ceiling_is_no_longer_claimed() { }
+        public System.Threading.Tasks.Task An_entry_whose_id_sorts_below_an_already_dispatched_one_is_still_claimed() { }
+        protected virtual void EnsureEngineAvailable() { }
+        protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Testing.Events.IOutboxStoreWorld> WorldAsync();
+    }
+}
 namespace MMLib.Alvo.Testing.Migrations
 {
     public abstract class DescriptorVersionStoreContractTests

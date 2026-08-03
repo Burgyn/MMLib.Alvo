@@ -32,6 +32,7 @@
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/OutboxTableFacts.cs" Link="_shared/OutboxTableFacts.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/AlvoDataOutboxWorld.cs" Link="_shared/AlvoDataOutboxWorld.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/OutboxStoreWorld.cs" Link="_shared/OutboxStoreWorld.cs" />
   </ItemGroup>
 
   <!-- The concurrent-cold-start harness, shared with MMLib.Alvo.Data.PostgreSql.Tests.Integration. Linked for

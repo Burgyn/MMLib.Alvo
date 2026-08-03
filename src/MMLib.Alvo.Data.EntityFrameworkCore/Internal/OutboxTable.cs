@@ -5,9 +5,10 @@ using System.Data.Common;
 namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 
 /// <summary>
-/// Alvo's own transactional outbox: its name, the DDL that creates it, and the insert the write path adds to
-/// the transaction that is already committing the row. A framework bookkeeping table like the
-/// descriptor-versions and idempotency-record ones, not something the descriptor-diff engine produces.
+/// Alvo's own transactional outbox: its name, the DDL that creates it, the insert the write path adds to the
+/// transaction that is already committing the row, and the three statements a dispatcher drains it with. A
+/// framework bookkeeping table like the descriptor-versions and idempotency-record ones, not something the
+/// descriptor-diff engine produces.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -201,6 +202,85 @@ internal static class OutboxTable
             await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
     }
+
+    /// <summary>
+    /// The claim: takes the oldest claimable entries of <paramref name="tableName"/>, stamps them, counts the
+    /// attempt, and returns them.
+    /// </summary>
+    /// <param name="tableName">The table name, already prefixed by <see cref="NameFor"/>.</param>
+    /// <remarks>
+    /// <para>
+    /// <b>The outer <c>WHERE</c> repeats the subquery's claimability predicate, and that is the whole
+    /// correctness of the statement — not a belt on a brace.</b> Measured without it (spike Q4): <em>"A claimed
+    /// 10, B claimed 10, overlap 10 (must be 0); rows with attempts &gt; 1: 10"</em> — two claimants deliver
+    /// <b>every</b> entry twice. Under <c>READ COMMITTED</c>, PostgreSQL's EvalPlanQual re-check runs the
+    /// <b>outer</b> <c>WHERE</c> again against the row the winner just updated, and nothing else; the
+    /// subquery's <c>claimed_at IS NULL</c> was evaluated before the block and is never re-checked, so the
+    /// loser's <c>id IN (…)</c> still holds and it re-claims what the winner took. With the predicate
+    /// repeated: <em>"A claimed 10, B claimed 0, overlap 0; rows with attempts &gt; 1: 0"</em>. Anyone tempted
+    /// to call it redundant is reading the subquery as if it re-ran.
+    /// </para>
+    /// <para>
+    /// <b>Why raw SQL and not LINQ.</b> <c>UseRelationalNulls()</c> is on in both drivers, so a LINQ predicate
+    /// over a nullable column would have to be written <c>x != null &amp;&amp; x &lt; y</c> against C#'s
+    /// reading of the same text (<c>docs/architecture/data-path.md</c>). Raw SQL has SQL's semantics natively,
+    /// so the constraint is met by construction rather than by whoever edits this next remembering it;
+    /// <c>ChangeTrackerReachTests.The_outbox_claim_is_raw_sql_and_never_linq_over_the_context</c> holds the
+    /// line.
+    /// </para>
+    /// <para>
+    /// <b>Why the <c>ORDER BY</c> and the <c>LIMIT</c> are in the subquery.</b> Measured on <b>both</b> engines
+    /// (Q3): the parser names <c>ORDER</c>, not <c>limit</c> — SQLite <c>'near "ORDER": syntax error'</c>,
+    /// PostgreSQL <c>42601 syntax error at or near "ORDER"</c> — so this is portability rather than a SQLite
+    /// workaround. The bundled <c>e_sqlite3</c> also reports <c>SQLITE_ENABLE_UPDATE_DELETE_LIMIT</c> unset.
+    /// </para>
+    /// <para>
+    /// <b>Why the result is re-sorted in process.</b> <c>RETURNING</c>'s row order is arbitrary in measured
+    /// fact on both engines — <c>RETURNING already sorted: False</c> for SQLite <em>and</em> PostgreSQL (Q3) —
+    /// so the subquery's <c>ORDER BY</c> decides <em>which</em> entries are claimed, never in what order they
+    /// come back. <see cref="EfCoreOutboxStore"/> sorts what it read.
+    /// </para>
+    /// <para>
+    /// <b>Why there is no <c>SKIP LOCKED</c>.</b> It skips the <b>row</b>, not the <b>key</b>, so it delivers
+    /// neither global nor per-entity-key ordering; with exactly one dispatcher it buys nothing, and a new
+    /// <see cref="IAlvoSqlDialect"/> member would be a public-API change in a driver package for a seam F7 will
+    /// design properly. Q4 measured that a second claimant blocks and then claims <b>nothing</b> — with this
+    /// statement, and every entry twice without its outer predicate.
+    /// </para>
+    /// </remarks>
+    internal static string ClaimSql(string tableName) =>
+        $"""
+        UPDATE {tableName} SET claimed_at = @claimed_at, claimed_by = @claimed_by,
+                               attempts = attempts + 1
+         WHERE dispatched_at IS NULL
+           AND (claimed_at IS NULL OR claimed_at < @stale_before)
+           AND id IN (SELECT id FROM {tableName}
+                       WHERE dispatched_at IS NULL
+                         AND attempts < @max_attempts
+                         AND (claimed_at IS NULL OR claimed_at < @stale_before)
+                       ORDER BY id
+                       LIMIT @batch)
+        RETURNING id, event_type, partition_key, payload, attempts
+        """;
+
+    /// <summary>Retires one entry of <paramref name="tableName"/>: it was delivered.</summary>
+    /// <param name="tableName">The table name, already prefixed by <see cref="NameFor"/>.</param>
+    /// <remarks>
+    /// The claim reads <c>dispatched_at IS NULL</c>, so stamping it is what makes delivery final — it outlives
+    /// the lease, which <c>claimed_at</c> alone would not. <c>claimed_at</c> and <c>claimed_by</c> are left in
+    /// place, because they are the only record of who delivered the entry.
+    /// </remarks>
+    internal static string MarkDispatchedSql(string tableName) =>
+        $"UPDATE {tableName} SET dispatched_at = @dispatched_at WHERE id = @id";
+
+    /// <summary>Hands one entry of <paramref name="tableName"/> back, claimable again immediately.</summary>
+    /// <param name="tableName">The table name, already prefixed by <see cref="NameFor"/>.</param>
+    /// <remarks>
+    /// <c>attempts</c> is deliberately untouched: releasing is how a dispatcher says it could not deliver, and
+    /// resetting the count would make the attempt ceiling unreachable and retry a poison event forever.
+    /// </remarks>
+    internal static string ReleaseSql(string tableName) =>
+        $"UPDATE {tableName} SET claimed_at = NULL, claimed_by = NULL WHERE id = @id";
 
     /// <summary>How many delivery attempts a freshly written event has had.</summary>
     private const int UndeliveredAttempts = 0;

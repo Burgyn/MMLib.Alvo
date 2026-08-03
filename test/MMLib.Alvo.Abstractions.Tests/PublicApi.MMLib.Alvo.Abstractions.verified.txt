@@ -787,6 +787,22 @@ namespace MMLib.Alvo.Events
         public static MMLib.Alvo.Events.AlvoEvent Read(string json) { }
         public static string Write(MMLib.Alvo.Events.AlvoEvent @event) { }
     }
+    public interface IOutboxStore
+    {
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.OutboxEntry>> ClaimAsync(string claimant, int batchSize, int maxAttempts, System.TimeSpan lease, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task EnsureAsync(System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task MarkDispatchedAsync(System.Guid id, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task ReleaseAsync(System.Guid id, System.Threading.CancellationToken cancellationToken = default);
+    }
+    public sealed class OutboxEntry : System.IEquatable<MMLib.Alvo.Events.OutboxEntry>
+    {
+        public OutboxEntry(System.Guid Id, string Type, string PartitionKey, string Payload, int Attempts) { }
+        public int Attempts { get; init; }
+        public System.Guid Id { get; init; }
+        public string PartitionKey { get; init; }
+        public string Payload { get; init; }
+        public string Type { get; init; }
+    }
 }
 namespace MMLib.Alvo.Expressions
 {

@@ -13,6 +13,13 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore
     {
         public static string Quote(string identifier) { }
     }
+    public sealed class EfCoreOutboxStore : MMLib.Alvo.Events.IOutboxStore
+    {
+        public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.OutboxEntry>> ClaimAsync(string claimant, int batchSize, int maxAttempts, System.TimeSpan lease, System.Threading.CancellationToken cancellationToken = default) { }
+        public System.Threading.Tasks.Task EnsureAsync(System.Threading.CancellationToken cancellationToken = default) { }
+        public System.Threading.Tasks.Task MarkDispatchedAsync(System.Guid id, System.Threading.CancellationToken cancellationToken = default) { }
+        public System.Threading.Tasks.Task ReleaseAsync(System.Guid id, System.Threading.CancellationToken cancellationToken = default) { }
+    }
     public sealed class EfCoreSchemaIntrospector : MMLib.Alvo.Schema.ISchemaIntrospector
     {
         public System.Threading.Tasks.Task<MMLib.Alvo.Schema.SchemaModel> IntrospectAsync(System.Threading.CancellationToken ct = default) { }

@@ -1,0 +1,8 @@
+﻿# OutboxStoreContractTests is xUnit test code even though it lives in src/, not test/ — it is inherited by
+# every IOutboxStore implementation's own test project, so its [Fact] methods follow the same descriptive
+# snake_case convention as test/.editorconfig, for the same reason
+# src/MMLib.Alvo.Testing/Migrations/.editorconfig does for DescriptorVersionStoreContractTests. Scoped to that
+# file, not the whole folder, so anything else added here still gets the normal naming rule.
+
+[OutboxStoreContractTests.cs]
+dotnet_diagnostic.CA1707.severity = none
