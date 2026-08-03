@@ -40,6 +40,11 @@
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/PolicyPredicateParameters.cs" Link="_shared/PolicyPredicateParameters.cs" />
   </ItemGroup>
 
+  <!-- The outbox table's engine facts, shared with MMLib.Alvo.Data.Sqlite.Tests — see the same link there. -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/OutboxTableFacts.cs" Link="_shared/OutboxTableFacts.cs" />
+  </ItemGroup>
+
   <!-- The container-creation mechanics every Testcontainers-backed PostgreSQL fixture in this repository
        needs, shared with MMLib.Alvo.Api.Tests.Integration's PostgresApiEngine — a second copy of the image
        tag and the lazy-build discipline is exactly how the two would quietly drift apart. -->

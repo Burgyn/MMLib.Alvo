@@ -121,10 +121,10 @@ public class ChangeTrackerReachTests
     /// history, the system schema), by running SQL EF's own generator produced, or by being the one seam that
     /// binds parameters rather than composing a row statement:
     /// <c>EfCoreDescriptorVersionStore</c>, <c>EfCoreRuntimeSchemaWriter</c>, <c>SystemSchemaInitializer</c>,
-    /// <c>IdempotencyTable</c>, <c>RelationalSqlBatch</c> and <c>VersionRowWriter</c> never touch an entity
-    /// table — <c>IdempotencyTable</c> in particular reads and writes only the idempotency-record table, and
-    /// exists as its own file precisely so the row-statement file does not also become the place framework
-    /// bookkeeping SQL is written;
+    /// <c>IdempotencyTable</c>, <c>OutboxTable</c>, <c>RelationalSqlBatch</c> and <c>VersionRowWriter</c> never
+    /// touch an entity table — <c>IdempotencyTable</c> in particular reads and writes only the
+    /// idempotency-record table, and <c>OutboxTable</c> only the outbox table, and each exists as its own file
+    /// precisely so the row-statement file does not also become the place framework bookkeeping SQL is written;
     /// <c>PredicateParameterBinder</c> creates a command only to reach the provider's parameter factory;
     /// <c>EfCoreSchemaMigrator</c> executes the migrator's generated statements;
     /// <c>SqliteCaseSensitiveLike</c> runs one connection pragma and can carry no row predicate at all; and
@@ -181,6 +181,7 @@ public class ChangeTrackerReachTests
         "EfCoreRuntimeSchemaWriter.cs",
         "EfCoreSchemaMigrator.cs",
         "IdempotencyTable.cs",
+        "OutboxTable.cs",
         "PredicateParameterBinder.cs",
         "RelationalSqlBatch.cs",
         "SqliteCaseSensitiveLike.cs",
