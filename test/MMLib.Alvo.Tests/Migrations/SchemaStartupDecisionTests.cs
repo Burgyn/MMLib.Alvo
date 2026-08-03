@@ -195,6 +195,36 @@ public sealed class SchemaStartupDecisionTests
             .Outcome.ShouldBe(SchemaStartupOutcome.Unchanged);
 
     /// <summary>
+    /// <c>AllowDestructive</c> does <b>not</b> wave an out-of-order boot through, and that is a deliberate
+    /// narrowing of what the flag used to buy.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Found in review, and it is a real behaviour change worth pinning rather than discovering.</b> Before
+    /// the ordering gate, <c>AllowDestructive=true</c> was exactly how an operator forced a deliberate rollback
+    /// through: the plan back drops a column, the flag allows the drop, the apply proceeds. It no longer does,
+    /// because the two settings answer different questions — the flag says "I accept losing data", never "I
+    /// accept serving an older descriptor than the database".
+    /// </para>
+    /// <para>
+    /// Conflating them would make the ordering protection evaporate for anyone who set an unrelated flag in a
+    /// staging environment, and the oscillation the gate exists to stop discards no data at all, so the flag
+    /// would be no evidence of intent about it. The way to force an older artifact through is to make it a new
+    /// one — bump its <c>revision</c>, which changes its canonical content — and the refusal text says so,
+    /// including that the destructive gate is still waiting behind it. Recorded as deviation 74.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AllowDestructive_does_not_wave_an_out_of_order_boot_through()
+        => Decide(
+                AppliedAt(2),
+                DestructivePlan,
+                AlvoSchemaStartupMode.Apply,
+                allowDestructive: true,
+                outOfOrder: OlderPod)
+            .Outcome.ShouldBe(SchemaStartupOutcome.StandDown);
+
+    /// <summary>
     /// <c>Skip</c> ignores the ordering exactly as it ignores every other drift: it never applies, so it cannot
     /// be the replica that rewrites the schema.
     /// </summary>

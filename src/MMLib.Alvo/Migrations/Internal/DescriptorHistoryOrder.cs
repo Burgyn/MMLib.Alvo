@@ -1,4 +1,6 @@
-﻿using MMLib.Alvo.Descriptor;
+﻿using Microsoft.Extensions.Logging;
+using MMLib.Alvo.Descriptor;
+using System.Text.Json;
 
 namespace MMLib.Alvo.Migrations.Internal;
 
@@ -35,10 +37,25 @@ internal sealed record OutOfOrderBoot(string Headline, IReadOnlyList<string> Fix
 /// declared-revision override for that case, in the one direction that cannot break anybody: see
 /// <see cref="DeclaredRevisionSaysOlder"/>.
 /// </para>
+/// <para>
+/// <b>A row it cannot read is answered, not thrown over — and that is a correctness requirement, not
+/// defensiveness.</b> This reads descriptor JSON <em>it did not write</em>: rows recorded by an older build
+/// whose <see cref="AlvoDescriptor"/> shape differed, or a row somebody edited by hand. Letting
+/// <see cref="AlvoDescriptor.Parse"/>'s <see cref="JsonException"/> escape would fail the boot from
+/// <c>StartingAsync</c> — it is neither of the two conflict shapes
+/// <c>AlvoBootService.IsAnotherWriterGettingThereFirst</c> retries — so one unreadable row anywhere in a
+/// project's history would crash-loop <em>every</em> later schema-changing boot, permanently, recoverable only
+/// by editing the database by hand. That is a strictly worse outage than the one this type exists to remove.
+/// So an unreadable row is skipped, at <see cref="LogLevel.Warning"/> naming its revision, and skipping it is
+/// <em>honest</em> rather than merely convenient: the booting descriptor parsed at stage 0, so a row that does
+/// not parse demonstrably is not it. The cost is that the protection weakens over exactly those rows, degrading
+/// to the behaviour before this type existed, which is the safe direction to fail.
+/// </para>
 /// </remarks>
-internal static class DescriptorHistoryOrder
+internal static partial class DescriptorHistoryOrder
 {
     /// <summary>Decides whether <paramref name="booting"/> is older than the descriptor the database is on.</summary>
+    /// <param name="logger">Where a history row this cannot read is reported.</param>
     /// <param name="booting">The descriptor this process is trying to serve.</param>
     /// <param name="bootingJson">
     /// The JSON <paramref name="booting"/> was loaded from, exactly as it was read — compared against the
@@ -52,8 +69,9 @@ internal static class DescriptorHistoryOrder
     /// </param>
     /// <returns>Why this boot is out of order, or <see langword="null"/> when it is not.</returns>
     internal static OutOfOrderBoot? Check(
-        AlvoDescriptor booting, string bootingJson, IReadOnlyList<DescriptorVersion> history)
+        ILogger logger, AlvoDescriptor booting, string bootingJson, IReadOnlyList<DescriptorVersion> history)
     {
+        ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(booting);
         ArgumentNullException.ThrowIfNull(bootingJson);
         ArgumentNullException.ThrowIfNull(history);
@@ -65,8 +83,8 @@ internal static class DescriptorHistoryOrder
 
         var current = history[^1];
 
-        return DeclaredRevisionSaysOlder(booting, current)
-            ?? HistorySaysOlder(booting, bootingJson, history, current);
+        return DeclaredRevisionSaysOlder(logger, booting, current)
+            ?? HistorySaysOlder(logger, booting, bootingJson, history, current);
     }
 
     /// <summary>
@@ -87,12 +105,14 @@ internal static class DescriptorHistoryOrder
     /// is what makes it safe to honour a field that until now was parsed and read by nothing.
     /// </para>
     /// </remarks>
+    /// <param name="logger">Where a current row this cannot read is reported.</param>
     /// <param name="booting">The descriptor this process is trying to serve.</param>
     /// <param name="current">The version the database is on.</param>
-    private static OutOfOrderBoot? DeclaredRevisionSaysOlder(AlvoDescriptor booting, DescriptorVersion current)
+    private static OutOfOrderBoot? DeclaredRevisionSaysOlder(
+        ILogger logger, AlvoDescriptor booting, DescriptorVersion current)
     {
         if (booting.Revision is not { } declared
-            || AlvoDescriptor.Parse(current.DescriptorJson).Revision is not { } applied
+            || DeclaredRevisionOf(logger, current) is not { } applied
             || declared >= applied)
         {
             return null;
@@ -109,17 +129,19 @@ internal static class DescriptorHistoryOrder
     /// The history comparison: this descriptor's content was applied before, and something else has been
     /// applied since.
     /// </summary>
+    /// <param name="logger">Where a history row this cannot read is reported.</param>
     /// <param name="booting">The descriptor this process is trying to serve.</param>
     /// <param name="bootingJson">The JSON it was loaded from, for the byte-equality fast path.</param>
     /// <param name="history">The project's applied history, oldest to newest.</param>
     /// <param name="current">The version the database is on.</param>
     private static OutOfOrderBoot? HistorySaysOlder(
+        ILogger logger,
         AlvoDescriptor booting,
         string bootingJson,
         IReadOnlyList<DescriptorVersion> history,
         DescriptorVersion current)
     {
-        if (NewestRevisionThisDescriptorWasAppliedAs(booting, bootingJson, history) is not { } appliedAs
+        if (NewestRevisionThisDescriptorWasAppliedAs(logger, booting, bootingJson, history) is not { } appliedAs
             || appliedAs >= current.Revision)
         {
             return null;
@@ -137,17 +159,18 @@ internal static class DescriptorHistoryOrder
     /// The newest revision whose descriptor is, canonically, <paramref name="booting"/> — or
     /// <see langword="null"/> when the history has never seen it.
     /// </summary>
+    /// <param name="logger">Where a history row this cannot read is reported.</param>
     /// <param name="booting">The descriptor this process is trying to serve.</param>
     /// <param name="bootingJson">The JSON it was loaded from, for the byte-equality fast path.</param>
     /// <param name="history">The project's applied history, oldest to newest.</param>
     private static int? NewestRevisionThisDescriptorWasAppliedAs(
-        AlvoDescriptor booting, string bootingJson, IReadOnlyList<DescriptorVersion> history)
+        ILogger logger, AlvoDescriptor booting, string bootingJson, IReadOnlyList<DescriptorVersion> history)
     {
         var canonical = DescriptorContent.Canonical(booting);
 
         for (var index = history.Count - 1; index >= 0; index--)
         {
-            if (IsSameDescriptor(bootingJson, canonical, history[index].DescriptorJson))
+            if (IsSameDescriptor(logger, bootingJson, canonical, history[index]))
             {
                 return history[index].Revision;
             }
@@ -161,12 +184,82 @@ internal static class DescriptorHistoryOrder
     /// first because a previous boot that recorded the same file recorded it verbatim — and the canonicalization
     /// that hit saves is the whole per-row cost of the history read.
     /// </summary>
+    /// <param name="logger">Where a row this cannot read is reported.</param>
     /// <param name="bootingJson">The JSON the booting descriptor was loaded from.</param>
     /// <param name="canonical">The canonical form of the booting descriptor, computed once.</param>
-    /// <param name="storedJson">One history row's descriptor JSON.</param>
-    private static bool IsSameDescriptor(string bootingJson, string canonical, string storedJson)
-        => string.Equals(bootingJson, storedJson, StringComparison.Ordinal)
-            || string.Equals(canonical, DescriptorContent.Canonical(storedJson), StringComparison.Ordinal);
+    /// <param name="stored">One history row.</param>
+    private static bool IsSameDescriptor(
+        ILogger logger, string bootingJson, string canonical, DescriptorVersion stored)
+        => string.Equals(bootingJson, stored.DescriptorJson, StringComparison.Ordinal)
+            || string.Equals(canonical, CanonicalOf(logger, stored), StringComparison.Ordinal);
+
+    /// <summary>
+    /// The canonical form of a stored row's descriptor, or <see langword="null"/> when the row cannot be read.
+    /// </summary>
+    /// <remarks>
+    /// <see langword="null"/> never compares equal to a canonical form, so an unreadable row simply is not the
+    /// descriptor being booted — see the type's remarks for why that is the correct answer and not a swallowed
+    /// error.
+    /// </remarks>
+    /// <param name="logger">Where the unreadable row is reported.</param>
+    /// <param name="stored">The row to canonicalize.</param>
+    private static string? CanonicalOf(ILogger logger, DescriptorVersion stored)
+    {
+        try
+        {
+            return DescriptorContent.Canonical(stored.DescriptorJson);
+        }
+        catch (Exception unreadable) when (unreadable is JsonException or InvalidOperationException)
+        {
+            HistoryRowCannotBeRead(logger, stored.Revision, unreadable.GetType().Name);
+
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The revision a stored row's descriptor declares, or <see langword="null"/> when it declares none or the
+    /// row cannot be read — both of which mean the same thing here: no override, fall through to the history.
+    /// </summary>
+    /// <param name="logger">Where the unreadable row is reported.</param>
+    /// <param name="stored">The row to read the declared revision from.</param>
+    private static int? DeclaredRevisionOf(ILogger logger, DescriptorVersion stored)
+    {
+        try
+        {
+            return AlvoDescriptor.Parse(stored.DescriptorJson).Revision;
+        }
+        catch (Exception unreadable) when (unreadable is JsonException or InvalidOperationException)
+        {
+            HistoryRowCannotBeRead(logger, stored.Revision, unreadable.GetType().Name);
+
+            return null;
+        }
+    }
+
+    /// <summary>The one record that a stored descriptor could not be read, and the ordering is weaker for it.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Warning, not Critical.</b> The boot continues and is correct for every row that <em>can</em> be read,
+    /// so this is not a refusal; but it says the ordering protection has a hole in it over this project's
+    /// history, which nothing else would report.
+    /// </para>
+    /// <para>
+    /// <b>The exception's <em>type</em>, never its message.</b> The text comes from a serializer reading a
+    /// database row and can quote the row's own content, which is the class of text the startup design's
+    /// deviation 59 keeps out of anything an aggregator collects. The revision is the only identifier an
+    /// operator needs to go and look at the row.
+    /// </para>
+    /// </remarks>
+    /// <param name="logger">The logger the boot writes through.</param>
+    /// <param name="revision">The revision whose descriptor could not be read.</param>
+    /// <param name="failure">The exception type the read reported.</param>
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Alvo could not read the descriptor recorded at revision {Revision}, so the boot cannot tell "
+            + "whether it is this process's own. Startup ordering is not enforced against that revision. "
+            + "Failure: {Failure}")]
+    private static partial void HistoryRowCannotBeRead(ILogger logger, int revision, string failure);
 
     /// <summary>
     /// The ways out of an out-of-order boot diagnosed from the history, and the reason the pod is not dying.

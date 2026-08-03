@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Descriptor;
+﻿using Microsoft.Extensions.Logging.Abstractions;
+using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Migrations.Internal;
 using MMLib.Alvo.Schema;
@@ -184,8 +185,52 @@ public sealed class DescriptorHistoryOrderTests
         Check(Region, [Declaring(Town, 9)]).ShouldBeNull();
     }
 
+    /// <summary>
+    /// A history row this build cannot parse is skipped, rather than failing the boot it was asked about.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Found in review, and it would have been the worst regression in the change.</b> This reads descriptor
+    /// JSON it did not write — a row recorded by an older build whose model shape differed, or one somebody
+    /// edited. An escaping <c>JsonException</c> is neither of the two conflict shapes
+    /// <c>AlvoBootService.IsAnotherWriterGettingThereFirst</c> retries, so it propagated out of
+    /// <c>StartingAsync</c>: one unreadable row anywhere in a project's history would have crash-looped
+    /// <em>every</em> later schema-changing boot, permanently, recoverable only by editing the database. That is
+    /// a strictly worse outage than the one this whole type exists to remove.
+    /// </para>
+    /// <para>
+    /// Skipping is the honest answer as well as the safe one: the booting descriptor parsed at stage 0, so a row
+    /// that does not parse cannot be it.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void A_history_row_that_cannot_be_read_is_skipped_rather_than_failing_the_boot()
+    {
+        Check(Region, ["{ this is not json", Town]).ShouldBeNull(
+            "an unreadable row is not this descriptor, so a forward deploy still applies");
+
+        Check(City, [City, "{ this is not json", Town]).ShouldNotBeNull(
+            "and the rows that can be read must still be compared")
+            .Headline.ShouldContain("revision 1");
+    }
+
+    /// <summary>
+    /// An unreadable <em>current</em> row costs the declared-revision override, not the boot.
+    /// </summary>
+    /// <remarks>
+    /// The override has to parse the current row to read the counter it declares. When that fails the answer is
+    /// "no override", which is the same answer as "it declares none" — and the history comparison still runs, so
+    /// an older pod is still caught by the rows that can be read.
+    /// </remarks>
+    [Fact]
+    public void An_unreadable_current_row_costs_the_override_not_the_boot()
+        => Check(Declaring(City, 1), [Declaring(City, 1), "{ this is not json"]).ShouldNotBeNull(
+                "the history comparison must still run over the rows that can be read")
+            .Headline.ShouldContain("already applied");
+
     private static OutOfOrderBoot? Check(string bootingJson, IReadOnlyList<string> historyJson) =>
         DescriptorHistoryOrder.Check(
+            NullLogger.Instance,
             AlvoDescriptor.Parse(bootingJson),
             bootingJson,
             [.. historyJson.Select(AppliedAs)]);

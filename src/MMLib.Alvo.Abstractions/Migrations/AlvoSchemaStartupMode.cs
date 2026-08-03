@@ -62,21 +62,27 @@ public enum AlvoSchemaStartupMode
     /// <see cref="Verify"/> plus a migration job.
     /// </para>
     /// <para>
-    /// <b>And one cost is sharper than either of those: a descriptor <em>rollback</em> cannot boot.</b> This
-    /// mode advances the applied schema with no operator decision, so redeploying the previous descriptor plans
-    /// a drop of whatever the forward deploy added. The way back is
-    /// <c>AlvoSchemaOptions.AllowDestructive</c> on the rollback, accepting the loss of what the new column
-    /// holds, or applying the older descriptor from a migration job. Under <see cref="Verify"/> the operator
-    /// chose the forward apply knowingly and can plan the way back; under this mode nobody chose it.
+    /// <b>And one cost is sharper than either of those: a descriptor <em>rollback</em> cannot be applied.</b>
+    /// This mode advances the applied schema with no operator decision, so redeploying the previous descriptor
+    /// plans a drop of whatever the forward deploy added. Under <see cref="Verify"/> the operator chose the
+    /// forward apply knowingly and can plan the way back; under this mode nobody chose it.
     /// </para>
     /// <para>
-    /// <b>What it no longer costs is a crash loop.</b> A process whose descriptor the database has already moved
-    /// on from is recognised as such — from the append-only descriptor history, not from a counter anybody
-    /// maintains — and <em>stands down</em>: it starts, reports not ready, and names the revision it is against
-    /// the revision the database is at, so an orchestrator drains it instead of restarting it forever over a
-    /// destructive-plan refusal that never explained which artifact was behind. That also closes the changes no
-    /// destructive gate can see, because they discard nothing: an index or constraint added one way and dropped
-    /// the other, and a pair of declared renames pointing at each other.
+    /// <b>The way back is to make the older descriptor a <em>new</em> artifact, not to set a flag.</b> A boot
+    /// whose descriptor the database has already moved on from is recognised as such — from the append-only
+    /// descriptor history, not from a counter anybody maintains — and is stood down whatever
+    /// <c>AlvoSchemaOptions.AllowDestructive</c> says, because that flag means "I accept losing data" and never
+    /// "I accept serving an older descriptor than the database". So: bump the descriptor's
+    /// <c>AlvoDescriptor.Revision</c> above the applied one, which makes it an artifact the history has not seen,
+    /// <em>and</em> set <c>AllowDestructive</c> if the plan back discards anything — or apply the older
+    /// descriptor from a migration job, which this gate does not govern.
+    /// </para>
+    /// <para>
+    /// <b>What it no longer costs is a crash loop.</b> A process that is merely behind starts, reports not ready,
+    /// and names the revision it is against the revision the database is at, so an orchestrator drains it instead
+    /// of restarting it forever over a destructive-plan refusal that never explained which artifact was behind.
+    /// That also closes the changes no destructive gate can see, because they discard nothing: an index or
+    /// constraint added one way and dropped the other, and a pair of declared renames pointing at each other.
     /// </para>
     /// </remarks>
     Apply = 1,

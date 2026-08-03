@@ -170,27 +170,44 @@ instead of restart-looping it.
 
 This is the second instance of **deviation 65**'s shape, for the same reason: a
 failing liveness probe gets the container killed, which is the wrong response to
-a condition no restart can fix. It is deliberately *not* extended to the other
-refusals, and the two are different in kind:
+a condition no restart can fix. What separates the two failures is **not** which
+mode is configured but what kind of thing went wrong:
 
-- a destructive or `Verify` refusal is an **authoring or configuration** error.
-  Nothing but a human changes the outcome, and the fastest feedback is a loud
-  failure at deploy time. It keeps throwing, and keeps exiting 78.
-- an out-of-order boot is a **position in a deployment**. The pod is not
-  misconfigured, it is behind. That is precisely what readiness is for.
+- a **destructive** refusal, or a `Verify` refusal over ordinary drift, is an
+  authoring or configuration error. Nothing but a human changes the outcome, and
+  the fastest feedback is a loud failure at deploy time. Those keep throwing, and
+  keep exiting 78.
+- an **out-of-order** boot is a *position in a deployment*. The pod is not
+  misconfigured, it is behind. That is precisely what readiness is for — and it is
+  no less true under `Verify` than under `Apply`, so the ordering verdict stands a
+  boot down in **every** mode that consults it. That narrows a decision the
+  startup design had ratified ("drift under `Verify` fails the start"); it is
+  recorded as deviation 75 rather than left as a surprise.
 
 Safety does not rest on nobody routing to it: the policy catalog stays unprimed,
 which denies every operation, and `ISchemaRegistry` reports an empty schema, so
 the route table materialises empty. A pod that stood down can answer 404 and 403
 and nothing else.
 
-**It does not make a rollback bootable**, and the design says so rather than
-letting a reader hope. Rolling back still needs `AllowDestructive` (accepting the
-loss) or a migration job applying the older descriptor. What changes is that the
-operator is told *which* problem they have. The escape hatch for "I really mean
-this older descriptor" is to bump its `revision` — which changes its canonical
-content, so it is no longer the artifact the history recorded — and then to clear
-the destructive gate as before.
+**It does not make a rollback appliable, and it takes away the flag that used to
+make one.** Before this change, `Alvo__Schema__AllowDestructive=true` was how an
+operator forced a deliberate rollback through: the plan back drops a column, the
+flag allows the drop, the apply proceeds. It no longer does — the ordering gate
+does not consult the flag, because the two settings answer different questions.
+The flag says "I accept losing data"; it has never said "I accept serving an older
+descriptor than the database", and the oscillation this gate exists to stop
+discards no data at all, so the flag would be no evidence of intent about it.
+Conflating them would delete the protection for anyone who set an unrelated flag
+in staging. Deviation 74, with the three places that still advertised the flag as
+the way back corrected.
+
+The way to deploy an older descriptor **on purpose** is therefore to make it a new
+artifact rather than to override a gate: bump its `revision`, which changes its
+canonical content so the history has never seen it, and then clear the destructive
+gate as before if the plan back discards anything. The refusal text says exactly
+that, both halves, so an operator who follows it does not meet a second refusal
+nobody warned them about. Applying the older descriptor from a migration job is
+unaffected — that path is not this gate's.
 
 ## Cost: `ListAsync` reads the whole history
 
@@ -202,7 +219,11 @@ the JSON the boot loaded short-circuits the canonicalisation when a previous boo
 recorded the same file verbatim.
 
 Measured on SQLite in Release, over an 8-entity ~5 KB descriptor, worst case (no
-row matches, so every one is canonicalised):
+row matches, so every one is canonicalised). Raw output, the harness and the exact
+commands are committed at
+`docs/superpowers/specs/evidence/2026-08-03-apply-ordering/measurements.txt` — a
+table published as measured with no trace is what the parent design had to correct
+one commit ago:
 
 | Applied revisions | History bytes | `ListAsync` | Canonicalise all N | Total per boot |
 |---|---|---|---|---|
@@ -233,6 +254,41 @@ implementation detail. Deferred, with the trigger named by the measurement above
 take it when a project's history read passes ~250 ms, i.e. somewhere around 800–1000
 applied revisions.
 
+## What this closes, and the one clause it cannot
+
+#145's acceptance criterion has four clauses: two hosts, one database, different
+descriptors, both `Apply`, started concurrently → exactly one applies; the other
+serves or reports not-ready naming the revision; **never a crash loop**; and no
+replica reports `Ready` while serving a schema its own descriptor does not
+describe. Stated plainly, because three of them are met and one is not:
+
+**Closed** — every shape where ordering information exists:
+
+- the rolling deploy where the database already holds a history (the reachable,
+  ordinary case: revision 2 is applied, a pod of the old ReplicaSet restarts);
+- the deliberate rollback, which stops crash-looping and is diagnosed correctly;
+- index / constraint / declared-rename oscillation, which nothing else caught;
+- an older artifact the history has *never* seen, **if** both descriptors maintain
+  `revision` — which is the whole of what the declared-counter override buys.
+
+**Not closed** — two descriptors racing an **empty** database, neither ever
+applied, neither declaring `revision`. The history is empty, so there is no
+ordering information and `DescriptorHistoryOrder.Check` returns "not older" for
+both. What then happens is unchanged and already measured
+(`docs/architecture/host.md`): the destructive gate decides it, and if the *subset*
+descriptor wins the race the superset pod applies revision 2 over it and **both
+replicas report `Ready`** — one of them serving a schema its own descriptor does
+not describe. That is the fourth clause, and A′ cannot reach it, because ordering
+two artifacts that have never been applied is not something an append-only history
+can know.
+
+**What closes it is option B**, mutual exclusion — one applier per deployment — and
+that is the second phase the issue already schedules for
+`baas-analyza.md:819`'s exactly-once cron requirement. So the honest summary is
+that this PR orders the apply wherever order is knowable and leaves the
+simultaneous-first-deploy case to the mechanism that is owed anyway. Recorded as
+deviation 76 so a later reader does not read the closed issue as covering it.
+
 ## Facts
 
 | Fact | What would otherwise be believed |
@@ -248,6 +304,9 @@ applied revisions.
 | `…An_out_of_order_verdict_does_not_stand_down_a_boot_with_nothing_to_apply` | the gate governs the apply |
 | `AlvoBootServiceTests.A_boot_holding_an_older_descriptor_starts_not_ready_instead_of_crash_looping` | end-to-end, incl. the exit path |
 | `…A_backwards_change_the_destructive_gate_cannot_see_is_stood_down_rather_than_oscillating` | that the gate closes something nothing else did |
+| `…AllowDestructive_does_not_wave_an_out_of_order_boot_through` | deviation 74's narrowing, which used to be the way back |
+| `DescriptorHistoryOrderTests.A_history_row_that_cannot_be_read_is_skipped_rather_than_failing_the_boot` | that one bad row cannot brick every later boot |
+| `…An_unreadable_current_row_costs_the_override_not_the_boot` | the same, on the declared-revision path |
 | `ConcurrentBootTests.A_replica_holding_an_older_descriptor_stands_down_while_the_current_one_serves` | both engines, over a database that already holds a history |
 
 `A_backwards_change_the_destructive_gate_cannot_see_is_stood_down_rather_than_oscillating`
@@ -256,7 +315,8 @@ change went green by applying**: an index added one way and dropped the other is
 destructive in neither direction, so removing the ordering gate records a third
 revision — the oscillation itself — rather than merely losing a diagnostic.
 
-The mutations run, and what each turned red:
+The mutations run, and what each turned red — raw counts, the exact edit each one
+made and the filters used are in the same evidence file:
 
 | Mutation | Observed |
 |---|---|
@@ -269,6 +329,8 @@ The mutations run, and what each turned red:
 | `appliedAs >= current` → `>` | 2 red — the current descriptor and the re-applied one both read as older |
 | standing down throws, like every other refusal | 3 red — both host facts and the SQLite one, on the exit path |
 | the harness's `Serving` reduced to "it did not throw" | the SQLite fact — a replica that stood down would otherwise count as serving |
+| the unreadable-row guard removed (rethrow instead of skip) | both malformed-row facts |
+| `AllowDestructive` waves an out-of-order boot through | `AllowDestructive_does_not_wave_an_out_of_order_boot_through` |
 
 One thing deliberately has **no** discriminating mutation, said plainly rather than
 implied: skipping the history read for an empty plan is a *cost* decision, and
@@ -325,3 +387,53 @@ Continuing the startup design's series, which ends at 65.
 73. **The whole history is read on a drifting boot, and the narrower port member
     is deferred.** Surfaced because it is a port change and therefore a design
     decision; the measured cost and the trigger for taking it are above.
+74. **`AllowDestructive` no longer forces a deliberate rollback through, and that
+    is a behaviour change rather than a clarification.** The flag used to be the
+    documented way back from a rollback under `Apply`; the ordering gate sits ahead
+    of the destructive gate and does not consult it, so that route is gone. The
+    reason is that the two settings answer different questions — "I accept losing
+    data" is not "I accept serving an older descriptor", and the oscillation the
+    gate exists to stop discards nothing, so the flag would be no evidence of
+    intent about it. The replacement route (bump `revision`, then clear the
+    destructive gate if the plan back discards anything) is stated in the refusal
+    text itself, and the three places that advertised the old one —
+    `AlvoSchemaStartupMode.Apply`'s **public** XML doc,
+    `docs/architecture/host.md`, and this design's own earlier wording — are
+    corrected rather than left to contradict the code.
+    `SchemaStartupDecisionTests.AllowDestructive_does_not_wave_an_out_of_order_boot_through`
+    pins it.
+75. **An out-of-order boot stands down under `Verify` too, narrowing the startup
+    design's ratified "drift under `Verify` fails the start".** That decision was
+    the maintainer's and it still holds for ordinary drift; what changes is the
+    out-of-order subset, which is not a configuration error in any mode. Recorded
+    because a ratified decision must not be narrowed silently, and because the
+    alternative — the same pod crash-looping under `Verify` and standing down under
+    `Apply` — would make the mode decide something the mode is not about.
+76. **The simultaneous first deploy of two different descriptors is *not* ordered,
+    and #145's fourth acceptance clause is therefore not met by this PR.** With an
+    empty history there is no ordering information, so if the subset descriptor
+    wins the race the superset pod applies over it and both replicas report
+    `Ready` — one serving a schema its own descriptor does not describe. Only
+    mutual exclusion (option B) closes that, and it is the phase the issue already
+    schedules for `baas-analyza.md:819`. Recorded so the closed issue is not read
+    as covering it; the "What this closes" section above states it in the
+    criterion's own terms.
+77. **An unreadable history row is skipped rather than failing the boot, which
+    weakens the ordering over exactly those rows.** Found in review. Letting
+    `AlvoDescriptor.Parse`'s `JsonException` escape would have crash-looped every
+    later schema-changing boot of a project holding one row this build cannot read
+    — a strictly worse outage than the one being fixed, and unrecoverable without
+    editing the database. Skipping is also the honest answer, since the booting
+    descriptor parsed at stage 0 and a row that does not parse cannot be it. Two
+    consequences are stated rather than hidden: the protection degrades to
+    pre-change behaviour over unreadable rows, at `Warning` naming the revision;
+    and `Serialize(Parse(...))` drops members this build does not know, so a
+    descriptor deployed to an *older* binary than wrote it can canonicalise equal
+    to an older row and be stood down — which is the safe direction for a
+    genuinely mismatched deployment. Both touch the upgrade/downgrade contract
+    deviation 55 defers, and neither is closed here.
+78. **A stand-down's only channels are the log and `/health/ready`.** An embedded
+    host that maps neither gets a process that started, threw nothing, and quietly
+    serves 403/404 from Alvo. Deviation 65 has the same property; it is stated here
+    because an embedded host is the composition most likely to map no probes, and
+    the fix is #133's reachability port plus a host that maps `MapAlvoHealth`.

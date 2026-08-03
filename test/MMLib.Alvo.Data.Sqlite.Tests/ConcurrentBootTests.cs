@@ -139,17 +139,21 @@ public sealed class ConcurrentBootTests : IDisposable
     }
 
     /// <summary>
-    /// #145's acceptance criterion: two replicas of a rolling deploy, one of them holding the descriptor the
-    /// database has already moved on from, and the older one stands down instead of applying its schema over
+    /// Two replicas of a rolling deploy over a database that already holds a history, one of them holding the
+    /// descriptor the database has moved on from: the older one stands down instead of applying its schema over
     /// the newer one.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>The difference from the facts above is that the database already holds a <em>history</em>.</b> Racing
-    /// an empty database, both descriptors are new and the loser is refused by the destructive gate; that is the
-    /// cold-start case and it was never the defect. The reachable one is the ordinary rolling deploy: revision 2
-    /// is applied, a pod of the old ReplicaSet restarts, and under the default <c>Apply</c> nothing but the
-    /// ordering compares the two generations.
+    /// <b>The difference from the facts above is that the database already holds a <em>history</em>, and that is
+    /// the honest limit of what #145 closes rather than a convenience of the fixture.</b> Racing an
+    /// <em>empty</em> database there is no ordering information at all — neither descriptor has ever been
+    /// applied — so nothing here orders them and the outcome is still the destructive gate's: one wins, and if
+    /// the subset descriptor wins, the superset pod applies over it and <em>both</em> replicas report Ready. That
+    /// case needs mutual exclusion, not ordering, and is the second phase the issue schedules (apply-ordering
+    /// design deviation 76). What this fact measures is the shape that is actually reachable in production and
+    /// that nothing compared before: revision 2 is applied, a pod of the old ReplicaSet restarts, and under the
+    /// default <c>Apply</c> only the ordering can tell the two generations apart.
     /// </para>
     /// <para>
     /// <b>Nobody reaching the schema write is the assertion, not an accident.</b> The old fix for this shape was

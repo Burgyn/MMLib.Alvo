@@ -177,11 +177,15 @@ retry), so `Apply` on a replica set is not an outage.
 able to boot.** A forward deploy under `Apply` advances the applied snapshot with no
 operator action and no decision. Rolling the descriptor *back* — redeploying the
 previous artifact, the first thing anyone does — then plans a `DropField` against the
-schema the forward deploy wrote, the always-on destructive gate refuses it, and **every
-pod exits 78 in a crash loop.** Under `Verify` the operator chose that forward apply
+schema the forward deploy wrote, the always-on destructive gate refuses it, and **the
+rollback cannot be applied.** Under `Verify` the operator chose that forward apply
 knowingly and can plan the way back; under `Apply` they never chose it. Recovering means
-`Alvo__Schema__AllowDestructive=true` on the rollback — accepting the loss of whatever
-the new column now holds — or applying the older descriptor from a migration job. This
+bumping the older descriptor's `revision` above the applied one — which makes it an
+artifact the history has not seen — **and** `Alvo__Schema__AllowDestructive=true` if the
+plan back discards data, accepting the loss of whatever the new column now holds; or
+applying the older descriptor from a migration job. The flag **on its own is no longer
+enough**, deliberately: it means "I accept losing data", never "I accept serving an
+older descriptor than the database" (#145, deviation 74). This
 is pinned (`AlvoHostRestartTests.A_descriptor_that_drops_a_field_fails_the_restart_and_names_the_step`)
 and `AlvoHostBootTests` states the shape in its own words: *"the previous descriptor is
 destructive relative to the schema the failed start wrote, so rolling the deployment back

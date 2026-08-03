@@ -363,12 +363,14 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>Not asked when there is nothing to apply, and that is what keeps an ordinary restart cheap.</b>
+    /// <b>Not asked when nothing will be applied, and that is what keeps an ordinary restart cheap.</b>
     /// <see cref="IDescriptorVersionStore.ListAsync"/> reads the whole history, which is O(N) in a project's
     /// applied revisions, so paying it on the most common boot in existence — a restart over an unchanged
     /// descriptor — to be told something the empty plan already implies would be a real tax for nothing. The
-    /// gate governs the <em>apply</em>: a boot that changes no schema cannot be the one that rewrites a newer
-    /// schema with an older one.
+    /// same holds for <see cref="AlvoSchemaStartupMode.Skip"/>, which never applies at all and whose branch in
+    /// <see cref="SchemaStartupPolicy.Decide"/> therefore returns before the verdict is ever consulted. Both
+    /// skips are the one rule: the gate governs the <em>apply</em>, and a boot that changes no schema cannot be
+    /// the one that rewrites a newer schema with an older one.
     /// </para>
     /// <para>
     /// <b>Read here rather than reusing the applied snapshot.</b> <see cref="ReadAppliedSchemaAsync"/> returns
@@ -384,14 +386,14 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     private async Task<OutOfOrderBoot?> AmIAnOlderPodAsync(
         BootPlan boot, MigrationPlan plan, CancellationToken ct)
     {
-        if (plan.IsEmpty)
+        if (plan.IsEmpty || _options.Value.Startup is AlvoSchemaStartupMode.Skip)
         {
             return null;
         }
 
         var history = await _history.ListAsync(boot.Descriptor.Name, ct).ConfigureAwait(false);
 
-        return DescriptorHistoryOrder.Check(boot.Descriptor, boot.DescriptorJson, history);
+        return DescriptorHistoryOrder.Check(_logger, boot.Descriptor, boot.DescriptorJson, history);
     }
 
     /// <summary>Stages 2 and 3: do what was decided, and prime from the descriptor that was accepted.</summary>
