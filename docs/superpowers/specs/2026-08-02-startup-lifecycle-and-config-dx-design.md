@@ -344,11 +344,14 @@ contain drops. With the guard inside the `Apply` arm, initialization would have
 been *unguarded*, and the first boot of Alvo against someone's existing database
 could have dropped their columns while `Verify` was still the configured mode.
 
-So the evaluation order is: `Skip` → empty plan → **destructive gate** →
-uninitialized → mode. A destructive plan is refused in *every* mode, including
-during initialization, unless `AllowDestructive` is explicitly set. Found while
-implementing Task 3; pinned by
+So the evaluation order is: empty plan → `Skip` (serve, unless nothing verified
+the schema — deviation 64) → **destructive gate** → uninitialized → mode. A
+destructive plan is refused in *every* mode, including during initialization,
+unless `AllowDestructive` is explicitly set. Found while implementing Task 3;
+pinned by
 `An_absent_snapshot_does_not_mean_an_empty_database_so_a_destructive_initialization_is_refused`.
+The empty-plan arm moved ahead of `Skip` when deviation 64 landed, so that
+"nothing to do" still answers before any mode is consulted.
 
 The mode, `AlvoSchemaStartup`:
 

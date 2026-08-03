@@ -1,4 +1,6 @@
-﻿using Microsoft.AspNetCore.TestHost;
+﻿using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
 using MMLib.Alvo.Migrations;
 
 namespace MMLib.Alvo.Host.Tests;
@@ -225,6 +227,50 @@ public class AlvoBootServiceTests
             skipped.BootState.AppliedRevision.ShouldBe(
                 1, "Skip applies nothing, so the recorded revision is the one it serves");
             skipped.PrimedEntities.ShouldContain("warehouses");
+        }
+        finally
+        {
+            AlvoHostWorld.TryDeleteDatabase(databasePath);
+        }
+    }
+
+    /// <summary>
+    /// A host that attached a driver and forgot the descriptor is refused by name — and the refusal is
+    /// <b>recorded</b>, so the phase is <c>Failed</c> rather than <c>Pending</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The recording is the half that was missing: stage 0 raises this refusal before any project name exists,
+    /// and <c>StartingAsync</c> rethrows an <c>AlvoStartupRefusedException</c> untouched so it cannot overwrite a
+    /// project-scoped failure — so nothing wrote it down at all, and an embedded host holding the state could not
+    /// tell "no descriptor configured" from "the boot has not run yet". <c>AlvoBootState.Failed(string)</c>'s own
+    /// remarks require the opposite, which is what makes this a contract violation rather than a preference.
+    /// </para>
+    /// <para>
+    /// Built inline rather than through <see cref="AlvoBootWorld"/>, because that world always attaches a
+    /// descriptor — the whole subject here is the composition that does not.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_host_with_no_descriptor_source_is_refused_by_name_and_the_refusal_is_recorded()
+    {
+        var databasePath = AlvoHostWorld.TempDatabasePath();
+        var builder = WebApplication.CreateSlimBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddAlvo(alvo => alvo.UseSqlite($"Data Source={databasePath}"));
+
+        await using var app = builder.Build();
+
+        try
+        {
+            var refusal = await Should.ThrowAsync<AlvoStartupRefusedException>(
+                () => app.StartAsync(TestContext.Current.CancellationToken));
+            refusal.FixSuggestion.ShouldContain("FromDescriptor");
+
+            var state = app.Services.GetRequiredService<AlvoBootState>();
+            state.Phase.ShouldBe(
+                AlvoBootPhase.Failed, "a stage-0 refusal must not be indistinguishable from a boot that never ran");
+            state.Failure.ShouldNotBeNull().ShouldContain("FromDescriptor");
         }
         finally
         {
