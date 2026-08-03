@@ -273,6 +273,11 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
             alvo.FromDescriptor(descriptorPath).AddDataApi(setup.ConfigureApi ?? (_ => { }));
         });
 
+        if (setup.RegisterAlvoTwice)
+        {
+            builder.Services.AddAlvo();
+        }
+
         return builder.Build();
     }
 
@@ -686,6 +691,14 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
 /// every other fact in this suite was written against (apply, then map), which is also the ordering the CLI and
 /// the Management API still use.
 /// </param>
+/// <param name="RegisterAlvoTwice">
+/// Whether the world calls <c>AddAlvo</c> a <b>second</b> time — the shape two libraries each registering the
+/// framework produce, which <c>AddAlvo</c>'s own remarks support and which is now the only way any Alvo
+/// registration runs twice. It is what keeps
+/// <c>OpenApiDocumentTests.The_overview_is_appended_once_however_often_alvo_is_registered</c> discriminating:
+/// once <c>AddDataApi</c> became configuration-only, a single <c>AddAlvo</c> registers the document transformer
+/// exactly once whether or not the registration deduplicates, so that fact would have passed vacuously.
+/// </param>
 internal sealed record AlvoApiWorldSetup(
     Action<AlvoApiOptions>? ConfigureApi = null,
     string? RevokedKeyId = null,
@@ -697,7 +710,8 @@ internal sealed record AlvoApiWorldSetup(
     string? PathBase = null,
     int? ServerBodyLimitBytes = null,
     string? RouteGroupPrefix = null,
-    bool MapBeforePriming = false);
+    bool MapBeforePriming = false,
+    bool RegisterAlvoTwice = false);
 
 /// <summary>One dev API key a world issues, in the shape a test reads best.</summary>
 /// <param name="KeyId">The key's public identifier.</param>

@@ -140,6 +140,10 @@ namespace Microsoft.AspNetCore.Builder
     {
         public static Microsoft.AspNetCore.Routing.IEndpointRouteBuilder MapAlvoDataApi(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints) { }
     }
+    public static class AlvoEndpointRouteBuilderExtensions
+    {
+        public static Microsoft.AspNetCore.Routing.IEndpointRouteBuilder MapAlvo(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints) { }
+    }
     public static class AlvoHealthEndpointRouteBuilderExtensions
     {
         public static Microsoft.AspNetCore.Routing.IEndpointRouteBuilder MapAlvoHealth(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints) { }

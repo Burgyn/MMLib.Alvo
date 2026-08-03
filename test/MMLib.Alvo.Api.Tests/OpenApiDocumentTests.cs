@@ -516,29 +516,38 @@ public sealed class OpenApiDocumentTests
     }
 
     /// <summary>
-    /// However many times a host's own registration runs <c>AddAlvoApi</c> — <c>AddAlvo</c> and
-    /// <c>AddDataApi</c> both call it — the overview paragraph is appended to <c>info.description</c> exactly
-    /// once.
+    /// However many times a host registers Alvo, the overview paragraph is appended to
+    /// <c>info.description</c> exactly once.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// This is the fact <c>ApiSetup.cs</c>'s own remarks on <see cref="AlvoOpenApiSetup"/> name: the
     /// transformer used to be registered once per <c>AddAlvoApi</c> call, and since
     /// <c>AddOpenApi(configure)</c> is additive, the same document got enriched twice — the overview paragraph
-    /// appeared verbatim in <c>info.description</c> twice over. <see cref="StoreAsync"/>'s own world already
-    /// calls <c>AddAlvo</c> and <c>AddDataApi</c> together, exactly as a real host does, so this needs no
-    /// fixture of its own — only counting how many times the paragraph's own text occurs.
+    /// appeared verbatim in <c>info.description</c> twice over.
+    /// </para>
+    /// <para>
+    /// <b>The world registers <c>AddAlvo</c> twice, and it has to.</b> The duplication used to come for free,
+    /// because <c>AddDataApi</c> called <c>AddAlvoApi</c> a second time; now that the Data API is on by default
+    /// and <c>AddDataApi</c> only configures it, a single <c>AddAlvo</c> registers the transformer exactly once
+    /// whether the registration deduplicates or not — so this fact would have gone on passing while the defect
+    /// it exists for was reachable again. Two <c>AddAlvo</c> calls is the shape two libraries each registering
+    /// the framework produce, which <c>AddAlvo</c>'s own remarks already promise to support.
+    /// </para>
     /// </remarks>
     [Fact]
     public async Task The_overview_is_appended_once_however_often_alvo_is_registered()
     {
-        await using var world = await StoreAsync();
+        await using var world = await AlvoApiWorld.FromDescriptorAsync(
+            "documented-store.alvo.json",
+            [_admin, _narrow],
+            new AlvoApiWorldSetup(MapOpenApiDocument: true, RegisterAlvoTwice: true));
         var document = await world.OpenApiDocumentAsync();
 
         var description = document["info"]!["description"]!.GetValue<string>();
 
         Occurrences(description, DataApiDocumentation.Overview).ShouldBe(
-            1, "AddAlvoApi runs twice (AddAlvo and AddDataApi both call it), and neither run may enrich the "
-            + "document a second time");
+            1, "a host may register Alvo twice, and neither registration may enrich the document a second time");
     }
 
     /// <summary>
