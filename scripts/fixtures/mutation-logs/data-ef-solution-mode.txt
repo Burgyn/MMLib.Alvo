@@ -1,0 +1,43 @@
+# Stryker log fixture for scripts/test-assert-mutation-run. DO NOT hand-edit.
+# Produced by: dotnet tool run dotnet-stryker -f stryker-config.data-ef.json --concurrency 4
+#   run from the REPOSITORY ROOT.
+# Captured: 2026-08-03 00:07 local, source tree at 293a47c (branch chore/mutation-gate).
+# Stryker 4.16.0 / .NET SDK 10.0.100 / xunit.v3 3.2.2, macOS arm64. Killed after the mutant list.
+# SHOWS: the ACTUAL data-ef regression this branch fixes — the shard that ran in 10 minutes at
+# 2b6b340 and then timed out with no config change. 1489 tests instead of 858, 596 mutants either way.
+# Machine-specific absolute paths replaced by /repo. Otherwise verbatim.
+#
+
+   _____ _              _               _   _ ______ _______  
+  / ____| |            | |             | \ | |  ____|__   __| 
+ | (___ | |_ _ __ _   _| | _____ _ __  |  \| | |__     | |    
+  \___ \| __| '__| | | | |/ / _ \ '__| | . ` |  __|    | |    
+  ____) | |_| |  | |_| |   <  __/ |    | |\  | |____   | |    
+ |_____/ \__|_|   \__, |_|\_\___|_| (_)|_| \_|______|  |_|    
+                   __/ |                                      
+                  |___/                                       
+
+
+Version: 4.16.0
+
+[00:07:14 INF] Stryker will use a max of 4 parallel testsessions.
+[00:07:14 INF] Analysis starting.
+[00:07:14 INF] Stryker will mutate solution MMLib.Alvo.
+[00:07:14 INF] Using configuration/platform 'Debug|Any CPU'.
+[00:07:14 INF] Identifying projects to mutate in /repo/MMLib.Alvo.slnx. This can take a while.
+[00:07:22 INF] Could not find an assembly reference to a mutable assembly for project /repo/test/MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj. Will look into project references.
+[00:07:22 INF] Could not find an assembly reference to a mutable assembly for project /repo/test/MMLib.Alvo.Abstractions.Tests/MMLib.Alvo.Abstractions.Tests.csproj. Will look into project references.
+[00:07:22 INF] Could not find an assembly reference to a mutable assembly for project /repo/test/MMLib.Alvo.Conventions.Tests/MMLib.Alvo.Conventions.Tests.csproj. Will look into project references.
+[00:07:22 INF] Could not find an assembly reference to a mutable assembly for project /repo/test/MMLib.Alvo.Schema.Tests/MMLib.Alvo.Schema.Tests.csproj. Will look into project references.
+[00:07:22 INF] Found project /repo/src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj to mutate.
+[00:07:22 INF] Analysis complete.
+[00:07:22 INF] Building solution MMLib.Alvo.slnx.
+[00:07:22 INF] Building project MMLib.Alvo.slnx using dotnet build MMLib.Alvo.slnx -c Debug --property:Platform="Any CPU" (directory /repo.)
+[00:07:35 WRN] The Microsoft Test Platform testrunner is currently in preview. Results should be verified since this feature is still being tested.
+[00:07:37 INF] Number of tests found: 1489 for project /repo/src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj. Initial test run started.
+[00:10:05 INF] 1302 mutants created
+[00:10:05 INF] 168   mutants got status CompileError. Reason: Mutant caused compile errors
+[00:10:05 INF] 154   mutants got status Ignored.      Reason: Removed by block already covered filter
+[00:10:05 INF] 384   mutants got status Ignored.      Reason: Removed by mutate filter
+[00:10:05 INF] 706   total mutants are skipped for the above mentioned reasons
+[00:10:05 INF] 596   total mutants will be tested

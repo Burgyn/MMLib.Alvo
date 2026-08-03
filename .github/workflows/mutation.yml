@@ -4,9 +4,8 @@ name: Mutation
 # when a mutated project changes. Five targets run in parallel via a matrix:
 #   - "security core (expressions)"       → src/MMLib.Alvo/Expressions/**
 #                        (stryker-config.expressions.json)
-#   - "security core (rules, auth, rest)" → the rest of src/MMLib.Alvo
-#                        (stryker-config.json). The two globs partition the project
-#                        exactly; see the matrix for why it is sharded at all.
+#   - "security core (rules, auth, rest)" → the rest of src/MMLib.Alvo EXCEPT Api/**
+#                        (stryker-config.json). See "DECLARED GAP" below for Api/**.
 #   - "data-ef"        → the EF provider's PURE-LOGIC only: DestructiveScan,
 #                        RenamePrePass, RenameGuessSplitter, DescriptorModelBuilder,
 #                        AlvoSqlIdentifier, and the data path's Internal/* composers
@@ -42,12 +41,86 @@ name: Mutation
 # not the Testcontainers-backed .Tests.Integration project, which self-skips off Linux
 # and would make the run depend on Docker.
 #
-# Each config pins `test-runner: mtp` + `coverage-analysis: off` because Stryker
-# 4.16's default VSTest runner cannot discover tests in xUnit v3 / Microsoft.Testing.Platform
-# projects (our primary runner — see global.json) and its per-test coverage capture
-# under MTP is preview-quality and reports false "NoCoverage" (stryker-net#3094).
-# The "Mutation test" step below fails loudly on a vacuous (zero-mutant) run
-# instead of reporting a false green.
+# Each config pins `test-runner: mtp` because Stryker 4.16's default VSTest runner
+# cannot discover tests in xUnit v3 / Microsoft.Testing.Platform projects (our primary
+# runner — see global.json).
+#
+# WHY `coverage-analysis: off`, MEASURED rather than assumed. Under the MTP runner
+# per-test coverage is not implemented upstream (stryker-net#3516, still open), and
+# turning it on is both wrong and pointless. Measured on Stryker 4.16.0 / .NET SDK
+# 10.0.100 / xunit.v3 3.2.2, same 90 mutants of src/MMLib.Alvo.Data.Sqlite, same
+# machine, same `--concurrency 4`:
+#
+#   coverage-analysis  tested  Killed  NoCoverage  score     wall clock
+#   off                    38      38           0  100.00 %  63 s
+#   perTest                33      33           5   86.84 %  59 s
+#
+# The five extra "NoCoverage" mutants are FALSE: with coverage off the very same
+# mutants are Killed. They sit in SqliteCaseSensitiveLike.cs and SqliteSqlDialect.cs
+# — the LIKE shape and the dialect rendering this gate exists to protect — and
+# because Stryker counts NoCoverage against the score, `perTest` silently reported
+# 86.84 % for a suite that actually kills everything. It also bought nothing: 59 s
+# vs 63 s, because stryker-net#3750 shows the MTP `runTests` filter is serialised
+# under a property the platform server does not bind, so a "filtered" run silently
+# executes the whole assembly anyway. Do not re-enable this without re-measuring;
+# raw folklore is what this table replaces (it was previously only a sentence in
+# commit 2b6b340).
+#
+# WHY THE RUN HAPPENS FROM `test/` AND NOT THE REPO ROOT. When Stryker is started in
+# a directory containing MMLib.Alvo.slnx it enters solution mode and IGNORES each
+# config's `test-projects`, running every test project in the solution that
+# references the mutated assembly instead. That is not a tuning detail — measured on
+# the same commit, `stryker-config.expressions.json` discovered 2211 tests from the
+# repo root and 722 from `test/` for an identical 834 mutants, and the 1489 extra
+# tests include the Testcontainers-backed .Tests.Integration projects that every
+# config deliberately excludes. Since cost is mutants × suite, that alone is the ~3×
+# that pushed three shards past their budget on run 30292141967. From `test/` there
+# is no solution file, `test-projects` IS honoured (verified: "Analyzing 2 test
+# project(s)" for data-ef), and the paths in each config are therefore relative to
+# `test/`. Measured for data-ef too, the shard whose 10-minute run became a
+# >120-minute timeout with no config change: 858 tests from `test/`, 1489 from the
+# repo root, 596 mutants either way.
+#
+# scripts/assert-mutation-run enforces all of that after every shard, and its header is
+# where the reasoning lives. It asserts POSITIVELY — the run must not be vacuous, must
+# report the number of test projects the config declares, and must not have lost 40 % of
+# either its mutants or its suite — because the first version of the solution-mode check
+# was a negative `grep -q 'will mutate solution'`, which fails OPEN the moment a Stryker
+# release rewords that line. Note especially why the solution-mode check is the
+# TEST-PROJECT count and not the mutant count: solution mode leaves the mutant count
+# untouched (834 and 834, 596 and 596 above) and moves only the suite. The `mutants:` and
+# `suite:` values in the matrix are what those two floors are measured against.
+# scripts/test-assert-mutation-run runs the whole thing over real logs from both modes.
+#
+# READ #142 BEFORE TRUSTING A SCORE FROM THIS WORKFLOW. Measured on the same
+# versions: this runner reports mutants as Killed that demonstrably survive the
+# suite (124/124 "Killed", 100.00 %, for two files no test in the configured test
+# project exercises; the same mutation applied by hand fails nothing in 731 tests).
+# It is not an always-red suite — with --break-on-initial-test-failure Stryker does
+# not abort. Until #142 is understood, a high score here is not evidence, and
+# `break: 80` cannot be relied on to fire. The workflow is kept running because the
+# cheap legs still exercise the plumbing and a *drop* is still informative; the
+# absolute number is not.
+#
+# DECLARED GAP: src/MMLib.Alvo/Api/** IS NOT UNDER MUTATION TODAY. It is excluded
+# from stryker-config.json and stryker-config.api.json has no matrix leg, so nothing
+# mutates the Data API's query parsing, authorization filter, idempotency or ETag
+# code. This is a deliberate, tracked decision, not an oversight, and it costs
+# nothing real:
+#   - Judged by MMLib.Alvo.Tests (what stryker-config.json did before Api/** was
+#     excluded) the score is an artefact: that project contains no test touching
+#     Api/**, yet every mutant came back Killed. That is #142's repro.
+#   - Judged by MMLib.Alvo.Api.Tests — the suite that does exercise it, and the one
+#     stryker-config.api.json now names — the measured cost is 6.3 s/mutant for
+#     1502 mutants: ~2.6 h on a 10-core dev machine, so more than that on a 4-vCPU
+#     runner. It cannot produce a verdict inside any budget under GitHub's 6 h
+#     ceiling without being sharded several ways.
+#   - Sharding it that way is premature while #142 makes the resulting scores
+#     untrustworthy, and a leg that always times out is noise, not a gate.
+# TRACKED IN #143, which is where the re-shard checklist lives — this comment is not the
+# work item, because #99 closes with this change and #142 is about the Killed artefact.
+# Run it on demand meanwhile: cd test && dotnet tool run dotnet-stryker
+#   -f ../stryker-config.api.json --concurrency 4
 #
 # WHY POST-MERGE AND NOT ON THE PR: this is the one deliberate exception to the
 # repo's "the PR is the only full gate" rule. A mutation run costs ~20 minutes,
@@ -99,6 +172,14 @@ on:
       # because what separates them is a dependency boundary, not a coverage one.
       - 'src/MMLib.Alvo.Testing/**'
       - 'src/MMLib.Alvo.Testing.EntityFrameworkCore/**'
+      # And what DECIDES what this gate checks, on the same principle
+      # .husky/task-runner.json already applies to the local gate. Breaking the
+      # guard or the workflow must trigger a run, or the breakage lands unrun.
+      # stryker-config.api.json is deliberately NOT here: no matrix leg reads it
+      # (see DECLARED GAP), so a change to it would start a multi-hour run that
+      # cannot exercise it.
+      - '.github/workflows/mutation.yml'
+      - 'scripts/assert-mutation-run'
   workflow_dispatch:
 
 permissions:
@@ -118,13 +199,12 @@ jobs:
   mutation:
     name: Stryker (${{ matrix.name }})
     runs-on: ubuntu-latest
-    # The security-core run outgrew a 40-minute budget the moment F3's PR1 landed the CEL
-    # compiler, both rule backends and the policy engine: it was cancelled at exactly 40:00
-    # with the run still in progress, which reads as a grey "cancelled" rather than as a
-    # verdict — the same silent-non-answer this workflow's own fail-loud step exists to
-    # prevent. Nothing waits on this run (it is post-merge, or dispatched on demand), so the
-    # budget is generous on purpose; a genuinely hung run still ends, just later.
-    timeout-minutes: 120
+    # PER-SHARD, ON PURPOSE. A single workflow-wide budget cannot tell "this shard grew"
+    # from "this shard was always the expensive one", and a silently rising global number
+    # hides the growth curve the timeouts on run 30292141967 made visible. Each leg
+    # therefore carries its own `timeout` with the mutant count it was sized against, and
+    # the cheap legs keep a tight one so a regression there still trips.
+    timeout-minutes: ${{ matrix.timeout }}
     strategy:
       fail-fast: false
       matrix:
@@ -132,26 +212,44 @@ jobs:
           # The security core is sharded by `mutate` glob, not because one shard is a
           # meaningful unit, but because wall-clock is this gate's whole cost: with
           # coverage-analysis off every mutant reruns the full test project, so time is
-          # mutants × suite, and F3's PR1 pushed that past two hours in one job. The two
-          # globs partition src/MMLib.Alvo exactly — `Expressions/**` in one, everything
-          # else in the other — so a file cannot be mutated twice or silently skipped. The
-          # expressions shard is the CEL lexer/parser/checker/interpreter/renderer, which is
-          # both the densest in mutants and the one whose score matters most.
+          # mutants × suite. `Expressions/**` in one leg, everything except `Api/**` in the
+          # other, and `Api/**` in neither — see DECLARED GAP in the header.
+          #
+          # `mutants:` below is a MEASURED count (discovery probe, 2026-08-02, at the commit
+          # that added this comment), not an estimate — it is what sizes the budget, and it
+          # is the number to re-probe when a leg starts timing out. F3's PR3 took
+          # stryker-config.json from 478 mutants to 2159; 1502 of those were `Api/**`, and
+          # excluding it leaves the 657 measured here.
           - name: security core (expressions)
             config: stryker-config.expressions.json
             project: src/MMLib.Alvo/MMLib.Alvo.csproj
+            mutants: 834
+            suite: 722
+            timeout: 180
           - name: security core (rules, auth, rest)
             config: stryker-config.json
             project: src/MMLib.Alvo/MMLib.Alvo.csproj
+            mutants: 657
+            suite: 722
+            timeout: 120
           - name: data-ef
             config: stryker-config.data-ef.json
             project: src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj
+            mutants: 596
+            suite: 858    # two test projects
+            timeout: 120
           - name: data-sqlite
             config: stryker-config.data-sqlite.json
             project: src/MMLib.Alvo.Data.Sqlite/MMLib.Alvo.Data.Sqlite.csproj
+            mutants: 38
+            suite: 403
+            timeout: 60
           - name: data-postgresql
             config: stryker-config.data-postgresql.json
             project: src/MMLib.Alvo.Data.PostgreSql/MMLib.Alvo.Data.PostgreSql.csproj
+            mutants: 16
+            suite: 101
+            timeout: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -163,45 +261,88 @@ jobs:
         with:
           global-json-file: global.json
 
+      # Fails the shard rather than skipping it. This step used to set run=false and
+      # let every later step skip, which reported the leg as SUCCESS — a shard that
+      # measured nothing looking exactly like a shard that measured everything, and
+      # `notify` never firing because the matrix result was 'success'. That guard made
+      # sense while the mutated projects were still being created one at a time; all
+      # of them exist now, so a missing csproj means a rename that silently retired a
+      # leg, which is precisely the failure this workflow exists to make loud.
       - name: Guard — mutated project must exist
-        id: guard
+        env:
+          PROJECT: ${{ matrix.project }}
+          SHARD: ${{ matrix.name }}
         run: |
-          if [ -f "${{ matrix.project }}" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "Project ${{ matrix.project }} not present — skipping mutation."
+          if [ ! -f "$PROJECT" ]; then
+            echo "::error::Mutation run ($SHARD) has no project at '$PROJECT'. If it was renamed or moved, update the matrix; a shard that cannot find its project must not report success."
+            exit 1
           fi
 
       - name: Restore tools
-        if: steps.guard.outputs.run == 'true'
         run: dotnet tool restore
 
       - name: Mutation test
-        if: steps.guard.outputs.run == 'true'
         shell: bash
+        # From `test/`, NOT the repo root: with MMLib.Alvo.slnx in the working directory
+        # Stryker enters solution mode and ignores each config's `test-projects`, running
+        # every test project that references the mutated assembly (measured: 2211 tests
+        # instead of 722 for the expressions shard, Testcontainers integration suites
+        # included). The header comment has the numbers. Hence `../<config>` too.
+        working-directory: test
+        env:
+          CONFIG: ../${{ matrix.config }}
+          MUTANTS: ${{ matrix.mutants }}
+          SUITE: ${{ matrix.suite }}
+          SHARD: ${{ matrix.name }}
         run: |
-          set -o pipefail
+          # `shell: bash` means `bash -eo pipefail`, so the pipeline below would abort
+          # the whole step the moment Stryker exits non-zero — before the assertions
+          # run. Turn -e off around it and take the exit code by hand, so that a run
+          # which measured the WRONG THING is diagnosed as that rather than as a low
+          # score. `|| true` would not do: it clobbers PIPESTATUS.
+          #
           # --concurrency: Stryker defaults to half the logical cores, i.e. 2 test runners on a
           # GitHub-hosted 4-vCPU runner, leaving half the machine idle for a run whose whole cost
           # is wall-clock. The runner has ~16 GB, comfortably more than four MTP hosts need for
           # this suite. Set on the command line rather than in the config so this reasoning has
           # somewhere to live — the config files are strict JSON with nowhere to put a comment.
-          dotnet tool run dotnet-stryker -f "${{ matrix.config }}" --concurrency 4 2>&1 | tee stryker-output.log
+          set +e
+          dotnet tool run dotnet-stryker -f "$CONFIG" --concurrency 4 2>&1 | tee stryker-output.log
           stryker_exit="${PIPESTATUS[0]}"
+          set -e
 
-          # Fail loud instead of showing a false green: a run that discovered
-          # or tested zero mutants is not a passing run, it's a broken one.
-          # See stryker-net#3094 — Stryker's VSTest-based runner can regress
-          # to this on an xUnit v3 / MTP test project even with `test-runner:
-          # mtp` configured (e.g. a tool upgrade, or a new test project that
-          # isn't MTP-compatible).
-          if grep -qE '0 total mutants will be tested|unable to calculate a mutation score|Number of tests found: 0' stryker-output.log; then
-            echo "::error::Mutation run (${{ matrix.name }}) tested zero mutants (vacuous run) — see stryker-output.log above. Failing the gate instead of a false green (stryker-net#3094)."
-            exit 1
-          fi
+          # Did this run MEASURE what the config asked for? Four positive assertions —
+          # vacuity, the test-project count, a floor on the mutant count and a floor on
+          # the suite size — live in scripts/assert-mutation-run so they can be run over
+          # a saved log by hand, which is how they were verified
+          # (scripts/test-assert-mutation-run). Read that script's header before
+          # changing any of them; in particular it records WHY the solution-mode check
+          # is the test-project count and not the mutant count (measured: solution mode
+          # leaves the mutant count identical and moves only the test count).
+          ../scripts/assert-mutation-run \
+            stryker-output.log "$CONFIG" "$MUTANTS" "$SUITE" "$SHARD"
 
           exit "$stryker_exit"
+
+      # The tracking issue tells whoever reads it to open the log to tell a vacuous run
+      # from a below-threshold score. Until now that log existed only in the job console,
+      # which is not linkable from an issue and is truncated for a long run — so upload it.
+      # `always()` so it survives the shard failing, which is the only case anyone wants it.
+      #
+      # WHAT THIS DOES NOT COVER, deliberately stated: a shard killed by `timeout-minutes`
+      # is CANCELLED, and a cancelled job does not run its remaining steps, `always()`
+      # included. So the one outcome with no verdict at all — #98's whole subject — is also
+      # the one whose log is not captured here. Nothing short of streaming the log
+      # elsewhere fixes that, and it is not worth it: a timeout needs the shard's budget
+      # looked at, not its log read.
+      - name: Upload the Stryker log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: stryker-log-${{ matrix.name }}
+          path: test/stryker-output.log
+          if-no-files-found: ignore
+          retention-days: 30
 
   # Post-merge, nothing blocks on this workflow, so a failure has to leave a mark
   # somebody trips over. Without this the only signal is GitHub's default email to
@@ -211,37 +352,99 @@ jobs:
   notify:
     name: Report a failed mutation run
     needs: mutation
-    if: failure() && github.event_name == 'push'
+    # NOT `failure()`. A job killed by `timeout-minutes` ends with conclusion
+    # `cancelled`, so `failure()` is false and this job was SKIPPED for the one
+    # outcome that is worse than a low score: a run that produced no verdict at
+    # all. That is what happened to run 30292141967 (#98) — three shards hit the
+    # 120-minute budget and nobody was told. `always()` plus an explicit result
+    # check covers failure, timeout and cancellation alike.
+    # Accepted cost: a human cancelling a push-triggered run by hand now also
+    # files a report. That is the same "no verdict" state, it is cheap to close,
+    # and it is strictly better than a silent timeout. (The concurrency group is
+    # keyed on the commit with cancel-in-progress off, so GitHub itself never
+    # cancels one of these runs as superseded.)
+    if: always() && github.event_name == 'push' && needs.mutation.result != 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       issues: write
+      # To read this run's PER-LEG job conclusions: `needs.mutation.result`
+      # collapses every shard into one word, and the three failure shapes
+      # below want telling apart, which needs the individual conclusions.
+      actions: read
     steps:
       - name: Open or update the tracking issue
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          MATRIX_RESULT: ${{ needs.mutation.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         shell: bash
         run: |
           set -euo pipefail
 
-          body="$(cat <<EOF
-          The post-merge mutation run failed for \`$SHA\`.
+          # Advisory enrichment only: if the API call fails, the report is still
+          # filed — just without the per-shard breakdown. Never let fetching
+          # detail be the reason the notification goes missing.
+          legs="$(gh api --paginate \
+            "repos/$REPO/actions/runs/$RUN_ID/jobs?per_page=100" \
+            --jq '.jobs[] | select(.name | startswith("Stryker (")) | [.conclusion, .name] | @tsv' \
+            2>/dev/null || true)"
+
+          legs_md="$(printf '%s\n' "$legs" \
+            | awk -F'\t' 'NF==2 && $1!="success" { printf "- `%s` — **%s**\n", $2, $1 }')"
+
+          if [ -z "$legs_md" ]; then
+            legs_md="- (per-shard conclusions unavailable; matrix result: \`$MATRIX_RESULT\`)"
+          fi
+
+          # Build the report in a FILE, with the heredocs at statement level and
+          # the static half quoted (<<'MD'). Not cosmetic: a heredoc nested inside
+          # a `$( )` command substitution still has its body scanned for quotes on
+          # bash 3.2, so a single apostrophe ("the shard's log") turns the whole
+          # step into a syntax error — and this step only ever runs in the failure
+          # case, where a syntax error would silence the notification exactly like
+          # the bug this job was fixed for. `--body-file` also means backticks need
+          # no escaping, so the Markdown below reads as Markdown.
+          {
+            cat <<EOF
+          The post-merge mutation run did not succeed for \`$SHA\` (matrix result:
+          \`$MATRIX_RESULT\`).
 
           Run: $RUN_URL
 
-          Mutation runs post-merge by design, so this did not block the merge —
-          it needs someone to act. Two shapes of failure:
+          Shards that did not succeed:
 
-          - **Mutation score below threshold** — the adversarial suite stopped
-            biting. The fix is to add or strengthen a test, not to revert.
-          - **Vacuous run (zero mutants tested)** — the gate itself is broken
-            (see stryker-net#3094). That is more urgent than a low score: it
-            means the previous greens were meaningless.
+          $legs_md
           EOF
-          )"
+            cat <<'MD'
+
+          Mutation runs post-merge by design, so this did not block the merge — it
+          needs someone to act. There are three shapes, and the right action differs
+          per shape; each shard's conclusion above says which one you are looking at.
+
+          - **`failure` — mutation score below threshold.** The adversarial suite
+            stopped biting. The fix is to add or strengthen a test, not to revert.
+          - **`failure` — a vacuous run, or one that measured the wrong thing.**
+            The gate is broken, not the suite (stryker-net#3094); the shard's log
+            carries an `::error::` annotation naming it, emitted by
+            `scripts/assert-mutation-run`. More urgent than a low score: it means
+            the previous greens were meaningless.
+          - **`cancelled` / `timed_out` — no verdict produced.** The shard hit
+            `timeout-minutes`, so there is no score at all, and nothing here says
+            the suite got worse. What needs looking at is the run's cost and its
+            budget — not the tests.
+
+          Each shard uploads its Stryker log as a **`stryker-log-<shard>`** artifact
+          on the run linked above; that is how to tell a vacuous run from a
+          below-threshold score. One gap worth knowing rather than discovering: a
+          shard killed by `timeout-minutes` is *cancelled*, and a cancelled job never
+          reaches its upload step — so the third case above is precisely the one with
+          no artifact. It is a budget question anyway, not a log-reading one.
+          MD
+          } > mutation-report.md
 
           # The label may not exist yet; creating it must not fail the job.
           gh label create mutation-gate \
@@ -253,10 +456,10 @@ jobs:
             --label mutation-gate --limit 1 --json number --jq '.[0].number // empty')"
 
           if [ -n "$existing" ]; then
-            gh issue comment "$existing" --repo "$REPO" --body "$body"
+            gh issue comment "$existing" --repo "$REPO" --body-file mutation-report.md
           else
             gh issue create --repo "$REPO" \
               --title "Mutation gate failed on main" \
               --label mutation-gate \
-              --body "$body"
+              --body-file mutation-report.md
           fi

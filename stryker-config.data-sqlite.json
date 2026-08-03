@@ -2,7 +2,7 @@
   "stryker-config": {
     "project": "MMLib.Alvo.Data.Sqlite.csproj",
     "test-projects": [
-      "test/MMLib.Alvo.Data.Sqlite.Tests/MMLib.Alvo.Data.Sqlite.Tests.csproj"
+      "MMLib.Alvo.Data.Sqlite.Tests/MMLib.Alvo.Data.Sqlite.Tests.csproj"
     ],
     "test-runner": "mtp",
     "coverage-analysis": "off",
