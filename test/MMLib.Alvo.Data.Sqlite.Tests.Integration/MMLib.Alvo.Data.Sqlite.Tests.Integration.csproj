@@ -1,0 +1,57 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The SQLite leg of the 10 000-event chaos criterion, and nothing else.
+       ".Tests.Integration" rather than ".Tests" is the whole reason this project exists: the criterion costs
+       ~27 s of dispatch on SQLite (~11 000 autocommit writes, one durable commit each), and while it lived in
+       MMLib.Alvo.Data.Sqlite.Tests it ran in ring0 — "after every small step" and on every pre-commit — taking
+       that module from ~7 s to ~34 s and ring0's wall clock from ~48 s to ~50 s with Sqlite.Tests as the critical
+       path. A numeric acceptance criterion belongs where PagingPerformanceTests already sits, which is ring2:
+       scripts/test-ring0 excludes it by the project-name suffix alone and scripts/test-ring2's own loop picks it
+       up by the same suffix, so no ring script changes and nothing can fail open.
+       It also restores the symmetry the criterion should always have had: both engine legs now live in
+       identically named, identically tiered projects, instead of one in ring0 and one in ring2.
+       Docker-free, unlike its PostgreSQL sibling — so it runs on both CI runners, and it stays the leg that
+       gates a merge.
+       Not a 1:1 unit test project (MMLib.Alvo.Data.Sqlite.Tests is), so it opts out of the shared architecture +
+       public-API approval gate. -->
+  <PropertyGroup>
+    <AlvoSharedArchTests>false</AlvoSharedArchTests>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Both, and for the same reason MMLib.Alvo.Data.Sqlite.Tests references both: AddAlvo and the dispatcher
+         live in the core, the engine lives in the driver, and the criterion drives one through the other. -->
+    <ProjectReference Include="../../src/MMLib.Alvo/MMLib.Alvo.csproj" />
+    <ProjectReference Include="../../src/MMLib.Alvo.Data.Sqlite/MMLib.Alvo.Data.Sqlite.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Configuration" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
+  </ItemGroup>
+
+  <!-- The SQLite fixture, shared with MMLib.Alvo.Data.Sqlite.Tests, which is where its other 28 callers live.
+       It moved into test/_shared/sqlite rather than being copied here: a second copy of "stand up one isolated
+       real SQLite database, migrated by the production migrator, with the policy catalog primed" is how the
+       chaos leg would come to run against a differently wired engine from every other SQLite fact. -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/sqlite/SqliteAlvoDataFixture.cs" Link="_shared/SqliteAlvoDataFixture.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/sqlite/LockRecordingSqlDialect.cs" Link="_shared/LockRecordingSqlDialect.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/SqlCapture.cs" Link="_shared/SqlCapture.cs" />
+  </ItemGroup>
+
+  <!-- The 10 000-event chaos criterion and the probes it measures with, shared with
+       MMLib.Alvo.Data.PostgreSql.Tests.Integration. The suite itself is linked, not only its world: "no event is
+       lost" is one criterion measured on two engines, so a per-engine copy of the seed, the chaos or any single
+       assertion would let one engine be asked an easier question than the other. -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/OutboxChaosCriteriaTests.cs" Link="_shared/OutboxChaosCriteriaTests.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/OutboxChaosWorld.cs" Link="_shared/OutboxChaosWorld.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/ChaosWebhookReceiver.cs" Link="_shared/ChaosWebhookReceiver.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/DispatchedEventCollection.cs" Link="_shared/DispatchedEventCollection.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/OutboxTallyProbe.cs" Link="_shared/OutboxTallyProbe.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/RecordingEventLog.cs" Link="_shared/RecordingEventLog.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/RecordingMeterListener.cs" Link="_shared/RecordingMeterListener.cs" />
+  </ItemGroup>
+
+</Project>

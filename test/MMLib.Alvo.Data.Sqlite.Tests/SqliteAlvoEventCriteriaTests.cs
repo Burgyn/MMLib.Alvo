@@ -10,8 +10,11 @@ namespace MMLib.Alvo.Data.Sqlite.Tests;
 /// unchanged: this class supplies a started backend and nothing else.
 /// </summary>
 /// <remarks>
-/// It belongs to <see cref="DispatchedEventCollection"/> together with <see cref="SqliteOutboxChaosTests"/>,
-/// because both assert process-wide event counters by value and xUnit would otherwise run them at once.
+/// It belongs to <see cref="DispatchedEventCollection"/>, because the event counters are process-wide statics and
+/// every event criterion asserts one by value — so no two dispatching suites in this assembly may run at once.
+/// The chaos criterion, which used to be the other member here, now lives in
+/// <c>MMLib.Alvo.Data.Sqlite.Tests.Integration</c>: it is a ~27 s numeric criterion and this project is a ring0
+/// module.
 /// </remarks>
 [Collection(DispatchedEventCollection.Name)]
 public sealed class SqliteAlvoEventCriteriaTests : AlvoEventCriteriaTests, IAsyncDisposable

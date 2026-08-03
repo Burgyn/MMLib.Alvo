@@ -4591,6 +4591,95 @@ git commit -m "test(events): pin the 10k-event chaos criterion on both engines"
 
 ### Task 12: The crash criteria, and what the harness does not prove
 
+**DONE.** Both halves green against a real child process: `An_event_committed_before_a_kill_is_delivered_after_a_restart`
+and `A_kill_mid_action_makes_the_action_repeat_after_a_restart`, **8.6 s for the pair** including the publish and
+four boots — against spike Q9's measured 6.0 s budget and the plan's 120 s rule. Exit code asserted: **137** on
+Unix (128 + SIGKILL) and **-1** on Windows (`TerminateProcess(handle, -1)`; .NET has no signals there), neither
+reachable by the host's own exits (0 for a stop, 78 for `EX_CONFIG`). The two in-process facts ship as written and
+cost 1.5 s.
+
+**One thing the plan's own sketch could not have compiled, and it matters.** `ClaimLease = TimeSpan.Zero` is
+**refused at startup** — `AlvoEventOptions` requires the lease to outlast `PollInterval`, and
+`OutboxDispatcherTests.A_claim_lease_shorter_than_the_poll_interval_is_refused_at_startup` is the fact that says
+so. Every lease here is therefore the shortest value *above* the poll interval: `00:00:00.100` over
+`00:00:00.050` in-process, `00:00:01` over `00:00:00.100` in the child (a killed child's claim has to be stale by
+the time its replacement is ready, and a boot costs ~1.5 s).
+
+**Five deliberate deviations from this task as written.**
+
+1. **The child-process facts live in a new `test/MMLib.Alvo.Host.Tests.Integration`, not in
+   `test/MMLib.Alvo.Host.Tests`.** `MMLib.Alvo.Host.Tests` is a ring0 module, and a `dotnet publish` plus four
+   real boots is not "after every small step". See the ring note below — this is the same decision as the chaos
+   leg's.
+2. **The in-process facts do stay in `MMLib.Alvo.Host.Tests`** (fast, 1.5 s) and cost one new
+   `InternalsVisibleTo("MMLib.Alvo.Host.Tests")` on `MMLib.Alvo`, for exactly one internal:
+   `WebhookDelivery.HttpClientName`. The alternative was to repeat the client-name string, and two authorities
+   for the name of the client a delivery goes through is how a fact comes to substitute a handler nothing
+   resolves. It moves `PublicApi.MMLib.Alvo.verified.txt` by one line.
+3. **A shared `test/_shared/events/SqliteOutboxProbe.cs` reads the queue off the database file**, linked into both
+   suites. Every claim about "committed and not yet delivered" is a claim about rows on disk, and asking the host
+   under test to report its own queue state would make it depend on the process the fact is about killing.
+4. **The mid-action kill is raised by the receiver, and the receiver is a real `HttpListener`** on a loopback
+   port — a child process has no container to install a primary handler into. `HttpListener` cannot bind port
+   zero, so the port is probed with a `TcpListener` and claimed, with a bounded retry.
+5. **The descriptor is a template whose placeholder URL is rewritten to the receiver's real port, and the rewrite
+   is verified.** A renamed placeholder would otherwise leave the child delivering to the discard port and every
+   fact timing out on a delivery that was never going to arrive — with a message naming the wrong cause.
+
+**Six mutations, each restored immediately.**
+
+1. **Mark the entry dispatched *before* running the action** (swap the order in `DeliverAsync`) → **RED** in 5.6 s
+   on `midAction.Dispatched.ShouldBeFalse`, not by timing out on the missing redelivery. Nothing else in the
+   suite pins that ordering. Clause 1 stayed green, correctly: ordering cannot matter when nothing drains.
+2. **The publish happens while the writing process is still alive** (`!options.Value.Enabled && false`, i.e. the
+   dispatcher ignores its own switch) → **GREEN at first, and that was a real hole.** The probe and the kill both
+   completed inside one 100 ms poll interval, so the fact passed with the publish already done — the exact
+   "killing after the work already finished" vacuity a crash test invites. **Closed rather than recorded:** the
+   fact now waits out a twenty-poll-interval delivery window before reading the row, and the same mutation is
+   **RED** on `committed.Dispatched.ShouldBeFalse`. The literal "publish inside the write transaction" is
+   unreachable by construction — the EF driver cannot see the core's action executor — which is why this is the
+   closest spelling and why that assertion is the one that would catch the boundary moving.
+3. **A graceful `SIGTERM` shutdown instead of the kill, with the exit-code assertion removed** → **GREEN**, as
+   the plan predicted. **Verdict: a property, not a hole** — a clean stop legitimately leaves a committed event
+   for the next host, so the *delivery* half cannot tell a crash from a stop. Recorded in the test's `<remarks>`.
+4. **The same graceful shutdown with the exit-code assertion restored** → **RED** (the child exits `0`). This is
+   the pairing that makes the harness worth its cost: `AssertKilled` is the only assertion in the file that a
+   graceful stop cannot satisfy.
+5. **`Alvo__Events__ClaimLease = 00:05:00`** → **RED**, bounded, at 60 s: `Waited 00:01:00 for 2 webhook
+   deliveries; 1 arrived`. The lease is what recovers a killed process's claim and nothing else does — and the
+   bound is what turns that into a named failure instead of a hung CI job.
+6. **`EventIdOf` stops reading the envelope's `id`** → **RED** on
+   `Distinct().ShouldHaveSingleItem()` while `deliveries.Count.ShouldBe(2)` stayed green. The repeat is proven by
+   id; a count alone would not have caught it. The in-process pair has the same shape: `ShortLease = 00:05:00`
+   → **RED**, bounded, at 30 s.
+
+**The ring cost this task also fixed, measured.** Task 11's note recorded that the SQLite chaos leg landed in a
+ring0 module; this task moved it. `SqliteOutboxChaosTests` now lives in a new
+`test/MMLib.Alvo.Data.Sqlite.Tests.Integration`, mirroring `MMLib.Alvo.Data.PostgreSql.Tests.Integration` exactly,
+so both engine legs of one criterion sit in identically named, identically tiered projects instead of one in ring0
+and one in ring2. **ring0's wall clock: 48.0 s → 28.3 s; its test phase 34.9 s → 23.2 s** (the module that was
+34.4 s and the critical path is gone from it). Nothing in `test-ring0`/`test-ring1`/`test-ring2` had to change —
+the `.Tests.Integration` suffix is the tier, and ring2's own loop finds the project by it. `ci.yml` still produces
+and uploads `artifacts/criteria/events.md` on both runners, because the SQLite leg needs no Docker and ring2 runs
+on both; only its comment moved.
+
+**Why the project name and not a trait or a class filter**, since both were considered: either one needs a
+matching *include* somewhere in ring2, and CI already sets `TESTINGPLATFORM_EXITCODE_IGNORE=8` on the Windows leg
+— so an include that stopped matching would pass with zero tests executed. A misnamed *project* can only ever
+land back in ring0, which is loud, never silently unrun; and ring0's own module-count guard checks the projects on
+disk against `MMLib.Alvo.slnx`. The reasoning is recorded in `scripts/test-ring0`'s comment, which is where a
+reader looks for it.
+
+**Three stated costs of the move.** `SqliteAlvoDataFixture` and `LockRecordingSqlDialect` moved to
+`test/_shared/sqlite/` and are linked into both projects (28 other callers unaffected) rather than copied.
+`MMLib.Alvo.Data.Sqlite.Tests.Integration` needs `InternalsVisibleTo` on both `MMLib.Alvo` and
+`MMLib.Alvo.Data.EntityFrameworkCore`, moving two more public-API baselines by one line each — the same price
+`MMLib.Alvo.Api.Tests.Integration` and `MMLib.Alvo.Data.PostgreSql.Tests.Integration` already pay, and for the
+same stated reason ("the two legs are two assemblies because ring0 must stay Docker-free"). And the chaos suite no
+longer contributes to Stryker's `data-ef` run: the configs pin explicit test-project lists and adding a 27 s test
+to a per-mutant run is not an option, so `SqliteOutbox{Store,Table}Tests` and `SqliteAlvoDataOutboxTests` remain
+that assembly's killers.
+
 `baas-analyza.md:676`'s second and third numbers: kill **between commit and publish** → the event is
 delivered after restart; **kill mid-action → the action repeats** (the half the issue body drops).
 Register R12 is the constraint: **no process-kill harness exists.** `AlvoHostWorld` runs in-process

@@ -110,8 +110,10 @@ jobs:
       # §3's own numeric criterion — a 10 000-event chaos run loses no event — measured on both engines by
       # OutboxChaosCriteriaTests, for the same reason and by the same mechanism as the paging criteria above:
       # a passing run prints neither of MTP's output mechanisms, so the appended file is the only durable copy.
-      # Not Linux-only: the SQLite leg runs in ring0 on both runners, so Windows writes a line too — and it is
-      # the leg that gates a merge, because the PostgreSQL one self-skips where Docker runs Windows containers.
+      # Not Linux-only: both legs run inside ring2 above (MMLib.Alvo.Data.Sqlite.Tests.Integration and
+      # MMLib.Alvo.Data.PostgreSql.Tests.Integration), and the SQLite one needs no Docker, so Windows writes a
+      # line too — and it is the leg that gates a merge, because the PostgreSQL one self-skips where Docker runs
+      # Windows containers.
       - name: Publish event criteria
         if: always()
         shell: bash

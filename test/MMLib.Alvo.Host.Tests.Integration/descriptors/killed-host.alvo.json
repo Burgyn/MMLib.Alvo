@@ -1,0 +1,42 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "killed-host",
+  "description": "One entity with an afterCreate webhook, for a host that is killed between the commit and the delivery. The endpoint URL below is a placeholder: ChildHostHarness rewrites it to the loopback receiver's own port before the child process reads this file, and refuses to start if the rewrite matched nothing.",
+  "auth": {
+    "providers": ["local"],
+    "roles": ["admin"]
+  },
+  "entities": {
+    "orders": {
+      "description": "An order, so a create has an event to emit.",
+      "fields": {
+        "reference": { "type": "string", "required": true, "unique": true, "maxLength": 20 },
+        "status": { "type": "string", "maxLength": 20 }
+      },
+      "rules": {
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+        "create": "'admin' in @user.roles",
+        "update": "'admin' in @user.roles",
+        "delete": "'admin' in @user.roles"
+      },
+      "hooks": {
+        "afterCreate": [
+          {
+            "action": { "type": "webhook", "endpoint": "order-sink" }
+          }
+        ]
+      }
+    }
+  },
+  "webhooks": {
+    "endpoints": {
+      "order-sink": {
+        "url": "http://127.0.0.1:9/hooks/orders",
+        "secretRef": "order-sink-signing-key",
+        "description": "Port 9 is discard: this URL is only ever the placeholder the harness rewrites, so a child started with the file as it sits on disk delivers nowhere instead of somewhere unexpected."
+      }
+    }
+  }
+}

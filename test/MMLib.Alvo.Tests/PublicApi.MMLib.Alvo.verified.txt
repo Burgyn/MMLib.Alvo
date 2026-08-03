@@ -3,6 +3,8 @@
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Api.Tests.Integration")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Data.PostgreSql.Tests.Integration")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Data.Sqlite.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Data.Sqlite.Tests.Integration")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Host.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Tests")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace MMLib.Alvo.Api
