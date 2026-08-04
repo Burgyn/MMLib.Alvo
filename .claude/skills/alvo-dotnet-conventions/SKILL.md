@@ -33,10 +33,22 @@ picking a library, or writing C#.
 - **No FluentAssertions v8+.** Same reasoning — v8+ is commercially licensed.
   Older FluentAssertions versions aren't the fix either; **use Shouldly** for
   all assertions, full stop.
-- If you need a mediator/outbox pattern, **Wolverine** is the suggested
-  alternative: it's MIT-licensed and covers both the transactional outbox and
-  an in-process mediator, which is exactly the shape principle 9 (vertical
-  slice, no MediatR) calls for.
+- If you need an **in-process mediator**, **Wolverine** is the suggested
+  alternative to MediatR: it's MIT-licensed and it's the shape principle 9
+  (vertical slice, no MediatR) calls for. Prefer plain DI handlers first —
+  `vertical-slice.md` only reaches for Wolverine if a genuine multi-handler
+  pipeline ever appears.
+- **Not for the outbox, and this is settled, not open.** The sources hint at
+  Wolverine for the transactional outbox (`baas-analyza.md:687`,
+  `alvo-specifikacia.md:329`); the F3 design's **deviation 1** rejected it and
+  PR5a implemented that rejection. **Alvo owns its outbox** — the core takes no
+  foreign dependency for it, so no embedded host inherits one, and the queue
+  behaves identically on every engine. The cost is stated and paid: Alvo owns
+  claim, retry and the poison-message ceiling. `IOutboxStore` (the earned port in
+  `Abstractions`) is what leaves Wolverine or an external bus available later as
+  an **adapter package** — an out-of-repo adapter implements the queue. Do not
+  reintroduce it here: two answers in the repo for one decision is the drift this
+  bullet exists to close. See `docs/architecture/events.md`.
 
 ## Test stack
 

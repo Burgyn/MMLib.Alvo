@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
+using MMLib.Alvo.Events;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Rules;
@@ -79,6 +80,7 @@ public static class AlvoEfCoreProvider
         builder.Services.TryAddSingleton(registration.Fields);
         builder.Services.TryAddSingleton(registration.Dialect);
         builder.Services.TryAddSingleton<IAlvoData>(CreateData);
+        builder.Services.TryAddSingleton<IOutboxStore>(CreateOutboxStore);
 
         return builder;
     }
@@ -92,6 +94,18 @@ public static class AlvoEfCoreProvider
         services.GetRequiredService<AlvoDataContextFactory>(),
         services.GetRequiredService<TimeProvider>(),
         services.GetRequiredService<IOptions<AlvoOptions>>().Value);
+
+    /// <summary>Creates the relational outbox store the dispatcher claims through.</summary>
+    /// <remarks>
+    /// A singleton beside the other stores, and the seam the core's dispatcher reaches the outbox through: the
+    /// statements themselves are <see langword="internal"/> to this package, and the dispatcher depends on
+    /// <c>MMLib.Alvo.Abstractions</c> alone. This is the port <c>docs/architecture/package-boundary.md</c>
+    /// predicted would be earned by the first framework table no store call touches.
+    /// </remarks>
+    private static EfCoreOutboxStore CreateOutboxStore(IServiceProvider services) => new(
+        services.GetRequiredService<RelationalConnectionFactory>(),
+        services.GetRequiredService<IOptions<AlvoOptions>>().Value,
+        services.GetRequiredService<TimeProvider>());
 
     private static RelationalConnectionFactory CreateConnectionFactory(IServiceProvider services, RelationalProviderRegistration registration)
     {

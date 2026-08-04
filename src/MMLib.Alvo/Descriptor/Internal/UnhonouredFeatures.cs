@@ -34,9 +34,10 @@
 /// refusal with no alternative sends an agent hunting for a flag to flip.
 /// </para>
 /// <para>
-/// Entries leave as features land: PR5 removes the hook points it implements, PR6 owns <c>computed</c>,
-/// <c>rollup</c> and <c>default</c>, and soft delete leaves with its own implementation. Shrinking this
-/// table is the whole of "implementing" one of them from this layer's point of view.
+/// Entries leave as features land, and three already have: PR5a removed the three <c>after*</c> hook points
+/// it implements, PR5b owns the three <c>before*</c> ones, PR6 owns <c>computed</c>, <c>rollup</c> and
+/// <c>default</c>, and soft delete leaves with its own implementation. Shrinking this table is the whole of
+/// "implementing" one of them from this layer's point of view.
 /// </para>
 /// </remarks>
 internal static class UnhonouredFeatures
@@ -87,12 +88,12 @@ internal static class UnhonouredFeatures
     /// justification for being tabulated is the field features' justification: one fact, one place.
     /// </para>
     /// <para>
-    /// <b>Per hook point, so PR5 can shrink this incrementally.</b> Refusing the <c>hooks</c> block as a whole
-    /// would force PR5 into an all-or-nothing switch — it could not ship <c>beforeCreate</c> while
-    /// <c>afterDelete</c> is still unimplemented without either lying about the rest or leaving the whole
-    /// block refused. Six entries let each one leave on the day it starts working. It is the same move PR2
-    /// made for <c>softDelete</c>: refuse the behaviour, keep the declared shape, so the implementing issue
-    /// inherits a shape rather than designing one.
+    /// <b>Per hook point, so PR5 can shrink this incrementally — and it has.</b> Refusing the <c>hooks</c>
+    /// block as a whole would have forced PR5 into an all-or-nothing switch: it could not ship
+    /// <c>afterUpdate</c> while <c>beforeUpdate</c> is still unimplemented without either lying about the rest
+    /// or leaving the whole block refused. Six entries let each one leave on the day it starts working, and
+    /// three of them did. It is the same move PR2 made for <c>softDelete</c>: refuse the behaviour, keep the
+    /// declared shape, so the implementing issue inherits a shape rather than designing one.
     /// </para>
     /// </remarks>
     internal static IReadOnlyList<UnhonouredFeature<EntityDescriptor>> OnAnEntity { get; } =
@@ -110,6 +111,14 @@ internal static class UnhonouredFeatures
     /// <summary>One refusal per hook point, each naming the operation it would have run on.</summary>
     /// <remarks>
     /// <para>
+    /// <b>Three entries left when the after-hooks landed, and that is the per-hook-point shape paying for
+    /// itself.</b> PR5a compiles <c>afterCreate</c>/<c>afterUpdate</c>/<c>afterDelete</c> into the policy
+    /// catalog and dispatches them from the outbox, so their entries are gone; the three <c>before*</c>
+    /// points stay, because a before-hook runs <em>in the write transaction</em> and nothing in this build
+    /// does. No author of a <c>before*</c> hook sees a changed message — which is exactly what "each one is
+    /// lifted the day it starts working" was written to buy.
+    /// </para>
+    /// <para>
     /// The consequence is worded per <em>phase</em> because the two lose different things. A
     /// <c>before*</c> hook may reject or mutate <em>in the write transaction</em>, so dropping it means a
     /// write the author believes is being vetted or patched is neither: the clearest case in this repo's own
@@ -118,29 +127,18 @@ internal static class UnhonouredFeatures
     /// silent-wrong-value outcome <c>rollup</c> is refused for. An author should not meet that surprise
     /// twice, so it is named here rather than discovered.
     /// </para>
-    /// <para>
-    /// An <c>after*</c> hook is post-commit from the outbox, so dropping it loses an effect the row's own
-    /// state does not record — a notification that never goes out, a downstream system never told.
-    /// </para>
     /// </remarks>
     private static IEnumerable<UnhonouredFeature<EntityDescriptor>> HookPoints() =>
     [
         Hook("beforeCreate", "create", hooks => hooks.BeforeCreate, InTransaction),
         Hook("beforeUpdate", "update", hooks => hooks.BeforeUpdate, InTransaction),
         Hook("beforeDelete", "delete", hooks => hooks.BeforeDelete, InTransaction),
-        Hook("afterCreate", "create", hooks => hooks.AfterCreate, PostCommit),
-        Hook("afterUpdate", "update", hooks => hooks.AfterUpdate, PostCommit),
-        Hook("afterDelete", "delete", hooks => hooks.AfterDelete, PostCommit),
     ];
 
     private const string InTransaction =
         "a before-hook runs inside the write transaction and may reject or mutate the payload, so the write "
         + "is neither vetted nor patched — a field the hook was meant to set stays permanently null, exactly "
         + "as an unmaintained 'rollup' column does";
-
-    private const string PostCommit =
-        "an after-hook runs post-commit from the outbox, so the effect simply never happens — and nothing in "
-        + "the row's own state records that it did not";
 
     /// <summary>Builds one hook point's entry, so the six differ only in the words that should differ.</summary>
     /// <param name="point">The hook point's key under <c>hooks</c>.</param>
@@ -159,7 +157,132 @@ internal static class UnhonouredFeatures
         $"Remove the '{point}' hooks, or track the hooks pipeline in #22. Refusing per hook point rather than "
         + "per 'hooks' block is deliberate: each one is lifted the day it starts working, so declaring the "
         + $"others costs you nothing once '{point}' lands.");
+
+    /// <summary>
+    /// A raw JSONata expression in any <c>$defs/jsonata</c>-typed slot: refused, never partially evaluated.
+    /// </summary>
+    /// <remarks>
+    /// There is no mature .NET JSONata implementation, and a hand-rolled subset would accept the part it
+    /// implements and silently produce a different payload for the rest — <c>$merge</c>, <c>$map</c>,
+    /// <c>^(…)</c> ordering, predicate contexts, <c>$$</c> root scope. That is the <c>default</c> case, not the
+    /// <c>webhooks</c> case: the action still runs, so nothing looks broken, and the body is not the one the
+    /// author declared.
+    /// </remarks>
+    internal static UnhonouredSlot RawJsonata { get; } = new(
+        "JSONata",
+        "JSONata transformations are not evaluated yet: the action still runs, but with Alvo's canonical event "
+        + "envelope as its body instead of the transformation declared here — a delivery that succeeded "
+        + "carrying data you did not declare, which is indistinguishable from a bug in the consumer.",
+        "Use a '{{...}}' template instead (e.g. \"{{new.title}}\"), which this build does render, or remove the "
+        + "transformation and accept the canonical envelope. A partial JSONata implementation is deliberately "
+        + "not offered: silently producing a different payload for the part it does not implement costs more "
+        + "than this refusal. Tracked in #149.");
+
+    /// <summary>
+    /// An <c>email</c> action's <c>data</c> slot: compiled and validated, and then read by nothing.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Refused because it was a dead slot, which is worse than an unimplemented one.</b> The compiler parsed
+    /// it, resolved every placeholder against the entity's schema and stored the result, and the executor renders
+    /// only <c>to</c>, <c>subject</c> and <c>body</c> — there is no <c>data.*</c> placeholder root for a subject
+    /// or a body to reach it with. So an author following the schema's own doc comment got a clean apply and a
+    /// silently discarded value.
+    /// </para>
+    /// <para>
+    /// That is the identical failure mode <see cref="RawJsonata"/> is refused for — the action still runs and the
+    /// message is not the one the author declared — at an implementation rate of zero. Adding a <c>data.*</c>
+    /// root instead would be new placeholder surface, which belongs to the PR that has a use for it.
+    /// </para>
+    /// </remarks>
+    internal static UnhonouredSlot EmailData { get; } = new(
+        "email.data",
+        "An 'email' action's 'data' is not rendered: it is validated when the descriptor is applied and then "
+        + "read by nothing, so the mail goes out with the referenced template's own subject and body and the "
+        + "values declared here are silently dropped — a message that was delivered without the data you "
+        + "declared, which is indistinguishable from a template bug.",
+        "Move the values into the template's 'subject'/'body' as '{{...}}' placeholders over 'new'/'old'/"
+        + "'event'/'@user.id', which this build does render, or remove 'data'. A 'data.*' placeholder root is "
+        + "new surface and lands with the PR that reads it.");
+
+    /// <summary>
+    /// A message template whose body lives in a bundle file, refused for the hook that would have rendered it.
+    /// </summary>
+    /// <remarks>
+    /// Refused per <em>reference</em> rather than per declaration: a template nothing references keeps its
+    /// <see cref="UnhonouredSubsystems"/> warning, because its absence is observable and it costs nothing. A
+    /// template an after-hook <em>does</em> reference is the silent case — nothing in this build reads a file
+    /// out of a descriptor bundle, so the mail would go out with an empty body.
+    /// </remarks>
+    internal static UnhonouredSlot TemplateBodyFile { get; } = new(
+        "bodyFile",
+        "A template's 'bodyFile' is not read yet: nothing in this build resolves a path inside a descriptor "
+        + "bundle, so an after-hook rendering this template would send a message with an empty body rather "
+        + "than fail.",
+        "Move the body inline into the template's 'body' — it takes the same '{{...}}' placeholders — or stop "
+        + "referencing this template from an after-hook until bundle files are read.");
+
+    /// <summary>The refusal for one action type the frozen <c>$defs/action</c> declares and this build never runs.</summary>
+    /// <param name="type">The action's <c>type</c> discriminator, exactly as the schema spells it.</param>
+    internal static UnhonouredSlot UnhonouredAction(string type) => new(
+        type,
+        $"The '{type}' action is declared in the schema but not implemented in this build, so this hook "
+        + $"{ActionConsequence(type)}.",
+        ActionFix(type));
+
+    /// <summary>What specifically does not happen for one unimplemented action type.</summary>
+    /// <remarks>
+    /// One arm per action rather than one sentence with the type interpolated in: the three lose different
+    /// things, and "not implemented" tells an author nothing they can weigh.
+    /// </remarks>
+    /// <param name="type">The action's <c>type</c> discriminator.</param>
+    private static string ActionConsequence(string type) => type switch
+    {
+        FunctionType => "invokes nothing — no function declared under 'functions' runs, on this hook or on "
+            + "any trigger or schedule it declares elsewhere",
+        HttpCallType => "makes no request: the URL is never called, and 'headersSecretRef' is never read, so "
+            + "a receiver you believe is being notified is not",
+        EntityUpdateType => "writes nothing — no record is written or patched on the target entity, and no "
+            + "event is emitted for the write that did not happen",
+        _ => throw new ArgumentOutOfRangeException(
+            nameof(type), type, "Unmapped action type; name what specifically does not happen for it here."),
+    };
+
+    /// <summary>The alternative for one unimplemented action type, and where it is tracked.</summary>
+    /// <param name="type">The action's <c>type</c> discriminator.</param>
+    private static string ActionFix(string type) => type switch
+    {
+        FunctionType => "Use a 'webhook' or 'email' action, which this build does run. Custom functions are "
+            + "an F4 concern and the schema freezes their shape ahead of the implementation.",
+        HttpCallType => "Declare the target under 'webhooks.endpoints' and use a 'webhook' action instead — "
+            + "that is the managed path, and it is the one this build delivers on.",
+        EntityUpdateType => "Perform the follow-up write through the Data API for now. 'entity.update' lands "
+            + "with automation, where the causation chain it creates can be bounded.",
+        _ => throw new ArgumentOutOfRangeException(
+            nameof(type), type, "Unmapped action type; name the alternative for it here."),
+    };
+
+    private const string FunctionType = "function";
+    private const string HttpCallType = "http.call";
+    private const string EntityUpdateType = "entity.update";
 }
+
+/// <summary>
+/// One feature this build does not honour that is detected by a <b>compiler</b> rather than by a
+/// descriptor-shape predicate, so it carries the words without carrying a path.
+/// </summary>
+/// <remarks>
+/// <see cref="UnhonouredFeature{T}"/>'s two-pass tie does not apply. The raw-JSON pass cannot ask whether a
+/// string is a well-formed <c>{{…}}</c> template without reimplementing the classifier over
+/// <see cref="System.Text.Json.JsonElement"/>, and it cannot ask which template a hook references either; the
+/// typed pass already knows the exact JSON Pointer of the slot it is looking at. So the <em>detection</em>
+/// lives where the action is compiled and only the <em>wording</em> lives here — which is what keeps one
+/// authority for the words, exactly as the other two shapes do.
+/// </remarks>
+/// <param name="Feature">The feature's name, for a reader grouping refusals by what they are about.</param>
+/// <param name="Consequence">What silently happens instead, concretely — never the word "unsupported" alone.</param>
+/// <param name="Fix">What to do instead, and where the feature is tracked.</param>
+internal sealed record UnhonouredSlot(string Feature, string Consequence, string Fix);
 
 /// <summary>
 /// One feature the frozen schema declares and this build does not honour, stated once for both passes that

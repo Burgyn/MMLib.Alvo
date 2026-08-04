@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The crash criteria, and the one thing in this repository that runs the product as a real OS process.
+       ".Tests.Integration" rather than ".Tests" is what puts it in ring2 instead of ring0: it publishes
+       MMLib.Alvo.Host and boots it twice per fact, which is minutes of "after every small step" and every
+       pre-commit for a criterion whose tier is "before opening a PR". scripts/test-ring0 excludes it by that
+       naming alone, so no ring script changes and nothing can fail open. It also opts out of the shared
+       architecture + public-API approval gate, because it maps to no production assembly of its own —
+       MMLib.Alvo.Host.Tests is the 1:1 suite. -->
+  <PropertyGroup>
+    <AlvoSharedArchTests>false</AlvoSharedArchTests>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The host is referenced rather than only published from source: it is what makes `dotnet publish` of
+         this suite's own child process part of the same build graph, and it carries Microsoft.Data.Sqlite and
+         AlvoHealth's route constants, which the probe and the readiness poll read rather than restate. No
+         InternalsVisibleTo is needed anywhere — a child process reaches the product over HTTP and over its
+         database file, which is the whole point of the tier. -->
+    <ProjectReference Include="../../src/MMLib.Alvo.Host/MMLib.Alvo.Host.csproj" />
+  </ItemGroup>
+
+  <!-- The outbox probe, shared with MMLib.Alvo.Host.Tests — see the same link there. -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/SqliteOutboxProbe.cs" Link="_shared/SqliteOutboxProbe.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="descriptors/*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

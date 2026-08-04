@@ -121,10 +121,10 @@ public class ChangeTrackerReachTests
     /// history, the system schema), by running SQL EF's own generator produced, or by being the one seam that
     /// binds parameters rather than composing a row statement:
     /// <c>EfCoreDescriptorVersionStore</c>, <c>EfCoreRuntimeSchemaWriter</c>, <c>SystemSchemaInitializer</c>,
-    /// <c>IdempotencyTable</c>, <c>RelationalSqlBatch</c> and <c>VersionRowWriter</c> never touch an entity
-    /// table — <c>IdempotencyTable</c> in particular reads and writes only the idempotency-record table, and
-    /// exists as its own file precisely so the row-statement file does not also become the place framework
-    /// bookkeeping SQL is written;
+    /// <c>IdempotencyTable</c>, <c>OutboxTable</c>, <c>RelationalSqlBatch</c> and <c>VersionRowWriter</c> never
+    /// touch an entity table — <c>IdempotencyTable</c> in particular reads and writes only the
+    /// idempotency-record table, and <c>OutboxTable</c> only the outbox table, and each exists as its own file
+    /// precisely so the row-statement file does not also become the place framework bookkeeping SQL is written;
     /// <c>PredicateParameterBinder</c> creates a command only to reach the provider's parameter factory;
     /// <c>EfCoreSchemaMigrator</c> executes the migrator's generated statements;
     /// <c>SqliteCaseSensitiveLike</c> runs one connection pragma and can carry no row predicate at all; and
@@ -173,14 +173,51 @@ public class ChangeTrackerReachTests
     public void Every_allow_listed_file_still_exists()
         => _sqlComposingFiles.ShouldBeSubsetOf(SourceFiles().Select(Path.GetFileName));
 
+    /// <summary>
+    /// The claim and dispatch statements stay raw SQL rather than LINQ over the context.
+    /// </summary>
+    /// <remarks>
+    /// <c>UseRelationalNulls()</c> is on in both drivers, so a LINQ comparison over a nullable column no
+    /// longer means what it means in C# (<c>docs/architecture/data-path.md</c>). Raw SQL carries SQL's
+    /// semantics natively; this fact is what stops the next edit from reaching for
+    /// <c>Where(entry =&gt; entry.ClaimedAt != stale)</c> and silently changing the predicate's meaning.
+    /// </remarks>
+    /// <param name="file">The outbox source file the rule covers.</param>
+    [Theory]
+    [InlineData("OutboxTable.cs")]
+    [InlineData("EfCoreOutboxStore.cs")]
+    public void The_outbox_claim_is_raw_sql_and_never_linq_over_the_context(string file)
+    {
+        var source = ReadSource(file);
+
+        foreach (var linq in _linqOverTheContext)
+        {
+            source.ShouldNotContain(linq, Case.Sensitive, file);
+        }
+    }
+
+    /// <summary>
+    /// The LINQ vocabulary the outbox files may not use — the shapes that would put a nullable comparison
+    /// under EF's translation instead of SQL's own semantics.
+    /// </summary>
+    private static readonly string[] _linqOverTheContext =
+        [".Where(", ".FirstOrDefault(", "IQueryable", "db.Rows("];
+
+    /// <summary>The named file's code, with whole-line comments removed.</summary>
+    private static string ReadSource(string fileName) => Code(
+        SourceFiles().SingleOrDefault(file => Path.GetFileName(file) == fileName)
+        ?? throw new FileNotFoundException($"No source file named '{fileName}' is scanned.", fileName));
+
     /// <summary>The files permitted to compose SQL text or construct a <c>DbCommand</c> inside a data package.</summary>
     private static readonly string[] _sqlComposingFiles =
     [
         "EfAlvoData.cs",
         "EfCoreDescriptorVersionStore.cs",
+        "EfCoreOutboxStore.cs",
         "EfCoreRuntimeSchemaWriter.cs",
         "EfCoreSchemaMigrator.cs",
         "IdempotencyTable.cs",
+        "OutboxTable.cs",
         "PredicateParameterBinder.cs",
         "RelationalSqlBatch.cs",
         "SqliteCaseSensitiveLike.cs",

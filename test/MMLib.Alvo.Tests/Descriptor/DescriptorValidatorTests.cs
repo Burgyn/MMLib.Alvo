@@ -129,8 +129,6 @@ public class DescriptorValidatorTests
         "softDelete" => @"""softDelete"": true",
         _ when path.StartsWith("hooks/before", StringComparison.Ordinal) =>
             $@"""hooks"": {{ ""{path["hooks/".Length..]}"": [ {{ ""action"": {{ ""reject"": ""no"" }} }} ] }}",
-        _ when path.StartsWith("hooks/after", StringComparison.Ordinal) =>
-            $@"""hooks"": {{ ""{path["hooks/".Length..]}"": [ {{ ""action"": {{ ""type"": ""webhook"", ""endpoint"": ""notify"" }} }} ] }}",
         _ => throw new InvalidOperationException(
             $"'{path}' is in UnhonouredFeatures but DeclarationFor does not know how to declare it. Teach it "
             + "a schema-valid declaration, or the theory case would assert nothing."),
@@ -247,8 +245,14 @@ public class DescriptorValidatorTests
         entityTenancy is null ? string.Empty : $@"""tenancy"": ""{entityTenancy}"",";
 
     /// <summary>
-    /// <b>The table covers every hook point the frozen schema declares</b> — asserted against
-    /// <c>schema/project.schema.json</c>, not against a copy of the list.
+    /// The three hook points PR5a honours, named as a literal so the fact below can say which points are
+    /// <em>deliberately</em> absent from the table rather than merely missing from it.
+    /// </summary>
+    private static readonly string[] _honouredHookPoints = ["afterCreate", "afterUpdate", "afterDelete"];
+
+    /// <summary>
+    /// <b>Every hook point the frozen schema declares is either refused by the table or honoured by this
+    /// build</b> — asserted against <c>schema/project.schema.json</c>, not against a copy of the list.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -259,13 +263,17 @@ public class DescriptorValidatorTests
     /// is the same argument that anchored the built-in formats to the schema's <c>format</c> enum.
     /// </para>
     /// <para>
-    /// Hook points can be asserted as an <em>exact</em> set because all six are unhonoured today. As PR5
-    /// implements them this fact is what has to be narrowed, deliberately, one point at a time — which is the
-    /// per-hook-point refusal doing its job.
+    /// <b>PR5a narrowed it, exactly as its predecessor said it would have to.</b> The set was once asserted as
+    /// exactly the schema's six, because all six were unhonoured; PR5a compiles the three <c>after*</c> points
+    /// into the policy catalog, so it is now a <em>partition</em>: refused ∪ honoured = declared, with nothing
+    /// in both and nothing in neither. That keeps the anchor's strength — a point dropped from the table
+    /// without being implemented lands in neither half and fails here — while letting each point leave on the
+    /// day it starts working. That the honoured three really are compiled is
+    /// <c>Events.AfterHookCompilerTests.Every_after_point_the_schema_declares_is_compiled_onto_its_own_list</c>.
     /// </para>
     /// </remarks>
     [Fact]
-    public void The_unhonoured_table_covers_every_hook_point_the_schema_declares()
+    public void Every_hook_point_the_schema_declares_is_either_refused_or_honoured()
     {
         var declared = SchemaProperties("$defs", "entity", "properties", "hooks");
 
@@ -273,15 +281,22 @@ public class DescriptorValidatorTests
             ["beforeCreate", "beforeUpdate", "beforeDelete", "afterCreate", "afterUpdate", "afterDelete"],
             ignoreOrder: true,
             "read from the frozen schema — if this changed, the schema changed and the table owes it a visit");
-        UnhonouredFeatures.OnAnEntity
+
+        var refused = UnhonouredFeatures.OnAnEntity
             .Select(feature => feature.Path)
             .Where(path => path.StartsWith("hooks/", StringComparison.Ordinal))
             .Select(path => path["hooks/".Length..])
-            .ShouldBe(
-                declared,
-                ignoreOrder: true,
-                "a hook point missing from the table is one that silently runs nothing again; PR5 narrows this "
-                + "as it implements them");
+            .ToList();
+
+        refused.ShouldNotContain(
+            point => _honouredHookPoints.Contains(point, StringComparer.Ordinal),
+            "a point this build runs must not also be refused, or a descriptor declaring it is rejected for a "
+            + "feature that works");
+        refused.Concat(_honouredHookPoints).ShouldBe(
+            declared,
+            ignoreOrder: true,
+            "a hook point in neither half is one that silently runs nothing again — dropped from the table "
+            + "without being implemented");
     }
 
     /// <summary>

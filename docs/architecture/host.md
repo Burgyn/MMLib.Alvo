@@ -32,8 +32,17 @@ database against a route table.
 Stage 1 has **no port of its own**, deliberately: the system schema is owned by whichever
 driver implements `IAppliedSchemaStore`, and that driver cannot answer a single call without
 it, so stage 2's read *is* stages 1 and 2 at once, in every mode — `Skip` included. A port is
-earned the moment a driver's system schema grows a table no store call touches (PR5's outbox
-is the first candidate).
+earned the moment a driver's system schema grows a table no store call touches, and PR5a paid
+it: `alvo_outbox` is the first such table and **`IOutboxStore`** is the port it earned —
+mandatory at boot from that commit, per `package-boundary.md`.
+
+**What waits on stage 3, besides the routes.** PR5a's outbox dispatcher is a
+`BackgroundService`, and on .NET 10 the whole of `ExecuteAsync` runs off the startup thread, so
+"not before the schema is primed" **cannot** be expressed by hosted-service registration order.
+It therefore awaits `AlvoBootState` explicitly, and a boot that refused leaves the pump claiming
+nothing. That is not decoration: an unprimed policy catalog knows no entity, so every event
+would match no hook, count as filtered and be *retired* — silent, permanent loss. Details in
+[`events.md`](./events.md), *The dispatcher*.
 
 **The apply→map coupling is gone, and so is the ordering folklore that used to live here.**
 `MapAlvo` may be called before or after the schema exists: the Data API's endpoints are read

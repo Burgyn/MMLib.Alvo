@@ -107,6 +107,32 @@ jobs:
           path: artifacts/criteria/paging.md
           if-no-files-found: ignore
 
+      # §3's own numeric criterion — a 10 000-event chaos run loses no event — measured on both engines by
+      # OutboxChaosCriteriaTests, for the same reason and by the same mechanism as the paging criteria above:
+      # a passing run prints neither of MTP's output mechanisms, so the appended file is the only durable copy.
+      # Not Linux-only: both legs run inside ring2 above (MMLib.Alvo.Data.Sqlite.Tests.Integration and
+      # MMLib.Alvo.Data.PostgreSql.Tests.Integration), and the SQLite one needs no Docker, so Windows writes a
+      # line too — and it is the leg that gates a merge, because the PostgreSQL one self-skips where Docker runs
+      # Windows containers.
+      - name: Publish event criteria
+        if: always()
+        shell: bash
+        run: |
+          if [ -f artifacts/criteria/events.md ]; then
+            {
+              echo "### Event criteria (§3, ${RUNNER_OS})"
+              cat artifacts/criteria/events.md
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload event criteria
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: event-criteria-${{ matrix.os }}
+          path: artifacts/criteria/events.md
+          if-no-files-found: ignore
+
       # Pack-only on the PR (issue #14): prove packaging works and publish the
       # .nupkg as an artifact. No feed publish — that lands with v0.1.
       - name: Pack

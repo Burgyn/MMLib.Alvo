@@ -12,7 +12,7 @@ Today it declares four such features, each refused at apply by
 | `computed` | `invoices.gross_total`, `invoice_items.line_total` | the expression is never evaluated, so the column stays null |
 | `rollup` | `companies.open_deals`, `invoices.net_total` | nothing maintains the aggregate, so it reads as permanently null while looking like data |
 | `default` | `companies.owner_id`, `deals.stage`, `deals.owner_id` | no column default is emitted and the value is dropped, so the field is simply null |
-| `hooks` | `contacts.beforeCreate`, `deals.beforeUpdate` | the hooks never run, so a write the author believes is vetted or patched is neither |
+| `hooks/before*` | `contacts.beforeCreate`, `deals.beforeUpdate` | the hooks never run, so a write the author believes is vetted or patched is neither. The three `after*` points **are** honoured now, and this example declares none of them |
 
 ## It also declares five blocks that are *warned about*, not refused
 
@@ -26,8 +26,8 @@ fires. So these five apply cleanly and earn one warning at apply naming each of 
 |---|---|---|
 | `dynamicEntities` | root | no runtime entity can be created; every governance limit here bounds nothing (F7) |
 | `automation` | root | no rule is evaluated, so no declared action runs — which looks like a condition that never matched |
-| `templates` | root | nothing renders a template, because the actions that would reference one never run |
-| `webhooks` | root | no event is delivered — which looks exactly like an endpoint that is down |
+| `templates` | root | an after-hook `email` action renders a template; one referenced only from an automation rule does not, and a `bodyFile` is read on neither path |
+| `webhooks` | root | an endpoint an after-hook posts to is delivered to; one referenced only from an automation rule receives nothing. No delivery is signed — `secretRef` is unread, no Standard Webhooks HMAC header is sent (7.1) — nor projected per endpoint (#152) |
 | `functions` | root | no function is invoked, on any trigger or schedule it declares |
 
 `UnhonouredSubsystemsTests` uses this file's descriptor as its fixture and asserts that the warning names

@@ -15,6 +15,19 @@
 # runs the integration projects, affected-scoped, which is where the ring table
 # already put them. This is the "fast-only filter" the previous version of this
 # script said to add when slow tests appeared.
+#
+# The `.Tests.Integration` suffix therefore means SLOW, not "needs Docker" — Docker
+# was only the first thing that was slow. Two of the projects it now excludes need
+# no container at all: the SQLite leg of the 10 000-event chaos criterion (~27s of
+# durable commits) and the killed-host crash criteria (a `dotnet publish` and two
+# real process boots). Both belong to the tier "before opening a PR", which is where
+# PagingPerformanceTests already sits, and both were measured in ring0 first — the
+# chaos leg took MMLib.Alvo.Data.Sqlite.Tests from ~7s to ~34s and made it ring0's
+# critical path. The project name is the ONLY tier discriminator here, deliberately:
+# a trait or a `--filter-not-class` would need a matching include somewhere in ring2,
+# and CI already sets TESTINGPLATFORM_EXITCODE_IGNORE=8 on Windows, so an include
+# that stopped matching would pass with zero tests. A misnamed project can only ever
+# land back HERE, which is loud, never silently unrun.
 set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$DIR/.." && pwd)"

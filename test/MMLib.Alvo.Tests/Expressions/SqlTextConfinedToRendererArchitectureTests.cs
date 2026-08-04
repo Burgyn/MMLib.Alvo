@@ -4,7 +4,8 @@ namespace MMLib.Alvo.Tests.Expressions;
 
 /// <summary>
 /// Pins the invariant that makes <c>SqlPredicateRenderer</c> the core's one seam for SQL text: no
-/// other file in the expression/rules core — in <c>MMLib.Alvo</c> or in <c>Abstractions</c> — should
+/// other file in the expression, rules or events core — in <c>MMLib.Alvo</c> or in
+/// <c>Abstractions</c> — should
 /// ever grow its own ad hoc SQL fragment. A future contributor adding a second place that renders SQL
 /// (a shortcut around the renderer, or a copy-pasted fragment for a "quick fix") would fragment the
 /// two-valued rendering rule and the per-dialect <see cref="MMLib.Alvo.Expressions.IFieldSqlRenderer"/>
@@ -50,12 +51,29 @@ public class SqlTextConfinedToRendererArchitectureTests
     /// </summary>
     private static readonly string[] _allowedFileNames = ["SqlPredicateRenderer.cs", "IFieldSqlRenderer.cs"];
 
+    /// <summary>
+    /// The directories this invariant covers. <c>Events</c> joined them when the outbox dispatcher landed:
+    /// the queue lives behind <see cref="MMLib.Alvo.Events.IOutboxStore"/> and every statement that drains it
+    /// belongs to the driver, so nothing under <c>Events</c> may compose SQL of its own. It was unscanned and
+    /// clean, which is precisely when a scan is worth adding — a guard added after the first offender is a
+    /// guard that had to be argued for.
+    /// </summary>
+    /// <remarks>
+    /// Scanning each project wholesale was considered and rejected: <c>Api/Internal/DataApiParameters.cs</c>
+    /// and <c>DataApiDocumentation.cs</c> document the <c>and</c>/<c>or</c> filter grammar in uppercase prose
+    /// inside string literals, and <c>Descriptor/Internal/UnhonouredFeatures.cs</c> spells <c>NOT</c> inside a
+    /// refusal message. Those are false positives on the connective rule, and weakening the rule to admit them
+    /// would cost more than this list costs: it is the connectives that catch a copy-paste of the renderer's
+    /// own idioms.
+    /// </remarks>
     private static readonly string[][] _scannedDirectories =
     [
         ["src", "MMLib.Alvo", "Expressions"],
         ["src", "MMLib.Alvo", "Rules"],
+        ["src", "MMLib.Alvo", "Events"],
         ["src", "MMLib.Alvo.Abstractions", "Expressions"],
         ["src", "MMLib.Alvo.Abstractions", "Rules"],
+        ["src", "MMLib.Alvo.Abstractions", "Events"],
     ];
 
     [Fact]

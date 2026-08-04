@@ -33,6 +33,14 @@
     <Using Include="MMLib.Alvo.Api.Tests" />
   </ItemGroup>
 
+  <!-- The outbox probe, shared with MMLib.Alvo.Host.Tests.Integration — see the same link there. Every crash
+       and recovery fact reads the queue off the database file rather than off the host that wrote it, and a
+       second copy of "what does a pending row look like" is how the in-process facts and the killed-host ones
+       would come to disagree about the state machine they both describe. -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/SqliteOutboxProbe.cs" Link="_shared/SqliteOutboxProbe.cs" />
+  </ItemGroup>
+
   <ItemGroup>
     <Content Include="descriptors/*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

@@ -322,6 +322,15 @@ public sealed class AddAlvoIntegrationTests : IDisposable
         AFrameworkTableSurvivesIntrospectionAsync("alvo_idempotency");
 
     /// <summary>
+    /// The same for the transactional outbox, and it is the table with the most to lose: a planned <c>DROP</c>
+    /// discards events that committed with their rows and have not been dispatched yet, so the symptom is
+    /// silently undelivered work rather than an error.
+    /// </summary>
+    [Fact]
+    public Task A_framework_bookkeeping_table_is_never_planned_for_a_drop_outbox() =>
+        AFrameworkTableSurvivesIntrospectionAsync("alvo_outbox");
+
+    /// <summary>
     /// Applies the real descriptor, then reproduces the runner's own no-snapshot fallback — introspect the live
     /// database and diff it against the applied schema — and requires that <paramref name="tableName"/> appears
     /// neither as an introspected entity nor in any step of the resulting plan.

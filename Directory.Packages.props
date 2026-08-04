@@ -58,6 +58,14 @@
          deliberately not used — it needs an entry-point assembly, which does not exist until
          MMLib.Alvo.Host lands in PR4. -->
     <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="10.0.10" />
+    <!-- Test-only: the CloudEvents conformance oracle. Apache-2.0. NOT a shipped dependency, and the
+         package-boundary rule is why: MMLib.Alvo.Abstractions may take no new external dependency, so the
+         envelope is hand-written there; and nothing in the core needs the SDK at run time, because Alvo
+         serializes its own envelope for the outbox row and for webhook delivery. What the SDK is used for is
+         enforcing CloudEvents' attribute-naming rule at test time (CloudEventAttribute.CreateExtension
+         throws on an illegal name), so conformance is proven by the specification's own implementation
+         rather than by a reading of the specification. -->
+    <PackageVersion Include="CloudNative.CloudEvents" Version="2.9.0" />
     <PackageVersion Include="Microsoft.SourceLink.GitHub" Version="10.0.301" />
     <PackageVersion Include="MinVer" Version="7.0.0" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.10" />

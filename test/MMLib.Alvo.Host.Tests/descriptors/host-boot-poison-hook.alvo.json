@@ -1,0 +1,42 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "host-boot-poison-hook",
+  "description": "One entity with an afterCreate webhook pointed at a port nothing listens on, so every delivery fails and the host has to survive it.",
+  "auth": {
+    "providers": ["local"],
+    "roles": ["admin"]
+  },
+  "entities": {
+    "warehouses": {
+      "description": "A storage location.",
+      "fields": {
+        "code": { "type": "string", "required": true, "unique": true, "maxLength": 20 },
+        "city": { "type": "string", "maxLength": 60 }
+      },
+      "rules": {
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+        "create": "'admin' in @user.roles",
+        "update": "'admin' in @user.roles",
+        "delete": "'admin' in @user.roles"
+      },
+      "hooks": {
+        "afterCreate": [
+          {
+            "action": { "type": "webhook", "endpoint": "warehouse-changed" }
+          }
+        ]
+      }
+    }
+  },
+  "webhooks": {
+    "endpoints": {
+      "warehouse-changed": {
+        "url": "http://127.0.0.1:1/hooks/warehouse-changed",
+        "secretRef": "warehouse-changed-signing-key",
+        "description": "Port 1 on the loopback interface: nothing listens there, so every delivery is refused at once."
+      }
+    }
+  }
+}

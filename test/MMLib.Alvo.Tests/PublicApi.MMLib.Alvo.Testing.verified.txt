@@ -252,6 +252,22 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task Paging_over_a_utc_timestamp_key_neither_skips_nor_repeats_a_row() { }
         public System.Threading.Tasks.Task Paging_over_sub_second_timestamps_keeps_instant_order() { }
     }
+    public abstract class AlvoDataOutboxTests
+    {
+        protected AlvoDataOutboxTests() { }
+        public System.Threading.Tasks.Task A_create_emits_exactly_one_event() { }
+        public System.Threading.Tasks.Task A_delete_emits_exactly_one_event_carrying_the_pre_image() { }
+        public System.Threading.Tasks.Task A_denied_write_emits_nothing() { }
+        public System.Threading.Tasks.Task A_replayed_idempotent_create_emits_no_second_event() { }
+        public System.Threading.Tasks.Task A_write_the_engine_refuses_leaves_no_outbox_row() { }
+        public System.Threading.Tasks.Task A_write_whose_clock_lands_mid_microsecond_still_records_one_instant() { }
+        public System.Threading.Tasks.Task An_events_record_carries_a_hidden_field_unmasked_and_that_is_the_documented_disclosure() { }
+        public System.Threading.Tasks.Task An_update_emits_exactly_one_event_carrying_both_images() { }
+        public System.Threading.Tasks.Task Every_event_carries_the_caller_the_write_was_performed_as() { }
+        public System.Threading.Tasks.Task The_events_time_equals_the_rows_own_audit_instant() { }
+        public System.Threading.Tasks.Task Two_concurrent_idempotent_creates_on_one_key_emit_exactly_one_event() { }
+        protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Testing.Data.IAlvoDataOutboxWorld> WorldAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, System.TimeProvider? time = null);
+    }
     public abstract class AlvoDataPagingTests
     {
         protected AlvoDataPagingTests() { }
@@ -288,6 +304,11 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task The_tenant_scope_is_bound_inside_the_same_where_clause() { }
         public System.Threading.Tasks.Task The_update_statement_itself_carries_the_policy_predicate() { }
     }
+    public interface IAlvoDataOutboxWorld
+    {
+        MMLib.Alvo.Data.IAlvoData Data { get; }
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.AlvoEvent>> EventsAsync();
+    }
     public interface IDifferentialProbe : System.IAsyncDisposable
     {
         System.Threading.Tasks.Task<bool> MatchesAsync(MMLib.Alvo.Data.AlvoRecord row, MMLib.Alvo.Expressions.SqlPredicate predicate);
@@ -307,6 +328,86 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoPage> QueryAsync(MMLib.Alvo.Data.AlvoQuery query, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default) { }
         public void Seed(string entity, params MMLib.Alvo.Data.AlvoRecord[] rows) { }
         public System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord> UpdateAsync(string entity, System.Guid id, System.Collections.Generic.IReadOnlyDictionary<string, object?> values, MMLib.Alvo.AlvoContext context, MMLib.Alvo.Data.AlvoPrecondition? precondition = default, System.Threading.CancellationToken cancellationToken = default) { }
+    }
+}
+namespace MMLib.Alvo.Testing.Events
+{
+    public abstract class AlvoEventCriteriaTests
+    {
+        protected const string DispatchedCounter = "alvo.events.dispatched";
+        protected const string Entity = "vehicles";
+        protected const string EventMeterName = "MMLib.Alvo.Events";
+        protected const string FilteredCounter = "alvo.events.filtered";
+        protected AlvoEventCriteriaTests() { }
+        protected static MMLib.Alvo.Testing.Events.AlvoEventProject Project { get; }
+        public System.Threading.Tasks.Task A_hundred_events_matching_nothing_produce_no_action_log_and_one_counter_each() { }
+        public System.Threading.Tasks.Task A_matched_event_writes_exactly_one_action_log_entry_naming_the_hook() { }
+        public System.Threading.Tasks.Task A_transition_to_a_value_the_condition_does_not_name_does_not_fire() { }
+        public System.Threading.Tasks.Task An_approval_transition_fires_exactly_once_and_a_second_approval_does_not() { }
+        protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Testing.Events.IAlvoEventWorld> WorldAsync();
+    }
+    public sealed class AlvoEventDelivery : System.IEquatable<MMLib.Alvo.Testing.Events.AlvoEventDelivery>
+    {
+        public AlvoEventDelivery(string Url, string Body) { }
+        public string Body { get; init; }
+        public string Url { get; init; }
+    }
+    public sealed class AlvoEventLogEntry : System.IEquatable<MMLib.Alvo.Testing.Events.AlvoEventLogEntry>
+    {
+        public AlvoEventLogEntry(string Name, string Message) { }
+        public string Message { get; init; }
+        public string Name { get; init; }
+    }
+    public sealed class AlvoEventProject : System.IEquatable<MMLib.Alvo.Testing.Events.AlvoEventProject>
+    {
+        public AlvoEventProject(MMLib.Alvo.Schema.SchemaModel Schema, MMLib.Alvo.Descriptor.AlvoDescriptor Descriptor, MMLib.Alvo.AlvoContext Caller, string Entity, string MeterName) { }
+        public MMLib.Alvo.AlvoContext Caller { get; init; }
+        public MMLib.Alvo.Descriptor.AlvoDescriptor Descriptor { get; init; }
+        public string Entity { get; init; }
+        public string MeterName { get; init; }
+        public MMLib.Alvo.Schema.SchemaModel Schema { get; init; }
+    }
+    public sealed class AlvoOutboxTally : System.IEquatable<MMLib.Alvo.Testing.Events.AlvoOutboxTally>
+    {
+        public AlvoOutboxTally(int Pending, int Retired) { }
+        public int Pending { get; init; }
+        public int Retired { get; init; }
+    }
+    public interface IAlvoEventMeter
+    {
+        long CountOf(string instrumentName);
+    }
+    public interface IAlvoEventWorld : System.IAsyncDisposable
+    {
+        System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Testing.Events.AlvoEventLogEntry> ActionLogEntries { get; }
+        System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Testing.Events.AlvoEventDelivery> Deliveries { get; }
+        MMLib.Alvo.Testing.Events.IAlvoEventMeter Metrics { get; }
+        System.Threading.Tasks.Task<System.Guid> CreateAsync(string status);
+        System.Threading.Tasks.Task DrainAsync();
+        System.Threading.Tasks.Task<MMLib.Alvo.Testing.Events.AlvoOutboxTally> TallyAsync();
+        System.Threading.Tasks.Task UpdateAsync(System.Guid id, string? status = null, string? plate = null);
+    }
+    public interface IOutboxStoreWorld : System.IAsyncDisposable
+    {
+        MMLib.Alvo.Events.IOutboxStore Store { get; }
+        void Advance(System.TimeSpan duration);
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<System.Guid>> SeedAsync(int count);
+        System.Threading.Tasks.Task<System.Guid> SeedWithExplicitIdAsync(System.Guid id);
+    }
+    public abstract class OutboxStoreContractTests
+    {
+        protected OutboxStoreContractTests() { }
+        public System.Threading.Tasks.Task A_claim_is_sorted_in_process_because_returning_order_is_arbitrary() { }
+        public System.Threading.Tasks.Task A_claim_returns_the_oldest_undispatched_entries_in_order() { }
+        public System.Threading.Tasks.Task A_claim_whose_lease_expired_is_claimed_again() { }
+        public System.Threading.Tasks.Task A_claimed_entry_is_not_claimed_twice_while_its_lease_holds() { }
+        public System.Threading.Tasks.Task A_dispatched_entry_is_never_claimed_again() { }
+        public System.Threading.Tasks.Task A_release_with_no_backoff_is_claimable_at_once() { }
+        public System.Threading.Tasks.Task A_released_entry_is_held_for_its_backoff_and_not_for_the_lease() { }
+        public System.Threading.Tasks.Task An_entry_past_the_attempt_ceiling_is_no_longer_claimed() { }
+        public System.Threading.Tasks.Task An_entry_whose_id_sorts_below_an_already_dispatched_one_is_still_claimed() { }
+        protected virtual void EnsureEngineAvailable() { }
+        protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Testing.Events.IOutboxStoreWorld> WorldAsync();
     }
 }
 namespace MMLib.Alvo.Testing.Migrations

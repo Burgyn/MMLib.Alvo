@@ -102,6 +102,13 @@ are numbered independently of the plan's own bracketed `[N]` step numbers
   and runs in-transaction; JSONata is Turing-complete and **never** runs
   in-transaction. See `docs/architecture/cel.md` for the three profiles, the
   two-valued rendering rule, and every deliberate narrowing from conformant CEL.
+  **How the ban is enforced today:** there is no JSONata evaluator at all, so the
+  invariant holds *vacuously* and F3 proves it with an **absence** test rather
+  than one named as a ban — a raw expression in a `$defs/jsonata` slot is refused
+  at apply, by name (#149). Whoever ships an evaluator owes the real ban test,
+  and it must be **architectural** (nothing on the in-transaction path can reach
+  it), never behavioural. `docs/architecture/events.md` records that obligation
+  alongside the rest of the event backbone.
 - **Never merge to `main` directly** — the PR is the gate for every layer
   but mutation (Stryker runs post-merge on `main`; see `CLAUDE.md`).
 - **The core is one big package** — a package is earned (foreign dependency,

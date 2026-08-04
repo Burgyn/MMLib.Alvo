@@ -164,7 +164,23 @@ left to be discovered by a third party.
   twice — once before the schema write, once more after losing the race) and it must be **safe from
   several processes at once**, which is exactly where the shipped EF driver had a real bug (a
   `CREATE TABLE IF NOT EXISTS` race on PostgreSQL). A port is **earned** the moment a driver's
-  system schema grows a table no store call touches — PR5's outbox is the first candidate.
+  system schema grows a table no store call touches — and PR5a paid that: `alvo_outbox` is the
+  first such table, so **`IOutboxStore`** is the port it earned (next bullet).
+- **`IOutboxStore` is now mandatory too, for the same reason `IRuntimeSchemaWriter` is.** PR5a's
+  outbox dispatcher takes it as a constructor dependency and is always registered, so from that
+  commit a provider without it can no longer boot. It is the port `alvo_outbox` earned: the
+  dispatcher lives in the core, which depends on `MMLib.Alvo.Abstractions` alone, and the driver's
+  `OutboxTable` is `internal` — no store call touches that table, so nothing else could have bridged
+  them. **Both in-repo drivers get it from `AddRelationalProvider`**, so no shipped provider is
+  affected; the cost falls on a future **non-EF** or dynamic-storage provider (F7), which would
+  otherwise meet it as a DI failure at startup rather than as a documented obligation. Same widening
+  of the **implicit** provider contract that startup-lifecycle deviation 60 recorded for
+  `IRuntimeSchemaWriter`, and stated here in the same words for the same reason. Details in
+  [`events.md`](./events.md), *What a provider owes*.
+- **`IEmailSender` is not mandatory**, and it is the counter-example worth naming: the core registers
+  `ConsoleEmailSender` with `TryAddSingleton`, so a host boots without a mail provider and a host
+  that has one takes mail over. A port is only a boot obligation when the core has no honest default
+  — there is no honest default for a database.
 - **The two apply paths differ on purpose.** `SchemaMigrationRunner` (the CLI /
   Management-API path) keeps applying the DDL and *then* saving the snapshot: that path is a
   single writer by construction, so the race the boot has to survive cannot arise there, and

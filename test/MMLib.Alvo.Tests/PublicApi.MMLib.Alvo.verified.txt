@@ -1,7 +1,10 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/Burgyn/MMLib.Alvo")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Api.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Api.Tests.Integration")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Data.PostgreSql.Tests.Integration")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Data.Sqlite.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Data.Sqlite.Tests.Integration")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Host.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Tests")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace MMLib.Alvo.Api
@@ -82,6 +85,19 @@ namespace MMLib.Alvo.Auth
     {
         public TenantResolver() { }
         public bool TryResolve(MMLib.Alvo.Auth.ApiKeyRecord key, string? requestedTenant, out MMLib.Alvo.TenantId? tenant) { }
+    }
+}
+namespace MMLib.Alvo.Events
+{
+    public sealed class AlvoEventOptions
+    {
+        public const string SectionName = "Alvo:Events";
+        public AlvoEventOptions() { }
+        public int BatchSize { get; set; }
+        public System.TimeSpan ClaimLease { get; set; }
+        public bool Enabled { get; set; }
+        public int MaxAttempts { get; set; }
+        public System.TimeSpan PollInterval { get; set; }
     }
 }
 namespace MMLib.Alvo.Migrations

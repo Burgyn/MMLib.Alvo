@@ -3,8 +3,8 @@
 namespace MMLib.Alvo.Tests;
 
 /// <summary>
-/// The narrowest <see cref="ILogger"/> that can answer <b>which blocks a warning line named</b> — it keeps
-/// the formatted message of every warning and drops everything else.
+/// The narrowest <see cref="ILogger"/> that can answer <b>what a log line said</b> — it keeps the formatted
+/// message and level of every entry, and <see cref="Warnings"/> is the warning-shaped view of them.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -30,10 +30,14 @@ namespace MMLib.Alvo.Tests;
 /// </remarks>
 internal sealed class CapturingLogger : ILogger, ILoggerProvider
 {
-    private readonly List<string> _warnings = [];
+    private readonly List<CapturedLogEntry> _entries = [];
+
+    /// <summary>Every entry written through this logger, in order.</summary>
+    internal IReadOnlyList<CapturedLogEntry> Entries => _entries;
 
     /// <summary>The formatted message of every warning written through this logger, in order.</summary>
-    internal IReadOnlyList<string> Warnings => _warnings;
+    internal IReadOnlyList<string> Warnings =>
+        [.. _entries.Where(entry => entry.Level == LogLevel.Warning).Select(entry => entry.Message)];
 
     /// <inheritdoc/>
     public ILogger CreateLogger(string categoryName) => this;
@@ -53,10 +57,7 @@ internal sealed class CapturingLogger : ILogger, ILoggerProvider
         Func<TState, Exception?, string> formatter)
     {
         ArgumentNullException.ThrowIfNull(formatter);
-        if (logLevel == LogLevel.Warning)
-        {
-            _warnings.Add(formatter(state, exception));
-        }
+        _entries.Add(new CapturedLogEntry(logLevel, formatter(state, exception), exception));
     }
 
     /// <summary>
@@ -68,3 +69,9 @@ internal sealed class CapturingLogger : ILogger, ILoggerProvider
         // Intentionally empty — see the summary.
     }
 }
+
+/// <summary>One captured log entry: the level, the rendered message, and the exception it carried.</summary>
+/// <param name="Level">The level the entry was written at.</param>
+/// <param name="Message">The formatted message, exactly as the pipeline rendered it.</param>
+/// <param name="Exception">The exception the entry carried, when it carried one.</param>
+internal sealed record CapturedLogEntry(LogLevel Level, string Message, Exception? Exception);

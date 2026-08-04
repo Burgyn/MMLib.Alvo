@@ -29,14 +29,23 @@ public sealed class SqliteAlvoDataFixture : IAsyncDisposable
     /// The clock the data path stamps an <c>audit</c> entity's timestamps from; the system clock by default.
     /// Registered before the driver's own <c>TryAdd</c>, which is the same seam a host would use.
     /// </param>
+    /// <param name="configure">
+    /// Applied to the collection <em>after</em> <c>AddAlvo</c> and before the provider is built, for a caller
+    /// that has to reach a seam only a host owns — a logging provider, or the primary handler of a named
+    /// <c>HttpClient</c>. Nothing here substitutes an Alvo service; that is what the registrations above the
+    /// call are for.
+    /// </param>
     public async Task<AlvoDataHost> StartAsync(
-        SchemaModel schema, AlvoDescriptor? descriptor = null, TimeProvider? time = null)
+        SchemaModel schema,
+        AlvoDescriptor? descriptor = null,
+        TimeProvider? time = null,
+        Action<IServiceCollection>? configure = null)
     {
         ArgumentNullException.ThrowIfNull(schema);
 
         var path = NewDatabaseFile();
         var dialect = new LockRecordingSqlDialect();
-        var services = BuildProvider(path, dialect, time);
+        var services = BuildProvider(path, dialect, time, configure);
         await MigrateAsync(services, schema);
 
         var capture = NewCapture(path);
@@ -65,7 +74,8 @@ public sealed class SqliteAlvoDataFixture : IAsyncDisposable
     /// place. That is the same seam a host would use to swap a dialect — the data port is still the one the
     /// container composed, not one a test built by hand.
     /// </summary>
-    private ServiceProvider BuildProvider(string path, IAlvoSqlDialect dialect, TimeProvider? time)
+    private ServiceProvider BuildProvider(
+        string path, IAlvoSqlDialect dialect, TimeProvider? time, Action<IServiceCollection>? configure)
     {
         var builder = new FixtureAlvoBuilder(new ServiceCollection());
         builder.Services.AddSingleton(dialect);
@@ -76,6 +86,7 @@ public sealed class SqliteAlvoDataFixture : IAsyncDisposable
 
         builder.UseSqlite($"Data Source={path}");
         builder.Services.AddAlvo();
+        configure?.Invoke(builder.Services);
 
         var services = builder.Services.BuildServiceProvider();
         _providers.Add(services);

@@ -6,21 +6,33 @@ using System.Text.RegularExpressions;
 namespace MMLib.Alvo.Data.EntityFrameworkCore;
 
 /// <summary>
-/// Idempotently creates Alvo's own fixed bookkeeping tables — the append-only descriptor-versions table
-/// and the idempotency-record table — neither of which is produced by the declarative descriptor-diff
-/// engine (<see cref="Migrations.ISchemaMigrator"/>).
+/// Idempotently creates Alvo's own fixed bookkeeping tables — the append-only descriptor-versions table, the
+/// idempotency-record table and the transactional outbox — none of which is produced by the declarative
+/// descriptor-diff engine (<see cref="Migrations.ISchemaMigrator"/>).
 /// </summary>
 /// <remarks>
 /// <para>
 /// Every DDL statement here is written to be identical on SQLite and PostgreSQL (a single <c>CREATE TABLE
 /// IF NOT EXISTS</c> with only ANSI-portable column types), so this class needs no per-engine branching.
+/// That invariant is what decided the outbox's ordering key: a <c>sequence</c> column would need
+/// <c>AUTOINCREMENT</c> on one engine and <c>… AS IDENTITY</c> on the other, each of which the other engine
+/// refuses outright, so the key is a UUIDv7 <c>id</c> instead (see <see cref="OutboxTable"/>).
 /// </para>
 /// <para>
 /// The idempotency table's own DDL lives beside its name in <see cref="IdempotencyTable"/> rather than
 /// inline here, because the write path also has to create it on demand: nothing calls this initializer on
 /// the data path (only a descriptor <em>apply</em> reaches it), so a host whose schema never came through
 /// the mapper would otherwise have the table missing exactly when a create carrying a token needs it. Two
-/// creators, one DDL string.
+/// creators, one DDL string. <see cref="OutboxTable"/> follows the same arrangement for the same reason —
+/// every write emits an event, so the outbox has to exist on the data path too.
+/// </para>
+/// <para>
+/// <b>The outbox is the moment <c>docs/architecture/package-boundary.md</c> predicted</b> — <em>"a port is
+/// earned the moment a driver's system schema grows a table no store call touches"</em>. It is the first such
+/// table: the descriptor-version history has <see cref="Migrations.IDescriptorVersionStore"/> and the
+/// idempotency record is read through the write path itself, but nothing above the driver can reach a queued
+/// event. That debt is paid by <c>IOutboxStore</c>, which the dispatcher depends on and
+/// <c>EfCoreOutboxStore</c> implements over the statements in <see cref="OutboxTable"/>.
 /// </para>
 /// </remarks>
 internal sealed partial class SystemSchemaInitializer
@@ -42,9 +54,11 @@ internal sealed partial class SystemSchemaInitializer
         _connection = connection;
         TableName = DescriptorVersionsTableName(schemaPrefix);
         _idempotencyTableName = IdempotencyTable.NameFor(schemaPrefix);
+        _outboxTableName = OutboxTable.NameFor(schemaPrefix);
     }
 
     private readonly string _idempotencyTableName;
+    private readonly string _outboxTableName;
 
     /// <summary>Gets the fully-prefixed descriptor-versions table name, e.g. <c>alvo_descriptor_versions</c>.</summary>
     public string TableName { get; }
@@ -65,7 +79,9 @@ internal sealed partial class SystemSchemaInitializer
     /// </summary>
     /// <param name="schemaPrefix">The validated <see cref="AlvoOptions.SchemaPrefix"/>.</param>
     public static IReadOnlyList<string> FrameworkTableNames(string schemaPrefix) =>
-        [DescriptorVersionsTableName(schemaPrefix), IdempotencyTable.NameFor(schemaPrefix)];
+        [DescriptorVersionsTableName(schemaPrefix),
+         IdempotencyTable.NameFor(schemaPrefix),
+         OutboxTable.NameFor(schemaPrefix)];
 
     /// <summary>
     /// Creates the framework's bookkeeping tables if they do not already exist. Safe to call repeatedly —
@@ -88,6 +104,8 @@ internal sealed partial class SystemSchemaInitializer
         await CreateIfMissingAsync(TableName, DescriptorVersionsDdl, ct).ConfigureAwait(false);
         await CreateIfMissingAsync(
             _idempotencyTableName, IdempotencyTable.Ddl(_idempotencyTableName), ct).ConfigureAwait(false);
+        await CreateIfMissingAsync(
+            _outboxTableName, OutboxTable.Ddl(_outboxTableName), ct).ConfigureAwait(false);
     }
 
     /// <summary>

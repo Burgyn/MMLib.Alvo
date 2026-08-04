@@ -161,6 +161,58 @@ public class UnhonouredSubsystemsTests
                 + "descriptor, which is worse than a missing entry because it reads as coverage");
     }
 
+    /// <summary>
+    /// <b>The two blocks an after-hook now reaches say so</b>, rather than going on claiming that nothing
+    /// renders a template and no event is ever delivered.
+    /// </summary>
+    /// <remarks>
+    /// The consequence is the whole product of an entry — a line that names the right block and describes the
+    /// wrong absence sends the author to the wrong layer just as effectively as no line at all. PR5a made both
+    /// of these half true: an after-hook <em>does</em> render a template and <em>does</em> post to an endpoint,
+    /// while automation still reaches neither. Both halves have to be in the words, which is what these two
+    /// substrings check for.
+    /// </remarks>
+    /// <param name="block">The block whose consequence must name both halves.</param>
+    [Theory]
+    [InlineData("templates")]
+    [InlineData("webhooks")]
+    public void The_two_blocks_an_after_hook_reaches_name_both_halves(string block)
+    {
+        var consequence = Consequence(block);
+
+        consequence.ShouldContain(
+            "after-hook", Shouldly.Case.Sensitive, "the honoured half — this build does run these from a hook");
+        consequence.ShouldContain(
+            "automation", Shouldly.Case.Sensitive, "the unhonoured half — no automation rule is evaluated yet");
+    }
+
+    /// <summary>
+    /// <b>The <c>webhooks</c> line names that a delivery is unsigned</b>, because that is a <em>security</em>
+    /// absence an author reading the old wording would have assumed away.
+    /// </summary>
+    /// <remarks>
+    /// Standard Webhooks signing is 7.1's, so a delivery that happens today carries no HMAC header and
+    /// <c>secretRef</c> is never read — and the endpoint declaration <em>requires</em> a <c>secretRef</c>, so
+    /// an author has already supplied one and has every reason to believe it is in use. Naming the two
+    /// specific absences rather than "signing is not implemented" is deliberate: <c>secretRef</c> is the key
+    /// they wrote, and the HMAC header is the thing the receiver looks for and will not find.
+    /// </remarks>
+    [Fact]
+    public void The_webhook_line_names_the_unsigned_delivery_and_the_unread_secret_ref()
+    {
+        var consequence = Consequence("webhooks");
+
+        consequence.ShouldContain("secretRef", Shouldly.Case.Sensitive);
+        consequence.ShouldContain("HMAC", Shouldly.Case.Sensitive);
+    }
+
+    /// <summary>One entry's consequence, looked up by block name.</summary>
+    /// <param name="block">The block's key at the descriptor root.</param>
+    private static string Consequence(string block) =>
+        UnhonouredSubsystems.All
+            .Single(subsystem => string.Equals(subsystem.Block, block, StringComparison.Ordinal))
+            .Consequence;
+
     /// <summary>The repository's <c>examples/</c> directory.</summary>
     private static string Examples() => Path.Combine(RepositoryRoot.Find(), "examples");
 

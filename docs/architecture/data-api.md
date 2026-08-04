@@ -726,15 +726,29 @@ consequence and the fix named in the error:
 | `field.validation` | the expression is not evaluated, so a value it forbids is accepted — the field is not constrained at all |
 | `field.default` (**#113**) | no column default is emitted and the value is dropped, so the field is null — and on a `required` field that is an INSERT of NULL into a NOT NULL column |
 | `entity.softDelete` | a delete would remove the row outright and reads would not exclude it — irrecoverable data loss where the schema promises recoverability |
-| the six `entity.hooks.*` points, refused **one per point** (**#114**) | a `before*` hook may reject or mutate in the write transaction, so a write the author believes is vetted is neither; an `after*` effect simply never happens |
+| the three `before*` `entity.hooks.*` points, refused **one per point** (**#114**) | a `before*` hook may reject or mutate in the write transaction, so a write the author believes is vetted is neither |
+| a raw **JSONata** expression in any `$defs/jsonata` action slot (**#149**) | the action still runs, with Alvo's canonical envelope instead of the declared transform — a delivery that succeeded carrying data the author did not declare |
+| a template's **`bodyFile`**, per referencing after-hook | nothing reads a path inside a descriptor bundle, so the mail would go out with an empty body rather than fail |
+| an **`entity.update`** / **`function`** / **`http.call`** action on an after-hook | each loses something different, so each names its own consequence |
 | **declaring a framework-managed column name at all** | see below |
 
-Hooks are refused per point precisely so PR5 can delete one entry per point it implements, rather than
-facing an all-or-nothing switch.
+Hooks are refused per point precisely so PR5 could delete one entry per point it implements, rather than
+facing an all-or-nothing switch — **and it has.** PR5a compiles `afterCreate`/`afterUpdate`/`afterDelete`
+into the policy catalog and dispatches them from the outbox, so those three entries are gone and the three
+`before*` points stay (a before-hook runs *in the write transaction*, and nothing in this build does). No
+author of a `before*` hook saw a changed message, which is what "each one is lifted the day it starts
+working" was written to buy. The refusals PR5a *added* are in the same table above, and the subsystem's own
+record is [`events.md`](./events.md).
 
 **Warned about, not refused** — one line at apply naming each block it finds
 (`Descriptor.Internal.UnhonouredSubsystems`): `dynamicEntities`, `automation`, `templates`, `webhooks`,
 `functions` — one issue each, and `webhooks` earned a new one (**#120**) because nothing covered it.
+**`templates` and `webhooks` are now *partially* honoured, and the wording carries that rather than the
+entry leaving:** an after-hook does render a template and does post to a declared endpoint, so "nothing
+renders a template" and "no event is ever delivered" stopped being true — but both blocks are still dead
+from `automation`, which is where most descriptors reference them, and a delivery that happens is
+**unsigned** (`secretRef` unread, no Standard Webhooks HMAC header) and unprojected (**#152**). Deleting
+either entry would have been the larger lie.
 `branding` and `access` are parsed and consumed by nothing either, but both describe an
 admin-dashboard surface that does not exist in this build, so there is no place their absence could be
 observed yet.

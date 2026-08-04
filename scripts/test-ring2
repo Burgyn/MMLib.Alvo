@@ -23,7 +23,10 @@ else
   # every other path (no `origin/main`, dotnet-affected failing) falls through to
   # running it — but it means this scoping decides coverage, so treat a change to it
   # as a change to what the PR gate proves.
-  echo "[ring2] integration tests (Testcontainers), affected-scoped"
+  # "Integration" here means the slow tier, not the Docker tier — see test-ring0's own
+  # comment. Two of these projects need no container: the SQLite chaos criterion and the
+  # killed-host crash criteria.
+  echo "[ring2] integration tests (slow tier: Testcontainers + the numeric/crash criteria), affected-scoped"
   base="${ALVO_AFFECTED_BASE:-origin/main}"
   affected_scoped=false
   affected_list=""

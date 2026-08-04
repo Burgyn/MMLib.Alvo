@@ -719,6 +719,102 @@ namespace MMLib.Alvo.Descriptor
         public System.Collections.Generic.IReadOnlyDictionary<string, MMLib.Alvo.Descriptor.WebhookEndpoint>? Endpoints { get; init; }
     }
 }
+namespace MMLib.Alvo.Events
+{
+    public sealed class AlvoEvent : System.IEquatable<MMLib.Alvo.Events.AlvoEvent>
+    {
+        public const int CurrentPayloadVersion = 1;
+        public const string DataContentType = "application/json";
+        public const string DefaultSource = "/alvo";
+        public const string SpecVersion = "1.0";
+        public AlvoEvent() { }
+        public string? AuthId { get; init; }
+        public required string AuthType { get; init; }
+        public string? CausationId { get; init; }
+        public int ChainDepth { get; init; }
+        public required string CorrelationId { get; init; }
+        public required MMLib.Alvo.Events.AlvoEventData Data { get; init; }
+        public required System.Guid Id { get; init; }
+        public required string PartitionKey { get; init; }
+        public int PayloadVersion { get; init; }
+        public required string Source { get; init; }
+        public required string Subject { get; init; }
+        public required System.DateTimeOffset Time { get; init; }
+        public required string Type { get; init; }
+    }
+    public static class AlvoEventAttributes
+    {
+        public const string AuthId = "authid";
+        public const string AuthType = "authtype";
+        public const string CausationId = "causationid";
+        public const string ChainDepth = "chaindepth";
+        public const string CorrelationId = "correlationid";
+        public const string Data = "data";
+        public const string DataContentType = "datacontenttype";
+        public const string Id = "id";
+        public const string PartitionKey = "partitionkey";
+        public const string PayloadVersion = "payloadversion";
+        public const string Source = "source";
+        public const string SpecVersion = "specversion";
+        public const string Subject = "subject";
+        public const string Time = "time";
+        public const string Type = "type";
+        public static System.Collections.Generic.IReadOnlyList<string> Extensions { get; }
+        public static System.Collections.Generic.IReadOnlyList<string> Standard { get; }
+    }
+    public static class AlvoEventAuthType
+    {
+        public const string Anonymous = "anon";
+        public const string ApiKey = "apikey";
+        public const string System = "system";
+    }
+    public sealed class AlvoEventData : System.IEquatable<MMLib.Alvo.Events.AlvoEventData>
+    {
+        public AlvoEventData() { }
+        public System.Collections.Generic.IReadOnlyList<string> Changed { get; init; }
+        public MMLib.Alvo.Data.AlvoRecord? OldRecord { get; init; }
+        public MMLib.Alvo.Data.AlvoRecord? Record { get; init; }
+        public bool Equals(MMLib.Alvo.Events.AlvoEventData? other) { }
+        public override int GetHashCode() { }
+    }
+    public static class AlvoEventId
+    {
+        public static System.Guid Create() { }
+        public static System.Guid Create(System.DateTimeOffset timestamp) { }
+    }
+    public static class AlvoEventJson
+    {
+        public static MMLib.Alvo.Events.AlvoEvent Read(string json) { }
+        public static string Write(MMLib.Alvo.Events.AlvoEvent @event) { }
+    }
+    public sealed class AlvoMailMessage : System.IEquatable<MMLib.Alvo.Events.AlvoMailMessage>
+    {
+        public AlvoMailMessage(string To, string Subject, string Body) { }
+        public string Body { get; init; }
+        public string Subject { get; init; }
+        public string To { get; init; }
+    }
+    public interface IEmailSender
+    {
+        System.Threading.Tasks.Task SendAsync(MMLib.Alvo.Events.AlvoMailMessage message, System.Threading.CancellationToken cancellationToken = default);
+    }
+    public interface IOutboxStore
+    {
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.OutboxEntry>> ClaimAsync(string claimant, int batchSize, int maxAttempts, System.TimeSpan lease, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task EnsureAsync(System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task MarkDispatchedAsync(System.Guid id, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task ReleaseAsync(System.Guid id, System.TimeSpan retryAfter, System.Threading.CancellationToken cancellationToken = default);
+    }
+    public sealed class OutboxEntry : System.IEquatable<MMLib.Alvo.Events.OutboxEntry>
+    {
+        public OutboxEntry(System.Guid Id, string Type, string PartitionKey, string Payload, int Attempts) { }
+        public int Attempts { get; init; }
+        public System.Guid Id { get; init; }
+        public string PartitionKey { get; init; }
+        public string Payload { get; init; }
+        public string Type { get; init; }
+    }
+}
 namespace MMLib.Alvo.Expressions
 {
     public sealed class CelBinary : MMLib.Alvo.Expressions.CelNode, System.IEquatable<MMLib.Alvo.Expressions.CelBinary>

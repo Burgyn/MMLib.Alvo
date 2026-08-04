@@ -50,13 +50,28 @@ public sealed class PostgreSqlAlvoDataFixture : IAsyncLifetime
     /// <summary>Creates a database, migrates <paramref name="schema"/> into it and primes the policy catalog.</summary>
     /// <param name="schema">The schema to migrate and compile the rules against.</param>
     /// <param name="descriptor">The descriptor whose rules are compiled; a permissive minimal one by default.</param>
-    public async Task<PostgreSqlAlvoDataHost> StartAsync(SchemaModel schema, AlvoDescriptor? descriptor = null)
+    /// <param name="time">
+    /// The clock the data path stamps an <c>audit</c> entity's timestamps from; the system clock by default.
+    /// Registered before the driver's own <c>TryAdd</c>, which is the same seam a host would use — the twin of
+    /// the SQLite fixture's parameter, in the same position, so a fact needing a fixed clock reads identically
+    /// against either engine.
+    /// </param>
+    /// <param name="configure">
+    /// Applied to the collection <em>after</em> <c>AddAlvo</c> and before the provider is built, for a caller
+    /// that has to reach a seam only a host owns — a logging provider, or the primary handler of a named
+    /// <c>HttpClient</c>. The twin of the SQLite fixture's own parameter, for the same reason.
+    /// </param>
+    public async Task<PostgreSqlAlvoDataHost> StartAsync(
+        SchemaModel schema,
+        AlvoDescriptor? descriptor = null,
+        TimeProvider? time = null,
+        Action<IServiceCollection>? configure = null)
     {
         ArgumentNullException.ThrowIfNull(schema);
         Assert.SkipUnless(Available, "Docker is unavailable on this platform, so the PostgreSQL engine cannot be started.");
 
         var (connectionString, database) = await CreateDatabaseAsync();
-        var services = BuildProvider(connectionString);
+        var services = BuildProvider(connectionString, time, configure);
         await MigrateAsync(services, schema);
 
         var capture = NewCapture(database);
@@ -77,11 +92,18 @@ public sealed class PostgreSqlAlvoDataFixture : IAsyncLifetime
         return capture;
     }
 
-    private ServiceProvider BuildProvider(string connectionString)
+    private ServiceProvider BuildProvider(
+        string connectionString, TimeProvider? time, Action<IServiceCollection>? configure)
     {
         var builder = new FixtureAlvoBuilder(new ServiceCollection());
+        if (time is not null)
+        {
+            builder.Services.AddSingleton(time);
+        }
+
         builder.UsePostgreSql(connectionString);
         builder.Services.AddAlvo();
+        configure?.Invoke(builder.Services);
 
         var services = builder.Services.BuildServiceProvider();
         _providers.Add(services);
