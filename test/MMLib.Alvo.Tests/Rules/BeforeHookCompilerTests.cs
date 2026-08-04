@@ -191,8 +191,11 @@ public class BeforeHookCompilerTests
         // An unresolvable CEL reference inside the mutate value, as opposed to in the condition.
         { BeforeCreate(Mutate("title", Cel("lowerAscii(new.titel)"))), "/entities/deals/hooks/beforeCreate/0/action/mutate/title" },
 
-        // A framework-managed column: the tenancy guard, refused for the whole managed set.
-        { BeforeCreate(Mutate("tenant_id", Cel("@tenant.id"))), "/entities/deals/hooks/beforeCreate/0/action/mutate/tenant_id" },
+        // A framework-managed column: the tenancy guard, refused for the whole managed set. Both values are
+        // ones the Mutate profile accepts — a literal uuid and now() — so the guard is the only thing that can
+        // be refusing them. A '@tenant.id' value would have been refused by the profile table anyway (context
+        // references are not admitted to Mutate yet), and this row would then have passed with no guard at all.
+        { BeforeCreate(Mutate("tenant_id", Literal(OtherTenant))), "/entities/deals/hooks/beforeCreate/0/action/mutate/tenant_id" },
         { BeforeCreate(Mutate("created_at", Cel("now()"))), "/entities/deals/hooks/beforeCreate/0/action/mutate/created_at" },
 
         // A value type the target field cannot hold.
@@ -284,6 +287,9 @@ public class BeforeHookCompilerTests
             .ShouldContainKeyAndValue("status", "approved");
 
     private static DateTimeOffset Stamp { get; } = new(2026, 8, 4, 9, 30, 0, TimeSpan.Zero);
+
+    /// <summary>A tenant that is not the caller's — the value a hook rewriting <c>tenant_id</c> would store.</summary>
+    private const string OtherTenant = "\"22222222-0000-0000-0000-000000000002\"";
 
     /// <summary>
     /// An expression past <c>CelCompiler.MaxTreeDepth</c>. Written as a <c>+</c> chain because a flat source
