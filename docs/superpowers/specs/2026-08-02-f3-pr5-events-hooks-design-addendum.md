@@ -88,28 +88,46 @@ Add a fourth profile, **`CelProfile.Mutate`**, appended to the enum
 (`src/MMLib.Alvo.Abstractions/Expressions/CelProfile.cs`), with this row in
 `cel.md`'s truth table:
 
-| Construct | Rule | Computed | Condition | **Mutate** |
-|---|---|---|---|---|
-| Literal | ✓ | ✓ | ✓ | **✓** |
-| Field ref, current row | ✓ | ✓ | ✓ | **✓** |
-| Field ref, `old.`/`new.` | ✗ | ✗ | ✓ | **✓** |
-| `@user`/`@tenant` | ✓ | ✗ | ✓ | **✓** |
-| `&&` / `\|\|` / `!` | ✓ | ✓ | ✓ | **✓** |
-| Comparison | ✓ | ✓ | ✓ | **✓** |
-| `in` (role membership) | ✓ | ✗ | ✓ | **✓** |
-| `has(field)` | ✓ | ✓ | ✓ | **✓** |
-| Arithmetic | ✗ | ✓ | ✗ | **✓** |
-| Ternary | ✗ | ✓ | ✗ | **✓** |
-| `changed(field)` | ✗ | ✗ | ✓ | **✓** |
-| **Allow-listed function call** | ✗ | ✗ | ✗ | **✓** |
-| **Result type** | `Bool` | non-boolean scalar | `Bool` | **any scalar, incl. `Bool`** |
+> **Corrected by PR5b, which implemented it.** This table's `Mutate` column was written as
+> the *upper bound* the profile may hold, and it read as a promise. What shipped is
+> narrower: `_allowedProfiles` admits **four** constructs in `Mutate` and no more. The
+> **Shipped** column below is what `CelTypeChecker` really does; the **Design** column is
+> this decision's original bound, kept because the argument for why each construct *may*
+> live in `Mutate` is still the argument a widening would use.
+> `docs/architecture/cel.md`'s truth table is the one that is authoritative, and it prints
+> the shipped state only. See deviation 79.
 
-`Mutate` is the union of `Condition`'s visibility with `Computed`'s expressive constructs,
-plus a small function allow-list, and it is the only profile with no constraint on the
-result type at all — a `boolean` column is a legitimate `mutate` target
+| Construct | Rule | Computed | Condition | **Mutate (shipped)** | Mutate (design bound) |
+|---|---|---|---|---|---|
+| Literal | ✓ | ✓ | ✓ | **✓** | ✓ |
+| Field ref, current row | ✓ | ✓ | ✓ | **✓** | ✓ |
+| Field ref, `old.`/`new.` | ✗ | ✗ | ✓ | **✓** | ✓ |
+| `@user`/`@tenant` | ✓ | ✗ | ✓ | **✗ deferred** | ✓ |
+| `&&` / `\|\|` / `!` | ✓ | ✓ | ✓ | **✗ deferred** | ✓ |
+| Comparison | ✓ | ✓ | ✓ | **✗ deferred** | ✓ |
+| `in` (role membership) | ✓ | ✗ | ✓ | **✗ deferred** | ✓ |
+| `has(field)` | ✓ | ✓ | ✓ | **✗ deferred** | ✓ |
+| Arithmetic | ✗ | ✓ | ✗ | **✗ deferred** | ✓ |
+| Ternary | ✗ | ✓ | ✗ | **✗ deferred** | ✓ |
+| `changed(field)` | ✗ | ✗ | ✓ | **✗ deferred** | ✓ |
+| **Allow-listed function call** | ✗ | ✗ | ✗ | **✓** | ✓ |
+| **Result type** | `Bool` | non-boolean scalar | `Bool` | **any scalar, incl. `Bool`** | any scalar, incl. `Bool` |
+
+**Deferred, not refused.** Deny-by-default is what makes the deferral safe: an unlisted
+pairing compiles in **no** profile, so nothing waits in a half-admitted state, and each
+construct arrives with the fact that needs it. Measured against the tree: the only `mutate`
+values that exist are `lowerAscii(new.email)` and `now()` (`crm.alvo.json:110`, `:148`), so
+the four shipped rows are exactly what the descriptors need — the deferral costs nothing
+that ships.
+
+At its design bound `Mutate` is the union of `Condition`'s visibility with `Computed`'s
+expressive constructs, plus a small function allow-list. The **result type** row shipped in
+full and is not deferred: `Mutate` is the only profile with no constraint on the result type
+at all — a `boolean` column is a legitimate `mutate` target
 (`"mutate": {"is_closed": {"$cel": "new.stage == 'won'"}}`), which is exactly the case
 `Computed` has to reject because a generated column cannot hold "predicate" as a value
-(`CelCompiler.cs:81-87`).
+(`CelCompiler.cs:81-87`). That example is also the one that will bring the comparison row
+with it, because it needs `==`, which today's checker refuses.
 
 **The name.** `Mutate`, not `Value`. Alvo's profiles are named after the **descriptor slot**
 they compile, never after the result shape: `Rule` is `entities.*.rules.*` (plus the
