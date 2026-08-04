@@ -395,4 +395,46 @@ public class SqlPredicateRendererTests
         scalar.Sql.ShouldBe(
             "(CASE WHEN (NOT COALESCE(CAST(\"total\" AS numeric) > CAST(@p0 AS numeric), FALSE)) THEN @p1 ELSE @p2 END)");
     }
+
+    /// <summary>
+    /// The <see cref="CelProfile.Mutate"/> profile's interpreter-only guarantee, asserted from the
+    /// renderer's side: a function call is refused <em>by name</em>, with a message naming the profile and
+    /// saying why, never by the generic "cannot be rendered by this entry point" default arm. Deleting the
+    /// explicit arm leaves a <see cref="NotSupportedException"/> of the same shape, so these two facts
+    /// assert the message and not merely the exception type — otherwise the guarantee would survive its own
+    /// removal.
+    /// </summary>
+    /// <remarks>
+    /// Both trees are assembled by hand rather than compiled from source, deliberately: the refusal has to
+    /// hold for any <see cref="CelCall"/> that reaches the renderer through any seam a provider may drive
+    /// directly, not only for the source shapes today's parser happens to produce.
+    /// </remarks>
+    [Fact]
+    public void A_mutate_function_call_is_refused_by_name_with_the_profile_and_the_reason()
+    {
+        var refused = Should.Throw<NotSupportedException>(
+            () => _renderer.Render(MutateExpression(LowerAsciiOfTitle), CelFixtures.Alice, _fields));
+
+        refused.Message.ShouldContain(nameof(CelProfile.Mutate));
+        refused.Message.ShouldContain(CelCall.LowerAscii);
+        refused.Message.ShouldContain("never rendered to SQL");
+    }
+
+    [Fact]
+    public void A_mutate_function_call_is_refused_in_an_operand_position_too_not_only_at_the_root()
+    {
+        var comparison = new CelBinary(
+            CelBinaryOperator.Equal, LowerAsciiOfTitle, new CelLiteral(CelValueType.String, "alvo"));
+
+        var refused = Should.Throw<NotSupportedException>(
+            () => _renderer.Render(MutateExpression(comparison, CelValueType.Bool), CelFixtures.Alice, _fields));
+
+        refused.Message.ShouldContain(nameof(CelProfile.Mutate));
+    }
+
+    private static CelCall LowerAsciiOfTitle =>
+        new(CelCall.LowerAscii, new CelFieldRef("title", CelValueType.String, CelRecordState.Current));
+
+    private static CompiledExpression MutateExpression(CelNode root, CelValueType resultType = CelValueType.String) =>
+        new(root, CelProfile.Mutate, resultType, "lowerAscii(title)", CelFixtures.Orders);
 }
