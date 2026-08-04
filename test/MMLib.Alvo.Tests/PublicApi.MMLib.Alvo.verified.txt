@@ -17,6 +17,12 @@ namespace MMLib.Alvo.Api
         public int MaxRequestBodyBytes { get; set; }
         public string RoutePrefix { get; set; }
     }
+    public static class AlvoHealth
+    {
+        public const string LivenessPath = "/health/live";
+        public const string ReadinessPath = "/health/ready";
+        public const string ReadyTag = "ready";
+    }
     public static class AlvoProblemTypes
     {
         public const string BaseUri = "https://alvo.dev/errors/";
@@ -80,6 +86,34 @@ namespace MMLib.Alvo.Auth
 }
 namespace MMLib.Alvo.Migrations
 {
+    public enum AlvoBootPhase
+    {
+        Pending = 0,
+        Ready = 1,
+        Failed = 2,
+    }
+    public sealed class AlvoBootState
+    {
+        public AlvoBootState() { }
+        public int? AppliedRevision { get; }
+        public string? Failure { get; }
+        public MMLib.Alvo.Migrations.AlvoBootPhase Phase { get; }
+    }
+    public sealed class AlvoSchemaOptions
+    {
+        public const string SectionName = "Alvo:Schema";
+        public AlvoSchemaOptions() { }
+        public bool AllowDestructive { get; set; }
+        public MMLib.Alvo.Migrations.AlvoSchemaStartupMode Startup { get; set; }
+    }
+    public sealed class AlvoStartupRefusedException : System.Exception
+    {
+        public AlvoStartupRefusedException() { }
+        public AlvoStartupRefusedException(string message) { }
+        public AlvoStartupRefusedException(string message, System.Exception innerException) { }
+        public AlvoStartupRefusedException(string message, string fixSuggestion) { }
+        public string FixSuggestion { get; }
+    }
     public sealed class RuntimeSchemaService
     {
         public RuntimeSchemaService(MMLib.Alvo.Descriptor.IDescriptorValidator validator, MMLib.Alvo.Migrations.ISchemaMigrator migrator, MMLib.Alvo.Migrations.IDescriptorVersionStore store, MMLib.Alvo.Migrations.IRuntimeSchemaWriter writer, MMLib.Alvo.Expressions.ICelCompiler compiler, MMLib.Alvo.Rules.IPolicyCatalogProvider policyCatalogProvider) { }
@@ -105,6 +139,14 @@ namespace Microsoft.AspNetCore.Builder
     public static class AlvoDataApiEndpointRouteBuilderExtensions
     {
         public static Microsoft.AspNetCore.Routing.IEndpointRouteBuilder MapAlvoDataApi(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints) { }
+    }
+    public static class AlvoEndpointRouteBuilderExtensions
+    {
+        public static Microsoft.AspNetCore.Routing.IEndpointRouteBuilder MapAlvo(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints) { }
+    }
+    public static class AlvoHealthEndpointRouteBuilderExtensions
+    {
+        public static Microsoft.AspNetCore.Routing.IEndpointRouteBuilder MapAlvoHealth(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints) { }
     }
 }
 namespace Microsoft.Extensions.DependencyInjection

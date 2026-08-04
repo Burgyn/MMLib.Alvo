@@ -12,18 +12,20 @@ namespace Microsoft.Extensions.DependencyInjection;
 /// genuinely needs is one verb — <em>bring the configured descriptor up</em> — so that is what is public.
 /// </para>
 /// <para>
-/// <b>Call it before mapping endpoints.</b> <c>MapAlvoDataApi</c> reads entity-name literals off the applied
-/// schema, so a host that maps first maps nothing at all. It is also what primes the policy catalog, and an
-/// unprimed catalog denies every operation (fail-closed) — see <c>RuntimeSchemaService</c>'s remarks.
+/// <b>No host has to call it, and the ordering obligation it used to carry is gone.</b> Alvo's own boot
+/// service loads, applies and primes before the server binds, and <c>MapAlvoDataApi</c> reads its
+/// entity-name literals when the endpoint table first materialises — so mapping before anything is applied is
+/// now the ordinary shape. What remains for this verb is the callers that <em>are</em> an explicit apply: the
+/// CLI and the Management API.
 /// </para>
 /// <para>
 /// <b>A refusal is a return value, not an exception.</b> A plan that is destructive while
 /// <c>AllowDestructive</c> is <see langword="false"/> comes back with <c>Applied == false</c> and no throw,
 /// because a caller that asked for a dry run wants to read the plan rather than catch it. A caller that
 /// wants a running backend wants the opposite and must say so: call
-/// <see cref="MigrationResult.EnsureApplied"/> on what this returns. Discarding the result is how a host
-/// ends up mapping zero routes while reporting healthy — <c>Applied == false</c> leaves the policy catalog
-/// unprimed, and <c>MapAlvoDataApi</c> reads its entity names off that.
+/// <see cref="MigrationResult.EnsureApplied"/> on what this returns. Discarding the result is how a caller
+/// ends up believing a refused descriptor was applied — <c>Applied == false</c> leaves the policy catalog
+/// unprimed, and an unprimed catalog denies every operation (fail-closed).
 /// </para>
 /// <para>
 /// A new verb in <c>docs/architecture/extensibility.md</c>'s taxonomy: <c>Apply{Thing}</c> is a runtime

@@ -14,12 +14,13 @@ namespace MMLib.Alvo.Api.Internal;
 /// path that does not exist, or miss one that does.
 /// </para>
 /// <para>
-/// <b>The read is live, and mapping happens once.</b> A host maps routes at startup, so the applied
-/// schema must already be in place by then — <see cref="AlvoApiOptions"/>' own seam,
-/// <c>MapAlvoDataApi</c>, documents that ordering. A descriptor applied <em>later</em> at runtime
-/// (<c>RuntimeSchemaService</c>) changes policy and validation immediately but cannot add a route
-/// literal to an already-built endpoint table; F7's dynamic entities will need an endpoint data source
-/// that can change, which is deliberately not built here.
+/// <b>The read is live, and it happens when the endpoint table materialises — not when a host called
+/// <c>MapAlvoDataApi</c>.</b> <see cref="AlvoEndpointDataSource"/> reads this once, on its first
+/// enumeration, which is after Alvo's boot has primed the schema and therefore removes the old
+/// obligation to apply the descriptor before mapping. A descriptor applied <em>later still</em> at runtime
+/// (<c>RuntimeSchemaService</c>) changes policy and validation immediately but cannot add a route literal
+/// to a table that has already materialised; F7's dynamic entities will need an endpoint data source that
+/// can change, which is deliberately not built here (#103).
 /// </para>
 /// </remarks>
 /// <param name="schema">The applied schema registry — the same instance the policy catalog serves, by construction.</param>

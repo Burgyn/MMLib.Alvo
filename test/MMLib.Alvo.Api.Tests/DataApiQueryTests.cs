@@ -1,9 +1,12 @@
 ﻿using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using MMLib.Alvo.Api.Internal;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Schema;
 using System.Net;
 using System.Text.Json.Nodes;
@@ -249,8 +252,8 @@ public sealed class DataApiQueryTests
     }
 
     /// <summary>
-    /// The mapping-time reserved-name belt, exercised on the <b>only</b> path it exists for: an applied schema that
-    /// reaches route generation without ever having passed descriptor validation.
+    /// The reserved-name belt, exercised on the <b>only</b> path it exists for: an applied schema that reaches
+    /// route generation without ever having passed descriptor validation.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -264,9 +267,26 @@ public sealed class DataApiQueryTests
     /// bypass: <c>EntityRouteCatalog</c> reads the applied schema from <c>ISchemaRegistry</c>, so a registry
     /// answering with a hostile schema is precisely the shape those two paths take.
     /// </para>
+    /// <para>
+    /// <b>The refusal is raised at route materialisation, not by the <c>MapAlvoDataApi</c> call — which is the
+    /// mechanism this fact had to change and the assertion it deliberately kept.</b> Route literals are now read
+    /// when the endpoint table is first enumerated, so a check made at the map call would have inspected an
+    /// unprimed registry and passed vacuously in every real host. The start-time refusal for a
+    /// <em>descriptor</em> is boot stage 0's, over the descriptor's own mapped schema
+    /// (<c>DescriptorBootPlanTests</c>); for a substituted registry, first enumeration is the earliest anything
+    /// can see the hostile schema at all.
+    /// </para>
+    /// <para>
+    /// <b>And the refusal is <em>recorded</em>, not thrown, which is the second thing this fact had to change.</b>
+    /// Throwing out of an <c>EndpointDataSource</c> broke the composite the framework matches every request
+    /// through — <c>/health/live</c> included — so a hostile registry got the container killed and restart-looped.
+    /// What is asserted instead is both halves of the fail-closed answer: the table materialises <em>empty</em>, so
+    /// no route exists, and <c>AlvoBootState</c> carries the reason with the phase Failed, so readiness reports it
+    /// and an orchestrator drains the pod instead of restarting it.
+    /// </para>
     /// </remarks>
     [Fact]
-    public void A_schema_reaching_mapping_without_validation_is_still_refused_for_a_reserved_field_name()
+    public void A_schema_reaching_route_materialisation_without_validation_is_still_refused_for_a_reserved_field_name()
     {
         var builder = WebApplication.CreateSlimBuilder();
         builder.WebHost.UseTestServer();
@@ -287,12 +307,31 @@ public sealed class DataApiQueryTests
         ])));
 
         using var app = builder.Build();
+        app.MapAlvoDataApi();
 
-        var refusal = Should.Throw<InvalidOperationException>(() => app.MapAlvoDataApi());
-        refusal.Message.ShouldContain("widgets");
-        refusal.Message.ShouldContain(ReservedQueryKeys.Limit);
-        refusal.Message.ShouldContain("Rename the field");
+        MaterialiseRoutes(app).ShouldBeEmpty("a schema the belt refused must produce no route at all");
+
+        var state = app.Services.GetRequiredService<AlvoBootState>();
+        state.Phase.ShouldBe(AlvoBootPhase.Failed);
+
+        var refusal = state.Failure.ShouldNotBeNull();
+        refusal.ShouldContain("widgets");
+        refusal.ShouldContain(ReservedQueryKeys.Limit);
+        refusal.ShouldContain("Rename the field");
     }
+
+    /// <summary>
+    /// Builds the mapped endpoint table, which is what the first request to arrive does, and returns what it
+    /// produced.
+    /// </summary>
+    /// <remarks>
+    /// Read off <see cref="IEndpointRouteBuilder.DataSources"/> rather than by sending a request, because a
+    /// request cannot tell the two outcomes apart: a refused schema and a schema with no such entity both answer
+    /// 404 from routing. The endpoint list can.
+    /// </remarks>
+    /// <param name="app">The application whose mapped routes to materialise.</param>
+    private static IReadOnlyList<Endpoint> MaterialiseRoutes(WebApplication app) =>
+        [.. ((IEndpointRouteBuilder)app).DataSources.SelectMany(source => source.Endpoints)];
 
     /// <summary>An applied schema handed straight to route generation, with no descriptor behind it.</summary>
     /// <param name="schema">The schema to answer with.</param>

@@ -17,6 +17,8 @@ internal static class DestructiveChangeGuard
 {
     private const string NoDestructiveChangesSummary = "No destructive changes.";
 
+    private const string DestructiveMarker = "  <- destructive";
+
     /// <summary>Describes the destructive steps of <paramref name="plan"/>, one line each.</summary>
     /// <param name="plan">The plan to describe.</param>
     /// <returns>
@@ -30,6 +32,23 @@ internal static class DestructiveChangeGuard
             ? NoDestructiveChangesSummary
             : string.Join(Environment.NewLine, destructiveSteps.Select(DescribeStep));
     }
+
+    /// <summary>
+    /// Describes <b>every</b> step of <paramref name="plan"/>, one line each, marking the destructive ones.
+    /// </summary>
+    /// <param name="plan">The plan to describe.</param>
+    /// <returns>A newline-separated summary of every step, empty when the plan has none.</returns>
+    /// <remarks>
+    /// The refusal a boot prints when the descriptor has drifted has to name the drift, which is usually
+    /// entirely non-destructive — an added field — so <see cref="Describe"/>'s destructive-only projection
+    /// says nothing about it. This is the second projection over the <em>same</em> per-step formatting rather
+    /// than a second formatter, so the two refusals an operator can see spell a step identically.
+    /// </remarks>
+    public static string DescribeAllSteps(MigrationPlan plan)
+        => string.Join(Environment.NewLine, plan.Steps.Select(DescribeStepMarkingDestructive));
+
+    private static string DescribeStepMarkingDestructive(MigrationStep step)
+        => step.IsDestructive ? DescribeStep(step) + DestructiveMarker : DescribeStep(step);
 
     private static string DescribeStep(MigrationStep step)
     {

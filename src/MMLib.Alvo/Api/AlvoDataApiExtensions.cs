@@ -11,12 +11,22 @@ namespace Microsoft.Extensions.DependencyInjection;
 /// </summary>
 public static class AlvoDataApiExtensions
 {
-    /// <summary>Registers the generated Data API's services.</summary>
+    /// <summary>Configures the generated Data API, which <c>AddAlvo</c> has already registered.</summary>
     /// <remarks>
-    /// Additive and idempotent (<c>Add{Thing}</c> in the fixed verb taxonomy). The services themselves
-    /// are already registered by <c>AddAlvo</c> — registering a service exposes nothing — so this method
-    /// exists to <em>configure</em> the feature and to make it discoverable beside the rest of the
-    /// builder. Nothing is reachable over HTTP until <c>MapAlvoDataApi</c> is called.
+    /// <para>
+    /// <b>The Data API is on by default, so this call is configuration and nothing else.</b> It is the point
+    /// of the framework: a registration a host has to ask for is a trap rather than a choice, and asking for
+    /// it was one of the ordering obligations this seam exists to remove. <c>AddAlvo</c> registers the
+    /// services, and nothing is reachable over HTTP until
+    /// <c>MapAlvoDataApi</c> — or <c>MapAlvo</c> — is called, which is a separate seam by design
+    /// (<c>docs/architecture/extensibility.md</c> rule 10).
+    /// </para>
+    /// <para>
+    /// Additive and idempotent (<c>Add{Thing}</c> in the fixed verb taxonomy, rule 7): calling it twice is not
+    /// a duplicate, and a second call carrying no <paramref name="configure"/> does not undo the first. Order
+    /// does not matter either — the default registration contributes no configure action of its own, so a
+    /// host's value wins whether it was written before or after <c>AddAlvo</c>.
+    /// </para>
     /// </remarks>
     /// <param name="builder">The Alvo builder.</param>
     /// <param name="configure">Configures <see cref="AlvoApiOptions"/> — the route prefix and the paging limits.</param>
@@ -25,7 +35,6 @@ public static class AlvoDataApiExtensions
     {
         ArgumentNullException.ThrowIfNull(builder);
 
-        builder.Services.AddAlvoApi();
         if (configure is not null)
         {
             builder.Services.Configure(configure);

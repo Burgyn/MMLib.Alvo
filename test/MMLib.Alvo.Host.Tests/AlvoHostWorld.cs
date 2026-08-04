@@ -6,6 +6,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using MMLib.Alvo.Migrations;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
@@ -18,8 +19,8 @@ namespace MMLib.Alvo.Host.Tests;
 /// </summary>
 /// <remarks>
 /// The composition <em>is</em> the thing under test: a fixture that assembled its own pipeline would go on
-/// passing after <see cref="AlvoHost.BuildAsync"/> stopped applying the descriptor, stopped mapping the Data
-/// API, or stopped registering the exception handler. Configuration arrives as an in-memory source keyed
+/// passing after <see cref="AlvoHost.BuildAsync"/> stopped calling <c>MapAlvo</c>, stopped honouring the path
+/// base, or stopped registering the exception handler. Configuration arrives as an in-memory source keyed
 /// exactly as the container's environment variables are, so a fact about <c>Alvo:Database:Provider</c> is a
 /// fact about <c>Alvo__Database__Provider</c>.
 /// </remarks>
@@ -66,10 +67,49 @@ internal sealed class AlvoHostWorld : IAsyncDisposable
         string? databasePath = null,
         Action<WebApplicationBuilder>? configure = null)
     {
-        var descriptorPath = Path.IsPathRooted(descriptor) ? descriptor : DescriptorPath(descriptor);
         var ownedDatabasePath = databasePath is null ? TempDatabasePath() : null;
         var logs = new CapturingLoggerProvider();
-        var settings = Settings(descriptorPath, databasePath ?? ownedDatabasePath!, overrides);
+        var builder = Builder(descriptor, databasePath ?? ownedDatabasePath!, overrides, logs, configure);
+
+        var app = await AlvoHost.BuildAsync(builder);
+        await app.StartAsync(TestContext.Current.CancellationToken);
+        return new AlvoHostWorld(app, ownedDatabasePath, logs);
+    }
+
+    /// <summary>
+    /// The builder a world would start, handed back unstarted so a caller can give it to
+    /// <see cref="AlvoHost.RunAsync(Func{WebApplicationBuilder})"/> — the container's own run-and-own path.
+    /// </summary>
+    /// <remarks>
+    /// <b>The reason this exists is what it deliberately does not do.</b> A fact about a refused start
+    /// disposing the application it built cannot be written through <see cref="StartAsync"/>, because a refusal
+    /// now escapes <c>app.StartAsync()</c> and nothing there owns the application: making it pass would mean
+    /// wrapping the fixture's own start in a <c>try</c>/<c>DisposeAsync</c>, and the fact would then measure
+    /// the fixture's cleanup rather than the product's. So the fixture stops at the builder and the product
+    /// runs it.
+    /// </remarks>
+    /// <param name="descriptor">A bare file name under this project's <c>descriptors/</c> output, or a rooted path.</param>
+    /// <param name="databasePath">A database the caller owns, so this builder can restart over an existing one.</param>
+    /// <param name="configure">Anything the caller adds to the builder — a probe, for instance.</param>
+    internal static WebApplicationBuilder BuilderFor(
+        string descriptor, string databasePath, Action<WebApplicationBuilder> configure) =>
+        Builder(descriptor, databasePath, overrides: null, new CapturingLoggerProvider(), configure);
+
+    /// <summary>Assembles the standalone host's builder over <see cref="TestServer"/>, and starts nothing.</summary>
+    /// <param name="descriptor">A bare file name under this project's <c>descriptors/</c> output, or a rooted path.</param>
+    /// <param name="databasePath">The database this host reads and writes.</param>
+    /// <param name="overrides">Configuration keys to overlay; a <see langword="null"/> value unsets one.</param>
+    /// <param name="logs">Where the host's log records are captured.</param>
+    /// <param name="configure">Anything the caller adds before <see cref="AlvoHost.BuildAsync"/> runs.</param>
+    private static WebApplicationBuilder Builder(
+        string descriptor,
+        string databasePath,
+        IReadOnlyDictionary<string, string?>? overrides,
+        CapturingLoggerProvider logs,
+        Action<WebApplicationBuilder>? configure)
+    {
+        var descriptorPath = Path.IsPathRooted(descriptor) ? descriptor : DescriptorPath(descriptor);
+        var settings = Settings(descriptorPath, databasePath, overrides);
 
         var builder = AlvoHost.CreateBuilder(
             [], configuration => configuration.AddInMemoryCollection(settings));
@@ -79,9 +119,7 @@ internal sealed class AlvoHostWorld : IAsyncDisposable
         builder.Services.AddSingleton<IStartupFilter>(new RemoteAddressStartupFilter(_remoteAddress));
         configure?.Invoke(builder);
 
-        var app = await AlvoHost.BuildAsync(builder, TestContext.Current.CancellationToken);
-        await app.StartAsync(TestContext.Current.CancellationToken);
-        return new AlvoHostWorld(app, ownedDatabasePath, logs);
+        return builder;
     }
 
     /// <summary>A fresh SQLite path under the temp directory, for a caller that starts more than one world over it.</summary>
@@ -370,6 +408,48 @@ internal sealed class DisposalProbe : IConfigureOptions<AlvoHostOptions>, IDispo
     }
 
     public void Dispose() => Disposed = true;
+}
+
+/// <summary>
+/// Counts how many times anything loaded the descriptor, by wrapping the source <c>FromDescriptor</c>
+/// registered rather than replacing it — the production file source stays in the path.
+/// </summary>
+/// <remarks>
+/// One number, and it is the only thing that can tell the collapsed host from the one before it. While
+/// <c>BuildAsync</c> applied the descriptor itself, a single start ran the load-validate-map-compile pass
+/// <em>twice</em>: once for that eager apply and once again inside the boot service, which then found nothing
+/// to do. Neither pass logged anything distinguishable and both produced the same schema, so nothing but a
+/// count could see it.
+/// </remarks>
+internal sealed class DescriptorReadCounter : IDescriptorSource
+{
+    private readonly IDescriptorSource _inner;
+    private int _reads;
+
+    private DescriptorReadCounter(IDescriptorSource inner) => _inner = inner;
+
+    /// <summary>Wraps whatever descriptor source the builder already has, and hands the counter back.</summary>
+    /// <param name="builder">The builder the world is assembling, after <c>AddAlvo</c> has registered its source.</param>
+    internal static DescriptorReadCounter RegisteredOn(WebApplicationBuilder builder)
+    {
+        var registered = builder.Services.Last(service => service.ServiceType == typeof(IDescriptorSource));
+        var counter = new DescriptorReadCounter((IDescriptorSource)registered.ImplementationInstance!);
+
+        builder.Services.Remove(registered);
+        builder.Services.AddSingleton<IDescriptorSource>(counter);
+
+        return counter;
+    }
+
+    /// <summary>How many times the descriptor was loaded.</summary>
+    internal int Reads => Volatile.Read(ref _reads);
+
+    public Task<string> LoadAsync(CancellationToken ct = default)
+    {
+        Interlocked.Increment(ref _reads);
+
+        return _inner.LoadAsync(ct);
+    }
 }
 
 /// <summary>Every log record the host wrote, so a fact can assert a warning was actually delivered.</summary>

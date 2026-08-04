@@ -102,6 +102,53 @@ public sealed class DestructiveChangeGuardTests
     }
 
     [Fact]
+    public void DescribeAllSteps_lists_the_non_destructive_step_Describe_omits()
+    {
+        var plan = new MigrationPlan
+        {
+            Steps =
+            [
+                new MigrationStep(
+                    new SchemaChange { Kind = SchemaChangeKind.AddField, Entity = "orders", Field = "discount" },
+                    IsDestructive: false,
+                    Reason: null),
+            ],
+        };
+
+        DestructiveChangeGuard.DescribeAllSteps(plan).ShouldBe("AddField orders.discount");
+    }
+
+    [Fact]
+    public void DescribeAllSteps_marks_only_the_destructive_step_so_a_drift_refusal_reads_as_one_list()
+    {
+        var plan = new MigrationPlan
+        {
+            Steps =
+            [
+                new MigrationStep(
+                    new SchemaChange { Kind = SchemaChangeKind.AddField, Entity = "orders", Field = "discount" },
+                    IsDestructive: false,
+                    Reason: null),
+                new MigrationStep(
+                    new SchemaChange
+                    {
+                        Kind = SchemaChangeKind.DropField,
+                        Entity = "orders",
+                        Field = "legacy_ref",
+                        IsDestructive = true,
+                    },
+                    IsDestructive: true,
+                    Reason: null),
+            ],
+        };
+
+        DestructiveChangeGuard.DescribeAllSteps(plan).ShouldBe(string.Join(
+            Environment.NewLine,
+            "AddField orders.discount",
+            "DropField orders.legacy_ref  <- destructive"));
+    }
+
+    [Fact]
     public void Describe_joins_multiple_destructive_steps_with_one_line_each()
     {
         var plan = new MigrationPlan

@@ -9,6 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (breaking)
 
+- **Alvo applies the descriptor on boot by default, and the host no longer applies anything itself.**
+  The boot sequence runs as part of the host lifecycle, before the server binds: it loads and
+  validates the descriptor, brings the schema up as far as the startup mode allows, primes the policy
+  catalog and publishes a boot state a readiness probe reads. Three consequences a consumer can see:
+  - **`Alvo:Schema:Startup` (`Alvo__Schema__Startup`) defaults to `Apply`.** On *drift* — a descriptor
+    that no longer matches the schema recorded for the database — the boot applies the difference
+    instead of refusing. Initialization of a database Alvo has recorded nothing for was never
+    governed by the mode and still is not, in every mode but `Skip`. The destructive gate is separate
+    and always on, so no mode drops or narrows anything without
+    `Alvo__Schema__AllowDestructive=true`. **The cost is real and is the reason a production
+    deployment sets `Verify`:** every replica of a rolling deploy attempts the DDL, the application
+    needs DDL rights against its own database, and — the sharp one — an additive deploy under `Apply`
+    makes the *rollback* destructive, so redeploying the previous descriptor refuses and every pod
+    crash-loops until someone sets `AllowDestructive` or applies the older descriptor from a
+    migration job. `Skip` refuses to start in exactly one state: Alvo has recorded nothing **and** the
+    live schema does not match, i.e. nothing has verified the schema exists.
+    `docs/architecture/host.md` documents the posture.
+  - **`AlvoHost.BuildAsync` no longer takes a `CancellationToken`.** There is nothing left in it to
+    cancel — the apply it used to perform is the host lifecycle's now, cancelled by the token
+    `StartAsync` already carries. A caller passing one no longer compiles; dropping the argument is
+    the whole migration.
+  - **`IRuntimeSchemaWriter` is now mandatory for a database provider.** It used to be resolved on
+    demand by the runtime apply path only, so a provider could ship `IAppliedSchemaStore` plus
+    `ISchemaMigrator` and boot without it. The boot writes every project-schema change through it,
+    because that port inserts the version row *first* as the optimistic-lock gate and runs the DDL in
+    the same transaction — which is what makes several replicas cold-starting against one empty
+    database converge instead of crash-looping. Both in-repo drivers implement it; a third-party
+    provider that does not can no longer boot. `docs/architecture/package-boundary.md` records the
+    widened contract, including that an `IAppliedSchemaStore` must bring its own storage up
+    idempotently and race-safely on first call.
+
 - **A `unique` field on a `tenancy: "scoped"` entity is now unique *within* the tenant, not across the
   instance** (#137). It was a **cross-tenant existence oracle**: `DescriptorModelBuilder` emitted
   `HasIndex(field).IsUnique()` with no `tenant_id` — and the same for a declared `unique` index — so
@@ -129,23 +160,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **The descriptor is the whole backend.** Entities, fields, validation and per-operation rules
     from the mounted file become tables and a REST API. Edit the file and restart, and an
     **additive** change (a new entity, a new field) migrates on the way up. A **destructive** one
-    does not: the host applies with `AllowDestructive: false` and has no setting to change that, so
-    a descriptor that would drop a column or a table is refused and the container fails to start
-    rather than losing data on a restart. An entity the file does not declare 404s, which is the
-    point: nothing is baked in.
+    does not: a plan that would drop a column or a table is refused in every startup mode unless
+    `Alvo__Schema__AllowDestructive=true` is set, so the container fails to start rather than losing
+    data on a restart. Note what that costs on the way *back*: rolling the descriptor back after an
+    additive change plans a drop, which is refused, so a rollback needs either that setting or a
+    migration job — see `docs/architecture/host.md`. An entity the file does not declare 404s, which
+    is the point: nothing is baked in.
   - **Interactive documentation at `/scalar`**, rendering the OpenAPI document the host serves at
     `/openapi/v1.json`. It works with **no outbound network access** — the assets ship inside the
     image. `Alvo__Docs__Enabled=false` removes both routes.
-  - **Liveness at `/health/live`**, and it means something: the host applies the descriptor
-    *before* it listens, so an answer proves the schema is up. A host whose apply fails exits
-    non-zero rather than reporting healthy with no schema. There is **no** readiness probe yet —
-    that needs a database-reachability port (#133).
+  - **Two probes, configured oppositely.** `/health/live` evaluates **no** health check at all, so
+    nothing anyone registers can make it fail and get the container killed; it means only "the
+    process is up". `/health/ready` is the schema signal: **503** until Alvo's boot has applied the
+    descriptor and primed the policy catalog, 200 after, with the boot phase as the whole body and
+    nothing else in it — the reason a boot refused can carry a path or a connection string, and a
+    probe is unauthenticated by design. A host whose boot refuses never listens at all and exits
+    non-zero. The stack's `healthcheck` and both compose files probe **readiness**. What is still
+    missing is the *continuing* database-reachability half, which needs a port (#133).
   - **Configuration is standard .NET environment binding** — `Alvo__DescriptorPath`,
     `Alvo__Database__Provider` (`sqlite` | `postgresql`), `ConnectionStrings__Alvo`,
-    `Alvo__PathBase`, `Alvo__Docs__Enabled`, `Alvo__Auth__DevKeys__0__*`. SQLite is the
-    zero-configuration default; an unknown provider name is refused rather than defaulted, and a
-    PostgreSQL host with no connection string fails rather than quietly writing to a
-    container-local file.
+    `Alvo__PathBase`, `Alvo__Docs__Enabled`, `Alvo__Auth__DevKeys__0__*`, plus
+    `Alvo__Schema__Startup` (`Verify` | `Apply` | `Skip`, default `Apply`) and
+    `Alvo__Schema__AllowDestructive`. SQLite is the zero-configuration default; an unknown provider
+    name is refused rather than defaulted, an unknown startup mode is refused naming all three, and
+    a PostgreSQL host with no connection string fails rather than quietly writing to a
+    container-local file. Every refusal names the environment spelling an operator can type and what
+    to set.
   - **Behind a reverse proxy**, `Alvo__PathBase` and — opt-in, off by default —
     `Alvo__ForwardedHeaders__Enabled` for `X-Forwarded-*`. Off by default deliberately:
     `X-Forwarded-Prefix` decides the URL a 201 advertises, so an untrusted caller honoured by
@@ -202,11 +242,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   docs UI's behaviour behind a path base is unmeasured (#134). `docs/architecture/host.md` records
   what the host is and what it deliberately is not.
 
+- **`MapAlvo()` and `MapAlvoHealth()`, plus a boot state to read** — new public API in the core.
+  `MapAlvo()` maps everything Alvo serves (the Data API and both probes) in one call, and
+  `MapAlvoHealth()` maps the probes alone. **Neither needs the schema to exist yet, and neither does
+  `MapAlvoDataApi()` any more**: route literals are read when the endpoint table is first
+  enumerated, on the first request, so the old ordering rule "apply before you map" is gone —
+  `register → map → boot → listen` is the sequence, and the boot runs before the server binds.
+  `AlvoBootState` (with `AlvoBootPhase`) is what the boot publishes for a readiness probe, a CLI or a
+  dashboard to read: the phase, and the applied revision it primed from.
+
 - **`IServiceProvider.ApplyAlvoDescriptorAsync()`** — new public API in the core. The one verb a
   host performs on a built container: bring the configured descriptor up, creating or migrating the
-  schema it declares. Call it *before* mapping endpoints — `MapAlvoDataApi()` reads entity names off
-  the applied schema, and the apply is also what primes the policy catalog (an unprimed catalog
-  denies everything). Previously the orchestrator behind it was `internal`, so only code inside the
+  schema it declares. It is no longer the *startup* path — Alvo's own boot does that before the
+  server binds, and it is also what primes the policy catalog (an unprimed catalog denies
+  everything) — so this is the explicit runtime apply: a CLI, a migration job, a dashboard. The
+  ordering rule it used to carry ("call it before mapping endpoints") no longer applies.
+  Previously the orchestrator behind it was `internal`, so only code inside the
   core assembly could apply a descriptor at all. A **refusal is a return value, not an exception** —
   a caller doing a dry run wants to read the plan — so a host that wants a running backend calls
   **`MigrationResult.EnsureApplied()`** on the result, also new. It throws only on a plan that was

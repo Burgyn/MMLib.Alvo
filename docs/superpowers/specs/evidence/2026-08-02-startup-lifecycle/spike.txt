@@ -1,0 +1,59 @@
+Captured verbatim from: dotnet run, four scratch ASP.NET Core apps.
+SDK: 10.0.100   Runtime: .NET 10.0.0 / Microsoft.AspNetCore.App 10.0.0 (TFM net10.0)
+Host: Darwin arm64
+Verdict: docs/superpowers/specs/2026-08-02-startup-lifecycle-and-config-dx-design.md
+Question: can the Data API be mapped declaratively at composition time and have its
+route literals materialise after a boot step primes the schema?
+
+################################################################
+# SPIKE 1  lazy EndpointDataSource, endpoints built BY HAND
+################################################################
+──────── SPIKE RESULTS ────────
+enumerated before StartAsync                : 0 enumerations
+enumerated after  StartAsync                : 0 enumerations
+S1 /health/live                             : 200
+S1 /api/orders  (primed after start)        : 200 'hit:orders'
+S1 /api/nope    (never declared)            : 404
+S2 /api/invoices WITHOUT invalidate         : 404
+S2 /api/invoices AFTER invalidate           : 200 'hit:invoices'
+OpenAPI lists /health/live (a real MapGet) : True
+OpenAPI lists /api/orders                   : False
+OpenAPI lists /api/invoices (after change)  : False
+total enumerations                          : 3
+───────────────────────────────
+
+################################################################
+# SPIKE 2  lazy EndpointDataSource, endpoints built via the REAL Map* helpers
+################################################################
+──────── SPIKE 2 RESULTS ────────
+enumerated after StartAsync                 : 0
+routing  /api/orders                        : 200 {"entity":"orders"}
+routing  /api/nope (undeclared)             : 404
+OpenAPI  /health/live (control)             : True
+OpenAPI  /api/orders                        : True
+OpenAPI  /api/customers                     : True
+OpenAPI  /api/invoices (not yet declared)   : False
+OpenAPI  /api/invoices after invalidate     : False
+routing  /api/invoices after invalidate     : 200
+total enumerations                          : 4
+─────────────────────────────────
+
+################################################################
+# SPIKE 3  IHostedLifecycleService ordering vs Kestrel listening
+################################################################
+──────── SPIKE 3 RESULTS ────────
+StartingAsync (prime here)  listening=False
+StartAsync                  listening=False
+StartedAsync                listening=True
+after StartAsync            listening=True
+─────────────────────────────────
+
+################################################################
+# SPIKE 4  does ValidateOnStart run before StartingAsync?
+################################################################
+# An option with ValidateDataAnnotations().ValidateOnStart() is deliberately
+# invalid. A Boot : IHostedLifecycleService logs from StartingAsync.
+# If 'BOOT StartingAsync ran' is ABSENT, the validator ran first.
+──────── SPIKE 4 RESULTS ────────
+OptionsValidationException: DataAnnotation validation failed for 'Bad' members: 'Required' with the error: 'The Required field is required.'.
+─────────────────────────────────

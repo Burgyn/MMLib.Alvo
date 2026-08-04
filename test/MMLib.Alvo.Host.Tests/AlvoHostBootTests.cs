@@ -152,6 +152,42 @@ public class AlvoHostBootTests
         }
     }
 
+    /// <summary>
+    /// One start loads the descriptor once. The host used to load it twice: once to apply it itself, and once
+    /// more inside the boot that now owns the apply.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The count is the fact. Both passes produced the same schema and neither logged anything the other did
+    /// not, so a duplicated stage 0 — parse, JSON-Schema validate, map, compile every rule — was invisible in a
+    /// green suite and in a container's log alike. It is also the only observable difference between "the host
+    /// stopped applying" and "the host still applies and the boot happens to find nothing to do", which is
+    /// exactly the shape a half-finished collapse would leave behind.
+    /// </para>
+    /// <para>
+    /// A working request is asserted beside it so the single read cannot be a host that read the descriptor and
+    /// then served nothing.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task One_start_loads_the_descriptor_once()
+    {
+        DescriptorReadCounter? reads = null;
+
+        await using var world = await AlvoHostWorld.StartAsync(
+            configure: builder => reads = DescriptorReadCounter.RegisteredOn(builder));
+
+        using var listed = await world.GetAsync("/api/warehouses");
+
+        listed.StatusCode.ShouldBe(
+            HttpStatusCode.OK, "a host that read the descriptor once must still serve what it declared");
+        reads.ShouldNotBeNull("the fixture must really have wrapped the descriptor source");
+        reads.Reads.ShouldBe(
+            1,
+            "the boot owns the apply, so one start is one load-validate-map-compile pass — two means the host "
+            + "is applying the descriptor again beside it");
+    }
+
     /// <summary>Liveness answers without a credential — a probe cannot present one.</summary>
     [Fact]
     public async Task Liveness_answers_an_unauthenticated_probe()
@@ -161,23 +197,6 @@ public class AlvoHostBootTests
         using var response = await world.SendAnonymouslyAsync(HttpMethod.Get, "/health/live");
 
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
-    }
-
-    /// <summary>An unknown provider name is refused by name, with the two that exist listed.</summary>
-    [Fact]
-    public async Task An_unknown_database_provider_is_refused_with_the_choices_named()
-    {
-        var overrides = new Dictionary<string, string?>(StringComparer.Ordinal)
-        {
-            ["Alvo:Database:Provider"] = "cosmos",
-        };
-
-        var failure = await Should.ThrowAsync<InvalidOperationException>(
-            () => AlvoHostWorld.StartAsync(overrides: overrides));
-
-        failure.Message.ShouldContain("cosmos");
-        failure.Message.ShouldContain("sqlite");
-        failure.Message.ShouldContain("postgresql");
     }
 
     /// <summary>

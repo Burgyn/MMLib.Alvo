@@ -149,7 +149,10 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
             app.Use(ServerBodyLimit.Enforcing(serverLimit));
         }
 
-        await ApplyDescriptorAsync(app);
+        if (!setup.MapBeforePriming)
+        {
+            await ApplyDescriptorAsync(app);
+        }
 
         // MapGroup, when a fact asks for one: the second supported way to mount the Data API, and the one
         // whose route-group prefix a created row's Location has to carry (#121). Mapped through the group
@@ -174,6 +177,11 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
 
         var capture = new SqlCapture(database.Marker);
         await app.StartAsync(TestContext.Current.CancellationToken);
+
+        if (setup.MapBeforePriming)
+        {
+            EnsureTheBootPrimed(app);
+        }
 
         var authOptions = app.Services.GetRequiredService<IOptions<AlvoAuthOptions>>().Value;
         return new AlvoApiWorld(database, app, capture, authOptions);
@@ -265,6 +273,11 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
             alvo.FromDescriptor(descriptorPath).AddDataApi(setup.ConfigureApi ?? (_ => { }));
         });
 
+        if (setup.RegisterAlvoTwice)
+        {
+            builder.Services.AddAlvo();
+        }
+
         return builder.Build();
     }
 
@@ -294,6 +307,21 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
 
         result.Applied.ShouldBeTrue("the world's descriptor must apply, or no route is generated at all");
     }
+
+    /// <summary>
+    /// Asserts that the boot service primed this world, for a world that asked nothing else to.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="AlvoApiWorldSetup.MapBeforePriming"/> replaces <see cref="ApplyDescriptorAsync"/>'s own
+    /// assertion, and something has to keep its place: a world whose boot silently did nothing would leave
+    /// every route fact below failing for the wrong reason — an unprimed schema rather than a mapping that
+    /// cannot read one.
+    /// </remarks>
+    /// <param name="app">The world's application, already started.</param>
+    private static void EnsureTheBootPrimed(WebApplication app) =>
+        app.Services.GetRequiredService<AlvoBootState>().Phase.ShouldBe(
+            AlvoBootPhase.Ready,
+            "the boot service must have primed this world's schema, or no route can materialise from it");
 
     /// <summary>Every route the host has mapped, as <c>METHOD pattern</c> — the mapped set itself, not a guess at it.</summary>
     /// <remarks>
@@ -655,6 +683,22 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
 /// prefix only lengthens the route, so a host mounted this way answers <em>nothing</em> at the unprefixed
 /// path.
 /// </param>
+/// <param name="MapBeforePriming">
+/// Whether the world maps the Data API <em>before</em> anything has primed the applied schema — the shape a
+/// host writes once <c>MapAlvo()</c> is all it calls, and the coupling the lazy endpoint data source exists to
+/// break. The boot service then primes during <c>StartAsync</c>, after the mapping, and
+/// <see cref="AlvoApiWorld.EnsureTheBootPrimed"/> asserts it did. <see langword="false"/> keeps the ordering
+/// every other fact in this suite was written against (apply, then map), which is also the ordering the CLI and
+/// the Management API still use.
+/// </param>
+/// <param name="RegisterAlvoTwice">
+/// Whether the world calls <c>AddAlvo</c> a <b>second</b> time — the shape two libraries each registering the
+/// framework produce, which <c>AddAlvo</c>'s own remarks support and which is now the only way any Alvo
+/// registration runs twice. It is what keeps
+/// <c>OpenApiDocumentTests.The_overview_is_appended_once_however_often_alvo_is_registered</c> discriminating:
+/// once <c>AddDataApi</c> became configuration-only, a single <c>AddAlvo</c> registers the document transformer
+/// exactly once whether or not the registration deduplicates, so that fact would have passed vacuously.
+/// </param>
 internal sealed record AlvoApiWorldSetup(
     Action<AlvoApiOptions>? ConfigureApi = null,
     string? RevokedKeyId = null,
@@ -665,7 +709,9 @@ internal sealed record AlvoApiWorldSetup(
     bool FaultingData = false,
     string? PathBase = null,
     int? ServerBodyLimitBytes = null,
-    string? RouteGroupPrefix = null);
+    string? RouteGroupPrefix = null,
+    bool MapBeforePriming = false,
+    bool RegisterAlvoTwice = false);
 
 /// <summary>One dev API key a world issues, in the shape a test reads best.</summary>
 /// <param name="KeyId">The key's public identifier.</param>

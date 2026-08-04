@@ -9,7 +9,7 @@ namespace MMLib.Alvo.Api.Internal;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>A reserved key wins, and a descriptor that would shadow one is refused at mapping.</b> The field-name
+/// <b>A reserved key wins, and a descriptor that would shadow one is refused at startup.</b> The field-name
 /// grammar (<c>^[a-z][a-z0-9_]{0,62}$</c>) admits every name here, so a field called <c>limit</c> is a legal
 /// descriptor and <c>?limit=10</c> would be genuinely ambiguous. Resolving that per request — either silently
 /// preferring one reading, or refusing the request — would make a descriptor problem look like a caller
@@ -72,17 +72,20 @@ internal static class ReservedQueryKeys
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>The whole applied schema is checked before a single route is mapped.</b> Per-entity it would map every
-    /// route up to the offending entity and then throw, leaving a host half-mapped on a startup failure — a state
-    /// nobody should have to reason about, and one whose symptom (some entities reachable, some not) says nothing
-    /// about its cause.
+    /// <b>The whole schema is checked before a single route is built.</b> Per-entity it would build every route
+    /// up to the offending entity and then throw, leaving a half-materialised table — a state nobody should have
+    /// to reason about, and one whose symptom (some entities reachable, some not) says nothing about its cause.
     /// </para>
     /// <para>
-    /// <b>This is the belt, not the primary guard.</b> A descriptor declaring such a field is refused at
-    /// <em>apply</em> time by <c>DescriptorValidator</c>, which is where a bad descriptor belongs — it is wrong
-    /// whether or not the API is mounted. This still exists because an applied schema can reach route mapping
-    /// without ever having passed that validation: a descriptor applied by an earlier build, or F7's
-    /// dynamic-entity registry, which never goes through the descriptor validator at all.
+    /// <b>This is the belt, not the primary guard, and the two run over different inputs at different times.</b>
+    /// A descriptor declaring such a field is refused at <em>apply</em> time by <c>DescriptorValidator</c> and
+    /// again by boot stage 0 (<c>DescriptorBootPlan</c>) over the descriptor's own mapped schema, both of which
+    /// fail the start — that is where a bad descriptor belongs, since it is wrong whether or not the API is
+    /// mounted. What this call adds is the belt for a schema that reaches route generation without ever having
+    /// passed either: a schema applied by an earlier build, a substituted <c>ISchemaRegistry</c>, or F7's
+    /// dynamic-entity registry. For that input the refusal can only be raised when
+    /// <c>AlvoEndpointDataSource</c> first materialises the table, i.e. on the first request — recorded as a
+    /// deviation rather than claimed to be a start-time guarantee.
     /// </para>
     /// </remarks>
     /// <param name="entities">Every entity about to get routes.</param>
@@ -99,8 +102,8 @@ internal static class ReservedQueryKeys
 
     /// <summary>
     /// Throws when <paramref name="entity"/> declares a field whose name a query-string key reserves, so the
-    /// ambiguity is a startup failure naming the entity, the field and the fix — not a route that silently
-    /// cannot filter by that field.
+    /// ambiguity is one refusal naming the entity, the field and the fix — not a route that silently cannot
+    /// filter by that field.
     /// </summary>
     /// <param name="entity">The entity to check.</param>
     /// <exception cref="InvalidOperationException">A declared field shadows a reserved query-string key.</exception>

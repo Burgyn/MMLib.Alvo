@@ -69,7 +69,7 @@ internal sealed partial class SystemSchemaInitializer
 
     /// <summary>
     /// Creates the framework's bookkeeping tables if they do not already exist. Safe to call repeatedly —
-    /// a second (or Nth) call is a no-op.
+    /// a second (or Nth) call is a no-op — and safe to call from several processes at once.
     /// </summary>
     // Deferred: Postgres schema cohabitation (spec §2.13) — embedded mode living inside a host's
     // own Postgres schema — is intentionally out of scope for this PR and tracked as follow-up
@@ -85,8 +85,75 @@ internal sealed partial class SystemSchemaInitializer
         // The table names are validated identifiers (see the ctor guard above), not attacker-controlled
         // data, so interpolating them is safe — SQL parameters can only bind values, never identifiers,
         // so this is the only way to parameterize them anyway.
-        await ExecuteAsync(DescriptorVersionsDdl, ct).ConfigureAwait(false);
-        await ExecuteAsync(IdempotencyTable.Ddl(_idempotencyTableName), ct).ConfigureAwait(false);
+        await CreateIfMissingAsync(TableName, DescriptorVersionsDdl, ct).ConfigureAwait(false);
+        await CreateIfMissingAsync(
+            _idempotencyTableName, IdempotencyTable.Ddl(_idempotencyTableName), ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Runs one <c>CREATE TABLE IF NOT EXISTS</c>, treating "another connection created it a moment ago" as
+    /// the success <c>IF NOT EXISTS</c> was asked for.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b><c>CREATE TABLE IF NOT EXISTS</c> is not concurrency-safe on PostgreSQL, and this was measured, not
+    /// assumed.</b> PostgreSQL's own documentation says so: the existence check and the catalog insert are not
+    /// atomic, so two sessions creating one table at the same instant leave the loser with
+    /// <c>23505 duplicate key value violates unique constraint "pg_type_typname_nsp_index"</c> rather than a
+    /// quiet no-op. Three replicas cold-starting against one empty database do exactly that, and before this
+    /// they failed their <em>first</em> database call — stage 1 — never reaching the applied-snapshot race the
+    /// boot's own convergence handles.
+    /// </para>
+    /// <para>
+    /// The recovery reads the outcome instead of the error: no <c>SQLSTATE</c> and no
+    /// <c>SqliteErrorCode</c> is inspected, because a driver that decoded engine error numbers here would need
+    /// a new branch for every engine Alvo adds. If the table is there afterwards, the intent was met by
+    /// whoever created it; if it is not, the failure was something else and is rethrown unchanged. That is the
+    /// same "re-read rather than classify" discipline <see cref="VersionRowWriter"/> uses to tell a lost race
+    /// from a genuine write failure.
+    /// </para>
+    /// <para>
+    /// The DDL runs outside any transaction, so a failed statement leaves the connection usable and the
+    /// existence probe below can run on it directly.
+    /// </para>
+    /// </remarks>
+    /// <param name="tableName">The table the DDL creates.</param>
+    /// <param name="ddl">The <c>CREATE TABLE IF NOT EXISTS</c> statement.</param>
+    /// <param name="ct">A token to cancel the operation.</param>
+    private async Task CreateIfMissingAsync(string tableName, string ddl, CancellationToken ct)
+    {
+        try
+        {
+            await ExecuteAsync(ddl, ct).ConfigureAwait(false);
+        }
+        catch (DbException)
+        {
+            if (!await ExistsAsync(tableName, ct).ConfigureAwait(false))
+            {
+                throw;
+            }
+        }
+    }
+
+    /// <summary>Whether <paramref name="tableName"/> can be selected from, i.e. whether it exists.</summary>
+    /// <remarks>
+    /// A zero-row select rather than a catalog query: SQLite has <c>sqlite_master</c>, PostgreSQL has
+    /// <c>information_schema</c>, and asking the table itself is the one question every engine answers the
+    /// same way. Nothing is returned, so the shape of the table does not matter either.
+    /// </remarks>
+    /// <param name="tableName">The table to look for.</param>
+    /// <param name="ct">A token to cancel the operation.</param>
+    private async Task<bool> ExistsAsync(string tableName, CancellationToken ct)
+    {
+        try
+        {
+            await ExecuteAsync($"SELECT 1 FROM {tableName} WHERE 1 = 0", ct).ConfigureAwait(false);
+            return true;
+        }
+        catch (DbException)
+        {
+            return false;
+        }
     }
 
     private string DescriptorVersionsDdl =>

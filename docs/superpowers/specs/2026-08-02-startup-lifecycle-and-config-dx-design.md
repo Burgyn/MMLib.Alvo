@@ -1,0 +1,1005 @@
+# Startup lifecycle and configuration DX
+
+> The design for how an Alvo host **boots** — what it registers, what runs when,
+> what is allowed to touch the database, and how a failure surfaces — and for the
+> **configuration surface** a host has to write to get there.
+>
+> Triggered by the maintainer's objection to `AlvoHost.BuildAsync`:
+>
+> ```csharp
+> var migration = await app.Services.ApplyAlvoDescriptorAsync(ct: ct).ConfigureAwait(false);
+> migration.EnsureApplied();
+> ```
+>
+> They did not expect a **blocking apply in startup**; they expected Alvo to
+> register what it needs and let a startup filter / hosted service drive it. They
+> also find the configuration too complicated.
+
+## Sources consulted
+
+Read before designing, per `CLAUDE.md`. The line references are to the tree at
+`018d47b`.
+
+- `docs/product/baas-analyza.md` — §1 (provider config validated at startup,
+  A:84/A:91), §2.1 (dynamic entities are DDL-free, A:166), §2.4, §2.12 (health,
+  A:487), §2.13 (migrations, A:508–A:519), §2.14 (deployment, A:524–A:557), §4,
+  §8.2, §9.2.
+- `docs/product/alvo-specifikacia.md` — §0, S:51 (mounted descriptor boots a
+  configured backend), S:85–S:95 (the two modes and the cross-mode contract),
+  S:157 (the **binding** DX goals), S:164–S:169 (`AddAlvo()` / `app.MapAlvo()`),
+  S:326, S:400–S:408 (Aspire).
+- `docs/design-brief.en.md` — and, importantly, the five places it is **silent**
+  where the full sources are not (see *What the brief omits*).
+- Frozen artifacts: `src/MMLib.Alvo.Abstractions` (`IAppliedSchemaStore`,
+  `ISchemaRegistry`, `MigrationOptions`/`MigrationResult`), `AlvoHost`,
+  `SchemaMigrationRunner`, `RuntimeSchemaService`, `EntityRouteCatalog`.
+- `docs/architecture/` — `extensibility.md` (the verb taxonomy and rule 5),
+  `host.md`, `data-api.md` ("Route generation happens at mapping time"),
+  `package-boundary.md`.
+- The F3 design's **deviations 36, 38, 41, 48**, and issues **#103, #132, #133,
+  #140, #141**.
+- Prior art: ASP.NET Core's `IHostedLifecycleService` / `IStartupFilter` /
+  `EndpointDataSource`, EF Core's position on migrating at startup, Kubernetes
+  liveness-vs-readiness semantics, and the `AddControllers`/`MapControllers`,
+  `AddAuthentication`/`UseAuthentication` and Aspire `AddServiceDefaults`
+  registration precedents.
+
+## What the brief omits, and why it matters here
+
+`docs/design-brief.en.md` is lossy by design, but four of its gaps sit directly
+in this design's blast radius, and designing from the brief alone would have
+produced the wrong answer:
+
+1. **Health is absent entirely.** The full source makes liveness **and**
+   readiness a "must contain", naming DB / cache / message-bus reachability
+   (A:487). A design that introduces a "not ready yet" state looks invented from
+   the brief; it is in fact mandated.
+2. **"Validate provider configuration at startup, fail fast with an actionable
+   message, not at first use" is missing.** It is an acceptance criterion
+   (A:91) and a named watch-out (A:84). Deviation 48 is therefore not a nicety
+   deferred — it is an **unmet acceptance criterion**.
+3. **The auto-migrate-on-boot licence, and its scope limit, are missing.** The
+   sources *do* mandate automatic migration at startup — **for the framework's
+   own system schema only** (A:508), on an independent chain that does not touch
+   the host's tables (A:515), with a documented upgrade/downgrade contract
+   (A:555). User entity schema is located at build/deploy (A:510) or an explicit
+   runtime apply. This is the distinction the current code does not make.
+4. **Every numeric criterion is gone**, including the one that constrains this
+   design hardest: `docker run mmlib/alvo` must reach a working backend in
+   **≤ 60 s with no configuration at all** (A:553).
+
+## The objection is right, but the reason is not the one it looks like
+
+Auto-migrate-on-boot *is* a production anti-pattern — replicas race, it needs DDL
+rights at runtime, and a bad migration takes the deployment down. But the sources
+do not forbid migrating at boot; they **partition** it. What is wrong with the
+current code is not that it migrates during startup. It is that **one call does
+five things at three different risk levels**, and the host has to opt into all
+five or none.
+
+`SchemaMigrationRunner.RunAsync` currently:
+
+1. loads and JSON-Schema-validates the descriptor,
+2. maps it to a desired `SchemaModel`,
+3. compiles the CEL policy catalog and publishes it — **priming**,
+4. diffs desired against applied and executes **DDL**,
+5. saves the applied snapshot.
+
+Steps 1–3 are pure CPU plus one descriptor read. They need **no database at
+all**, they are what routes and authorization depend on, and they are safe on
+every replica simultaneously. Step 4 is the dangerous one. Today a host that
+wants (1–3) — which is every host that merely wants to *serve* an
+already-migrated database — has no way to ask for them without also asking for
+(4).
+
+That conflation is also why `apply → map → listen` is forced: `MapAlvoDataApi`
+needs step 3's output, so the host must run step 4 to get it.
+
+And the gap is already named in the code. `RuntimeSchemaService`'s own remarks:
+
+> **Nothing primes at startup.** This service is driven by a request, so a host
+> that only ever applies descriptors at runtime comes back from a restart with an
+> unprimed provider … That is the safe direction, but it is **a real gap rather
+> than a design intent**.
+
+So the design is not "stop applying at startup". It is **separate the five steps,
+and let each run at the moment its risk justifies**.
+
+## Measured facts
+
+Three claims are load-bearing, so they were measured rather than assumed, on
+.NET 10.0.0 / `Microsoft.AspNetCore.App` 10.0.0. Verbatim output:
+`docs/superpowers/specs/evidence/2026-08-02-startup-lifecycle/spike.txt`.
+
+| # | Question | Measured answer |
+|---|---|---|
+| 1 | Is an `EndpointDataSource` enumerated during `StartAsync`? | **No** — 0 enumerations before *and* after `StartAsync`. It is enumerated lazily, on the first request that builds the matcher. |
+| 2 | Can the schema be primed **after** the app is listening and still produce routes? | **Yes** — primed post-`StartAsync`, `/api/orders` answers 200, and an undeclared `/api/nope` still 404s. Fail-closed is preserved. |
+| 3 | Can a route be added after the matcher was already built? | **Yes**, with an `IChangeToken`: 404 before `Invalidate()`, 200 after. This is #103's resolution A, and it is ~15 lines. |
+| 4 | Do hand-built `RouteEndpointBuilder` endpoints appear in the OpenAPI document? | **No.** A real `MapGet` control in the same app *does* appear. Hand-built endpoints lack the metadata ApiExplorer needs. |
+| 5 | Does building through the real `Map*` helpers on a nested `IEndpointRouteBuilder` fix that? | **Yes** — `/api/orders` and `/api/customers` both appear in the document. |
+| 6 | Does the OpenAPI document refresh when the data source invalidates? | **No.** After `Invalidate()` the new entity *routes* (200) but is still **absent from the document**. |
+| 7 | Does `IHostedLifecycleService.StartingAsync` run before Kestrel listens? | **Yes** — `StartingAsync` and `StartAsync` both observe the port closed; only `StartedAsync` observes it open. |
+| 8 | Does `ValidateOnStart` run before `StartingAsync`? | **Yes.** An invalid option threw `OptionsValidationException` and `StartingAsync` **never ran at all**. |
+
+Fact 6 corrects a claim this repository currently makes. `data-api.md` says
+resolution A "keeps the OpenAPI document able to list exactly what is mapped".
+It does not — **not for free**. Routing and the document have independent caches,
+and invalidating the endpoint data source refreshes only the former. #103's real
+remaining cost is document-cache invalidation, which nothing has yet designed.
+
+Fact 4 is the trap this design would otherwise have walked into: the obvious
+implementation of a lazy data source silently empties the OpenAPI document that
+PR3 built and snapshot-tests.
+
+Fact 7 is what makes the whole thing safe. `StartingAsync` runs before **every**
+`IHostedService.StartAsync`, including `GenericWebHostService`'s, so it does not
+depend on registration order.
+
+A plain `IHostedService` would *also* work today, but for a weaker reason:
+`WebApplicationBuilder.Build()` deliberately **appends** the
+`GenericWebHostService` descriptor after every user-registered hosted service
+([aspnetcore#36122](https://github.com/dotnet/aspnetcore/pull/36122), .NET 7),
+so user services start before Kestrel binds. That is a behaviour change with no
+API-level guarantee, and it is sensitive to *when* `AddAlvo` was called relative
+to `Build()`. `StartingAsync` is guaranteed by the documented lifecycle instead of
+by a registration-order accident, so it is the one this design uses.
+
+Fact 8 removes a step the first draft of this design had, and is worth recording
+because it inverts a claim the current code is built on. `AlvoHost` calls
+`IStartupValidator.Validate()` **by hand**, and its remarks explain why:
+`ValidateOnStart` runs from `app.StartAsync()`, which is *after* `BuildAsync` has
+already applied the descriptor. That reasoning is correct **for the current
+shape** and stops being true once the apply moves into the host lifecycle:
+`Host.StartAsync` runs the startup validator *before* any `StartingAsync`
+([Host.cs](https://github.com/dotnet/runtime/blob/main/src/libraries/Microsoft.Extensions.Hosting/src/Internal/Host.cs)),
+measured in fact 8. So `AlvoHost.ValidateOptions` is **deleted**, not relocated,
+and the ordering property it protects becomes a framework guarantee rather than a
+line of host code that a future edit could drop.
+
+## Prior art
+
+Alvo adopts known mechanisms so an agent recognizes them (`CLAUDE.md`), so the
+established answers are recorded here rather than re-derived.
+
+### How comparable products split apply from serve
+
+| | Serving process applies schema on boot? | Separate apply command | How the server learns of a change | Routes rebuilt at runtime? |
+|---|---|---|---|---|
+| **Supabase / PostgREST** | **never** — PostgREST only *reads* the catalog | `supabase db push` | `NOTIFY pgrst, 'reload schema'` / `SIGUSR1`, or a `ddl_command_end` trigger | yes, no restart |
+| **Hasura** | no for `graphql-engine`; **yes** for the dedicated `cli-migrations-v3` image | `hasura migrate apply` | `POST /v1/metadata {"type":"reload_metadata"}`, returning `is_consistent` + `inconsistent_objects` | yes |
+| **PocketBase** | **yes, always** (`--automigrate`, on by default; gated on `IsProbablyGoRun()` when embedded) | `pocketbase migrate` | in-process | **no rebuild needed** — routes are generic |
+| **Directus** | no — CLI only | `directus bootstrap` | `schema/snapshot` → `schema/diff` → `schema/apply` on the live instance | **no rebuild needed** — routes are generic |
+| **Strapi** | **yes, always** — and the sync *"will delete any unknown tables without warning"* | none | file change + **process restart** | fixed at boot |
+| **K8s operators** | n/a — applying and reconciling are different processes by construction | `kubectl apply` | watch + reconcile, readiness *reported* via `status.observedGeneration` | n/a |
+
+Three lessons, all of which this design takes:
+
+- **Hasura is the closest precedent and it splits by image, not by flag.** The
+  auto-applying variant is a *separate published artifact*. That is exactly the
+  core/`Host` split A:530 already mandates.
+- **Strapi is the counter-example, and its price is instructive.** Because it
+  fuses apply and serve, it must forbid schema authorship in production outright
+  — *"at this time and in the future there is no plan to allow model creating or
+  updating while in a production environment."* Fusing the two forecloses the
+  dashboard-first mode Alvo is committed to.
+- **Kubernetes' `spec`/`status` split is the right vocabulary for readiness.**
+  Desired state is submitted by one actor and realised by another, and
+  `status.observedGeneration` is what makes "has my descriptor actually been
+  applied?" answerable. Alvo's analogue is exact: the applied snapshot already
+  carries a **revision**, so readiness is `appliedRevision` matching the
+  descriptor the process actually primed from. That one comparison serves the
+  probe, the CLI and a future dashboard identically.
+
+### EF Core on migrating at startup
+
+Worth quoting because it is the guidance the objection rests on, and because it
+is narrower than "never migrate at boot":
+
+> It's possible for the application itself to apply migrations programmatically,
+> typically during startup. … this approach is **inappropriate for managing
+> production databases**.
+
+The four reasons that survive EF 9 are: an app accessing the database while
+another migrates it *"can cause severe issues"*; the app *"must have elevated
+access to modify the database schema"*, against good practice in production;
+there is no rollback; and *"the SQL commands are applied directly by the program,
+without giving the developer a chance to inspect or modify them"*. Only the
+concurrent-instance reason was mitigated, by EF 9's database-wide migration lock
+— and Microsoft did **not** upgrade the recommendation, restating in the same
+release that *"we recommend applying migrations at deployment, rather than as part
+of application startup."* The lock is serialisation, not safety.
+
+**Alvo does not use EF Migrations**, so EF's lock does not apply to it: the
+project schema goes through Alvo's own `ISchemaMigrator` + `IAppliedSchemaStore`.
+The transferable part is the *reasoning*, and one concrete warning worth heeding
+— EF's SQLite lock is a table row with **no timeout** that survives a killed
+process, so an OOM-kill mid-migration wedges every subsequent boot until someone
+drops it by hand. Whatever serialisation Alvo grows must not have that shape;
+this design leans on the optimistic revision check instead, which has no lock to
+leak.
+
+### The routing seam
+
+The ASP.NET Core routing docs' guidance for library authors endorses this design's
+mechanism explicitly — *"**CONSIDER** writing your own `EndpointDataSource`.
+`EndpointDataSource` is the low-level primitive for **declaring and updating** a
+collection of endpoints"* — and constrains it in two ways this design obeys:
+
+- *"**DO NOT** attempt to register an `EndpointDataSource` by default. … The
+  philosophy of routing is that nothing is included by default."* So `MapAlvo()`
+  stays **mandatory and explicit**; the DX pass below never auto-maps.
+- *"**DO NOT** call `UseRouting` or `UseEndpoints` on the user's behalf."*
+
+Two mechanical details from the framework source, both easy to get wrong:
+
+- `WebApplicationBuilder` decides whether to wire `UseRouting`/`UseEndpoints` at
+  all from `_builtApplication.DataSources.Count > 0` — it counts **data sources,
+  not endpoints**. Registering one *empty* data source at `Map` time is therefore
+  both necessary and sufficient; registering none means routing is never added.
+- The change token must be swapped **before** the old one is cancelled (new list →
+  new `CancellationTokenSource` → publish → *then* cancel the old). The reverse
+  order re-enters and overflows the stack — a real bug fixed in
+  [aspnetcore#44392](https://github.com/dotnet/aspnetcore/pull/44392).
+
+YARP is the in-box precedent for the startup half, and its documented contract is
+the one adopted here: a config provider may **throw** (prevent the application
+from starting), **block** (delay startup until valid data is available), or
+**return empty and signal later**. This design throws for stages 0–2 and does not
+use the empty-and-signal-later option, which is what would let a host serve while
+unreconciled.
+
+### Why not generic routes
+
+PocketBase (`/api/collections/{collection}/records`) and Directus
+(`/items/{collection}`) add an entity with **zero** routing-table mutation,
+because their record APIs are generic. That would dissolve this whole problem —
+and #103's — into a schema-cache question, which is strictly cheaper. It is
+rejected for Alvo, and the reason is already load-bearing elsewhere:
+`data-api.md`'s Position A rests on **routing** answering "no such entity" before
+authorization runs, and the OpenAPI document has to enumerate real paths per
+entity (`[15b]`, and #26's contract linting assumes it). A catch-all can do
+neither. Recorded as a considered alternative rather than an unexamined choice —
+and note that for F7's *virtual* entities the trade may genuinely invert, which is
+#103's resolution B.
+
+## The design
+
+### Five stages, each at its own risk level
+
+The boot sequence runs in `IHostedLifecycleService.StartingAsync`, i.e. before
+the server listens (fact 7).
+
+| Stage | What it does | Touches the DB? | Governed by |
+|---|---|---|---|
+| **0 Validate** | load and JSON-Schema-validate the descriptor; map to the desired schema; compile CEL; run the reserved-name and format checks | no | always — failure is a configuration error |
+| **1 System schema** | bring the framework's own `alvo.*` tables up (`descriptor_versions`, `alvo_idempotency`, PR5's outbox) on their own chain | yes, DDL | **always**, mandated by A:508/A:515/A:555 |
+| | *(needs no code of its own today — see below)* | | |
+| **2 Project schema** | diff the descriptor against `IAppliedSchemaStore`'s snapshot and decide | yes, reads always; DDL conditionally | the **startup mode** (below) |
+| **3 Prime** | publish the policy catalog and the schema model for the descriptor stage 2 confirmed is the one in the database | no | always, if stage 2 succeeded |
+| **4 Serve** | routes materialise lazily from the primed registry on the first request (facts 1, 2, 5) | no | — |
+
+**Stage 1 needs no code of its own, and that is a finding rather than a
+shortcut.** `SystemSchemaInitializer` is `internal` to
+`MMLib.Alvo.Data.EntityFrameworkCore` and has **no port in `Abstractions`**, so
+the core cannot call it without breaking `package-boundary.md`. It does not need
+to: the system schema is owned by whichever driver implements
+`IAppliedSchemaStore`, and that driver cannot answer a single call without it —
+`EfCoreDescriptorVersionStore` routes *every* method through
+`VersionRowWriter.EnsureReadyAsync`, which runs `SystemSchemaInitializer.EnsureAsync`
+once, race-guarded. So **stage 2's read of the applied snapshot *is* stages 1 and
+2**, unconditionally, in every mode. A:508/A:515 hold — automatic at startup, on a
+chain independent of the host's own tables — with no abstraction invented for it.
+
+A port is earned the moment a driver's system schema grows a table that no store
+call touches. **PR5's outbox is the first candidate**, so this is the seam that
+work should expect to add rather than discover.
+
+One consequence, recorded rather than hidden: the design's own line that `Skip`
+should *"not read the store"* is **wrong as written**. `Skip` does read it,
+because stage 1 is unconditional and that read is the only thing that brings the
+system schema up. The read is idempotent and touches exactly the tables stage 1
+must create anyway; `Skip` still ignores what it found. Deviation 58.
+
+Options validation is **not** a stage here, because it does not need to be
+(fact 8). The framework runs every `ValidateOnStart` registration before any
+`StartingAsync`, so the property the existing test
+`A_credential_the_startup_validation_refuses_leaves_the_database_untouched`
+pins — a mistyped `Alvo__Auth__DevKeys__0__Scopes__0` must not commit a migration
+and *then* crash-loop, because rolling back does not recover — is guaranteed by
+the host lifecycle rather than by a call the host has to remember to make.
+
+That test must keep passing unchanged, which is the point: it is the fact that
+proves the guarantee transferred, rather than being lost along with the line of
+code that used to provide it.
+
+### Stage 2's decision, and why "initialize" is not "migrate"
+
+The hazard the sources warn about, and the hazard EF Core's guidance warns
+about, is **migrating an existing database**: replicas race, DDL rights are
+needed at runtime, a bad migration is hard to reverse. Creating a schema from
+nothing is a different act with a different risk profile. Conflating the two is
+what forces the choice between "unsafe in production" and "broken zero-config
+dev".
+
+So stage 2 branches on what it finds, not only on what it was told:
+
+- **Unchanged** — the applied snapshot matches the descriptor. Prime and serve.
+  This is the ordinary restart and the common case.
+- **Uninitialized** — no applied snapshot exists at all. **Initialize, in every
+  mode except `Skip`.** This is what makes `AddAlvo()` → `dotnet run` → a working
+  backend in seconds (S:157/S:164/S:169) and `docker run` → a working backend in
+  ≤ 60 s (A:553) both hold with no configuration.
+- **Drifted** — a snapshot exists and differs from the descriptor. Governed by
+  the mode.
+
+**The destructive guardrail sits *before* this branch, not inside the `Apply`
+arm — and that ordering is a data-loss fix, not tidiness.** The first draft of
+this design put it inside `Apply`, which was wrong, because **"no applied
+snapshot" does not mean "empty database."** It means *Alvo has recorded no schema
+for this project*. `SchemaMigrationRunner` falls back to `ISchemaIntrospector` in
+exactly that case, so an "initialize" plan computed against an **adopted**
+database — one with pre-existing tables Alvo did not create — can legitimately
+contain drops. With the guard inside the `Apply` arm, initialization would have
+been *unguarded*, and the first boot of Alvo against someone's existing database
+could have dropped their columns while `Verify` was still the configured mode.
+
+So the evaluation order is: empty plan → `Skip` (serve, unless nothing verified
+the schema — deviation 64) → **destructive gate** → uninitialized → mode. A
+destructive plan is refused in *every* mode, including during initialization,
+unless `AllowDestructive` is explicitly set. Found while implementing Task 3;
+pinned by
+`An_absent_snapshot_does_not_mean_an_empty_database_so_a_destructive_initialization_is_refused`.
+The empty-plan arm moved ahead of `Skip` when deviation 64 landed, so that
+"nothing to do" still answers before any mode is consulted.
+
+The mode, `AlvoSchemaStartup`:
+
+| Mode | On *drift* | Intended for |
+|---|---|---|
+| `Verify` | refuse, printing the structured diff | production, together with a migration job |
+| `Apply` *(the default)* | apply it, still refusing a destructive plan unless `AllowDestructive` | the dev loop, the standalone image, and anything else that has not opted out |
+| `Skip` | read the store (that read is stage 1), ignore the drift, prime from the descriptor | a host whose schema is owned entirely by a migration job |
+
+**`Skip` has one refused state, and it is the only one nothing has verified**: no recorded snapshot
+*and* a non-empty plan against the live schema — the shape of a migration job that never ran. Serving
+it published `Ready` with a null `AppliedRevision`, so the phase and the revision contradicted each
+other and every pod answered 200 to a readiness probe while every request failed at the database. An
+*adopted* database whose live schema already matches produces an empty plan and still serves, so the
+composition `Skip` exists for is untouched; the refusal names both ways out (`Verify`, or the
+migration job). Deviation 64.
+
+**`Apply` is the default — the maintainer overruled this design's `Verify`, and
+the argument won on the merits.** Recorded here in full, because the reasoning is
+what a later reader needs, not the outcome alone (deviation 53, rewritten):
+
+- **`Verify` breaks the loop the product exists for** — edit descriptor, restart,
+  works. The "initialization is exempt" carve-out below only saves the **first**
+  run; the second run, after the first edit, is drift, and refusing there is
+  refusing exactly when somebody is working.
+- **The protection was never in the mode.** The destructive gate is separate and
+  always on (deviation 57), so `Apply` cannot drop a column or a table without an
+  explicit `AllowDestructive` — including during initialization. What `Apply`
+  actually permits is **additive** DDL, and a host that had the rights for that on
+  run 1 has them on run 2.
+- **The "someone else's database" framing was wrong.** The developer wrote
+  `.FromDescriptor(...)` and pointed Alvo at that database deliberately; this is
+  not an uninvited migration of a stranger's schema.
+
+**The cost is documented, not hidden.** A production replica set on a rolling
+deploy has *every* replica attempt DDL — they converge rather than crash-loop
+(*Initialization under concurrency*, below), but they all try. The application
+also needs DDL rights in production, which is what EF Core's guidance advises
+against. So **production sets `Verify` and applies from a migration job**, and
+`docs/architecture/host.md` says so — an **opt-out**, not an opt-in. That is the
+honest trade: the common case is configured for the developer, and the operator of
+a replica set has one setting to change.
+
+**And the sharpest cost is one the first version of this section did not state at
+all: under `Apply`, a descriptor rollback may not be able to boot.** A forward
+deploy advances the applied snapshot with no operator action and no decision.
+Redeploying the previous descriptor — the first thing anyone does — then plans a
+`DropField` against the schema the forward deploy wrote, the always-on destructive
+gate (deviation 57) refuses it, and **every pod exits 78 in a crash loop**. The way
+out is `AllowDestructive` on the rollback (accepting the loss) or applying the older
+descriptor from a migration job. Under `Verify` the operator chose the forward apply
+knowingly; under `Apply` they never chose it, which is the difference this paragraph
+exists to state. Already pinned by
+`AlvoHostRestartTests.A_descriptor_that_drops_a_field_fails_the_restart_and_names_the_step`,
+and named in `AlvoHostBootTests`' own remarks — *"one typo in an environment
+variable, one unbootable database"* — so the branch knew the shape and had not
+published it as a cost of the default. It does not change the default: the
+maintainer's argument stands on the destructive gate being always on, and this is
+what that gate costs when it fires on the way *back*. Deviation 53.
+
+**The enum's zero stays `Verify` while the property's default is `Apply`, and the
+two differ on purpose.** Zero is where a value that went *missing* lands — an
+uninitialized field, `default(AlvoSchemaStartupMode)`, a silent fallback — and
+losing a value must never be how a process earns the right to rewrite a schema.
+The property initializer is where a host that *chose* to say nothing lands.
+Collapsing them in either direction forfeits one of the two guarantees; both
+halves are pinned by
+`AlvoSchemaOptionsTests.The_enum_zero_stays_Verify_even_though_the_configured_default_is_Apply`.
+
+The image's `appsettings.json` therefore sets **nothing**: with `Apply` as the
+core default there is no policy left for the image to state, and A:553 never
+depended on the setting anyway — a bare `docker run` starts against an empty
+database, which is *initialization*, exempt from the mode in every mode but
+`Skip`. A duplicate `Alvo:Schema:Startup: Apply` line would have been a second
+source of truth that no fact compares against the first.
+
+An **environment-gated** default (`Apply` in Development, `Verify` otherwise) was
+considered and rejected, and remains rejected under the new default for the same
+reason: the container runs in Production by default, so the image would silently
+take the `Verify` branch and drift-refuse a restart after an edit, which is the
+exact class of surprise this section is about. Branching on *initialized vs
+drifted* plus one explicit setting achieves the DX with no environment magic and
+no hidden coupling to `ASPNETCORE_ENVIRONMENT`.
+
+**Initialization under concurrency.** Three replicas starting against an empty
+database all see "uninitialized". One wins; the losers **re-read, re-decide, and
+converge**. That convergence is a required behaviour, not an accident — a loser
+that throws would turn a normal cold start of a replica set into a crash loop.
+
+Two things about that were wrong in this design's first draft, both found by
+measuring rather than reasoning, and the second is a bug that predates this work.
+
+**The write must be atomic, or there is nothing to converge on.** The first draft
+assumed the losers are serialized by the applied-snapshot write. They were not:
+the boot applied DDL through `ISchemaMigrator.ApplyAsync` and *then* saved the
+snapshot — two transactions, DDL first — so a loser never reached the snapshot
+write at all. It got `SQLite Error 1: 'table "depots" already exists'`. Worse,
+DDL-first leaves a window in which the tables exist and no revision row explains
+them, so a loser's re-read can legitimately see `null`.
+`EfCoreRuntimeSchemaWriter`'s own remarks already named this ordering as the wrong
+one — *"With insert-first, the only writer that reaches the DDL is the confirmed
+winner."* So the boot writes through `IRuntimeSchemaWriter.ApplyAndAppendAsync`:
+version row first as the gate, DDL and row in one transaction. The destructive
+guardrail is **restated at that call site**, because that writer deliberately
+re-evaluates no policy and dropping it would have been a silent data-loss
+regression.
+
+**`CREATE TABLE IF NOT EXISTS` is not concurrency-safe on PostgreSQL**, and stage 1
+hits that before any project-schema race can happen. The catalog check and the
+insert are not atomic, so every replica failed its *first* database call with
+`23505 duplicate key value violates unique constraint "pg_type_typname_nsp_index"`
+inside `SystemSchemaInitializer.EnsureAsync`. `IdempotencyTable`'s remarks already
+knew this on the data path (*"a duplicate-relation error on PostgreSQL … is retried
+by the caller"*); the boot had no such retry, and the one retry it did have was
+being consumed here, leaving none for the race it was for. Fixed at source: run the
+DDL, and on any `DbException` **probe whether the table now exists**
+(`SELECT 1 FROM t WHERE 1 = 0` — the one question both engines answer identically)
+and rethrow if it does not. No `SQLSTATE` and no `SqliteErrorCode` is decoded, which
+is the same "re-read rather than classify" discipline `VersionRowWriter` uses.
+
+Measured, once the ordering was atomic: the SQLite loser gets a clean
+`DescriptorConcurrencyException`, never `SQLITE_BUSY` — its own post-conflict
+re-read has to take the write lock, so it serializes behind the winner's commit.
+A **different** descriptor (a rolling deploy mid-flight) is ordinary drift with a
+non-null snapshot, so the mode governs: under `Verify` the loser **refuses**, and
+under the default `Apply` it applies its own descriptor over the winner's **if that
+plan is purely additive**. Either way it re-decides; a loser never silently adopts
+the winner's schema and serves rules compiled against something it never agreed to.
+Measured after the default flip: with no mode configured, the loser of the
+*superset* race (`DriftedDescriptor` adds a nullable `region`) serves and the history
+becomes `[1, 2]` — which is why
+`A_loser_holding_a_different_descriptor_refuses_rather_than_adopting_the_winners_schema`
+now names `Verify` explicitly on both engines instead of leaning on the default.
+
+**What that does *not* reach, and this design published the opposite for one
+commit.** The mode section used to say two replicas holding two descriptors "take
+turns rewriting the schema", and `host.md` and #145 said the additive-vs-additive
+case (A adds `region`, B adds `city`) is refused by nothing, so the database ends up
+with **both** — a schema no deployed descriptor declares. Neither is reachable, and
+the reason is one line of the policy: the loser's plan is computed from *its own*
+descriptor against the winner's snapshot, so a field the loser does not declare is a
+`DropColumn`, which `DestructiveScan` marks destructive and the gate refuses **in
+every mode**. So:
+
+- divergent-additive is **refused**, and the database ends on one descriptor's
+  schema — now measured by
+  `ConcurrentBootTests.Two_replicas_adding_different_fields_end_on_one_descriptors_schema_not_the_union`,
+  which asserts the applied *field list* because the revision history alone cannot
+  tell "one descriptor won" from "a merged apply";
+- there are no turns to take: the subset pod cannot revert the superset pod's column,
+  so instead of oscillating it **crash-loops**, by the same mechanism as the rollback
+  cost above.
+
+Recorded at this length because the branch has been careful to separate measured from
+theorised, and this is the one place that slipped: the claim was labelled *"measured,
+not theorised"* while only the superset half had been measured.
+
+### How a failure surfaces
+
+A stage 0–2 failure throws out of `StartingAsync`, which fails `StartAsync`,
+which stops the process before the server ever listens. That is today's
+behaviour and it is deliberate — #132 states it plainly: *"Refusing to start is
+the designed behaviour and the right one … Nothing here asks for a fallback."*
+
+What changes is the **presentation**, which is what #132 actually asks for and
+what A:91 requires as an acceptance criterion. Every refusal is a structured,
+operator-readable message naming the thing and the fix, written before the
+process exits with a deliberate code — not an unhandled `FileNotFoundException`
+and exit 139:
+
+```
+Alvo cannot start: no project descriptor at /alvo/descriptor.json.
+
+  Mount one:  docker run -v ./project.alvo.json:/alvo/descriptor.json mmlib/alvo
+  Or set:     Alvo__DescriptorPath=/path/to/descriptor.json
+```
+
+and, for drift under `Verify`:
+
+```
+Alvo cannot start: the mounted descriptor does not match the schema applied to this database.
+
+  add column  orders.discount (numeric, null)
+  drop column orders.legacy_ref          <- destructive
+
+  Apply it with a migration job, or set Alvo__Schema__Startup=Apply to apply on boot.
+```
+
+This closes **#132**, and it discharges **deviation 48** by giving
+`AlvoHostOptions` the `IValidateOptions<T>` + `ValidateOnStart` that
+`extensibility.md` rule 5 requires and that A:91 makes an acceptance criterion.
+
+**Disposal must not regress.** `BuildAsync` today wraps composition in
+`try/catch → DisposeAsync` because a refused start used to leak the whole
+application — the service provider stayed alive holding the SQLite file open,
+visible in this repository's own suite as a swallowed `IOException`. Moving the
+failure into `StartingAsync` moves *where* that leak could reappear, so the
+existing fact `A_refused_restart_disposes_the_application_it_had_already_built`
+must keep holding against the new shape, and the host's `Program.cs` must
+dispose the application when `RunAsync` throws.
+
+### Readiness, and keeping deviation 38's guarantee
+
+Deviation 38's guarantee is: **a host whose apply is refused must not report
+healthy while serving nothing.** Today that holds by an accident of ordering —
+the apply happens before `RunAsync`, so answering `/health/live` at all proves it
+succeeded. Under this design it holds **structurally**, and from both ends:
+
+- A refused boot never reaches `StartedAsync`, so the server never listens and
+  nothing answers at all — the strong end, unchanged.
+- The boot service publishes its state (`Pending` / `Ready` / `Failed`), and
+  `/health/ready` reports it. So a state published *after* a successful boot cannot
+  report *ready* while the process can serve nothing.
+
+**The second bullet is not hypothetical, and the argument for it changed twice.** It
+was written as "even if a future mode were to let a host start degraded". Two
+candidates were then examined:
+
+- **`HostOptions.ServicesStartConcurrently`** — proposed as already-true, and it is
+  **false**. The option flips the host's `abortOnFirstException` to `false`, so every
+  service in a phase gets its turn, but `Host.StartAsync` rethrows collected
+  exceptions after **each** phase, so a refused `StartingAsync` still aborts before
+  the web host service binds anything. Measured, not read:
+  `AlvoBootServiceTests.A_refused_boot_binds_no_socket_even_when_services_start_concurrently`.
+  Kept as a fact because it is the only supported composition that could break the
+  strong end.
+- **An applied schema the Data API refuses to route** — and this one is reachable
+  today. The reserved-key and format guards run when the endpoint table materialises,
+  which is *after* the server is listening, over a schema `ISchemaRegistry` answers
+  with (a substituted registry, a schema applied by an older build, F7's dynamic
+  entities). That refusal is recorded on `AlvoBootState`, so readiness turns `Failed`
+  and the pod is drained. It used to be **thrown** out of
+  `EndpointDataSource.Endpoints` — which the matcher enumerates through the composite
+  of *every* source in the application — so `/health/live` answered 500 as well, for
+  the life of the process, and a hostile schema got the container killed and
+  restart-looped. Deviation 65.
+
+`/health/live` stays unconditional — the process is up. `/health/ready` becomes
+the schema-applied signal, expressed the way Kubernetes expresses it: readiness is
+`appliedRevision == the revision this process primed from`, the direct analogue of
+`status.observedGeneration`.
+
+This is the standard split and it is the correct one: a failing **liveness** probe
+gets the container killed and restarted, which is the wrong response to "the
+migration job has not run yet" — and the Kubernetes docs warn that exactly this
+mistake causes *"cascading failures … restarting of container under high load"*. A
+failing **readiness** probe merely removes the pod's address from the Service's
+EndpointSlices, which is precisely right.
+
+**One trap, and it would silently void the whole gate.** ASP.NET Core's default
+`ResultStatusCodes` map `Healthy` → 200, **`Degraded` → 200**, `Unhealthy` → 503,
+and Kubernetes treats any 200–399 as success. So "schema not applied" must be
+reported **`Unhealthy`, never `Degraded`** — a degraded schema gate is invisible to
+an `httpGet` probe and the pod would receive traffic anyway. The fact that pins
+readiness must therefore assert the **status code**, not merely the reported
+health string; asserting the string is how this passes review and fails in
+production.
+
+The two paths are also configured oppositely, deliberately: liveness registers
+**zero** checks (`Predicate = _ => false`), so a future health check cannot
+accidentally make liveness fail and start killing containers; readiness selects by
+tag, so a check registered without thinking lands in readiness, where the
+consequence is losing traffic rather than losing the process. Aspire's service
+defaults make the same choice for the same reason.
+
+### The readiness endpoint must not echo the failure reason
+
+Found while implementing the boot service, and it is an information-disclosure
+bug that would otherwise have shipped in the obvious implementation.
+
+`AlvoBootState.Failure` records the reason a boot was refused, and
+`/health/ready` is **unauthenticated by design** — a probe cannot hold a
+credential, and the existing liveness fact
+`Liveness_answers_an_unauthenticated_probe` pins that shape.
+
+**The premise, measured and narrowed.** This design first claimed the reason is the
+provider's message and "routinely carries a connection string". That is **not
+evidenced for either shipped provider**: `SqliteException` reports
+`"SQLite Error 14: 'unable to open database file'"` with no path, and Npgsql reports
+a `SocketException` for an unreachable host and the offending *keyword* — never its
+value — for a bad connection string. What **is** genuinely leaked today is a
+**filesystem path**: a missing descriptor throws `FileNotFoundException` and
+`AlvoBootState.Failure` then contains the descriptor's absolute path.
+
+The guard is still right, for a reason that does not depend on the overclaim:
+`Failed(failure.Message)` accepts *any* exception from *any* provider, interceptor
+or third-party driver, and `IAppliedSchemaStore` is a public port precisely so a
+third party can implement it. So the barrier is against a class of message, not
+against a specific observed one — and the non-vacuity fact anchors on the path leak
+that does exist rather than on a hypothetical.
+
+So whatever answers readiness reports the **phase**, and never that text:
+
+- the probe response carries `Pending` / `Ready` / `Failed` and nothing else;
+- the reason goes to the **log**, where it is already governed by the host's own
+  redaction, and to the operator-facing refusal written to stderr before the
+  process exits. **That took an actual `ILogger` call, which the first
+  implementation did not have**: the reason was recorded on `AlvoBootState` and
+  reached stderr only, so "the operator gets it in the log" was a promise this
+  design, `MapAlvoHealth`'s remarks and `AlvoSchemaHealthCheck`'s remarks all made
+  and nothing kept. The boot now logs a refusal at `Critical` — the one place an
+  *embedded* host can read it;
+- a fact must assert the negative — that a readiness body does **not** contain a
+  connection-string fragment — because the positive assertions (503 while pending,
+  200 when ready) all pass happily while the body leaks.
+
+**There are two independent leak sites, so there are two facts.** The health
+*check*'s description and the response *writer* are separate barriers: making the
+check leak its reason does **not** turn the HTTP body fact red, because the writer
+discards the report. That is exactly why the HTTP fact alone is insufficient, and
+each barrier carries its own discriminating mutation.
+
+**The body's *format* is a decision too, and it is recorded rather than argued from
+the contents alone.** It is `text/plain` carrying the bare phase word, in a framework
+that publishes RFC 7807 for every other refusal. One writer answers both the 200 and
+the 503, and a problem document describes a *problem*, so `application/problem+json`
+would be wrong for half of what this route answers; `{"phase":"Pending"}` leaks no
+more than the word, but it advertises a JSON contract for a body whose only consumer —
+an orchestrator's `httpGet` probe — reads the status code and ignores the body. A
+probe response is not an API response. A structured phase for a dashboard is an
+authenticated diagnostic, not this route.
+
+**`Degraded` is deliberately left mapping to 200.** Remapping it to 503 in
+`ResultStatusCodes` would hide the trap behind an option rather than pin it with a
+fact — and would make the `Unhealthy` → `Degraded` mutation *stop* going red, which
+is the one observation proving the gate works. A host's own checks may also mean
+`Degraded` honestly.
+
+This is why the change is labelled `needs-deep-review` and why
+`alvo-security-core-review` is run on it: the boot path decides *when the policy
+catalog is primed*, and an unprimed catalog denies everything, so the fail-closed
+direction is a security property rather than an implementation detail.
+
+This delivers the **schema-applied half** of §2.12's readiness bullet (A:487).
+It does **not** deliver the continuing database-reachability probe — that needs
+the port **#133** exists to design, and the core may not touch a provider
+directly (§0 principle 2). So #133 stays open, narrowed: this design supplies
+`/health/ready` and its registration seam; #133 supplies the reachability check
+that plugs into it. Said plainly so a later reader does not read `/health/ready`
+existing as §2.12 being met.
+
+### Breaking `apply → map → listen`
+
+`MapAlvoDataApi` currently enumerates `EntityRouteCatalog` **eagerly**, inside
+the map call, so the schema has to be primed before the host maps. It is replaced
+by an `EndpointDataSource` that reads the registry at **enumeration** time
+(facts 1, 2), so:
+
+```
+register  →  map (declaratively, schema not yet known)  →  boot/prime  →  listen  →  first request materialises routes
+```
+
+Two things must be preserved through that move, and both are traps:
+
+- **The OpenAPI document must not silently empty** (facts 4, 5). The data source
+  builds its endpoints through the genuine minimal-API `Map*` helpers on a nested
+  `IEndpointRouteBuilder`, never by hand — that is the only measured way the
+  ApiExplorer metadata survives. A fact must pin the document's contents, or a
+  future refactor to hand-built endpoints passes every routing test and empties
+  the document.
+- **The eager refusals must stay eager.** `MapAlvoDataApi` today throws at map
+  time when an entity declares a field named after a reserved query key, and
+  `DataApiQueryTests` pins that. Under a lazy data source that refusal would move
+  to the first request — a startup error becoming a runtime 500. So the *checks*
+  (`ReservedQueryKeys.EnsureNoneIsShadowed`, `FormatCatalog.Build`) move into
+  **stage 0**, where they run before anything is durable and still fail the start.
+
+Two mechanical requirements fall out of the framework's own behaviour, both
+recorded above under *Prior art → The routing seam*: the data source must be
+registered (empty) during `MapAlvo()`, because `WebApplicationBuilder` wires
+`UseRouting`/`UseEndpoints` only when `DataSources.Count > 0` and counts *sources*
+rather than endpoints; and if the mutable half is ever built, the change token must
+be replaced before the old one is cancelled.
+
+This delivers the lazy half of **#103** and leaves the mutable half measured but
+unbuilt. #103 is updated, not closed: its remaining substance is (a) runtime
+route addition for F7's virtual entities, and (b) the newly measured fact that
+the OpenAPI document does **not** refresh on invalidation.
+
+### The configuration surface
+
+The briefing's list — `AddAlvo` + provider + descriptor + `AddAlvoApi` +
+`AddAlvoAuth` + `AddAlvoProblemDetails` + `AddAlvoHostDocs` + `MapAlvoDataApi` —
+overstates the problem, and saying so is more useful than inventing a
+simplification. `AddAlvoApi` and `AddAlvoAuth` are **already internal**;
+`AddAlvo` composes them. `AddAlvoHostDocs` is internal to the Host. The actual
+public surface today is five members:
+
+```csharp
+services.AddAlvo(alvo => alvo.UseSqlite(cs).FromDescriptor(path).AddDataApi());
+services.AddAlvoProblemDetails();
+var r = await app.Services.ApplyAlvoDescriptorAsync(); r.EnsureApplied();
+app.MapAlvoDataApi();
+```
+
+So the complexity is **not the call count — it is the ordering obligation**. A
+host must know that the apply precedes the map, that the result must be checked
+rather than discarded, and that `EnsureApplied` is the difference between serving
+and 404-ing everything while reporting healthy. That is three pieces of
+load-bearing folklore, and none of it is expressible in the type system.
+
+The design removes the obligation rather than renaming the calls:
+
+```csharp
+builder.Services.AddAlvo(alvo => alvo
+    .UseSqlite("Data Source=app.db")
+    .FromDescriptor("project.alvo.json"));
+
+app.MapAlvo();
+```
+
+- **`AddDataApi()` becomes configuration-only** — and the Data API was *already*
+  registered by `AddAlvo`, which this design initially got wrong (deviation 56,
+  withdrawn). So S:157's "**one entry point for the whole framework**" was already
+  satisfied for registration; what this task removed was a redundant second
+  `AddAlvoApi()` call inside `AddDataApi` and the docs that described it as
+  load-bearing.
+- **`MapAlvo()`** maps the Data API plus health. It is not an invention — it is
+  the spec's own name (S:167). `MapAlvoDataApi()` and `MapAlvoHealth()` stay
+  public for a host that wants the pieces, exactly as `MapControllers` coexists
+  with finer-grained mapping. `MapAlvo()` is the composition, not a replacement.
+- **The apply disappears from host code.** `ApplyAlvoDescriptorAsync` stays
+  public — the CLI and the Management API need it, and it is the `Apply{Thing}`
+  verb `extensibility.md` added for exactly that — but no host has to call it,
+  and none of the ordering folklore survives.
+- **`AddAlvoProblemDetails()` stays opt-in**, deliberately. Deviation 36's
+  reasoning still holds: an embedded host has its own error handling, and
+  silently taking over `UseExceptionHandler`'s document shape inside someone
+  else's application is worse than one explicit call. Recorded rather than
+  quietly "simplified".
+
+`AlvoHost.BuildAsync` collapses to composition: no apply, no `EnsureApplied`, no
+`try/catch` around a migration. It stays `async` only if something else needs it
+to be.
+
+### Not foreclosing #141
+
+Serving several projects from one host is parked (#141). This design does not
+build it and must not wall it off. Two cheap precautions, no more:
+
+- The boot state is **keyed by project name**, over a collection that today has
+  exactly one entry. `IPolicyCatalogProvider.SetCurrent(project, …)` and
+  `IAppliedSchemaStore` are already project-keyed, so this matches the grain the
+  data model already has.
+- The endpoint data source is constructed **per project**, not as a process
+  singleton reading one global registry.
+
+`PolicyCatalogProvider`'s existing refusal of a second project stays. Keeping the
+door closed but unlocked is the point; opening it is #141's work.
+
+## Deviations from the sources
+
+Numbering continues the F3 design's series, which ends at 51.
+
+52. **Automatic migration at startup is kept, not removed — but partitioned.**
+    A:508 mandates that the framework's **own system schema** migrates
+    automatically at startup, and A:515 requires it on an independent chain that
+    does not touch the host's tables. So stage 1 is unconditional. What becomes
+    conditional is the **project** schema, which A:510 locates at build/deploy
+    or at an explicit runtime apply. The maintainer's objection is honoured for
+    the half the sources leave open, and the half they mandate is kept.
+53. **`Apply` is the default, and initialization is exempt from the mode
+    entirely.** No source states either split; both are derived. The exemption's
+    reason is unchanged: A:553 (60 s, zero config) and S:157 (dev run with no
+    configuration) are unreachable under a blanket `Verify`, because the hazard the
+    sources and EF's guidance describe is migrating an existing database, not
+    creating an empty one. **The default itself was changed by the maintainer after
+    this design shipped `Verify`, and the argument won on the merits** — the
+    exemption saves only the first run, the destructive gate (deviation 57) is
+    separate and always on so `Apply` can only add, and the host pointed Alvo at
+    that database on purpose. The cost is published rather than absorbed — `Verify`
+    plus a migration job is the documented production posture in
+    `docs/architecture/host.md`, i.e. an **opt-out** — and it has three parts, the
+    third of which this design failed to state when the default flipped:
+    (a) every replica of a rolling deploy attempts the DDL; (b) the application needs
+    DDL rights in production; and (c) **a descriptor rollback may not be able to
+    boot.** `Apply` advances the applied snapshot with no operator decision, so
+    redeploying the previous descriptor plans a `DropField`, deviation 57's always-on
+    gate refuses it, and every pod exits 78 in a crash loop — recoverable only with
+    `AllowDestructive` (accepting the loss) or a migration job applying the older
+    descriptor. Under `Verify` the operator chose the forward apply; under `Apply` they
+    did not. This is the strongest argument on the record for the other default, it was
+    absent when the maintainer ratified `Apply`, and it is recorded here rather than
+    used to reopen the decision. The enum's zero stays `Verify` so a *lost* value still
+    lands on the mode that touches nothing; see *Stage 2's decision* for the full
+    reasoning.
+54. **`/health/ready` reports schema-applied, not reachability.** §2.12 (A:487)
+    asks for readiness over DB, cache and message-bus reachability. This design
+    supplies the endpoint, the state machine and the registration seam, and
+    exactly one contributor to it. The reachability port stays **#133**.
+    Deviation 38 is superseded in its liveness-only part and preserved in its
+    guarantee.
+55. **The upgrade/downgrade contract between the NuGet version and the system
+    schema version (A:555) is not designed here.** Stage 1 creates the current
+    system tables idempotently; it does not yet carry a version contract for
+    downgrades. Recorded because A:555 is an acceptance criterion and this design
+    touches the exact mechanism — deferred to the issue that publishes the image
+    (#24), not silently skipped.
+56. **~~`AddDataApi()` becoming default-on is a public-API behaviour change.~~
+    WITHDRAWN — the premise was false.** Measured at Task 8: `AddAlvo` has **always**
+    called `AddAlvoApi()` (`origin/main`, `AlvoServiceCollectionExtensions.cs:57`), so
+    the Data API's services were registered by `AddAlvo` before this branch existed.
+    Nothing became default-on; no host's container changes; the full fast suite shows
+    no test changing behaviour. What actually changed is narrower: `AddDataApi` no
+    longer *registers* anything, only configures. That can affect only a caller holding
+    a hand-rolled `IAlvoBuilder`, and none can exist — `AlvoBuilder` is `internal`.
+    Recorded as withdrawn rather than deleted, because this design asked the maintainer
+    to ratify a breaking change that is not one.
+57. **The destructive guardrail applies during *initialization*, not only during
+    a mode-governed apply.** Stated as a deviation because it is stricter than
+    A:513 literally requires — that criterion attaches the explicit flag to
+    "DROP/column type change", without distinguishing a first apply from a later
+    one. The reason is in *Stage 2's decision* above: an absent applied snapshot
+    means Alvo recorded nothing, **not** that the database is empty, so an
+    initialization plan against an adopted database can contain drops. The cost of
+    being stricter is that adopting an existing database whose shape genuinely
+    conflicts with the descriptor now requires `AllowDestructive` on the first
+    boot — which is the right way round, because the alternative silently
+    discards someone else's columns.
+58. **`Skip` reads the applied-schema store, contrary to this design's own
+    earlier wording.** Stage 1 is unconditional (A:508/A:515), and the store read
+    is what brings the system schema up, so there is nothing to skip. `Skip` still
+    ignores what the read found. Recorded because the design previously said `Skip`
+    would "not read the store", and a later reader would otherwise take the
+    implementation for a shortcut. The **public** `AlvoSchemaStartupMode.Skip` XML doc
+    said it too, which is the copy a consumer reads out of the package, and it now
+    states what the code does. See deviation 64 for the one state `Skip` refuses.
+59. **The readiness endpoint reports the phase only, never `AlvoBootState.Failure`.**
+    §0 principle 4 wants structured errors with fix suggestions, and this
+    deliberately withholds one from an HTTP response: a stage 1/2 failure reason is
+    the provider's message and can carry a connection string, while `/health/ready`
+    is unauthenticated by design. The operator gets the full reason on stderr and in
+    the log; the probe gets a phase. Deviating from the agent-first error rule is
+    correct here because the reader of a probe response is not the operator. Two
+    consequences the first implementation missed and this round fixed: the "in the log"
+    half needed an actual `ILogger` call (there was none), and the same class of text
+    was being logged at **Information** on the lost-race path — a third-party
+    `DbException.Message`, at the level most aggressively shipped to an aggregator. That
+    line now logs the exception *type*.
+60. **`IRuntimeSchemaWriter` becomes mandatory for every provider at boot.** It was
+    previously resolved on demand, only by `RuntimeSchemaService` (the runtime
+    dashboard-first path). The boot now needs it for the atomic version-row-then-DDL
+    write, so a provider that implements `IAppliedSchemaStore` but not
+    `IRuntimeSchemaWriter` can no longer boot. Both in-repo drivers implement it; the
+    cost is borne by a future third-party provider, and it is a widening of the
+    implicit provider contract that `package-boundary.md` records.
+61. **`SchemaMigrationRunner` keeps the non-atomic ordering the boot just abandoned.**
+    The CLI / Management-API path still applies DDL and *then* saves the snapshot. Left
+    deliberately: that path is a single writer by construction, so the race the boot has
+    to survive cannot arise there, and changing it would alter behaviour the CLI's tests
+    pin for no benefit. Recorded because the two apply paths now differ in a way a later
+    reader would otherwise take for an oversight — and because if the Management API
+    ever serves concurrent applies, this is the line that has to move.
+62. **The concurrency fix to `SystemSchemaInitializer` is a bug fix outside this
+    design's scope, shipped here because this design is what exposed it.** Multi-replica
+    PostgreSQL deployments could not reliably bring the system schema up at all;
+    nothing before this needed three hosts to start at once, so nothing had found it.
+    Recorded so it is not mistaken for part of the lifecycle redesign.
+63. **Alvo's health check is registered through `IConfigureOptions<HealthCheckServiceOptions>`
+    via `TryAddEnumerable`, not through `AddCheck`.** `AddCheck` is a plain `Configure`
+    and is **additive**, so a host calling `AddAlvo` twice — which `AddBoot`'s own remarks
+    explicitly support — would register two checks named `alvo-schema`, and
+    `DefaultHealthCheckService` **refuses to be constructed at all** on a duplicate name.
+    Both probes would then answer 500, which an orchestrator cannot distinguish from
+    "not ready". `TryAddEnumerable` dedupes on implementation type, matching what
+    `AddAlvoApi` already does. Recorded because it is a real trap for anyone adding a
+    second Alvo health check.
+64. **`Skip` refuses the start in one state, which is stricter than "never touch the
+    project schema" reads.** No source asks for this; it is derived from what readiness
+    means. With no recorded snapshot *and* a non-empty plan against the live schema,
+    nothing has verified that the schema the descriptor needs exists — the shape of a
+    migration job that never ran — and priming anyway published `Ready` with a null
+    `AppliedRevision`, i.e. the phase contradicting the revision, while every request
+    failed at the database. The cost of being stricter is one refusal for a host that
+    points `Skip` at an empty database on purpose, and the refusal names both ways out
+    (`Verify`, which checks without writing, or the migration job). The composition
+    `Skip` is *for* — an adopted database whose live schema already matches — produces an
+    empty plan and still serves.
+65. **A schema the Data API cannot route degrades readiness instead of failing the
+    request path.** §0 principle 4 would have the refusal be loud, and it is — at
+    `Critical`, naming the entity and the field — but it is no longer *thrown*. Throwing
+    out of `EndpointDataSource.Endpoints` takes down the composite the framework matches
+    **every** request through, so `/health/live` answered 500 as well and the container
+    was killed and restart-looped for a schema no restart can fix, contradicting
+    `AlvoHealth.LivenessPath`'s own promise. The endpoint table now materialises empty
+    (nothing is reachable, so the fail-closed direction is unchanged) and the reason is
+    recorded on `AlvoBootState`, so readiness reports `Failed` and the pod is drained.
+    Reachable only for a schema no descriptor validation passed through — a substituted
+    `ISchemaRegistry`, a schema applied by an older build, F7's dynamic entities; a
+    descriptor is still refused at stage 0, before anything is durable.
+
+## Ratification needed from the maintainer
+
+Flagged rather than decided silently, per the brief.
+
+1. ~~**`Verify` as the core default (deviation 53).**~~ **Ratified as `Apply`, and
+   the design was wrong.** The maintainer overruled `Verify` at Task 10 and the
+   argument stands: the exemption saved only the first run, the destructive gate is
+   separate and always on, and the developer pointed Alvo at that database
+   deliberately. Implemented as `AlvoSchemaOptions.Startup = Apply` with the enum's
+   zero left at `Verify`. What is left to ratify is the *disclosure* rather than the
+   default: `docs/architecture/host.md` now tells a production deployment to set
+   `Verify` and apply from a migration job, and says plainly that this is an
+   opt-out. See deviation 53 and *Stage 2's decision*.
+2. **Drift under `Verify` fails the start, rather than starting un-ready.**
+   Failing the start keeps #132's stated contract and deviation 38's guarantee
+   literally. Starting un-ready would give a rolling deployment a better story —
+   the pod is inspectable rather than crash-looping, and the readiness probe
+   already exists to express it. I recommend failing the start now, because it is
+   the behaviour every existing test pins, and revisiting it when #133 lands.
+3. ~~**`AddDataApi()` default-on (deviation 56).** Cheap now, breaking later.~~
+   **Withdrawn — nothing to ratify.** Measured at Task 8: `AddAlvo` always registered
+   the Data API, so this was never a behaviour change. See deviation 56.
+4. **The `Alvo__Schema__Startup` environment name.** Deviation 39 already flagged
+   that the whole `Alvo__*` spelling wants confirming before the image is
+   published, and this adds one more key to that set.
+
+## Definition of Done
+
+- A host registers Alvo and maps it; **nothing in host code calls the apply**,
+  and the ordering folklore is gone from the public surface.
+- The boot sequence runs in `StartingAsync`, before the server listens — pinned
+  by a fact that observes the port closed, not by reading the code.
+- `AlvoHost.ValidateOptions` is **deleted**, and
+  `A_credential_the_startup_validation_refuses_leaves_the_database_untouched`
+  still passes — which is what proves the guarantee moved to the framework
+  rather than being lost with the code that used to provide it.
+- A missing descriptor produces a structured, operator-readable refusal naming
+  the path and the fix, and a deliberate exit code — **#132 closed**, reproduced
+  through the compose stack, not only a unit test.
+- `AlvoHostOptions` is validated at startup with a structured error —
+  **deviation 48 discharged**, A:91 met.
+- Zero-config still holds: `AddAlvo()` + `UseSqlite()` + `FromDescriptor()` on an
+  empty database serves a working backend, and `docker compose up` still passes
+  the existing e2e suite unchanged.
+- Drift under `Verify` refuses with a readable diff; under `Apply` it applies;
+  a destructive plan is still refused without the explicit flag.
+- Three replicas cold-starting against one empty database all converge —
+  one initializes, the others observe "unchanged" and serve. A real test, not an
+  argument.
+- `/health/live` answers unconditionally; `/health/ready` returns **503** until
+  the boot state is Ready, and the fact asserts the **status code** — not the
+  reported health string, which would pass while `Degraded` silently served 200.
+- **The OpenAPI document still lists exactly the mapped routes** — the fact that
+  catches fact 4's trap.
+- A reserved-field-name descriptor still fails the **start**, not the first
+  request.
+- A refused start still disposes the application it had already built.
+- ring2 green; `scripts/test-e2e` green (the host and compose are touched);
+  `alvo-plan-guard` dispatched; reviewer subagents run as substitutes for
+  `/code-review` and `/security-review`.

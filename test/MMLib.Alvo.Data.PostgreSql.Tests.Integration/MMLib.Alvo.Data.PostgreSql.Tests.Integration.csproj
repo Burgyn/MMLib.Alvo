@@ -47,4 +47,11 @@
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/postgres/PostgresTestContainer.cs" Link="_shared/PostgresTestContainer.cs" />
   </ItemGroup>
 
+  <!-- The concurrent-cold-start harness, shared with MMLib.Alvo.Data.Sqlite.Tests. Convergence under a lost
+       race is an engine-agnostic guarantee (§0 principle 3) and only the engine's own failure differs, so the
+       barrier and the probe counts are linked rather than copied. -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/boot/ConcurrentColdStart.cs" Link="_shared/ConcurrentColdStart.cs" />
+  </ItemGroup>
+
 </Project>

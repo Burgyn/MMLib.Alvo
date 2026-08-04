@@ -1,0 +1,6 @@
+### Readiness answers without a credential, and answering 200 is what proves the descriptor applied
+### Liveness (001) is deliberately unconditional, so it cannot carry that claim: this route is the one
+### the compose healthcheck waits on.
+# @name Readiness
+## TEST-EXPECT-STATUS: [200]
+GET {{baseUrl}}/health/ready

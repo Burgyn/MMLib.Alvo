@@ -57,7 +57,11 @@ extension method in its own package, never an edit to `AddAlvo`/`IAlvoBuilder`.
    - `Apply{Thing}` — a runtime operation on a built container, not a registration
      (`ApplyAlvoDescriptorAsync` on `IServiceProvider`). Added in PR4 because a host
      outside the core assembly cannot reach the `internal` migration orchestrator, and
-     the operation is not a registration so no existing verb fits it.
+     the operation is not a registration so no existing verb fits it. **The verb
+     survives even though no host calls it any more**: the boot applies the descriptor
+     from the host lifecycle, so `ApplyAlvoDescriptorAsync` is now the explicit,
+     on-demand door the CLI (`alvo apply …`) and the Management API go through — the
+     same operation, minus the start.
    - Fluent methods return `IAlvoBuilder`.
 5. **Config via the options pattern, validated at startup.** Infrastructure config
    is typed options (`AlvoOptions`, and per-provider options), bound and validated
@@ -92,7 +96,30 @@ extension method in its own package, never an edit to `AddAlvo`/`IAlvoBuilder`.
 9. **Explicit, documented lifetimes** for every port registration (thread-safe
    singletons per the DI guidelines).
 10. **Endpoints are a separate seam** — `MapAlvo(this IEndpointRouteBuilder)` is
-    orthogonal to `AddAlvo`. Adding endpoints never changes the DI seam.
+    orthogonal to `AddAlvo`. Adding endpoints never changes the DI seam. `MapAlvo`
+    now exists, and three things about it are part of the seam rather than of its
+    implementation:
+    - **It is a composition, not a replacement.** It is defined as
+      `MapAlvoHealth()` + `MapAlvoDataApi()` and nothing else, and **both parts stay
+      public** — a host may map only one of them, or mount them under different
+      route groups, exactly as `MapControllers` coexists with the finer-grained
+      controller mappings. A fact asserts the umbrella and its parts produce the
+      same endpoint data sources, so the two cannot drift. Health maps **first**:
+      `MapAlvoDataApi` refuses a host whose Data API services are absent, and an
+      operator facing that refusal needs a container that can still be probed.
+    - **Alvo never calls `UseRouting`/`UseEndpoints` on a host's behalf, and never
+      self-registers an endpoint data source outside an explicit `Map*` call.** That
+      is the ASP.NET Core routing documentation's guidance for library authors, and
+      it is why calling `MapAlvo` stays mandatory: nothing Alvo registers is
+      reachable over HTTP until a host maps it. The standalone host adds no
+      `UseRouting` either — `UsePathBaseMiddleware` re-runs matching over the
+      rewritten path itself (measured; `host.md`, *Behind a reverse proxy*).
+    - **What it does not require is an order.** It may be called before or after the
+      schema exists: the Data API's routes materialise from the primed registry at
+      first *enumeration*, not at map time (`data-api.md`). It also does not
+      register `AddAlvoProblemDetails()`, which stays opt-in — taking over the shape
+      of `UseExceptionHandler`'s document inside someone else's application is worse
+      than one explicit call (deviation 36).
 11. **The builder surface is under public-API approval** (`IAlvoBuilder`,
     `AddAlvo`, `AlvoOptions`, the verb taxonomy); any change is a conscious SemVer
     act. Concrete builder + registrations are `internal`.
