@@ -167,7 +167,7 @@
             "action": {
               "mutate": {
                 "email": {
-                  "$cel": "lower(new.email)"
+                  "$cel": "lowerAscii(new.email)"
                 }
               }
             },

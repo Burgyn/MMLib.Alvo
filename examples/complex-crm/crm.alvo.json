@@ -107,7 +107,7 @@
         "beforeCreate": [
           {
             "condition": "has(new.email)",
-            "action": { "mutate": { "email": { "$cel": "lower(new.email)" } } }
+            "action": { "mutate": { "email": { "$cel": "lowerAscii(new.email)" } } }
           }
         ]
       }
