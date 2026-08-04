@@ -1,0 +1,467 @@
+#!/usr/bin/env bash
+# playground/run — pick a playground project, start the Alvo image over its descriptor, and
+# optionally run that project's TeaPie suite against it.
+#
+# A project is a FOLDER next to this script holding exactly one `*.alvo.json`. Nothing registers a
+# project anywhere: this script globs, so adding one is `mkdir` plus a descriptor. That is the whole
+# extensibility story and it is deliberate — a playground you have to register a project with is a
+# playground you stop adding to.
+#
+# NOT a ring, and not in CI. `scripts/test-ring0..2` and the PR's e2e gate the product; this gates
+# nothing and is free to be broken while you are experimenting in it. The suites here are for finding
+# out what a descriptor does, and the day one goes red the answer may well be "the descriptor was
+# wrong", which is the point.
+#
+# Portability: bash 3.2, which is what macOS ships as /bin/bash — so no `mapfile`, no `${var,,}`.
+set -euo pipefail
+
+PLAYGROUND="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$PLAYGROUND/.." && pwd)"
+
+# 8090, not 8080. The repo root's own stacks take 8080 (docker-compose.yml, vehicle-registry) and
+# 8081 (docker-compose.field-service.yml), and the playground has no business evicting a demo
+# somebody left running. Override with --port.
+DEFAULT_PORT=8090
+
+# The two dev keys' user ids — the values that land in `created_by`/`updated_by` on an audited row, and
+# the ones a row-level rule compares a column against (`user_id == @user.id`).
+#
+# Fixed constants rather than fresh guids per run: they are identifiers, not credentials. A stable
+# admin id means a row an earlier run created is recognisably the same author's, and a stable member id
+# is what lets a suite link a row to that identity and then assert what its owner may do.
+PLAYGROUND_USER=6f9619ff-8b86-d011-b42d-00c04fc964ff
+PLAYGROUND_MEMBER_USER=0a51c4e1-1000-4000-8000-000000000001
+
+# Where a stack's secret and port are remembered between invocations, so `--test-only` can talk to a
+# stack `run` started ten minutes ago. Gitignored: the secret is a credential.
+STATE_DIR="$PLAYGROUND/.run"
+
+PROJECT=""
+PROVIDER=sqlite
+PORT="$DEFAULT_PORT"
+PORT_IS_EXPLICIT=0
+DO_START=1
+DO_TEST=0
+DO_DOWN=0
+
+# ---------------------------------------------------------------- projects
+
+# Every folder here holding exactly one *.alvo.json, in directory order.
+projects() {
+    local dir
+    for dir in "$PLAYGROUND"/*/; do
+        if [ -n "$(descriptor_in "$dir")" ]; then
+            basename "$dir"
+        fi
+    done
+}
+
+# The single descriptor in a folder, or empty if there is not exactly one. "Exactly one" is what makes
+# the glob unambiguous; a folder with two is a mistake worth a message rather than a coin toss.
+descriptor_in() {
+    local -a found
+    found=("$1"*.alvo.json)
+    if [ "${#found[@]}" = 1 ] && [ -f "${found[0]}" ]; then
+        printf '%s' "${found[0]}"
+    fi
+}
+
+# The `description` the descriptor states, first sentence only — so the menu describes each project in
+# the project's own words instead of in a list this script would have to keep in step with.
+summary_of() {
+    local descriptor
+    descriptor="$(descriptor_in "$PLAYGROUND/$1/")"
+    [ -n "$descriptor" ] || return 0
+    python3 -c '
+import json, sys
+print(json.load(open(sys.argv[1])).get("description", "").split(".")[0][:74])
+' "$descriptor" 2>/dev/null || true
+}
+
+list_projects() {
+    local name
+    for name in $(projects); do
+        printf '  %-14s %s\n' "$name" "$(summary_of "$name")"
+    done
+}
+
+# ---------------------------------------------------------------- arguments
+
+usage() {
+    cat <<'USAGE'
+playground/run — start the Alvo image over a playground project's descriptor.
+
+  playground/run                        pick from a menu, then start
+  playground/run simple-todo            start that one
+  playground/run simple-pm --test       start it, then run its TeaPie suite
+  playground/run simple-pm --test-only  run the suite against a stack already up
+  playground/run simple-todo --pg       start it over PostgreSQL instead of SQLite
+  playground/run simple-todo --down     stop it and throw its data away
+  playground/run --list                 what is here
+
+  --port N   publish on N instead of 8090
+
+USAGE
+    echo "Projects:"
+    list_projects
+}
+
+parse_arguments() {
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --test)      DO_TEST=1 ;;
+            --test-only) DO_TEST=1; DO_START=0 ;;
+            --down)      DO_DOWN=1; DO_START=0 ;;
+            --pg)        PROVIDER=postgresql ;;
+            --port)      PORT="${2:?--port needs a number}"; PORT_IS_EXPLICIT=1; shift ;;
+            --list)      list_projects; exit 0 ;;
+            -h|--help)   usage; exit 0 ;;
+            -*)          die "unknown option '$1'. Try --help." ;;
+            *)
+                [ -z "$PROJECT" ] || die "two projects named ('$PROJECT' and '$1'); this runs one at a time."
+                PROJECT="$1"
+                ;;
+        esac
+        shift
+    done
+}
+
+# Asks only when it has to: a project on the command line, or a menu on a terminal. In a
+# non-interactive shell there is no third option, so it says which projects exist rather than blocking
+# on a prompt nobody will answer.
+resolve_project() {
+    [ -z "$PROJECT" ] || return 0
+    if [ ! -t 0 ]; then
+        echo "[playground] no project given, and stdin is not a terminal so there is nobody to ask." >&2
+        echo "[playground] name one of:" >&2
+        list_projects >&2
+        exit 2
+    fi
+    choose_project
+}
+
+choose_project() {
+    local -a names=()
+    local name
+    while IFS= read -r name; do
+        names+=("$name")
+    done < <(projects)
+    [ "${#names[@]}" -gt 0 ] \
+        || die "no projects here — a project is a folder next to this script with one *.alvo.json in it."
+
+    echo "Which project?"
+    local index=1
+    for name in "${names[@]}"; do
+        printf '  %d) %-14s %s\n' "$index" "$name" "$(summary_of "$name")"
+        index=$((index + 1))
+    done
+
+    local answer
+    read -r -p "> " answer
+    case "$answer" in
+        # A number picks by position; anything else is taken as a name, so typing `simple-pm` works.
+        ''|*[!0-9]*) PROJECT="$answer" ;;
+        *)
+            [ "$answer" -ge 1 ] && [ "$answer" -le "${#names[@]}" ] || die "there is no choice $answer."
+            PROJECT="${names[$((answer - 1))]}"
+            ;;
+    esac
+}
+
+check_project() {
+    [ -n "$PROJECT" ] || die "no project chosen."
+    [ -d "$PLAYGROUND/$PROJECT" ] || die "no project '$PROJECT' here. Try --list."
+    [ -n "$(descriptor_in "$PLAYGROUND/$PROJECT/")" ] \
+        || die "'$PROJECT' holds no single *.alvo.json — a project needs exactly one descriptor."
+}
+
+die() {
+    echo "[playground] $*" >&2
+    exit 2
+}
+
+# ---------------------------------------------------------------- compose
+
+# Placeholder values for every `${...:?}` the compose file names, for a command that does not need the
+# real ones.
+#
+# Compose interpolates the WHOLE file before deciding what to do, so `down`, `logs` and `ps` demand the
+# same variables `up` does — and a teardown that failed on a missing secret is a teardown that did
+# nothing. The values are deliberately not credentials: nothing is started from them, and the one thing
+# that must be honest is the descriptor path, which compose resolves as a bind mount.
+#
+# Only ever fills a variable that is UNSET, so a real value already in the environment always wins.
+set_teardown_variables() {
+    : "${ALVO_PLAYGROUND_DESCRIPTOR:=$(descriptor_in "$PLAYGROUND/$PROJECT/")}"
+    : "${ALVO_PLAYGROUND_USER:=$PLAYGROUND_USER}"
+    : "${ALVO_PLAYGROUND_MEMBER_USER:=$PLAYGROUND_MEMBER_USER}"
+    : "${ALVO_PLAYGROUND_SECRET:=teardown-only-never-a-credential}"
+    : "${ALVO_PLAYGROUND_MEMBER_SECRET:=teardown-only-never-a-credential}"
+    : "${ALVO_PLAYGROUND_PORT:=$PORT}"
+    export ALVO_PLAYGROUND_DESCRIPTOR ALVO_PLAYGROUND_USER ALVO_PLAYGROUND_MEMBER_USER
+    export ALVO_PLAYGROUND_SECRET ALVO_PLAYGROUND_MEMBER_SECRET ALVO_PLAYGROUND_PORT
+}
+
+# One compose project per playground project, NOT per provider. Both providers under one name is what
+# makes `--down` and the teardown above complete whichever way the stack was started: compose removes
+# containers by project label, and --remove-orphans catches the postgres a `--pg` run added.
+compose() {
+    set_teardown_variables
+    local -a files
+    files=(-f "$PLAYGROUND/docker-compose.yml")
+    if [ "$PROVIDER" = postgresql ]; then
+        files+=(-f "$PLAYGROUND/docker-compose.pg.yml")
+    fi
+    docker compose -p "alvo-playground-$PROJECT" "${files[@]}" "$@"
+}
+
+# Is something listening on 127.0.0.1:$1? bash's own /dev/tcp rather than lsof or nc, neither of which
+# is reliably present and which disagree about flags across macOS and Linux.
+port_is_taken() {
+    (exec 3<>"/dev/tcp/127.0.0.1/$1") >/dev/null 2>&1
+}
+
+# Is $1 free, giving it a moment if it is not?
+#
+# The wait exists for exactly one case, and without it the stickiness below never triggers: `compose
+# down` returns once the container is REMOVED, and the published port stays bound for a fraction of a
+# second after that. Probing immediately therefore finds this project's own port busy and walks past
+# it — measured, and it is why simple-pm crept 8091 → 8092 → 8093 across restarts. Two seconds is
+# generous for a socket already closing, and a port genuinely held by something else costs that once
+# before the walk takes over.
+port_frees_up() {
+    local attempt=0
+    while [ "$attempt" -lt 10 ]; do
+        port_is_taken "$1" || return 0
+        sleep 0.2
+        attempt=$((attempt + 1))
+    done
+    return 1
+}
+
+# Two playground projects both defaulting to 8090 is the first thing you hit when you keep one up and
+# start another, and "port is already allocated" from the Docker daemon explains none of it. So a
+# DEFAULT port walks forward to the first free one and says which it picked; an EXPLICIT --port is
+# honoured or fails, because a port you named is one something else is expecting to find you on.
+resolve_port() {
+    if [ "$PORT_IS_EXPLICIT" = 1 ]; then
+        port_is_taken "$PORT" && die "port $PORT is already in use, and you asked for it by name."
+        return 0
+    fi
+    # The port this project used last, tried first. Without it two projects kept up together creep
+    # upward on every restart — simple-pm lands on 8091, then 8092, then 8093 — and a bookmark or an
+    # open /scalar tab goes stale each time for no reason. A project keeps its port as long as nothing
+    # else has taken it.
+    local remembered
+    remembered="$(remembered_port)"
+    if [ -n "$remembered" ] && port_frees_up "$remembered"; then
+        [ "$remembered" = "$PORT" ] || echo "[playground] reusing $PROJECT's previous port $remembered."
+        PORT="$remembered"
+        return 0
+    fi
+
+    local candidate="$PORT" limit=$((PORT + 20))
+    while [ "$candidate" -lt "$limit" ]; do
+        if ! port_is_taken "$candidate"; then
+            [ "$candidate" = "$PORT" ] || echo "[playground] $PORT is busy — using $candidate instead."
+            PORT="$candidate"
+            return 0
+        fi
+        candidate=$((candidate + 1))
+    done
+    die "every port from $PORT to $limit is in use. Free one, or pass --port."
+}
+
+start_stack() {
+    # EVERY variable the compose file names has to be set before ANY compose command, `down` included.
+    # Compose interpolates the whole file before it decides what to do, so a `${...:?}` it cannot
+    # resolve makes `down` fail exactly as it would make `up` fail — and with the `|| true` below that
+    # failure is silent: the teardown does nothing, the old container keeps running, and the fresh
+    # database this function promises is quietly the previous run's. Measured, after an earlier version
+    # of this function resolved the port first.
+    #
+    # The port is the exception, and it is why the order here looks odd: its final value is not known
+    # until after the teardown has released it. `down` does not care what it is, so it is set twice —
+    # provisionally here, then again below.
+    ALVO_PLAYGROUND_DESCRIPTOR="$(descriptor_in "$PLAYGROUND/$PROJECT/")"
+    ALVO_PLAYGROUND_USER="$PLAYGROUND_USER"
+    ALVO_PLAYGROUND_MEMBER_USER="$PLAYGROUND_MEMBER_USER"
+    ALVO_PLAYGROUND_SECRET="$(openssl rand -hex 16)"
+    ALVO_PLAYGROUND_MEMBER_SECRET="$(openssl rand -hex 16)"
+    ALVO_PLAYGROUND_PORT="$PORT"
+    export ALVO_PLAYGROUND_DESCRIPTOR ALVO_PLAYGROUND_USER ALVO_PLAYGROUND_MEMBER_USER
+    export ALVO_PLAYGROUND_SECRET ALVO_PLAYGROUND_MEMBER_SECRET ALVO_PLAYGROUND_PORT
+
+    # Down first, so this run owns its database rather than inheriting one. Not tidiness: a descriptor
+    # is applied at BOOT, so a stack left up by an earlier run is serving the descriptor as it was
+    # then — you would edit a field, restart nothing, and measure the old shape. It also means every
+    # suite here starts from an empty database, which is what lets a test count rows at all.
+    #
+    # It also has to precede resolve_port: this project's own container is the likeliest holder of the
+    # port, and probing before releasing it would walk past it for no reason.
+    echo "[playground] $PROJECT — down, then up ($PROVIDER)"
+    compose down --volumes --remove-orphans >/dev/null 2>&1 || true
+
+    resolve_port
+    ALVO_PLAYGROUND_PORT="$PORT"
+
+    # Build outside the timed window on purpose: §2.14's "a working backend within 60 s" is boot time,
+    # not compile time. The first build of the day is minutes; every one after it is a cache hit.
+    compose build
+    compose up --detach --wait --wait-timeout 90
+
+    save_state
+    announce
+}
+
+stop_stack() {
+    echo "[playground] $PROJECT — down (data discarded)"
+    compose down --volumes --remove-orphans
+}
+
+# The two facts a later `--test-only` cannot re-derive: the secret (minted per stack, never committed)
+# and the port (which --port may have moved).
+save_state() {
+    mkdir -p "$STATE_DIR"
+    (
+        umask 077
+        cat > "$STATE_DIR/$PROJECT.env" <<ENV
+ALVO_PLAYGROUND_SECRET=$ALVO_PLAYGROUND_SECRET
+ALVO_PLAYGROUND_MEMBER_SECRET=$ALVO_PLAYGROUND_MEMBER_SECRET
+ALVO_PLAYGROUND_PORT=$PORT
+ENV
+    )
+}
+
+# The port the last stack for this project published, or empty if there has not been one. Read with a
+# grep rather than by sourcing the file: sourcing it here would also overwrite ALVO_PLAYGROUND_SECRET,
+# and the secret of the stack about to be replaced is not the one this one will use.
+remembered_port() {
+    local file="$STATE_DIR/$PROJECT.env"
+    [ -f "$file" ] || return 0
+    sed -n 's/^ALVO_PLAYGROUND_PORT=\([0-9]\{1,\}\)$/\1/p' "$file"
+}
+
+load_state() {
+    local file="$STATE_DIR/$PROJECT.env"
+    [ -f "$file" ] || die "no remembered stack for '$PROJECT'. Start one first: playground/run $PROJECT"
+    # shellcheck disable=SC1090
+    . "$file"
+    PORT="$ALVO_PLAYGROUND_PORT"
+}
+
+announce() {
+    cat <<INFO
+
+  baseUrl   http://localhost:$PORT
+  admin     demo.$ALVO_PLAYGROUND_SECRET   (header: X-Alvo-Api-Key)
+  member    member.$ALVO_PLAYGROUND_MEMBER_SECRET   (authenticated, no admin)
+  docs      http://localhost:$PORT/scalar
+  openapi   http://localhost:$PORT/openapi/v1.json
+
+  tests     playground/run $PROJECT --test-only
+  logs      docker compose -p alvo-playground-$PROJECT logs -f alvo
+  stop      playground/run $PROJECT --down
+
+INFO
+}
+
+# ---------------------------------------------------------------- tests
+
+run_suite() {
+    local suite="$PLAYGROUND/$PROJECT/tests"
+    [ -d "$suite" ] || die "'$PROJECT' has no tests/ directory."
+
+    # From the root: the tool manifest (.config/dotnet-tools.json) lives there.
+    cd "$ROOT"
+    dotnet tool restore
+
+    local env_file="$STATE_DIR/$PROJECT.teapie.json"
+    local report="$ROOT/artifacts/teapie/playground-$PROJECT.xml"
+    write_teapie_environment "$env_file"
+    mkdir -p "$(dirname "$report")"
+
+    echo "[playground] teapie test playground/$PROJECT/tests"
+    # --no-cache-vars: TeaPie caches collection variables between runs, so a stale id captured from an
+    # earlier stack would let a later case resolve against a row this database does not hold — green
+    # for a reason that has nothing to do with the claim.
+    dotnet tool run teapie -- test "$suite" \
+        -e playground \
+        --env-file "$env_file" \
+        -r "$report" \
+        --no-cache-vars \
+        --no-logo
+}
+
+# A FRESH runToken every time the suite runs, not once per stack.
+#
+# It is what makes `--test-only` repeatable. Every row a suite creates carries the token in a name or
+# a title, and every list assertion filters on it — so a second run against the same stack measures
+# its own rows rather than the union with the first run's. Without it the first `--test-only` would
+# pass and the second would fail on a count, which reads as a product defect and is not one.
+#
+# The two user ids come from this script's CONSTANTS, not from the exported ALVO_* copies: they are
+# compile-time facts rather than per-stack state, and `--test-only` never goes through start_stack —
+# so reading the exports there was an unbound variable, caught by `set -u` after the tool restore had
+# already run. The secrets are the opposite and do come from the state file, because they are minted
+# per stack.
+write_teapie_environment() {
+    mkdir -p "$STATE_DIR"
+    (
+        umask 077
+        cat > "$1" <<JSON
+{
+  "\$shared": {
+    "apiKeyId": "demo"
+  },
+  "playground": {
+    "baseUrl": "http://localhost:$PORT",
+    "apiKeySecret": "$ALVO_PLAYGROUND_SECRET",
+
+    "keyAdmin": "demo.$ALVO_PLAYGROUND_SECRET",
+    "keyMember": "member.$ALVO_PLAYGROUND_MEMBER_SECRET",
+    "userAdmin": "$PLAYGROUND_USER",
+    "userMember": "$PLAYGROUND_MEMBER_USER",
+
+    "runToken": "$(openssl rand -hex 4)"
+  }
+}
+JSON
+    )
+}
+
+# ---------------------------------------------------------------- main
+
+# Container logs on the way out of a failure. A stack that would not become ready, or a suite that
+# failed on a 500, is explained in the log and nowhere else — and the stack is LEFT UP so you can ask
+# it questions. `--down` is one command; a stack torn down under you is a lost repro.
+on_failure() {
+    local status=$?
+    trap - EXIT
+    if [ "$status" = 0 ]; then
+        exit 0
+    fi
+    echo "[playground] FAILED (exit $status) — container logs below, if the stack got far enough to" >&2
+    echo "[playground] produce any. It is left exactly as it is, so you can ask it questions." >&2
+    compose logs --no-color --tail 60 alvo >&2 2>/dev/null || true
+    exit "$status"
+}
+
+parse_arguments "$@"
+resolve_project
+check_project
+trap on_failure EXIT
+
+if [ "$DO_DOWN" = 1 ]; then
+    stop_stack
+fi
+if [ "$DO_START" = 1 ]; then
+    start_stack
+fi
+if [ "$DO_TEST" = 1 ]; then
+    if [ "$DO_START" != 1 ]; then
+        load_state
+    fi
+    run_suite
+fi
+exit 0

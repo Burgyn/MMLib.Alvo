@@ -1,0 +1,88 @@
+# The playground stack: ONE Alvo container over whichever descriptor `run` points it at.
+#
+# One templated file rather than a compose file per project. Everything that differs between two
+# playground projects is a value — the descriptor path, the published port, the key's secret — and
+# `run` supplies all three, so adding a project means adding a folder and nothing else. Compose
+# interpolates the whole file before it starts anything (which is why the repo root keeps its demo
+# stacks in separate files: a `${...:?}` there would break the plain `docker compose up` in the
+# README), and here that is the point rather than a problem — every variable comes from `run`.
+#
+# SQLite by default, and that is deliberate: one container, a database file inside it, nothing to
+# clean up. A recreated container is a fresh database by construction, with no named volume to
+# forget. `run --pg` layers docker-compose.pg.yml on top when the question is whether something
+# behaves the same on a real server engine.
+#
+# Not meant to be driven by hand — use `playground/run`. If you must:
+#   ALVO_PLAYGROUND_DESCRIPTOR=/abs/path/todo.alvo.json \
+#   ALVO_PLAYGROUND_PORT=8080 ALVO_PLAYGROUND_SECRET=$(openssl rand -hex 16) \
+#   ALVO_PLAYGROUND_USER=6f9619ff-8b86-d011-b42d-00c04fc964ff \
+#   docker compose -p alvo-playground-simple-todo -f playground/docker-compose.yml up --wait
+
+services:
+  alvo:
+    build:
+      # The repository ROOT, not playground/ — the Dockerfile's own comment says why (Central Package
+      # Management, Directory.Build.props, .editorconfig and schema/ all live up there). Relative to
+      # this file's directory, which is how compose resolves a build context.
+      context: ..
+      dockerfile: src/MMLib.Alvo.Host/Dockerfile
+    environment:
+      Alvo__DescriptorPath: /alvo/descriptor.json
+      Alvo__Database__Provider: sqlite
+      # The image's own default is /alvo/data/alvo.db and the Dockerfile makes that directory
+      # writable by the non-root user. Stated rather than inherited so a reader of this file knows
+      # where the database is without reading the image.
+      Alvo__Database__SqliteConnectionString: Data Source=/alvo/data/alvo.db
+
+      # TWO keys, and they differ in EXACTLY ONE THING: whether the caller holds `admin`.
+      #
+      # That discipline is the whole point. Same scopes, same tenant (none), same everything else —
+      # so anything the second key cannot do is the descriptor's rules and can be nothing else. A
+      # suite comparing two keys that differed in two ways would prove neither.
+      #
+      # A project whose rules never mention a role simply ignores the second key: simple-todo is
+      # public and sends no credential at all.
+      #
+      # The image ships no credential of its own (§2.14), so both secrets come from the environment
+      # with `:?` — `run` mints fresh ones per stack and remembers them for `--test-only`. The user
+      # ids are NOT secrets: a row-level rule compares a column against `@user.id`, so a test cannot
+      # be written without knowing them.
+
+      # 1. The admin. Every project's privileged caller.
+      Alvo__Auth__DevKeys__0__KeyId: demo
+      Alvo__Auth__DevKeys__0__Secret: ${ALVO_PLAYGROUND_SECRET:?set ALVO_PLAYGROUND_SECRET, or use playground/run}
+      Alvo__Auth__DevKeys__0__User: ${ALVO_PLAYGROUND_USER:?set ALVO_PLAYGROUND_USER, or use playground/run}
+      Alvo__Auth__DevKeys__0__Roles__0: authenticated
+      Alvo__Auth__DevKeys__0__Roles__1: admin
+      Alvo__Auth__DevKeys__0__Scopes__0: "*:read"
+      Alvo__Auth__DevKeys__0__Scopes__1: "*:write"
+
+      # 2. An ordinary member: authenticated, and nothing else. Note the scopes are identical to the
+      #    admin's — a refusal this key gets is a POLICY refusal (`forbidden`), never `out-of-scope`,
+      #    and those are different slugs with different fixes.
+      Alvo__Auth__DevKeys__1__KeyId: member
+      Alvo__Auth__DevKeys__1__Secret: ${ALVO_PLAYGROUND_MEMBER_SECRET:?set ALVO_PLAYGROUND_MEMBER_SECRET, or use playground/run}
+      Alvo__Auth__DevKeys__1__User: ${ALVO_PLAYGROUND_MEMBER_USER:?set ALVO_PLAYGROUND_MEMBER_USER, or use playground/run}
+      Alvo__Auth__DevKeys__1__Roles__0: authenticated
+      Alvo__Auth__DevKeys__1__Scopes__0: "*:read"
+      Alvo__Auth__DevKeys__1__Scopes__1: "*:write"
+
+    # Loopback only, for the reason the root docker-compose.yml states at length: "8080:8080" binds
+    # 0.0.0.0, Docker's DOCKER-USER iptables chain sits ahead of UFW, and an operator who runs this
+    # on a cloud VM would publish a `*:read`/`*:write` admin key — with an anonymous
+    # /openapi/v1.json describing the surface — to the internet. Everything that consumes this port
+    # is on this machine: `run`, TeaPie, and your browser.
+    ports:
+      - "127.0.0.1:${ALVO_PLAYGROUND_PORT:?set ALVO_PLAYGROUND_PORT, or use playground/run}:8080"
+
+    volumes:
+      - ${ALVO_PLAYGROUND_DESCRIPTOR:?set ALVO_PLAYGROUND_DESCRIPTOR to a descriptor path, or use playground/run}:/alvo/descriptor.json:ro
+
+    # /health/ready rather than /health/live: liveness evaluates no check and answers 200 for any
+    # process that is up, while readiness stays 503 until the descriptor has applied and the policy
+    # catalog is primed. `up --wait` on this means "the tables exist", which is what the suites need.
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health/ready"]
+      interval: 2s
+      timeout: 3s
+      retries: 30

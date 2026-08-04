@@ -1,0 +1,126 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "simple-pm",
+  "description": "A small project-management backend: people, the milestones they work towards, and the tasks in between. Three entities, two references, and rules that actually distinguish an admin from an ordinary member — only an admin may add or remove a person, and a member may edit nobody's profile but their own.",
+  "auth": {
+    "providers": ["local"]
+  },
+  "entities": {
+    "people": {
+      "description": "Someone who can be assigned a task. Administered: only an admin may add or remove one, because a directory anybody can write to is not a directory.",
+      "audit": true,
+      "fields": {
+        "name": {
+          "type": "string",
+          "description": "Their display name. Required, so a paged list may sort by it.",
+          "required": true,
+          "maxLength": 120
+        },
+        "email": {
+          "type": "string",
+          "description": "How to reach them. Unique across the instance, which is why a second person with the same address is a 409 rather than a second row.",
+          "unique": true,
+          "maxLength": 160,
+          "format": "email"
+        },
+        "user_id": {
+          "type": "uuid",
+          "description": "The identity this person signs in as, and the field the `update` rule compares with @user.id — which is what makes 'edit your own profile' expressible. A plain uuid rather than a ref to the reserved `users` entity, because a rule compiles to a predicate over THIS entity's columns and cannot join. Deliberately NOT unique: the playground reuses one member identity across runs, and a real deployment would want the constraint."
+        }
+      },
+      "rules": {
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+
+        "create": "'admin' in @user.roles",
+        "delete": "'admin' in @user.roles",
+
+        "update": "'admin' in @user.roles || user_id == @user.id"
+      }
+    },
+    "milestones": {
+      "description": "Something the tasks are working towards. The plan itself is an admin's to set; everyone reads it.",
+      "audit": true,
+      "fields": {
+        "name": {
+          "type": "string",
+          "description": "What the milestone is called.",
+          "required": true,
+          "maxLength": 120
+        },
+        "status": {
+          "type": "enum",
+          "description": "Where the milestone stands.",
+          "required": true,
+          "values": ["planned", "active", "done"]
+        },
+        "due_on": {
+          "type": "date",
+          "description": "The date it is meant to be reached."
+        }
+      },
+      "rules": {
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+
+        "create": "'admin' in @user.roles",
+        "update": "'admin' in @user.roles",
+        "delete": "'admin' in @user.roles"
+      }
+    },
+    "tasks": {
+      "description": "One piece of work, optionally assigned to a person and optionally belonging to a milestone.",
+      "audit": true,
+      "fields": {
+        "title": {
+          "type": "string",
+          "description": "One line describing the work. Required, so a paged list may sort by it.",
+          "required": true,
+          "maxLength": 200
+        },
+        "status": {
+          "type": "enum",
+          "description": "Where the work stands.",
+          "required": true,
+          "values": ["todo", "doing", "done"]
+        },
+        "description": {
+          "type": "text",
+          "description": "The full detail, if there is any."
+        },
+        "estimate_hours": {
+          "type": "decimal",
+          "description": "How long it is expected to take.",
+          "precision": 6,
+          "scale": 2
+        },
+        "assignee_id": {
+          "type": "ref",
+          "description": "Who is doing it. `restrict`, so deleting a person who still holds work is refused rather than silently unassigning it.",
+          "entity": "people",
+          "onDelete": "restrict"
+        },
+        "milestone_id": {
+          "type": "ref",
+          "description": "Which milestone it belongs to. `cascade`, because a task outside every milestone of a milestone-shaped plan is orphaned data, not history.",
+          "entity": "milestones",
+          "onDelete": "cascade"
+        }
+      },
+      "rules": {
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+
+        "create": "'authenticated' in @user.roles",
+        "update": "'authenticated' in @user.roles",
+
+        "delete": "'admin' in @user.roles"
+      },
+      "indexes": [
+        { "fields": ["status", "title"] },
+        { "fields": ["milestone_id"] }
+      ]
+    }
+  }
+}
