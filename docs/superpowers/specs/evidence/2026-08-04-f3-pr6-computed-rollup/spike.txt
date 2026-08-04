@@ -1,0 +1,87 @@
+F3 PR6 (#21) — computed & rollup spike
+=====================================
+Provenance
+  Date              2026-08-04
+  Host              Darwin arm64
+  sqlite3 CLI       3.51.0 (2025-06-12)  -- system CLI, NOT the bundled e_sqlite3
+  PostgreSQL        16.14 on aarch64-unknown-linux-musl (postgres:16-alpine)
+  Isolation         PostgreSQL default, READ COMMITTED
+
+CAVEAT ON THE SQLITE LEG
+  Measured with the system sqlite3 CLI. The product runs the BUNDLED e_sqlite3 via
+  SQLitePCLRaw, and PR5a's Q3 already found the two disagree about build options
+  (SQLITE_ENABLE_UPDATE_DELETE_LIMIT). Q1 below MUST be re-measured against the
+  bundled provider before the design is frozen. Recorded here so the gap is visible
+  rather than assumed away.
+
+------------------------------------------------------------------------------
+Q1  Can a generated column be ADDED to an existing table?
+------------------------------------------------------------------------------
+SQLite, isolating the only variable that differs (table empty vs holding one row):
+
+    table state   STORED                              VIRTUAL
+    empty         OK                                  OK
+    non-empty     Error: stepping,                    OK
+                  cannot add a STORED column
+
+PostgreSQL 16, non-empty table:
+
+    ALTER TABLE t ADD COLUMN s numeric GENERATED ALWAYS AS (a*b) STORED;
+      -> ALTER TABLE, and the EXISTING row is backfilled:  id=1  s=6.00
+    UPDATE t SET s = 999 WHERE id = 1;
+      -> ERROR: column "s" can only be updated to DEFAULT
+         DETAIL: Column "s" is a generated column.        (read-only enforced by the DB)
+    ALTER TABLE t ADD COLUMN v numeric GENERATED ALWAYS AS (a*b) VIRTUAL;
+      -> ERROR: syntax error at or near "VIRTUAL"          (no VIRTUAL before PG 18)
+
+VERDICT: the two shipped engines are asymmetric in opposite directions. There is NO
+single spelling that adds a computed field to an entity that already holds rows on
+both engines. SQLite takes VIRTUAL but refuses STORED; PostgreSQL 16 takes STORED and
+has no VIRTUAL at all.
+
+WHY THIS IS THE FINDING AND NOT A FOOTNOTE: on an EMPTY table SQLite accepts STORED.
+A test built on a fresh fixture therefore passes, and the production migration — the
+only case that matters, an entity that already has data — fails. The empty/non-empty
+split is the whole content of this question.
+
+------------------------------------------------------------------------------
+Q2  Is "UPDATE parent SET total = (SELECT SUM(child.v) ...)" safe under
+    concurrent child writes?  (PostgreSQL, READ COMMITTED, 40 writers, 1 parent)
+------------------------------------------------------------------------------
+    A) atomic UPDATE, no delay                     children=40  total=40   CORRECT
+    B) the SAME UPDATE, pg_sleep(0.05) before it   children=40  total=31   LOST UPDATE
+    C) value computed outside the UPDATE           children=40  total=33   LOST UPDATE
+    D) SELECT ... FOR UPDATE the parent first,
+       then recompute, same 0.05s window           children=40  total=40   CORRECT
+
+VERDICT: the atomic single-statement recompute IS a lost update, and the hypothesis
+that "the row lock serialises and the subquery re-evaluates" is FALSE. Under READ
+COMMITTED the SET expression is evaluated from the snapshot taken at statement start;
+when the row lock is finally acquired, EvalPlanQual re-checks only the outer WHERE
+(id = 1, still true), so the stale SET value is written.
+
+This is the SAME EvalPlanQual mechanism that bit the outbox claim in PR5a — the outer
+predicate is re-checked, nothing else is. Second occurrence in this codebase.
+
+Run A is the trap: without the delay the window is too small to lose an update, so the
+naive implementation LOOKS correct. The pg_sleep is the entire difference between a
+fact and an illusion, and any rollup fact must carry an equivalent widening or it
+proves nothing.
+
+D is what holds: take the parent's row lock BEFORE recomputing. After the lock is
+granted the following statement gets a fresh snapshot, so the aggregate sees every
+committed child. Note this also generalises to all five ops the frozen schema allows
+(sum|count|avg|min|max), which a "total = total + delta" shortcut does not — delta is
+commutative for sum and count, drifts with no self-correction, and is simply wrong for
+min/max.
+
+------------------------------------------------------------------------------
+Still to measure before the design is frozen
+------------------------------------------------------------------------------
+  * Q1 against the bundled e_sqlite3, not the system CLI.
+  * The same Q2 sequence on SQLite (one writer at a time under WAL — the lock
+    behaviour differs and the PR5a spike Q5 found SQLITE_BUSY_SNAPSHOT unretryable
+    for a read-then-write transaction, which is exactly this shape).
+  * Whether a computed column may reference a rollup column on both engines, since
+    the frozen schema's `computed` description explicitly allows it (gross_total =
+    net_total + vat_total).
