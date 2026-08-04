@@ -353,14 +353,18 @@ public sealed class EventActionExecutorTests : IDisposable
     [Fact]
     public async Task An_action_type_no_descriptor_can_carry_throws_rather_than_silently_doing_nothing()
     {
+        var action = new FunctionAction { Name = "recalculate" };
         var hook = new CompiledAfterHook(
             HookPath,
             Condition: null,
             RequiredContext.None,
             new CompiledAction(
-                new FunctionAction { Name = "recalculate" },
+                action,
                 new Dictionary<string, AlvoTemplate>(StringComparer.Ordinal),
-                Endpoint: null));
+                Endpoint: null,
+                // Resolved rather than written as "function", so TypeName cannot drift from Action in the one
+                // place a catalog is hand-built — which is the whole point of this fact.
+                ActionType.NameOf(action)));
 
         var refusal = await Should.ThrowAsync<InvalidOperationException>(
             () => Subject().ExecuteAsync(hook, SampleEvent(), Cancellation));

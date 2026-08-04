@@ -243,7 +243,7 @@ internal static class AfterHookCompiler
         var payload = AddTransformSlot(
             templates, ActionSlot.Payload, webhook.Payload, $"{path}/{ActionSlot.Payload}", scope);
 
-        return target is not null && payload ? new CompiledAction(webhook, templates, target) : null;
+        return target is not null && payload ? new CompiledAction(webhook, templates, target, ActionType.NameOf(webhook)) : null;
     }
 
     /// <summary>
@@ -306,7 +306,7 @@ internal static class AfterHookCompiler
         var data = RefuseEmailData(email.Data, $"{path}/{ActionSlot.Data}", scope);
         var body = AddMessageTemplate(templates, email.Template, message, scope);
 
-        return recipient && data && body ? new CompiledAction(email, templates, Endpoint: null) : null;
+        return recipient && data && body ? new CompiledAction(email, templates, Endpoint: null, ActionType.NameOf(email)) : null;
     }
 
     /// <summary>

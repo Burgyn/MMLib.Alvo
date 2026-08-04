@@ -229,10 +229,25 @@ internal sealed record CompiledAfterHook(
 /// The endpoint a <c>webhook</c> action resolved from <c>webhooks.endpoints</c>; <see langword="null"/> for
 /// every other action type.
 /// </param>
+/// <param name="TypeName">
+/// The action's <c>type</c> discriminator as the descriptor spells it, resolved once here rather than per
+/// delivery.
+/// <para>
+/// It is a member and not a call at the use site for two reasons, and the smaller one is the analyzer.
+/// <b>The real one:</b> the only consumer is a log line written once per delivered action, and resolving a
+/// polymorphic action to its name is a switch over every declared type — so a call at that site pays the
+/// switch on the hot path for a string that is fixed at apply time. <b>The smaller one:</b> passing that call
+/// as a <c>LoggerMessage</c> argument is <c>CA1873</c>, because the argument is evaluated whether or not the
+/// level is enabled. Both point the same way, and the analyzer only made the cost visible: a rolled-forward
+/// SDK in CI refused it while the pinned local SDK did not (issue #129), which is the second time that gap has
+/// broken this milestone's build.
+/// </para>
+/// </param>
 internal sealed record CompiledAction(
     AutomationAction Action,
     IReadOnlyDictionary<string, AlvoTemplate> Templates,
-    WebhookTarget? Endpoint);
+    WebhookTarget? Endpoint,
+    string TypeName);
 
 /// <summary>
 /// The compiled <c>USING</c>/<c>WITH CHECK</c> pair for one operation. Exactly Postgres's

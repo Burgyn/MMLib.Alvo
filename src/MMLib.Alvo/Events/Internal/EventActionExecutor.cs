@@ -106,7 +106,7 @@ internal sealed class EventActionExecutor(
         action.Templates.TryGetValue(slot, out var template) ? template.Render(@event) : string.Empty;
 
     private void Executed(CompiledAfterHook hook, AlvoEvent @event) => EventLog.ActionExecuted(
-        logger, hook.Path, ActionType.NameOf(hook.Action.Action), @event.Id, @event.Type);
+        logger, hook.Path, hook.Action.TypeName, @event.Id, @event.Type);
 
     private static WebhookTarget EndpointOf(CompiledAfterHook hook) =>
         hook.Action.Endpoint ?? throw UnresolvedEndpoint(hook);
