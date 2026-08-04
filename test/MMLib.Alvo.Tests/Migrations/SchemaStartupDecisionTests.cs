@@ -134,15 +134,131 @@ public sealed class SchemaStartupDecisionTests
         Decide(AppliedAt(1), plan, AlvoSchemaStartupMode.Apply).Plan.ShouldBeSameAs(plan);
     }
 
+    /// <summary>
+    /// A boot holding a descriptor the database has moved on from stands down — a distinct outcome from
+    /// <c>Refuse</c>, because it does not stop the process.
+    /// </summary>
+    /// <remarks>
+    /// <c>Refuse</c> throws and the host exits 78, which for an ordering problem is a crash loop an orchestrator
+    /// retries forever over a condition no restart can fix. Standing down publishes <c>Failed</c> instead, so
+    /// readiness answers 503 and the pod is drained. Asserting the outcome rather than "it did not apply" is
+    /// what pins the exit path.
+    /// </remarks>
+    [Fact]
+    public void An_out_of_order_boot_stands_down_instead_of_refusing()
+    {
+        var decision = Decide(
+            AppliedAt(2), PlanAdding("orders", "discount"), AlvoSchemaStartupMode.Apply, outOfOrder: OlderPod);
+
+        decision.Outcome.ShouldBe(SchemaStartupOutcome.StandDown);
+        decision.Refusal.ShouldNotBeNull().ShouldContain("older descriptor");
+        decision.Fix.ShouldNotBeNull().ShouldContain("Deploy the descriptor");
+    }
+
+    /// <summary>
+    /// The ordering gate is decided <em>before</em> the destructive gate, so a rollback is diagnosed as "you are
+    /// older" rather than as "destructive change refused".
+    /// </summary>
+    /// <remarks>
+    /// This is the whole reason the gate sits ahead of a gate that would refuse the same boot anyway: both
+    /// verdicts are true, and only one of them tells an operator that the artifact they deployed is behind the
+    /// database. The mutation that proves the ordering — moving the destructive check back in front — turns this
+    /// fact red and leaves every other fact in this class green.
+    /// </remarks>
+    [Fact]
+    public void An_out_of_order_boot_is_diagnosed_as_older_rather_than_as_destructive()
+    {
+        var decision = Decide(
+            AppliedAt(2), DestructivePlan, AlvoSchemaStartupMode.Apply, outOfOrder: OlderPod);
+
+        decision.Outcome.ShouldBe(SchemaStartupOutcome.StandDown);
+
+        var fix = decision.Fix.ShouldNotBeNull();
+        fix.ShouldContain("Deploy the descriptor");
+        fix.Contains(AllowDestructiveFix, StringComparison.Ordinal).ShouldBeFalse(
+            "the destructive gate's own fix would send an operator to discard data to recover from being one "
+            + "deploy behind");
+    }
+
+    /// <summary>
+    /// A boot with nothing to apply serves, whatever the ordering says — the gate governs the apply, not the
+    /// serve.
+    /// </summary>
+    /// <remarks>
+    /// It is also what lets <c>AlvoBootService</c> skip the O(N) history read on the most common boot there is,
+    /// so this fact is the policy half of that decision: an empty plan cannot be the boot that rewrites a newer
+    /// schema with an older one.
+    /// </remarks>
+    [Fact]
+    public void An_out_of_order_verdict_does_not_stand_down_a_boot_with_nothing_to_apply()
+        => Decide(AppliedAt(2), EmptyPlan, AlvoSchemaStartupMode.Apply, outOfOrder: OlderPod)
+            .Outcome.ShouldBe(SchemaStartupOutcome.Unchanged);
+
+    /// <summary>
+    /// <c>AllowDestructive</c> does <b>not</b> wave an out-of-order boot through, and that is a deliberate
+    /// narrowing of what the flag used to buy.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Found in review, and it is a real behaviour change worth pinning rather than discovering.</b> Before
+    /// the ordering gate, <c>AllowDestructive=true</c> was exactly how an operator forced a deliberate rollback
+    /// through: the plan back drops a column, the flag allows the drop, the apply proceeds. It no longer does,
+    /// because the two settings answer different questions — the flag says "I accept losing data", never "I
+    /// accept serving an older descriptor than the database".
+    /// </para>
+    /// <para>
+    /// Conflating them would make the ordering protection evaporate for anyone who set an unrelated flag in a
+    /// staging environment, and the oscillation the gate exists to stop discards no data at all, so the flag
+    /// would be no evidence of intent about it. The way to force an older artifact through is to make it a new
+    /// one — bump its <c>revision</c>, which changes its canonical content — and the refusal text says so,
+    /// including that the destructive gate is still waiting behind it. Recorded as deviation 74.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AllowDestructive_does_not_wave_an_out_of_order_boot_through()
+        => Decide(
+                AppliedAt(2),
+                DestructivePlan,
+                AlvoSchemaStartupMode.Apply,
+                allowDestructive: true,
+                outOfOrder: OlderPod)
+            .Outcome.ShouldBe(SchemaStartupOutcome.StandDown);
+
+    /// <summary>
+    /// <c>Skip</c> ignores the ordering exactly as it ignores every other drift: it never applies, so it cannot
+    /// be the replica that rewrites the schema.
+    /// </summary>
+    [Fact]
+    public void Skip_ignores_the_ordering_because_it_applies_nothing()
+        => Decide(AppliedAt(2), DestructivePlan, AlvoSchemaStartupMode.Skip, outOfOrder: OlderPod)
+            .Outcome.ShouldBe(SchemaStartupOutcome.Unchanged);
+
+    /// <summary>
+    /// <c>Verify</c> stands an older pod down too, rather than refusing it with the drift message — the mode
+    /// decides what may be <em>applied</em>, and this boot is not asking to apply anything it is entitled to.
+    /// </summary>
+    [Fact]
+    public void An_out_of_order_boot_under_Verify_stands_down_rather_than_reporting_ordinary_drift()
+        => Decide(AppliedAt(2), PlanAdding("orders", "discount"), AlvoSchemaStartupMode.Verify, outOfOrder: OlderPod)
+            .Outcome.ShouldBe(SchemaStartupOutcome.StandDown);
+
+    private static OutOfOrderBoot OlderPod => new(
+        "Alvo cannot start: this process's descriptor was already applied to this database as revision 1, and "
+        + "the database has since moved on to revision 2. This process is running an older descriptor than the "
+        + "database, so it must not apply its schema over a newer one.",
+        ["  Deploy the descriptor this database is on (revision 2)."]);
+
     private static SchemaStartupDecision Decide(
         AppliedSchema? applied,
         MigrationPlan plan,
         AlvoSchemaStartupMode mode,
-        bool allowDestructive = false)
+        bool allowDestructive = false,
+        OutOfOrderBoot? outOfOrder = null)
         => SchemaStartupPolicy.Decide(
             applied,
             plan,
-            new AlvoSchemaOptions { Startup = mode, AllowDestructive = allowDestructive });
+            new AlvoSchemaOptions { Startup = mode, AllowDestructive = allowDestructive },
+            outOfOrder);
 
     private static AppliedSchema AppliedAt(int revision)
         => new(new SchemaModel([]), "{}", revision, DateTimeOffset.UtcNow);

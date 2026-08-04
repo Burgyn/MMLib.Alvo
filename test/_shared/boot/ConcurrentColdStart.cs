@@ -26,6 +26,12 @@ namespace MMLib.Alvo.Tests.Boot;
 /// Whether this replica met the others at the barrier in front of the schema write. False means the test did
 /// not contend and proves nothing — the whole fact would be theatre.
 /// </param>
+/// <param name="PublishedFailure">
+/// What its <see cref="AlvoBootState.Failure"/> says, or <see langword="null"/> when the boot published none.
+/// Distinct from <paramref name="Failure"/> and necessary: a replica that <em>stands down</em> — holding a
+/// descriptor the database has already moved on from — throws nothing at all, so the reason it is not serving
+/// exists only here.
+/// </param>
 /// <param name="Trace">
 /// Every port call this replica's boot made, in order. A concurrency fact that fails is otherwise almost
 /// unreadable: the exception it reports is the <em>last</em> thing that went wrong, and which attempt it
@@ -40,10 +46,18 @@ internal sealed record ColdStartOutcome(
     int SchemaWrites,
     int AppliedSchemaWrites,
     bool Rendezvoused,
+    string? PublishedFailure,
     IReadOnlyList<string> Trace)
 {
-    /// <summary>Whether this replica's host started, i.e. whether the boot let it serve.</summary>
-    internal bool Serving => Failure is null;
+    /// <summary>Whether this replica's boot let it serve.</summary>
+    /// <remarks>
+    /// <b>The phase, not merely the absence of an exception.</b> A replica that stands down starts perfectly
+    /// well and serves nothing, so "it did not throw" stopped being the same question as "it is serving" the
+    /// moment an out-of-order boot became a published <see cref="AlvoBootPhase.Failed"/> rather than a refusal
+    /// (#145). Every earlier fact means the same thing under this definition, because a boot that threw never
+    /// published Ready either.
+    /// </remarks>
+    internal bool Serving => Failure is null && Phase is AlvoBootPhase.Ready;
 
     /// <summary>This replica's trace on one line, for a failing assertion's message.</summary>
     internal string Explain() => $"replica {Replica}: {string.Join(" | ", Trace)}";
@@ -201,12 +215,19 @@ internal static class ConcurrentColdStart
     /// <see cref="AlvoSchemaStartupMode.Apply"/>, so a drift fact that named no mode would silently become a
     /// fact about applying.
     /// </param>
+    /// <param name="deployedBefore">
+    /// Descriptors applied one at a time, in order, by a host that starts and stops before the race — so the
+    /// database already holds a <em>history</em> when the racing replicas boot.
+    /// </param>
     internal static async Task<ColdStartRace> RaceAsync(
         Action<IAlvoBuilder> connectToTheOneDatabase,
         IReadOnlyList<string> descriptorPerReplica,
         CancellationToken ct,
-        AlvoSchemaStartupMode? startup = null)
+        AlvoSchemaStartupMode? startup = null,
+        IReadOnlyList<string>? deployedBefore = null)
     {
+        await DeployOneAtATimeAsync(connectToTheOneDatabase, deployedBefore ?? [], ct);
+
         var descriptorFiles = descriptorPerReplica.Select(WriteToATemporaryFile).ToList();
         using var startTogether = new Barrier(descriptorPerReplica.Count);
         var replicas = descriptorFiles
@@ -230,6 +251,57 @@ internal static class ConcurrentColdStart
             }
 
             descriptorFiles.ForEach(TryDelete);
+        }
+    }
+
+    /// <summary>
+    /// Deploys each descriptor on its own, in order, before the race — the ordinary sequence of deploys that
+    /// leaves a project with a history rather than a single revision.
+    /// </summary>
+    /// <remarks>
+    /// <b>Through the product's own boot rather than by writing rows.</b> The ordering gate compares canonical
+    /// descriptor content against what the store recorded, so a history seeded by hand would be a history in
+    /// whatever shape the fixture chose — and the fact would then measure the fixture's idea of a stored
+    /// descriptor instead of the boot's. Each host is started and disposed in turn, so there is no concurrency
+    /// here and the revisions are deterministic.
+    /// <para>
+    /// <b>The seed is checked with <see cref="ColdStartOutcome.Serving"/>, not with "it did not throw."</b> A
+    /// stand-down throws nothing — that is the outcome #145 added and the one this harness exists to measure —
+    /// so a seed that stood down would pass an exception-only guard, omit its revision from the history, and
+    /// leave the race contending over a setup nobody established. The whole fact would then be theatre in the
+    /// same way <see cref="ColdStartOutcome.Rendezvoused"/> guards against, which is why the reason is
+    /// reported from <see cref="ColdStartOutcome.PublishedFailure"/>: on a stand-down it is the only place the
+    /// reason exists.
+    /// </para>
+    /// </remarks>
+    /// <param name="connectToTheOneDatabase">The provider and connection every host shares.</param>
+    /// <param name="descriptors">The descriptors to deploy, oldest first.</param>
+    /// <param name="ct">A token to cancel the deploys.</param>
+    private static async Task DeployOneAtATimeAsync(
+        Action<IAlvoBuilder> connectToTheOneDatabase, IReadOnlyList<string> descriptors, CancellationToken ct)
+    {
+        foreach (var descriptorJson in descriptors)
+        {
+            var file = WriteToATemporaryFile(descriptorJson);
+            using var alone = new Barrier(1);
+            var deploy = Replica.Build(connectToTheOneDatabase, file, index: -1, alone, AlvoSchemaStartupMode.Apply);
+
+            try
+            {
+                var outcome = await deploy.StartAsync(ct);
+                if (!outcome.Serving)
+                {
+                    throw new InvalidOperationException(
+                        $"the race's own setup did not deploy a serving descriptor: {outcome.Explain()} "
+                        + $"(phase {outcome.Phase}, published refusal: {outcome.PublishedFailure ?? "none"})",
+                        outcome.Failure);
+                }
+            }
+            finally
+            {
+                await deploy.DisposeAsync();
+                TryDelete(file);
+            }
         }
     }
 
@@ -329,6 +401,7 @@ internal static class ConcurrentColdStart
                 probe.SchemaWrites,
                 probe.AppliedSchemaWrites,
                 probe.Rendezvoused,
+                state.Failure,
                 probe.Trace);
         }
 

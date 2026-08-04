@@ -138,6 +138,19 @@ left to be discovered by a third party.
   converge instead of crash-looping. So a provider without it can no longer boot at all.
   Both in-repo drivers implement it; the cost falls on a future third-party provider, and it
   is a widening of the **implicit** provider contract (startup-lifecycle design deviation 60).
+- **`IDescriptorVersionStore` is now mandatory too, and its `ListAsync` *ordering* is
+  load-bearing rather than cosmetic.** The boot resolves it to answer "is this process
+  holding a descriptor the database has already moved on from?" from the append-only history,
+  which is what stops a replica applying an older descriptor over a newer schema (#145,
+  apply-ordering design deviation 72). Two obligations follow. First, a provider that
+  implements only the single-row `IAppliedSchemaStore` can no longer boot — both in-repo
+  drivers already serve both ports from one instance, so again the cost falls on a future
+  third party. Second, `ListAsync` **must** return the history oldest-to-newest, because the
+  core reads the last element as the revision the database is on: that is stated on the port
+  and held by `DescriptorVersionStoreContractTests.History_is_append_only_and_ordered`, so it
+  is a contract every implementation is already tested against rather than an assumption the
+  core makes about a driver. A driver that returned the rows unordered would not fail — it
+  would answer the ordering question wrongly, which is why the obligation is written down.
 - **Stage 1 — the framework's own `alvo.*` tables — has no port, so bringing that storage up is
   a *requirement* on `IAppliedSchemaStore`.** Stated prescriptively, because the core now depends
   on it: an implementation **must** bring its own storage up, idempotently and race-safely, on its

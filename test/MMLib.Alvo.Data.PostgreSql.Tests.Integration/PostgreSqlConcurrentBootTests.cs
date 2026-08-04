@@ -107,13 +107,55 @@ public sealed class PostgreSqlConcurrentBootTests : IClassFixture<PostgresFixtur
         refused.AppliedSchemaReads.ShouldBe(2, "the refusal must be reached by re-reading, not by guessing");
     }
 
+    /// <summary>
+    /// The PostgreSQL leg of #145: a replica holding the descriptor the database has already moved on from
+    /// stands down, while the one holding the current descriptor serves.
+    /// </summary>
+    /// <remarks>
+    /// Engine parity for
+    /// <c>MMLib.Alvo.Data.Sqlite.Tests.ConcurrentBootTests.A_replica_holding_an_older_descriptor_stands_down_while_the_current_one_serves</c>,
+    /// and it is worth running on both engines even though the decision is engine-agnostic by construction: the
+    /// history it is decided from is read through the driver, and a driver whose <c>ListAsync</c> ordered the
+    /// rows differently would answer the ordering question differently. §0 principle 3 is a claim about
+    /// behaviour, not about where the code lives.
+    /// </remarks>
+    [Fact]
+    public async Task A_replica_holding_an_older_descriptor_stands_down_while_the_current_one_serves()
+    {
+        EnsureEngineAvailable();
+
+        var race = await RaceAsync(
+            [ConcurrentColdStart.Descriptor, ConcurrentColdStart.DriftedDescriptor],
+            deployedBefore: [ConcurrentColdStart.Descriptor, ConcurrentColdStart.DriftedDescriptor]);
+
+        race.RecordedRevisions.ShouldBe(
+            [1, 2], "the older replica must not append a third revision undoing the second");
+        race.AppliedFields.ShouldContain("depots.region");
+        race.Replicas.Sum(replica => replica.SchemaWrites).ShouldBe(
+            0, "the older replica must be stopped before it contends for the DDL at all");
+
+        race.Replicas.Single(replica => replica.Serving).AppliedRevision.ShouldBe(2);
+
+        var stoodDown = race.Replicas.Single(replica => !replica.Serving);
+        stoodDown.Failure.ShouldBeNull(
+            $"a pod that is one deploy behind must be drained, not crash-looped. {stoodDown.Explain()}");
+        stoodDown.Phase.ShouldBe(AlvoBootPhase.Failed);
+
+        var reason = stoodDown.PublishedFailure.ShouldNotBeNull();
+        reason.ShouldContain("revision 1");
+        reason.ShouldContain("revision 2");
+    }
+
     private Task<ColdStartRace> RaceAsync(
-        IReadOnlyList<string> descriptorPerReplica, AlvoSchemaStartupMode? startup = null) =>
+        IReadOnlyList<string> descriptorPerReplica,
+        AlvoSchemaStartupMode? startup = null,
+        IReadOnlyList<string>? deployedBefore = null) =>
         ConcurrentColdStart.RaceAsync(
             alvo => alvo.UsePostgreSql(_connectionString),
             descriptorPerReplica,
             TestContext.Current.CancellationToken,
-            startup);
+            startup,
+            deployedBefore);
 
     private static void EnsureEngineAvailable() =>
         Assert.SkipUnless(

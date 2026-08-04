@@ -138,13 +138,72 @@ public sealed class ConcurrentBootTests : IDisposable
             .Message.ShouldContain("destructive");
     }
 
+    /// <summary>
+    /// Two replicas of a rolling deploy over a database that already holds a history, one of them holding the
+    /// descriptor the database has moved on from: the older one stands down instead of applying its schema over
+    /// the newer one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The difference from the facts above is that the database already holds a <em>history</em>, and that is
+    /// the honest limit of what #145 closes rather than a convenience of the fixture.</b> Racing an
+    /// <em>empty</em> database there is no ordering information at all — neither descriptor has ever been
+    /// applied — so nothing here orders them and the outcome is still the destructive gate's: one wins, and if
+    /// the subset descriptor wins, the superset pod applies over it and <em>both</em> replicas report Ready. That
+    /// case needs mutual exclusion, not ordering, and is the second phase the issue schedules (apply-ordering
+    /// design deviation 76). What this fact measures is the shape that is actually reachable in production and
+    /// that nothing compared before: revision 2 is applied, a pod of the old ReplicaSet restarts, and under the
+    /// default <c>Apply</c> only the ordering can tell the two generations apart.
+    /// </para>
+    /// <para>
+    /// <b>Nobody reaching the schema write is the assertion, not an accident.</b> The old fix for this shape was
+    /// "the loser's plan is destructive, so it is refused" — which happens <em>at</em> the write's door and only
+    /// when the change discards something. Here the outcome is decided before either replica contends, which is
+    /// why <c>Rendezvoused</c> is deliberately not asserted: the race the harness exists to force is the thing
+    /// that has been prevented, and asserting the barrier was met would demand the defect back.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_replica_holding_an_older_descriptor_stands_down_while_the_current_one_serves()
+    {
+        var race = await RaceAsync(
+            [ConcurrentColdStart.Descriptor, ConcurrentColdStart.DriftedDescriptor],
+            deployedBefore: [ConcurrentColdStart.Descriptor, ConcurrentColdStart.DriftedDescriptor]);
+
+        race.RecordedRevisions.ShouldBe(
+            [1, 2], "the older replica must not append a third revision undoing the second");
+        race.AppliedFields.ShouldContain(
+            "depots.region", "the database must still be on the newer descriptor's schema");
+        race.Replicas.Sum(replica => replica.SchemaWrites).ShouldBe(
+            0, "neither replica may reach the schema write: one has nothing to do and the other must be stopped "
+            + "before it contends for the DDL at all");
+
+        var serving = race.Replicas.Single(replica => replica.Serving);
+        serving.AppliedRevision.ShouldBe(2, serving.Explain());
+
+        var stoodDown = race.Replicas.Single(replica => !replica.Serving);
+        stoodDown.Failure.ShouldBeNull(
+            $"a pod that is one deploy behind must be drained, not crash-looped. {stoodDown.Explain()}");
+        stoodDown.Phase.ShouldBe(AlvoBootPhase.Failed);
+        stoodDown.AppliedRevision.ShouldBeNull();
+
+        var reason = stoodDown.PublishedFailure.ShouldNotBeNull(
+            "a replica that stands down throws nothing, so the published reason is the only diagnosis an "
+            + "operator gets");
+        reason.ShouldContain("revision 1");
+        reason.ShouldContain("revision 2");
+    }
+
     private Task<ColdStartRace> RaceAsync(
-        IReadOnlyList<string> descriptorPerReplica, AlvoSchemaStartupMode? startup = null) =>
+        IReadOnlyList<string> descriptorPerReplica,
+        AlvoSchemaStartupMode? startup = null,
+        IReadOnlyList<string>? deployedBefore = null) =>
         ConcurrentColdStart.RaceAsync(
             alvo => alvo.UseSqlite($"Data Source={_databasePath}"),
             descriptorPerReplica,
             TestContext.Current.CancellationToken,
-            startup);
+            startup,
+            deployedBefore);
 
     public void Dispose()
     {

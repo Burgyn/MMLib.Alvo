@@ -41,6 +41,13 @@ internal sealed class AlvoBootWorld : IAsyncDisposable
 
     internal const string AddedFieldDescriptorFileName = "host-boot-added-field.alvo.json";
 
+    /// <summary>
+    /// The default descriptor plus an explicit index — a difference <c>DestructiveScan</c> marks destructive in
+    /// <b>neither</b> direction, so it is the shape that can oscillate between two deployed descriptors with no
+    /// data loss and no refusal to stop it.
+    /// </summary>
+    internal const string IndexedDescriptorFileName = "host-boot-indexed.alvo.json";
+
     private readonly WebApplication _app;
     private readonly string? _ownedDatabasePath;
     private readonly BootObservingDescriptorSource _descriptorSource;
@@ -86,6 +93,20 @@ internal sealed class AlvoBootWorld : IAsyncDisposable
     /// start has to ask, since <see cref="ServerWasListeningDuringBoot"/> only reports what the boot itself saw.
     /// </summary>
     internal bool ServerIsListening => BootObservingDescriptorSource.CanServeARequest(_app.Services);
+
+    /// <summary>
+    /// The revisions the descriptor-versions table holds — what the database itself says, rather than what a
+    /// boot published about it.
+    /// </summary>
+    /// <remarks>
+    /// The only way to tell "this boot changed nothing" from "this boot applied something and then failed to
+    /// report it": <see cref="AlvoBootState.AppliedRevision"/> is <see langword="null"/> for every unsuccessful
+    /// boot, whatever it wrote on the way.
+    /// </remarks>
+    internal async Task<IReadOnlyList<int>> RecordedRevisionsAsync(string project)
+        => [.. (await _app.Services.GetRequiredService<IDescriptorVersionStore>()
+                .ListAsync(project, TestContext.Current.CancellationToken))
+            .Select(version => version.Revision)];
 
     /// <summary>Every entity the primed schema registry reports — empty when nothing primed.</summary>
     /// <remarks>
