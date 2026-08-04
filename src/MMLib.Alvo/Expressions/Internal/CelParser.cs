@@ -420,6 +420,7 @@ internal static class CelParser
         {
             "changed" => ParseChangedCall(),
             CelCall.LowerAscii => ParseLowerAsciiCall(),
+            CelCall.Now => ParseNowCall(),
             _ => throw UnrecognizedFunction(identifierToken),
         };
 
@@ -452,6 +453,27 @@ internal static class CelParser
             RejectExtraArgument(CelCall.LowerAscii);
             Expect(CelTokenKind.RightParen);
             return new CelCall(CelCall.LowerAscii, field);
+        }
+
+        /// <summary>
+        /// Parses <c>now()</c>, which takes no arguments — and says so rather than reporting a missing
+        /// identifier, because "now() takes no arguments" is the sentence that tells an author the value is
+        /// the write's own instant and not something they get to choose.
+        /// </summary>
+        private CelCall ParseNowCall()
+        {
+            Expect(CelTokenKind.LeftParen);
+
+            if (Current.Kind != CelTokenKind.RightParen)
+            {
+                throw new CelSyntaxException(
+                    $"{CelCall.Now}() takes no arguments.",
+                    Current.Position,
+                    $"Write {CelCall.Now}() — it resolves to the instant the write itself is stamped with.");
+            }
+
+            Expect(CelTokenKind.RightParen);
+            return new CelCall(CelCall.Now, null);
         }
 
         private void RejectExtraArgument(string functionName)

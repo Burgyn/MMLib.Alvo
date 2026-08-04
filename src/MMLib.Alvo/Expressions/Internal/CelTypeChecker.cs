@@ -522,6 +522,7 @@ internal static class CelTypeChecker
             return call switch
             {
                 { Name: CelCall.LowerAscii, Argument: { } argument } => CheckLowerAsciiCall(call, argument, profileBad, position),
+                { Name: CelCall.Now, Argument: null } => (call, CelValueType.Timestamp, profileBad, position),
                 _ => UnrecognizedNode(call),
             };
         }

@@ -186,19 +186,29 @@ internal static class CelInterpreter
     /// reason <see cref="EvaluatePredicate"/> requires one.
     /// </param>
     /// <param name="previous">The row as it was before the change, or <see langword="null"/> on a create.</param>
+    /// <param name="now">
+    /// The instant <c>now()</c> resolves to: the one this write is stamped with, bound <b>once</b> by the
+    /// caller that already computed the audit stamp — never read here. That is what makes a
+    /// <see cref="CelProfile.Mutate"/> expression referentially transparent within a write, and therefore
+    /// safe to evaluate inside a transaction that may be retried: a retry re-stamps, but one attempt cannot
+    /// disagree with itself, two hooks on one write agree, and the value a hook writes agrees with the row's
+    /// own <c>updated_at</c>. An interpreter that read <see cref="TimeProvider"/> itself would give up all
+    /// three, and could not be asserted on at all.
+    /// </param>
     /// <returns>
     /// The value to assign, or <see langword="null"/>. <see langword="null"/> is a value here rather than a
     /// failure signal — a fold over a missing field yields a missing field, not an empty string — so it is
     /// the caller's business whether writing it is allowed.
     /// </returns>
-    public static object? EvaluateMutation(CompiledExpression expression, AlvoRecord current, AlvoRecord? previous)
+    public static object? EvaluateMutation(
+        CompiledExpression expression, AlvoRecord current, AlvoRecord? previous, DateTimeOffset now)
     {
         ArgumentNullException.ThrowIfNull(expression);
         ArgumentNullException.ThrowIfNull(current);
 
         try
         {
-            var state = new EvalState(current, previous, null);
+            var state = new EvalState(current, previous, null, now);
             return Evaluate(expression.Root, state);
         }
 #pragma warning disable CA1031
@@ -223,9 +233,15 @@ internal static class CelInterpreter
         _ => null,
     };
 
-    private static string? EvaluateCall(CelCall call, in EvalState state) => call switch
+    /// <summary>
+    /// Evaluates one of the two allow-listed <see cref="CelProfile.Mutate"/> functions. <c>now()</c> reads the
+    /// instant the caller bound for this write — it is <b>not</b> a clock read, and there is deliberately no
+    /// <see cref="TimeProvider"/> in reach of this class to make one from.
+    /// </summary>
+    private static object? EvaluateCall(CelCall call, in EvalState state) => call switch
     {
         { Name: CelCall.LowerAscii, Argument: { } argument } => LowerAscii(Evaluate(argument, state)),
+        { Name: CelCall.Now, Argument: null } => state.Now,
         _ => null,
     };
 
@@ -595,12 +611,23 @@ internal static class CelInterpreter
         ? -decimalValue
         : null;
 
-    private readonly struct EvalState(AlvoRecord current, AlvoRecord? previous, AlvoContext? context)
+    private readonly struct EvalState(
+        AlvoRecord current, AlvoRecord? previous, AlvoContext? context, DateTimeOffset? now = null)
     {
         public AlvoRecord Current { get; } = current;
 
         public AlvoRecord? Previous { get; } = previous;
 
         public AlvoContext? Context { get; } = context;
+
+        /// <summary>
+        /// The instant <c>now()</c> resolves to, bound once per write by the caller, or
+        /// <see langword="null"/> on every entry point that is not a <see cref="CelProfile.Mutate"/>
+        /// evaluation — where a call node cannot appear at all, because the type checker allows the call
+        /// construct in <see cref="CelProfile.Mutate"/> and nowhere else. <see langword="null"/> is
+        /// therefore unreachable rather than a default anyone can observe, and it evaluates to a missing
+        /// value rather than to some substitute instant if a defect ever makes it reachable.
+        /// </summary>
+        public DateTimeOffset? Now { get; } = now;
     }
 }

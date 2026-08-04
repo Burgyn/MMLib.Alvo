@@ -1,5 +1,7 @@
-﻿using MMLib.Alvo.Expressions;
+﻿using MMLib.Alvo.Data;
+using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
+using System.Reflection;
 
 namespace MMLib.Alvo.Tests.Expressions;
 
@@ -177,9 +179,110 @@ public class CelMutateFunctionTests
         refused.Errors[0].Message.ShouldContain(nameof(CelProfile.Mutate));
     }
 
+    [Fact]
+    public void Now_compiles_in_the_mutate_profile_as_a_timestamp()
+    {
+        CelFixtures.CompileMutate("now()").ResultType.ShouldBe(CelValueType.Timestamp);
+    }
+
+    [Theory]
+    [MemberData(nameof(EveryProfileButMutate))]
+    public void Now_is_refused_in_every_profile_but_mutate(CelProfile profile)
+    {
+        var refused = Compile("now()", profile);
+
+        refused.IsSuccess.ShouldBeFalse();
+        refused.Errors[0].Message.ShouldContain(nameof(CelProfile.Mutate));
+    }
+
+    [Fact]
+    public void Now_takes_no_arguments()
+    {
+        Compile("now(title)", CelProfile.Mutate).IsSuccess.ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// The fact that makes <c>now()</c> not-a-clock-read: the write binds one instant — the same one its
+    /// audit stamp uses — and every evaluation in that write reads the bound value, so the wall clock moving
+    /// mid-write cannot change the answer. A retry re-stamps, exactly as the candidate row is rebuilt per
+    /// attempt; what one attempt cannot do is disagree with itself.
+    /// </summary>
+    /// <remarks>
+    /// This is what makes a <see cref="CelProfile.Mutate"/> expression referentially transparent within a
+    /// write, and therefore what makes it safe to evaluate inside a transaction that may be retried. It is
+    /// also the fact that dies if the interpreter ever reads a clock itself — verified by mutation, since
+    /// <see cref="The_interpreter_is_handed_an_instant_and_never_a_clock_to_read"/> only pins the signature
+    /// and cannot see into a method body.
+    /// </remarks>
+    [Fact]
+    public void Now_is_the_writes_bound_instant_and_not_a_fresh_read()
+    {
+        var clock = new MovableClock(_stamp);
+        var bound = clock.GetUtcNow();             // the write stamps itself once, from the clock port
+        clock.Advance(TimeSpan.FromMinutes(5));    // the wall clock then moves, mid-write
+
+        MutateAt("now()", bound).ShouldBe(_stamp);  // and the answer does not
+    }
+
+    [Fact]
+    public void Now_is_the_same_instant_for_every_evaluation_in_one_write()
+    {
+        var bound = new MovableClock(_stamp).GetUtcNow();
+
+        MutateAt("now()", bound).ShouldBe(MutateAt("now()", bound));
+        MutateAt("now()", bound).ShouldBe(_stamp);
+    }
+
+    /// <summary>
+    /// The structural half of the same rule: the interpreter is <em>handed</em> an instant and is never
+    /// handed a clock, so the caller that already computed the write's audit stamp is the only thing that
+    /// reads time. A signature fact cannot see a <c>TimeProvider.System</c> call inside a method body — the
+    /// bound-instant fact above is what catches that — but it does stop the seam from being widened into one.
+    /// </summary>
+    [Fact]
+    public void The_interpreter_is_handed_an_instant_and_never_a_clock_to_read()
+    {
+        typeof(CelInterpreter)
+            .GetMethods(BindingFlags.Public | BindingFlags.Static)
+            .SelectMany(method => method.GetParameters())
+            .ShouldNotContain(parameter => parameter.ParameterType == typeof(TimeProvider));
+    }
+
+    /// <summary>
+    /// A timestamp is not a string, so the fold refuses it — and the refusal is the type checker's, at
+    /// compile time, rather than a <see langword="null"/> discovered mid-write.
+    /// </summary>
+    [Fact]
+    public void LowerAscii_of_now_is_refused_because_a_timestamp_is_not_a_string()
+    {
+        Compile("lowerAscii(now())", CelProfile.Mutate).IsSuccess.ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// A fixed instant far from any wall clock, so a fact that accidentally measured
+    /// <c>TimeProvider.System</c> could never coincide with it.
+    /// </summary>
+    private static readonly DateTimeOffset _stamp = new(2000, 1, 2, 3, 4, 5, TimeSpan.Zero);
+
     private static CelCompilationResult Compile(string source, CelProfile profile) =>
         CelFixtures.Compiler.Compile(source, profile, CelFixtures.Orders);
 
     private static object? Mutate(string source, params (string Field, object? Value)[] candidate) =>
-        CelInterpreter.EvaluateMutation(CelFixtures.CompileMutate(source), CelFixtures.Row(candidate), null);
+        CelInterpreter.EvaluateMutation(CelFixtures.CompileMutate(source), CelFixtures.Row(candidate), null, _stamp);
+
+    private static object? MutateAt(string source, DateTimeOffset now) =>
+        CelInterpreter.EvaluateMutation(CelFixtures.CompileMutate(source), AlvoRecord.Empty, null, now);
+
+    /// <summary>
+    /// A hand-rolled movable clock. <c>FakeTimeProvider</c> would be a new package reference for one fact,
+    /// and the only thing these facts need from a clock is "it was read once, and it moved afterwards".
+    /// </summary>
+    private sealed class MovableClock(DateTimeOffset start) : TimeProvider
+    {
+        private DateTimeOffset _now = start;
+
+        public override DateTimeOffset GetUtcNow() => _now;
+
+        public void Advance(TimeSpan by) => _now = _now.Add(by);
+    }
 }
