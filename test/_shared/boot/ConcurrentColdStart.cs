@@ -264,6 +264,15 @@ internal static class ConcurrentColdStart
     /// whatever shape the fixture chose — and the fact would then measure the fixture's idea of a stored
     /// descriptor instead of the boot's. Each host is started and disposed in turn, so there is no concurrency
     /// here and the revisions are deterministic.
+    /// <para>
+    /// <b>The seed is checked with <see cref="ColdStartOutcome.Serving"/>, not with "it did not throw."</b> A
+    /// stand-down throws nothing — that is the outcome #145 added and the one this harness exists to measure —
+    /// so a seed that stood down would pass an exception-only guard, omit its revision from the history, and
+    /// leave the race contending over a setup nobody established. The whole fact would then be theatre in the
+    /// same way <see cref="ColdStartOutcome.Rendezvoused"/> guards against, which is why the reason is
+    /// reported from <see cref="ColdStartOutcome.PublishedFailure"/>: on a stand-down it is the only place the
+    /// reason exists.
+    /// </para>
     /// </remarks>
     /// <param name="connectToTheOneDatabase">The provider and connection every host shares.</param>
     /// <param name="descriptors">The descriptors to deploy, oldest first.</param>
@@ -280,10 +289,12 @@ internal static class ConcurrentColdStart
             try
             {
                 var outcome = await deploy.StartAsync(ct);
-                if (outcome.Failure is { } refused)
+                if (!outcome.Serving)
                 {
                     throw new InvalidOperationException(
-                        $"the race's own setup failed to deploy a descriptor: {outcome.Explain()}", refused);
+                        $"the race's own setup did not deploy a serving descriptor: {outcome.Explain()} "
+                        + $"(phase {outcome.Phase}, published refusal: {outcome.PublishedFailure ?? "none"})",
+                        outcome.Failure);
                 }
             }
             finally
