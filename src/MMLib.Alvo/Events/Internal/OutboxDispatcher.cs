@@ -184,6 +184,16 @@ internal sealed class OutboxDispatcher(
     /// row is gone from the queue. An event that matched nothing takes the same path and increments
     /// <c>alvo.events.filtered</c> instead — once per event, never per hook — and writes no execution-log entry
     /// at all, which is the half of that criterion no counter can express.
+    /// <para>
+    /// <b>There is no per-hook progress, so a partial failure re-runs the hooks that already succeeded.</b> Two
+    /// hooks match, the first POSTs, the second throws: nothing is retired, the whole entry is released, and the
+    /// next attempt runs the first hook again. That is a consequence of at-least-once rather than an oversight —
+    /// the receiver is already told to deduplicate on the event's <c>id</c>
+    /// (<see cref="MMLib.Alvo.Events.IEmailSender"/> and <see cref="EventActionExecutor"/> both say so), and that
+    /// key is unchanged by a redelivery whichever hook triggers it. Recording per-hook progress would mean a
+    /// second piece of mutable state per entry to keep consistent with the row, which buys nothing a dedup key
+    /// does not already buy.
+    /// </para>
     /// </remarks>
     private async Task DeliverAsync(OutboxEntry entry, CancellationToken stoppingToken)
     {

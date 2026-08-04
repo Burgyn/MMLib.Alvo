@@ -240,6 +240,55 @@ public sealed class EventActionExecutorTests : IDisposable
     }
 
     /// <summary>
+    /// The same guarantee on the <b>refused-status</b> branch, whose exception this codebase does not author:
+    /// <see cref="HttpResponseMessage.EnsureSuccessStatusCode"/> writes it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why a second fact rather than one more case on the first.</b> The timeout branch is pinned by a
+    /// message this repository writes (<c>WebhookDelivery.TimedOut</c>), so it stays true by construction. This
+    /// branch is pinned by a message the <em>BCL</em> writes, and the delivery attaches it to
+    /// <c>ActionFailed</c>'s exception parameter untouched. Today the text is <c>"Response status code does not
+    /// indicate success: 404 (Not Found)."</c> — no path, no query. That is a property of the current
+    /// implementation, not of anything here, which is exactly why it is worth an assertion rather than a
+    /// paragraph.
+    /// </para>
+    /// <para>
+    /// <b>So this fact is deliberately a canary on someone else's behaviour.</b> If a future runtime, or a
+    /// <see cref="DelegatingHandler"/> a host adds to the named client, starts putting the request URI into that
+    /// message, this goes red — and the fix is then to wrap the exception rather than to relax the assertion.
+    /// Read that way, a failure here is information, not maintenance. The alternative was to wrap unconditionally
+    /// today, which would throw away the failure reason a `404` versus a `503` gives an author and would silently
+    /// overturn a disclosure decision <c>WebhookTarget</c>'s remarks already record and accept.
+    /// </para>
+    /// <para>
+    /// <b>What is still unpinned, so nobody reads this as more than it is.</b> A refused <em>connection</em> —
+    /// DNS failure, connection refused, TLS failure — also produces a BCL-authored message, and that one does
+    /// carry <c>host:port</c> (accepted: the host is not the secret; the path and the query are). Reaching it
+    /// needs a real socket, so it belongs to the host integration suite rather than here, and it is filed rather
+    /// than half-covered.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task No_log_line_carries_a_webhook_url_when_the_endpoint_refuses_the_delivery()
+    {
+        var receiver = new RecordingWebhookReceiver { Status = HttpStatusCode.NotFound };
+
+        var failure = await Should.ThrowAsync<HttpRequestException>(
+            () => Subject(receiver).ExecuteAsync(SecretUrlHook(), SampleEvent(), Cancellation));
+        EventLog.ActionFailed(
+            _loggers.CreateLogger<OutboxDispatcher>(), Guid.NewGuid(), "entity.deals.updated", 1, failure);
+
+        receiver.Targets.ShouldHaveSingleItem().AbsoluteUri.ShouldContain(
+            SecretSegment, Case.Sensitive, "the positive control: the secret really was on the wire this run");
+
+        var shipped = Shipped();
+        shipped.ShouldNotBeEmpty("the dispatcher's own failure line must have been written");
+        shipped.ShouldAllBe(line => !line.Contains(SecretSegment, StringComparison.Ordinal));
+        shipped.ShouldAllBe(line => !line.Contains(SecretUrl, StringComparison.Ordinal));
+    }
+
+    /// <summary>
     /// The other half: a cancellation the <em>caller</em> asked for stays a cancellation, so shutdown is not
     /// reported as a delivery failure and retried.
     /// </summary>
