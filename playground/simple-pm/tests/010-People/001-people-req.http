@@ -4,7 +4,7 @@
 ## TEST-EXPECT-STATUS: [201]
 ## TEST-HAS-HEADER: Location
 POST {{baseUrl}}/api/people
-X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+X-Alvo-Api-Key: {{keyAdmin}}
 Content-Type: application/json
 
 {
@@ -16,7 +16,7 @@ Content-Type: application/json
 # @name CreateGrace
 ## TEST-EXPECT-STATUS: [201]
 POST {{baseUrl}}/api/people
-X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+X-Alvo-Api-Key: {{keyAdmin}}
 Content-Type: application/json
 
 {
@@ -28,7 +28,7 @@ Content-Type: application/json
 # @name CreateAnonymousContributor
 ## TEST-EXPECT-STATUS: [201]
 POST {{baseUrl}}/api/people
-X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+X-Alvo-Api-Key: {{keyAdmin}}
 Content-Type: application/json
 
 { "name": "{{runToken}} Zoe Nameless" }
@@ -39,7 +39,7 @@ Content-Type: application/json
 # @name DuplicateEmail
 ## TEST-EXPECT-STATUS: [409]
 POST {{baseUrl}}/api/people
-X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+X-Alvo-Api-Key: {{keyAdmin}}
 Content-Type: application/json
 
 {
@@ -52,7 +52,7 @@ Content-Type: application/json
 # @name NotAnEmail
 ## TEST-EXPECT-STATUS: [422]
 POST {{baseUrl}}/api/people
-X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+X-Alvo-Api-Key: {{keyAdmin}}
 Content-Type: application/json
 
 {
@@ -64,4 +64,4 @@ Content-Type: application/json
 # @name Team
 ## TEST-EXPECT-STATUS: [200]
 GET {{baseUrl}}/api/people?name=like.{{runToken}}%25&order=name.asc&limit=100
-X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+X-Alvo-Api-Key: {{keyAdmin}}

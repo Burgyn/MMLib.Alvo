@@ -21,7 +21,7 @@ descriptor generated, browsable.
 | Project | What it is for |
 |---|---|
 | **`simple-todo`** | One entity, four fields, **no authorization** — every request is a plain `curl` with no credential. What "a simple thing stays simple" looks like end to end, plus the query grammar, paging, and the refusals you will meet on day one. |
-| **`simple-pm`** | People, milestones, tasks. Two references, a unique value, a `restrict` and a `cascade` — the relational behaviour a real backend has. Role-based rules, so it is also where you see what authorization actually does. |
+| **`simple-pm`** | People, milestones, tasks. Two references, a unique value, a `restrict` and a `cascade` — the relational behaviour a real backend has. Also **where the rules live**: only an admin may add a person, and a member may edit nobody's profile but their own. |
 
 Each has its own README stating which behaviour every construct in its descriptor exists to show.
 
@@ -44,8 +44,13 @@ Two constraints worth knowing before you write a descriptor:
 - **`docker-compose.yml`** — one templated stack, parameterised by descriptor path, port and key
   secret. `run` supplies all three, which is why adding a project needs no compose file of its own.
 - **`docker-compose.pg.yml`** — the `--pg` overlay: the same stack over `postgres:16-alpine`.
-- **`.run/`** — per-project state (the key secret, the port, the generated TeaPie environment).
-  Gitignored; the secret is a credential.
+- **`.run/`** — per-project state (the key secrets, the port, the generated TeaPie environment).
+  Gitignored; the secrets are credentials.
+
+**Two keys, differing in exactly one thing** — whether the caller holds `admin`. Same scopes, same
+tenant, everything else identical, so anything the second key cannot do is the descriptor's rules and
+can be nothing else. `run` mints both secrets per stack and prints them. A project whose rules never
+mention a role simply ignores the second key; `simple-todo` is public and sends no credential at all.
 
 **SQLite is the default** because it is one container with a database file inside it: a recreated
 container is a fresh database, with no volume to forget. Reach for `--pg` when the question is whether

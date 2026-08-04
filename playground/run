@@ -23,10 +23,14 @@ ROOT="$(cd "$PLAYGROUND/.." && pwd)"
 # somebody left running. Override with --port.
 DEFAULT_PORT=8090
 
-# The dev key's user id — the value that lands in `created_by`/`updated_by` on every audited row. A
-# fixed constant rather than a fresh guid per run: it is an identifier, not a credential, and a stable
-# one means a row an earlier run created is recognisably the same author's.
+# The two dev keys' user ids — the values that land in `created_by`/`updated_by` on an audited row, and
+# the ones a row-level rule compares a column against (`user_id == @user.id`).
+#
+# Fixed constants rather than fresh guids per run: they are identifiers, not credentials. A stable
+# admin id means a row an earlier run created is recognisably the same author's, and a stable member id
+# is what lets a suite link a row to that identity and then assert what its owner may do.
 PLAYGROUND_USER=6f9619ff-8b86-d011-b42d-00c04fc964ff
+PLAYGROUND_MEMBER_USER=0a51c4e1-1000-4000-8000-000000000001
 
 # Where a stack's secret and port are remembered between invocations, so `--test-only` can talk to a
 # stack `run` started ten minutes ago. Gitignored: the secret is a credential.
@@ -178,9 +182,6 @@ die() {
 
 # ---------------------------------------------------------------- compose
 
-# One compose project per playground project, NOT per provider. Both providers under one name is what
-# makes `--down` and the teardown below complete whichever way the stack was started: compose removes
-# containers by project label, and --remove-orphans catches the postgres a `--pg` run added.
 # Placeholder values for every `${...:?}` the compose file names, for a command that does not need the
 # real ones.
 #
@@ -193,11 +194,17 @@ die() {
 set_teardown_variables() {
     : "${ALVO_PLAYGROUND_DESCRIPTOR:=$(descriptor_in "$PLAYGROUND/$PROJECT/")}"
     : "${ALVO_PLAYGROUND_USER:=$PLAYGROUND_USER}"
+    : "${ALVO_PLAYGROUND_MEMBER_USER:=$PLAYGROUND_MEMBER_USER}"
     : "${ALVO_PLAYGROUND_SECRET:=teardown-only-never-a-credential}"
+    : "${ALVO_PLAYGROUND_MEMBER_SECRET:=teardown-only-never-a-credential}"
     : "${ALVO_PLAYGROUND_PORT:=$PORT}"
-    export ALVO_PLAYGROUND_DESCRIPTOR ALVO_PLAYGROUND_USER ALVO_PLAYGROUND_SECRET ALVO_PLAYGROUND_PORT
+    export ALVO_PLAYGROUND_DESCRIPTOR ALVO_PLAYGROUND_USER ALVO_PLAYGROUND_MEMBER_USER
+    export ALVO_PLAYGROUND_SECRET ALVO_PLAYGROUND_MEMBER_SECRET ALVO_PLAYGROUND_PORT
 }
 
+# One compose project per playground project, NOT per provider. Both providers under one name is what
+# makes `--down` and the teardown above complete whichever way the stack was started: compose removes
+# containers by project label, and --remove-orphans catches the postgres a `--pg` run added.
 compose() {
     set_teardown_variables
     local -a files
@@ -278,9 +285,12 @@ start_stack() {
     # provisionally here, then again below.
     ALVO_PLAYGROUND_DESCRIPTOR="$(descriptor_in "$PLAYGROUND/$PROJECT/")"
     ALVO_PLAYGROUND_USER="$PLAYGROUND_USER"
+    ALVO_PLAYGROUND_MEMBER_USER="$PLAYGROUND_MEMBER_USER"
     ALVO_PLAYGROUND_SECRET="$(openssl rand -hex 16)"
+    ALVO_PLAYGROUND_MEMBER_SECRET="$(openssl rand -hex 16)"
     ALVO_PLAYGROUND_PORT="$PORT"
-    export ALVO_PLAYGROUND_DESCRIPTOR ALVO_PLAYGROUND_USER ALVO_PLAYGROUND_SECRET ALVO_PLAYGROUND_PORT
+    export ALVO_PLAYGROUND_DESCRIPTOR ALVO_PLAYGROUND_USER ALVO_PLAYGROUND_MEMBER_USER
+    export ALVO_PLAYGROUND_SECRET ALVO_PLAYGROUND_MEMBER_SECRET ALVO_PLAYGROUND_PORT
 
     # Down first, so this run owns its database rather than inheriting one. Not tidiness: a descriptor
     # is applied at BOOT, so a stack left up by an earlier run is serving the descriptor as it was
@@ -317,6 +327,7 @@ save_state() {
         umask 077
         cat > "$STATE_DIR/$PROJECT.env" <<ENV
 ALVO_PLAYGROUND_SECRET=$ALVO_PLAYGROUND_SECRET
+ALVO_PLAYGROUND_MEMBER_SECRET=$ALVO_PLAYGROUND_MEMBER_SECRET
 ALVO_PLAYGROUND_PORT=$PORT
 ENV
     )
@@ -343,7 +354,8 @@ announce() {
     cat <<INFO
 
   baseUrl   http://localhost:$PORT
-  api key   demo.$ALVO_PLAYGROUND_SECRET   (header: X-Alvo-Api-Key)
+  admin     demo.$ALVO_PLAYGROUND_SECRET   (header: X-Alvo-Api-Key)
+  member    member.$ALVO_PLAYGROUND_MEMBER_SECRET   (authenticated, no admin)
   docs      http://localhost:$PORT/scalar
   openapi   http://localhost:$PORT/openapi/v1.json
 
@@ -387,6 +399,12 @@ run_suite() {
 # a title, and every list assertion filters on it — so a second run against the same stack measures
 # its own rows rather than the union with the first run's. Without it the first `--test-only` would
 # pass and the second would fail on a count, which reads as a product defect and is not one.
+#
+# The two user ids come from this script's CONSTANTS, not from the exported ALVO_* copies: they are
+# compile-time facts rather than per-stack state, and `--test-only` never goes through start_stack —
+# so reading the exports there was an unbound variable, caught by `set -u` after the tool restore had
+# already run. The secrets are the opposite and do come from the state file, because they are minted
+# per stack.
 write_teapie_environment() {
     mkdir -p "$STATE_DIR"
     (
@@ -399,6 +417,12 @@ write_teapie_environment() {
   "playground": {
     "baseUrl": "http://localhost:$PORT",
     "apiKeySecret": "$ALVO_PLAYGROUND_SECRET",
+
+    "keyAdmin": "demo.$ALVO_PLAYGROUND_SECRET",
+    "keyMember": "member.$ALVO_PLAYGROUND_MEMBER_SECRET",
+    "userAdmin": "$PLAYGROUND_USER",
+    "userMember": "$PLAYGROUND_MEMBER_USER",
+
     "runToken": "$(openssl rand -hex 4)"
   }
 }

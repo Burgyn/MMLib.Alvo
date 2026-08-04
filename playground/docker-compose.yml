@@ -34,14 +34,21 @@ services:
       # where the database is without reading the image.
       Alvo__Database__SqliteConnectionString: Data Source=/alvo/data/alvo.db
 
-      # One key, full rights. A playground is for finding out what the descriptor does, and a
-      # second identity would mean every request in every suite has to say which one it is for a
-      # distinction these two projects never make. The demos at the repo root are where role and
-      # tenant differences are measured; here the rules read `'authenticated' in @user.roles` and
-      # one key satisfies them.
+      # TWO keys, and they differ in EXACTLY ONE THING: whether the caller holds `admin`.
       #
-      # The image ships no credential of its own (§2.14), so the secret comes from the environment
-      # with `:?` — `run` mints a fresh one per stack and remembers it for `--test-only`.
+      # That discipline is the whole point. Same scopes, same tenant (none), same everything else —
+      # so anything the second key cannot do is the descriptor's rules and can be nothing else. A
+      # suite comparing two keys that differed in two ways would prove neither.
+      #
+      # A project whose rules never mention a role simply ignores the second key: simple-todo is
+      # public and sends no credential at all.
+      #
+      # The image ships no credential of its own (§2.14), so both secrets come from the environment
+      # with `:?` — `run` mints fresh ones per stack and remembers them for `--test-only`. The user
+      # ids are NOT secrets: a row-level rule compares a column against `@user.id`, so a test cannot
+      # be written without knowing them.
+
+      # 1. The admin. Every project's privileged caller.
       Alvo__Auth__DevKeys__0__KeyId: demo
       Alvo__Auth__DevKeys__0__Secret: ${ALVO_PLAYGROUND_SECRET:?set ALVO_PLAYGROUND_SECRET, or use playground/run}
       Alvo__Auth__DevKeys__0__User: ${ALVO_PLAYGROUND_USER:?set ALVO_PLAYGROUND_USER, or use playground/run}
@@ -49,6 +56,16 @@ services:
       Alvo__Auth__DevKeys__0__Roles__1: admin
       Alvo__Auth__DevKeys__0__Scopes__0: "*:read"
       Alvo__Auth__DevKeys__0__Scopes__1: "*:write"
+
+      # 2. An ordinary member: authenticated, and nothing else. Note the scopes are identical to the
+      #    admin's — a refusal this key gets is a POLICY refusal (`forbidden`), never `out-of-scope`,
+      #    and those are different slugs with different fixes.
+      Alvo__Auth__DevKeys__1__KeyId: member
+      Alvo__Auth__DevKeys__1__Secret: ${ALVO_PLAYGROUND_MEMBER_SECRET:?set ALVO_PLAYGROUND_MEMBER_SECRET, or use playground/run}
+      Alvo__Auth__DevKeys__1__User: ${ALVO_PLAYGROUND_MEMBER_USER:?set ALVO_PLAYGROUND_MEMBER_USER, or use playground/run}
+      Alvo__Auth__DevKeys__1__Roles__0: authenticated
+      Alvo__Auth__DevKeys__1__Scopes__0: "*:read"
+      Alvo__Auth__DevKeys__1__Scopes__1: "*:write"
 
     # Loopback only, for the reason the root docker-compose.yml states at length: "8080:8080" binds
     # 0.0.0.0, Docker's DOCKER-USER iptables chain sits ahead of UFW, and an operator who runs this

@@ -3,7 +3,7 @@
 # @name CreateBeta
 ## TEST-EXPECT-STATUS: [201]
 POST {{baseUrl}}/api/milestones
-X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+X-Alvo-Api-Key: {{keyAdmin}}
 Content-Type: application/json
 
 {
@@ -16,7 +16,7 @@ Content-Type: application/json
 # @name CreateLaunch
 ## TEST-EXPECT-STATUS: [201]
 POST {{baseUrl}}/api/milestones
-X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+X-Alvo-Api-Key: {{keyAdmin}}
 Content-Type: application/json
 
 {
@@ -29,7 +29,7 @@ Content-Type: application/json
 # @name AdvanceBeta
 ## TEST-EXPECT-STATUS: [200]
 PATCH {{baseUrl}}/api/milestones/{{CreateBeta.response.body.$.id}}
-X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+X-Alvo-Api-Key: {{keyAdmin}}
 If-Match: {{CreateBeta.response.headers.ETag}}
 Content-Type: application/json
 
@@ -39,7 +39,7 @@ Content-Type: application/json
 # @name NotADeclaredStatus
 ## TEST-EXPECT-STATUS: [422]
 POST {{baseUrl}}/api/milestones
-X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+X-Alvo-Api-Key: {{keyAdmin}}
 Content-Type: application/json
 
 { "name": "{{runToken}} Wrong", "status": "shipped" }
@@ -48,4 +48,4 @@ Content-Type: application/json
 # @name Plan
 ## TEST-EXPECT-STATUS: [200]
 GET {{baseUrl}}/api/milestones?name=like.{{runToken}}%25&order=name.asc&limit=100
-X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+X-Alvo-Api-Key: {{keyAdmin}}

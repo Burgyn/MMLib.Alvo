@@ -4,13 +4,13 @@
 # @name ReadCard
 ## TEST-EXPECT-STATUS: [200]
 GET {{baseUrl}}/api/tasks/{{TaskBId}}
-X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+X-Alvo-Api-Key: {{keyAdmin}}
 
 ### todo → doing, with the version the read handed out
 # @name Start
 ## TEST-EXPECT-STATUS: [200]
 PATCH {{baseUrl}}/api/tasks/{{TaskBId}}
-X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+X-Alvo-Api-Key: {{keyAdmin}}
 If-Match: {{ReadCard.response.headers.ETag}}
 Content-Type: application/json
 
@@ -21,7 +21,7 @@ Content-Type: application/json
 # @name SecondEditorLoses
 ## TEST-EXPECT-STATUS: [412]
 PATCH {{baseUrl}}/api/tasks/{{TaskBId}}
-X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+X-Alvo-Api-Key: {{keyAdmin}}
 If-Match: {{ReadCard.response.headers.ETag}}
 Content-Type: application/json
 
@@ -31,7 +31,7 @@ Content-Type: application/json
 # @name HandOver
 ## TEST-EXPECT-STATUS: [200]
 PATCH {{baseUrl}}/api/tasks/{{TaskBId}}
-X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+X-Alvo-Api-Key: {{keyAdmin}}
 If-Match: {{Start.response.headers.ETag}}
 Content-Type: application/json
 
@@ -42,7 +42,7 @@ Content-Type: application/json
 # @name DropFromMilestone
 ## TEST-EXPECT-STATUS: [200]
 PATCH {{baseUrl}}/api/tasks/{{TaskBId}}
-X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+X-Alvo-Api-Key: {{keyAdmin}}
 If-Match: {{HandOver.response.headers.ETag}}
 Content-Type: application/json
 
@@ -52,4 +52,4 @@ Content-Type: application/json
 # @name FinalState
 ## TEST-EXPECT-STATUS: [200]
 GET {{baseUrl}}/api/tasks/{{TaskBId}}
-X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+X-Alvo-Api-Key: {{keyAdmin}}
