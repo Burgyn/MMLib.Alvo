@@ -173,6 +173,42 @@ internal static class CelInterpreter
         }
     }
 
+    /// <summary>
+    /// Evaluates a <see cref="CelProfile.Mutate"/> expression's value against the candidate row, inside the
+    /// write's own transaction. This is the <b>only</b> backend for that profile — a
+    /// <see cref="CelProfile.Mutate"/> expression is never handed to <see cref="SqlPredicateRenderer"/>,
+    /// which refuses its function calls by name — so the two-valued fold and the collation caveat this
+    /// class's remarks describe have no second backend to agree with here.
+    /// </summary>
+    /// <param name="expression">The compiled <see cref="CelProfile.Mutate"/> expression.</param>
+    /// <param name="current">
+    /// The candidate row the mutate value is derived from — the <b>complete post-image</b>, for the same
+    /// reason <see cref="EvaluatePredicate"/> requires one.
+    /// </param>
+    /// <param name="previous">The row as it was before the change, or <see langword="null"/> on a create.</param>
+    /// <returns>
+    /// The value to assign, or <see langword="null"/>. <see langword="null"/> is a value here rather than a
+    /// failure signal — a fold over a missing field yields a missing field, not an empty string — so it is
+    /// the caller's business whether writing it is allowed.
+    /// </returns>
+    public static object? EvaluateMutation(CompiledExpression expression, AlvoRecord current, AlvoRecord? previous)
+    {
+        ArgumentNullException.ThrowIfNull(expression);
+        ArgumentNullException.ThrowIfNull(current);
+
+        try
+        {
+            var state = new EvalState(current, previous, null);
+            return Evaluate(expression.Root, state);
+        }
+#pragma warning disable CA1031
+        catch (Exception)
+#pragma warning restore CA1031
+        {
+            return null;
+        }
+    }
+
     private static object? Evaluate(CelNode node, in EvalState state) => node switch
     {
         CelLiteral literal => literal.Value,
@@ -183,8 +219,43 @@ internal static class CelInterpreter
         CelHas has => ResolveField(has.Field, state) is not null,
         CelConditional conditional => EvaluateConditional(conditional, state),
         CelChanged changed => EvaluateChanged(changed, state),
+        CelCall call => EvaluateCall(call, state),
         _ => null,
     };
+
+    private static string? EvaluateCall(CelCall call, in EvalState state) => call switch
+    {
+        { Name: CelCall.LowerAscii, Argument: { } argument } => LowerAscii(Evaluate(argument, state)),
+        _ => null,
+    };
+
+    /// <summary>
+    /// Applies <c>lowerAscii</c>. A value that is not a string is <see langword="null"/> rather than an
+    /// error: the type checker already refused a non-string argument, so this can only be reached by a
+    /// record whose stored value disagrees with its declared type, and this class never throws.
+    /// </summary>
+    private static string? LowerAscii(object? value) => value is string text ? FoldAsciiUpperCase(text) : null;
+
+    /// <summary>
+    /// Folds <c>A</c>–<c>Z</c> and nothing else — spelled out character by character, so nothing
+    /// culture- or Unicode-sensitive can creep in later. <see cref="string.ToLowerInvariant"/> is
+    /// <b>not</b> equivalent and must never replace this: it folds <c>İ</c> (U+0130) to two code points
+    /// and a long tail of other non-ASCII letters besides, and a stored value folded that way is a
+    /// permanently wrong row — the write cannot be undone by fixing the expression afterwards.
+    /// </summary>
+    private static string FoldAsciiUpperCase(string value)
+    {
+        var folded = value.ToCharArray();
+        for (var index = 0; index < folded.Length; index++)
+        {
+            if (folded[index] is >= 'A' and <= 'Z')
+            {
+                folded[index] = (char)(folded[index] + 32);
+            }
+        }
+
+        return new string(folded);
+    }
 
     private static object? ResolveField(CelFieldRef fieldRef, in EvalState state)
     {

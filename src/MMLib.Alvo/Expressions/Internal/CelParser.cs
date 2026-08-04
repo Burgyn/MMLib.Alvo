@@ -62,6 +62,16 @@ internal static class CelParser
         private const string MacroNotSupportedSuggestion =
             "CEL comprehension macros (all, exists, map, filter) are optional extensions and are not part of any Alvo profile; express row conditions in hooks.beforeUpdate instead.";
 
+        /// <summary>
+        /// The fix for <c>lower(x)</c>, which no CEL dialect has: the standard library's own name for the
+        /// fold is <c>lowerAscii</c>, and the name is the contract — an ASCII-only fold, not a
+        /// culture-sensitive one that would rewrite a stored value beyond recovery.
+        /// </summary>
+        private const string LowerAsciiSuggestion =
+            "CEL spells a lower-case fold lowerAscii, and it folds A-Z only: write lowerAscii(field). A "
+            + "culture-sensitive fold also rewrites non-ASCII letters (Turkish 'İ' becomes two code points), "
+            + "and a stored value folded that way is permanently wrong.";
+
         private static readonly Dictionary<CelTokenKind, CelBinaryOperator> _relationOperators = new()
         {
             [CelTokenKind.Equal] = CelBinaryOperator.Equal,
@@ -399,21 +409,49 @@ internal static class CelParser
             return new CelFieldRef(identifierToken.Text, CelValueType.Null, CelRecordState.Current);
         }
 
-        private CelChanged ParseCall(CelToken identifierToken)
+        /// <summary>
+        /// The closed set of identifiers that may be followed by <c>(</c>. It is a <b>positive</b> list on
+        /// purpose: an identifier missing from it is refused, so a future function is unavailable until
+        /// somebody adds it deliberately, never available because nobody blocked it. Which profiles may use
+        /// each entry is not decided here — the parser is profile-blind and the type checker's own
+        /// per-construct allow-list refuses <see cref="CelCall"/> outside <see cref="CelProfile.Mutate"/>.
+        /// </summary>
+        private CelNode ParseCall(CelToken identifierToken) => identifierToken.Text switch
         {
-            if (identifierToken.Text != "changed")
-            {
-                throw new CelSyntaxException(
-                    $"'{identifierToken.Text}' is not a recognized function.",
-                    identifierToken.Position,
-                    MacroNotSupportedSuggestion);
-            }
+            "changed" => ParseChangedCall(),
+            CelCall.LowerAscii => ParseLowerAsciiCall(),
+            _ => throw UnrecognizedFunction(identifierToken),
+        };
 
+        private static CelSyntaxException UnrecognizedFunction(CelToken identifierToken) =>
+            new(
+                $"'{identifierToken.Text}' is not a recognized function.",
+                identifierToken.Position,
+                identifierToken.Text == "lower" ? LowerAsciiSuggestion : MacroNotSupportedSuggestion);
+
+        private CelChanged ParseChangedCall()
+        {
             Expect(CelTokenKind.LeftParen);
             var fieldToken = Expect(CelTokenKind.Identifier);
             RejectExtraArgument("changed");
             Expect(CelTokenKind.RightParen);
             return new CelChanged(fieldToken.Text);
+        }
+
+        /// <summary>
+        /// Parses <c>lowerAscii(field)</c>. The argument is a field reference — optionally
+        /// <c>old.</c>/<c>new.</c>-qualified — and not an arbitrary expression, the same narrowing
+        /// <c>has(field)</c> and <c>changed(field)</c> already use. Admitting a general expression later
+        /// accepts strictly more source than this does and so cannot break an authored descriptor; starting
+        /// general and narrowing afterwards would.
+        /// </summary>
+        private CelCall ParseLowerAsciiCall()
+        {
+            Expect(CelTokenKind.LeftParen);
+            var field = ParseFieldRefArgument();
+            RejectExtraArgument(CelCall.LowerAscii);
+            Expect(CelTokenKind.RightParen);
+            return new CelCall(CelCall.LowerAscii, field);
         }
 
         private void RejectExtraArgument(string functionName)

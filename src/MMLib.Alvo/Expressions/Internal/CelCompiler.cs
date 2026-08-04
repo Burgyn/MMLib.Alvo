@@ -94,6 +94,16 @@ internal sealed class CelCompiler : ICelCompiler
                 position);
         }
 
+        if (profile == CelProfile.Mutate && !IsMutateValue(resultType))
+        {
+            return new CelCompilationError(
+                $"A {CelProfile.Mutate} expression must evaluate to a value a field can hold — a scalar or a "
+                + $"boolean; {resultType} is not one.",
+                "Fold, compare or convert to a scalar (string/number/date/uuid) or a boolean before assigning it "
+                + "as the mutate value.",
+                position);
+        }
+
         if ((profile == CelProfile.Rule || profile == CelProfile.Condition) && resultType != CelValueType.Bool)
         {
             return new CelCompilationError(
@@ -107,6 +117,20 @@ internal sealed class CelCompiler : ICelCompiler
 
     private static bool IsScalar(CelValueType type) => type is
         CelValueType.Int or CelValueType.Decimal or CelValueType.String or CelValueType.Timestamp or CelValueType.Uuid;
+
+    /// <summary>
+    /// What a <see cref="CelProfile.Mutate"/> expression may evaluate to. A <c>mutate</c> value is assigned
+    /// to one field and written as a bound parameter, so the bar is "a value a column can hold" — which is
+    /// looser than <see cref="CelProfile.Computed"/>'s in exactly one place, and that difference is the
+    /// point: a boolean is a legitimate <c>mutate</c> result (<c>"is_closed": {"$cel": "new.stage == 'won'"}</c>
+    /// targets a boolean column), whereas <see cref="CelProfile.Computed"/> has to refuse one because a
+    /// generated column cannot hold "predicate" as its value. <see cref="CelValueType.Json"/>,
+    /// <see cref="CelValueType.StringList"/> and <see cref="CelValueType.Null"/> stay refused here: the first
+    /// two are not a single column value, and the third is the checker's "unresolved" placeholder rather than
+    /// an authored intent to store null — an author who means null writes it as JSON in the descriptor, with
+    /// no <c>$cel</c> at all.
+    /// </summary>
+    private static bool IsMutateValue(CelValueType type) => IsScalar(type) || type == CelValueType.Bool;
 
     private static CelCompilationError? ValidateTreeDepth(CelNode root)
     {
