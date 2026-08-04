@@ -872,6 +872,7 @@ Each line with the issue or the PR that owns it.
 | **`entity.update`** | PR5b's automation half — still open |
 | ~~**Before-hooks**, the `CelProfile.Mutate` profile~~ | **done** — PR5b (#114); see *Before-hooks* above |
 | **The budget-overrun rollback** | **not built, and not scheduled**: there is no wall-clock budget to overrun — the bound is the grammar (deviation 81, and *What bounds a hook's execution time* above) |
+| **Before-hooks in `InMemoryAlvoData`** | **not built** — the public in-memory reference runs the policy engine but no hook pipeline, so a host testing against the double sees a `reject` not refuse and a `mutate` not apply. Deliberate (the contract suite is inherited by the two relational drivers, which have a transaction to run a hook in), and recorded as an **owed obligation** rather than a mere absence: deviation 85 |
 | **Automation** (`event` + `schedule` triggers), cron, and cron's distributed lock | PR5b's automation half — still open (the lock: deviation 74) |
 | **`Publish`** (custom application events) and its security ruling | unowned — see below |
 | **Wildcard subscription** (`entity.orders.*`) and its tenant scoping | PR5b — see below |

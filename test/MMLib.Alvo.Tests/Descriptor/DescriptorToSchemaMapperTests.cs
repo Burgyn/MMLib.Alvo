@@ -284,11 +284,13 @@ public class DescriptorToSchemaMapperTests
     /// <c>complex-crm</c> is still refused by a <em>structured unhonoured-feature error</em> and not by a CEL
     /// syntax error — the reason simply moved to another entry in the same table: <c>owner_id</c> declares
     /// <c>default</c>, which is refused with its own fix suggestion. So the marker still means what it says.
-    /// Measured on this branch by applying the example, not inferred. The strengthening of
+    /// Measured on this branch by applying the example, not inferred. One of the five defects <em>was</em>
+    /// fixed here, because this PR's own rename forced it: <c>lower(new.email)</c> became
+    /// <c>lowerAscii(new.email)</c>, or the example would name a function no profile has. The strengthening of
     /// <see cref="Every_example_marked_not_runnable_really_is_refused"/> to assert the <em>reason</em>, and the
-    /// example's own remaining defects (two list literals in <c>deals.beforeUpdate</c> conditions and the
-    /// unresolvable <c>{{@user.email}}</c> template) stay with PR5b-2 — see deviation 83, which records that
-    /// deviation 76 asked for them here and why they are not here.
+    /// three remaining defects (two list literals in <c>deals.beforeUpdate</c> conditions and the unresolvable
+    /// <c>{{@user.email}}</c> template) stay with PR5b-2 — see deviation 83, which records that deviation 76
+    /// asked for all of them here and why only one is.
     /// </para>
     /// <para>
     /// Driven off the tree rather than off <c>complex-crm</c> by name, so a <em>new</em> example declaring an

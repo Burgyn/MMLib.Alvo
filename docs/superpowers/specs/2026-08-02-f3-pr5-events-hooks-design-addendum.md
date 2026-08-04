@@ -969,9 +969,10 @@ PR's. Entries marked **[unratified]** depend on a recommendation above.
 
 ## Deviations added by PR5b-1 (before-hooks and the `Mutate` profile)
 
-Continuing the series above. 79–83 are the before-hook PR's; every one was taken while
+Continuing the series above. 79–85 are the before-hook PR's; every one was taken while
 implementing a decision this document made, so each names what the decision said as well as
-what shipped.
+what shipped. 84 and 85 were added after `alvo-plan-guard`'s pre-PR pass, and 83 was corrected
+by it — noted so a reader can tell which entries the guard earned.
 
 **Deviation 75's owed ruling is discharged here rather than as a new entry**, in the direction
 it predicted: `WritePayloadGuard` is **not** re-run over a mutated payload (it judges a
@@ -1032,23 +1033,66 @@ be stored, or a hook writing `owner_id` from a caller-controlled field would pla
     to know which of the two it is serving. The signature is also **synchronous** — no `Task`,
     no `CancellationToken` — which is the network ban at the contract rather than a style
     choice, and is asserted as a fact.
-83. **`examples/complex-crm/crm.alvo.json` is *not* corrected in this PR, against deviation
-    76's own instruction, and the hazard it warned about is measured rather than assumed.**
-    Deviation 76 requires the example's fixes and the strengthening of
-    `Every_example_marked_not_runnable_really_is_refused` to land in the PR that lifts a
-    `before*` refusal — which is this one — because a CEL syntax error could otherwise stand in
-    silently for the feature refusal the test claims to hold. They are deferred to PR5b-2 for
-    the review-coverage reason: #157 carried 133 files and CodeRabbit skipped it entirely, so
-    staying under 100 files is a requirement rather than tidiness. **What makes the deferral
-    safe is a measurement, not an argument:** with all three `before*` entries gone,
-    `complex-crm` is still refused by a *structured unhonoured-feature error* — `owner_id`
-    declares `default`, refused with its own fix suggestion — and **not** by a CEL syntax
-    error, so the marker still means what it says and the substitution deviation 76 feared has
-    not happened. Two of the example's five defects (`:110`, `:148`) now compile as a
-    side-effect of this PR; the remaining three are two list literals in `deals.beforeUpdate`
-    conditions and the unresolvable `{{@user.email}}` template. Recorded in
-    `DescriptorToSchemaMapperTests`' own remarks as well, so the measurement sits next to the
-    fact that depends on it.
+83. **`examples/complex-crm/crm.alvo.json` is corrected only on the one line this PR's own
+    rename forced, against deviation 76's instruction to correct all five, and the hazard 76
+    warned about is measured rather than assumed.** Deviation 76 requires the example's five
+    fixes *and* the strengthening of `Every_example_marked_not_runnable_really_is_refused` to
+    land in the PR that lifts a `before*` refusal — which is this one — because a CEL syntax
+    error could otherwise stand in silently for the feature refusal the test claims to hold.
+    What actually shipped, stated precisely, because an earlier draft of this entry got it
+    wrong and claimed the file was untouched:
+    - **`:110` was edited**, `lower(new.email)` → `lowerAscii(new.email)`, and
+      `canonical-complex-crm.verified.txt` moved with it. Not a side-effect: deviation 60
+      renames the function, so leaving the old spelling would have shipped an example naming a
+      function no profile has.
+    - **`:148`** (`now()`) compiles now as a genuine side-effect of the profile landing; the
+      line is untouched.
+    - **Three defects remain** — two list literals in `deals.beforeUpdate` conditions (`:143`,
+      `:147`) and the unresolvable `{{@user.email}}` template (`:221`) — plus the refusal-reason
+      strengthening. All four are **PR5b-2's**, deferred for review coverage: #157 carried 133
+      files and CodeRabbit skipped it entirely, so staying under 100 files is a requirement
+      rather than tidiness.
+
+    **What makes the deferral safe is a measurement, not an argument:** with all three
+    `before*` entries gone, `complex-crm` is still refused by a *structured unhonoured-feature
+    error* — `owner_id` declares `default`, refused with its own fix suggestion — and **not** by
+    a CEL syntax error, so the marker still means what it says and the substitution deviation 76
+    feared has not happened. Measured by applying the example on this branch, not inferred, and
+    recorded in `DescriptorToSchemaMapperTests`' own remarks so it sits next to the fact that
+    depends on it.
+84. **A `reject` hook's gate keeps `EvaluatePredicate`'s "false on anything it cannot resolve"
+    direction, which is *open* for a guard, and the direction is argued rather than inherited.**
+    For an authorization predicate `false` means deny and the direction is closed; for a
+    `reject` gate `false` means "not guarded", so the same call is fail-open —
+    `EvaluateMask` exists precisely because that asymmetry is real, and a third consumer owes
+    the argument. Two halves, and only one is a live decision. **Reachable half:** the collapse
+    is the documented two-valued null rule and it is *correct* — a `reject` gated on
+    `old.stage == 'won'` must not fire on a deal that was never won — and what keeps it honest
+    is the complete post-image the runner is handed, so an omitted field reads as its stored
+    value rather than as null. **Unreachable half:** the caught exception. Nothing in a
+    `Condition` tree can throw — the node switch ends in `_ => null`, every comparison funnels
+    through a `TryNormalize` that answers `false` instead of converting unsuccessfully, and the
+    profile admits no arithmetic, the one family that could overflow — which is the property
+    `CelInterpreter`'s own remarks already assert. So a fail-closed entry point for this caller
+    would be a change to the security core that **no fact could discriminate**, which is the
+    shape this repo requires a killing mutant for. **The obligation:** the argument is a
+    property of the profile's *grammar*, not of the interpreter's signature. The PR that admits
+    arithmetic — or any construct that can throw — into `Condition` makes the open direction
+    reachable, and owes a `reject` gate its own fail-closed evaluation. Recorded after
+    `alvo-plan-guard` flagged the direction; its recommendation to add the fail-closed entry
+    point now was **declined**, for the reason above, and the disagreement is on the record
+    rather than resolved silently.
+85. **`InMemoryAlvoData` honours no before-hook, and it is public and shipped.** The reference
+    implementation in `MMLib.Alvo.Testing` runs the policy engine but no hook pipeline, so a
+    host writing tests against the double sees a `reject` not refuse and a `mutate` not apply —
+    a double that disagrees with production on exactly the behaviour #114 adds. Deliberate for
+    this PR: the shared contract suite `AlvoDataBeforeHookTests` is inherited by the two
+    relational drivers on purpose, and placing its facts on the suite the in-memory reference
+    also inherits would either be vacuous for it or force it to grow a pipeline it has no
+    transaction to run one in. Recorded here because the suite's own remarks state the fact
+    while nothing states it as an **owed obligation**, which is the difference between a
+    deferral and a gap. It is now also in `events.md`'s *What PR5a does not do* table, which is
+    where a reader looks for what is not built.
 
 ---
 

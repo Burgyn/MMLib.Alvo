@@ -200,6 +200,19 @@ internal static class CelInterpreter
     /// failure signal — a fold over a missing field yields a missing field, not an empty string — so it is
     /// the caller's business whether writing it is allowed.
     /// </returns>
+    /// <remarks>
+    /// <b>The <c>catch</c> collapses to the same <see langword="null"/> a legitimate missing value produces,
+    /// and that conflation is safe only because no input reaches it.</b> Written down because the two are
+    /// otherwise indistinguishable to a caller, and the create path turns a <see langword="null"/> patch value
+    /// into an <em>absent</em> key — so a reachable failure here would silently store a column default instead
+    /// of refusing the write, which is the class of outcome this framework refuses <c>default</c> and
+    /// <c>rollup</c> for. Nothing in a <see cref="CelProfile.Mutate"/> tree can throw: the profile admits only
+    /// literals, field references and the two allow-listed calls; <see cref="Evaluate"/>'s node switch ends in
+    /// <c>_ =&gt; null</c>; <c>lowerAscii</c> of a non-string is <see langword="null"/> rather than an error;
+    /// and <c>now()</c> reads a value the caller already bound. The <c>catch</c> is therefore the same
+    /// defence-in-depth as <see cref="EvaluatePredicate"/>'s, and admitting a construct that can throw into
+    /// this profile is what would make it a live decision.
+    /// </remarks>
     public static object? EvaluateMutation(
         CompiledExpression expression, AlvoRecord current, AlvoRecord? previous, DateTimeOffset now)
     {

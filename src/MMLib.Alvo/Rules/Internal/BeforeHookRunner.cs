@@ -120,6 +120,43 @@ internal sealed class BeforeHookRunner : IBeforeHookRunner
     /// Whether a hook's condition selects this write. A hook with no condition always fires — that is what
     /// the frozen schema's optional <c>condition</c> means.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The gate uses <see cref="CelInterpreter.EvaluatePredicate"/>, whose "false on anything it cannot
+    /// resolve" direction means a <c>reject</c> does not fire — so the direction is stated here rather than
+    /// inherited silently.</b> For an authorization predicate <see langword="false"/> is <em>deny</em> and the
+    /// direction is closed; for a <c>reject</c> gate <see langword="false"/> is "not guarded", so the same
+    /// direction is open. <see cref="CelInterpreter.EvaluateMask"/> exists because that asymmetry is real and
+    /// a mask needed the other side of it, and this is the third consumer, so it owes the argument.
+    /// </para>
+    /// <para>
+    /// <b>The reachable half of that direction is correct, and it is the two-valued null rule rather than a
+    /// failure.</b> A condition whose operand is missing collapses to <see langword="false"/> — a
+    /// <c>reject</c> gated on <c>old.stage == 'won'</c> must <em>not</em> fire on a deal that was never won,
+    /// and one gated on <c>new.amount &gt; 10000</c> must not fire on a row whose amount is null. What makes
+    /// that honest is the <b>complete post-image</b> this type is handed: a field the caller merely omitted
+    /// reads as its stored value, so the collapse never stands in for "the caller did not mention it".
+    /// </para>
+    /// <para>
+    /// <b>The unreachable half is the caught exception, and its direction is defence-in-depth rather than a
+    /// live decision.</b> Nothing in a <see cref="CelProfile.Condition"/> tree can throw:
+    /// <c>CelInterpreter.Evaluate</c>'s node switch ends in <c>_ =&gt; null</c>, every comparison funnels
+    /// through a <c>TryNormalize</c> that answers <see langword="false"/> rather than converting
+    /// unsuccessfully, and the profile admits no arithmetic — the one family that could overflow. That is the
+    /// property `CelInterpreter`'s own remarks assert for any well-typed expression and any record, including
+    /// one whose stored value is of an unexpected CLR type. So no input reaches the <c>catch</c>, and a
+    /// fail-closed entry point for this one caller would be a change to the security core that <b>no fact
+    /// could discriminate</b> — which is the shape this repository requires a killing mutant for.
+    /// </para>
+    /// <para>
+    /// <b>The obligation this creates, which is the real answer.</b> The argument above is a property of the
+    /// profile's grammar, not a guarantee of the interpreter's signature. Admitting arithmetic into
+    /// <see cref="CelProfile.Condition"/> — or any construct that can throw — makes the open direction
+    /// <em>reachable</em>, and at that moment a <c>reject</c> gate needs its own fail-closed evaluation and
+    /// this paragraph is what should be re-read. Recorded as deviation 84 so it is a decision on the record
+    /// rather than an inherited default.
+    /// </para>
+    /// </remarks>
     private static bool Fires(
         CompiledBeforeHook hook, AlvoRecord candidate, AlvoRecord? previous, AlvoContext context) =>
         hook.Condition is null
