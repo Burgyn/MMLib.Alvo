@@ -132,6 +132,8 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task A_mutate_on_an_update_reaches_the_stored_row_at_that_writes_instant() { }
         public System.Threading.Tasks.Task A_mutate_reaches_the_stored_row() { }
         public System.Threading.Tasks.Task A_mutate_reading_now_records_the_writes_own_audit_instant() { }
+        public System.Threading.Tasks.Task A_mutate_that_moves_a_row_out_of_the_create_rule_is_refused() { }
+        public System.Threading.Tasks.Task A_mutate_the_create_rule_accepts_still_lands() { }
         public System.Threading.Tasks.Task A_mutate_writes_through_a_bound_parameter_like_every_other_value() { }
         public System.Threading.Tasks.Task A_reject_on_a_delete_leaves_the_row_in_place() { }
         public System.Threading.Tasks.Task A_reject_on_an_update_leaves_the_stored_row_untouched() { }

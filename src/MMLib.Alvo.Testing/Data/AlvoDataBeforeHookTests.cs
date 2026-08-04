@@ -278,7 +278,59 @@ public abstract class AlvoDataBeforeHookTests
         world.HookRuns.ShouldBe([DataOperation.Create, DataOperation.Update, DataOperation.Delete]);
     }
 
+    /// <summary>
+    /// <b>A patch is judged by the write's own policy, and this is the bypass that makes it necessary.</b> The
+    /// caller passes the <c>create</c> rule with their own id, and the hook then rewrites the very field the
+    /// rule is about — from a field the caller controls. The verdict is re-reached over the patched post-image,
+    /// so the write is refused.
+    /// </summary>
+    /// <remarks>
+    /// The candidate's first verdict is reached before the transaction opens, over the caller's own payload; the
+    /// patch happens after it. Without the second verdict the row would be stored owned by whoever the caller
+    /// named — a row the <c>create</c> rule refuses, written through a hook. The counterweight below is what
+    /// keeps this from being satisfied by refusing every patched write.
+    /// </remarks>
+    [Fact]
+    public async Task A_mutate_that_moves_a_row_out_of_the_create_rule_is_refused()
+    {
+        var world = await DealsWorldAsync();
+        var stranger = Guid.Parse("bbbbbbbb-0000-0000-0000-000000000002");
+
+        await Should.ThrowAsync<AlvoAuthorizationException>(() => world.Data.CreateAsync(
+            Guarded,
+            Payload(("owner_id", Caller.User.Value), ("requested_owner", stranger)),
+            Caller,
+            cancellationToken: Ct));
+
+        (await world.Data.QueryAsync(new AlvoQuery { Entity = Guarded }, Caller, Ct)).Items.ShouldBeEmpty(
+            "the refused write must leave no row owned by whoever the caller named");
+    }
+
+    /// <summary>
+    /// The counterweight: a patch the rule accepts still lands. Without it, an implementation that refused
+    /// every patched write would satisfy the fact above.
+    /// </summary>
+    [Fact]
+    public async Task A_mutate_the_create_rule_accepts_still_lands()
+    {
+        var world = await DealsWorldAsync();
+
+        var created = await world.Data.CreateAsync(
+            Guarded,
+            Payload(("owner_id", Caller.User.Value), ("requested_owner", Caller.User.Value)),
+            Caller,
+            cancellationToken: Ct);
+
+        created["owner_id"].ShouldBe(Caller.User.Value);
+    }
+
     private const string Deals = "deals";
+
+    /// <summary>
+    /// The second entity, whose whole purpose is one adversarial question: its <c>create</c> rule is about the
+    /// very field its hook patches, from a field the caller controls.
+    /// </summary>
+    private const string Guarded = "guarded";
 
     private const string Blocked = "blocked";
 
@@ -442,6 +494,32 @@ public abstract class AlvoDataBeforeHookTests
                 Rules = AllowAll,
                 Hooks = Hooks,
             },
+            [Guarded] = new()
+            {
+                Tenancy = EntityTenancy.Global,
+                Fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
+                {
+                    ["owner_id"] = new() { Type = DescField.Uuid },
+                    ["requested_owner"] = new() { Type = DescField.Uuid },
+                },
+                Rules = AllowAll with { Create = "owner_id == @user.id" },
+                Hooks = new EntityHooks
+                {
+                    BeforeCreate =
+                    [
+                        new BeforeHook
+                        {
+                            Action = new BeforeHookAction
+                            {
+                                Mutate = new Dictionary<string, ValueOrExpr>(StringComparer.Ordinal)
+                                {
+                                    ["owner_id"] = ValueOrExpr.FromExpression("new.requested_owner"),
+                                },
+                            },
+                        },
+                    ],
+                },
+            },
         },
     };
 
@@ -477,6 +555,17 @@ public abstract class AlvoDataBeforeHookTests
                 new FieldSchema { Name = AlvoManagedColumns.CreatedBy, Type = SchemaField.Uuid, Nullable = true },
                 new FieldSchema { Name = AlvoManagedColumns.UpdatedAt, Type = SchemaField.DateTime, Nullable = true },
                 new FieldSchema { Name = AlvoManagedColumns.UpdatedBy, Type = SchemaField.Uuid, Nullable = true },
+            ],
+        },
+        new EntitySchema
+        {
+            Name = Guarded,
+            Tenancy = TenancyMode.Global,
+            Fields =
+            [
+                new FieldSchema { Name = AlvoManagedColumns.Id, Type = SchemaField.Uuid, Required = true },
+                new FieldSchema { Name = "owner_id", Type = SchemaField.Uuid, Nullable = true },
+                new FieldSchema { Name = "requested_owner", Type = SchemaField.Uuid, Nullable = true },
             ],
         },
     ]);
