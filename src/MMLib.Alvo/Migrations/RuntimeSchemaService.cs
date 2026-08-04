@@ -1,5 +1,6 @@
 ﻿using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Expressions;
+using MMLib.Alvo.Migrations.Internal;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Schema;
@@ -136,13 +137,7 @@ public sealed class RuntimeSchemaService
     }
 
     private static bool IsUnchangedReapply(MigrationPlan plan, DescriptorVersion? current, AlvoDescriptor descriptor) =>
-        plan.IsEmpty && current is not null && IsSameDescriptorContent(descriptor, current.DescriptorJson);
-
-    private static bool IsSameDescriptorContent(AlvoDescriptor descriptor, string storedDescriptorJson) =>
-        string.Equals(
-            AlvoDescriptor.Serialize(descriptor),
-            AlvoDescriptor.Serialize(AlvoDescriptor.Parse(storedDescriptorJson)),
-            StringComparison.Ordinal);
+        plan.IsEmpty && current is not null && DescriptorContent.IsSame(descriptor, current.DescriptorJson);
 
     /// <summary>Rolls the project back to <paramref name="targetRevision"/> by appending a git-revert version.</summary>
     /// <param name="project">The project to roll back.</param>

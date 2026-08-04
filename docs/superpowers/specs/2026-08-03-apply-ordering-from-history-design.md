@@ -1,0 +1,439 @@
+# Ordering the boot apply from the append-only history (#145)
+
+Stacked on the startup-lifecycle design
+(`2026-08-02-startup-lifecycle-and-config-dx-design.md`), whose deviations 53
+(the `Apply` default and its three costs) and 57 (the destructive gate ahead of
+the mode) this narrows. Deviation numbering continues that design's series,
+which ends at **65**.
+
+## The defect, as traced rather than as filed
+
+`Apply` is the default startup mode, so a booting replica may rewrite the schema
+of a database another replica just wrote. Nothing compares the two descriptors'
+*generations*, so **which artifact wins is decided by a race** and the loser has
+no good outcome. The destructive gate (deviation 57) catches the cases that
+*discard* data; what escapes it is non-destructive backwards change.
+
+`DestructiveScan.Classify` was re-traced for this design. Destructive:
+`DropTableOperation`, `DropColumnOperation`, and an `AlterColumnOperation` that
+narrows (nullable → not-null, a shrinking or newly-imposed length/precision/scale,
+a changed CLR type). **Not** destructive: `CreateTableOperation`,
+`RenameTableOperation`, `AddColumnOperation`, `RenameColumnOperation`, a widening
+or neutral `AlterColumnOperation`, every index operation
+(`CreateIndexOperation`/`DropIndexOperation`/`RenameIndexOperation`), every
+foreign-key operation, and every primary-key / unique-constraint operation —
+the last three families set no `IsDestructive` **in either direction**.
+
+So the reachable hazards, and what the trace changed about each:
+
+1. **Index / constraint oscillation — reachable, and the cleanest example.**
+   Two descriptors differing only in an `indexes` entry (or a `unique` flag) plan
+   `AddIndex` one way and `DropIndex` the other. Neither is destructive, so under
+   `Apply` each pod applies its own on every boot and the schema flip-flops. No
+   data loss, no refusal, no signal.
+2. **Rename oscillation — reachable only in a narrower shape than #145 states.**
+   The issue's version ("B renames `city` to `town`; A restarts and plans
+   `RenameColumn` back") is **not** reachable, and this is a correction. A rename
+   is a genuine `RenameColumnOperation` only when the descriptor *declares* it
+   (`renamedFrom`, handled by `RenamePrePass`). A pod whose descriptor merely
+   still says `city` produces an unmatched drop + add, EF's differ *guesses* a
+   rename, and `RenameGuessSplitter` splits the guess back into
+   `DropColumn` + `AddColumn` precisely so it cannot bypass the gate — so the way
+   back is destructive and is refused. Oscillation therefore needs **both**
+   descriptors to declare mutually inverse renames, which is what a rename shipped
+   and then reverted *by an author who wrote the revert properly* looks like.
+   Narrower than filed, still real, and still nothing that orders the two.
+3. **The rollback crash-loop — reachable, and the one anybody meets.** Deviation
+   53's cost (c). A forward deploy advances the applied snapshot with no operator
+   decision; redeploying the previous artifact plans a `DropField`, the gate
+   refuses it correctly, and every pod exits 78 in a crash loop. The refusal is
+   right and the **diagnosis is wrong**: the operator is told "destructive change
+   refused", not "you are running an older descriptor than the database".
+
+What is **not** the defect, and was published as if it were: the
+additive-vs-additive union. A adds `region`, B adds `city`; B's plan against A's
+applied snapshot contains a `DropColumn` of `region`, which is destructive and is
+refused in every mode. Measured by
+`ConcurrentBootTests.Two_replicas_adding_different_fields_end_on_one_descriptors_schema_not_the_union`.
+
+## The mechanism: A′, derived from the history
+
+`IDescriptorVersionStore` is an **append-only** version history and
+`ListAsync(project)` already returns it oldest-to-newest. So a booting replica
+does not need a counter anybody maintains; it can ask the history where it stands:
+
+> If my descriptor's canonical content appears in the history, and its **newest**
+> occurrence is older than the current revision, I am an old pod and must not
+> apply.
+
+"Newest occurrence" is load-bearing rather than pedantic: a descriptor
+re-applied later (history `X, Y, X`) appears at an older revision *and* at the
+current one, and it is current.
+
+Canonicalisation is `AlvoDescriptor.Serialize(AlvoDescriptor.Parse(json))`
+compared ordinally — the comparison `RuntimeSchemaService.IsSameDescriptorContent`
+already makes. It is **extracted** to `DescriptorContent` and shared rather than
+copied: a second notion of "the same descriptor" is exactly the kind of drift that
+makes two code paths disagree about identity. No hash format is invented; a hash
+would buy a smaller comparison and cost a canonical-form-to-bytes contract that
+has to survive a serializer change, which is not a trade worth making for an
+O(N) boot-time read.
+
+**No new port member.** That is the point of choosing A′: the ordering falls out
+of state the store already writes.
+
+### The declared `revision` becomes an override, in one direction only
+
+`AlvoDescriptor.Revision` is parsed today and read by nothing;
+`schema/project.schema.json` documents it as *"used for optimistic concurrency
+during apply"*. It now is — as an **override that can only ever conclude "you are
+older"**:
+
+- the booting descriptor declares `revision` **and** the current stored
+  descriptor declares one **and** mine is lower → older, refuse;
+- anything else falls through to the history comparison.
+
+It deliberately cannot conclude "I am newer" (that would let a bumped counter
+wave an out-of-order descriptor past the history), and it deliberately does not
+refuse "equal revision, different content" even though that is an authoring
+error. Both restraints exist for the same reason: a descriptor carrying a
+decorative `revision: 1` that nobody bumps must not have its ordinary dev loop
+broken by a field the author never opted into. The override can only ever *add* a
+refusal that the history would have missed, never create one for a static counter.
+
+### An absent `revision` means unprotected-but-compatible
+
+Recommended, and taken. The alternative — refuse to apply on any drift when
+`revision` is absent — is safe and **breaks every descriptor that exists**:
+`revision` is optional in the frozen schema, no descriptor in this repository
+declares it, and a zero-config `docker run` plus one edit is the loop the `Apply`
+default was ratified for. A′ does not need the counter, so absent means the
+history comparison alone, which covers every case where the older artifact was
+*ever applied by Alvo* — i.e. every rolling deploy and every rollback. What it
+does not cover is an older descriptor that was never applied here at all, which
+no counter nobody maintains would have covered either.
+
+### Rejected: leader election / an apply lock (option B)
+
+The maintainer's initial preference, and it does not close this issue. A lock
+provides **mutual exclusion**; this is an **ordering** bug. Serialise two
+replicas holding different descriptors and one still applies last — ping-pong
+serialised rather than concurrent. It is still owed for a different problem:
+`baas-analyza.md:819` requires a scheduled job to fire *"exactly once in a
+3-instance deployment"*, and when that machinery lands the apply path should use
+it, because it also covers changes that never went through a descriptor — which
+A′ can never cover. **Not** an EF-style lock table: EF Core's SQLite migration
+lock is a row with no timeout that survives a killed process, so an OOM-kill
+mid-migration wedges every later boot.
+
+## Where the gate sits
+
+`SchemaStartupPolicy.Decide` gains a fourth parameter — the ordering verdict,
+computed by the caller and passed in, so the policy stays a pure decision table.
+The gate order becomes:
+
+1. empty plan → `Unchanged`
+2. `Skip` → refuse only the unverifiable state, else `Unchanged`
+3. **out of order → `StandDown`**
+4. destructive without `AllowDestructive` → `Refuse`
+5. no applied snapshot → `Initialize`
+6. `Apply` → `Apply`, otherwise `Refuse`
+
+**Ahead of the destructive gate (3 before 4), which narrows deviation 57's
+ordering without weakening it.** Both verdicts refuse the same boot; only the
+message differs, and "you are running an older descriptor than the database
+(revision 1 versus revision 2)" is the diagnosis for the rollback crash-loop that
+"destructive change refused" has been failing to give. The destructive gate is
+untouched for every plan that is *not* out of order, and
+`AlvoBootService.RefuseToDiscardDataWhateverWasDecided` still re-checks it
+immediately before the DDL.
+
+**After the empty-plan check, which is what keeps an ordinary restart O(1).** The
+history is read only by a boot that would otherwise *change* the schema, so the
+common case — a restart over an unchanged descriptor — pays no history read at
+all. This also scopes the gate honestly: it governs the **apply**, not the
+**serve**. A pod whose descriptor is older but whose schema is identical to the
+applied one (a rules-only revision appended by the runtime path) still serves;
+adopting the database's current descriptor is a different problem and not this
+issue's.
+
+**After the `Skip` branch.** `Skip` never applies, so it cannot enter the race,
+and its contract is that the schema is somebody else's business.
+
+## What an out-of-order boot does: stand down, not crash
+
+A new outcome, `SchemaStartupOutcome.StandDown`. The boot records the refusal on
+`AlvoBootState` (phase `Failed`), logs it at `Critical`, primes **nothing**, and
+**returns normally**. The process starts, `/health/live` answers 200,
+`/health/ready` answers 503 with `Failed`, and an orchestrator drains the pod
+instead of restart-looping it.
+
+This is the second instance of **deviation 65**'s shape, for the same reason: a
+failing liveness probe gets the container killed, which is the wrong response to
+a condition no restart can fix. What separates the two failures is **not** which
+mode is configured but what kind of thing went wrong:
+
+- a **destructive** refusal, or a `Verify` refusal over ordinary drift, is an
+  authoring or configuration error. Nothing but a human changes the outcome, and
+  the fastest feedback is a loud failure at deploy time. Those keep throwing, and
+  keep exiting 78.
+- an **out-of-order** boot is a *position in a deployment*. The pod is not
+  misconfigured, it is behind. That is precisely what readiness is for — and it is
+  no less true under `Verify` than under `Apply`, so the ordering verdict stands a
+  boot down in **every** mode that consults it. That narrows a decision the
+  startup design had ratified ("drift under `Verify` fails the start"); it is
+  recorded as deviation 75 rather than left as a surprise.
+
+Safety does not rest on nobody routing to it: the policy catalog stays unprimed,
+which denies every operation, and `ISchemaRegistry` reports an empty schema, so
+the route table materialises empty. A pod that stood down can answer 404 and 403
+and nothing else.
+
+**It does not make a rollback appliable, and it takes away the flag that used to
+make one.** Before this change, `Alvo__Schema__AllowDestructive=true` was how an
+operator forced a deliberate rollback through: the plan back drops a column, the
+flag allows the drop, the apply proceeds. It no longer does — the ordering gate
+does not consult the flag, because the two settings answer different questions.
+The flag says "I accept losing data"; it has never said "I accept serving an older
+descriptor than the database", and the oscillation this gate exists to stop
+discards no data at all, so the flag would be no evidence of intent about it.
+Conflating them would delete the protection for anyone who set an unrelated flag
+in staging. Deviation 74, with the three places that still advertised the flag as
+the way back corrected.
+
+The way to deploy an older descriptor **on purpose** is therefore to make it a new
+artifact rather than to override a gate: bump its `revision`, which changes its
+canonical content so the history has never seen it, and then clear the destructive
+gate as before if the plan back discards anything. The refusal text says exactly
+that, both halves, so an operator who follows it does not meet a second refusal
+nobody warned them about. Applying the older descriptor from a migration job is
+unaffected — that path is not this gate's.
+
+## Cost: `ListAsync` reads the whole history
+
+Measured, not assumed. The read is O(N) in applied revisions and pays twice:
+`EfCoreDescriptorVersionStore.ListAsync` deserializes each row's `schema_json`, and
+the ordering check canonicalises each row's `descriptor_json`. A forward deploy —
+the case that never matches — pays the full N; a byte-equality fast path against
+the JSON the boot loaded short-circuits the canonicalisation when a previous boot
+recorded the same file verbatim.
+
+Measured on SQLite in Release, over an 8-entity ~5 KB descriptor, worst case (no
+row matches, so every one is canonicalised). Raw output, the harness and the exact
+commands are committed at
+`docs/superpowers/specs/evidence/2026-08-03-apply-ordering/measurements.txt` — a
+table published as measured with no trace is what the parent design had to correct
+one commit ago:
+
+| Applied revisions | History bytes | `ListAsync` | Canonicalise all N | Total per boot |
+|---|---|---|---|---|
+| 50 | 0.25 MB | 6.2 ms | 3.7 ms | ~10 ms |
+| 250 | 1.3 MB | 30.1 ms | 21.3 ms | ~51 ms |
+| 1000 | 5.1 MB | 176.4 ms | 127.6 ms | ~304 ms |
+
+Linear in N, as expected, and **acceptable**: it is paid once per process start,
+only on a boot that would change the schema, and N counts *applied* revisions for
+one project — a number that grows per schema-changing deploy, not per request. A
+project at 250 revisions pays 50 ms of a boot that is already running DDL.
+
+**One consequence of reading N rows instead of one, recorded rather than papered
+over.** `EfCoreDescriptorVersionStore.ReadVersion` deserializes every row it
+returns and throws on a row it cannot read, so a boot that previously touched
+only the current row can now be stopped by a corrupt *older* one. It is narrow —
+the row would have to hold unreadable `schema_json` or an unparseable timestamp,
+i.e. something no build wrote — and tolerating it belongs to the driver, where
+skipping a row silently would be a worse answer than failing. The descriptor-JSON
+parse the ordering check adds raises nothing new: `ListAsync` has already
+deserialized that row's schema by the time the check sees it.
+
+**The narrower query is surfaced, not taken.** `SELECT revision, descriptor_json`
+without the schema JSON, or a stored canonical digest compared instead of the
+JSON, would cut both halves — and both are **port changes** to
+`IDescriptorVersionStore`, so they are a design decision rather than an
+implementation detail. Deferred, with the trigger named by the measurement above:
+take it when a project's history read passes ~250 ms, i.e. somewhere around 800–1000
+applied revisions.
+
+## What this closes, and the one clause it cannot
+
+#145's acceptance criterion has four clauses: two hosts, one database, different
+descriptors, both `Apply`, started concurrently → exactly one applies; the other
+serves or reports not-ready naming the revision; **never a crash loop**; and no
+replica reports `Ready` while serving a schema its own descriptor does not
+describe. Stated plainly, because three of them are met and one is not:
+
+**Closed** — every shape where ordering information exists:
+
+- the rolling deploy where the database already holds a history (the reachable,
+  ordinary case: revision 2 is applied, a pod of the old ReplicaSet restarts);
+- the deliberate rollback, which stops crash-looping and is diagnosed correctly;
+- index / constraint / declared-rename oscillation, which nothing else caught;
+- an older artifact the history has *never* seen, **if** both descriptors maintain
+  `revision` — which is the whole of what the declared-counter override buys.
+
+**Not closed** — two descriptors racing an **empty** database, neither ever
+applied, neither declaring `revision`. The history is empty, so there is no
+ordering information and `DescriptorHistoryOrder.Check` returns "not older" for
+both. What then happens is unchanged and already measured
+(`docs/architecture/host.md`): the destructive gate decides it, and if the *subset*
+descriptor wins the race the superset pod applies revision 2 over it and **both
+replicas report `Ready`** — one of them serving a schema its own descriptor does
+not describe. That is the fourth clause, and A′ cannot reach it, because ordering
+two artifacts that have never been applied is not something an append-only history
+can know.
+
+**What closes it is option B**, mutual exclusion — one applier per deployment — and
+that is the second phase the issue already schedules for
+`baas-analyza.md:819`'s exactly-once cron requirement. So the honest summary is
+that this PR orders the apply wherever order is knowable and leaves the
+simultaneous-first-deploy case to the mechanism that is owed anyway. Recorded as
+deviation 76 so a later reader does not read the closed issue as covering it.
+
+## Facts
+
+| Fact | What would otherwise be believed |
+|---|---|
+| `DescriptorHistoryOrderTests.A_descriptor_the_history_has_never_seen_is_a_forward_deploy_not_an_older_pod` | that the gate bricks every deploy |
+| `…A_descriptor_recorded_at_an_older_revision_is_an_older_pod` | the mechanism works at all |
+| `…A_descriptor_re_applied_since_is_current_not_older` | the newest occurrence is what counts |
+| `…The_comparison_is_canonical_so_reformatting_a_descriptor_does_not_make_it_new` | that whitespace defeats it |
+| `…A_lower_declared_revision_is_an_older_pod_even_when_the_history_has_not_seen_it` | the override exists |
+| `…A_higher_declared_revision_does_not_wave_a_descriptor_the_history_calls_older_through` | the override is one-directional |
+| `SchemaStartupDecisionTests.An_out_of_order_boot_stands_down_instead_of_refusing` | the outcome is distinct |
+| `…An_out_of_order_boot_is_diagnosed_as_older_rather_than_as_destructive` | gate 3 really precedes gate 4 |
+| `…An_out_of_order_verdict_does_not_stand_down_a_boot_with_nothing_to_apply` | the gate governs the apply |
+| `AlvoBootServiceTests.A_boot_holding_an_older_descriptor_starts_not_ready_instead_of_crash_looping` | end-to-end, incl. the exit path |
+| `…A_backwards_change_the_destructive_gate_cannot_see_is_stood_down_rather_than_oscillating` | that the gate closes something nothing else did |
+| `…AllowDestructive_does_not_wave_an_out_of_order_boot_through` | deviation 74's narrowing, which used to be the way back |
+| `DescriptorHistoryOrderTests.A_history_row_that_cannot_be_read_is_skipped_rather_than_failing_the_boot` | that one bad row cannot brick every later boot |
+| `…An_unreadable_current_row_costs_the_override_not_the_boot` | the same, on the declared-revision path |
+| `ConcurrentBootTests.A_replica_holding_an_older_descriptor_stands_down_while_the_current_one_serves` | both engines, over a database that already holds a history |
+
+`A_backwards_change_the_destructive_gate_cannot_see_is_stood_down_rather_than_oscillating`
+is the one that matters most, because it is the only fact here that **before this
+change went green by applying**: an index added one way and dropped the other is
+destructive in neither direction, so removing the ordering gate records a third
+revision — the oscillation itself — rather than merely losing a diagnostic.
+
+The mutations run, and what each turned red — raw counts, the exact edit each one
+made and the filters used are in the same evidence file:
+
+| Mutation | Observed |
+|---|---|
+| the ordering gate never fires | 6 red — 3 decision-table, 2 host, 1 SQLite concurrency |
+| the ordering gate moved *after* the destructive gate | 3 red, and exactly the three diagnosis facts; the index fact stays green, since its plan is not destructive |
+| the history searched oldest-first | `A_descriptor_re_applied_since_is_current_not_older` |
+| `declared >= applied` → `>` (equal counts as older) | `Equal_declared_revisions_with_different_content_are_not_treated_as_out_of_order` |
+| `declared >= applied` → `==` (the comparison's direction) | `A_lower_declared_revision_is_an_older_pod_even_when_the_history_has_not_seen_it` |
+| the canonical comparison dropped, leaving bytes only | `The_comparison_is_canonical_so_reformatting_a_descriptor_does_not_make_it_new` |
+| `appliedAs >= current` → `>` | 2 red — the current descriptor and the re-applied one both read as older |
+| standing down throws, like every other refusal | 3 red — both host facts and the SQLite one, on the exit path |
+| the harness's `Serving` reduced to "it did not throw" | the SQLite fact — a replica that stood down would otherwise count as serving |
+| the unreadable-row guard removed (rethrow instead of skip) | both malformed-row facts |
+| `AllowDestructive` waves an out-of-order boot through | `AllowDestructive_does_not_wave_an_out_of_order_boot_through` |
+
+One thing deliberately has **no** discriminating mutation, said plainly rather than
+implied: skipping the history read for an empty plan is a *cost* decision, and
+removing the short-circuit changes no behaviour, because the policy's own empty-plan
+branch returns `Unchanged` before the ordering gate either way.
+`An_out_of_order_verdict_does_not_stand_down_a_boot_with_nothing_to_apply` pins that
+branch, which is what makes the short-circuit safe to have.
+
+## Deviations from the sources
+
+Continuing the startup design's series, which ends at 65.
+
+66. **The apply ordering is derived from the append-only history, not from the
+    declared `revision`.** No source describes either; #145 offered the declared
+    counter (A) and leader election (B). A′ is chosen because A makes correctness
+    depend on a counter nothing enforces monotonic, and B provides mutual
+    exclusion for an ordering bug. B stays owed for `baas-analyza.md:819`'s
+    exactly-once cron requirement, where it is the right mechanism.
+67. **An absent `revision` means unprotected-but-compatible.** Recorded as a
+    decision rather than a default, because the safe alternative (refuse to apply
+    on drift when no `revision` is declared) was genuinely on the table and is
+    rejected for breaking every existing descriptor and the zero-config loop
+    deviation 53 was ratified for.
+68. **The declared `revision` can only conclude "you are older".** It cannot
+    conclude "newer", and it does not refuse equal-revision-different-content
+    even though that is an authoring error — so a decorative counter nobody
+    maintains cannot create a refusal that did not exist before.
+69. **The ordering gate is evaluated ahead of the destructive gate**, narrowing
+    deviation 57's stated ordering. The same boots are refused; the more precise
+    diagnosis wins when both apply. The destructive gate is unchanged for every
+    plan that is not out of order, and is still re-checked immediately before the
+    DDL.
+70. **The gate governs the apply, not the serve.** It is not consulted for an
+    empty plan (so an ordinary restart pays no O(N) history read) and it does not
+    override `Skip`. The consequence is stated rather than hidden: a pod holding
+    an older descriptor whose *schema* matches the applied one still serves its
+    own older rules. Making a pod adopt the database's current descriptor is a
+    different design.
+71. **An out-of-order boot stands down instead of throwing** — it starts, primes
+    nothing, publishes `Failed`, and answers 503 on readiness. Deviation 65's
+    shape, applied a second time, and deliberately not extended to the
+    destructive or `Verify` refusals, which stay hard stops with exit 78. #145's
+    acceptance criterion asks for "never a crash loop"; the reason it is the
+    right answer *here* and the wrong answer *there* is the difference between a
+    deployment position and a configuration error.
+72. **`IDescriptorVersionStore` becomes a required boot dependency**, widening
+    the implicit provider contract the same way deviation 60 widened it for
+    `IRuntimeSchemaWriter`. Both in-repo drivers already register it from the
+    same instance that serves `IAppliedSchemaStore`; the cost is borne by a
+    future third-party provider that implements only the single-row port. The
+    boot keeps reading `IAppliedSchemaStore` for the current snapshot rather than
+    taking `history[^1]`, so that stage 1's unconditional read and every probe
+    count pinned on it stay exactly as measured.
+73. **The whole history is read on a drifting boot, and the narrower port member
+    is deferred.** Surfaced because it is a port change and therefore a design
+    decision; the measured cost and the trigger for taking it are above.
+74. **`AllowDestructive` no longer forces a deliberate rollback through, and that
+    is a behaviour change rather than a clarification.** The flag used to be the
+    documented way back from a rollback under `Apply`; the ordering gate sits ahead
+    of the destructive gate and does not consult it, so that route is gone. The
+    reason is that the two settings answer different questions — "I accept losing
+    data" is not "I accept serving an older descriptor", and the oscillation the
+    gate exists to stop discards nothing, so the flag would be no evidence of
+    intent about it. The replacement route (bump `revision`, then clear the
+    destructive gate if the plan back discards anything) is stated in the refusal
+    text itself, and the three places that advertised the old one —
+    `AlvoSchemaStartupMode.Apply`'s **public** XML doc,
+    `docs/architecture/host.md`, and this design's own earlier wording — are
+    corrected rather than left to contradict the code.
+    `SchemaStartupDecisionTests.AllowDestructive_does_not_wave_an_out_of_order_boot_through`
+    pins it.
+75. **An out-of-order boot stands down under `Verify` too, narrowing the startup
+    design's ratified "drift under `Verify` fails the start".** That decision was
+    the maintainer's and it still holds for ordinary drift; what changes is the
+    out-of-order subset, which is not a configuration error in any mode. Recorded
+    because a ratified decision must not be narrowed silently, and because the
+    alternative — the same pod crash-looping under `Verify` and standing down under
+    `Apply` — would make the mode decide something the mode is not about.
+76. **The simultaneous first deploy of two different descriptors is *not* ordered,
+    and #145's fourth acceptance clause is therefore not met by this PR.** With an
+    empty history there is no ordering information, so if the subset descriptor
+    wins the race the superset pod applies over it and both replicas report
+    `Ready` — one serving a schema its own descriptor does not describe. Only
+    mutual exclusion (option B) closes that, and it is the phase the issue already
+    schedules for `baas-analyza.md:819`. Recorded so the closed issue is not read
+    as covering it; the "What this closes" section above states it in the
+    criterion's own terms.
+77. **An unreadable history row is skipped rather than failing the boot, which
+    weakens the ordering over exactly those rows.** Found in review. Letting
+    `AlvoDescriptor.Parse`'s `JsonException` escape would have crash-looped every
+    later schema-changing boot of a project holding one row this build cannot read
+    — a strictly worse outage than the one being fixed, and unrecoverable without
+    editing the database. Skipping is also the honest answer, since the booting
+    descriptor parsed at stage 0 and a row that does not parse cannot be it. Two
+    consequences are stated rather than hidden: the protection degrades to
+    pre-change behaviour over unreadable rows, at `Warning` naming the revision;
+    and `Serialize(Parse(...))` drops members this build does not know, so a
+    descriptor deployed to an *older* binary than wrote it can canonicalise equal
+    to an older row and be stood down — which is the safe direction for a
+    genuinely mismatched deployment. Both touch the upgrade/downgrade contract
+    deviation 55 defers, and neither is closed here.
+78. **A stand-down's only channels are the log and `/health/ready`.** An embedded
+    host that maps neither gets a process that started, threw nothing, and quietly
+    serves 403/404 from Alvo. Deviation 65 has the same property; it is stated here
+    because an embedded host is the composition most likely to map no probes, and
+    the fix is #133's reachability port plus a host that maps `MapAlvoHealth`.

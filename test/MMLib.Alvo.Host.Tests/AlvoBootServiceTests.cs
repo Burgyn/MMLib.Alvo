@@ -325,6 +325,113 @@ public class AlvoBootServiceTests
         }
     }
 
+    /// <summary>
+    /// The rollback under <c>Apply</c>: a boot holding the descriptor the database has already moved on from
+    /// <b>starts</b>, reports not ready, and says which revision it is versus which one the database is at.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This is #145's acceptance criterion, and the three halves are each a separate regression.</b> Before
+    /// the ordering gate this exact sequence was a <c>DropField</c> refusal — correct, and diagnosed as
+    /// "destructive change refused", which sends an operator to
+    /// <c>Alvo__Schema__AllowDestructive=true</c> (discarding the column's data) to recover from being one
+    /// deploy behind. It also exited 78, so every pod of the rolled-back deployment crash-looped.
+    /// </para>
+    /// <para>
+    /// So: the start must <em>not</em> throw (the pod is drained, not killed); the phase must still be
+    /// <c>Failed</c> with nothing primed (a process that stood down must be structurally unable to serve); the
+    /// message must name both revisions (or it is the same unactionable sentence as before); and the history must
+    /// be untouched (the whole point is that the older descriptor did not apply).
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_boot_holding_an_older_descriptor_starts_not_ready_instead_of_crash_looping()
+    {
+        var databasePath = AlvoHostWorld.TempDatabasePath();
+
+        try
+        {
+            await InitializeAsync(databasePath);
+            await using (await AlvoBootWorld.StartAsync(
+                AlvoBootWorld.AddedFieldDescriptorFileName, databasePath, AlvoSchemaStartupMode.Apply))
+            {
+            }
+
+            await using var rolledBack = await AlvoBootWorld.TryStartAsync(databasePath: databasePath);
+
+            rolledBack.StartFailure.ShouldBeNull(
+                "a pod that is merely one deploy behind must be drained by its orchestrator, not restart-looped");
+            rolledBack.BootState.Phase.ShouldBe(AlvoBootPhase.Failed);
+            rolledBack.BootState.AppliedRevision.ShouldBeNull();
+            rolledBack.PrimedEntities.ShouldBeEmpty(
+                "a process that stood down must leave the policy catalog unprimed, so every operation denies");
+
+            var reason = rolledBack.BootState.Failure.ShouldNotBeNull();
+            reason.ShouldContain("older descriptor");
+            reason.ShouldContain("revision 1");
+            reason.ShouldContain("revision 2");
+
+            (await rolledBack.RecordedRevisionsAsync("host-boot")).ShouldBe(
+                [1, 2], "the older descriptor must not have applied anything, in either direction");
+        }
+        finally
+        {
+            AlvoHostWorld.TryDeleteDatabase(databasePath);
+        }
+    }
+
+    /// <summary>
+    /// The hazard no other gate can see: a difference that is destructive in <b>neither</b> direction — an
+    /// index — oscillated between two deployed descriptors on every boot. Now the older one stands down.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This is the fact the ordering gate exists for, and the only one that would have gone <em>green by
+    /// applying</em> before it.</b> `DestructiveScan` sets no `IsDestructive` on any index, constraint or
+    /// foreign-key operation, in either direction, so `AddIndex` one way and `DropIndex` the other both sail
+    /// through the destructive gate and through `Apply`: two pods holding these two descriptors flip the index
+    /// on and off forever, each reporting `Ready` over a schema the other is about to change. Removing the
+    /// ordering gate turns this fact red by recording revision 3 — the oscillation itself — which is what makes
+    /// it discriminating rather than a second spelling of the rollback fact above.
+    /// </para>
+    /// <para>
+    /// The declared-rename pair is the same shape and is not pinned here: it needs both descriptors to declare
+    /// mutually inverse `renamedFrom` markers, because an *undeclared* rename back is split into drop + add by
+    /// `RenameGuessSplitter` and refused as destructive. Same mechanism, narrower reach, and this fact covers
+    /// the mechanism.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_backwards_change_the_destructive_gate_cannot_see_is_stood_down_rather_than_oscillating()
+    {
+        var databasePath = AlvoHostWorld.TempDatabasePath();
+
+        try
+        {
+            await InitializeAsync(databasePath);
+            await using (var indexed = await AlvoBootWorld.StartAsync(
+                AlvoBootWorld.IndexedDescriptorFileName, databasePath, AlvoSchemaStartupMode.Apply))
+            {
+                indexed.BootState.AppliedRevision.ShouldBe(
+                    2, "adding an index must really be a non-empty, non-destructive apply, or nothing below has "
+                    + "a backwards change to make");
+            }
+
+            await using var backwards = await AlvoBootWorld.TryStartAsync(databasePath: databasePath);
+
+            backwards.StartFailure.ShouldBeNull();
+            backwards.BootState.Phase.ShouldBe(AlvoBootPhase.Failed);
+            (await backwards.RecordedRevisionsAsync("host-boot")).ShouldBe(
+                [1, 2],
+                "dropping the index again is destructive to nothing, so only the ordering gate can stop this "
+                + "pod from flipping the schema back");
+        }
+        finally
+        {
+            AlvoHostWorld.TryDeleteDatabase(databasePath);
+        }
+    }
+
     /// <summary>Boots once over <paramref name="databasePath"/> so the boots above diff against something.</summary>
     private static async Task InitializeAsync(string databasePath)
     {

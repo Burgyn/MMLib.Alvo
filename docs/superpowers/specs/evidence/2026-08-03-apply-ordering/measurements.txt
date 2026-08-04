@@ -1,0 +1,151 @@
+Evidence for docs/superpowers/specs/2026-08-03-apply-ordering-from-history-design.md (#145).
+Recorded 2026-08-03 on the branch f3/apply-ordering, base 9a90bbd.
+Host: darwin 25.5.0, arm64, .NET SDK per global.json (net10.0).
+
+Committed because the design publishes two tables as measured, and the immediately
+preceding commit on the parent branch (e89bd0d, "correct what was published as measured,
+and disclose what was not") is what happens when that is done without a trace.
+
+
+========================================================================
+1. HISTORY READ COST  (design section "Cost: ListAsync reads the whole history")
+========================================================================
+
+Harness: a throwaway xUnit theory in test/MMLib.Alvo.Data.Sqlite.Tests, run in
+Release, DELETED after the numbers were taken (it asserts nothing — it exists only
+to print a measurement, so keeping it would be a permanently red test). To
+reproduce, seed N revisions through the real store and time the two halves:
+
+    var store = provider.GetRequiredService<IDescriptorVersionStore>();   // UseSqlite, real file
+    for (var revision = 0; revision < N; revision++)
+        await store.AppendAsync("cost", new DescriptorVersion(Schema(revision), Json(revision), 0, now), revision, ct);
+
+    var read = Stopwatch.StartNew();
+    var history = await store.ListAsync("cost", ct);                      // half 1
+    read.Stop();
+
+    var canonicalise = Stopwatch.StartNew();                              // half 2, worst case:
+    var mine = AlvoDescriptor.Serialize(AlvoDescriptor.Parse(Json(N + 1)));  // matches nothing,
+    var matched = history.Count(v => string.Equals(                          // so every row is
+        mine, AlvoDescriptor.Serialize(AlvoDescriptor.Parse(v.DescriptorJson)), StringComparison.Ordinal));
+    canonicalise.Stop();
+
+Descriptor shape: 8 entities x 4 fields x 5 CEL rules, ~5 KB of JSON per revision —
+the size of a small-but-real project descriptor. Each revision adds one field, so no
+two rows are identical and the byte-equality fast path never hits, which is the
+worst case for the canonicalisation half.
+
+    dotnet test --project test/MMLib.Alvo.Data.Sqlite.Tests -c Release -- --filter-class '*ZzHistoryReadCost*'
+
+Raw output (Assert.Fail is how the theory reports; matched=0 confirms the worst case):
+
+    N=50   bytes=256560   ListAsync=6.2ms    canonicalise-all=3.7ms    matched=0
+    N=250  bytes=1284510  ListAsync=30.1ms   canonicalise-all=21.3ms   matched=0
+    N=1000 bytes=5141010  ListAsync=176.4ms  canonicalise-all=127.6ms  matched=0
+
+Linear in N in both halves. Totals ~10 ms / ~51 ms / ~304 ms, paid once per process
+start and only on a boot that would change the schema. This is what deviation 73's
+trigger ("~250 ms, around 800-1000 applied revisions") is read off.
+
+
+========================================================================
+2. MUTATIONS  (design section "Facts")
+========================================================================
+
+Each mutation was applied to the working tree, `dotnet build` was confirmed to print
+"Build succeeded" before any test result was believed, the affected classes were run,
+and the file was then restored. Filters, verbatim:
+
+    dotnet test --project test/MMLib.Alvo.Tests -- --filter-class '*DescriptorHistoryOrderTests*'
+    dotnet test --project test/MMLib.Alvo.Tests -- --filter-class '*SchemaStartupDecisionTests*'
+    dotnet test --project test/MMLib.Alvo.Host.Tests -- --filter-class '*AlvoBootServiceTests*'
+    dotnet test --project test/MMLib.Alvo.Data.Sqlite.Tests -- --filter-class '*ConcurrentBootTests*'
+
+Baseline, all green: DescriptorHistoryOrderTests 12, SchemaStartupDecisionTests 21,
+AlvoBootServiceTests 12, ConcurrentBootTests 4 (SQLite), PostgreSqlConcurrentBootTests 3.
+
+M1  the ordering gate never fires
+    SchemaStartupPolicy.Decide: `if (outOfOrder is not null)` -> `is not null && applied is null`
+    (rewritten rather than deleted: deleting it fails the build on RCS1213/IDE0060,
+    so the gate cannot be removed and still compile)
+    => decision-table failed: 3 / succeeded: 17
+       host          failed: 2 / succeeded: 10
+       sqlite        failed: 1 / succeeded: 3
+    Six facts, and exactly the six new ones.
+
+M2  the ordering gate moved AFTER the destructive gate
+    => decision-table failed: 1 / succeeded: 19
+       host          failed: 1 / succeeded: 11
+       sqlite        failed: 1 / succeeded: 3
+    Exactly the three diagnosis facts. The index-oscillation fact stays GREEN, which
+    is the point: its plan is not destructive, so gate order cannot affect it.
+
+M3  the history searched oldest-first
+    `for (var index = history.Count - 1; index >= 0; index--)` -> `for (var index = 0; index < history.Count; index++)`
+    => failed: 1 / succeeded: 9  (A_descriptor_re_applied_since_is_current_not_older;
+       observed headline named "revision 1 ... moved on to revision 3", i.e. the first
+       match rather than the newest)
+
+M4  `declared >= applied` -> `declared > applied`   (equal counts as older)
+    => failed: 1 / succeeded: 9  (Equal_declared_revisions_with_different_content_are_not_treated_as_out_of_order)
+
+M5  `declared >= applied` -> `declared == applied`  (the comparison's direction)
+    => failed: 1 / succeeded: 9  (A_lower_declared_revision_is_an_older_pod_even_when_the_history_has_not_seen_it)
+
+M6  the canonical comparison dropped, leaving bytes only
+    IsSameDescriptor: `bytes || canonical == Canonical(stored)` -> `bytes && canonical.Length > 0`
+    => failed: 1 / succeeded: 9  (The_comparison_is_canonical_so_reformatting_a_descriptor_does_not_make_it_new)
+
+M7  `appliedAs >= current.Revision` -> `appliedAs > current.Revision`
+    => failed: 2 / succeeded: 8  (the current descriptor and the re-applied one both read as older)
+
+M8  standing down throws, like every other refusal
+    AlvoBootService.StandDown: `return null;` -> `throw new AlvoStartupRefusedException(refusal, decision.Fix ?? "")`
+    => host   failed: 2 / succeeded: 10
+       sqlite failed: 1 / succeeded: 3
+    The three facts asserting the exit path (StartFailure / Failure must be null).
+
+M9  the harness's Serving reduced to "it did not throw"
+    ColdStartOutcome.Serving: `Failure is null && Phase is Ready` -> `Failure is null`
+    => sqlite failed: 1 / succeeded: 3
+    A replica that stood down would otherwise count as serving.
+
+M10 the unreadable-row guard removed (found in review; rethrow instead of skip)
+    CanonicalOf: `return null;` -> `throw;`
+    => failed: 2 / succeeded: 10  (both malformed-row facts)
+
+M11 AllowDestructive waves an out-of-order boot through
+    `if (outOfOrder is not null)` -> `if (outOfOrder is not null && !options.AllowDestructive)`
+    => failed: 1 / succeeded: 20  (AllowDestructive_does_not_wave_an_out_of_order_boot_through)
+
+NOT mutated, deliberately, and said so rather than implied: skipping the history read
+for an empty plan or under Skip is a COST decision, not a behavioural one. Removing
+either short-circuit changes no outcome, because SchemaStartupPolicy.Decide returns
+from its empty-plan and Skip branches before it ever consults the verdict — which is
+what those two facts (An_out_of_order_verdict_does_not_stand_down_a_boot_with_nothing_to_apply,
+Skip_ignores_the_ordering_because_it_applies_nothing) pin, and what makes the
+short-circuits safe to have.
+
+
+========================================================================
+3. BOTH ENGINES
+========================================================================
+
+Docker was available, so the PostgreSQL leg really ran rather than being skipped.
+
+    dotnet test --project test/MMLib.Alvo.Data.Sqlite.Tests -- --filter-class '*ConcurrentBootTests*'
+        total: 4   failed: 0   succeeded: 4
+
+    dotnet test --project test/MMLib.Alvo.Data.PostgreSql.Tests.Integration -- --filter-class '*PostgreSqlConcurrentBootTests*'
+        total: 3   failed: 0   succeeded: 3
+
+scripts/test-ring2 (Build succeeded asserted before believing any result):
+    ring0  total: 2307  failed: 0  succeeded: 2301  skipped: 6
+    ring2  total: 16    failed: 0  succeeded: 16
+    ring2  total: 156   failed: 0  succeeded: 153   skipped: 3
+    [ring2] OK
+
+scripts/test-e2e: NOT run. The change touches no host code and no compose file — only
+AlvoSchemaStartupMode's XML docs in Abstractions and docs/architecture/host.md — and
+the e2e runs `docker compose down --volumes` before every run, so every boot it makes
+is a cold start against an empty history, where this gate does not fire at all.
