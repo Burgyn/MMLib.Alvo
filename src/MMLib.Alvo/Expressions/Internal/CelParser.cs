@@ -69,8 +69,8 @@ internal static class CelParser
         /// </summary>
         private const string LowerAsciiSuggestion =
             "CEL spells a lower-case fold lowerAscii, and it folds A-Z only: write lowerAscii(field). A "
-            + "culture-sensitive fold also rewrites non-ASCII letters (Turkish 'İ' becomes two code points), "
-            + "and a stored value folded that way is permanently wrong.";
+            + "Unicode-wide fold also rewrites non-ASCII letters ('Ä' becomes 'ä', 'ẞ' becomes 'ß'), and a "
+            + "stored value folded that way is permanently wrong.";
 
         private static readonly Dictionary<CelTokenKind, CelBinaryOperator> _relationOperators = new()
         {

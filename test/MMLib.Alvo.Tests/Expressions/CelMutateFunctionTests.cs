@@ -28,15 +28,31 @@ namespace MMLib.Alvo.Tests.Expressions;
 public class CelMutateFunctionTests
 {
     /// <summary>
-    /// <c>'İ'</c> (U+0130, LATIN CAPITAL LETTER I WITH DOT ABOVE) is the trap this fact exists for:
-    /// <c>ToLowerInvariant()</c> folds it to <c>"i̇"</c> — two code points, a different string length —
-    /// and a stored value folded that way can never be recovered. The fold must touch <c>A</c>–<c>Z</c>
-    /// and leave every other code point byte-identical.
+    /// The fold touches <c>A</c>–<c>Z</c> and leaves every other code point byte-identical, so a stored
+    /// value cannot be rewritten beyond recovery by a fold nobody asked for.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The sample string is chosen to kill the obvious wrong implementation.</b> Replacing the fold with
+    /// <c>value.ToLowerInvariant()</c> must fail this fact, and picking the trap character by reputation is
+    /// not enough to make that true: <c>'İ'</c> (U+0130, LATIN CAPITAL LETTER I WITH DOT ABOVE) is the
+    /// famous one, and it is exactly the character .NET's invariant casing leaves <em>alone</em> — measured,
+    /// not assumed: <c>"İ".ToLowerInvariant()</c> is U+0130 on .NET 10, unchanged and still one char. A fact
+    /// built on <c>İ</c> alone passes under the wrong implementation and proves nothing.
+    /// </para>
+    /// <para>
+    /// So the sample carries the code points <c>ToLowerInvariant</c> really does fold — <c>Ž</c> (U+017D →
+    /// U+017E), <c>Ä</c> (U+00C4 → U+00E4), <c>ẞ</c> (U+1E9E → U+00DF, a fold no reverse mapping recovers)
+    /// and <c>Σ</c> (U+03A3 → U+03C3) — and keeps <c>İ</c> for what it does document: the fold is
+    /// <em>positive</em> (fold A–Z) rather than a list of exceptions, so it is right about characters
+    /// nobody thought of, on every runtime and ICU version, including the environments whose full case
+    /// mapping turns <c>İ</c> into two code points.
+    /// </para>
+    /// </remarks>
     [Fact]
     public void LowerAscii_folds_A_to_Z_and_leaves_every_other_code_point_alone()
     {
-        Mutate("lowerAscii(new.title)", ("title", "AB.İ.Z")).ShouldBe("ab.İ.z");
+        Mutate("lowerAscii(new.title)", ("title", "AB.Ž.Ä.ẞ.Σ.İ.Z")).ShouldBe("ab.Ž.Ä.ẞ.Σ.İ.z");
     }
 
     [Fact]

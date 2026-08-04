@@ -238,11 +238,24 @@ internal static class CelInterpreter
 
     /// <summary>
     /// Folds <c>A</c>–<c>Z</c> and nothing else — spelled out character by character, so nothing
-    /// culture- or Unicode-sensitive can creep in later. <see cref="string.ToLowerInvariant"/> is
-    /// <b>not</b> equivalent and must never replace this: it folds <c>İ</c> (U+0130) to two code points
-    /// and a long tail of other non-ASCII letters besides, and a stored value folded that way is a
-    /// permanently wrong row — the write cannot be undone by fixing the expression afterwards.
+    /// culture- or Unicode-sensitive can creep in later.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b><see cref="string.ToLowerInvariant"/> is not equivalent and must never replace this.</b> It folds
+    /// every non-ASCII letter it has a mapping for — <c>Ž</c>→<c>ž</c>, <c>Ä</c>→<c>ä</c>, <c>Σ</c>→<c>σ</c>,
+    /// and <c>ẞ</c>→<c>ß</c>, which no reverse mapping recovers — and a stored value folded that way is a
+    /// permanently wrong row: fixing the expression afterwards does not restore the bytes.
+    /// </para>
+    /// <para>
+    /// <b>The set of characters it folds is a runtime detail, which is the deeper reason this loop is
+    /// positive rather than a list of exceptions.</b> <c>İ</c> (U+0130) is the famous trap and is exactly
+    /// where the reputation misleads: .NET 10's invariant casing leaves it <em>unchanged</em> (measured, not
+    /// assumed), while a full Unicode case mapping folds it to two code points. Either way an author asked
+    /// for an ASCII fold and must get one on every runtime and ICU version — which "fold A–Z" satisfies by
+    /// construction and "fold, but skip the ones we know about" cannot.
+    /// </para>
+    /// </remarks>
     private static string FoldAsciiUpperCase(string value)
     {
         var folded = value.ToCharArray();
