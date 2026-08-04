@@ -192,10 +192,21 @@ to adopt the **name and semantics** from the standard and deviate only on the **
 which `has(...)`/`changed(...)` already established: `lowerAscii(new.email)`. `lower(...)`
 is refused, with a fix suggestion naming `lowerAscii`. The name matters beyond recognition:
 `lowerAscii` means an ASCII-only fold, so the implementation is pinned to folding `A`–`Z`
-and nothing else — **not** `ToLowerInvariant()`, which folds `İ` and a long tail of
+and nothing else — **not** `ToLowerInvariant()`, which folds a long tail of
 non-ASCII code points. A culture- or Unicode-sensitive fold on a *stored* value is a
 permanently wrong row, which is the same class of defect `UnhonouredFeatures` refuses
 `default` for (`UnhonouredFeatures.cs:68-75`).
+
+**Correction — the example this paragraph originally used was wrong, and it made the
+pinning fact vacuous.** It named `İ` (U+0130) as the code point `ToLowerInvariant()` folds
+to two code points. Measured on .NET 10 here: `"İ".ToLowerInvariant()` is **unchanged**,
+length 1 — .NET's *invariant* casing deliberately excludes the dotted capital I, and only a
+full Unicode case mapping produces `i̇`. The consequence is worse than a wrong sentence: the
+implementation fact written from it passed under its own `ToLowerInvariant()` mutation, so it
+proved nothing. Code points `ToLowerInvariant()` demonstrably *does* fold, and which the fact
+now uses: `Ž` (U+017D→U+017E), `Ä` (U+00C4→U+00E4), `ẞ` (U+1E9E→ß), `Σ` (U+03A3→σ). `İ` is
+kept in the sample for what it legitimately documents — a non-ASCII code point an ASCII fold
+must leave alone.
 
 **`now()` is safe in-transaction only under one rule: it is not a clock read.**
 

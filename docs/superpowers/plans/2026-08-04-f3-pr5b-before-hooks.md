@@ -28,9 +28,12 @@ impossible because the hook context exposes no client of any kind.
   #157 carried 133 files and CodeRabbit skipped it entirely (*"133 files exceed the limit of
   100"*), which is how a flaky fact and a MEDIUM in concurrency SQL reached `main` unreviewed.
   Staying under 100 files is a review-coverage requirement, not tidiness.
-- `lowerAscii` folds `A`–`Z` **and nothing else**. Never `ToLowerInvariant()`, which folds `İ`
-  and a long tail of non-ASCII code points; a culture-sensitive fold on a *stored* value is a
-  permanently wrong row.
+- `lowerAscii` folds `A`–`Z` **and nothing else**. Never `ToLowerInvariant()`, which folds a long
+  tail of non-ASCII code points; a culture-sensitive fold on a *stored* value is a permanently
+  wrong row. **Measured, correcting this plan's first draft and the addendum:** `İ` (U+0130) is
+  *not* one of them — `"İ".ToLowerInvariant()` is unchanged, length 1, because .NET's invariant
+  casing excludes the dotted capital I. Use `Ž`/`Ä`/`ẞ`/`Σ`, which it does fold, or the fact
+  passes under its own mutation and proves nothing.
 - `now()` is **not a clock read**. It resolves to the same `DateTimeOffset` the write's audit
   stamp already uses, bound once per write, through `TimeProvider`. `now()` twice in one write
   returns the same value. It is never rendered to SQL (Postgres returns transaction-start time;
@@ -159,8 +162,10 @@ adding the node first would leave a window where the renderer silently accepts i
 [Fact]
 public void lowerAscii_folds_A_to_Z_and_leaves_every_other_code_point_alone()
 {
-    // 'İ' (U+0130) is the trap: ToLowerInvariant folds it to "i̇" (two code points).
-    Evaluate("lowerAscii(new.email)", new { email = "AB.İ.Z" }).ShouldBe("ab.İ.z");
+    // Ž, Ä, ẞ and Σ are code points ToLowerInvariant() measurably does fold, so this sample is
+    // what makes the mutation in step 5 kill the fact. İ is here for what it legitimately
+    // documents — a non-ASCII code point an ASCII fold leaves alone — not as the trap.
+    Evaluate("lowerAscii(new.email)", new { email = "AB.Ž.Ä.ẞ.Σ.İ.Z" }).ShouldBe("ab.Ž.Ä.ẞ.Σ.İ.z");
 }
 
 [Fact]
@@ -206,8 +211,9 @@ private static string LowerAscii(string value)
 - [ ] **Step 4: Run them, watch all four pass.**
 
 - [ ] **Step 5: The mutation that matters** — replace the body with `value.ToLowerInvariant()`.
-      The `İ` fact must go red. If it stays green the fact is not measuring the fold; fix the
-      fact, not the mutation.
+      The fold fact must go red. If it stays green the fact is not measuring the fold; fix the
+      fact, not the mutation. This is not hypothetical — the plan's first draft used `İ` alone
+      and stayed green under exactly this mutation.
 
 - [ ] **Step 6: Commit**
 
