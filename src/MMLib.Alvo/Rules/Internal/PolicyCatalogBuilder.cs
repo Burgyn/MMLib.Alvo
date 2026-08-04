@@ -101,8 +101,20 @@ internal static class PolicyCatalogBuilder
         var hidden = CompileFieldFlags("hidden", fields, field => field.Hidden, build);
         var readOnly = CompileFieldFlags("readOnly", fields, field => field.ReadOnly, build);
         var afterHooks = CompileAfterHooks(descriptor, build);
-        return new EntityPolicy(build.Schema.Tenancy, tenantScope, operations, hidden, readOnly, afterHooks);
+        var beforeHooks = CompileBeforeHooks(descriptor, build);
+        return new EntityPolicy(
+            build.Schema.Tenancy, tenantScope, operations, hidden, readOnly, afterHooks, beforeHooks);
     }
+
+    /// <summary>
+    /// Compiles the entity's <c>before*</c> hooks in this same pass, against this same schema, appending to
+    /// this same error list — R11's one-priming-site rule, and it binds harder for a before-hook than for an
+    /// after-hook: this one runs inside the very write the rules compiled here are judging.
+    /// </summary>
+    private static EntityBeforeHooks CompileBeforeHooks(EntityDescriptor? descriptor, EntityBuild build) =>
+        BeforeHookCompiler.Compile(
+            descriptor?.Hooks,
+            new BeforeHookScope(build.Schema, build.Compiler, build.Path, build.Errors));
 
     /// <summary>
     /// Compiles the entity's <c>after*</c> hooks in this same pass, against this same schema, appending to this

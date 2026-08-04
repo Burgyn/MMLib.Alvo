@@ -1137,6 +1137,10 @@ namespace MMLib.Alvo.Rules
         Update = 3,
         Delete = 4,
     }
+    public interface IBeforeHookRunner
+    {
+        System.Collections.Generic.IReadOnlyDictionary<string, object?> Run(string entity, MMLib.Alvo.Rules.DataOperation operation, MMLib.Alvo.Data.AlvoRecord candidate, MMLib.Alvo.Data.AlvoRecord? previous, MMLib.Alvo.AlvoContext context, System.DateTimeOffset now);
+    }
     public interface IPolicyEngine
     {
         MMLib.Alvo.Rules.PolicyDecision Resolve(string entity, MMLib.Alvo.Rules.DataOperation operation, MMLib.Alvo.AlvoContext context);
