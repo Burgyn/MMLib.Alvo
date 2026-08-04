@@ -13,9 +13,10 @@ public sealed class SqliteAlvoDataOutboxTests : AlvoDataOutboxTests, IAsyncDispo
 {
     private readonly SqliteAlvoDataFixture _fixture = new();
 
-    protected override async Task<IAlvoDataOutboxWorld> WorldAsync(SchemaModel schema, AlvoDescriptor descriptor)
+    protected override async Task<IAlvoDataOutboxWorld> WorldAsync(
+        SchemaModel schema, AlvoDescriptor descriptor, TimeProvider? time = null)
     {
-        var host = await _fixture.StartAsync(schema, descriptor);
+        var host = await _fixture.StartAsync(schema, descriptor, time);
         return new AlvoDataOutboxWorld(host.Data, host.Services);
     }
 

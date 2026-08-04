@@ -28,7 +28,7 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// UTC would shift the day for any caller east or west of UTC.
 /// </para>
 /// <para>
-/// One helper, called from one place — <see cref="ColumnValue"/>, which is the single funnel every
+/// <see cref="Of"/> is called from one place — <see cref="ColumnValue"/>, which is the single funnel every
 /// caller-supplied value meets a column through. It used to expose a second entry point (<c>Stored</c>) that
 /// the write paths called directly, which is precisely how the write path ended up applying the timestamp
 /// normalisation and none of the funnel's other rules. A second copy of a conversion is how the two copies
@@ -78,6 +78,55 @@ internal static class StoredInstant
     /// </remarks>
     internal static string Text(DateTimeOffset instant) =>
         instant.ToString("O", CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// <paramref name="instant"/> at the finest precision every engine Alvo supports can round-trip: whole
+    /// microseconds, truncated rather than rounded.
+    /// </summary>
+    /// <param name="instant">An instant this process just read off a clock.</param>
+    /// <remarks>
+    /// <para>
+    /// <b>An instant the framework mints for itself is minted at storage precision, because the stored value
+    /// is the authoritative one.</b> A .NET clock keeps 100-nanosecond ticks, while a <c>datetime</c> column
+    /// on the reference engine is a PostgreSQL <c>timestamptz</c>, which keeps microseconds and drops the rest
+    /// on the way in. An audit stamp taken straight off the clock is therefore a value the row it is written
+    /// to cannot hold: measured on a real engine, <c>…4567</c> stamped and <c>…4560</c> read back — 7 ticks
+    /// apart, and no longer the same instant as the <c>time</c> on the event that write emitted. That is the
+    /// difference between "one write, one instant" and three timestamps that agree only when the clock happens
+    /// to land on a whole microsecond, which is a coincidence one host produces on every write (macOS reads
+    /// the wall clock at microsecond granularity) and another almost never does (Linux reads it at nanosecond
+    /// granularity).
+    /// </para>
+    /// <para>
+    /// <see cref="Data.AlvoPrecondition"/> already states this hazard for the version channel and closes it by
+    /// only ever comparing values that came <em>out of</em> the database. An event envelope cannot do that —
+    /// its <c>time</c> is the write's own instant, shared with the millisecond embedded in the event id and
+    /// with the outbox row's <c>created_at</c>, not a column read back — so the instant itself is made
+    /// storable instead, once, where the clock is read.
+    /// </para>
+    /// <para>
+    /// <b>Truncated, never rounded.</b> Rounding up would stamp a row with an instant that had not yet
+    /// happened when the write ran, and truncation is what the engine itself does, so the stamped value is
+    /// bit-for-bit the value the engine that keeps the least will hand back.
+    /// </para>
+    /// <para>
+    /// <b>Why one microsecond rather than each engine's own answer.</b> SQLite stores the rendered text and
+    /// keeps all seven digits, so leaving the floor to the engine means one write records a different instant
+    /// per engine and an event's <c>time</c> equals its row's stamp on one of them only — §0 principle 3, on
+    /// the framework's own bookkeeping. One microsecond is the coarsest of the engines Alvo ships or targets
+    /// (PostgreSQL <c>timestamptz</c>, SQLite text, Azure SQL <c>datetime2</c>), so it is the precision every
+    /// one of them agrees on.
+    /// </para>
+    /// <para>
+    /// <b>A caller-supplied <c>datetime</c> value is deliberately not truncated here.</b> This is about the
+    /// instants the framework mints and then compares against itself; a caller's own value is stored at
+    /// whatever precision the engine they chose keeps, exactly as it already was, and truncating it would
+    /// silently move a filter boundary the caller wrote (a <c>gt</c> bound floored by 900 ns admits the row it
+    /// was meant to exclude).
+    /// </para>
+    /// </remarks>
+    internal static DateTimeOffset Storable(DateTimeOffset instant) =>
+        instant.AddTicks(-(instant.Ticks % TimeSpan.TicksPerMicrosecond));
 
     /// <summary>Whether a column of <paramref name="clrType"/> holds an instant.</summary>
     /// <param name="clrType">The column's CLR type, nullable or not.</param>

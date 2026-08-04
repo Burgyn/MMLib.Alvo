@@ -42,7 +42,14 @@ public abstract class AlvoDataOutboxTests
     /// </summary>
     /// <param name="schema">The schema every entity in <paramref name="descriptor"/> maps to.</param>
     /// <param name="descriptor">The project descriptor whose rules and field flags apply.</param>
-    protected abstract Task<IAlvoDataOutboxWorld> WorldAsync(SchemaModel schema, AlvoDescriptor descriptor);
+    /// <param name="time">
+    /// The clock the store stamps its writes from, or <see langword="null"/> for the real one. One fact here
+    /// needs an instant it chose rather than one it observed — see
+    /// <see cref="A_write_whose_clock_lands_mid_microsecond_still_records_one_instant"/>, whose whole point is
+    /// that a system clock asks the question only on a host whose clock is finer than the store.
+    /// </param>
+    protected abstract Task<IAlvoDataOutboxWorld> WorldAsync(
+        SchemaModel schema, AlvoDescriptor descriptor, TimeProvider? time = null);
 
     /// <summary>
     /// An update queues one event carrying both images and naming only the fields that moved.
@@ -206,8 +213,18 @@ public abstract class AlvoDataOutboxTests
     /// (<c>docs/architecture/data-path.md</c>, <em>Every timestamp is one instant</em>).
     /// </summary>
     /// <remarks>
+    /// <para>
     /// It is asserted on both write faces that stamp, because each site reads the clock for itself and a site
     /// that read it twice would be off by however long its own I/O took.
+    /// </para>
+    /// <para>
+    /// <b>Compared as ticks rather than as instants for the failure message alone</b>, which is a real cost
+    /// this fact already paid: <see cref="DateTimeOffset"/> equality <em>is</em> instant equality, so the
+    /// comparison is unchanged, but Shouldly renders a <see cref="DateTimeOffset"/> without sub-second digits,
+    /// so a sub-microsecond difference was reported as <c>should be 04:29:06 +00:00 but was 04:29:06
+    /// +00:00</c> — a message that sends the next reader looking for a whole second. The exact same values are
+    /// compared, and now a failure says which ones.
+    /// </para>
     /// </remarks>
     [Fact]
     public async Task The_events_time_equals_the_rows_own_audit_instant()
@@ -219,8 +236,61 @@ public abstract class AlvoDataOutboxTests
             Vehicles, IdOf(created), Patch(("color", "blue")), Caller, cancellationToken: Ct);
 
         var events = await world.EventsAsync();
-        events[0].Time.ShouldBe(InstantOf(created, AlvoManagedColumns.CreatedAt));
-        events[^1].Time.ShouldBe(InstantOf(updated, AlvoManagedColumns.UpdatedAt));
+        events[0].Time.UtcTicks.ShouldBe(InstantOf(created, AlvoManagedColumns.CreatedAt).UtcTicks);
+        events[^1].Time.UtcTicks.ShouldBe(InstantOf(updated, AlvoManagedColumns.UpdatedAt).UtcTicks);
+    }
+
+    /// <summary>
+    /// A write whose clock lands <b>mid-microsecond</b> still records one instant: the stamp is the clock
+    /// floored to the microsecond every engine can keep, and the event's <c>time</c> is that same value.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The deterministic twin of <see cref="The_events_time_equals_the_rows_own_audit_instant"/>, which asks
+    /// the question of the real clock and therefore only asks it where the clock is finer than the store. A
+    /// <c>datetime</c> column is a <c>timestamptz</c> on PostgreSQL and keeps microseconds, while a .NET clock
+    /// keeps 100-nanosecond ticks — so the stamp and the envelope agreed on macOS, whose wall clock is
+    /// microsecond-granular, on every write, and disagreed on Linux, whose is nanosecond-granular, on every
+    /// write whose tick count is not a whole multiple of ten — nine in ten of them. This clock is fixed 7 ticks
+    /// past a whole microsecond, so nothing here is a race.
+    /// </para>
+    /// <para>
+    /// <b>Both halves are asserted, because either alone is passable without the guarantee.</b> The equality
+    /// alone is free on SQLite, which stores the rendered text and keeps all seven digits. The stamp's exact
+    /// value alone would be satisfied by a driver that floored the column and left the envelope's own
+    /// <c>time</c> at full precision — the defect this fact was written for. Stating the expected instant as a
+    /// literal, rather than recomputing the flooring here, is what makes it a fact about the guarantee instead
+    /// of a second copy of the implementation.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_write_whose_clock_lands_mid_microsecond_still_records_one_instant()
+    {
+        var world = await WorldAsync(Schema, Descriptor, new FixedClock(MidMicrosecond));
+
+        var created = await CreateVehicleAsync(world, make: "vw");
+
+        var stamped = InstantOf(created, AlvoManagedColumns.CreatedAt);
+        stamped.UtcTicks.ShouldBe(
+            WholeMicrosecond.UtcTicks,
+            "an instant the framework mints for itself is minted at a precision the column can hold");
+        (await world.EventsAsync()).ShouldHaveSingleItem().Time.UtcTicks.ShouldBe(
+            stamped.UtcTicks, "the event's time and the row's stamp are one instant, not two clock reads");
+    }
+
+    /// <summary>The instant the fixed clock answers: 7 ticks past a whole microsecond.</summary>
+    private static DateTimeOffset MidMicrosecond { get; } =
+        new DateTimeOffset(2026, 8, 4, 4, 29, 6, TimeSpan.Zero).AddTicks(1234567);
+
+    /// <summary><see cref="MidMicrosecond"/> as every engine Alvo supports can store it.</summary>
+    private static DateTimeOffset WholeMicrosecond { get; } =
+        new DateTimeOffset(2026, 8, 4, 4, 29, 6, TimeSpan.Zero).AddTicks(1234560);
+
+    /// <summary>A clock every read of which answers <see cref="MidMicrosecond"/>.</summary>
+    /// <param name="instant">The instant this clock answers.</param>
+    private sealed class FixedClock(DateTimeOffset instant) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => instant;
     }
 
     /// <summary>

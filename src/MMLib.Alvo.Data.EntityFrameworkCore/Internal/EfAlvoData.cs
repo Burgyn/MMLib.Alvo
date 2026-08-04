@@ -176,7 +176,7 @@ internal sealed class EfAlvoData : IAlvoData
         CancellationToken cancellationToken)
     {
         using var db = _contexts.Create();
-        var now = _time.GetUtcNow();
+        var now = WriteInstantNow();
         var (schema, candidate) = AuthorizedCandidate(db, entity, values, decision, context, now);
         await EnsureOutboxTableAsync(db, cancellationToken);
 
@@ -324,7 +324,7 @@ internal sealed class EfAlvoData : IAlvoData
         AlvoIdempotency token, CancellationToken cancellationToken)
     {
         using var db = _contexts.Create();
-        var now = _time.GetUtcNow();
+        var now = WriteInstantNow();
         var (schema, candidate) = AuthorizedCandidate(db, entity, values, decision, context, now);
         await EnsureIdempotencyTableAsync(db, cancellationToken);
         await EnsureOutboxTableAsync(db, cancellationToken);
@@ -615,7 +615,7 @@ internal sealed class EfAlvoData : IAlvoData
         WritePayloadGuard.EnsureWritable(values, schema, decision, isUpdate: true);
         AlvoPrecondition.EnsureSupported(precondition, schema);
 
-        var now = _time.GetUtcNow();
+        var now = WriteInstantNow();
         await EnsureOutboxTableAsync(db, cancellationToken);
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
@@ -651,6 +651,19 @@ internal sealed class EfAlvoData : IAlvoData
         AlvoAuditStamp.Applied(schema, values, context, new WriteInstant(now), isUpdate);
 
     /// <summary>
+    /// The instant one write happens at: this store's clock, at the precision the row it is about to stamp
+    /// can hold.
+    /// </summary>
+    /// <remarks>
+    /// One method rather than a bare clock read at each of the four write sites, because every one of them
+    /// hands the value it reads to <em>both</em> the audit stamp and the event it emits, and the two are only
+    /// the same instant if the value survives being stored — a <c>timestamptz</c> keeps microseconds and a
+    /// .NET clock keeps 100-nanosecond ticks. See <see cref="StoredInstant.Storable"/> for the measurement and
+    /// for why the stored value is the authoritative one.
+    /// </remarks>
+    private DateTimeOffset WriteInstantNow() => StoredInstant.Storable(_time.GetUtcNow());
+
+    /// <summary>
     /// The write's own instant, in the shape <see cref="AlvoAuditStamp.Applied"/> takes it.
     /// </summary>
     /// <remarks>
@@ -682,7 +695,7 @@ internal sealed class EfAlvoData : IAlvoData
         EnsureNotSoftDeleted(schema);
         AlvoPrecondition.EnsureSupported(precondition, schema);
 
-        var now = _time.GetUtcNow();
+        var now = WriteInstantNow();
         await EnsureOutboxTableAsync(db, cancellationToken);
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);

@@ -405,6 +405,33 @@ clock once and three places agree. `StoredInstant` is `internal` to this driver 
 `AlvoEvent.Time` refuses a value whose `Offset` is not `TimeSpan.Zero`, with a message naming
 `ToUniversalTime()`. See [`events.md`](./events.md), *The outbox*.
 
+**One instant also means one *precision*, and the store's is the authoritative one.** "Three places agree"
+was true of the three timestamps above and false of the fourth — the entity row's own `created_at`. That
+column is not framework bookkeeping and does not go through `StoredInstant.Text`: it is a declared `datetime`
+field, so `FieldClrType` maps it to `DateTimeOffset` and `DescriptorModelBuilder` lets the provider pick the
+store type, which on PostgreSQL is `timestamp with time zone` — **microseconds**. A .NET clock keeps
+100-nanosecond ticks, so an audit stamp read straight off it is a value the row cannot hold: measured on a
+real engine, `…4567` stamped and `…4560` read back, 7 ticks apart, and the event's `time` (full precision, out
+of the JSON payload) then unequal to the `created_at` it is supposed to *be*.
+
+So the framework mints its own instants at storage precision — `StoredInstant.Storable`, floored to the whole
+microsecond, called once per write site in `EfAlvoData.WriteInstantNow`. Floored rather than rounded, because
+rounding up stamps a row with an instant that had not happened yet. One microsecond rather than each engine's
+own answer, because SQLite keeps all seven digits of the rendered text: leaving the floor to the engine means
+one write records a different instant per engine, and `AlvoDataOutboxTests.The_events_time_equals_the_rows_own_audit_instant`
+holds on one of them only — §0 principle 3, on the framework's own bookkeeping. `AlvoPrecondition` states the
+same hazard for the version channel and closes it differently, by only ever comparing values that came *out
+of* the database; an envelope's `time` is not a column read back, so the instant itself is made storable
+instead. A **caller-supplied** `datetime` is deliberately untouched: it is stored at whatever precision the
+engine keeps, and flooring it would silently move a filter boundary the caller wrote.
+
+This is also a warning about where a green local run comes from. The defect was invisible on macOS and failed
+~9 writes in 10 on the Linux CI leg, for one reason: macOS reads the wall clock at microsecond granularity, so
+every stamp there is already whole-microsecond and round-trips by luck. `A_write_whose_clock_lands_mid_microsecond_still_records_one_instant`
+therefore injects a clock fixed 7 ticks past a whole microsecond, and asserts both halves — the stamp's exact
+value *and* its equality with the envelope — because equality alone is free on SQLite and the stamp alone is
+satisfied by a driver that floors the column and leaves the envelope at full precision.
+
 **Deliberately not covered: `date`.** `PredicateParameterBinder.AsDate` keeps its own rule — the calendar date
 the caller wrote, read at the offset they wrote it with. Normalising one to UTC would shift the day for any
 caller east or west of UTC, so `StoredInstant` tests the column's CLR type and leaves `DateOnly` alone.

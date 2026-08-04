@@ -260,12 +260,13 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task A_denied_write_emits_nothing() { }
         public System.Threading.Tasks.Task A_replayed_idempotent_create_emits_no_second_event() { }
         public System.Threading.Tasks.Task A_write_the_engine_refuses_leaves_no_outbox_row() { }
+        public System.Threading.Tasks.Task A_write_whose_clock_lands_mid_microsecond_still_records_one_instant() { }
         public System.Threading.Tasks.Task An_events_record_carries_a_hidden_field_unmasked_and_that_is_the_documented_disclosure() { }
         public System.Threading.Tasks.Task An_update_emits_exactly_one_event_carrying_both_images() { }
         public System.Threading.Tasks.Task Every_event_carries_the_caller_the_write_was_performed_as() { }
         public System.Threading.Tasks.Task The_events_time_equals_the_rows_own_audit_instant() { }
         public System.Threading.Tasks.Task Two_concurrent_idempotent_creates_on_one_key_emit_exactly_one_event() { }
-        protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Testing.Data.IAlvoDataOutboxWorld> WorldAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor);
+        protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Testing.Data.IAlvoDataOutboxWorld> WorldAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, System.TimeProvider? time = null);
     }
     public abstract class AlvoDataPagingTests
     {

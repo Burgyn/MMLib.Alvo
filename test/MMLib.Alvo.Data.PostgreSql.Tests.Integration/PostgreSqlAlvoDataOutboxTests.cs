@@ -17,9 +17,10 @@ public sealed class PostgreSqlAlvoDataOutboxTests : AlvoDataOutboxTests, IAsyncL
 
     public ValueTask InitializeAsync() => _fixture.InitializeAsync();
 
-    protected override async Task<IAlvoDataOutboxWorld> WorldAsync(SchemaModel schema, AlvoDescriptor descriptor)
+    protected override async Task<IAlvoDataOutboxWorld> WorldAsync(
+        SchemaModel schema, AlvoDescriptor descriptor, TimeProvider? time = null)
     {
-        var host = await _fixture.StartAsync(schema, descriptor);
+        var host = await _fixture.StartAsync(schema, descriptor, time);
         return new AlvoDataOutboxWorld(host.Data, host.Services);
     }
 

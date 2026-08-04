@@ -126,4 +126,41 @@ public class StoredInstantTests
     [InlineData(typeof(string), false)]
     public void A_column_holds_an_instant_only_when_it_is_a_datetimeoffset(Type clrType, bool expected)
         => StoredInstant.IsTimestamp(clrType).ShouldBe(expected);
+
+    /// <summary>
+    /// An instant the framework mints for itself is floored to the whole microsecond every supported engine
+    /// keeps, so the value it stamps is the value the store hands back.
+    /// </summary>
+    /// <remarks>
+    /// The tick offsets are the interesting ones: <c>0</c> must be left alone, <c>1</c> and <c>9</c> must both
+    /// floor to the same microsecond (a rounding implementation would send <c>9</c> forward, stamping a row
+    /// with an instant that had not happened), and <c>10</c> must land on the next one rather than being
+    /// coarsened further.
+    /// </remarks>
+    /// <param name="ticks">Ticks past <see cref="_noon"/> the clock is read at.</param>
+    /// <param name="expected">Ticks past <see cref="_noon"/> the stored value carries.</param>
+    [Theory]
+    [InlineData(0, 0)]
+    [InlineData(1, 0)]
+    [InlineData(7, 0)]
+    [InlineData(9, 0)]
+    [InlineData(10, 10)]
+    [InlineData(1234567, 1234560)]
+    public void An_instant_the_framework_mints_is_floored_to_a_whole_microsecond(long ticks, long expected)
+        => StoredInstant.Storable(_noon.AddTicks(ticks)).UtcTicks.ShouldBe(_noon.AddTicks(expected).UtcTicks);
+
+    /// <summary>
+    /// The flooring is arithmetic on the instant and leaves the offset alone, so it cannot double as a second
+    /// (and differently-spelled) copy of the UTC normalisation <see cref="StoredInstant.Of"/> owns.
+    /// </summary>
+    [Fact]
+    public void Flooring_an_instant_leaves_its_offset_alone()
+    {
+        var spelled = _noon.ToOffset(TimeSpan.FromHours(2)).AddTicks(7);
+
+        var stored = StoredInstant.Storable(spelled);
+
+        stored.Offset.ShouldBe(TimeSpan.FromHours(2));
+        stored.UtcTicks.ShouldBe(_noon.UtcTicks);
+    }
 }
