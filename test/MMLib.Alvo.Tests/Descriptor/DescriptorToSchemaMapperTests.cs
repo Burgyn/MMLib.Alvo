@@ -273,11 +273,22 @@ public class DescriptorToSchemaMapperTests
     /// because it asserts only that <em>an</em> <see cref="InvalidDataException"/> was thrown.
     /// </para>
     /// <para>
-    /// PR5a is safe from that only because the corpus declares <c>beforeCreate</c> and <c>beforeUpdate</c> and
-    /// nothing else, so the example stays refused by the two <c>before*</c> entries that remain. That is a
+    /// PR5a was safe from that only because the corpus declares <c>beforeCreate</c> and <c>beforeUpdate</c> and
+    /// nothing else, so the example stayed refused by the two <c>before*</c> entries that remained. That is a
     /// measured property of the tree rather than an assumption, which is what this fact records; the example's
     /// own five fixes and the strengthening of the refusal-reason assertion belong to the PR that lifts a
     /// <c>before*</c> refusal.
+    /// </para>
+    /// <para>
+    /// <b>PR5b lifted all three <c>before*</c> entries, and the hazard measurably did not materialize.</b>
+    /// <c>complex-crm</c> is still refused by a <em>structured unhonoured-feature error</em> and not by a CEL
+    /// syntax error — the reason simply moved to another entry in the same table: <c>owner_id</c> declares
+    /// <c>default</c>, which is refused with its own fix suggestion. So the marker still means what it says.
+    /// Measured on this branch by applying the example, not inferred. The strengthening of
+    /// <see cref="Every_example_marked_not_runnable_really_is_refused"/> to assert the <em>reason</em>, and the
+    /// example's own remaining defects (two list literals in <c>deals.beforeUpdate</c> conditions and the
+    /// unresolvable <c>{{@user.email}}</c> template) stay with PR5b-2 — see deviation 83, which records that
+    /// deviation 76 asked for them here and why they are not here.
     /// </para>
     /// <para>
     /// Driven off the tree rather than off <c>complex-crm</c> by name, so a <em>new</em> example declaring an

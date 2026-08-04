@@ -967,6 +967,89 @@ PR's. Entries marked **[unratified]** depend on a recommendation above.
     awkward to retrofit"* (`:585-592`). Cost: PR5 closes #22 only when 5b merges, and 5a
     cannot merge before the startup PR.
 
+## Deviations added by PR5b-1 (before-hooks and the `Mutate` profile)
+
+Continuing the series above. 79–83 are the before-hook PR's; every one was taken while
+implementing a decision this document made, so each names what the decision said as well as
+what shipped.
+
+**Deviation 75's owed ruling is discharged here rather than as a new entry**, in the direction
+it predicted: `WritePayloadGuard` is **not** re-run over a mutated payload (it judges a
+*caller's* keys, and re-running it would refuse a hook legitimately setting a `readOnly`
+field, which is one of the two things a before-hook exists for), while `EnsureWriteAllowed`
+**is** — the `WITH CHECK` verdict and the tenant scope judge the post-image that will really
+be stored, or a hook writing `owner_id` from a caller-controlled field would place a row the
+`create` rule refuses. Both halves are pinned by facts in `AlvoDataBeforeHookTests`.
+
+79. **The shipped `Mutate` profile is narrower than Decision 1's truth table, by deferral
+    rather than by ruling.** That table marks `@user`/`@tenant`, `&&`/`||`/`!`, comparison,
+    `in`, `has`, arithmetic, the ternary and `changed(field)` as available in `Mutate`;
+    `_allowedProfiles` admits **none** of them. Four rows shipped: literals, current-row field
+    references, `old.`/`new.` field references, and the allow-listed call. The result-type row
+    shipped in full. Deny-by-default is what makes the deferral safe rather than sloppy — an
+    unlisted pairing compiles in **no** profile, so nothing sits half-admitted — and each
+    construct is meant to arrive with the fact that needs it. **Measured, so the narrowness is
+    measured rather than convenient:** the only `mutate` values in the tree are
+    `lowerAscii(new.email)` (`crm.alvo.json:110`) and `now()` (`:148`), both of which compile,
+    so nothing shipped is blocked by it. `docs/architecture/cel.md`'s truth table prints the
+    shipped state and is the authority; Decision 1's table is annotated in place so it stops
+    reading as a promise. The first `mutate` needing `==` — the `is_closed` example Decision 1
+    itself uses — brings the comparison row with it.
+80. **A `reject` reuses `AlvoAuthorizationException` (→ 403) instead of a new failure family.**
+    The alternative was a `AlvoHookRejectedException` with its own problem type, which would
+    have been more precise about *who* refused. Rejected for two reasons. First, `IAlvoData`
+    already reserves that exception for "the operation is not permitted", and a before-hook
+    `reject` is exactly that — a second family would make two spellings of one answer that
+    every request layer, provider and test double has to learn. Second, the caller learning
+    *which mechanism* refused them is a disclosure, not a feature. The cost is real and stated:
+    a client cannot distinguish "a policy refused you" from "a hook refused you" by status or
+    problem type, only by the author's own `detail` text — which carries the author's `reject`
+    string and the hook's JSON pointer, both descriptor-authored and never caller-supplied, so
+    naming them discloses nothing the descriptor did not already declare.
+81. **There is no wall-clock budget on a before-hook, so the addendum's "budget-overrun
+    rollback" has nothing to overrun.** The bound is the grammar instead: a hook is a fixed
+    number of compiled expressions (count fixed at apply, never by the request) in profiles
+    with no loop, no comprehension, no recursion, no user-defined function and no I/O, each
+    tree walked once with node count bounded by the schema's own 2000-character cap on a `cel`
+    string. The work is O(descriptor), not O(caller input), so no request can make a hook
+    slower and a budget could only fire on a machine that had already stopped serving; a
+    timeout would buy a clock read per hook plus a second failure mode *inside a transaction*.
+    Stated as a deviation because the addendum's own PR5b content row names the rollback, and
+    an absent feature that was reasoned away must not look like one that was forgotten.
+    **The obligation this creates:** the PR that admits a loop, a comprehension, or a call that
+    can block into a before-hook profile owes a budget with it, and the argument above is
+    where it should look first to see what it invalidates.
+82. **`IBeforeHookRunner.Run` returns the patch and throws for a refusal, rather than mutating
+    a candidate dictionary in place and returning a refusal.** The plan proposed the latter
+    (*"returns a refusal or mutates `candidate` in place"*). Both halves were reversed on
+    purpose. A **returned** refusal is one a driver can forget to check, and a forgotten refusal
+    is a hook that silently does not guard the write it was declared to guard — worse than no
+    hook at all; an exception cannot be ignored by omission. And an **in-place** mutation cannot
+    express what a patch has to express: a `mutate` writing `null` is an authored intent to
+    store nothing, which the insert path's non-nullable value bag cannot hold at all (the key is
+    left out) while the update path must turn it into a real `SET column = NULL`. A returned
+    patch lets each write path apply that in its own terms, and it keeps the runner from having
+    to know which of the two it is serving. The signature is also **synchronous** — no `Task`,
+    no `CancellationToken` — which is the network ban at the contract rather than a style
+    choice, and is asserted as a fact.
+83. **`examples/complex-crm/crm.alvo.json` is *not* corrected in this PR, against deviation
+    76's own instruction, and the hazard it warned about is measured rather than assumed.**
+    Deviation 76 requires the example's fixes and the strengthening of
+    `Every_example_marked_not_runnable_really_is_refused` to land in the PR that lifts a
+    `before*` refusal — which is this one — because a CEL syntax error could otherwise stand in
+    silently for the feature refusal the test claims to hold. They are deferred to PR5b-2 for
+    the review-coverage reason: #157 carried 133 files and CodeRabbit skipped it entirely, so
+    staying under 100 files is a requirement rather than tidiness. **What makes the deferral
+    safe is a measurement, not an argument:** with all three `before*` entries gone,
+    `complex-crm` is still refused by a *structured unhonoured-feature error* — `owner_id`
+    declares `default`, refused with its own fix suggestion — and **not** by a CEL syntax
+    error, so the marker still means what it says and the substitution deviation 76 feared has
+    not happened. Two of the example's five defects (`:110`, `:148`) now compile as a
+    side-effect of this PR; the remaining three are two list literals in `deals.beforeUpdate`
+    conditions and the unresolvable `{{@user.email}}` template. Recorded in
+    `DescriptorToSchemaMapperTests`' own remarks as well, so the measurement sits next to the
+    fact that depends on it.
+
 ---
 
 # Ratification needed from the maintainer

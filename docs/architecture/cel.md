@@ -115,7 +115,7 @@ memberless context reference.
 
 ### The profile is narrower than the design addendum's table, deliberately
 
-The PR5 design addendum's *Decision 1* prints a `Mutate` column with ✓ in **every** row:
+The PR5 design addendum's *Decision 1* (deviation 79) prints a `Mutate` column with ✓ in **every** row:
 `@user`/`@tenant`, `&&`/`||`/`!`, comparison, `in`, `has`, arithmetic, the ternary and
 `changed(field)`. **As implemented, none of those are admitted.** `_allowedProfiles` gives `Mutate`
 four rows and no more — literals, current-row field references, `old.`/`new.` field references, and
