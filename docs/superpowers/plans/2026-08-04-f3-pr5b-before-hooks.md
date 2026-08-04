@@ -298,6 +298,35 @@ built. The same applies to `UpdateAsync` (`:621`), `DeleteAsync` (`:701`),
 sixth that must **not** get one: `ReplayableCreateAsync` replays a stored idempotency record and
 runs no hook, because the hook already ran on the original write.
 
+> **Correction, recorded during Task 9 rather than edited away.** The paragraph above says
+> **five** call sites and names `CreatedOrReplayedAsync` as one of them. That is wrong, and the
+> implementation deliberately did not follow it. There are **four**:
+>
+> | What shipped | Hook point |
+> |---|---|
+> | `CreatedAsync` | `beforeCreate` |
+> | `RecordedCreateAsync` | `beforeCreate` (the idempotent create's **writing** branch) |
+> | `WriteAsync` — update's private in-transaction body, not the public `UpdateAsync` | `beforeUpdate` |
+> | `EraseAsync` — delete's private in-transaction body, not the public `DeleteAsync` | `beforeDelete` |
+>
+> `CreatedOrReplayedAsync` gets **no** call: it opens the transaction and *then* branches
+> between a replay and a fresh write, so a hook called there would run on the replay too —
+> double-applying a `mutate` whose value the first attempt already stored, and letting a
+> `reject` refuse a retry of a create the caller has already been told succeeded. The hook
+> belongs on the branch that writes a row, which is `RecordedCreateAsync`. That makes the
+> plan's "sixth that must not get one" a *second* one that must not, and
+> `ReplayableCreateAsync` — the retry loop around `CreatedOrReplayedAsync` — is the other.
+>
+> `beforeUpdate`/`beforeDelete` also moved one level down from where this task named them
+> (`UpdateAsync`/`DeleteAsync`), for a reason the plan did not state: the private bodies are
+> where the **row-locked pre-image** exists, and `old.`/`changed(...)` are answered from it. A
+> pre-image read in the public method — before the transaction, or on another connection —
+> could be overwritten between the hook's judgement and the write.
+>
+> `BeforeHookTransactionArchitectureTests.The_pipeline_is_called_from_the_four_write_bodies_and_nowhere_else`
+> pins the count at four, so this correction is enforced rather than merely written down.
+> Recorded in `docs/architecture/events.md`'s *Before-hooks* section as the durable version.
+
 - [ ] **Step 1: The facts** — a `mutate` value reaches the stored row; a `reject` rolls the
       transaction back leaving no row; `now()` inside a `mutate` equals the row's `created_at`;
       an idempotent replay does **not** re-run the hook.
