@@ -104,6 +104,11 @@ public class OutboxClaimSqlTests
             2, $"the subquery must be one more '{OuterWhereSeparator}' on a non-empty outer WHERE");
         clauses[0].ShouldContain("dispatched_at IS NULL");
         clauses[0].ShouldContain("claimed_at IS NULL");
+        clauses[0].Contains("attempts < @max_attempts", StringComparison.Ordinal).ShouldBeTrue(
+            "the attempt ceiling is subject to the same EvalPlanQual re-check as claimability, so an outer WHERE "
+            + "that omits it lets a claimant push an entry past the bound. This assertion is the reason the "
+            + "omission could survive review: the fact read the two predicates it was written for and none of "
+            + $"the third. Outer WHERE was: {clauses[0]}");
     }
 
     private const string TableName = "alvo_outbox";

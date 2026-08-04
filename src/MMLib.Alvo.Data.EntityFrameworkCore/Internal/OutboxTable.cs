@@ -271,15 +271,36 @@ internal static class OutboxTable
         UPDATE {tableName} SET claimed_at = @claimed_at, claimed_by = @claimed_by,
                                attempts = attempts + 1
          WHERE dispatched_at IS NULL
+           AND {WithinAttemptCeiling}
            AND {Claimable}
            AND id IN (SELECT id FROM {tableName}
                        WHERE dispatched_at IS NULL
-                         AND attempts < @max_attempts
+                         AND {WithinAttemptCeiling}
                          AND {Claimable}
                        ORDER BY id
                        LIMIT @batch)
         RETURNING id, event_type, partition_key, payload, attempts
         """;
+
+    /// <summary>When an entry still has attempts left: it has not reached the ceiling.</summary>
+    /// <remarks>
+    /// <b>A constant in both halves for the same reason <see cref="Claimable"/> is one, and it was in the
+    /// subquery alone.</b> The EvalPlanQual argument the remarks on <see cref="ClaimSql"/> make about
+    /// claimability applies verbatim to the ceiling: the re-check runs the <em>outer</em> <c>WHERE</c> against
+    /// the newer row version and never re-runs the subquery. So a claimant whose subquery snapshot saw an entry
+    /// at <c>attempts = @max_attempts - 1</c> could be woken after another claimant had claimed, failed and
+    /// released it — leaving it genuinely claimable, genuinely at the ceiling — and the outer predicate had
+    /// nothing to refuse it with.
+    /// <para>
+    /// <b>What that cost, stated so the severity is not inflated on a later read.</b> The overshoot is bounded
+    /// by the number of racing claimants, because a claimant only reaches the row at all if its own subquery
+    /// saw room; an entry pushed to <c>@max_attempts + 1</c> is then <em>more</em> excluded, not less, since the
+    /// subquery still gates on this predicate. So no entry was delivered twice and none was lost — what broke
+    /// is only the ceiling's own promise in <see cref="MMLib.Alvo.Events.IOutboxStore.ClaimAsync"/>, that an
+    /// entry stops being claimed once it is past the bound.
+    /// </para>
+    /// </remarks>
+    private const string WithinAttemptCeiling = "attempts < @max_attempts";
 
     /// <summary>
     /// When an undelivered row may be taken: never claimed at all, released and past its backoff, or held on a
