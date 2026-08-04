@@ -1,0 +1,117 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "simple-pm",
+  "description": "A small project-management backend: people, the milestones they work towards, and the tasks in between. Three entities and two references — enough for the relational behaviour a real backend has (a unique value, a restrict-ed reference, a cascade) and nothing beyond it.",
+  "auth": {
+    "providers": ["local"]
+  },
+  "entities": {
+    "people": {
+      "description": "Someone who can be assigned a task.",
+      "audit": true,
+      "fields": {
+        "name": {
+          "type": "string",
+          "description": "Their display name. Required, so a paged list may sort by it.",
+          "required": true,
+          "maxLength": 120
+        },
+        "email": {
+          "type": "string",
+          "description": "How to reach them. Unique across the instance, which is why a second person with the same address is a 409 rather than a second row.",
+          "unique": true,
+          "maxLength": 160,
+          "format": "email"
+        }
+      },
+      "rules": {
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+        "create": "'authenticated' in @user.roles",
+        "update": "'authenticated' in @user.roles",
+        "delete": "'authenticated' in @user.roles"
+      }
+    },
+    "milestones": {
+      "description": "Something the tasks are working towards.",
+      "audit": true,
+      "fields": {
+        "name": {
+          "type": "string",
+          "description": "What the milestone is called.",
+          "required": true,
+          "maxLength": 120
+        },
+        "status": {
+          "type": "enum",
+          "description": "Where the milestone stands.",
+          "required": true,
+          "values": ["planned", "active", "done"]
+        },
+        "due_on": {
+          "type": "date",
+          "description": "The date it is meant to be reached."
+        }
+      },
+      "rules": {
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+        "create": "'authenticated' in @user.roles",
+        "update": "'authenticated' in @user.roles",
+        "delete": "'authenticated' in @user.roles"
+      }
+    },
+    "tasks": {
+      "description": "One piece of work, optionally assigned to a person and optionally belonging to a milestone.",
+      "audit": true,
+      "fields": {
+        "title": {
+          "type": "string",
+          "description": "One line describing the work. Required, so a paged list may sort by it.",
+          "required": true,
+          "maxLength": 200
+        },
+        "status": {
+          "type": "enum",
+          "description": "Where the work stands.",
+          "required": true,
+          "values": ["todo", "doing", "done"]
+        },
+        "description": {
+          "type": "text",
+          "description": "The full detail, if there is any."
+        },
+        "estimate_hours": {
+          "type": "decimal",
+          "description": "How long it is expected to take.",
+          "precision": 6,
+          "scale": 2
+        },
+        "assignee_id": {
+          "type": "ref",
+          "description": "Who is doing it. `restrict`, so deleting a person who still holds work is refused rather than silently unassigning it.",
+          "entity": "people",
+          "onDelete": "restrict"
+        },
+        "milestone_id": {
+          "type": "ref",
+          "description": "Which milestone it belongs to. `cascade`, because a task outside every milestone of a milestone-shaped plan is orphaned data, not history.",
+          "entity": "milestones",
+          "onDelete": "cascade"
+        }
+      },
+      "rules": {
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+        "create": "'authenticated' in @user.roles",
+        "update": "'authenticated' in @user.roles",
+        "delete": "'authenticated' in @user.roles"
+      },
+      "indexes": [
+        { "fields": ["status", "title"] },
+        { "fields": ["milestone_id"] }
+      ]
+    }
+  }
+}

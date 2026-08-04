@@ -1,0 +1,99 @@
+### A query key the entity does not declare is refused, never ignored. An ignored `?titel=…` answers
+### with the whole collection and the caller has no way to notice they filtered nothing.
+# @name UnknownKey
+## TEST-EXPECT-STATUS: [422]
+GET {{baseUrl}}/api/todos?colour=eq.red
+
+### A misspelled operator is refused rather than falling back to `eq` — a mistyped operator that
+### quietly became equality answers a different question than the caller asked.
+# @name UnknownOperator
+## TEST-EXPECT-STATUS: [422]
+GET {{baseUrl}}/api/todos?status=equals.done
+
+### `like` is a text operator, and `due_on` is a date. The operator exists and the field exists; the
+### pairing does not, and that is checked rather than rendered into SQL and hoped for.
+# @name OperatorWrongForType
+## TEST-EXPECT-STATUS: [422]
+GET {{baseUrl}}/api/todos?due_on=like.2026%25
+
+### A paged read sorted by a NULLABLE field is refused: a keyset cursor cannot place its nulls. Every
+### list here is paged, so this is `due_on`'s permanent state as a sort key (issue #116).
+# @name SortByNullable
+## TEST-EXPECT-STATUS: [422]
+GET {{baseUrl}}/api/todos?order=due_on.asc&limit=2
+
+### An unrecognised sort modifier is refused rather than ignored — an ignored one is a silent re-sort
+# @name MalformedOrder
+## TEST-EXPECT-STATUS: [422]
+GET {{baseUrl}}/api/todos?order=title.sideways
+
+### A page size past the configured maximum is refused, not quietly clamped — a clamped page makes a
+### client's own arithmetic wrong, and an unbounded one is a denial of service one query long.
+# @name PageTooLarge
+## TEST-EXPECT-STATUS: [422]
+GET {{baseUrl}}/api/todos?limit=5000
+
+### ---------------------------------------------------------------------------------------------
+### Access. This project's five rules are all `true`, so there is nothing to authorize: every request
+### above and below carries no credential at all, which is the point. What is left to pin is the ONE
+### thing "no authorization" does not mean.
+### ---------------------------------------------------------------------------------------------
+
+### A row created by nobody, so the reads below have something to find
+# @name SeedRow
+## TEST-EXPECT-STATUS: [201]
+POST {{baseUrl}}/api/todos
+Content-Type: application/json
+
+{ "title": "{{runToken}}-open", "status": "todo" }
+
+### Read it. No header, no key, no identity — and 200.
+# @name ReadWithoutCredential
+## TEST-EXPECT-STATUS: [200]
+GET {{baseUrl}}/api/todos/{{SeedRow.response.body.$.id}}
+
+### Write it, still anonymously. A `create` rule of `true` is evaluated against the candidate row and
+### says yes, so the read/write asymmetry a role-based rule produces does not exist here.
+# @name WriteWithoutCredential
+## TEST-EXPECT-STATUS: [200]
+PATCH {{baseUrl}}/api/todos/{{SeedRow.response.body.$.id}}
+Content-Type: application/json
+
+{ "status": "done" }
+
+### And delete it, anonymously
+# @name DeleteWithoutCredential
+## TEST-EXPECT-STATUS: [204]
+DELETE {{baseUrl}}/api/todos/{{SeedRow.response.body.$.id}}
+
+### The one thing that is NOT waived: a credential you actually presented has to work. Nothing here
+### requires a key — but a request that offers a broken one is refused rather than treated as
+### anonymous, because "this key is wrong" and "I have no key" are different situations with
+### different fixes, and silently downgrading the first would hide a misconfigured client.
+# @name BrokenKeyIsStillRefused
+## TEST-EXPECT-STATUS: [401]
+GET {{baseUrl}}/api/todos
+X-Alvo-Api-Key: demo.0000000000000000
+
+### A key that is not even key-shaped, same answer
+# @name GarbageKeyIsStillRefused
+## TEST-EXPECT-STATUS: [401]
+GET {{baseUrl}}/api/todos
+X-Alvo-Api-Key: nonsense
+
+### An entity the descriptor does not declare has no route at all. Nothing is generated for it, so
+### this is the web server's 404 rather than a policy decision — the descriptor IS the surface.
+# @name UndeclaredEntity
+## TEST-EXPECT-STATUS: [404]
+GET {{baseUrl}}/api/projects
+
+### An id that is not a guid does not match the route's `{id:guid}` constraint, so there is no
+### endpoint to refuse it — the same 404, from the same place.
+# @name NotAGuid
+## TEST-EXPECT-STATUS: [404]
+GET {{baseUrl}}/api/todos/not-a-guid
+
+### A well-formed id nothing holds
+# @name MissingRow
+## TEST-EXPECT-STATUS: [404]
+GET {{baseUrl}}/api/todos/00000000-0000-4000-8000-000000000000

@@ -1,0 +1,67 @@
+### Two people, and every later case references them. Names carry this run's token so a second
+### `--test-only` measures its own rows rather than the union with the last run's.
+# @name CreateAda
+## TEST-EXPECT-STATUS: [201]
+## TEST-HAS-HEADER: Location
+POST {{baseUrl}}/api/people
+X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+Content-Type: application/json
+
+{
+  "name": "{{runToken}} Ada Lovelace",
+  "email": "ada-{{runToken}}@example.test"
+}
+
+### The second, so a filter over `assignee_id` has something to discriminate
+# @name CreateGrace
+## TEST-EXPECT-STATUS: [201]
+POST {{baseUrl}}/api/people
+X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+Content-Type: application/json
+
+{
+  "name": "{{runToken}} Grace Hopper",
+  "email": "grace-{{runToken}}@example.test"
+}
+
+### `email` is optional. A person the team knows by name and nothing else is a real row.
+# @name CreateAnonymousContributor
+## TEST-EXPECT-STATUS: [201]
+POST {{baseUrl}}/api/people
+X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+Content-Type: application/json
+
+{ "name": "{{runToken}} Zoe Nameless" }
+
+### `email` is UNIQUE, so a second person at the same address is refused. This is one of the two
+### facets the framework cannot check before the write — only the engine knows whether a value is
+### already held — so it arrives as a 409 from the database rather than a 422 from the validator.
+# @name DuplicateEmail
+## TEST-EXPECT-STATUS: [409]
+POST {{baseUrl}}/api/people
+X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+Content-Type: application/json
+
+{
+  "name": "{{runToken}} Ada Impostor",
+  "email": "ada-{{runToken}}@example.test"
+}
+
+### `format: email` is checked before the write, though — that one the framework can see, and it is a
+### 422 naming the field.
+# @name NotAnEmail
+## TEST-EXPECT-STATUS: [422]
+POST {{baseUrl}}/api/people
+X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+Content-Type: application/json
+
+{
+  "name": "{{runToken}} Bad Address",
+  "email": "not-an-email"
+}
+
+### The team as it now stands: three people, and neither refused write left a row.
+# @name Team
+## TEST-EXPECT-STATUS: [200]
+GET {{baseUrl}}/api/people?name=like.{{runToken}}%25&order=name.asc&limit=100
+X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}

@@ -1,0 +1,51 @@
+### Two milestones. The second exists so the cascade in 040 can delete one and leave the other's tasks
+### standing — a cascade that took everything would look identical to one that took the right rows.
+# @name CreateBeta
+## TEST-EXPECT-STATUS: [201]
+POST {{baseUrl}}/api/milestones
+X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+Content-Type: application/json
+
+{
+  "name": "{{runToken}} Beta",
+  "status": "active",
+  "due_on": "2026-09-30"
+}
+
+###
+# @name CreateLaunch
+## TEST-EXPECT-STATUS: [201]
+POST {{baseUrl}}/api/milestones
+X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+Content-Type: application/json
+
+{
+  "name": "{{runToken}} Launch",
+  "status": "planned",
+  "due_on": "2026-12-01"
+}
+
+### Move Beta along, conditionally. `audit: true` is what mints the version the ETag is taken from.
+# @name AdvanceBeta
+## TEST-EXPECT-STATUS: [200]
+PATCH {{baseUrl}}/api/milestones/{{CreateBeta.response.body.$.id}}
+X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+If-Match: {{CreateBeta.response.headers.ETag}}
+Content-Type: application/json
+
+{ "status": "done" }
+
+### `status` is an enum with three declared values, and 'shipped' is not one of them
+# @name NotADeclaredStatus
+## TEST-EXPECT-STATUS: [422]
+POST {{baseUrl}}/api/milestones
+X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+Content-Type: application/json
+
+{ "name": "{{runToken}} Wrong", "status": "shipped" }
+
+### The plan as it stands
+# @name Plan
+## TEST-EXPECT-STATUS: [200]
+GET {{baseUrl}}/api/milestones?name=like.{{runToken}}%25&order=name.asc&limit=100
+X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}

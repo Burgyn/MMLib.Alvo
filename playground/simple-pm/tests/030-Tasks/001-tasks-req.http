@@ -1,0 +1,116 @@
+### Four tasks across two people and two milestones, so every filter below has something to leave out.
+### The ids come from 010 and 020 via captured variables — the two references are what make this a
+### relational backend rather than three independent tables.
+# @name TaskA
+## TEST-EXPECT-STATUS: [201]
+POST {{baseUrl}}/api/tasks
+X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+Content-Type: application/json
+
+{
+  "title": "{{runToken}} a design the schema",
+  "status": "done",
+  "description": "Three entities, two references.",
+  "estimate_hours": 4.5,
+  "assignee_id": "{{AdaId}}",
+  "milestone_id": "{{BetaId}}"
+}
+
+###
+# @name TaskB
+## TEST-EXPECT-STATUS: [201]
+POST {{baseUrl}}/api/tasks
+X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+Content-Type: application/json
+
+{
+  "title": "{{runToken}} b write the endpoints",
+  "status": "doing",
+  "estimate_hours": 12,
+  "assignee_id": "{{AdaId}}",
+  "milestone_id": "{{BetaId}}"
+}
+
+###
+# @name TaskC
+## TEST-EXPECT-STATUS: [201]
+POST {{baseUrl}}/api/tasks
+X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+Content-Type: application/json
+
+{
+  "title": "{{runToken}} c review the endpoints",
+  "status": "todo",
+  "assignee_id": "{{GraceId}}",
+  "milestone_id": "{{BetaId}}"
+}
+
+### On the OTHER milestone, so the cascade in 040 has something it must not take.
+# @name TaskD
+## TEST-EXPECT-STATUS: [201]
+POST {{baseUrl}}/api/tasks
+X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+Content-Type: application/json
+
+{
+  "title": "{{runToken}} d write the announcement",
+  "status": "todo",
+  "assignee_id": "{{GraceId}}",
+  "milestone_id": "{{LaunchId}}"
+}
+
+### Both references are optional: a task in nobody's queue and no milestone is a legitimate row.
+# @name TaskUnassigned
+## TEST-EXPECT-STATUS: [201]
+POST {{baseUrl}}/api/tasks
+X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+Content-Type: application/json
+
+{ "title": "{{runToken}} e someone should look at this", "status": "todo" }
+
+### Everything this run created, in title order
+# @name AllTasks
+## TEST-EXPECT-STATUS: [200]
+GET {{baseUrl}}/api/tasks?title=like.{{runToken}}%25&order=title.asc&limit=100
+X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+
+### One milestone's tasks — a filter over a `ref` field, which is what the second index is for
+# @name BetaTasks
+## TEST-EXPECT-STATUS: [200]
+GET {{baseUrl}}/api/tasks?title=like.{{runToken}}%25&milestone_id=eq.{{BetaId}}&order=title.asc&limit=100
+X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+
+### One person's open work: two terms conjoined, which is the query a task board actually issues
+# @name GraceOpenWork
+## TEST-EXPECT-STATUS: [200]
+GET {{baseUrl}}/api/tasks?title=like.{{runToken}}%25&assignee_id=eq.{{GraceId}}&status=in.(todo,doing)&order=title.asc&limit=100
+X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+
+### The tasks nobody owns — `is.null` on a `ref`, which is how a triage view is built
+# @name Unassigned
+## TEST-EXPECT-STATUS: [200]
+GET {{baseUrl}}/api/tasks?title=like.{{runToken}}%25&assignee_id=is.null&order=title.asc&limit=100
+X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+
+### A `ref` to a row that does not exist is refused before the write, naming the field
+# @name AssigneeDoesNotExist
+## TEST-EXPECT-STATUS: [422]
+POST {{baseUrl}}/api/tasks
+X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+Content-Type: application/json
+
+{
+  "title": "{{runToken}} z assigned to nobody real",
+  "status": "todo",
+  "assignee_id": "00000000-0000-4000-8000-00000000dead"
+}
+
+### `estimate_hours` declares scale 2, so a third fractional digit is refused rather than rounded — a
+### silently rounded number is a wrong number nobody can see.
+# @name TooPrecise
+## TEST-EXPECT-STATUS: [422]
+POST {{baseUrl}}/api/tasks
+X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+Content-Type: application/json
+
+{ "title": "{{runToken}} z too precise", "status": "todo", "estimate_hours": 1.234 }

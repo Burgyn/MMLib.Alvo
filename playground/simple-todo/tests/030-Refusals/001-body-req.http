@@ -1,0 +1,39 @@
+### Three problems in one payload, so the claim is that the refusal names EVERY one of them rather
+### than the first. §0 principle 4's reader is an agent, and a 422 reporting one problem per round
+### trip costs it one request per mistake.
+###
+###   title   - 201 characters where the field declares maxLength 200
+###   status  - 'urgent' is not one of the three declared enum values
+###   colour  - a key the entity does not declare at all
+# @name ManyProblems
+## TEST-EXPECT-STATUS: [422]
+POST {{baseUrl}}/api/todos
+Content-Type: application/json
+
+{
+  "title": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "status": "urgent",
+  "colour": "red"
+}
+
+### An empty body: both required fields are absent, and both are named.
+# @name NothingSent
+## TEST-EXPECT-STATUS: [422]
+POST {{baseUrl}}/api/todos
+Content-Type: application/json
+
+{}
+
+### The two optional fields really are optional — the minimum viable todo is a title and a status.
+# @name MinimumViable
+## TEST-EXPECT-STATUS: [201]
+POST {{baseUrl}}/api/todos
+Content-Type: application/json
+
+{ "title": "{{runToken}}-minimal", "status": "todo" }
+
+### After two refused writes, nothing of theirs was stored. Scoped to this run's rows so a second
+### `--test-only` measures its own writes rather than the union with the last run's.
+# @name NothingWasWritten
+## TEST-EXPECT-STATUS: [200]
+GET {{baseUrl}}/api/todos?title=like.{{runToken}}-minimal%25&order=title.asc&limit=100

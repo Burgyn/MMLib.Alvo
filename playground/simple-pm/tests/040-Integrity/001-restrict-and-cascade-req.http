@@ -1,0 +1,46 @@
+### The two `onDelete` policies the descriptor declares, measured against each other. This case runs
+### last on purpose: it destroys the rows the earlier ones built.
+###
+### State it inherits: Ada holds task `a`; Grace holds `b` and `d`; Zoe holds nothing. Tasks `a` and
+### `c` are on milestone Beta, `d` is on Launch, `e` is on neither.
+###
+### Deleting Ada is refused — `tasks.assignee_id` is `restrict`, so a person who still holds work
+### cannot be removed. The alternative would be silently unassigning her tasks, which loses the one
+### fact somebody would have wanted to look up.
+# @name DeleteAdaRefused
+## TEST-EXPECT-STATUS: [409]
+DELETE {{baseUrl}}/api/people/{{AdaId}}
+X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+
+### Zoe holds nothing, and goes. The control: without it, the 409 above could be "delete is broken"
+### rather than "the reference stopped it".
+# @name DeleteZoe
+## TEST-EXPECT-STATUS: [204]
+DELETE {{baseUrl}}/api/people/{{ZoeId}}
+X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+
+### Beta goes, and `tasks.milestone_id` is `cascade`, so the tasks on it go with it. A task belonging
+### to a milestone that no longer exists is orphaned data, not history.
+# @name DeleteBeta
+## TEST-EXPECT-STATUS: [204]
+DELETE {{baseUrl}}/api/milestones/{{BetaId}}
+X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+
+### What is left of this run's tasks
+# @name TasksAfterCascade
+## TEST-EXPECT-STATUS: [200]
+GET {{baseUrl}}/api/tasks?title=like.{{runToken}}%25&order=title.asc&limit=100
+X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+
+### Ada now holds nothing — the cascade took the task that was blocking her — so the same delete that
+### was refused above succeeds. The restrict was about the reference, and it lifted with it.
+# @name DeleteAdaNow
+## TEST-EXPECT-STATUS: [204]
+DELETE {{baseUrl}}/api/people/{{AdaId}}
+X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
+
+### And the team is Grace alone
+# @name TeamAfter
+## TEST-EXPECT-STATUS: [200]
+GET {{baseUrl}}/api/people?name=like.{{runToken}}%25&order=name.asc&limit=100
+X-Alvo-Api-Key: {{apiKeyId}}.{{apiKeySecret}}
