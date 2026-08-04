@@ -77,6 +77,22 @@ public sealed class OutboxDispatcherTests : IDisposable
     /// A boot that refused leaves the pump doing nothing at all, rather than claiming against a catalog that was
     /// never primed.
     /// </summary>
+    /// <remarks>
+    /// <b>The two halves need two different waits, and collapsing them into one is what made this fact flaky.</b>
+    /// "It claimed nothing" is a claim about a <em>window</em>, so a fixed delay is the only thing that can
+    /// measure it. "The pump ended" is a claim about a <em>state</em> reached by a continuation the thread pool
+    /// schedules — <c>AlvoBootState</c> completes its settled task with
+    /// <c>RunContinuationsAsynchronously</c> — so a fixed delay does not establish it, it only usually happens to.
+    /// ring0 runs nine test assemblies at once and CI measured the difference: green locally and on the previous
+    /// run, red on ubuntu with <c>IsCompletedSuccessfully</c> false. The bounded wait is what
+    /// <c>The_dispatcher_can_be_switched_off_entirely</c> below already does; this fact simply did not.
+    /// <para>
+    /// Nothing is weakened by the change. <see cref="Task.IsCompletedSuccessfully"/> is still the assertion, so a
+    /// pump that ended <em>faulted</em> or cancelled still fails; and <c>UntilAsync</c> carries a budget, so a
+    /// pump that parks forever still fails — with a message naming what never happened instead of a bare
+    /// <c>False</c>.
+    /// </para>
+    /// </remarks>
     [Fact]
     public async Task A_boot_that_refused_leaves_the_pump_claiming_nothing()
     {
@@ -87,6 +103,8 @@ public sealed class OutboxDispatcherTests : IDisposable
 
         store.ClaimCount.ShouldBe(0);
         store.EnsureCount.ShouldBe(0);
+
+        await UntilAsync(() => pump.Service.ExecuteTask!.IsCompleted, "the pump to end rather than park");
         pump.Service.ExecuteTask!.IsCompletedSuccessfully.ShouldBeTrue(
             "the pump ends rather than parks, so the host's StopAsync has nothing to wait for");
     }
