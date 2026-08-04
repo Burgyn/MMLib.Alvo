@@ -27,17 +27,45 @@ namespace MMLib.Alvo.Tests;
 /// is asserting on the framework's own plumbing rather than on the message, and the runs that use this
 /// resolve exactly one logger.
 /// </para>
+/// <para>
+/// <b>The list is guarded, because a background service is a legitimate writer.</b> A fact that starts a real
+/// hosted service — <c>OutboxDispatcherTests</c> does — has the pump appending on its own thread while the
+/// fact enumerates, which is an <see cref="InvalidOperationException"/> (*"Collection was modified"*) waiting
+/// for the wrong interleaving, and it was observed once under parallel load. Both the write and every read
+/// take one lock and every reader hands back a **snapshot**, which is the shape
+/// <c>RecordingWebhookReceiver</c> already uses for the same reason: a caller iterating the returned list
+/// cannot be racing a later append.
+/// </para>
 /// </remarks>
 internal sealed class CapturingLogger : ILogger, ILoggerProvider
 {
     private readonly List<CapturedLogEntry> _entries = [];
 
+    private readonly object _gate = new();
+
     /// <summary>Every entry written through this logger, in order.</summary>
-    internal IReadOnlyList<CapturedLogEntry> Entries => _entries;
+    internal IReadOnlyList<CapturedLogEntry> Entries
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return [.. _entries];
+            }
+        }
+    }
 
     /// <summary>The formatted message of every warning written through this logger, in order.</summary>
-    internal IReadOnlyList<string> Warnings =>
-        [.. _entries.Where(entry => entry.Level == LogLevel.Warning).Select(entry => entry.Message)];
+    internal IReadOnlyList<string> Warnings
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return [.. _entries.Where(entry => entry.Level == LogLevel.Warning).Select(entry => entry.Message)];
+            }
+        }
+    }
 
     /// <inheritdoc/>
     public ILogger CreateLogger(string categoryName) => this;
@@ -57,7 +85,12 @@ internal sealed class CapturingLogger : ILogger, ILoggerProvider
         Func<TState, Exception?, string> formatter)
     {
         ArgumentNullException.ThrowIfNull(formatter);
-        _entries.Add(new CapturedLogEntry(logLevel, formatter(state, exception), exception));
+
+        var entry = new CapturedLogEntry(logLevel, formatter(state, exception), exception);
+        lock (_gate)
+        {
+            _entries.Add(entry);
+        }
     }
 
     /// <summary>

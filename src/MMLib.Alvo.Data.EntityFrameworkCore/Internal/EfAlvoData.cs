@@ -39,6 +39,18 @@ internal sealed class EfAlvoData : IAlvoData
 {
     private readonly IPolicyEngine _policy;
     private readonly IPredicateEvaluator _evaluator;
+
+    /// <summary>
+    /// The <c>before*</c> hook pipeline, called from <b>inside</b> every write transaction this class opens.
+    /// </summary>
+    /// <remarks>
+    /// A port and not a call into the core, because this class is <see langword="internal"/> to a driver that
+    /// depends on <c>MMLib.Alvo.Abstractions</c> alone — so both shipped engines and any out-of-repo one run
+    /// the same pipeline rather than each growing its own. Its method is synchronous, which is what makes a
+    /// network call from a hook holding this transaction's locks inexpressible; see
+    /// <see cref="IBeforeHookRunner"/>.
+    /// </remarks>
+    private readonly IBeforeHookRunner _hooks;
     private readonly ReadStatementComposer _statements;
 
     /// <summary>
@@ -55,6 +67,7 @@ internal sealed class EfAlvoData : IAlvoData
     internal EfAlvoData(
         IPolicyEngine policy,
         IPredicateEvaluator evaluator,
+        IBeforeHookRunner hooks,
         IPredicateRenderer predicates,
         IFieldSqlRenderer fields,
         IAlvoSqlDialect dialect,
@@ -64,6 +77,7 @@ internal sealed class EfAlvoData : IAlvoData
     {
         ArgumentNullException.ThrowIfNull(policy);
         ArgumentNullException.ThrowIfNull(evaluator);
+        ArgumentNullException.ThrowIfNull(hooks);
         ArgumentNullException.ThrowIfNull(predicates);
         ArgumentNullException.ThrowIfNull(fields);
         ArgumentNullException.ThrowIfNull(dialect);
@@ -72,6 +86,7 @@ internal sealed class EfAlvoData : IAlvoData
         ArgumentNullException.ThrowIfNull(options);
         _policy = policy;
         _evaluator = evaluator;
+        _hooks = hooks;
         _statements = new ReadStatementComposer(predicates, fields, dialect);
         _dialect = dialect;
         _contexts = contexts;
@@ -181,6 +196,7 @@ internal sealed class EfAlvoData : IAlvoData
         await EnsureOutboxTableAsync(db, cancellationToken);
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        candidate = RunBeforeCreate(db, schema, decision, context, candidate, now);
         var stored = await InsertAsync(db, schema, decision, context, candidate, cancellationToken);
         await EmitAsync(
             db, transaction, schema, OutboxOperation.Created, context, now, Unmasked(stored), preImage: null,
@@ -189,6 +205,84 @@ internal sealed class EfAlvoData : IAlvoData
 
         return RecordMaterializer.ToRecord(stored, decision.HiddenFields);
     }
+
+    /// <summary>
+    /// Runs the entity's <c>beforeCreate</c> hooks over the candidate and re-reaches the write's own verdict
+    /// over whatever they patched.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Called from inside the transaction at every create site, and never where the candidate is built.</b>
+    /// <see cref="AuthorizedCandidate"/> runs before <c>BeginTransactionAsync</c> — a hook placed there would
+    /// have nothing to roll back, so a <c>reject</c> would refuse a write whose row was already committed on
+    /// the next site to open a transaction, and a budget the hook overran would be spent outside the scope
+    /// that could undo it. Inside the transaction, a refusal is a rolled-back write with no row and no outbox
+    /// event, which is what the DoD asks of it.
+    /// </para>
+    /// <para>
+    /// <b>The verdict is re-reached and the caller's payload guard is not, and the asymmetry is the ruling.</b>
+    /// <see cref="WritePayloadGuard"/> judges <em>a caller's</em> keys — framework-managed columns, fields a
+    /// policy froze as <c>readOnly</c> — and a hook is not the caller: re-running it would refuse a hook
+    /// legitimately setting a field callers may not write, which is one of the two things a before-hook exists
+    /// for. <see cref="EnsureWriteAllowed"/> judges something else entirely: the <em>row</em> the write will
+    /// store, against <c>WITH CHECK</c> and the tenant scope. A patch reaching storage unjudged would be a
+    /// caller-reachable authorization bypass — a hook writing <c>owner_id</c> from a field the caller controls
+    /// would place a row the <c>create</c> rule refuses — so the post-image verdict runs again over exactly
+    /// what will be written.
+    /// </para>
+    /// </remarks>
+    /// <returns>
+    /// The candidate to insert: the one passed in when no hook patched anything, and a patched copy otherwise.
+    /// A copy rather than an in-place edit because a patch may write <see langword="null"/>, which the bag's
+    /// non-nullable value type cannot hold — the key is left out instead, which is
+    /// <see cref="WritePropertyBag"/>'s own rule for an insert.
+    /// </returns>
+    private Dictionary<string, object> RunBeforeCreate(
+        AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context,
+        Dictionary<string, object> candidate, DateTimeOffset now)
+    {
+        var patch = _hooks.Run(schema.Name, DataOperation.Create, Unmasked(candidate), previous: null, context, now);
+        if (patch.Count == 0)
+        {
+            return candidate;
+        }
+
+        var patched = Patched(db.Rows(schema.Name).EntityType, candidate, patch);
+        EnsureWriteAllowed(decision, Unmasked(patched), previous: null, context);
+
+        return patched;
+    }
+
+    /// <summary>
+    /// Applies a hook's patch to the candidate bag, through <see cref="WritePropertyBag"/> — the same funnel a
+    /// caller's own value goes through, so a mutated value reaches the column as a bound parameter in that
+    /// column's own representation and never as interpolated text.
+    /// </summary>
+    /// <remarks>
+    /// A field the patch set to <see langword="null"/> is <b>absent</b> from the result rather than present
+    /// with a null, which is <see cref="WritePropertyBag"/>'s own rule for an insert: the bag's value type is
+    /// non-nullable, and an absent key already means "leave the column at its default", which for a nullable
+    /// column is a SQL null. Built as a new bag rather than edited in place, so this path composes no
+    /// change-tracker vocabulary at all.
+    /// </remarks>
+    private static Dictionary<string, object> Patched(
+        IEntityType rows, Dictionary<string, object> candidate, IReadOnlyDictionary<string, object?> patch)
+    {
+        var patched = candidate
+            .Where(entry => !IsNulledBy(patch, entry.Key))
+            .ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.Ordinal);
+
+        foreach (var (field, value) in WritePropertyBag.For(rows, patch))
+        {
+            patched[field] = value;
+        }
+
+        return patched;
+    }
+
+    /// <summary>Whether <paramref name="patch"/> sets <paramref name="field"/> to <see langword="null"/>.</summary>
+    private static bool IsNulledBy(IReadOnlyDictionary<string, object?> patch, string field) =>
+        patch.TryGetValue(field, out var value) && value is null;
 
     /// <summary>
     /// The candidate row this create would insert, already refused if the payload named a field a caller may
@@ -363,12 +457,21 @@ internal sealed class EfAlvoData : IAlvoData
     /// The instant is the write's own, threaded in rather than read again here: the row's audit stamp, the
     /// event's <c>time</c> and the record's <c>created_at</c> are one instant.
     /// </para>
+    /// <para>
+    /// <b>This is where the <c>beforeCreate</c> hooks run on the idempotent path, and
+    /// <see cref="CreatedOrReplayedAsync"/> is deliberately not.</b> That method opens the transaction and then
+    /// branches on whether a record for the key already exists, so a hook called there would run on a
+    /// <em>replay</em> too — doubling a <c>mutate</c> whose value the first attempt already stored, and letting
+    /// a <c>reject</c> refuse a retry of a create the caller has already been told succeeded. A hook belongs on
+    /// the branch that writes a row, which is this one.
+    /// </para>
     /// </remarks>
     private async Task<AlvoRecord> RecordedCreateAsync(
         AlvoDataContext db, IDbContextTransaction transaction, EntitySchema schema, PolicyDecision decision,
         AlvoContext context, Dictionary<string, object> candidate, IdempotencyScope records, DateTimeOffset now,
         CancellationToken cancellationToken)
     {
+        candidate = RunBeforeCreate(db, schema, decision, context, candidate, now);
         var stored = await InsertAsync(db, schema, decision, context, candidate, cancellationToken);
         await EmitAsync(
             db, transaction, schema, OutboxOperation.Created, context, now, Unmasked(stored), preImage: null,
@@ -418,6 +521,12 @@ internal sealed class EfAlvoData : IAlvoData
     /// <para>
     /// A different fingerprint under the same key is refused before the row is read at all: it is not a replay,
     /// and answering with the first request's row would report success for a create that never happened.
+    /// </para>
+    /// <para>
+    /// <b>A replay runs no <c>beforeCreate</c> hook</b>, and that is the same argument this whole method rests
+    /// on: nothing is re-done, only re-read. The hooks ran on the write that produced this record, so running
+    /// them again would apply a second <c>mutate</c> on top of a value already stored, and would let a
+    /// <c>reject</c> refuse a retry of a create the caller was already told succeeded.
     /// </para>
     /// </remarks>
     private async Task<AlvoRecord> ReplayedAsync(
@@ -621,7 +730,7 @@ internal sealed class EfAlvoData : IAlvoData
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var (preImage, postImage) = await WriteAsync(
             db, schema, decision, context, id, Stamped(schema, values, context, now, isUpdate: true), precondition,
-            cancellationToken);
+            now, cancellationToken);
         await EmitAsync(
             db, transaction, schema, OutboxOperation.Updated, context, now, Unmasked(postImage), preImage,
             cancellationToken);
@@ -699,7 +808,7 @@ internal sealed class EfAlvoData : IAlvoData
         await EnsureOutboxTableAsync(db, cancellationToken);
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var preImage = await EraseAsync(db, schema, decision, context, id, precondition, cancellationToken);
+        var preImage = await EraseAsync(db, schema, decision, context, id, precondition, now, cancellationToken);
         await EmitAsync(
             db, transaction, schema, OutboxOperation.Deleted, context, now, postImage: null, preImage,
             cancellationToken);
@@ -734,12 +843,13 @@ internal sealed class EfAlvoData : IAlvoData
     /// </remarks>
     private async Task<AlvoRecord> EraseAsync(
         AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context,
-        Guid id, AlvoPrecondition? precondition, CancellationToken cancellationToken)
+        Guid id, AlvoPrecondition? precondition, DateTimeOffset now, CancellationToken cancellationToken)
     {
         var stored = await SingleAsync(
             db, schema, decision, context, id, PreImageMutation.Delete, cancellationToken, unmasked: true)
             ?? throw new AlvoRecordNotFoundException();
         AlvoPrecondition.EnsureMatches(precondition, StoredVersion(schema, stored));
+        RunBeforeDelete(schema, context, Unmasked(stored), now);
 
         // A `ref` declaring onDelete: "restrict" is the descriptor ASKING the store to refuse this, so the
         // refusal is a conflict the caller can act on rather than a broken invariant — hence the translation.
@@ -754,6 +864,37 @@ internal sealed class EfAlvoData : IAlvoData
         }
 
         return Unmasked(stored);
+    }
+
+    /// <summary>
+    /// Runs the entity's <c>beforeDelete</c> hooks over the row-locked pre-image, so a <c>reject</c> refuses
+    /// the delete before the <c>DELETE</c> is issued and inside the transaction that would have committed it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The pre-image is passed as <em>both</em> images. A delete produces no post-image, so the compiler
+    /// refuses <c>new.</c> and <c>changed(...)</c> in a <c>beforeDelete</c> expression — and a bare field
+    /// reference, which resolves against the current image, has to read the row being removed rather than
+    /// nothing at all.
+    /// </para>
+    /// <para>
+    /// A patch here is an invariant violation and not an author's mistake: a <c>mutate</c> under
+    /// <c>beforeDelete</c> is refused when the descriptor is applied, so a non-empty patch means the compiler
+    /// and this path disagree. It is raised rather than ignored, because silently dropping it is how the
+    /// refusal would come to be untrue without anything failing.
+    /// </para>
+    /// </remarks>
+    private void RunBeforeDelete(
+        EntitySchema schema, AlvoContext context, AlvoRecord preImage, DateTimeOffset now)
+    {
+        var patch = _hooks.Run(schema.Name, DataOperation.Delete, preImage, preImage, context, now);
+        if (patch.Count > 0)
+        {
+            throw new InvalidOperationException(
+                "A 'beforeDelete' hook produced a payload patch, which no delete can write. A 'mutate' on that "
+                + "hook point is refused when the descriptor is applied, so this means the hook compiler and "
+                + "this write path disagree about what a delete may carry.");
+        }
     }
 
     /// <summary>
@@ -784,14 +925,24 @@ internal sealed class EfAlvoData : IAlvoData
     /// post-image's verdict, the policy-carrying write, and the re-read that produces what is returned.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Both images leave with the result, because both are already in hand and the event needs both — the
     /// pre-image the <c>WITH CHECK</c> verdict was reached over, and the post-image the caller is answered
     /// with. That is what makes the emit cost this path no extra read.
+    /// </para>
+    /// <para>
+    /// <b>The <c>beforeUpdate</c> hooks run here and not in <see cref="UpdateAsync"/>, because this is where
+    /// both row images exist.</b> A hook's <c>old.</c> references and its <c>changed(...)</c> calls need the
+    /// in-transaction, row-locked pre-image — a pre-image read before the transaction, or on another
+    /// connection, would let the row advance between what the hook judged and what the write stored. Running
+    /// before <see cref="EnsureWriteAllowed"/> is likewise deliberate: the verdict then judges the patched
+    /// post-image, which is what will actually be written.
+    /// </para>
     /// </remarks>
     private async Task<(AlvoRecord PreImage, Dictionary<string, object> PostImage)> WriteAsync(
         AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context,
         Guid id, IReadOnlyDictionary<string, object?> values, AlvoPrecondition? precondition,
-        CancellationToken cancellationToken)
+        DateTimeOffset now, CancellationToken cancellationToken)
     {
         var stored = await SingleAsync(
             db, schema, decision, context, id, PreImageMutation.Update, cancellationToken, unmasked: true)
@@ -799,9 +950,10 @@ internal sealed class EfAlvoData : IAlvoData
         AlvoPrecondition.EnsureMatches(precondition, StoredVersion(schema, stored));
 
         var preImage = Unmasked(stored);
-        EnsureWriteAllowed(decision, Merge(preImage, values), preImage, context);
+        var vetted = RunBeforeUpdate(schema, context, preImage, values, now);
+        EnsureWriteAllowed(decision, Merge(preImage, vetted), preImage, context);
 
-        if (await AffectedAsync(db, schema, decision, context, id, values, cancellationToken) == 0)
+        if (await AffectedAsync(db, schema, decision, context, id, vetted, cancellationToken) == 0)
         {
             throw new AlvoRecordNotFoundException();
         }
@@ -811,6 +963,37 @@ internal sealed class EfAlvoData : IAlvoData
             ?? throw new AlvoRecordNotFoundException();
 
         return (preImage, postImage);
+    }
+
+    /// <summary>
+    /// Runs the entity's <c>beforeUpdate</c> hooks over the merged post-image and returns the payload the
+    /// <c>UPDATE</c> should carry — the caller's, with whatever the hooks patched on top.
+    /// </summary>
+    /// <remarks>
+    /// The hooks judge the <b>complete</b> post-image and not the caller's partial payload, for the reason
+    /// <see cref="EnsureWriteAllowed"/> does: a field the caller did not mention has to read as its stored
+    /// value, or a condition over one unrelated field would see a null. A patched <see langword="null"/>
+    /// survives into the setters here — unlike on the insert path — because <c>ExecuteUpdate</c> writes it as
+    /// a real <c>SET column = NULL</c>, which is what an author asking for null on an update means.
+    /// </remarks>
+    private IReadOnlyDictionary<string, object?> RunBeforeUpdate(
+        EntitySchema schema, AlvoContext context, AlvoRecord preImage,
+        IReadOnlyDictionary<string, object?> values, DateTimeOffset now)
+    {
+        var patch = _hooks.Run(
+            schema.Name, DataOperation.Update, Merge(preImage, values), preImage, context, now);
+        if (patch.Count == 0)
+        {
+            return values;
+        }
+
+        var patched = new Dictionary<string, object?>(values, StringComparer.Ordinal);
+        foreach (var (field, value) in patch)
+        {
+            patched[field] = value;
+        }
+
+        return patched;
     }
 
     /// <summary>

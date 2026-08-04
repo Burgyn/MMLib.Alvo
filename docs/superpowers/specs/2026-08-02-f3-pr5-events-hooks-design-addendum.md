@@ -88,28 +88,46 @@ Add a fourth profile, **`CelProfile.Mutate`**, appended to the enum
 (`src/MMLib.Alvo.Abstractions/Expressions/CelProfile.cs`), with this row in
 `cel.md`'s truth table:
 
-| Construct | Rule | Computed | Condition | **Mutate** |
-|---|---|---|---|---|
-| Literal | ✓ | ✓ | ✓ | **✓** |
-| Field ref, current row | ✓ | ✓ | ✓ | **✓** |
-| Field ref, `old.`/`new.` | ✗ | ✗ | ✓ | **✓** |
-| `@user`/`@tenant` | ✓ | ✗ | ✓ | **✓** |
-| `&&` / `\|\|` / `!` | ✓ | ✓ | ✓ | **✓** |
-| Comparison | ✓ | ✓ | ✓ | **✓** |
-| `in` (role membership) | ✓ | ✗ | ✓ | **✓** |
-| `has(field)` | ✓ | ✓ | ✓ | **✓** |
-| Arithmetic | ✗ | ✓ | ✗ | **✓** |
-| Ternary | ✗ | ✓ | ✗ | **✓** |
-| `changed(field)` | ✗ | ✗ | ✓ | **✓** |
-| **Allow-listed function call** | ✗ | ✗ | ✗ | **✓** |
-| **Result type** | `Bool` | non-boolean scalar | `Bool` | **any scalar, incl. `Bool`** |
+> **Corrected by PR5b, which implemented it.** This table's `Mutate` column was written as
+> the *upper bound* the profile may hold, and it read as a promise. What shipped is
+> narrower: `_allowedProfiles` admits **four** constructs in `Mutate` and no more. The
+> **Shipped** column below is what `CelTypeChecker` really does; the **Design** column is
+> this decision's original bound, kept because the argument for why each construct *may*
+> live in `Mutate` is still the argument a widening would use.
+> `docs/architecture/cel.md`'s truth table is the one that is authoritative, and it prints
+> the shipped state only. See deviation 79.
 
-`Mutate` is the union of `Condition`'s visibility with `Computed`'s expressive constructs,
-plus a small function allow-list, and it is the only profile with no constraint on the
-result type at all — a `boolean` column is a legitimate `mutate` target
+| Construct | Rule | Computed | Condition | **Mutate (shipped)** | Mutate (design bound) |
+|---|---|---|---|---|---|
+| Literal | ✓ | ✓ | ✓ | **✓** | ✓ |
+| Field ref, current row | ✓ | ✓ | ✓ | **✓** | ✓ |
+| Field ref, `old.`/`new.` | ✗ | ✗ | ✓ | **✓** | ✓ |
+| `@user`/`@tenant` | ✓ | ✗ | ✓ | **✗ deferred** | ✓ |
+| `&&` / `\|\|` / `!` | ✓ | ✓ | ✓ | **✗ deferred** | ✓ |
+| Comparison | ✓ | ✓ | ✓ | **✗ deferred** | ✓ |
+| `in` (role membership) | ✓ | ✗ | ✓ | **✗ deferred** | ✓ |
+| `has(field)` | ✓ | ✓ | ✓ | **✗ deferred** | ✓ |
+| Arithmetic | ✗ | ✓ | ✗ | **✗ deferred** | ✓ |
+| Ternary | ✗ | ✓ | ✗ | **✗ deferred** | ✓ |
+| `changed(field)` | ✗ | ✗ | ✓ | **✗ deferred** | ✓ |
+| **Allow-listed function call** | ✗ | ✗ | ✗ | **✓** | ✓ |
+| **Result type** | `Bool` | non-boolean scalar | `Bool` | **any scalar, incl. `Bool`** | any scalar, incl. `Bool` |
+
+**Deferred, not refused.** Deny-by-default is what makes the deferral safe: an unlisted
+pairing compiles in **no** profile, so nothing waits in a half-admitted state, and each
+construct arrives with the fact that needs it. Measured against the tree: the only `mutate`
+values that exist are `lowerAscii(new.email)` and `now()` (`crm.alvo.json:110`, `:148`), so
+the four shipped rows are exactly what the descriptors need — the deferral costs nothing
+that ships.
+
+At its design bound `Mutate` is the union of `Condition`'s visibility with `Computed`'s
+expressive constructs, plus a small function allow-list. The **result type** row shipped in
+full and is not deferred: `Mutate` is the only profile with no constraint on the result type
+at all — a `boolean` column is a legitimate `mutate` target
 (`"mutate": {"is_closed": {"$cel": "new.stage == 'won'"}}`), which is exactly the case
 `Computed` has to reject because a generated column cannot hold "predicate" as a value
-(`CelCompiler.cs:81-87`).
+(`CelCompiler.cs:81-87`). That example is also the one that will bring the comparison row
+with it, because it needs `==`, which today's checker refuses.
 
 **The name.** `Mutate`, not `Value`. Alvo's profiles are named after the **descriptor slot**
 they compile, never after the result shape: `Rule` is `entities.*.rules.*` (plus the
@@ -192,10 +210,21 @@ to adopt the **name and semantics** from the standard and deviate only on the **
 which `has(...)`/`changed(...)` already established: `lowerAscii(new.email)`. `lower(...)`
 is refused, with a fix suggestion naming `lowerAscii`. The name matters beyond recognition:
 `lowerAscii` means an ASCII-only fold, so the implementation is pinned to folding `A`–`Z`
-and nothing else — **not** `ToLowerInvariant()`, which folds `İ` and a long tail of
+and nothing else — **not** `ToLowerInvariant()`, which folds a long tail of
 non-ASCII code points. A culture- or Unicode-sensitive fold on a *stored* value is a
 permanently wrong row, which is the same class of defect `UnhonouredFeatures` refuses
 `default` for (`UnhonouredFeatures.cs:68-75`).
+
+**Correction — the example this paragraph originally used was wrong, and it made the
+pinning fact vacuous.** It named `İ` (U+0130) as the code point `ToLowerInvariant()` folds
+to two code points. Measured on .NET 10 here: `"İ".ToLowerInvariant()` is **unchanged**,
+length 1 — .NET's *invariant* casing deliberately excludes the dotted capital I, and only a
+full Unicode case mapping produces `i̇`. The consequence is worse than a wrong sentence: the
+implementation fact written from it passed under its own `ToLowerInvariant()` mutation, so it
+proved nothing. Code points `ToLowerInvariant()` demonstrably *does* fold, and which the fact
+now uses: `Ž` (U+017D→U+017E), `Ä` (U+00C4→U+00E4), `ẞ` (U+1E9E→ß), `Σ` (U+03A3→σ). `İ` is
+kept in the sample for what it legitimately documents — a non-ASCII code point an ASCII fold
+must leave alone.
 
 **`now()` is safe in-transaction only under one rule: it is not a clock read.**
 
@@ -937,6 +966,133 @@ PR's. Entries marked **[unratified]** depend on a recommendation above.
     5a because the base design's own argument is that it is *"nearly free if designed in and
     awkward to retrofit"* (`:585-592`). Cost: PR5 closes #22 only when 5b merges, and 5a
     cannot merge before the startup PR.
+
+## Deviations added by PR5b-1 (before-hooks and the `Mutate` profile)
+
+Continuing the series above. 79–85 are the before-hook PR's; every one was taken while
+implementing a decision this document made, so each names what the decision said as well as
+what shipped. 84 and 85 were added after `alvo-plan-guard`'s pre-PR pass, and 83 was corrected
+by it — noted so a reader can tell which entries the guard earned.
+
+**Deviation 75's owed ruling is discharged here rather than as a new entry**, in the direction
+it predicted: `WritePayloadGuard` is **not** re-run over a mutated payload (it judges a
+*caller's* keys, and re-running it would refuse a hook legitimately setting a `readOnly`
+field, which is one of the two things a before-hook exists for), while `EnsureWriteAllowed`
+**is** — the `WITH CHECK` verdict and the tenant scope judge the post-image that will really
+be stored, or a hook writing `owner_id` from a caller-controlled field would place a row the
+`create` rule refuses. Both halves are pinned by facts in `AlvoDataBeforeHookTests`.
+
+79. **The shipped `Mutate` profile is narrower than Decision 1's truth table, by deferral
+    rather than by ruling.** That table marks `@user`/`@tenant`, `&&`/`||`/`!`, comparison,
+    `in`, `has`, arithmetic, the ternary and `changed(field)` as available in `Mutate`;
+    `_allowedProfiles` admits **none** of them. Four rows shipped: literals, current-row field
+    references, `old.`/`new.` field references, and the allow-listed call. The result-type row
+    shipped in full. Deny-by-default is what makes the deferral safe rather than sloppy — an
+    unlisted pairing compiles in **no** profile, so nothing sits half-admitted — and each
+    construct is meant to arrive with the fact that needs it. **Measured, so the narrowness is
+    measured rather than convenient:** the only `mutate` values in the tree are
+    `lowerAscii(new.email)` (`crm.alvo.json:110`) and `now()` (`:148`), both of which compile,
+    so nothing shipped is blocked by it. `docs/architecture/cel.md`'s truth table prints the
+    shipped state and is the authority; Decision 1's table is annotated in place so it stops
+    reading as a promise. The first `mutate` needing `==` — the `is_closed` example Decision 1
+    itself uses — brings the comparison row with it.
+80. **A `reject` reuses `AlvoAuthorizationException` (→ 403) instead of a new failure family.**
+    The alternative was a `AlvoHookRejectedException` with its own problem type, which would
+    have been more precise about *who* refused. Rejected for two reasons. First, `IAlvoData`
+    already reserves that exception for "the operation is not permitted", and a before-hook
+    `reject` is exactly that — a second family would make two spellings of one answer that
+    every request layer, provider and test double has to learn. Second, the caller learning
+    *which mechanism* refused them is a disclosure, not a feature. The cost is real and stated:
+    a client cannot distinguish "a policy refused you" from "a hook refused you" by status or
+    problem type, only by the author's own `detail` text — which carries the author's `reject`
+    string and the hook's JSON pointer, both descriptor-authored and never caller-supplied, so
+    naming them discloses nothing the descriptor did not already declare.
+81. **There is no wall-clock budget on a before-hook, so the addendum's "budget-overrun
+    rollback" has nothing to overrun.** The bound is the grammar instead: a hook is a fixed
+    number of compiled expressions (count fixed at apply, never by the request) in profiles
+    with no loop, no comprehension, no recursion, no user-defined function and no I/O, each
+    tree walked once with node count bounded by the schema's own 2000-character cap on a `cel`
+    string. The work is O(descriptor), not O(caller input), so no request can make a hook
+    slower and a budget could only fire on a machine that had already stopped serving; a
+    timeout would buy a clock read per hook plus a second failure mode *inside a transaction*.
+    Stated as a deviation because the addendum's own PR5b content row names the rollback, and
+    an absent feature that was reasoned away must not look like one that was forgotten.
+    **The obligation this creates:** the PR that admits a loop, a comprehension, or a call that
+    can block into a before-hook profile owes a budget with it, and the argument above is
+    where it should look first to see what it invalidates.
+82. **`IBeforeHookRunner.Run` returns the patch and throws for a refusal, rather than mutating
+    a candidate dictionary in place and returning a refusal.** The plan proposed the latter
+    (*"returns a refusal or mutates `candidate` in place"*). Both halves were reversed on
+    purpose. A **returned** refusal is one a driver can forget to check, and a forgotten refusal
+    is a hook that silently does not guard the write it was declared to guard — worse than no
+    hook at all; an exception cannot be ignored by omission. And an **in-place** mutation cannot
+    express what a patch has to express: a `mutate` writing `null` is an authored intent to
+    store nothing, which the insert path's non-nullable value bag cannot hold at all (the key is
+    left out) while the update path must turn it into a real `SET column = NULL`. A returned
+    patch lets each write path apply that in its own terms, and it keeps the runner from having
+    to know which of the two it is serving. The signature is also **synchronous** — no `Task`,
+    no `CancellationToken` — which is the network ban at the contract rather than a style
+    choice, and is asserted as a fact.
+83. **`examples/complex-crm/crm.alvo.json` is corrected only on the one line this PR's own
+    rename forced, against deviation 76's instruction to correct all five, and the hazard 76
+    warned about is measured rather than assumed.** Deviation 76 requires the example's five
+    fixes *and* the strengthening of `Every_example_marked_not_runnable_really_is_refused` to
+    land in the PR that lifts a `before*` refusal — which is this one — because a CEL syntax
+    error could otherwise stand in silently for the feature refusal the test claims to hold.
+    What actually shipped, stated precisely, because an earlier draft of this entry got it
+    wrong and claimed the file was untouched:
+    - **`:110` was edited**, `lower(new.email)` → `lowerAscii(new.email)`, and
+      `canonical-complex-crm.verified.txt` moved with it. Not a side-effect: deviation 60
+      renames the function, so leaving the old spelling would have shipped an example naming a
+      function no profile has.
+    - **`:148`** (`now()`) compiles now as a genuine side-effect of the profile landing; the
+      line is untouched.
+    - **Three defects remain** — two list literals in `deals.beforeUpdate` conditions (`:143`,
+      `:147`) and the unresolvable `{{@user.email}}` template (`:221`) — plus the refusal-reason
+      strengthening. All four are **PR5b-2's**, deferred for review coverage: #157 carried 133
+      files and CodeRabbit skipped it entirely, so staying under 100 files is a requirement
+      rather than tidiness.
+
+    **What makes the deferral safe is a measurement, not an argument:** with all three
+    `before*` entries gone, `complex-crm` is still refused by a *structured unhonoured-feature
+    error* — `owner_id` declares `default`, refused with its own fix suggestion — and **not** by
+    a CEL syntax error, so the marker still means what it says and the substitution deviation 76
+    feared has not happened. Measured by applying the example on this branch, not inferred, and
+    recorded in `DescriptorToSchemaMapperTests`' own remarks so it sits next to the fact that
+    depends on it.
+84. **A `reject` hook's gate keeps `EvaluatePredicate`'s "false on anything it cannot resolve"
+    direction, which is *open* for a guard, and the direction is argued rather than inherited.**
+    For an authorization predicate `false` means deny and the direction is closed; for a
+    `reject` gate `false` means "not guarded", so the same call is fail-open —
+    `EvaluateMask` exists precisely because that asymmetry is real, and a third consumer owes
+    the argument. Two halves, and only one is a live decision. **Reachable half:** the collapse
+    is the documented two-valued null rule and it is *correct* — a `reject` gated on
+    `old.stage == 'won'` must not fire on a deal that was never won — and what keeps it honest
+    is the complete post-image the runner is handed, so an omitted field reads as its stored
+    value rather than as null. **Unreachable half:** the caught exception. Nothing in a
+    `Condition` tree can throw — the node switch ends in `_ => null`, every comparison funnels
+    through a `TryNormalize` that answers `false` instead of converting unsuccessfully, and the
+    profile admits no arithmetic, the one family that could overflow — which is the property
+    `CelInterpreter`'s own remarks already assert. So a fail-closed entry point for this caller
+    would be a change to the security core that **no fact could discriminate**, which is the
+    shape this repo requires a killing mutant for. **The obligation:** the argument is a
+    property of the profile's *grammar*, not of the interpreter's signature. The PR that admits
+    arithmetic — or any construct that can throw — into `Condition` makes the open direction
+    reachable, and owes a `reject` gate its own fail-closed evaluation. Recorded after
+    `alvo-plan-guard` flagged the direction; its recommendation to add the fail-closed entry
+    point now was **declined**, for the reason above, and the disagreement is on the record
+    rather than resolved silently.
+85. **`InMemoryAlvoData` honours no before-hook, and it is public and shipped.** The reference
+    implementation in `MMLib.Alvo.Testing` runs the policy engine but no hook pipeline, so a
+    host writing tests against the double sees a `reject` not refuse and a `mutate` not apply —
+    a double that disagrees with production on exactly the behaviour #114 adds. Deliberate for
+    this PR: the shared contract suite `AlvoDataBeforeHookTests` is inherited by the two
+    relational drivers on purpose, and placing its facts on the suite the in-memory reference
+    also inherits would either be vacuous for it or force it to grow a pipeline it has no
+    transaction to run one in. Recorded here because the suite's own remarks state the fact
+    while nothing states it as an **owed obligation**, which is the difference between a
+    deferral and a gap. It is now also in `events.md`'s *What PR5a does not do* table, which is
+    where a reader looks for what is not built.
 
 ---
 

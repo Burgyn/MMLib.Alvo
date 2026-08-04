@@ -1,18 +1,20 @@
 # The event backbone
 
 How a committed write becomes a delivered after-hook action, and the decisions that shape it. Written
-during F3 PR5a (#22).
+during F3 PR5a (#22); the *Before-hooks* section was added by PR5b (#114).
 
-> **Status: complete for PR5a**, which is the *durable half* of #22. Everything below describes what the
-> code does today; where a decision was deliberately deferred it says so and names the PR or issue that
-> owns it — see *What PR5a does not do* and *What PR5b and F7 inherit* at the end, which is where a PR5b
-> author starts.
+> **Status: complete for PR5a**, which is the *durable half* of #22, **plus PR5b's before-hooks**
+> (#114). Everything below describes what the code does today; where a decision was deliberately
+> deferred it says so and names the PR or issue that owns it — see *What PR5a does not do* and
+> *What PR5b and F7 inherit* at the end, which is where an author of the remaining PR5b work starts.
 >
 > **Sibling records:** [`data-path.md`](./data-path.md) owns the port and the SQL a read or a write
-> becomes; [`host.md`](./host.md) owns the boot and the process. This file owns the queue and the
-> delivery: the envelope, `alvo_outbox`, the claim, the dispatcher, and the after-hook pipeline that
-> hangs off them. The split is along the same seam — a decision about a statement lives in
-> `data-path.md`, a decision about the boot lives in `host.md`, a decision about an event lives here.
+> becomes; [`host.md`](./host.md) owns the boot and the process; [`cel.md`](./cel.md) owns the profiles,
+> including the `Mutate` profile a before-hook's `mutate` value compiles in. This file owns the queue
+> and the delivery — the envelope, `alvo_outbox`, the claim, the dispatcher — and both hook pipelines
+> that hang off a write. The split is along the same seam: a decision about a statement lives in
+> `data-path.md`, a decision about the boot lives in `host.md`, a decision about a hook or an event
+> lives here.
 >
 > **Measured evidence** for every number quoted below is
 > `docs/superpowers/specs/evidence/2026-08-03-f3-pr5a-events/spike.txt`, cited by its question number
@@ -347,6 +349,122 @@ remarks were listed here as a fifth and state neither**: they state the one-inst
 ordering, which is fine — the guarantee is not the emit site's to make — but citing them was the same class
 of citation defect this document corrects twice elsewhere, so the list now names the four places that really
 carry it.
+
+## Before-hooks
+
+`beforeCreate`, `beforeUpdate` and `beforeDelete` are the other half of the hook subsystem, and they
+are almost the mirror image of the after-hooks below: same compiler pass, same catalog, opposite side
+of the commit. An after-hook is *told* about a write that happened and may reach the network; a
+before-hook *judges* a write that has not happened yet, holds row locks while it runs, and can reach
+nothing at all. Added by **PR5b** (#114).
+
+Two actions, both from the frozen schema, and nothing else is expressible in-transaction:
+
+| Action | What it does | How the caller sees it |
+|---|---|---|
+| `reject` | refuses the write | `AlvoAuthorizationException` → **403** with the author's own text, and the hook's JSON pointer |
+| `mutate` | rewrites fields of the row about to be written | nothing, except the stored row and the emitted event |
+
+Everything is compiled at **apply** by `BeforeHookCompiler` into the same `PolicyCatalog` the rules
+and the after-hooks live on (`EntityBeforeHooks`), with a JSON Pointer an author can act on. That is
+not tidiness: a before-hook runs inside the same write the rules are judging, so a hook compiled
+against a different schema revision than the `WITH CHECK` predicate over the same candidate row would
+be two views of one write disagreeing about what the row's fields are. There is no author to report a
+mistake to from inside a transaction, so `BeforeHookRunner` parses, resolves and compiles **nothing**
+— it evaluates and nothing else.
+
+### The four write-path call sites, and the two that deliberately have none
+
+The runner is called from four places in `EfAlvoData`, every one of them **inside** the transaction
+the write commits in:
+
+| Call site | Hook point | Why there |
+|---|---|---|
+| `CreatedAsync` | `beforeCreate` | the ordinary create, after `BeginTransactionAsync` |
+| `RecordedCreateAsync` | `beforeCreate` | the idempotent create's **writing** branch |
+| `WriteAsync` | `beforeUpdate` | update's in-transaction body, where both row images exist |
+| `EraseAsync` | `beforeDelete` | delete's in-transaction body, over the row-locked pre-image |
+
+And from two places it must **not** be called:
+
+| Not a call site | Why not |
+|---|---|
+| `CreatedOrReplayedAsync` | it opens the transaction and *then* branches between a replay and a fresh write. A call there would run on the replay too — double-applying a `mutate` whose value the first attempt already stored, and letting a `reject` refuse a retry of a create the caller was already told succeeded. The hook belongs on the branch that writes a row, which is `RecordedCreateAsync` |
+| `ReplayableCreateAsync` | it is the retry loop around that method, not a write path of its own |
+
+**A hook may not run where the candidate is built.** `AuthorizedCandidate` runs *before*
+`BeginTransactionAsync`, so a hook placed next to it would have nothing to roll back: a `reject` would
+refuse a write whose row the next site to open a transaction had already committed. Inside the
+transaction a refusal is a rolled-back write with **no row and no outbox event**, which is what #114's
+DoD asks of it.
+
+**Update and delete hook in the private bodies (`WriteAsync`, `EraseAsync`), not in the public
+`UpdateAsync`/`DeleteAsync`, and that is where the pre-image is.** A hook's `old.` references and its
+`changed(...)` calls are answered from the **in-transaction, row-locked** pre-image that those bodies
+read under `USING`. A pre-image read before the transaction, or on another connection, could be
+overwritten between the hook's judgement and the write — the hook would then have judged a row that no
+longer exists, which is exactly the merge-then-check discipline `data-path.md` states for the verdict
+itself.
+
+**What re-runs over a patch, and what deliberately does not.** After a `mutate`,
+`EnsureWriteAllowed` runs again over the **patched** post-image: `WITH CHECK` and the tenant scope
+judge the row that will actually be stored, or a hook writing `owner_id` from a caller-controlled
+field would place a row the `create` rule refuses — a caller-reachable authorization bypass.
+`WritePayloadGuard` is **not** re-run, because it judges *a caller's* keys (framework-managed columns,
+fields a policy froze as `readOnly`) and a hook is not the caller; re-running it would refuse a hook
+legitimately setting a field callers may not write, which is one of the two things a before-hook
+exists for. This asymmetry is the ruling deviation 75 asked PR5b to make explicitly.
+
+**Ordering inside the pipeline.** Hooks fire in declaration order and each sees the candidate as the
+hooks before it left it, so a later hook's condition legitimately reads an earlier hook's patch.
+Within *one* hook, every mutation is evaluated against the candidate as that hook received it —
+because a `mutate` is a JSON object and neither JSON nor .NET promises member enumeration order, so
+letting one mutation see another's value would make the stored row depend on an order nobody
+specified.
+
+**A `beforeDelete` that produces a patch is an invariant violation, not an authoring mistake.** A
+`mutate` on that hook point is refused when the descriptor is applied, so a non-empty patch reaching
+`EraseAsync` means the compiler and the write path disagree; it throws rather than dropping the patch
+silently, because silently dropping it is how a refusal comes to be untrue with nothing failing.
+
+### Network isolation is structural, not conventional
+
+The frozen schema states the ban in the slot's own description — *"Before-actions run in-transaction:
+reject or mutate only. No network, no external calls."* — because a hook holds a write transaction open
+while it runs, so one HTTP call inside one is a row lock held for a stranger's timeout. It is enforced
+in two places, and neither is a naming convention:
+
+- **The port's signature.** `IBeforeHookRunner.Run` returns no `Task` and takes no
+  `CancellationToken`, so an implementation cannot `await` anything; the shortest path to a network
+  call is closed at the contract, and taking it would mean *blocking* a transaction-holding thread.
+- **The implementation's dependency list.** A signature cannot express "and nothing you hold may do it
+  either", so `BeforeHookRunner`'s own dependencies are asserted by an **architecture fact**: nothing
+  reachable from its constructor exposes `HttpClient`, `IHttpClientFactory`, a socket or a mail port.
+  Injecting `IHttpClientFactory` into it turns that fact red, which is what makes it a fact rather than
+  a wish — the `alvo-security-core-review` checklist requires a network call from a before-hook to be
+  *inexpressible*, not discouraged.
+
+A hook that genuinely needs a network call belongs one rung over: an after-hook, which runs after the
+commit and therefore holds no lock.
+
+### What bounds a hook's execution time — the grammar, not a timeout
+
+There is no wall-clock budget and no cancellation token to carry one, and that is a decision rather
+than an omission. **The bound is structural.** A hook is a fixed number of compiled CEL expressions —
+the count fixed by the descriptor at apply, never by the request — and the profiles they compile in
+(`Condition` for the gate, `Mutate` for the values) have no loop, no comprehension macro, no
+recursion, no user-defined function and no I/O. `Mutate`'s entire function allow-list is an ASCII fold
+over one string and a read of an instant the caller already bound. Each expression's tree is walked
+once and its node count is bounded by its source length, which the frozen schema caps at 2000
+characters.
+
+So the work is **O(descriptor), not O(caller input)**: no request can make a hook slower, and a
+wall-clock budget could only fire on a machine that had already stopped serving. A timeout would buy a
+clock read per hook plus a second failure mode *inside a transaction*, to guard against an overrun the
+grammar cannot express. Recorded as deviation 81, because the addendum's DoD names a "budget-overrun
+rollback" and a reader is owed the reason there is no budget to overrun. The claim is only as good as
+the grammar it rests on: **the PR that admits a loop, a comprehension or a call that can block into a
+before-hook profile owes a budget with it.**
 
 ## After-hooks
 
@@ -751,9 +869,11 @@ Each line with the issue or the PR that owns it.
 | **Global ordering**, and cross-process same-millisecond ordering | **#150** (F7's partitioned claim) |
 | **JSONata evaluation** in any of the four `$defs/jsonata` slots | **#149** |
 | **`function`**, **`http.call`** | frozen in the schema, out of scope for all of PR5 |
-| **`entity.update`** | PR5b |
-| **Before-hooks**, the `CelProfile.Mutate` profile, the budget-overrun rollback | PR5b |
-| **Automation** (`event` + `schedule` triggers), cron, and cron's distributed lock | PR5b (the lock: deviation 74) |
+| **`entity.update`** | PR5b's automation half — still open |
+| ~~**Before-hooks**, the `CelProfile.Mutate` profile~~ | **done** — PR5b (#114); see *Before-hooks* above |
+| **The budget-overrun rollback** | **not built, and not scheduled**: there is no wall-clock budget to overrun — the bound is the grammar (deviation 81, and *What bounds a hook's execution time* above) |
+| **Before-hooks in `InMemoryAlvoData`** | **not built** — the public in-memory reference runs the policy engine but no hook pipeline, so a host testing against the double sees a `reject` not refuse and a `mutate` not apply. Deliberate (the contract suite is inherited by the two relational drivers, which have a transaction to run a hook in), and recorded as an **owed obligation** rather than a mere absence: deviation 85 |
+| **Automation** (`event` + `schedule` triggers), cron, and cron's distributed lock | PR5b's automation half — still open (the lock: deviation 74) |
 | **`Publish`** (custom application events) and its security ruling | unowned — see below |
 | **Wildcard subscription** (`entity.orders.*`) and its tenant scoping | PR5b — see below |
 | **HMAC signing / `secretRef`** on a delivery | 7.1 (webhook management) |
@@ -890,11 +1010,14 @@ adapter implements the queue, not the dispatcher.
 | Assembly | Files |
 |---|---|
 | `MMLib.Alvo.Abstractions/Events/` | `AlvoEvent`, `AlvoEventId`, `AlvoEventAttributes`, `AlvoEventJson`, `IOutboxStore`, `IEmailSender` — all public |
-| `MMLib.Alvo.Data.EntityFrameworkCore/` | `Internal/OutboxTable`, `Internal/OutboxEventFactory`, `EfCoreOutboxStore` |
+| `MMLib.Alvo.Abstractions/Rules/` | `IBeforeHookRunner` — public, the port a storage driver calls in-transaction |
+| `MMLib.Alvo.Data.EntityFrameworkCore/` | `Internal/OutboxTable`, `Internal/OutboxEventFactory`, `EfCoreOutboxStore`; the four before-hook call sites in `Internal/EfAlvoData` |
 | `MMLib.Alvo/Events/` | `AlvoEventOptions`, `Setup`; and `Internal/`: `OutboxDispatcher`, `EventSubscriptions`, `EventActionExecutor`, `WebhookDelivery`, `ConsoleEmailSender`, `AlvoTemplate`, `JsonataSlot`, `AfterHookCompiler`, `ActionVocabulary`, `AlvoEventMetrics`, `EventLog`, `AlvoEventOptionsConfiguration` |
+| `MMLib.Alvo/Rules/` | `BeforeHooks` (`EntityBeforeHooks`, `CompiledBeforeHook`, `CompiledMutation`) and `Internal/`: `BeforeHookCompiler`, `BeforeHookRunner` — all `internal` |
 | `MMLib.Alvo.Testing/Events/` | `OutboxStoreContractTests` + `IOutboxStoreWorld`, `AlvoEventCriteriaTests` + `IAlvoEventWorld` — the suites a provider inherits |
+| `MMLib.Alvo.Testing/Data/` | `AlvoDataBeforeHookTests` + `IAlvoDataBeforeHookWorld` — the before-hook suite every engine inherits |
 
-Only `AlvoEventOptions`, the two ports and the four envelope types are public; everything else in the
+Only `AlvoEventOptions`, the three ports and the four envelope types are public; everything else in the
 core is `internal`.
 
 ## What is proved, and where
@@ -920,6 +1043,12 @@ core is `internal`.
 | **`email.data` is refused** whatever it carries | `UnhonouredJsonataTests.An_email_data_slot_is_refused_at_apply_whatever_it_carries` (both spellings) + the `UnhonouredFeatures` slot baseline |
 | an endpoint **URL is validated at apply**: absolute, and `https` unless loopback | `AfterHookCompilerTests`, two theories — the refusals and the deliverable-shapes control |
 | a released entry is **held for its backoff and not for the lease**, and a zero backoff is claimable at once | `OutboxStoreContractTests` (2 facts), green on SQLite and on a real PostgreSQL container |
+| a `mutate` reaches the stored row, a `reject` leaves **no row** behind, and a replay runs no hook a second time | `AlvoDataBeforeHookTests` (14 facts, inherited by both engines) — incl. `An_idempotent_replay_runs_no_hook_a_second_time` and `Every_write_face_consults_the_hook_pipeline` |
+| a `mutate` may write a field the **caller** may not, and still cannot place a row the `create` rule refuses | same suite — `A_mutate_may_write_a_field_the_caller_is_refused` paired with `A_mutate_that_moves_a_row_out_of_the_create_rule_is_refused` and its positive control |
+| the hook runs **inside** the write's own transaction, at exactly **four** call sites and nowhere else | `BeforeHookTransactionArchitectureTests` — the scan asserts the call follows `BeginTransactionAsync` within each body, and has its own facts proving the scan can see a call site and can read order within a member |
+| **a before-hook cannot make a network call**, one hop or two from its constructor | `BeforeHookIsolationArchitectureTests` — over `BeforeHookRunner`'s real dependency closure, plus the port's synchronous signature, plus a deliberately offending chain as the non-vacuity control |
+| `lowerAscii` folds `A`–`Z` and **nothing else**, `lower(...)` is refused naming it, and both calls compile in `Mutate` alone | `CelMutateFunctionTests` (18 facts and theories) |
+| `now()` is the write's **bound** instant — the same value for every evaluation in one write, and unmoved by a clock that advances mid-write | same suite — `Now_is_the_writes_bound_instant_and_not_a_fresh_read`, `Now_is_the_same_instant_for_every_evaluation_in_one_write`, and `The_interpreter_is_handed_an_instant_and_never_a_clock_to_read` |
 | the backoff **grows** per attempt, and the shipped defaults spread the ceiling over ≥ 45 s | `OutboxDispatcherTests`, two facts — the second is arithmetic over the defaults so no test waits 45 s |
 
 **Where the numeric criteria live, with the citation corrected.** The addendum and PR5a's plan both cite

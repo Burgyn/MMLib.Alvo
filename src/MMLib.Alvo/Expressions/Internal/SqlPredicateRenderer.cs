@@ -133,6 +133,29 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
     private static NotSupportedException Unsupported(CelNode node) =>
         new($"'{node.GetType().Name}' cannot be rendered to SQL by this entry point.");
 
+    /// <summary>
+    /// Refuses an allow-listed <see cref="CelProfile.Mutate"/> function call by name, rather than letting
+    /// it fall through to <see cref="Unsupported"/>'s generic arm. The distinction is the point: a generic
+    /// "cannot be rendered" reads like a gap somebody should fill in, and this is not a gap — it is the
+    /// guarantee <see cref="CelProfile.Mutate"/>'s own remarks make, and the three costs that profile does
+    /// not pay (no <see cref="IFieldSqlRenderer"/> member, no per-engine snapshot, no two-valued fold to
+    /// agree on) are only free while it holds.
+    /// </summary>
+    /// <remarks>
+    /// Reached from the predicate path only. The scalar path refuses a <see cref="CelProfile.Mutate"/>
+    /// expression at its entry point (<see cref="RequireScalarProfile"/> admits <see cref="CelProfile.Computed"/>
+    /// alone) before any node is walked, and a <see cref="CelCall"/> can never appear inside a
+    /// <see cref="CelProfile.Computed"/> expression because the type checker allows the call construct in
+    /// <see cref="CelProfile.Mutate"/> and nowhere else — so an arm there would be unreachable, and an
+    /// unreachable refusal is one no test can hold to its claim.
+    /// </remarks>
+    private static NotSupportedException MutateIsInterpreterOnly(CelCall call) =>
+        new($"'{call.Name}(...)' is legal only in the {CelProfile.Mutate} profile, which is evaluated by the "
+            + "in-memory interpreter inside the write transaction and is never rendered to SQL. Rendering it "
+            + "would bring the two-valued null fold and the string-collation caveat back into scope, and "
+            + $"'{CelCall.Now}()' would answer with the engine's own clock — PostgreSQL's transaction-start "
+            + "time, SQLite's second-precision text — instead of the instant the write bound once.");
+
     private readonly record struct PredicateFragment(string Sql, bool IsTwoValued);
 
     /// <summary>
@@ -165,6 +188,7 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
             CelBinary { Operator: CelBinaryOperator.In } inNode => RenderIn(inNode, entity, context, fields, bag),
             CelBinary comparison => RenderComparison(comparison, entity, context, fields, bag),
             CelHas has => RenderHas(has, entity, fields),
+            CelCall call => throw MutateIsInterpreterOnly(call),
             _ => throw Unsupported(node),
         };
 
@@ -318,6 +342,7 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
             CelLiteral literal => RenderLiteralOperand(literal, fields, bag),
             CelFieldRef fieldRef => RenderField(fieldRef, entity, fields),
             CelContextRef contextRef => RenderContextOperand(contextRef, context, fields, bag),
+            CelCall call => throw MutateIsInterpreterOnly(call),
             _ => throw Unsupported(node),
         };
 
