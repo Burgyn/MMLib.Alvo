@@ -310,27 +310,23 @@ public interface IAlvoSqlDialect
     string? GeneratedColumnDefinition(string columnName, string storeType, string renderedExpression) => null;
 
     /// <summary>
-    /// Whether adding a stored generated column to a table that <b>already holds rows</b> requires rebuilding
-    /// the table on this engine, rather than one <c>ALTER TABLE … ADD COLUMN</c>.
+    /// The statements this engine needs run <b>outside</b> a migration's transaction, around the plan's own
+    /// SQL — <see cref="MigrationBatchFraming.None"/> for an engine that needs none.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>Why this is a second member and not a <see langword="null"/> from
-    /// <see cref="GeneratedColumnDefinition"/>.</b> The two questions come apart on a shipped engine: SQLite
-    /// has a perfectly good spelling and still refuses <c>ALTER TABLE … ADD COLUMN … STORED</c> the moment the
-    /// table is non-empty (<c>cannot add a STORED column</c>, measured against the bundled <c>e_sqlite3</c>),
-    /// while PostgreSQL accepts the same add and backfills every existing row. Folding the second answer into
-    /// the first would force SQLite to deny it can express a generated column at all, and would then produce
-    /// no column anywhere.
+    /// A <b>default interface member</b> answering "nothing", so no existing implementation breaks and no
+    /// engine is assumed to have a peculiarity it does not have. See
+    /// <see cref="MigrationBatchFraming"/> for the measured data loss that made this necessary: SQLite's
+    /// <c>PRAGMA foreign_keys</c> is a no-op inside a transaction, and a table rebuild inside one therefore
+    /// cascades away the child rows of every <c>onDelete: "cascade"</c> reference to the table being rebuilt.
     /// </para>
     /// <para>
-    /// <b>It is deliberately not asked per table state.</b> A dialect answering <see langword="true"/> gets the
-    /// rebuild whether the table holds rows or not: on an <em>empty</em> table SQLite accepts the add, so a
-    /// migration that branched on the row count would take a shape in production that no test ever ran, and
-    /// the observable outcome must be identical on both engines either way (§0 principle 3).
+    /// The migrator runs <see cref="MigrationBatchFraming.After"/> even when the batch failed, so a suspension
+    /// is never left in place on a connection a pool may hand out again.
     /// </para>
     /// </remarks>
-    bool GeneratedColumnAddRequiresTableRebuild => false;
+    MigrationBatchFraming MigrationFraming => MigrationBatchFraming.None;
 
     /// <summary>
     /// Decides whether <paramref name="failure"/> is this engine refusing a write on a constraint a

@@ -73,6 +73,11 @@ internal sealed class LockRecordingSqlDialect : IAlvoSqlDialect
     public string? GeneratedColumnDefinition(string columnName, string storeType, string renderedExpression) =>
         _inner.GeneratedColumnDefinition(columnName, storeType, renderedExpression);
 
-    /// <inheritdoc cref="IAlvoSqlDialect.GeneratedColumnAddRequiresTableRebuild"/>
-    public bool GeneratedColumnAddRequiresTableRebuild => _inner.GeneratedColumnAddRequiresTableRebuild;
+    /// <inheritdoc cref="IAlvoSqlDialect.MigrationFraming"/>
+    /// <remarks>
+    /// Forwarded for the same reason the two generated-column members are: the default is "no framing", and a
+    /// wrapper that forgot it would silently take SQLite's foreign-key suspension away from every migration run
+    /// through this fixture — which is data loss on a table rebuild, not a failing test.
+    /// </remarks>
+    public MigrationBatchFraming MigrationFraming => _inner.MigrationFraming;
 }

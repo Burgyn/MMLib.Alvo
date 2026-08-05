@@ -46,6 +46,5 @@ public class TestSqlDialectContractTests : AlvoSqlDialectContractTests
         var dialect = CreateDialect();
 
         dialect.GeneratedColumnDefinition("line_total", "numeric(18,2)", "(1 + 1)").ShouldBeNull();
-        dialect.GeneratedColumnAddRequiresTableRebuild.ShouldBeFalse();
     }
 }

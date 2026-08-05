@@ -132,10 +132,9 @@ public sealed class TSqlSqlDialect : IAlvoSqlDialect
     /// dropped on this engine, which is a decision a dialect is allowed to make and a composer is not.
     /// </para>
     /// <para>
-    /// Azure SQL adds it in place on a populated table and backfills, so
-    /// <see cref="IAlvoSqlDialect.GeneratedColumnAddRequiresTableRebuild"/> keeps its <see langword="false"/>
-    /// default here — the pairing the contract suite asserts is that a dialect answering
-    /// <see langword="null"/> above cannot demand a rebuild, and this one answers a definition.
+    /// Azure SQL adds it in place on a populated table and backfills, and this dialect needs no
+    /// <see cref="IAlvoSqlDialect.MigrationFraming"/> either: the rebuild-and-cascade problem is SQLite's, and
+    /// how a rebuild is <em>reached</em> is EF's per-provider generator's business rather than a dialect's.
     /// </para>
     /// </remarks>
     /// <param name="columnName">The column's name.</param>

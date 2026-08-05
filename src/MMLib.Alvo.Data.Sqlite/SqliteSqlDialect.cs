@@ -68,21 +68,27 @@ public sealed class SqliteSqlDialect : IAlvoSqlDialect
     /// <inheritdoc/>
     /// <remarks>
     /// <para>
-    /// <b>Measured, against the bundled <c>e_sqlite3</c> the product actually runs (3.53.3), not the system
-    /// CLI.</b> <c>ALTER TABLE t ADD COLUMN s … STORED</c> succeeds while <c>t</c> is <em>empty</em> and is
-    /// refused with <c>SQLite Error 1: 'cannot add a STORED column'</c> the moment it holds a single row —
-    /// which is the whole content of the finding, because the empty case is the one a fresh test fixture
-    /// exercises and the non-empty case is the only one a deployed entity is ever in.
+    /// <b>This is the other half of the rebuild, and without it the rebuild loses rows.</b> EF's SQLite
+    /// generator already emits <c>PRAGMA foreign_keys = 0</c> around a table rebuild and marks it
+    /// transaction-suppressed — but a <c>MigrationPlan</c> carries plain SQL strings, so the flag cannot
+    /// survive and the pragma ran inside Alvo's single migration transaction, where SQLite documents it as a
+    /// <em>no-op</em>. With foreign keys still enforced, <c>DROP TABLE parent</c> performs an implicit
+    /// <c>DELETE FROM</c>, which fires <c>ON DELETE CASCADE</c> on every reference to it. Measured: rebuilding
+    /// <c>invoices</c> and <c>invoice_items</c> in one plan left the invoice and deleted the item.
     /// </para>
     /// <para>
-    /// The alternative SQLite <em>does</em> accept on a populated table is <c>VIRTUAL</c>, and it is refused
-    /// here: a virtual column is not stored, so indexing and filtering would silently differ from PostgreSQL,
-    /// which has no <c>VIRTUAL</c> at all before 18. Answering <see langword="true"/> instead buys the
-    /// documented create-new / copy / drop / rename rebuild, whose observable outcome is identical on both
-    /// engines.
+    /// Suspending enforcement for the duration of a migration is what EF does and is safe here: the batch is
+    /// DDL plus its own <c>INSERT … SELECT</c> copies, which reproduce the rows they came from, and the
+    /// connection is the migrator's own — the data path never uses it. It is restored afterwards regardless of
+    /// outcome rather than left to connection disposal, because a pooled connection handed back with foreign
+    /// keys off would silently stop enforcing them for whatever ran next.
     /// </para>
     /// </remarks>
-    public bool GeneratedColumnAddRequiresTableRebuild => true;
+    public MigrationBatchFraming MigrationFraming { get; } = new()
+    {
+        Before = ["PRAGMA foreign_keys = 0"],
+        After = ["PRAGMA foreign_keys = 1"],
+    };
 
     /// <summary><c>SQLITE_CONSTRAINT_UNIQUE</c> (2067): a <c>UNIQUE</c> index refused the row.</summary>
     private const int ConstraintUnique = 2067;

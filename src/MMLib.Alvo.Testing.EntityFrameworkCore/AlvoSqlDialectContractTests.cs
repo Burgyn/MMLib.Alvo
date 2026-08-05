@@ -489,24 +489,6 @@ public abstract class AlvoSqlDialectContractTests
     }
 
     /// <summary>
-    /// <b>The pairing rule for the two generated-column members.</b> A dialect that cannot express a stored
-    /// generated column at all cannot coherently demand a table rebuild in order to add one: there would be
-    /// nothing to add. The combination is worth an assertion rather than a comment because it is the one that
-    /// would make the migrator rebuild a table and then refuse the field, destroying the table's identity for
-    /// no change at all.
-    /// </summary>
-    [Fact]
-    public void A_dialect_that_cannot_express_a_generated_column_does_not_demand_a_rebuild_to_add_one()
-    {
-        var dialect = CreateDialect();
-
-        if (dialect.GeneratedColumnDefinition("total", "int", "(1)") is null)
-        {
-            dialect.GeneratedColumnAddRequiresTableRebuild.ShouldBeFalse();
-        }
-    }
-
-    /// <summary>
     /// A <see cref="DbException"/> from no provider at all, for the fact above. It carries a message shaped
     /// like the ones the engines really use, so a decoder that reads prose instead of a numeric code fails
     /// rather than passing on the absence of a match.

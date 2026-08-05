@@ -176,10 +176,42 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator
         var connection = _connections.Create();
         await using (connection.ConfigureAwait(false))
         {
-            await RelationalSqlBatch.ExecuteAsync(connection, plan.Sql, ct).ConfigureAwait(false);
+            await ExecuteFramedAsync(connection, plan, ct).ConfigureAwait(false);
         }
 
         return new MigrationResult(true, plan, false);
+    }
+
+    /// <summary>
+    /// Runs the plan's SQL in one transaction, framed by the statements this engine only honours
+    /// <b>outside</b> one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The framing exists because SQLite's <c>PRAGMA foreign_keys</c> is a no-op inside a transaction, which
+    /// made a table rebuild cascade away the child rows of every <c>onDelete: "cascade"</c> reference to the
+    /// rebuilt table — see <see cref="MigrationBatchFraming"/> for the measurement. Nothing about that is
+    /// specific to this migrator, so the statements come from the dialect and this method only decides
+    /// <em>where</em> they run.
+    /// </para>
+    /// <para>
+    /// <c>After</c> runs in a <c>finally</c>: a failed batch rolls back on its own, but a suspension that was
+    /// never restored would ride the connection into whatever a pool handed it to next, and that is a
+    /// constraint quietly not being enforced rather than a migration that failed loudly.
+    /// </para>
+    /// </remarks>
+    private async Task ExecuteFramedAsync(DbConnection connection, MigrationPlan plan, CancellationToken ct)
+    {
+        var framing = _dialect.MigrationFraming;
+        await RelationalSqlBatch.ExecuteUntransactedAsync(connection, framing.Before, ct).ConfigureAwait(false);
+        try
+        {
+            await RelationalSqlBatch.ExecuteAsync(connection, plan.Sql, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            await RelationalSqlBatch.ExecuteUntransactedAsync(connection, framing.After, ct).ConfigureAwait(false);
+        }
     }
 
     // A step is purely semantic now: it names the change and whether it destroys data. The

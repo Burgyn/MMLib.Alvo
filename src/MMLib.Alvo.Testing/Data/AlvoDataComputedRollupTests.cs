@@ -1,5 +1,6 @@
 ﻿using MMLib.Alvo.Data;
 using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Schema;
 using Shouldly;
 using Xunit;
@@ -75,6 +76,20 @@ public abstract class AlvoDataComputedRollupTests
     /// </remarks>
     /// <param name="sql">The statement to execute. Identifiers are double-quoted, which both engines accept.</param>
     protected abstract Task<Exception?> ExecuteOutOfBandAsync(string sql);
+
+    /// <summary>
+    /// Plans and applies the change from <paramref name="current"/> to <paramref name="desired"/> against the store the
+    /// most recent <see cref="CreateAsync"/> stood up, and re-primes the port against
+    /// <paramref name="desired"/> — a real second migration of a database that already holds rows.
+    /// </summary>
+    /// <remarks>
+    /// It returns the <see cref="MigrationResult"/> rather than <c>void</c> so a fact can assert on the plan the
+    /// migrator produced as well as on the database afterwards: whether the change was classified destructive is
+    /// a property of the plan, and on the engine that rebuilds its table it is not obvious.
+    /// </remarks>
+    /// <param name="current">The schema the store currently holds.</param>
+    /// <param name="desired">The schema to migrate it to.</param>
+    protected abstract Task<MigrationResult> MigrateAsync(SchemaModel current, SchemaModel desired);
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
@@ -174,6 +189,62 @@ public abstract class AlvoDataComputedRollupTests
         updated[LineTotal].ShouldBe(15m, "the engine recomputed from the row it now holds");
     }
 
+    /// <summary>
+    /// Adding a computed field to an entity that <b>already holds a row</b> succeeds, the existing row gets the
+    /// value, and the column is a generated one afterwards.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The row is written BEFORE the migration, and that is the single most load-bearing line in this
+    /// suite.</b> On an <em>empty</em> table SQLite accepts <c>ALTER TABLE … ADD COLUMN … STORED</c>; on a table
+    /// holding one row it refuses with <c>cannot add a STORED column</c>. The same fact over a fresh fixture is
+    /// therefore green on both engines while the only case that matters — a deployed entity that already has
+    /// data — is broken on one of them. Moving the write below the migration silently removes the whole fact.
+    /// </para>
+    /// <para>
+    /// It asserts the value <em>and</em> the engine's refusal, because a rebuild that copied the column as an
+    /// ordinary one would satisfy the value alone.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_computed_field_can_be_added_to_an_entity_that_already_holds_a_row()
+    {
+        var data = await CreateAsync(PlainSchema, PlainDescriptor);
+        var invoice = await CreateInvoiceAsync(data, vatTotal: 5m);
+        await CreateItemAsync(data, invoice, unitPrice: 3m, amount: 2);      // FIRST. Not a detail.
+
+        var migration = await MigrateAsync(PlainSchema, Schema);
+
+        migration.Applied.ShouldBeTrue("adding a computed field is not a destructive change on either engine");
+        var item = (await data.QueryAsync(new AlvoQuery { Entity = Items }, Caller, Ct)).Items.ShouldHaveSingleItem();
+        item[LineTotal].ShouldBe(6m, "the engine computed the value for the row that was already there");
+        (await ExecuteOutOfBandAsync($"UPDATE \"{Items}\" SET \"{LineTotal}\" = 999")).ShouldNotBeNull(
+            "and it is a GENERATED column afterwards, not an ordinary one the rebuild happened to fill in");
+    }
+
+    /// <summary>
+    /// The counterweight to the fact above, and the answer to "does the two-hop trip the destructive gate":
+    /// adding a computed field plans <b>no destructive step</b>, so it applies without
+    /// <see cref="MigrationOptions.AllowDestructive"/>.
+    /// </summary>
+    /// <remarks>
+    /// It is not obvious on the engine that rebuilds: the emitted SQL contains <c>DROP TABLE</c>, and only the
+    /// <em>operation</em> EF was handed — an <c>AlterColumnOperation</c> that narrows nothing — decides the
+    /// classification. If <c>DestructiveScan</c> ever started reading the SQL instead of the operation, every
+    /// computed field would become a change a host has to opt into, and this is the fact that would say so.
+    /// </remarks>
+    [Fact]
+    public async Task Adding_a_computed_field_is_not_classified_destructive()
+    {
+        var data = await CreateAsync(PlainSchema, PlainDescriptor);
+        await CreateItemAsync(data, await CreateInvoiceAsync(data), unitPrice: 3m, amount: 2);
+
+        var migration = await MigrateAsync(PlainSchema, Schema);
+
+        migration.Plan.HasDestructiveChanges.ShouldBeFalse();
+        migration.Plan.Steps.ShouldNotBeEmpty("a plan with no steps would pass this vacuously");
+    }
+
     private const string Invoices = "invoices";
 
     private const string Items = "invoice_items";
@@ -235,7 +306,15 @@ public abstract class AlvoDataComputedRollupTests
     /// remaining rollups exist so <c>min</c>/<c>max</c>/<c>avg</c>/<c>count</c> cannot be satisfied by a
     /// sum-shaped implementation.
     /// </summary>
-    private static AlvoDescriptor Descriptor => new()
+    private static AlvoDescriptor Descriptor => DescriptorFor(computed: true);
+
+    /// <summary>
+    /// The descriptor with or without its two <c>computed</c> declarations, so the migration fact starts from a
+    /// schema whose columns are ordinary and adds the generation — the production shape, where a computed field
+    /// is declared on an entity that has been serving for a while.
+    /// </summary>
+    /// <param name="computed">Whether the two computed fields declare their expression.</param>
+    private static AlvoDescriptor DescriptorFor(bool computed) => new()
     {
         ApiVersion = "alvo.dev/v1",
         Name = "computed-rollup-suite",
@@ -248,7 +327,7 @@ public abstract class AlvoDataComputedRollupTests
                 {
                     [VatTotal] = new() { Type = DescField.Decimal },
                     [NetTotal] = new() { Type = DescField.Decimal, Rollup = Sum(LineTotal) },
-                    [GrossTotal] = new() { Type = DescField.Decimal, Computed = "net_total + vat_total" },
+                    [GrossTotal] = new() { Type = DescField.Decimal, Computed = computed ? "net_total + vat_total" : null },
                     [ItemCount] = new() { Type = DescField.Integer, Rollup = new() { From = Items, Op = RollupOp.Count } },
                     [LargestLine] = new() { Type = DescField.Decimal, Rollup = Aggregate(RollupOp.Max, LineTotal) },
                     [SmallestLine] = new() { Type = DescField.Decimal, Rollup = Aggregate(RollupOp.Min, LineTotal) },
@@ -264,7 +343,7 @@ public abstract class AlvoDataComputedRollupTests
                     [Invoice] = new() { Type = DescField.Ref, Entity = Invoices, Required = true },
                     ["unit_price"] = new() { Type = DescField.Decimal, Required = true },
                     ["amount"] = new() { Type = DescField.Integer, Required = true },
-                    [LineTotal] = new() { Type = DescField.Decimal, Computed = "unit_price * amount" },
+                    [LineTotal] = new() { Type = DescField.Decimal, Computed = computed ? "unit_price * amount" : null },
                 },
                 Rules = AllowAll,
             },
@@ -284,9 +363,15 @@ public abstract class AlvoDataComputedRollupTests
     /// unreachable from this project. Nothing here restates a <em>rule</em> — only each field's shape and the
     /// two mechanisms the drivers read off the applied schema.
     /// </summary>
-    private static SchemaModel Schema => new([Invoice_(), Items_()]);
+    private static SchemaModel Schema => new([Invoice_(computed: true), Items_(computed: true)]);
 
-    private static EntitySchema Invoice_() => new()
+    /// <summary>The same schema with both computed fields as ordinary columns — where the migration fact starts.</summary>
+    private static SchemaModel PlainSchema => new([Invoice_(computed: false), Items_(computed: false)]);
+
+    /// <summary>The descriptor that matches <see cref="PlainSchema"/>.</summary>
+    private static AlvoDescriptor PlainDescriptor => DescriptorFor(computed: false);
+
+    private static EntitySchema Invoice_(bool computed) => new()
     {
         Name = Invoices,
         Tenancy = TenancyMode.Global,
@@ -295,7 +380,7 @@ public abstract class AlvoDataComputedRollupTests
             new FieldSchema { Name = "id", Type = SchemaField.Uuid, Required = true },
             Money(VatTotal),
             Money(NetTotal) with { Rollup = RollupOf(RollupOperation.Sum, LineTotal) },
-            Money(GrossTotal) with { ComputedExpression = "net_total + vat_total" },
+            Money(GrossTotal) with { ComputedExpression = computed ? "net_total + vat_total" : null },
             new FieldSchema { Name = ItemCount, Type = SchemaField.Integer, Nullable = true, Rollup = RollupOf(RollupOperation.Count, field: null) },
             Money(LargestLine) with { Rollup = RollupOf(RollupOperation.Max, LineTotal) },
             Money(SmallestLine) with { Rollup = RollupOf(RollupOperation.Min, LineTotal) },
@@ -303,7 +388,7 @@ public abstract class AlvoDataComputedRollupTests
         ],
     };
 
-    private static EntitySchema Items_() => new()
+    private static EntitySchema Items_(bool computed) => new()
     {
         Name = Items,
         Tenancy = TenancyMode.Global,
@@ -319,7 +404,7 @@ public abstract class AlvoDataComputedRollupTests
             },
             Money("unit_price") with { Required = true, Nullable = false },
             new FieldSchema { Name = "amount", Type = SchemaField.Integer, Required = true },
-            Money(LineTotal) with { ComputedExpression = "unit_price * amount" },
+            Money(LineTotal) with { ComputedExpression = computed ? "unit_price * amount" : null },
         ],
     };
 

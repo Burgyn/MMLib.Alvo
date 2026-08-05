@@ -128,15 +128,4 @@ public class PostgreSqlSqlDialectTests : AlvoSqlDialectContractTests
     public void A_stored_generated_column_is_spelled_generated_always_as_stored()
         => _dialect.GeneratedColumnDefinition("line_total", "numeric(18,2)", "\"unit_price\" * \"amount\"")
             .ShouldBe("\"line_total\" numeric(18,2) GENERATED ALWAYS AS (\"unit_price\" * \"amount\") STORED");
-
-    /// <summary>
-    /// The other half of the measured asymmetry: this engine accepts the add on a populated table and backfills
-    /// every existing row, so it needs no rebuild. It is <b>inherited</b> from the interface default rather than
-    /// restated on the driver — the default is right here — and asserted through the interface anyway, so a
-    /// later revision that overrode it to <see langword="true"/> and quietly doubled every PostgreSQL
-    /// generated-column migration into a table copy would break a fact.
-    /// </summary>
-    [Fact]
-    public void Adding_a_generated_column_needs_no_table_rebuild_on_this_engine()
-        => ((IAlvoSqlDialect)_dialect).GeneratedColumnAddRequiresTableRebuild.ShouldBeFalse();
 }
