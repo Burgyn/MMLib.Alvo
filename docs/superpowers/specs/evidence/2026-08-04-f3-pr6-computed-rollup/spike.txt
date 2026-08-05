@@ -162,3 +162,87 @@ defect. The rollup race fact must run on PostgreSQL to mean anything.
 AND: any rollup race fact must widen the window (the 50 ms delay). Without it the
 PostgreSQL lost update does not reproduce — 40 of 40 looked correct. The delay is the
 entire difference between a fact and an illusion.
+
+==============================================================================
+THIRD PASS — measured against the PRODUCT's own migrator, 2026-08-05
+==============================================================================
+The first two passes measured the ENGINES with raw SQL. This pass measures what
+EF Core's own migrations SQL generator does when Alvo's model marks a property
+`HasComputedColumnSql(expr, stored: true)`, because that decides whether the
+design's "the core must never spell the DDL" is satisfiable at all.
+
+Harness: a throwaway test in test/MMLib.Alvo.Data.Sqlite.Tests and
+test/MMLib.Alvo.Data.PostgreSql.Tests.Integration driving the real
+EfCoreSchemaMigrator through UseSqlite / UsePostgreSql, with
+DescriptorModelBuilder.ConfigureField temporarily honouring ComputedExpression.
+Both files were deleted after measuring; the product diff carries none of it.
+
+Q5  What DDL does EF emit for a stored generated column?
+    SQLite   CREATE TABLE ... "line_total" AS (unit_price * amount) STORED
+             (no type, and no GENERATED ALWAYS keyword — both optional in SQLite)
+    Postgres CREATE TABLE ... line_total numeric(18,2)
+                             GENERATED ALWAYS AS (unit_price * amount) STORED
+
+  So PostgreSQL's spelling is EXACTLY the one the design names. SQLite's is the
+  legal short form of it.
+
+Q6  Adding the field to an entity that ALREADY HOLDS A ROW, through the migrator:
+    Postgres ALTER TABLE spike_items ADD line_total numeric(18,2)
+                          GENERATED ALWAYS AS (unit_price * amount) STORED
+             -> applied, row backfilled (3 * 2 = 6.00), and
+                UPDATE ... SET line_total = 999 -> 428C9 "can only be updated to DEFAULT"
+    SQLite   ALTER TABLE "items" ADD "line_total" AS (unit_price * amount) STORED
+             -> SqliteException 1: 'cannot add a STORED column'   (Q1 reproduced
+                through the product, not just through the CLI)
+
+  And the plan's own step for it is `AddField ... destructive=False`, so the
+  destructive gate does not stand between the descriptor and this crash. The
+  refusal is a raw provider exception out of ApplyAsync.
+
+Q7  THE FINDING THIS PASS EXISTS FOR. EF Core's SQLite generator ALREADY
+    implements the create-new / copy / drop / rename rebuild — but it triggers on
+    an AlterColumnOperation, never on an AddColumnOperation. Diffing a model whose
+    column is PLAIN against one whose column is COMPUTED emits:
+
+        CREATE TABLE "ef_temp_items" (
+            "id" TEXT NOT NULL CONSTRAINT "PK_items" PRIMARY KEY,
+            "amount" INTEGER NOT NULL,
+            "line_total" AS (unit_price * amount) STORED,
+            "unit_price" TEXT NOT NULL);
+        INSERT INTO "ef_temp_items" ("id", "amount", "unit_price")
+        SELECT "id", "amount", "unit_price" FROM "items";
+        PRAGMA foreign_keys = 0;
+        DROP TABLE "items";
+        ALTER TABLE "ef_temp_items" RENAME TO "items";
+        PRAGMA foreign_keys = 1;
+
+    Applied against a table HOLDING A ROW: succeeded. line_total = 6,
+    UPDATE ... SET line_total = 999 -> 'cannot UPDATE generated column'.
+    Note the INSERT ... SELECT correctly OMITS the generated column.
+
+  So the documented sequence does not have to be written: it has to be REACHED,
+  by planning the change as two hops (add the column plain, then alter it into a
+  generated one) so EF sees an AlterColumnOperation. On PostgreSQL the same two-hop
+  emits DROP COLUMN + ADD (measured, and it also works, value 20.00) — more DDL
+  than the one-hop ADD that engine already accepts, so the hop count is per engine.
+
+Q8  CONSEQUENCE FOR THE DESIGN, stated rather than worked around. The design's
+    D1 asks for ONE new dialect member returning the column definition, and for the
+    core never to spell the DDL. Both are satisfiable, but not by the same mechanism
+    for both engines:
+
+      * the REBUILD can only come from EF (it needs every column's DDL, which only
+        EF's type mapping knows), so on SQLite EF spells the generated column;
+      * the IN-PLACE ADD is one statement, so the dialect member can and does spell
+        it, which is the path PostgreSQL takes.
+
+    The single member the design specifies therefore cannot also carry the second
+    bit the measurements demand — "can this engine add a stored generated column to
+    a table that already holds rows" — so a second, default-implemented member
+    carries it. Recorded here because it is a gap in the design, not a preference.
+
+Q9  A `computed` expression's LITERALS become BIND PARAMETERS.
+    SqlPredicateRenderer.RenderLiteralOperand routes every non-boolean literal
+    through the ParameterBag, so `unit_price * 1.2` renders `(<col> * @p0)`. DDL
+    cannot carry a bind parameter. Field-only arithmetic — which is every example
+    in the sources, including baas-analyza:1358's ladder — renders clean.
