@@ -1,7 +1,9 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Metadata.Conventions;
+using Microsoft.Extensions.DependencyInjection;
 using MMLib.Alvo.Data.EntityFrameworkCore;
+using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore.Tests;
@@ -365,35 +367,86 @@ public class DescriptorModelBuilderTests
         index.Properties.Select(p => p.Name).ShouldBe(["make", "model"]);
     }
 
+    /// <summary>
+    /// #21 revives <c>computed</c>, and it revives it as a <b>stored</b> generated column whose SQL came out of
+    /// the CEL compiler — never out of the descriptor string #20 removed as an arbitrary-DDL-injection vector.
+    /// </summary>
+    /// <remarks>
+    /// The rendered SQL is asserted to be delimited identifiers and an operator, which is what makes it safe to
+    /// reach DDL unparameterized: it is a render of a compiled AST, so it cannot carry anything the descriptor
+    /// wrote verbatim.
+    /// </remarks>
     [Fact]
-    public void Computed_expression_is_ignored_until_the_cel_sql_compiler_lands()
+    public void Computed_expression_becomes_a_stored_generated_column()
     {
-        // #20: the raw descriptor-string -> GENERATED ALWAYS AS (...) STORED splice was an
-        // arbitrary-DDL-injection vector, so the builder no longer honors ComputedExpression.
-        // DescriptorToSchemaMapper already refuses 'computed' at mapping time (#21 revives this).
-        var model = new SchemaModel([
+        IModel efModel = DescriptorModelBuilder.Build(ComputedVehicles(), NewSqliteBuilder, Computed());
+
+        var total = efModel.FindEntityType("vehicles")!.FindProperty("total")!;
+        total.GetComputedColumnSql().ShouldBe("(\"unit_price\" * \"amount\")");
+        total.GetIsStored().ShouldBe(true, "a virtual column is not indexable or filterable on both engines");
+    }
+
+    /// <summary>
+    /// A container with no expression services refuses the field and <b>names the missing registration</b>.
+    /// </summary>
+    /// <remarks>
+    /// Falling through to a plain column is the worst available outcome: the descriptor says the database
+    /// maintains the value, the column would hold whatever anyone wrote, and nothing would report it. A driver's
+    /// <c>UseSqlite</c> is attachable to a bare builder that never called <c>AddAlvo()</c>, so this case is
+    /// reachable rather than hypothetical.
+    /// </remarks>
+    [Fact]
+    public void Computed_expression_without_expression_services_is_refused_naming_AddAlvo()
+    {
+        var refusal = Should.Throw<InvalidOperationException>(
+            () => DescriptorModelBuilder.Build(ComputedVehicles(), NewSqliteBuilder));
+
+        refusal.Message.ShouldContain("vehicles.total");
+        refusal.Message.ShouldContain("AddAlvo()");
+    }
+
+    /// <summary>
+    /// A <c>computed</c> carrying a literal is refused, naming the constant (spike Q9): the scalar renderer routes
+    /// every literal through its parameter bag and DDL has no bind-parameter form, so inlining it would put
+    /// engine-specific literal escaping into persisted DDL.
+    /// </summary>
+    [Fact]
+    public void Computed_expression_carrying_a_literal_is_refused_naming_the_constant()
+    {
+        var model = ComputedVehicles("unit_price * 1.2");
+
+        var refusal = Should.Throw<InvalidOperationException>(
+            () => DescriptorModelBuilder.Build(model, NewSqliteBuilder, Computed()));
+
+        refusal.Message.ShouldContain("1.2");
+        refusal.Message.ShouldContain("before-hook");
+    }
+
+    private static SchemaModel ComputedVehicles(string expression = "unit_price * amount") =>
+        new([
             new EntitySchema
             {
                 Name = "vehicles",
                 Fields = [
                     new FieldSchema { Name = "id", Type = FieldType.Uuid, Required = true },
-                    new FieldSchema { Name = "make", Type = FieldType.String, Required = true },
-                    new FieldSchema { Name = "model", Type = FieldType.String, Required = true },
-                    new FieldSchema
-                    {
-                        Name = "full_name",
-                        Type = FieldType.String,
-                        ComputedExpression = "make || ' ' || model",
-                    },
+                    new FieldSchema { Name = "unit_price", Type = FieldType.Decimal, Required = true },
+                    new FieldSchema { Name = "amount", Type = FieldType.Integer, Required = true },
+                    new FieldSchema { Name = "total", Type = FieldType.Decimal, ComputedExpression = expression },
                 ],
             },
         ]);
 
-        IModel efModel = DescriptorModelBuilder.Build(model, NewSqliteBuilder);
-
-        var fullName = efModel.FindEntityType("vehicles")!.FindProperty("full_name")!;
-        fullName.GetComputedColumnSql().ShouldBeNull();
-        fullName.GetIsStored().ShouldBeNull();
+    /// <summary>
+    /// The real renderer trio, out of <c>AddAlvo()</c> — a fake compiler would let this suite prove the builder
+    /// wires up whatever it is handed rather than that a descriptor's CEL becomes legal DDL.
+    /// </summary>
+    private static ComputedColumnSql Computed()
+    {
+        using var services = new ServiceCollection().AddAlvo().Services.BuildServiceProvider();
+        return new ComputedColumnSql(
+            services.GetRequiredService<ICelCompiler>(),
+            services.GetRequiredService<IPredicateRenderer>(),
+            new TestFieldSqlRenderer());
     }
 
     [Theory]

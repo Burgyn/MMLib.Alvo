@@ -21,6 +21,11 @@ public sealed class SqliteGeneratedSqlSnapshotTests : SchemaSqlSnapshotTests, ID
     {
         var builder = new TestAlvoBuilder(new ServiceCollection());
         builder.UseSqlite($"Data Source={_databasePath}");
+        // AddAlvo() beside the driver, and it is now load-bearing rather than tidy: the computed-column
+        // case renders CEL to SQL, so the migrator needs the core's ICelCompiler/IPredicateRenderer. A
+        // container without them refuses a schema declaring 'computed' by name — see
+        // DescriptorModelBuilder.EnsureComputedIsRenderable.
+        builder.Services.AddAlvo();
         _services = builder.Services.BuildServiceProvider();
     }
 

@@ -57,7 +57,47 @@ internal static class WritePayloadGuard
 
         QueryFieldGuard.EnsureDeclared(values, entity);
         EnsureNoManagedColumnWrite(values, entity, isUpdate);
+        EnsureNoComputedWrite(values, entity);
         EnsureNoReadOnlyWrite(values, decision.ReadOnlyFields);
+    }
+
+    /// <summary>
+    /// Refuses a payload that names a <c>computed</c> field. The value is maintained by the <b>engine</b>, as a
+    /// stored generated column, so there is no write for this port to perform.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Refused rather than dropped, and that is the whole point of stating it here.</b> The runtime model
+    /// marks a computed property store-generated (<see cref="AlvoDataContext"/>), which makes EF leave the
+    /// column out of the <c>INSERT</c> — so without this check a caller who sent <c>line_total: 999</c> would
+    /// get a <c>201</c> whose body reports the engine's own value, with nothing anywhere saying their number was
+    /// discarded. A payload that is silently ignored is the wrong-stored-number failure class this feature is
+    /// otherwise built to remove, arriving from the caller's side instead of the schema's.
+    /// </para>
+    /// <para>
+    /// The engine's refusal is still the guarantee — a write that reaches the column at all, from another
+    /// application or a raw statement, is rejected by the database itself — and this is what turns that
+    /// guarantee into an actionable answer for a caller who came through the port. The two are not redundant:
+    /// this one names the field and the mechanism, the engine's one names neither.
+    /// </para>
+    /// <para>
+    /// Its position in the order is immaterial to disclosure: like every refusal in this type it is decided from
+    /// the payload and the schema alone, so no row is consulted and no answer here depends on stored data.
+    /// </para>
+    /// </remarks>
+    private static void EnsureNoComputedWrite(IReadOnlyDictionary<string, object?> values, EntitySchema? entity)
+    {
+        var computed = entity?.Fields
+            .Where(field => field.ComputedExpression is not null)
+            .Where(field => values.ContainsKey(field.Name));
+
+        foreach (var field in computed ?? [])
+        {
+            throw new AlvoAuthorizationException(
+                $"Field '{field.Name}' is computed by the database and cannot be written: it is a stored "
+                + "generated column, so the engine itself refuses every write to it. Remove it from the "
+                + "payload — its value follows from the fields the expression reads.");
+        }
     }
 
     /// <summary>

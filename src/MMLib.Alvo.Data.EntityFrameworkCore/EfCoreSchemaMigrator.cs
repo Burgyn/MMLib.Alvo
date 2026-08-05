@@ -42,6 +42,8 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator
     private readonly IModelRuntimeInitializer _modelRuntimeInitializer;
     private readonly Func<ModelBuilder> _newModelBuilder;
     private readonly RelationalConnectionFactory _connections;
+    private readonly IAlvoSqlDialect _dialect;
+    private readonly ComputedColumnSql? _computed;
 
     /// <summary>
     /// Initializes a new migrator from a provider's EF Core services and a per-call connection factory.
@@ -51,24 +53,37 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator
     /// <param name="modelRuntimeInitializer">Runs the runtime-model initialization the relational model requires.</param>
     /// <param name="newModelBuilder">Creates a conventionless <see cref="ModelBuilder"/> seeded with the provider's convention set.</param>
     /// <param name="connections">Creates a fresh ADO.NET connection per <see cref="ApplyAsync"/> call; each connection is owned and disposed within that call.</param>
+    /// <param name="dialect">
+    /// This driver's SQL seam, asked two questions about a generated column: whether the engine can express one
+    /// at all, and whether adding one to an existing table needs the table rebuilt.
+    /// </param>
+    /// <param name="computed">
+    /// Renders a <c>computed</c> field's CEL to this driver's SQL, or <see langword="null"/> when the container
+    /// registered no expression services — a schema declaring one is then refused by name.
+    /// </param>
     internal EfCoreSchemaMigrator(
         IMigrationsModelDiffer differ,
         IMigrationsSqlGenerator sqlGenerator,
         IModelRuntimeInitializer modelRuntimeInitializer,
         Func<ModelBuilder> newModelBuilder,
-        RelationalConnectionFactory connections)
+        RelationalConnectionFactory connections,
+        IAlvoSqlDialect dialect,
+        ComputedColumnSql? computed)
     {
         ArgumentNullException.ThrowIfNull(differ);
         ArgumentNullException.ThrowIfNull(sqlGenerator);
         ArgumentNullException.ThrowIfNull(modelRuntimeInitializer);
         ArgumentNullException.ThrowIfNull(newModelBuilder);
         ArgumentNullException.ThrowIfNull(connections);
+        ArgumentNullException.ThrowIfNull(dialect);
 
         _differ = differ;
         _sqlGenerator = sqlGenerator;
         _modelRuntimeInitializer = modelRuntimeInitializer;
         _newModelBuilder = newModelBuilder;
         _connections = connections;
+        _dialect = dialect;
+        _computed = computed;
     }
 
     /// <inheritdoc/>
@@ -176,7 +191,67 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator
     {
         // DescriptorModelBuilder.Build returns a FinalizeModel()'d model; GetRelationalModel()
         // additionally requires the runtime initializer to have run (Task 0 report, gotcha #1).
-        var model = DescriptorModelBuilder.Build(schema, _newModelBuilder);
-        return _modelRuntimeInitializer.Initialize(model, designTime: true);
+        var model = DescriptorModelBuilder.Build(schema, _newModelBuilder, _computed);
+        var initialized = _modelRuntimeInitializer.Initialize(model, designTime: true);
+        EnsureEveryGeneratedColumnIsExpressible(initialized);
+
+        return initialized;
+    }
+
+    /// <summary>
+    /// Refuses a <c>computed</c> field on an engine whose dialect declares it cannot express a stored generated
+    /// column, naming the engine — the gate the design's D1 asks for.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Asked here, after the runtime initializer, because that is the first moment the store type exists.</b>
+    /// <see cref="IAlvoSqlDialect.GeneratedColumnDefinition"/> takes the column's EF-resolved store type — a
+    /// dialect that needs it (PostgreSQL names the type; T-SQL rejects one being named) can only be asked once
+    /// the relational model has resolved it, and a model builder runs long before that.
+    /// </para>
+    /// <para>
+    /// <b>What is used is the answer's <em>nullness</em>, not its text, and that is deliberate rather than an
+    /// oversight.</b> Measured (spike Q5–Q7): from <c>HasComputedColumnSql(…, stored: true)</c> EF's own
+    /// per-provider generator already emits the full definition in <c>CREATE TABLE</c>, in PostgreSQL's in-place
+    /// <c>ALTER TABLE … ADD</c>, and inside SQLite's table rebuild — so splicing the dialect's own string into
+    /// the plan would be a <em>second</em> author for DDL EF has already spelled correctly, and would lose the
+    /// type mapping only EF has. The member's contract is therefore read the way it is written: a
+    /// <see langword="null"/> means "this engine has no stored generated column", and the migrator refuses the
+    /// field rather than emitting a plain one that nothing maintains. The returned text remains the reference
+    /// spelling a driver whose EF provider cannot emit the annotation would use.
+    /// </para>
+    /// <para>
+    /// It walks the built model rather than the <see cref="SchemaModel"/> so it cannot come to disagree with
+    /// what was actually configured: a field the model builder decided not to mark computed is not one this gate
+    /// should have an opinion about.
+    /// </para>
+    /// </remarks>
+    private void EnsureEveryGeneratedColumnIsExpressible(IModel model)
+    {
+        var generated = model.GetEntityTypes()
+            .SelectMany(entity => entity.GetProperties())
+            .Where(property => property.GetComputedColumnSql() is not null);
+
+        foreach (var property in generated)
+        {
+            EnsureExpressible(property);
+        }
+    }
+
+    private void EnsureExpressible(IProperty property)
+    {
+        var column = property.GetColumnName();
+        var storeType = property.GetColumnType();
+        var expression = property.GetComputedColumnSql()!;
+
+        if (_dialect.GeneratedColumnDefinition(column, storeType, expression) is null)
+        {
+            throw new InvalidOperationException(
+                $"Field '{property.DeclaringType.DisplayName()}.{column}' declares 'computed', which Alvo "
+                + $"honours as a stored generated column — and {_dialect.GetType().Name} declares that this "
+                + "engine cannot express one. Remove 'computed' from the field and maintain the value in a "
+                + "before-hook instead, or move the entity to an engine whose driver supports generated "
+                + "columns.");
+        }
     }
 }

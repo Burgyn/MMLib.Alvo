@@ -60,4 +60,19 @@ internal sealed class LockRecordingSqlDialect : IAlvoSqlDialect
     /// </summary>
     public string RowWindowClause(string rowCountParameterMarker, string? rowOffsetParameterMarker = null) =>
         ((IAlvoSqlDialect)_inner).RowWindowClause(rowCountParameterMarker, rowOffsetParameterMarker);
+
+    /// <summary>
+    /// Forwarded, and <b>not optional</b>: both generated-column members ship with a refusing default
+    /// (<see langword="null"/>, <see langword="false"/>), so a wrapper that merely forgot them would silently
+    /// turn every fixture built on it into an engine that "cannot express a generated column" and would make the
+    /// whole computed suite refuse at apply — while looking like a wrapper that only records locks.
+    /// </summary>
+    /// <param name="columnName">The column's name.</param>
+    /// <param name="storeType">The column's EF-resolved store type.</param>
+    /// <param name="renderedExpression">The rendered SQL scalar expression.</param>
+    public string? GeneratedColumnDefinition(string columnName, string storeType, string renderedExpression) =>
+        _inner.GeneratedColumnDefinition(columnName, storeType, renderedExpression);
+
+    /// <inheritdoc cref="IAlvoSqlDialect.GeneratedColumnAddRequiresTableRebuild"/>
+    public bool GeneratedColumnAddRequiresTableRebuild => _inner.GeneratedColumnAddRequiresTableRebuild;
 }

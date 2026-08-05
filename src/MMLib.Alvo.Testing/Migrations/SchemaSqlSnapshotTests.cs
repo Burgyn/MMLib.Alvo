@@ -139,6 +139,33 @@ public abstract class SchemaSqlSnapshotTests
         await VerifySql(plan);
     }
 
+    /// <summary>
+    /// Creating an entity whose <c>total</c> field is <c>computed</c> — freezes the <b>generation clause</b> each
+    /// engine spells for a stored generated column.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This is the EF-version drift guard the whole mechanism rests on.</b> Alvo never spells this DDL: the
+    /// model marks the property <c>HasComputedColumnSql(…, stored: true)</c> and EF's own per-provider generator
+    /// emits it — <c>numeric(18,2) GENERATED ALWAYS AS (…) STORED</c> on PostgreSQL, the legal short form
+    /// <c>AS (…) STORED</c> on SQLite. A provider bump that stopped emitting the clause would ship an
+    /// <em>ordinary column nothing maintains</em>, with every behavioural fact still green because a column that
+    /// merely holds the right number reads identically. Here it breaks a snapshot instead.
+    /// </para>
+    /// <para>
+    /// The expression is field-only arithmetic, which is not a simplification: a <c>computed</c> carrying a
+    /// literal is refused at apply, because the scalar renderer routes every literal through a bind parameter and
+    /// DDL has no bind-parameter form.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task Create_entity_with_a_computed_field_sql_is_stable()
+    {
+        EnsureEngineAvailable();
+        var plan = await CreateMigrator().PlanAsync(Empty(), Model(Lines()), new MigrationOptions(), TestContext.Current.CancellationToken);
+        await VerifySql(plan);
+    }
+
     private Task VerifySql(MigrationPlan plan) => Verify(Sql(plan)).UseParameters(EngineName);
 
     private static string Sql(MigrationPlan plan) => string.Join("\n;\n", plan.Sql);
@@ -181,6 +208,30 @@ public abstract class SchemaSqlSnapshotTests
             new FieldSchema { Name = "updated_at", Type = FieldType.DateTime, Required = true },
             new FieldSchema { Name = "updated_by", Type = FieldType.Uuid, Nullable = true },
             new FieldSchema { Name = "deleted_at", Type = FieldType.DateTime, Nullable = true },
+        ],
+    };
+
+    /// <summary>
+    /// The computed-column case's entity: two ordinary columns and one generated from them, mirroring
+    /// <c>baas-analyza:1358</c>'s <c>invoice_items.line_total = unit_price * amount</c>.
+    /// </summary>
+    private static EntitySchema Lines() => new()
+    {
+        Name = "lines",
+        Fields =
+        [
+            new FieldSchema { Name = "id", Type = FieldType.Uuid, Required = true },
+            new FieldSchema { Name = "unit_price", Type = FieldType.Decimal, Precision = 18, Scale = 2, Required = true },
+            new FieldSchema { Name = "amount", Type = FieldType.Integer, Required = true },
+            new FieldSchema
+            {
+                Name = "total",
+                Type = FieldType.Decimal,
+                Precision = 18,
+                Scale = 2,
+                Nullable = true,
+                ComputedExpression = "unit_price * amount",
+            },
         ],
     };
 

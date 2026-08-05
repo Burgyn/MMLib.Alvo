@@ -178,6 +178,17 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task Equality_against_a_decimal_column_answers_numerically(string rule, int expected) { }
         protected abstract System.Threading.Tasks.Task<int> MatchesAsync(string rule, decimal? price, long? mileage);
     }
+    public abstract class AlvoDataComputedRollupTests
+    {
+        protected AlvoDataComputedRollupTests() { }
+        public System.Threading.Tasks.Task A_computed_field_is_the_expression_over_the_row_the_write_stored() { }
+        public System.Threading.Tasks.Task A_payload_naming_a_computed_field_is_refused_rather_than_ignored() { }
+        public System.Threading.Tasks.Task An_update_to_a_source_field_moves_the_computed_value_with_it() { }
+        protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Data.IAlvoData> CreateAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor);
+        protected abstract System.Threading.Tasks.Task<System.Exception?> ExecuteOutOfBandAsync(string sql);
+        public System.Threading.Tasks.Task The_engine_accepts_the_same_write_to_an_ordinary_column() { }
+        public System.Threading.Tasks.Task The_engine_itself_refuses_a_write_to_a_computed_column() { }
+    }
     public abstract class AlvoDataConcurrencyTests
     {
         protected AlvoDataConcurrencyTests() { }
@@ -477,6 +488,7 @@ namespace MMLib.Alvo.Testing.Migrations
         public System.Threading.Tasks.Task Add_ref_foreign_key_sql_is_stable() { }
         protected abstract MMLib.Alvo.Migrations.ISchemaMigrator CreateMigrator();
         public System.Threading.Tasks.Task Create_audited_tenant_entity_sql_is_stable() { }
+        public System.Threading.Tasks.Task Create_entity_with_a_computed_field_sql_is_stable() { }
         public System.Threading.Tasks.Task Create_entity_with_every_field_type_sql_is_stable() { }
         public System.Threading.Tasks.Task Create_vehicles_table_sql_is_stable() { }
         public System.Threading.Tasks.Task Drop_column_sql_is_stable() { }
