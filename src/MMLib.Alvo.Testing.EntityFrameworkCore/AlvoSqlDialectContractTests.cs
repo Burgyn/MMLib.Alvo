@@ -433,6 +433,80 @@ public abstract class AlvoSqlDialectContractTests
     }
 
     /// <summary>
+    /// A dialect that <em>does</em> spell a stored generated column must spell all three parts it was handed —
+    /// or, where its engine rejects one of them, must have dropped it deliberately. Asserted as "the column and
+    /// the expression are present, verbatim" rather than as an exact string, because the surrounding grammar is
+    /// per engine (<c>GENERATED ALWAYS AS (…) STORED</c> on both shipped drivers, <c>AS (…) PERSISTED</c> on
+    /// T-SQL, which also drops the type).
+    /// </summary>
+    /// <remarks>
+    /// <b>Vacuous for a dialect that answers <see langword="null"/>, and that is stated rather than hidden</b> —
+    /// the same price this suite already pays for <c>DecodeConstraintViolation</c>. <see langword="null"/> is the
+    /// <em>legitimate</em> answer for an engine with no generated columns, and <c>TestSqlDialect</c> — an
+    /// implementor that adds nothing beyond the required members — is what proves the inherited default is a
+    /// refusal. What is asserted here is the half a driver can get wrong <em>silently</em>, since the migrator
+    /// interpolates the result straight into DDL.
+    /// </remarks>
+    [Fact]
+    public void A_generated_column_definition_names_the_column_and_the_expression_it_was_handed()
+    {
+        var dialect = CreateDialect();
+        var definition = dialect.GeneratedColumnDefinition("line_total", "numeric(18,2)", "\"unit_price\" * \"amount\"");
+        if (definition is null)
+        {
+            return;
+        }
+
+        definition.ShouldBe(definition.Trim(), "A column definition carries no separator of its own.");
+        definition.ShouldNotContain(";");
+        definition.ShouldNotContain("ADD COLUMN");
+        definition.ShouldStartWith(dialect.RenderColumn("line_total"));
+        // The dialect supplies the parentheses the generation clause requires. A bare column reference reaches
+        // it unparenthesised, so a dialect relying on the caller for them would emit
+        // GENERATED ALWAYS AS "col" STORED — which parses on neither shipped engine.
+        definition.ShouldContain("(\"unit_price\" * \"amount\")");
+    }
+
+    /// <summary>
+    /// Each of the three arguments is required, and a missing one is refused rather than interpolated as an
+    /// empty string — which would produce <c>"" GENERATED ALWAYS AS () STORED</c>, DDL that fails at migration
+    /// time with a syntax error naming nothing the author wrote.
+    /// </summary>
+    [Theory]
+    [InlineData(null, "int", "(1 + 1)")]
+    [InlineData("", "int", "(1 + 1)")]
+    [InlineData("total", null, "(1 + 1)")]
+    [InlineData("total", "int", " ")]
+    public void A_generated_column_definition_refuses_a_missing_part(string? columnName, string? storeType, string? expression)
+    {
+        var dialect = CreateDialect();
+        if (dialect.GeneratedColumnDefinition("total", "int", "(1)") is null)
+        {
+            return;
+        }
+
+        Should.Throw<ArgumentException>(() => dialect.GeneratedColumnDefinition(columnName!, storeType!, expression!));
+    }
+
+    /// <summary>
+    /// <b>The pairing rule for the two generated-column members.</b> A dialect that cannot express a stored
+    /// generated column at all cannot coherently demand a table rebuild in order to add one: there would be
+    /// nothing to add. The combination is worth an assertion rather than a comment because it is the one that
+    /// would make the migrator rebuild a table and then refuse the field, destroying the table's identity for
+    /// no change at all.
+    /// </summary>
+    [Fact]
+    public void A_dialect_that_cannot_express_a_generated_column_does_not_demand_a_rebuild_to_add_one()
+    {
+        var dialect = CreateDialect();
+
+        if (dialect.GeneratedColumnDefinition("total", "int", "(1)") is null)
+        {
+            dialect.GeneratedColumnAddRequiresTableRebuild.ShouldBeFalse();
+        }
+    }
+
+    /// <summary>
     /// A <see cref="DbException"/> from no provider at all, for the fact above. It carries a message shaped
     /// like the ones the engines really use, so a decoder that reads prose instead of a numeric code fails
     /// rather than passing on the absence of a match.

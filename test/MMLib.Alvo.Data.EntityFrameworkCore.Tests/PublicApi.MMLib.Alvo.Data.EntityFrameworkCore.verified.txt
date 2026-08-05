@@ -32,7 +32,9 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore
     }
     public interface IAlvoSqlDialect
     {
+        bool GeneratedColumnAddRequiresTableRebuild { get; }
         MMLib.Alvo.Data.EntityFrameworkCore.SqlConstraintViolation? DecodeConstraintViolation(System.Data.Common.DbException failure);
+        string? GeneratedColumnDefinition(string columnName, string storeType, string renderedExpression);
         string RenderColumn(string columnName);
         string RenderNullProjection(string storeType);
         string RenderTable(MMLib.Alvo.Schema.EntitySchema entity, MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation? lockedPreImageFor);

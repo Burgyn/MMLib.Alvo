@@ -1,6 +1,8 @@
 ﻿using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Testing;
 using MMLib.Alvo.Testing.Data;
+using Shouldly;
+using Xunit;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore.Tests;
 
@@ -28,4 +30,22 @@ public class TestSqlDialectContractTests : AlvoSqlDialectContractTests
     protected override IAlvoSqlDialect CreateDialect() => new TestSqlDialect();
 
     protected override IFieldSqlRenderer CreateFieldRenderer() => new TestFieldSqlRenderer();
+
+    /// <summary>
+    /// <b>The default of <see cref="IAlvoSqlDialect.GeneratedColumnDefinition"/> is a refusal, not a
+    /// spelling.</b> <see cref="TestSqlDialect"/> implements the port's required members and nothing else, so
+    /// it is the one implementation in the repo that can prove what an out-of-repo driver inherits. A default
+    /// that guessed <c>GENERATED ALWAYS AS (…) STORED</c> would compile and migrate on two engines and produce
+    /// a syntax error on the third, or — on an engine where the phrase happens to parse differently — an
+    /// ordinary column nothing ever maintains, which is the silent outcome <c>computed</c> was refused for in
+    /// the first place.
+    /// </summary>
+    [Fact]
+    public void An_implementor_that_adds_nothing_cannot_express_a_generated_column()
+    {
+        var dialect = CreateDialect();
+
+        dialect.GeneratedColumnDefinition("line_total", "numeric(18,2)", "(1 + 1)").ShouldBeNull();
+        dialect.GeneratedColumnAddRequiresTableRebuild.ShouldBeFalse();
+    }
 }

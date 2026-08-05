@@ -43,6 +43,47 @@ public sealed class SqliteSqlDialect : IAlvoSqlDialect
         return $"CAST(NULL AS {storeType})";
     }
 
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <para>
+    /// <c>GENERATED ALWAYS</c> is <em>optional</em> in SQLite's grammar — EF's own generator emits the short
+    /// <c>&lt;column&gt; AS (&lt;expr&gt;) STORED</c> — and it is spelled in full here anyway, so the two
+    /// shipped engines' generated-column DDL is comparable by eye in a review and in a golden snapshot.
+    /// </para>
+    /// <para>
+    /// The store type is named even though SQLite would accept a generated column without one. An untyped
+    /// generated column has no type affinity, so a <c>decimal</c> — which this driver stores as <c>TEXT</c> —
+    /// would come back out of the same expression as a numeric value on one path and a string on another.
+    /// </para>
+    /// </remarks>
+    public string? GeneratedColumnDefinition(string columnName, string storeType, string renderedExpression)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(columnName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(storeType);
+        ArgumentException.ThrowIfNullOrWhiteSpace(renderedExpression);
+
+        return $"{RenderColumn(columnName)} {storeType} GENERATED ALWAYS AS ({renderedExpression}) STORED";
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <para>
+    /// <b>Measured, against the bundled <c>e_sqlite3</c> the product actually runs (3.53.3), not the system
+    /// CLI.</b> <c>ALTER TABLE t ADD COLUMN s … STORED</c> succeeds while <c>t</c> is <em>empty</em> and is
+    /// refused with <c>SQLite Error 1: 'cannot add a STORED column'</c> the moment it holds a single row —
+    /// which is the whole content of the finding, because the empty case is the one a fresh test fixture
+    /// exercises and the non-empty case is the only one a deployed entity is ever in.
+    /// </para>
+    /// <para>
+    /// The alternative SQLite <em>does</em> accept on a populated table is <c>VIRTUAL</c>, and it is refused
+    /// here: a virtual column is not stored, so indexing and filtering would silently differ from PostgreSQL,
+    /// which has no <c>VIRTUAL</c> at all before 18. Answering <see langword="true"/> instead buys the
+    /// documented create-new / copy / drop / rename rebuild, whose observable outcome is identical on both
+    /// engines.
+    /// </para>
+    /// </remarks>
+    public bool GeneratedColumnAddRequiresTableRebuild => true;
+
     /// <summary><c>SQLITE_CONSTRAINT_UNIQUE</c> (2067): a <c>UNIQUE</c> index refused the row.</summary>
     private const int ConstraintUnique = 2067;
 

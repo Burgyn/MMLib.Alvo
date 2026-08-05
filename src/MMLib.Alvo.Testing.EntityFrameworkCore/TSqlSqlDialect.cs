@@ -123,6 +123,36 @@ public sealed class TSqlSqlDialect : IAlvoSqlDialect
     /// <inheritdoc/>
     /// <remarks>
     /// <para>
+    /// <b>T-SQL is the engine that makes the third argument's presence load-bearing, and the second's absence
+    /// too.</b> It spells a stored generated column <c>&lt;column&gt; AS (&lt;expr&gt;) PERSISTED</c> and
+    /// <em>rejects</em> a named type — the type is inferred from the expression — so a member shaped as "give me
+    /// the column and its type and I will interpolate them" would have had no legal answer here. That is why
+    /// <see cref="IAlvoSqlDialect.GeneratedColumnDefinition"/> hands the dialect the parts and lets it decide
+    /// which to use, rather than returning only the generation clause: <paramref name="storeType"/> is simply
+    /// dropped on this engine, which is a decision a dialect is allowed to make and a composer is not.
+    /// </para>
+    /// <para>
+    /// Azure SQL adds it in place on a populated table and backfills, so
+    /// <see cref="IAlvoSqlDialect.GeneratedColumnAddRequiresTableRebuild"/> keeps its <see langword="false"/>
+    /// default here — the pairing the contract suite asserts is that a dialect answering
+    /// <see langword="null"/> above cannot demand a rebuild, and this one answers a definition.
+    /// </para>
+    /// </remarks>
+    /// <param name="columnName">The column's name.</param>
+    /// <param name="storeType">Ignored: T-SQL infers a persisted column's type and rejects one being named.</param>
+    /// <param name="renderedExpression">The rendered SQL scalar expression.</param>
+    public string? GeneratedColumnDefinition(string columnName, string storeType, string renderedExpression)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(columnName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(storeType);
+        ArgumentException.ThrowIfNullOrWhiteSpace(renderedExpression);
+
+        return $"{RenderColumn(columnName)} AS ({renderedExpression}) PERSISTED";
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <para>
     /// <b>Nothing, and the reason is a property of this stand-in rather than of T-SQL.</b> A real SQL Server /
     /// Azure SQL driver decodes this from <c>SqlException.Number</c> — <c>2627</c> (a unique <em>constraint</em>),
     /// <c>2601</c> (a unique <em>index</em>; both mean the same thing to a caller and both must be handled, which
