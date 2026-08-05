@@ -184,13 +184,19 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task A_computed_field_can_be_added_to_an_entity_that_already_holds_a_row() { }
         public System.Threading.Tasks.Task A_computed_field_is_the_expression_over_the_row_the_write_stored() { }
         public System.Threading.Tasks.Task A_payload_naming_a_computed_field_is_refused_rather_than_ignored() { }
+        public System.Threading.Tasks.Task A_rollup_over_no_children_is_the_operations_own_empty_answer() { }
         public System.Threading.Tasks.Task Adding_a_computed_field_is_not_classified_destructive() { }
         public System.Threading.Tasks.Task An_update_to_a_source_field_moves_the_computed_value_with_it() { }
         protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Data.IAlvoData> CreateAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor);
+        public System.Threading.Tasks.Task Deleting_a_child_lowers_the_parents_aggregates() { }
+        public System.Threading.Tasks.Task Every_rollup_operation_is_maintained_over_the_same_children() { }
         protected abstract System.Threading.Tasks.Task<System.Exception?> ExecuteOutOfBandAsync(string sql);
         protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Migrations.MigrationResult> MigrateAsync(MMLib.Alvo.Schema.SchemaModel current, MMLib.Alvo.Schema.SchemaModel desired);
+        public System.Threading.Tasks.Task Moving_a_child_between_parents_recomputes_both() { }
         public System.Threading.Tasks.Task The_engine_accepts_the_same_write_to_an_ordinary_column() { }
         public System.Threading.Tasks.Task The_engine_itself_refuses_a_write_to_a_computed_column() { }
+        public System.Threading.Tasks.Task The_whole_ladder_moves_when_a_child_is_added_and_again_when_one_is_removed() { }
+        public System.Threading.Tasks.Task Updating_an_aggregated_child_field_moves_the_parents_rollup() { }
     }
     public abstract class AlvoDataConcurrencyTests
     {

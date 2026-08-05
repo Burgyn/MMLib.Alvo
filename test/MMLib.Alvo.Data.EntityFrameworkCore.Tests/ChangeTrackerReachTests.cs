@@ -127,7 +127,10 @@ public class ChangeTrackerReachTests
     /// precisely so the row-statement file does not also become the place framework bookkeeping SQL is written;
     /// <c>PredicateParameterBinder</c> creates a command only to reach the provider's parameter factory;
     /// <c>EfCoreSchemaMigrator</c> executes the migrator's generated statements;
-    /// <c>SqliteCaseSensitiveLike</c> runs one connection pragma and can carry no row predicate at all; and
+    /// <c>SqliteCaseSensitiveLike</c> runs one connection pragma and can carry no row predicate at all;
+    /// <c>RollupRecompute</c> writes the parent's own aggregate columns from a subquery over the child table
+    /// and narrows by the row id it read off the child row this caller was already authorised to write, so it
+    /// composes no caller-influenced predicate and every identifier in it comes from the dialect; and
     /// <c>EfAlvoData</c> is the one file that composes a row statement, and it is the file every other fact
     /// here pins.
     /// </para>
@@ -220,6 +223,7 @@ public class ChangeTrackerReachTests
         "OutboxTable.cs",
         "PredicateParameterBinder.cs",
         "RelationalSqlBatch.cs",
+        "RollupRecompute.cs",
         "SqliteCaseSensitiveLike.cs",
         "SystemSchemaInitializer.cs",
         "VersionRowWriter.cs",

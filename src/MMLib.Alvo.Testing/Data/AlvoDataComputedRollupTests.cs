@@ -245,6 +245,169 @@ public abstract class AlvoDataComputedRollupTests
         migration.Plan.Steps.ShouldNotBeEmpty("a plan with no steps would pass this vacuously");
     }
 
+    /// <summary>
+    /// Every one of the five operations the frozen schema allows is maintained, over the same children — so a
+    /// <c>sum</c>-shaped implementation cannot satisfy <c>min</c>, <c>max</c>, <c>avg</c> or <c>count</c>.
+    /// </summary>
+    /// <remarks>
+    /// One fact rather than five, because what is being asserted is that the five answers are <em>consistent
+    /// with each other</em> over one child set: five separate facts would each pass over a different fixture and
+    /// none of them would say that.
+    /// </remarks>
+    [Fact]
+    public async Task Every_rollup_operation_is_maintained_over_the_same_children()
+    {
+        var data = await CreateAsync(Schema, Descriptor);
+        var invoice = await CreateInvoiceAsync(data);
+
+        await CreateItemAsync(data, invoice, unitPrice: 10m, amount: 1);
+        await CreateItemAsync(data, invoice, unitPrice: 6m, amount: 1);
+
+        var stored = await InvoiceAsync(data, invoice);
+        stored[NetTotal].ShouldBe(16m);
+        stored[ItemCount].ShouldBe(2L);
+        stored[LargestLine].ShouldBe(10m);
+        stored[SmallestLine].ShouldBe(6m);
+        stored[AverageLine].ShouldBe(8m);
+
+        // The two extremes over a PLAIN decimal column, which is where the value repair is load-bearing: SQLite
+        // stores such a column as TEXT, and '10.0' sorts BELOW '6.0' as text — so an unrepaired MIN answers 10
+        // and an unrepaired MAX answers 6, both plausible and both wrong. The same two aggregates over
+        // line_total cannot show it, because a computed column has no declared type on that engine and is
+        // therefore stored as `real`; measuring only those was how the repair first looked unnecessary.
+        stored[LargestPrice].ShouldBe(10m);
+        stored[SmallestPrice].ShouldBe(6m);
+    }
+
+    /// <summary>
+    /// A rollup over <b>zero</b> children reads as the operation's own empty answer — <c>0</c> for
+    /// <c>count</c> and <c>NULL</c> for the other four.
+    /// </summary>
+    /// <remarks>
+    /// The engine's answer, not a <c>COALESCE(…, 0)</c> this layer invented: on a nullable field that
+    /// substitution would make "no children yet" indistinguishable from "children summing to zero", and the
+    /// difference is the whole reason an author may declare the field nullable.
+    /// </remarks>
+    [Fact]
+    public async Task A_rollup_over_no_children_is_the_operations_own_empty_answer()
+    {
+        var data = await CreateAsync(Schema, Descriptor);
+        var invoice = await CreateInvoiceAsync(data);
+        await DeleteAsync(data, Items, (Guid)(await CreateItemAsync(data, invoice, 2.5m, 4))["id"]!);
+
+        var stored = await InvoiceAsync(data, invoice);
+        stored[ItemCount].ShouldBe(0L);
+        stored[NetTotal].ShouldBeNull();
+        stored[LargestLine].ShouldBeNull();
+        stored[SmallestLine].ShouldBeNull();
+        stored[AverageLine].ShouldBeNull();
+    }
+
+    /// <summary>A delete lowers the parent's aggregates, which a <c>total = total + delta</c> shortcut gets wrong.</summary>
+    [Fact]
+    public async Task Deleting_a_child_lowers_the_parents_aggregates()
+    {
+        var data = await CreateAsync(Schema, Descriptor);
+        var invoice = await CreateInvoiceAsync(data);
+        await CreateItemAsync(data, invoice, unitPrice: 2.5m, amount: 4);
+        var second = await CreateItemAsync(data, invoice, unitPrice: 3m, amount: 2);
+
+        await DeleteAsync(data, Items, (Guid)second["id"]!);
+
+        var stored = await InvoiceAsync(data, invoice);
+        stored[NetTotal].ShouldBe(10m);
+        stored[SmallestLine].ShouldBe(10m, "removing the extreme child cannot be expressed as a delta at all");
+        stored[ItemCount].ShouldBe(1L);
+    }
+
+    /// <summary>
+    /// An update that <b>moves a child from one parent to another</b> recomputes <em>both</em> — the case the
+    /// design does not name, and it exists because the foreign key is writable.
+    /// </summary>
+    /// <remarks>
+    /// Only the child's <em>pre</em>-image knows about the parent it is leaving, so an implementation that
+    /// recomputed from the post-image alone leaves the old parent holding a number for a child it no longer has.
+    /// </remarks>
+    [Fact]
+    public async Task Moving_a_child_between_parents_recomputes_both()
+    {
+        var data = await CreateAsync(Schema, Descriptor);
+        var from = await CreateInvoiceAsync(data);
+        var to = await CreateInvoiceAsync(data);
+        var item = await CreateItemAsync(data, from, unitPrice: 2.5m, amount: 4);
+
+        await data.UpdateAsync(
+            Items,
+            (Guid)item["id"]!,
+            new Dictionary<string, object?>(StringComparer.Ordinal) { [Invoice] = to },
+            Caller,
+            cancellationToken: Ct);
+
+        (await InvoiceAsync(data, from))[NetTotal].ShouldBeNull("the parent it left holds nothing now");
+        (await InvoiceAsync(data, to))[NetTotal].ShouldBe(10m);
+    }
+
+    /// <summary>
+    /// An update to a child field the aggregate reads moves the parent's rollup with it, without the child
+    /// changing parents.
+    /// </summary>
+    [Fact]
+    public async Task Updating_an_aggregated_child_field_moves_the_parents_rollup()
+    {
+        var data = await CreateAsync(Schema, Descriptor);
+        var invoice = await CreateInvoiceAsync(data);
+        var item = await CreateItemAsync(data, invoice, unitPrice: 2.5m, amount: 4);
+
+        await data.UpdateAsync(
+            Items,
+            (Guid)item["id"]!,
+            new Dictionary<string, object?>(StringComparer.Ordinal) { ["amount"] = 6 },
+            Caller,
+            cancellationToken: Ct);
+
+        (await InvoiceAsync(data, invoice))[NetTotal].ShouldBe(15m);
+    }
+
+    /// <summary>
+    /// The ladder of <c>baas-analyza:1358</c>, end to end: <c>invoice_items.line_total</c> is <em>computed</em>,
+    /// <c>invoices.net_total</c> is a <em>rollup</em> over it, and <c>invoices.gross_total</c> is
+    /// <em>computed again</em> over a column the framework maintains — so a child write moves all three.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The fourth rung is missing, and it is named here rather than skipped.</b> The analysis puts
+    /// <c>vat_total</c> in a <em>before-hook</em>, because a VAT rate is contextual and time-valid business
+    /// logic rather than arithmetic over this row. Before-hooks are PR5b-1, which is <b>PR #160 and still
+    /// open</b>: this branch is cut from <c>origin/main</c>, which has none, so <c>vat_total</c> is written
+    /// explicitly by the fixture. When #160 merges, the write goes away and the assertion below stays exactly as
+    /// it is — the ladder's shape does not change, only who fills that one field. A fact that silently omitted
+    /// the rung would read as a ladder proven end to end.
+    /// </para>
+    /// <para>
+    /// It asserts the chain twice — once after a child is added and once after one is removed — because a
+    /// computed column over a rollup only proves it <em>tracks</em> the rollup if the rollup moves in both
+    /// directions.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task The_whole_ladder_moves_when_a_child_is_added_and_again_when_one_is_removed()
+    {
+        var data = await CreateAsync(Schema, Descriptor);
+        var invoice = await CreateInvoiceAsync(data, vatTotal: 4m);   // the before-hook rung, written by hand
+        await CreateItemAsync(data, invoice, unitPrice: 2.5m, amount: 4);
+        var second = await CreateItemAsync(data, invoice, unitPrice: 3m, amount: 2);
+
+        var added = await InvoiceAsync(data, invoice);
+        added[NetTotal].ShouldBe(16m, "rollup: sum(line_total), and line_total is itself computed");
+        added[GrossTotal].ShouldBe(20m, "computed over a column the framework maintains");
+
+        await DeleteAsync(data, Items, (Guid)second["id"]!);
+
+        var removed = await InvoiceAsync(data, invoice);
+        removed[NetTotal].ShouldBe(10m);
+        removed[GrossTotal].ShouldBe(14m, "the engine tracked the rollup down as well as up");
+    }
+
     private const string Invoices = "invoices";
 
     private const string Items = "invoice_items";
@@ -266,6 +429,10 @@ public abstract class AlvoDataComputedRollupTests
     private const string SmallestLine = "smallest_line";
 
     private const string AverageLine = "average_line";
+
+    private const string LargestPrice = "largest_price";
+
+    private const string SmallestPrice = "smallest_price";
 
     private static readonly AlvoContext _caller = new()
     {
@@ -298,6 +465,12 @@ public abstract class AlvoDataComputedRollupTests
             },
             Caller,
             cancellationToken: Ct);
+
+    private static async Task<AlvoRecord> InvoiceAsync(IAlvoData data, Guid id) =>
+        (await data.GetAsync(Invoices, id, Caller, Ct))!;
+
+    private static Task DeleteAsync(IAlvoData data, string entity, Guid id) =>
+        data.DeleteAsync(entity, id, Caller, cancellationToken: Ct);
 
     /// <summary>
     /// <c>baas-analyza:1358</c>'s invoice, as one descriptor: <c>invoice_items.line_total</c> is
@@ -332,6 +505,8 @@ public abstract class AlvoDataComputedRollupTests
                     [LargestLine] = new() { Type = DescField.Decimal, Rollup = Aggregate(RollupOp.Max, LineTotal) },
                     [SmallestLine] = new() { Type = DescField.Decimal, Rollup = Aggregate(RollupOp.Min, LineTotal) },
                     [AverageLine] = new() { Type = DescField.Decimal, Rollup = Aggregate(RollupOp.Avg, LineTotal) },
+                    [LargestPrice] = new() { Type = DescField.Decimal, Rollup = Aggregate(RollupOp.Max, "unit_price") },
+                    [SmallestPrice] = new() { Type = DescField.Decimal, Rollup = Aggregate(RollupOp.Min, "unit_price") },
                 },
                 Rules = AllowAll,
             },
@@ -385,6 +560,8 @@ public abstract class AlvoDataComputedRollupTests
             Money(LargestLine) with { Rollup = RollupOf(RollupOperation.Max, LineTotal) },
             Money(SmallestLine) with { Rollup = RollupOf(RollupOperation.Min, LineTotal) },
             Money(AverageLine) with { Rollup = RollupOf(RollupOperation.Avg, LineTotal) },
+            Money(LargestPrice) with { Rollup = RollupOf(RollupOperation.Max, "unit_price") },
+            Money(SmallestPrice) with { Rollup = RollupOf(RollupOperation.Min, "unit_price") },
         ],
     };
 
