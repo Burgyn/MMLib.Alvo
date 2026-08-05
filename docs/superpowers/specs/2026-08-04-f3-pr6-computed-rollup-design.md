@@ -190,6 +190,78 @@ maintains. Named here rather than discovered.
 does not reference this one is refused. A `computed` expression referencing another row is
 already impossible — the `Computed` profile admits no `old.`/`new.` and no context.
 
+## What building it moved — the deviations, numbered, each with its measurement
+
+Written from the implementation rather than from the plan, so a reader can tell a decision from an oversight.
+Dev-1 and Dev-2 in the plan **no longer exist**, and that is the largest item here.
+
+**Dev-1 and Dev-2 are withdrawn: spike Q7 is wrong against the product.** Q7 asserted that EF's SQLite
+generator "triggers on an `AlterColumnOperation`, never on an `AddColumnOperation`", and the plan built a
+two-hop diff plus a second dialect member (`GeneratedColumnAddRequiresTableRebuild`) on it. Measured through
+the real migrator on EF Core 10: a **single**-hop diff from *plain column absent* to *computed column present*
+already emits the whole create-new / copy / drop / rename rebuild. It never emits the bare
+`ALTER TABLE … ADD COLUMN … STORED` the engine refuses. So the two-hop is unnecessary and strictly worse (an
+extra plain `ADD` first), and the member answered a question nobody asks — a default interface member with no
+consumer. Both are gone. The engine fact Q1 measured is still true; the inference drawn from it was not.
+
+**Dev-7 — the rebuild's real missing piece was a foreign-key pragma outside the transaction, and no pass of the
+spike found it.** EF emits `PRAGMA foreign_keys = 0` around its rebuild and marks those commands
+transaction-suppressed, but `MigrationPlan.Sql` carries plain strings and cannot carry the flag — so the pragma
+ran inside Alvo's single migration transaction, where SQLite documents it as a **no-op**. With foreign keys
+still enforced, `DROP TABLE parent` performs an implicit `DELETE FROM`, firing `ON DELETE CASCADE` on every
+reference to it. Measured: one invoice and one invoice item in, one invoice and **zero** items out. This is
+**pre-existing** — any `AlterColumn` on a parent table with cascading children hits it, computed or not — and
+#21 only made it reachable. Fixed by a third dialect member, `IAlvoSqlDialect.MigrationFraming`, run around the
+batch and restored in a `finally`.
+
+**Dev-3 — `FOR NO KEY UPDATE`, not `FOR UPDATE`.** As planned. The recompute provably never touches the
+parent's key, `PreImageMutation.Update` already means exactly that on this dialect, and the weaker mode still
+conflicts with itself — which is the whole correctness argument. Asking for `PreImageMutation.Delete` to obtain
+the literal words `FOR UPDATE` would serialise unrelated inserts against the parent for nothing.
+
+**Dev-4 — a `computed` expression may not carry a bound value.** As planned, and reproduced in the product:
+`unit_price * 1.2` renders `(<col> * @p0)`, and the field is refused naming the constant rather than inlined.
+Inlining would put engine-specific literal escaping into DDL that is then persisted.
+
+**Dev-5 — `rollup.where` is refused, not implemented.** As planned. `via` is implemented; `where` is an
+unhonoured slot, because ignoring it aggregates every child instead of the declared subset.
+
+**Dev-6 — the before-hook rung is not assemblable in this branch.** As planned. PR5b-1 is PR #160, still open,
+so the ladder fact writes `vat_total` explicitly and its remarks name the gap and the assertion that replaces
+the write once #160 merges. Merging #160 in to close it is refused: it would put an unmerged PR's ~40 files
+into this diff.
+
+**Dev-8 — the parent's lock is taken after the child write, not before it.** The design numbers it 1-2-3
+(lock, write child, recompute) and then says "step 1 before step 3 is the whole correctness argument" — which
+is what the measurement establishes; where the child write sits is free. Taking the lock immediately before the
+recompute holds it for less time and puts every parent this write touches in one place **in id order**, which
+is what stops two writers moving children between the same two parents in opposite directions from
+deadlocking. Locking first would spread acquisition over three call sites with no ordering between them.
+
+**Dev-9 — an update recomputes BOTH the parent it left and the parent it joined.** The design does not name
+this case; it exists because the foreign key is writable, and only the child's *pre*-image knows the parent it
+is leaving.
+
+**Dev-10 — `MIN`/`MAX` over a decimal child column needs the driver's value repair.** Not in the design.
+SQLite stores a `decimal` as `TEXT`, so `MIN('10.0','6.0')` answers `'10.0'`. `RollupRecompute` therefore routes
+the aggregated column through `IFieldSqlRenderer.RenderComparableOperands` — the member that already owns that
+repair, and whose own remarks call it an ordering key, which is exactly what an extreme-value aggregate is. It
+is applied for every operation so there is one code path; the repair is a no-op wherever the storage already
+orders correctly.
+
+**Dev-11 — a payload naming a computed field is refused, not ignored.** Not in the design. The runtime model
+marks a computed property store-generated, so EF omits it from the `INSERT` — without a guard the caller would
+get a `201` whose body reports a different number, with nothing saying theirs was discarded. `WritePayloadGuard`
+refuses it by name; the *engine's* refusal remains the guarantee for anything that reaches the column
+otherwise.
+
+**Dev-12 — `GeneratedColumnDefinition` is read for its nullness, as the migrator's capability gate.** Its
+returned text is not spliced into any plan, because EF's own per-provider generator already emits the full
+definition on both shipped engines (Q5–Q7) and a second author for correct DDL is a liability. The member's
+documented contract — "`null` when the engine cannot express one, in which case the migrator refuses the field
+and names the engine" — is honoured exactly as written.
+
+
 ## Acceptance
 
 #21's DoD, plus what the spike showed those two facts must contain:

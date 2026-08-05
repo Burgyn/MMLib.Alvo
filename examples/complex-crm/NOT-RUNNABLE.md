@@ -4,15 +4,20 @@ Applying this descriptor **fails**, on purpose. It exists to exercise the *shape
 `schema/project.schema.json` declares — including the ones this build does not yet honour — so the schema
 corpus has one fixture that covers the whole surface.
 
-Today it declares four such features, each refused at apply by
+Today it declares three such features, each refused at apply by
 `DescriptorToSchemaMapper`/`DescriptorValidator` with the consequence and the fix named:
 
 | Feature | Where | Why it is refused |
 |---|---|---|
-| `computed` | `invoices.gross_total`, `invoice_items.line_total` | the expression is never evaluated, so the column stays null |
-| `rollup` | `companies.open_deals`, `invoices.net_total` | nothing maintains the aggregate, so it reads as permanently null while looking like data |
+| `rollup.where` | `companies.open_deals` | the *filter* is not evaluated, so the aggregate is maintained over **every** child instead of the declared subset — a stored number that looks like data. `rollup` itself is honoured now (#21); only its `where` is not |
 | `default` | `companies.owner_id`, `deals.stage`, `deals.owner_id` | no column default is emitted and the value is dropped, so the field is simply null |
 | `hooks/before*` | `contacts.beforeCreate`, `deals.beforeUpdate` | the hooks never run, so a write the author believes is vetted or patched is neither. The three `after*` points **are** honoured now, and this example declares none of them |
+
+**`computed` and `rollup` are no longer on that list — #21 honours both.**
+`invoice_items.line_total` is a stored generated column the database maintains and refuses every write to,
+`invoices.net_total` is a rollup Alvo recomputes inside the child write's own transaction, and
+`invoices.gross_total` is a computed column *over* that rollup. What is left of the pair is
+`companies.open_deals`' `where`, above.
 
 ## It also declares five blocks that are *warned about*, not refused
 
@@ -44,5 +49,5 @@ would fire on every descriptor ever applied. `docs/architecture/data-api.md` rec
 
 Delete it as soon as applying `crm.alvo.json` succeeds. That is not a suggestion a reader has to remember:
 `DescriptorToSchemaMapperTests.Every_example_marked_not_runnable_really_is_refused` asserts every marked
-example *is* refused, so the day the last of the four features lands, that fact fails until this file is
+example *is* refused, so the day the last of the three features lands, that fact fails until this file is
 removed. The marker cannot outlive its reason.

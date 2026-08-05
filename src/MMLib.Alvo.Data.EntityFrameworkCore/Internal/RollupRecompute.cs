@@ -26,8 +26,10 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// directions. PostgreSQL requires the lock; SQLite must <em>not</em> read the parent before writing inside a
 /// deferred transaction — 12 of 24 writers died on <c>SQLITE_BUSY_SNAPSHOT</c> (<c>[5/517]</c>) when they did —
 /// and needs no lock at all, because the child write already took the database-wide write lock and SQLite
-/// admits one writer at a time. So an empty <see cref="IAlvoSqlDialect.RowLockClause"/> means "issue no locking
-/// read here", not "issue an unlocked one", and the read is skipped entirely.
+/// admits one writer at a time. So a dialect that expresses no lock in <em>either</em> of the port's two
+/// positions means "issue no locking read here", not "issue an unlocked one", and the read is skipped entirely —
+/// see <see cref="LockStatement"/>, which is careful to ask about both positions rather than only the trailing
+/// clause.
 /// </para>
 /// <para>
 /// <b>Why the lock is taken after the child write rather than before it, which is where the design's numbering
@@ -52,9 +54,29 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// the comparing ones: one code path, and the repair is a no-op wherever the storage already orders correctly.
 /// </para>
 /// <para>
-/// <b>What this does not claim.</b> The recompute is unbypassable only for writes that go through this port. A
-/// direct <c>INSERT</c> into the child table by another application leaves the rollup stale — the honest
-/// difference from <c>computed</c>, whose value the engine itself maintains. Named here rather than discovered.
+/// <b>What this does not claim.</b> Three gaps, all decisions rather than oversights, and all named here
+/// because each of them is a number that stays stale while looking like data:
+/// </para>
+/// <para>
+/// 1. <b>An out-of-band write is not seen.</b> The recompute is unbypassable only for writes that go through
+/// this port; a direct <c>INSERT</c> into the child table by another application leaves the rollup stale. That
+/// is the honest difference from <c>computed</c>, whose value the engine itself maintains.
+/// </para>
+/// <para>
+/// 2. <b>A rollup <em>over</em> a rollup does not propagate.</b> Only entities rolling up the child that was
+/// written are recomputed. If <c>C</c> rolls up into <c>B</c> and <c>B</c> into <c>A</c>, a write to <c>C</c>
+/// moves <c>B</c>'s aggregate by a raw <c>UPDATE</c> that never re-enters this port, so <c>A</c>'s does not
+/// move. Deliberate: the sources' own worked ladder (<c>baas-analyza:1358</c>) nests <c>computed</c> over a
+/// rollup — which <em>does</em> work, because the engine maintains a generated column — and never nests one
+/// rollup inside another. Closing it means a transitive walk with cycle detection, which is a feature with its
+/// own issue, not a line here. A descriptor that declares one gets a correct <c>B</c> and a stale <c>A</c>.
+/// </para>
+/// <para>
+/// 3. <b>The parent's change emits no event.</b> The write's outbox row is the <em>child</em>'s; the parent's
+/// <c>UPDATE</c> is a raw statement that never reaches the change tracker, so an automation conditioned on
+/// <c>entity.&lt;parent&gt;.updated</c> does not fire for a rollup-only change. Emitting one would mean a second
+/// event per child write whose <c>old</c>/<c>new</c> images this layer does not have in hand, so it is left to
+/// whoever needs it.
 /// </para>
 /// </remarks>
 /// <param name="dialect">This driver's statement seam: the table source, the delimiters and the row lock.</param>
@@ -138,9 +160,31 @@ internal sealed class RollupRecompute(IAlvoSqlDialect dialect, IFieldSqlRenderer
             .Distinct();
 
     /// <summary>
-    /// Takes the parent row's write lock, or issues nothing at all when this engine has no locking clause.
+    /// Takes the parent row's write lock, or issues nothing at all when this engine expresses no lock in
+    /// <b>either</b> of the two positions the port defines.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// <b>Both positions are asked for, and asking only one of them was a real bug.</b>
+    /// <see cref="IAlvoSqlDialect"/>'s contract is that a locking read carries its lock in exactly one place:
+    /// a trailing <see cref="IAlvoSqlDialect.RowLockClause"/> (PostgreSQL's <c>FOR NO KEY UPDATE</c>) or a
+    /// table hint from <see cref="IAlvoSqlDialect.RenderTable"/> (T-SQL's
+    /// <c>FROM notes WITH (UPDLOCK, ROWLOCK)</c>, which has no trailing form at all). A version of this method
+    /// that only read the trailing clause would issue <em>no lock</em> on a table-hint engine — and, because
+    /// that engine's <see cref="IAlvoSqlDialect.RowLockClause"/> is legitimately empty, it would skip the read
+    /// entirely and silently reproduce the measured 31-of-40 lost update on the one engine §0 principle 3 names
+    /// and no in-repo driver covers. So the table source is rendered <em>for this mutation</em>, exactly as
+    /// <c>ReadStatementComposer</c> renders a pre-image read's.
+    /// </para>
+    /// <para>
+    /// <b>And "no lock anywhere" is a real answer, not a gap.</b> SQLite expresses row locking in neither
+    /// position, and it must <em>not</em> read the parent before writing inside a deferred transaction — 12 of
+    /// 24 writers died on <c>SQLITE_BUSY_SNAPSHOT</c> when they did. The two cases are told apart by the
+    /// pairing the port already defines: a dialect that hints its lock returns a <em>different</em> table
+    /// source for a locked pre-image than for a plain read, so comparing the two is the same question the
+    /// contract suite asks, rather than a new one invented here.
+    /// </para>
+    /// <para>
     /// The <see cref="PreImageMutation.Update"/> mode is deliberate rather than incidental. The recompute
     /// provably never touches the parent's key, which is exactly the case PostgreSQL documents
     /// <c>FOR NO KEY UPDATE</c> for, and that weaker mode does not block the <c>FOR KEY SHARE</c> another
@@ -148,18 +192,37 @@ internal sealed class RollupRecompute(IAlvoSqlDialect dialect, IFieldSqlRenderer
     /// parent serialise — which is the entire correctness argument. Asking for
     /// <see cref="PreImageMutation.Delete"/> to obtain the literal words <c>FOR UPDATE</c> would serialise
     /// unrelated inserts against the parent for no benefit.
+    /// </para>
     /// </remarks>
-    private async Task LockAsync(AlvoDataContext db, Group group, CancellationToken cancellationToken)
+    private Task LockAsync(AlvoDataContext db, Group group, CancellationToken cancellationToken) =>
+        LockStatement(group.Parent) is { } sql
+            ? db.Database.ExecuteSqlRawAsync(sql, [group.ParentId], cancellationToken)
+            : Task.CompletedTask;
+
+    /// <summary>
+    /// The locking read for one parent entity, or <see langword="null"/> when this engine expresses no row lock
+    /// in either position and the read must therefore not be issued at all.
+    /// </summary>
+    /// <remarks>
+    /// <see langword="internal"/> and separated from its execution so it can be asserted without a database:
+    /// the obligation it carries is about the <b>third</b> engine — one whose locking grammar is a table hint —
+    /// and no in-repo driver has that grammar, so a fact over the two shipped dialects cannot see a regression
+    /// here. <c>MMLib.Alvo.Testing.Data.TSqlSqlDialect</c> is what pins it.
+    /// </remarks>
+    /// <param name="parent">The entity holding the rollup fields.</param>
+    internal string? LockStatement(EntitySchema parent)
     {
-        if (dialect.RowLockClause(PreImageMutation.Update) is not { Length: > 0 } clause)
+        var clause = dialect.RowLockClause(PreImageMutation.Update);
+        var locked = dialect.RenderTable(parent, PreImageMutation.Update);
+
+        if (clause.Length == 0 && string.Equals(locked, Table(parent), StringComparison.Ordinal))
         {
-            return;
+            return null;
         }
 
         var id = dialect.RenderColumn(AlvoManagedColumns.Id);
-        var sql = $"SELECT {id} FROM {Table(group.Parent)} WHERE {id} = {{0}} {clause}";
 
-        await db.Database.ExecuteSqlRawAsync(sql, [group.ParentId], cancellationToken).ConfigureAwait(false);
+        return $"SELECT {id} FROM {locked} WHERE {id} = {{0}} {clause}".TrimEnd();
     }
 
     /// <summary>

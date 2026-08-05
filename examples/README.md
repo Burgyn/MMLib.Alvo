@@ -8,7 +8,8 @@ Reference descriptors validated against `schema/project.schema.json`
   one composite index. **Applies as it stands.** It used to carry a `count`
   rollup, per-field `default`s and a `beforeUpdate` mutate; those were removed
   when the apply-time refusals below landed, because an example that cannot be
-  applied is worse than a smaller one.
+  applied is worse than a smaller one. (`rollup` is honoured as of #21; the
+  example was not put back, because the smallest starting point is the point.)
 - **`complex-crm/`** — **a format showcase, not a runnable backend** (see
   `complex-crm/NOT-RUNNABLE.md`): the analysis §16 CRM adapted to v1, exercising
   most of the surface *including keys this build refuses*, which is exactly why
@@ -41,13 +42,12 @@ Reference descriptors validated against `schema/project.schema.json`
 The descriptor schema is the **v1 format**, and this build does not implement all of it yet. Rather than
 accepting a key and quietly doing nothing with it, Alvo **refuses the descriptor at apply**, naming what
 would silently have happened and what to do instead — a descriptor that asks for behaviour it does not get
-is a lie its author cannot see. Five features are in that state, and each is one entry in
-`UnhonouredFeatures`, the single table both the mapper and the descriptor validator read:
+is a lie its author cannot see. Each is one entry in `UnhonouredFeatures`, the single table both the mapper
+and the descriptor validator read:
 
 | Feature | What you would silently get | Tracked in |
 |---|---|---|
-| `field.computed` | the expression never runs; the column stays null | #21 (CEL→SQL) |
-| `field.rollup` | nothing maintains the aggregate; a null column that looks like data | PR6 |
+| `field.rollup.where` | the aggregate is maintained over **every** child instead of the declared subset — a stored number that looks like data. `rollup` itself works; only the filter does not | filtered-rollup issue |
 | `field.validation` | the expression is never evaluated, so a value it forbids is accepted — the field is not constrained at all | #22 (before-hooks) |
 | `field.default` | no column default is emitted and the value is dropped; on a `required` field, an INSERT of NULL into NOT NULL | PR6 |
 | `entity.softDelete` | DELETE removes the row and reads do not exclude it — irrecoverable loss where the contract promises recovery | soft-delete issue |

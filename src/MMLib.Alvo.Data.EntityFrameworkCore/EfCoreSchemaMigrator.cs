@@ -195,22 +195,54 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator
     /// <em>where</em> they run.
     /// </para>
     /// <para>
-    /// <c>After</c> runs in a <c>finally</c>: a failed batch rolls back on its own, but a suspension that was
-    /// never restored would ride the connection into whatever a pool handed it to next, and that is a
-    /// constraint quietly not being enforced rather than a migration that failed loudly.
+    /// <b><c>After</c> always runs, but it is <em>not</em> a bare <c>finally</c>, and the difference is which
+    /// exception a caller sees.</b> A suspension that was never restored would ride the connection into whatever
+    /// a pool handed it to next, which is a constraint quietly not being enforced — so the restore is attempted
+    /// on both paths. But in a <c>finally</c> a throwing restore <em>replaces</em> the failure that caused the
+    /// unwind, and "restoring a pragma failed" is a far worse answer than the DDL error that actually broke the
+    /// migration. So the two paths are split: on the failing path the restore is best-effort and the original
+    /// exception is what propagates; on the succeeding path a failed restore is the only failure there is, and
+    /// it propagates, because leaving enforcement off after a migration that otherwise worked is exactly the
+    /// state nobody would notice.
     /// </para>
     /// </remarks>
     private async Task ExecuteFramedAsync(DbConnection connection, MigrationPlan plan, CancellationToken ct)
     {
         var framing = _dialect.MigrationFraming;
         await RelationalSqlBatch.ExecuteUntransactedAsync(connection, framing.Before, ct).ConfigureAwait(false);
+
         try
         {
             await RelationalSqlBatch.ExecuteAsync(connection, plan.Sql, ct).ConfigureAwait(false);
         }
-        finally
+        catch
+        {
+            await TryRestoreAsync(connection, framing, ct).ConfigureAwait(false);
+            throw;
+        }
+
+        await RelationalSqlBatch.ExecuteUntransactedAsync(connection, framing.After, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Restores the framing while an exception is already on its way out, swallowing a <em>second</em> failure so
+    /// it cannot displace the first.
+    /// </summary>
+    /// <remarks>
+    /// Only the two families a restore can realistically raise are swallowed — the provider's own
+    /// (<see cref="DbException"/>, a connection the failed batch left unusable) and
+    /// <see cref="InvalidOperationException"/> (a connection that can no longer be opened). Anything else still
+    /// propagates, because a restore failing for an unrelated reason is not something to hide. Cancellation is
+    /// not caught either: a cancelled migration wants the cancellation.
+    /// </remarks>
+    private static async Task TryRestoreAsync(DbConnection connection, MigrationBatchFraming framing, CancellationToken ct)
+    {
+        try
         {
             await RelationalSqlBatch.ExecuteUntransactedAsync(connection, framing.After, ct).ConfigureAwait(false);
+        }
+        catch (Exception secondary) when (secondary is DbException or InvalidOperationException)
+        {
         }
     }
 
