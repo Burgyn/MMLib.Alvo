@@ -118,11 +118,42 @@ string? GeneratedColumnDefinition(string columnName, string storeType, string re
 
 **Adding a computed field to an entity that already holds rows takes a table rebuild on
 SQLite.** This is not optional and not a per-engine behaviour difference: the observable
-outcome must be identical on both engines (§0 principle 3), so SQLite performs the documented
+outcome must be identical on both engines (§0 principle 3), so SQLite performs the
 create-new / copy / drop / rename sequence rather than Alvo emitting `VIRTUAL` there and
 `STORED` on PostgreSQL. A `VIRTUAL` column is not stored, so it would silently differ in what
 an index and a filter can do — the one thing the analysis names as the on-read variant's
 drawback.
+
+#### D1 revised — corrected by the third spike pass, against the product's migrator
+
+The first two passes measured raw SQL. Measuring the **product's own migrator** moved three
+things, and the paragraphs above were wrong about one of them.
+
+**The rebuild does not have to be written — it has to be reached (Q7).** EF Core's SQLite
+generator already implements create-new / copy / drop / rename, but it triggers on an
+`AlterColumnOperation` and never on an `AddColumnOperation`. So the change is planned as **two
+hops** — add the column plain, then alter it into a generated one — and EF emits the rebuild,
+correctly omitting the generated column from its `INSERT … SELECT`. Measured against a table
+holding a row: it succeeds, the value is computed, and a write to the column is refused. On
+PostgreSQL the same two-hop emits `DROP COLUMN` + `ADD`, which also works but is more DDL than
+the one-hop `ADD` that engine already accepts — **so the hop count is per engine, not global.**
+
+**One dialect member is not enough (Q8), and this was a gap in the design rather than a
+preference.** The two paths cannot come from the same mechanism: a rebuild needs every column's
+DDL, which only EF's type mapping knows, so on SQLite **EF** spells the generated column; the
+in-place `ADD` is a single statement, so the dialect member spells it, which is PostgreSQL's
+path. The member from D1 keeps its job, and a **second default-implemented member** answers the
+question the measurements actually demand — *can this engine add a stored generated column to a
+table that already holds rows* — which is what selects one hop or two.
+
+**A `computed` expression's literals become bind parameters, and DDL cannot carry one (Q9).**
+`SqlPredicateRenderer` routes every non-boolean literal through the parameter bag, so
+`unit_price * 1.2` renders `(… * @p0)`. Field-only arithmetic renders clean, and that covers
+every example in the sources including `baas-analyza:1358`'s ladder. A `computed` expression
+carrying a literal is therefore **refused at apply** with a message naming the literal, rather
+than inlined: inlining would mean a second rendering path whose escaping rules nothing else in
+this repository exercises, in DDL that is persisted in the schema. Widening it later is
+additive; getting the escaping wrong once is not.
 
 **Deviation from the spec, stated:** spec §2.1 names three engines
 (Postgres/SQL Server/SQLite). Only two ship. Azure SQL's spelling is
