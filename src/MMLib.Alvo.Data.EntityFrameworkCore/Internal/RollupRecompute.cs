@@ -8,7 +8,8 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// Recomputes every <c>rollup</c> a write to a child entity can change, <b>inside that write's own
 /// transaction</b>: the parent's row lock first, then one
 /// <c>UPDATE parent SET &lt;rollup&gt; = (SELECT &lt;op&gt;(&lt;field&gt;) FROM &lt;child&gt; WHERE &lt;fk&gt; = @parent)</c>
-/// per parent.
+/// per parent — with <b>both</b> of those statements narrowed by <c>tenant_id</c> when the pair is
+/// tenant-scoped.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -54,7 +55,18 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// the comparing ones: one code path, and the repair is a no-op wherever the storage already orders correctly.
 /// </para>
 /// <para>
-/// <b>What this does not claim.</b> Three gaps, all decisions rather than oversights, and all named here
+/// <b>Why every statement is tenant-narrowed.</b> A scoped rollup aggregates <em>one tenant's</em> children
+/// into <em>that tenant's</em> parent row, and nothing below this layer enforces it: the physical <c>ref</c>
+/// is a foreign key on the parent's <c>id</c> alone, so a child row may legally name a parent in another
+/// tenant, and an id taken off a row image is therefore not a promise about whose row it is. Without the
+/// predicate this recompute writes that other tenant's parent from this tenant's children and aggregates
+/// every tenant's children into it — a cross-tenant write and a cross-tenant read in one statement pair, on
+/// the shape §0 principle 5 exists for. A pair that <em>disagrees</em> about tenancy cannot be narrowed at all
+/// and is refused: at apply by <c>RollupResolver</c>, and again here by
+/// <see cref="EnsureTenancyDoesNotCross"/> for a schema that did not come through the mapper.
+/// </para>
+/// <para>
+/// <b>What this does not claim.</b> Four gaps, all decisions rather than oversights, and all named here
 /// because each of them is a number that stays stale while looking like data:
 /// </para>
 /// <para>
@@ -72,7 +84,16 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// own issue, not a line here. A descriptor that declares one gets a correct <c>B</c> and a stale <c>A</c>.
 /// </para>
 /// <para>
-/// 3. <b>The parent's change emits no event.</b> The write's outbox row is the <em>child</em>'s; the parent's
+/// 3. <b>A child whose <c>ref</c> names a parent in another tenant aggregates nowhere.</b> The tenant
+/// predicate makes that write a no-op rather than a cross-tenant one — the parent's <c>UPDATE</c> matches no
+/// row — so the child exists and no rollup anywhere counts it. Closing it properly means the foreign key
+/// spanning <c>(tenant_id, id)</c>, which is a change to every <c>ref</c> on every scoped entity rather than
+/// to a rollup, so it is tracked as its own issue and named in the design's open questions. Refusing the
+/// cross-tenant <c>ref</c> here instead would mean a read of the parent on every child write, to answer a
+/// question this layer is not the right one to ask.
+/// </para>
+/// <para>
+/// 4. <b>The parent's change emits no event.</b> The write's outbox row is the <em>child</em>'s; the parent's
 /// <c>UPDATE</c> is a raw statement that never reaches the change tracker, so an automation conditioned on
 /// <c>entity.&lt;parent&gt;.updated</c> does not fire for a rollup-only change. Emitting one would mean a second
 /// event per child write whose <c>old</c>/<c>new</c> images this layer does not have in hand, so it is left to
@@ -100,12 +121,96 @@ internal sealed class RollupRecompute(IAlvoSqlDialect dialect, IFieldSqlRenderer
         IReadOnlyList<IReadOnlyDictionary<string, object?>> images,
         CancellationToken cancellationToken)
     {
-        foreach (var group in Groups(db.AppliedSchema, child, images))
+        var tenant = TenantOf(child, images);
+
+        foreach (var group in Groups(db.AppliedSchema, child, images, tenant))
         {
+            EnsureTenancyDoesNotCross(group.Parent, child);
             await LockAsync(db, group, cancellationToken).ConfigureAwait(false);
             await RecomputeAsync(db, child, group, cancellationToken).ConfigureAwait(false);
         }
     }
+
+    /// <summary>
+    /// The tenant every statement of this recompute is narrowed to — the written child row's own
+    /// <c>tenant_id</c> — or <see langword="null"/> when the child entity is not tenant-scoped.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The row's value, not the caller's context, and that is the aggregation key rather than a
+    /// convenience.</b> A rollup is the statement "these children belong to that parent", and on a scoped
+    /// entity the rows on both sides belong to one tenant; the child row this write just stored already had
+    /// its <c>tenant_id</c> checked against the caller's tenant by the synthesized tenant scope, so reading it
+    /// off the image is reading a value policy has already approved. Taking it from the ambient context
+    /// instead would let a recompute narrow the parent to one tenant while aggregating a child that lives in
+    /// another — a consistent-looking number about two tenants at once.
+    /// </para>
+    /// <para>
+    /// <b>Both refusals are invariant violations rather than caller errors.</b> A scoped entity's stored row
+    /// always carries a <c>tenant_id</c> (the column is <c>required</c> and the framework refuses a payload
+    /// that omits it), and it can never move tenant afterwards (<c>tenant_id</c> is not caller-writable on an
+    /// update), so "no tenant" and "two tenants" both mean this layer was handed images that did not come off
+    /// one stored row. Dropping the predicate in either case is what would turn the situation into a
+    /// cross-tenant write, so it fails loudly instead.
+    /// </para>
+    /// </remarks>
+    /// <param name="child">The child entity that was written.</param>
+    /// <param name="images">The child row's images.</param>
+    private static Guid? TenantOf(
+        EntitySchema child, IReadOnlyList<IReadOnlyDictionary<string, object?>> images)
+    {
+        if (child.Tenancy != TenancyMode.Scoped)
+        {
+            return null;
+        }
+
+        var tenants = images
+            .Select(image => image.GetValueOrDefault(AlvoManagedColumns.TenantId))
+            .OfType<Guid>()
+            .Distinct()
+            .ToList();
+
+        return tenants.Count == 1
+            ? tenants[0]
+            : throw new InvalidOperationException(
+                $"A write to the tenant-scoped entity '{child.Name}' reached the rollup recompute with "
+                + $"{tenants.Count} distinct '{AlvoManagedColumns.TenantId}' values in its row images, and "
+                + "every statement here has to be narrowed to exactly one. A stored row on a scoped entity "
+                + "always carries a tenant and can never move to another one, so this is an image that did "
+                + "not come off one stored row rather than anything a caller can cause.");
+    }
+
+    /// <summary>
+    /// Refuses a rollup whose parent and child <b>disagree about tenancy</b>, because neither statement could
+    /// then be narrowed honestly.
+    /// </summary>
+    /// <remarks>
+    /// The fail-closed belt for a <see cref="SchemaModel"/> that did not come through the descriptor mapper —
+    /// a host-assembled one, or F7's dynamic registry — exactly like <c>EfAlvoData.EnsureNotSoftDeleted</c>.
+    /// <c>RollupResolver</c> already refuses the pair at apply and says why at length; the reason it is
+    /// refused <em>again</em> here is that the alternative is silent: with only one side scoped, an
+    /// unqualified <c>tenant_id</c> in the child aggregate would bind to the parent's column in the enclosing
+    /// statement and the subquery would quietly aggregate <b>every</b> tenant's children, or the parent's
+    /// <c>UPDATE</c> would carry no tenant predicate at all and write another tenant's row.
+    /// </remarks>
+    private static void EnsureTenancyDoesNotCross(EntitySchema parent, EntitySchema child)
+    {
+        if ((parent.Tenancy == TenancyMode.Scoped) == (child.Tenancy == TenancyMode.Scoped))
+        {
+            return;
+        }
+
+        throw new InvalidOperationException(
+            $"Entity '{parent.Name}' rolls up '{child.Name}', but '{parent.Name}' is "
+            + $"{Describe(parent.Tenancy)} and '{child.Name}' is {Describe(child.Tenancy)}. A rollup "
+            + "aggregates one tenant's children into that same tenant's parent row, so both entities must "
+            + "agree about tenancy; the descriptor mapper refuses this pair at apply, and this schema did not "
+            + "come through it.");
+    }
+
+    /// <summary>One entity's tenancy, as the refusal above names it.</summary>
+    private static string Describe(TenancyMode? tenancy) =>
+        tenancy == TenancyMode.Scoped ? "tenant-scoped" : "global";
 
     /// <summary>Whether any entity in <paramref name="schema"/> rolls up <paramref name="child"/> at all.</summary>
     /// <remarks>
@@ -124,9 +229,14 @@ internal sealed class RollupRecompute(IAlvoSqlDialect dialect, IFieldSqlRenderer
     /// </summary>
     /// <param name="Parent">The entity holding the rollup fields.</param>
     /// <param name="ParentId">The row whose aggregates are being recomputed.</param>
+    /// <param name="TenantId">
+    /// The tenant both statements are narrowed to, or <see langword="null"/> on a global pair — see
+    /// <see cref="TenantOf"/>.
+    /// </param>
     /// <param name="Via">The child's foreign-key column this group's aggregates filter on.</param>
     /// <param name="Fields">The rollup fields recomputed in one statement.</param>
-    private sealed record Group(EntitySchema Parent, Guid ParentId, string Via, IReadOnlyList<FieldSchema> Fields);
+    private sealed record Group(
+        EntitySchema Parent, Guid ParentId, Guid? TenantId, string Via, IReadOnlyList<FieldSchema> Fields);
 
     /// <summary>
     /// Every group one child write touches, in a <b>deterministic order</b>.
@@ -137,14 +247,15 @@ internal sealed class RollupRecompute(IAlvoSqlDialect dialect, IFieldSqlRenderer
     /// by the row id rather than by declaration order is what makes it total across processes.
     /// </remarks>
     private static IEnumerable<Group> Groups(
-        SchemaModel schema, EntitySchema child, IReadOnlyList<IReadOnlyDictionary<string, object?>> images) =>
+        SchemaModel schema, EntitySchema child, IReadOnlyList<IReadOnlyDictionary<string, object?>> images,
+        Guid? tenant) =>
         from parent in schema.Entities
         let rollups = parent.Fields.Where(field => RollsUp(field, child)).ToList()
         where rollups.Count > 0
         from via in rollups.Select(field => field.Rollup!.Via).Distinct(StringComparer.Ordinal)
         from parentId in ParentIds(images, via)
         orderby parentId
-        select new Group(parent, parentId, via, [.. rollups.Where(field => string.Equals(field.Rollup!.Via, via, StringComparison.Ordinal))]);
+        select new Group(parent, parentId, tenant, via, [.. rollups.Where(field => string.Equals(field.Rollup!.Via, via, StringComparison.Ordinal))]);
 
     /// <summary>The distinct parent ids <paramref name="images"/> name through <paramref name="via"/>.</summary>
     /// <remarks>
@@ -196,8 +307,44 @@ internal sealed class RollupRecompute(IAlvoSqlDialect dialect, IFieldSqlRenderer
     /// </remarks>
     private Task LockAsync(AlvoDataContext db, Group group, CancellationToken cancellationToken) =>
         LockStatement(group.Parent) is { } sql
-            ? db.Database.ExecuteSqlRawAsync(sql, [group.ParentId], cancellationToken)
+            ? db.Database.ExecuteSqlRawAsync(sql, Arguments(group), cancellationToken)
             : Task.CompletedTask;
+
+    /// <summary>
+    /// The values both statements bind: the parent row id, and the tenant when the pair is scoped.
+    /// </summary>
+    /// <remarks>
+    /// The tenant is omitted entirely on a global pair rather than passed and unreferenced, so the argument
+    /// list and the <c>{0}</c>/<c>{1}</c> placeholders the statements carry cannot come apart.
+    /// </remarks>
+    private static object[] Arguments(Group group) =>
+        group.TenantId is { } tenant ? [group.ParentId, tenant] : [group.ParentId];
+
+    /// <summary>
+    /// <c> AND &lt;tenant_id&gt; = {1}</c> for a scoped entity, and nothing at all for a global one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Both statements carry it, and neither of them may lean on the foreign key instead.</b> The physical
+    /// <c>ref</c> is a foreign key on the parent's <c>id</c> alone — not on <c>(tenant_id, id)</c> — so a child
+    /// row can legally name a parent row in another tenant, and the referenced row's existence is the only
+    /// thing the engine checks. Without this predicate the recompute then <em>writes</em> that other tenant's
+    /// parent row from this tenant's children, and the aggregate over the child table includes every tenant's
+    /// children of that parent: a cross-tenant write and a cross-tenant read in one statement pair. With it,
+    /// such a child moves no rollup at all — the parent's <c>UPDATE</c> matches no row — which is the
+    /// conservative of the two outcomes and is recorded as an open question in the design rather than repaired
+    /// here, because a <c>ref</c> across tenants is reachable on every entity and not only on a rollup's.
+    /// </para>
+    /// <para>
+    /// The parent's own predicate is unqualified because the enclosing statement has exactly one table source;
+    /// the child's is qualified by <see cref="ChildTenantPredicate"/>, for the reason that method records.
+    /// </para>
+    /// </remarks>
+    /// <param name="parent">The entity whose row the statement names.</param>
+    private string TenantPredicate(EntitySchema parent) =>
+        parent.Tenancy == TenancyMode.Scoped
+            ? $" AND {dialect.RenderColumn(AlvoManagedColumns.TenantId)} = {{1}}"
+            : string.Empty;
 
     /// <summary>
     /// The locking read for one parent entity, or <see langword="null"/> when this engine expresses no row lock
@@ -222,7 +369,7 @@ internal sealed class RollupRecompute(IAlvoSqlDialect dialect, IFieldSqlRenderer
 
         var id = dialect.RenderColumn(AlvoManagedColumns.Id);
 
-        return $"SELECT {id} FROM {locked} WHERE {id} = {{0}} {clause}".TrimEnd();
+        return $"SELECT {id} FROM {locked} WHERE {id} = {{0}}{TenantPredicate(parent)} {clause}".TrimEnd();
     }
 
     /// <summary>
@@ -231,18 +378,19 @@ internal sealed class RollupRecompute(IAlvoSqlDialect dialect, IFieldSqlRenderer
     /// <remarks>
     /// One statement per group rather than per field, because the aggregates of one parent row are one fact
     /// about it: written separately, a reader between the two <c>UPDATE</c>s would see a <c>count</c> that does
-    /// not match its <c>sum</c>. The <c>WHERE</c> narrows by row id alone — the id came off the child row this
-    /// caller was already authorised to write, and a uuid primary key identifies one row, so no tenant
-    /// predicate can change which row this is.
+    /// not match its <c>sum</c>. The <c>WHERE</c> narrows by row id <b>and, on a scoped entity, by tenant</b> —
+    /// the row id came off the child row this caller was authorised to write, but the child's <c>ref</c> is a
+    /// foreign key on the parent's <c>id</c> alone, so an id from a row image is not by itself a promise about
+    /// whose row it is. See <see cref="TenantPredicate"/>.
     /// </remarks>
     private async Task RecomputeAsync(
         AlvoDataContext db, EntitySchema child, Group group, CancellationToken cancellationToken)
     {
         var setters = string.Join(", ", group.Fields.Select(field => Setter(child, field)));
         var id = dialect.RenderColumn(AlvoManagedColumns.Id);
-        var sql = $"UPDATE {Table(group.Parent)} SET {setters} WHERE {id} = {{0}}";
+        var sql = $"UPDATE {Table(group.Parent)} SET {setters} WHERE {id} = {{0}}{TenantPredicate(group.Parent)}";
 
-        await db.Database.ExecuteSqlRawAsync(sql, [group.ParentId], cancellationToken).ConfigureAwait(false);
+        await db.Database.ExecuteSqlRawAsync(sql, Arguments(group), cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>One <c>&lt;rollup&gt; = (SELECT &lt;op&gt;(…) FROM &lt;child&gt; WHERE &lt;fk&gt; = @parent)</c>.</summary>
@@ -258,8 +406,37 @@ internal sealed class RollupRecompute(IAlvoSqlDialect dialect, IFieldSqlRenderer
         var fk = dialect.RenderColumn(rollup.Via);
         var aggregate = Aggregate(child, rollup);
 
-        return $"{dialect.RenderColumn(field.Name)} = (SELECT {aggregate} FROM {Table(child)} WHERE {fk} = {{0}})";
+        return $"{dialect.RenderColumn(field.Name)} = (SELECT {aggregate} FROM {Table(child)} "
+            + $"WHERE {fk} = {{0}}{ChildTenantPredicate(child)})";
     }
+
+    /// <summary>
+    /// The child aggregate's own tenant predicate, <b>qualified by the child's table</b> — or nothing at all
+    /// when the child is global.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Qualified deliberately, because the unqualified spelling fails open.</b> This predicate sits in a
+    /// subquery inside an <c>UPDATE</c> of the parent, and both tables carry a column of this name when both
+    /// are scoped — so a bare <c>tenant_id</c> is resolved by name scoping: the child's, correctly, while both
+    /// have one, and <em>the parent's</em> the moment the child does not. That second case makes the predicate
+    /// <c>parent.tenant_id = @tenant</c>, which is true for every child row and therefore aggregates every
+    /// tenant's children into one number, with no error anywhere.
+    /// <see cref="EnsureTenancyDoesNotCross"/> already refuses that pair, and this makes the statement correct
+    /// by construction as well — a predicate whose meaning depends on which columns another table happens to
+    /// have is exactly the kind of thing a later change breaks silently.
+    /// </para>
+    /// <para>
+    /// The qualifier is the table source asked for with <b>no lock</b>, which is what
+    /// <see cref="Table"/> already answers: a dialect whose locking grammar is a table hint would otherwise
+    /// have the hint spliced into a column reference.
+    /// </para>
+    /// </remarks>
+    /// <param name="child">The child entity being aggregated.</param>
+    private string ChildTenantPredicate(EntitySchema child) =>
+        child.Tenancy == TenancyMode.Scoped
+            ? $" AND {Table(child)}.{dialect.RenderColumn(AlvoManagedColumns.TenantId)} = {{1}}"
+            : string.Empty;
 
     /// <summary>The aggregate expression, with the driver's value repair around the aggregated column.</summary>
     /// <remarks>

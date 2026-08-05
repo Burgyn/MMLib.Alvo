@@ -408,6 +408,68 @@ public abstract class AlvoDataComputedRollupTests
         removed[GrossTotal].ShouldBe(14m, "the engine tracked the rollup down as well as up");
     }
 
+    /// <summary>
+    /// The two-tenant adversarial half, write side: a child written in tenant A must not move a parent row that
+    /// belongs to tenant B, <b>even when the child's own <c>ref</c> names it</b>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The cross-tenant <c>ref</c> is reachable, which is what makes this a fact rather than a hypothetical.</b>
+    /// A <c>ref</c> is a foreign key on the parent's <c>id</c> alone — not on <c>(tenant_id, id)</c> — so the
+    /// engine accepts a child row naming any existing parent, and the synthesized tenant scope judges the
+    /// <em>child's</em> <c>tenant_id</c>, which is honestly this caller's. So Globex can write a child pointing at
+    /// Acme's invoice, and without a tenant predicate on the recompute's <c>UPDATE</c> that write lands on Acme's
+    /// row: a cross-tenant write through a port whose whole premise is that it cannot happen.
+    /// </para>
+    /// <para>
+    /// It asserts Acme's stored aggregates rather than an exception, because the write is <em>allowed</em> — what
+    /// must not happen is that it changes anything of Acme's. Both aggregates are checked: a <c>count</c> that
+    /// stayed while a <c>sum</c> moved is the same defect.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_child_write_in_one_tenant_never_moves_another_tenants_rollup()
+    {
+        var data = await CreateAsync(ScopedSchema, ScopedDescriptor);
+        var invoice = await CreateInvoiceInTenantAsync(data, Acme);
+        await CreateItemInTenantAsync(data, Acme, invoice, amount: 10m);
+
+        await CreateItemInTenantAsync(data, Globex, invoice, amount: 5m);
+
+        var stored = await InvoiceInTenantAsync(data, Acme, invoice);
+        stored[NetTotal].ShouldBe(10m, "Globex's write must not reach a row belonging to Acme");
+        stored[ItemCount].ShouldBe(1L, "and must not be counted into it either");
+    }
+
+    /// <summary>
+    /// The read side of the same adversary: a tenant's rollup is computed from <b>its own</b> children only, so
+    /// the stored number never discloses another tenant's rows.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the half the parent's <c>WHERE</c> cannot cover, and it needs the foreign tenant's child to be
+    /// already present when a <em>legitimate</em> recompute runs: Globex's child names Acme's invoice, and then
+    /// Acme writes a second child of their own. That recompute correctly targets Acme's row, so the only thing
+    /// standing between Globex's amount and Acme's <c>sum</c> is the tenant predicate <b>inside the aggregate</b>.
+    /// Without it, Acme reads a number that is the sum of two tenants' rows and a <c>count</c> that reports how
+    /// many rows Globex holds — a read oracle of the same class as the unique-index one (#137).
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_tenants_rollup_never_aggregates_another_tenants_children()
+    {
+        var data = await CreateAsync(ScopedSchema, ScopedDescriptor);
+        var invoice = await CreateInvoiceInTenantAsync(data, Acme);
+        await CreateItemInTenantAsync(data, Acme, invoice, amount: 10m);
+        await CreateItemInTenantAsync(data, Globex, invoice, amount: 5m);
+
+        await CreateItemInTenantAsync(data, Acme, invoice, amount: 2m);
+
+        var stored = await InvoiceInTenantAsync(data, Acme, invoice);
+        stored[NetTotal].ShouldBe(12m, "Acme's own two children, and nothing of Globex's");
+        stored[ItemCount].ShouldBe(2L, "a count over another tenant's rows is a disclosure of how many they hold");
+    }
+
     private const string Invoices = "invoices";
 
     private const string Items = "invoice_items";
@@ -442,6 +504,55 @@ public abstract class AlvoDataComputedRollupTests
 
     /// <summary>One caller for the whole suite: none of these facts is about authorization.</summary>
     private static AlvoContext Caller => _caller;
+
+    private static readonly AlvoContext _acme = InTenant(TenantId.New());
+
+    private static readonly AlvoContext _globex = InTenant(TenantId.New());
+
+    /// <summary>
+    /// The two tenants of the adversarial pair, with the repository's usual names. Two <em>different</em> users
+    /// as well as two tenants, because a shared user id would let a rule that happens to be about the user pass
+    /// a fact that is about the tenant.
+    /// </summary>
+    private static AlvoContext Acme => _acme;
+
+    /// <inheritdoc cref="Acme"/>
+    private static AlvoContext Globex => _globex;
+
+    private static AlvoContext InTenant(TenantId tenant) => new()
+    {
+        User = UserId.New(),
+        Roles = new HashSet<Role> { Role.Authenticated },
+        Tenant = tenant,
+    };
+
+    /// <summary>
+    /// Creates one invoice in <paramref name="caller"/>'s tenant. <c>tenant_id</c> is in the payload because it
+    /// is the one managed column a create may carry — the synthesized tenant scope is what decides whether the
+    /// tenant named is allowed, and this suite always names the caller's own.
+    /// </summary>
+    private static async Task<Guid> CreateInvoiceInTenantAsync(IAlvoData data, AlvoContext caller) =>
+        (Guid)(await data.CreateAsync(Invoices, Owned(caller), caller, cancellationToken: Ct))["id"]!;
+
+    /// <summary>
+    /// Creates one child in <paramref name="caller"/>'s tenant, pointing at <paramref name="invoice"/> —
+    /// <b>whichever tenant that invoice belongs to</b>, which is exactly what the adversarial facts need.
+    /// </summary>
+    private static Task<AlvoRecord> CreateItemInTenantAsync(
+        IAlvoData data, AlvoContext caller, Guid invoice, decimal amount)
+    {
+        var payload = Owned(caller);
+        payload[Invoice] = invoice;
+        payload["amount"] = amount;
+
+        return data.CreateAsync(Items, payload, caller, cancellationToken: Ct);
+    }
+
+    private static Dictionary<string, object?> Owned(AlvoContext caller) =>
+        new(StringComparer.Ordinal) { ["tenant_id"] = caller.Tenant!.Value.Value };
+
+    private static async Task<AlvoRecord> InvoiceInTenantAsync(IAlvoData data, AlvoContext caller, Guid id) =>
+        (await data.GetAsync(Invoices, id, caller, Ct))!;
 
     /// <summary>
     /// Creates one invoice and returns its id. <c>vat_total</c> is written <b>explicitly</b>, which is the
@@ -601,4 +712,88 @@ public abstract class AlvoDataComputedRollupTests
 
     private static RollupSchema RollupOf(RollupOperation op, string? field) =>
         new() { From = Items, Op = op, Field = field, Via = Invoice };
+
+    /// <summary>
+    /// The adversarial pair's descriptor: the same parent/child relationship, with <b>both</b> entities
+    /// <c>scoped</c> — which is the only tenancy shape a rollup may declare, since a pair that disagrees is
+    /// refused at apply (<c>RollupResolver</c>, and <c>RollupLadderTests</c> pins both crossing directions).
+    /// </summary>
+    /// <remarks>
+    /// No <c>computed</c> field on it, deliberately: what these two facts are about is which rows a recompute
+    /// reads and writes, and a generated column would only add a second reason for them to fail.
+    /// </remarks>
+    private static AlvoDescriptor ScopedDescriptor => new()
+    {
+        ApiVersion = "alvo.dev/v1",
+        Name = "computed-rollup-tenancy",
+        Tenancy = new Tenancy { Enabled = true },
+        Entities = new Dictionary<string, EntityDescriptor>(StringComparer.Ordinal)
+        {
+            [Invoices] = new()
+            {
+                Tenancy = EntityTenancy.Scoped,
+                Fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
+                {
+                    [NetTotal] = new() { Type = DescField.Decimal, Rollup = Aggregate(RollupOp.Sum, "amount") },
+                    [ItemCount] = new() { Type = DescField.Integer, Rollup = new() { From = Items, Op = RollupOp.Count } },
+                },
+                Rules = AllowAll,
+            },
+            [Items] = new()
+            {
+                Tenancy = EntityTenancy.Scoped,
+                Fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
+                {
+                    [Invoice] = new() { Type = DescField.Ref, Entity = Invoices, Required = true },
+                    ["amount"] = new() { Type = DescField.Decimal, Required = true },
+                },
+                Rules = AllowAll,
+            },
+        },
+    };
+
+    /// <summary>
+    /// The applied schema <see cref="ScopedDescriptor"/> maps to, paired by hand like the one above — including
+    /// the managed <c>tenant_id</c> the mapper injects on a scoped entity, which is the column both halves of the
+    /// recompute narrow by.
+    /// </summary>
+    private static SchemaModel ScopedSchema => new([
+        new EntitySchema
+        {
+            Name = Invoices,
+            Tenancy = TenancyMode.Scoped,
+            Fields =
+            [
+                new FieldSchema { Name = "id", Type = SchemaField.Uuid, Required = true },
+                Money(NetTotal) with { Rollup = RollupOf(RollupOperation.Sum, "amount") },
+                new FieldSchema { Name = ItemCount, Type = SchemaField.Integer, Nullable = true, Rollup = RollupOf(RollupOperation.Count, field: null) },
+                TenantColumn,
+            ],
+        },
+        new EntitySchema
+        {
+            Name = Items,
+            Tenancy = TenancyMode.Scoped,
+            Fields =
+            [
+                new FieldSchema { Name = "id", Type = SchemaField.Uuid, Required = true },
+                new FieldSchema
+                {
+                    Name = Invoice,
+                    Type = SchemaField.Ref,
+                    Required = true,
+                    Reference = new RefSchema(Invoices, MMLib.Alvo.Schema.OnDelete.Cascade),
+                },
+                Money("amount") with { Required = true, Nullable = false },
+                TenantColumn,
+            ],
+        },
+    ]);
+
+    /// <summary>
+    /// The managed tenant discriminator, in the shape <c>DescriptorToSchemaMapper</c> injects it — appended
+    /// <b>after</b> the declared fields, which is where that mapper puts it.
+    /// </summary>
+    private static FieldSchema TenantColumn =>
+        new() { Name = "tenant_id", Type = SchemaField.Uuid, Required = true, Indexed = true };
 }

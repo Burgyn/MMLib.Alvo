@@ -154,6 +154,58 @@ public class RollupLadderTests
     }
 
     /// <summary>
+    /// A <c>scoped</c> child rolled up into a <c>global</c> parent is refused, and this one is a
+    /// <b>cross-tenant read oracle</b> rather than a wrong number: every tenant's children would aggregate into
+    /// one globally readable row, so its <c>count</c> discloses how many rows other tenants hold and its
+    /// <c>sum</c> discloses their values — the same class as the unique-index oracle (#137).
+    /// </summary>
+    [Fact]
+    public void A_rollup_from_a_scoped_child_into_a_global_parent_is_refused()
+    {
+        var refused = Should.Throw<InvalidDataException>(() => Map(Invoicing(
+            netTotal: Rolled(Sum("invoice_items", "line_total")),
+            parentTenancy: EntityTenancy.Global,
+            childTenancy: EntityTenancy.Scoped)));
+
+        refused.Message.ShouldContain("disagree about tenancy");
+        refused.Message.ShouldContain("'invoices' is global");
+        refused.Message.ShouldContain("'invoice_items' is scoped");
+    }
+
+    /// <summary>
+    /// The other direction is refused too: a <c>global</c> child aggregated into a <c>scoped</c> parent computes
+    /// every tenant's number from rows no tenant owns, and there is no tenant the aggregate could be narrowed to.
+    /// </summary>
+    [Fact]
+    public void A_rollup_from_a_global_child_into_a_scoped_parent_is_refused()
+    {
+        var refused = Should.Throw<InvalidDataException>(() => Map(Invoicing(
+            netTotal: Rolled(Sum("invoice_items", "line_total")),
+            parentTenancy: EntityTenancy.Scoped,
+            childTenancy: EntityTenancy.Global)));
+
+        refused.Message.ShouldContain("disagree about tenancy");
+        refused.Message.ShouldContain("'invoices' is scoped");
+        refused.Message.ShouldContain("'invoice_items' is global");
+    }
+
+    /// <summary>
+    /// And a pair that agrees is accepted — so the two refusals above are about the <em>crossing</em> rather than
+    /// about tenancy: a scoped rollup is the shape the write path narrows by <c>tenant_id</c> on both sides, and
+    /// <c>AlvoDataComputedRollupTests</c>' two-tenant facts are what prove it does.
+    /// </summary>
+    [Fact]
+    public void A_rollup_whose_parent_and_child_are_both_scoped_is_resolved()
+    {
+        var model = Map(Invoicing(
+            netTotal: Rolled(Sum("invoice_items", "line_total")),
+            parentTenancy: EntityTenancy.Scoped,
+            childTenancy: EntityTenancy.Scoped));
+
+        Rollup(model, "invoices", "net_total").Via.ShouldBe("invoice");
+    }
+
+    /// <summary>
     /// The happy path, and the one that proves the rest are about the declaration rather than about rollups:
     /// the single reference is resolved without a <c>via</c>, and the CEL source of a <c>computed</c> field
     /// reaches the applied schema unrendered.
@@ -192,13 +244,21 @@ public class RollupLadderTests
     /// <c>baas-analyza:1358</c>'s invoice, minus whatever a fact is testing: <c>invoice_items.line_total</c> is
     /// computed, and the parent's <paramref name="netTotal"/> is whatever the fact declares.
     /// </summary>
+    /// <param name="netTotal">The parent's rollup field, as the fact declares it.</param>
+    /// <param name="extraEntity">A third entity the fact needs, if any.</param>
+    /// <param name="parentTenancy">The parent's declared tenancy, or <see langword="null"/> to declare none.</param>
+    /// <param name="childTenancy">The child's declared tenancy, or <see langword="null"/> to declare none.</param>
     private static AlvoDescriptor Invoicing(
-        FieldDescriptor netTotal, (string Name, EntityDescriptor Entity)? extraEntity = null)
+        FieldDescriptor netTotal,
+        (string Name, EntityDescriptor Entity)? extraEntity = null,
+        EntityTenancy? parentTenancy = null,
+        EntityTenancy? childTenancy = null)
     {
         var entities = new Dictionary<string, EntityDescriptor>(StringComparer.Ordinal)
         {
             ["invoices"] = new EntityDescriptor
             {
+                Tenancy = parentTenancy,
                 Fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
                 {
                     ["number"] = new FieldDescriptor { Type = DescriptorFieldType.String, Required = true },
@@ -207,6 +267,7 @@ public class RollupLadderTests
             },
             ["invoice_items"] = new EntityDescriptor
             {
+                Tenancy = childTenancy,
                 Fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
                 {
                     ["invoice"] = new FieldDescriptor { Type = DescriptorFieldType.Ref, Entity = "invoices" },

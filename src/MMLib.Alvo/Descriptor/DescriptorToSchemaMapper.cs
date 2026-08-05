@@ -106,7 +106,7 @@ internal static class DescriptorToSchemaMapper
 
         foreach (var (fname, f) in e.Fields)
         {
-            fields.Add(MapField(name, fname, f, formats, rollups));
+            fields.Add(MapField(name, e, fname, f, formats, rollups));
         }
 
         EnsureEveryDeclaredFeatureIsHonoured(name, e, UnhonouredFeatures.OnAnEntity);
@@ -260,7 +260,18 @@ internal static class DescriptorToSchemaMapper
     private static FieldSchema ActorColumn(string name) =>
         new() { Name = name, Type = SchemaFieldType.Uuid, Nullable = true };
 
-    private static TenancyMode? ResolveTenancy(EntityTenancy? entityTenancy, bool tenancyEnabled) =>
+    /// <summary>
+    /// One entity's resolved tenancy, from its own declaration and the project's switch.
+    /// </summary>
+    /// <remarks>
+    /// <see langword="internal"/> rather than private because <see cref="RollupResolver"/> asks the same
+    /// question of the same inputs: a rollup whose parent and child disagree about tenancy is refused at
+    /// apply, and deciding that from a second copy of the defaulting rule is how the refusal comes to
+    /// disagree with the columns this mapper actually injects.
+    /// </remarks>
+    /// <param name="entityTenancy">The entity's own declared tenancy, or <see langword="null"/> for none.</param>
+    /// <param name="tenancyEnabled">Whether the project's <c>tenancy.enabled</c> is on.</param>
+    internal static TenancyMode? ResolveTenancy(EntityTenancy? entityTenancy, bool tenancyEnabled) =>
         ResolveTenancy(
             entityTenancy switch
             {
@@ -300,8 +311,8 @@ internal static class DescriptorToSchemaMapper
         declared ?? (projectTenancyEnabled ? TenancyMode.Scoped : null);
 
     private static FieldSchema MapField(
-        string entity, string name, FieldDescriptor f, IReadOnlyDictionary<string, string> formats,
-        RollupResolver rollups)
+        string entity, EntityDescriptor declaring, string name, FieldDescriptor f,
+        IReadOnlyDictionary<string, string> formats, RollupResolver rollups)
     {
         EnsureEveryDeclaredFeatureIsHonoured(name, f, UnhonouredFeatures.OnAField);
 
@@ -330,7 +341,7 @@ internal static class DescriptorToSchemaMapper
             // so the translation to a generated column's DDL happens per driver when the migration model is
             // built. See FieldSchema.ComputedExpression.
             ComputedExpression = f.Computed,
-            Rollup = rollups.Resolve(entity, name, f),
+            Rollup = rollups.Resolve(entity, declaring, name, f),
         };
     }
 

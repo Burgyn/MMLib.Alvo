@@ -29,14 +29,22 @@ internal sealed class RollupResolver(AlvoDescriptor descriptor)
     private readonly IReadOnlyDictionary<string, EntityDescriptor> _entities =
         descriptor.Entities ?? new Dictionary<string, EntityDescriptor>(StringComparer.Ordinal);
 
+    /// <summary>Whether the project turns row-level tenancy on, which is what an entity's tenancy defaults from.</summary>
+    private readonly bool _tenancyEnabled = descriptor.Tenancy?.Enabled == true;
+
     /// <summary>
     /// The applied-schema rollup for one field, or <see langword="null"/> when the field declares none.
     /// </summary>
     /// <param name="parent">The entity the rollup field belongs to.</param>
+    /// <param name="declaring">
+    /// The parent's own descriptor — needed for its tenancy, which cannot be looked up by name without
+    /// assuming this pass and the descriptor's entity dictionary agree about the key.
+    /// </param>
     /// <param name="fieldName">The rollup field's name.</param>
     /// <param name="field">The field's descriptor.</param>
     /// <exception cref="InvalidDataException">The declaration cannot be honoured as written.</exception>
-    internal RollupSchema? Resolve(string parent, string fieldName, FieldDescriptor field)
+    internal RollupSchema? Resolve(
+        string parent, EntityDescriptor declaring, string fieldName, FieldDescriptor field)
     {
         EnsureNotAlsoComputed(parent, fieldName, field);
 
@@ -47,6 +55,7 @@ internal sealed class RollupResolver(AlvoDescriptor descriptor)
 
         var child = ChildEntity(parent, fieldName, rollup);
         EnsureNoFilter(parent, fieldName, rollup);
+        EnsureTenancyDoesNotCross(parent, declaring, fieldName, rollup, child);
         EnsureAggregatedFieldIsResolvable(parent, fieldName, rollup, child);
 
         return new RollupSchema
@@ -103,6 +112,70 @@ internal sealed class RollupResolver(AlvoDescriptor descriptor)
                 + UnhonouredFeatures.RollupWhere.Fix);
         }
     }
+
+    /// <summary>
+    /// A rollup whose parent and child <b>disagree about tenancy</b> is refused, because there is no tenant
+    /// the aggregate could be narrowed to that is honest for both sides.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This is a cross-tenant refusal, not a tidiness rule, and both crossing shapes are reachable from a
+    /// descriptor the JSON Schema accepts.</b> A <c>scoped</c> parent with a <c>global</c> child aggregates one
+    /// shared child set into every tenant's parent row — every tenant's number is computed from rows no tenant
+    /// owns. A <c>global</c> parent with a <c>scoped</c> child is worse and is the reason this is refused rather
+    /// than documented: every tenant's children aggregate into <em>one</em> globally readable row, so a
+    /// <c>count</c> discloses how many rows other tenants hold and a <c>sum</c> discloses their values. That is
+    /// a cross-tenant read oracle of the same class as the unique-index one (#137), and it contradicts the
+    /// premise that Alvo's app-side rules are as safe as native row-level security.
+    /// </para>
+    /// <para>
+    /// <b>Refused here rather than repaired below.</b> The write path narrows both statements of the recompute
+    /// by <c>tenant_id</c> when the pair is scoped (see <c>RollupRecompute</c>), which is what keeps a scoped
+    /// rollup inside one tenant — but that predicate only exists when <em>both</em> sides carry the column.
+    /// Inventing a value for the side that does not have one would be inventing an answer to "whose rows is
+    /// this number about", and the descriptor is the only place that question can be answered.
+    /// </para>
+    /// <para>
+    /// The comparison is "is this side scoped", not equality of the resolved mode: a project that leaves
+    /// tenancy off resolves an entity's tenancy to <see langword="null"/>, which carries no <c>tenant_id</c>
+    /// and is therefore the same thing as <c>global</c> for every question here. Refusing
+    /// <see langword="null"/>-versus-<c>global</c> would reject a legal descriptor over a distinction with no
+    /// physical consequence.
+    /// </para>
+    /// </remarks>
+    private void EnsureTenancyDoesNotCross(
+        string parent, EntityDescriptor declaring, string fieldName, Rollup rollup, EntityDescriptor child)
+    {
+        var parentTenancy = Tenancy(declaring);
+        var childTenancy = Tenancy(child);
+
+        if (IsScoped(parentTenancy) == IsScoped(childTenancy))
+        {
+            return;
+        }
+
+        throw new InvalidDataException(
+            $"Field '{parent}.{fieldName}' rolls up '{rollup.From}', but the two entities disagree about "
+            + $"tenancy: '{parent}' is {Describe(parentTenancy)} and '{rollup.From}' is "
+            + $"{Describe(childTenancy)}. A rollup aggregates the child rows of one tenant into that same "
+            + "tenant's parent row, and only a pair that agrees can be narrowed by 'tenant_id' — a scoped "
+            + "child aggregated into a global parent would put every tenant's rows into one globally readable "
+            + "number, which discloses their row count and their values, and a global child aggregated into a "
+            + "scoped parent would compute every tenant's number from rows no tenant owns. Give both entities "
+            + $"the same tenancy: make '{rollup.From}' {Describe(parentTenancy)}, or '{parent}' "
+            + $"{Describe(childTenancy)}.");
+    }
+
+    /// <summary>One entity's resolved tenancy, from the mapper's own defaulting rule.</summary>
+    private TenancyMode? Tenancy(EntityDescriptor entity) =>
+        DescriptorToSchemaMapper.ResolveTenancy(entity.Tenancy, _tenancyEnabled);
+
+    /// <summary>Whether an entity carries a <c>tenant_id</c> at all — the only property the refusal is about.</summary>
+    private static bool IsScoped(TenancyMode? tenancy) => tenancy == TenancyMode.Scoped;
+
+    /// <summary>One tenancy mode, as the refusal names it.</summary>
+    private static string Describe(TenancyMode? tenancy) =>
+        IsScoped(tenancy) ? "scoped" : "global";
 
     /// <summary>
     /// The child entity the rollup aggregates over, refused when the descriptor declares no such entity.
