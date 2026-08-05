@@ -1,0 +1,6 @@
+﻿CREATE TABLE "lines" (
+    "id" TEXT NOT NULL CONSTRAINT "PK_lines" PRIMARY KEY,
+    "amount" INTEGER NOT NULL,
+    "total" AS (("unit_price" * "amount")) STORED,
+    "unit_price" TEXT NOT NULL
+);

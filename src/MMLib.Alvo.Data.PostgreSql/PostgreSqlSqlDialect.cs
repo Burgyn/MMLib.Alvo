@@ -49,6 +49,23 @@ public sealed class PostgreSqlSqlDialect : IAlvoSqlDialect
         return $"CAST(NULL AS {storeType})";
     }
 
+    /// <inheritdoc/>
+    /// <remarks>
+    /// PostgreSQL's own spelling, since 12: <c>&lt;column&gt; &lt;type&gt; GENERATED ALWAYS AS
+    /// (&lt;expr&gt;) STORED</c>. It has no <c>VIRTUAL</c> at all before 18 — <c>ADD COLUMN … VIRTUAL</c> is a
+    /// syntax error on 16 — which is the other half of why
+    /// <see cref="IAlvoSqlDialect.GeneratedColumnDefinition"/> commits to stored rather than letting each
+    /// engine pick.
+    /// </remarks>
+    public string? GeneratedColumnDefinition(string columnName, string storeType, string renderedExpression)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(columnName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(storeType);
+        ArgumentException.ThrowIfNullOrWhiteSpace(renderedExpression);
+
+        return $"{RenderColumn(columnName)} {storeType} GENERATED ALWAYS AS ({renderedExpression}) STORED";
+    }
+
     /// <summary>SQLSTATE 23505 — <c>unique_violation</c> (PostgreSQL, Appendix A, class 23).</summary>
     private const string UniqueViolation = "23505";
 

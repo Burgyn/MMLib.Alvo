@@ -163,5 +163,41 @@ internal sealed class AlvoDataContext : DbContext
         {
             property = field.Scale is { } scale ? property.HasPrecision(precision, scale) : property.HasPrecision(precision);
         }
+
+        ConfigureComputed(property, field);
+    }
+
+    /// <summary>
+    /// Tells this model that a <c>computed</c> field's value comes from the <b>store</b>, so no statement this
+    /// context emits ever writes it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Not cosmetic, and not a duplicate of the migration model's own annotation.</b> Without it EF includes
+    /// the column in the property-bag <c>INSERT</c> and both engines refuse the statement outright
+    /// (<c>cannot INSERT into generated column</c>), so <em>every</em> create on an entity carrying a computed
+    /// field would fail — including creates whose payload never mentioned the field. With it, EF omits the
+    /// column from the insert and reads the engine's value back, which is also what makes a create's response
+    /// carry the computed value rather than a hole.
+    /// </para>
+    /// <para>
+    /// <b>Why not <c>HasComputedColumnSql</c> here as well.</b> That annotation exists to <em>generate DDL</em>,
+    /// and this model never migrates anything; carrying it would mean rendering CEL to SQL on every request, and
+    /// would give the runtime context a second authority for a column definition that
+    /// <see cref="DescriptorModelBuilder"/> already owns. What this model needs is the one bit that changes
+    /// which columns a statement names, and this is that bit.
+    /// </para>
+    /// <para>
+    /// A caller who <em>does</em> name a computed field in a payload is refused by
+    /// <see cref="WritePayloadGuard"/> before any of this is reached: silently dropping their value would be
+    /// the same wrong-stored-number outcome from the other direction.
+    /// </para>
+    /// </remarks>
+    private static void ConfigureComputed(PropertyBuilder property, FieldSchema field)
+    {
+        if (field.ComputedExpression is not null)
+        {
+            property.ValueGeneratedOnAddOrUpdate();
+        }
     }
 }

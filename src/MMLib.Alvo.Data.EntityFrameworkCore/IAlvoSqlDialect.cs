@@ -267,6 +267,68 @@ public interface IAlvoSqlDialect
             : $"LIMIT {rowCountParameterMarker} OFFSET {rowOffsetParameterMarker}";
 
     /// <summary>
+    /// The column definition this engine spells for a <b>stored generated column</b> — the mechanism a
+    /// descriptor's <c>field.computed</c> is honoured by — or <see langword="null"/> when the engine cannot
+    /// express one, in which case the migrator refuses the field and names the engine.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Stored, never virtual, and that is a portability decision rather than a default.</b> SQLite accepts
+    /// <c>VIRTUAL</c> exactly where it refuses <c>STORED</c>, so emitting it there would make one descriptor
+    /// produce a column PostgreSQL can index and filter on and SQLite cannot — §0 principle 3's own failure
+    /// mode, silently rather than loudly, and precisely the drawback <c>baas-analyza</c> names for the
+    /// aggregate-at-read alternative.
+    /// </para>
+    /// <para>
+    /// A <b>default interface member</b>, like <see cref="RowWindowClause"/>, so adding it breaks no existing
+    /// implementation. The default is <see langword="null"/> rather than a spelling, and that is the one
+    /// difference from that precedent: there is no majority spelling to inherit — SQL Server / Azure SQL says
+    /// <c>AS (&lt;expr&gt;) PERSISTED</c> and names no type — so a guessed default would produce either DDL the
+    /// engine rejects at migration time or, worse, an ordinary column nothing maintains.
+    /// </para>
+    /// <para>
+    /// <b>Return grammar.</b> One column definition, exactly as it appears inside a <c>CREATE TABLE</c> column
+    /// list or after <c>ADD COLUMN</c>: the quoted column name, the store type where the engine wants one, and
+    /// the generation clause. No separating comma, no <c>ADD COLUMN</c> keyword, no terminator, no surrounding
+    /// whitespace.
+    /// </para>
+    /// <para>
+    /// <paramref name="renderedExpression"/> reaches the SQL text unparameterized because DDL has no
+    /// bind-parameter form at all. That is safe only because it comes from
+    /// <see cref="MMLib.Alvo.Expressions.IPredicateRenderer"/>'s scalar entry point over a <b>compiled</b> CEL
+    /// AST, so it can contain nothing but this entity's own field references, arithmetic and
+    /// <c>CASE WHEN</c> — never a descriptor string spliced in, which is what #20 removed as an
+    /// arbitrary-DDL-injection vector. A dialect must never be handed one assembled from caller input.
+    /// </para>
+    /// </remarks>
+    /// <param name="columnName">The column's name, to be delimited by this dialect.</param>
+    /// <param name="storeType">
+    /// The column's EF-resolved store type, exactly as this provider spells it — the same authority
+    /// <see cref="RenderNullProjection"/> takes it from, for the same reason.
+    /// </param>
+    /// <param name="renderedExpression">The already-rendered SQL scalar expression the column is generated from.</param>
+    string? GeneratedColumnDefinition(string columnName, string storeType, string renderedExpression) => null;
+
+    /// <summary>
+    /// The statements this engine needs run <b>outside</b> a migration's transaction, around the plan's own
+    /// SQL — <see cref="MigrationBatchFraming.None"/> for an engine that needs none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A <b>default interface member</b> answering "nothing", so no existing implementation breaks and no
+    /// engine is assumed to have a peculiarity it does not have. See
+    /// <see cref="MigrationBatchFraming"/> for the measured data loss that made this necessary: SQLite's
+    /// <c>PRAGMA foreign_keys</c> is a no-op inside a transaction, and a table rebuild inside one therefore
+    /// cascades away the child rows of every <c>onDelete: "cascade"</c> reference to the table being rebuilt.
+    /// </para>
+    /// <para>
+    /// The migrator runs <see cref="MigrationBatchFraming.After"/> even when the batch failed, so a suspension
+    /// is never left in place on a connection a pool may hand out again.
+    /// </para>
+    /// </remarks>
+    MigrationBatchFraming MigrationFraming => MigrationBatchFraming.None;
+
+    /// <summary>
     /// Decides whether <paramref name="failure"/> is this engine refusing a write on a constraint a
     /// <em>caller</em> can do something about — a <c>unique</c> collision or a <c>restrict</c>-ed reference —
     /// and recovers whatever it names, or answers <see langword="null"/> when it is anything else.

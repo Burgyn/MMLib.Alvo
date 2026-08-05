@@ -43,6 +43,67 @@ public sealed class SqliteSqlDialect : IAlvoSqlDialect
         return $"CAST(NULL AS {storeType})";
     }
 
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <para>
+    /// <c>GENERATED ALWAYS</c> is <em>optional</em> in SQLite's grammar — EF's own generator emits the short
+    /// <c>&lt;column&gt; AS (&lt;expr&gt;) STORED</c> — and it is spelled in full here anyway, so the two
+    /// shipped engines' generated-column DDL is comparable by eye in a review and in a golden snapshot.
+    /// </para>
+    /// <para>
+    /// The store type is named even though SQLite would accept a generated column without one, because an
+    /// untyped generated column has no affinity at all and therefore holds whatever the expression evaluated
+    /// to, while an ordinary <c>decimal</c> column on this driver is <c>TEXT</c>.
+    /// </para>
+    /// <para>
+    /// <b>That paragraph describes this reference spelling, and NOT the DDL Alvo ships — measured, and stated
+    /// here because the two are easy to confuse.</b> The migrator reads this member for its
+    /// <see langword="null"/>ness only (see <c>EfCoreSchemaMigrator.EnsureExpressible</c>); the emitted DDL
+    /// comes from EF Core's own SQLite generator, which spells the short form <b>with no column type</b> and
+    /// drops one even when the model configures it explicitly — measured through the product's snapshot suite
+    /// with the real store type and with a deliberately bogus one, both leaving the emitted <c>CREATE TABLE</c>
+    /// byte-identical. So a shipped computed <c>decimal</c> column holds a <c>real</c>, which
+    /// <c>SqliteComputedDecimalStorageTests</c> pins, and naming the type would not change its <em>value</em>
+    /// in any case: SQLite has no decimal arithmetic, so <c>'0.1' * 3</c> is <c>0.30000000000000004</c> in an
+    /// untyped, a <c>TEXT</c> and a <c>REAL</c> column alike, where PostgreSQL's <c>numeric(18,2)</c> answers
+    /// <c>0.30</c>. Closing <em>that</em> needs the expression rounded to the field's declared scale, which is
+    /// a seam the ports do not have; it is tracked as #162.
+    /// </para>
+    /// </remarks>
+    public string? GeneratedColumnDefinition(string columnName, string storeType, string renderedExpression)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(columnName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(storeType);
+        ArgumentException.ThrowIfNullOrWhiteSpace(renderedExpression);
+
+        return $"{RenderColumn(columnName)} {storeType} GENERATED ALWAYS AS ({renderedExpression}) STORED";
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <para>
+    /// <b>This is the other half of the rebuild, and without it the rebuild loses rows.</b> EF's SQLite
+    /// generator already emits <c>PRAGMA foreign_keys = 0</c> around a table rebuild and marks it
+    /// transaction-suppressed — but a <c>MigrationPlan</c> carries plain SQL strings, so the flag cannot
+    /// survive and the pragma ran inside Alvo's single migration transaction, where SQLite documents it as a
+    /// <em>no-op</em>. With foreign keys still enforced, <c>DROP TABLE parent</c> performs an implicit
+    /// <c>DELETE FROM</c>, which fires <c>ON DELETE CASCADE</c> on every reference to it. Measured: rebuilding
+    /// <c>invoices</c> and <c>invoice_items</c> in one plan left the invoice and deleted the item.
+    /// </para>
+    /// <para>
+    /// Suspending enforcement for the duration of a migration is what EF does and is safe here: the batch is
+    /// DDL plus its own <c>INSERT … SELECT</c> copies, which reproduce the rows they came from, and the
+    /// connection is the migrator's own — the data path never uses it. It is restored afterwards regardless of
+    /// outcome rather than left to connection disposal, because a pooled connection handed back with foreign
+    /// keys off would silently stop enforcing them for whatever ran next.
+    /// </para>
+    /// </remarks>
+    public MigrationBatchFraming MigrationFraming { get; } = new()
+    {
+        Before = ["PRAGMA foreign_keys = 0"],
+        After = ["PRAGMA foreign_keys = 1"],
+    };
+
     /// <summary><c>SQLITE_CONSTRAINT_UNIQUE</c> (2067): a <c>UNIQUE</c> index refused the row.</summary>
     private const int ConstraintUnique = 2067;
 

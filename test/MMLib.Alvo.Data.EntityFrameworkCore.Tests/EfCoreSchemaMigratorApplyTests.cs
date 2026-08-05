@@ -39,7 +39,9 @@ public class EfCoreSchemaMigratorApplyTests : IDisposable
             ctx.GetService<IMigrationsSqlGenerator>(),
             ctx.GetService<IModelRuntimeInitializer>(),
             () => new ModelBuilder(SqliteConventionSetBuilder.Build()),
-            _connections);
+            _connections,
+            new TestSqlDialect(),
+            computed: null);
         // IDatabaseModelFactory is a design-time-only service (never registered by the runtime
         // UseSqlite pipeline), so it's resolved through the same reflective bootstrap `dotnet-ef`
         // itself uses: DesignTimeServicesBuilder reads the [DesignTimeProviderServices] attribute

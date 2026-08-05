@@ -38,6 +38,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/DifferentialProbe.cs" Link="_shared/DifferentialProbe.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/SqlCapture.cs" Link="_shared/SqlCapture.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/PolicyPredicateParameters.cs" Link="_shared/PolicyPredicateParameters.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/OutOfBandStatement.cs" Link="_shared/OutOfBandStatement.cs" />
   </ItemGroup>
 
   <!-- The outbox table's engine facts, shared with MMLib.Alvo.Data.Sqlite.Tests — see the same link there. -->

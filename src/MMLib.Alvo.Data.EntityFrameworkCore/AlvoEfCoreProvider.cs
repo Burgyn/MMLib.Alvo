@@ -125,8 +125,29 @@ public static class AlvoEfCoreProvider
             efServices.GetRequiredService<IMigrationsSqlGenerator>(),
             efServices.GetRequiredService<IModelRuntimeInitializer>(),
             registration.CreateModelBuilder,
-            connections);
+            connections,
+            registration.Dialect,
+            ComputedColumns(services, registration));
     }
+
+    /// <summary>
+    /// The CEL-to-generated-column renderer, or <see langword="null"/> when this container has no expression
+    /// services.
+    /// </summary>
+    /// <remarks>
+    /// <b><c>GetService</c>, not <c>GetRequiredService</c>, and the difference is the error a host sees.</b> A
+    /// driver's <c>UseSqlite</c>/<c>UsePostgreSql</c> is attachable to a bare <see cref="IAlvoBuilder"/> that
+    /// never called <c>AddAlvo()</c> — the in-repo generated-SQL snapshot suites did exactly that for six
+    /// releases — so demanding the services here would turn every migration in such a container into an
+    /// <see cref="InvalidOperationException"/> about <c>ICelCompiler</c>, whether or not any field is computed.
+    /// Answering <see langword="null"/> instead keeps that container working for every schema that declares no
+    /// <c>computed</c>, and lets <c>DescriptorModelBuilder</c> name the missing <c>AddAlvo()</c> for the one that
+    /// does.
+    /// </remarks>
+    private static ComputedColumnSql? ComputedColumns(IServiceProvider services, RelationalProviderRegistration registration) =>
+        services.GetService<ICelCompiler>() is { } compiler && services.GetService<IPredicateRenderer>() is { } renderer
+            ? new ComputedColumnSql(compiler, renderer, registration.Fields)
+            : null;
 
     private static EfCoreSchemaIntrospector CreateIntrospector(IServiceProvider services, RelationalProviderRegistration registration)
     {

@@ -794,6 +794,114 @@ differently, and T-SQL additionally names the *alias* as the update target rathe
 would surface rather than one Alvo composes itself — but it is the second place a T-SQL driver will need its own
 answer, and unlike the lock it is not behind a seam Alvo owns.
 
+## `computed` is the engine's column; `rollup` is this port's statement (#21)
+
+The two look like one feature in the descriptor and are nothing alike underneath, and the split is the whole
+design: **`computed` is DDL, `rollup` is a write-path concern.** A computed field becomes a *stored generated
+column*, so the value is unbypassable by construction — the engine itself refuses every write to it, whether it
+comes from a hook, a custom endpoint, a bug, or another application entirely. A rollup is maintained by Alvo,
+inside the child write's own transaction, and is therefore unbypassable only for writes that go through this
+port. That asymmetry is stated rather than smoothed over: an out-of-band `INSERT` into a child table leaves a
+rollup stale, and nothing here detects it.
+
+**Alvo never spells the generated column's DDL.** `DescriptorModelBuilder` marks the property
+`HasComputedColumnSql(<rendered>, stored: true)` and EF's own per-provider generator emits it — measured as
+`numeric(18,2) GENERATED ALWAYS AS (…) STORED` on PostgreSQL and the legal short form `AS (…) STORED` on
+SQLite, including inside SQLite's own table rebuild. Two golden snapshots freeze the clause per engine, because
+a provider bump that stopped emitting it would ship *an ordinary column nothing maintains*, and every
+behavioural fact would stay green: a column that merely holds the right number reads identically to one the
+engine maintains. That is why the load-bearing fact asserts **the engine refusing an out-of-band write**, never
+a value read back.
+
+`stored`, never `virtual`, and that is a portability decision: SQLite accepts `VIRTUAL` exactly where it refuses
+`STORED`, and PostgreSQL 16 has no `VIRTUAL` at all — so letting each engine pick would make one descriptor
+produce a column one engine can index and filter on and the other cannot.
+
+**One §0 principle 3 divergence is left, and it is a property of SQLite's arithmetic rather than of the DDL.** A
+computed `decimal` answers `0.30` on PostgreSQL's `numeric(18,2)` and `0.30000000000000004` on SQLite for
+`0.1 * 3` — measured on both engines through the port. The cause is *not* the missing store type on SQLite's
+column, and that was measured too: EF's SQLite generator drops the column type for a computed column
+unconditionally (configuring `HasColumnType` with the real type and with a bogus one both left the emitted DDL
+byte-identical), and SQLite evaluates the expression as a double whatever affinity the column declares — an
+untyped, a `TEXT` and a `REAL` column all store `0.30000000000000004`, and `SUM` over each answers identically.
+So the dialect's `GeneratedColumnDefinition` naming the type is a *reference spelling*, not what ships, and its
+remarks say so. Closing the divergence means rounding a computed decimal expression to the field's declared
+scale in the driver, which needs a seam the ports do not have; the state as it stands is pinned per engine by
+`SqliteComputedDecimalStorageTests` and tracked as #162. The shared suite deliberately picks values
+exact in binary floating point, so it asserts what the two engines *do* agree on.
+
+Three things about `computed` are refusals rather than behaviour, each because the alternative is a stored
+number that looks like data:
+
+- **A constant in the expression is refused, naming it.** The scalar renderer routes every literal through its
+  parameter bag and DDL has no bind-parameter form, so `unit_price * 1.2` cannot become a column definition.
+  Inlining it would put decimal separators and string escaping — engine-specific, both — into DDL that is then
+  persisted. Field-only arithmetic covers every example the sources give, and `baas-analyza:1358` deliberately
+  puts a contextual constant (a VAT rate) in a before-hook instead.
+- **An engine whose dialect cannot express a stored generated column is refused by name**, rather than the
+  field silently becoming plain.
+- **A payload naming a computed field is refused**, rather than dropped. The runtime model marks the property
+  store-generated, so EF leaves it out of the `INSERT` — the caller would otherwise get a `201` whose body
+  reports the engine's number with nothing saying theirs was discarded.
+
+**`rollup` is lock-then-recompute, and the order is the entire correctness argument.** Inside the child write's
+transaction, after the child row is written: take the parent's row lock through the dialect, then one
+`UPDATE parent SET <rollup> = (SELECT <op>(<field>) FROM <child> WHERE <fk> = @parent)` per parent. The atomic
+single statement *alone* is a lost update — measured on PostgreSQL, READ COMMITTED, 40 writers: 31 of 40 once
+the window was widened. Under READ COMMITTED the `SET` expression is evaluated from the snapshot taken at
+statement start, and when the row lock is finally granted EvalPlanQual re-checks only the outer `WHERE`
+(`id = @p`, still true), so the stale value is written. **This is the same EvalPlanQual mechanism that bit the
+outbox claim in PR5a** — second occurrence in this codebase. `PostgreSqlRollupRaceTests` pins it, on that engine
+only (SQLite serialises writers, so a lost update is structurally impossible there and a shared fact would
+report a guarantee it never tested), and with the window widened, because without the widening the naive
+implementation measured 40 of 40 and looked correct.
+
+Five consequences worth naming:
+
+- **Both statements are narrowed by `tenant_id` when the pair is tenant-scoped, and neither may lean on the
+  foreign key.** A `ref` is a foreign key on the parent's `id` alone — not on `(tenant_id, id)` — so a child row
+  may legally name a parent in another tenant, and an id taken off a row image is not a promise about whose row
+  it is. Without the predicate the recompute *writes* that other tenant's parent from this tenant's children and
+  aggregates every tenant's children into it: a cross-tenant write and a cross-tenant read in one statement pair.
+  The child aggregate's predicate is **qualified by the child's table**, because an unqualified `tenant_id` inside
+  that subquery binds to the parent's column the moment the child has none — which is true for every child row
+  and therefore aggregates every tenant's. A pair that *disagrees* about tenancy cannot be narrowed at all and is
+  refused: at apply by `RollupResolver`, naming both entities and their modes, and again inside `RollupRecompute`
+  for a schema that never came through the mapper. Two two-tenant facts in the shared suite are the acceptance
+  bar, and both go red with either predicate removed (measured: Acme's `sum` read 15 instead of 10, then 17
+  instead of 12). What is *left* open is the cross-tenant `ref` itself: such a child now aggregates nowhere
+  instead of writing across the boundary, and the real fix — a foreign key spanning `(tenant_id, id)` — belongs
+  to every `ref`, not to rollups (#161).
+
+- **The lock is the dialect's, and is a no-op on SQLite** — where reading the parent before writing inside a
+  deferred transaction killed 12 of 24 writers on `SQLITE_BUSY_SNAPSHOT`. So a dialect that expresses no lock in
+  **either** of the port's two positions means "issue no locking read", not "issue an unlocked one", and the read
+  is skipped entirely. **Both positions, never only the trailing clause**: T-SQL locks with a table hint
+  (`FROM notes WITH (UPDLOCK, ROWLOCK)`) and legitimately returns an empty `RowLockClause`, so a single-position
+  rule skips the read on exactly the engine that needs it and silently reproduces the 31-of-40 lost update.
+  `LockStatement` therefore compares the locked table source against the plain one as well, and
+  `RollupLockStatementTests` pins all three shapes against `TSqlSqlDialect`.
+- **All five operations go through one recompute from scratch.** `total = total + delta` is commutative for
+  `sum`/`count` only, drifts with no self-correction if one write is ever missed, and is simply wrong for
+  `min`/`max`.
+- **The aggregated column goes through `IFieldSqlRenderer.RenderComparableOperands`.** `MIN`/`MAX` compare, and
+  SQLite stores a `decimal` as `TEXT`, so an unrepaired `MIN('10.0','6.0')` answers `'10.0'`. That member
+  already owns the repair and its own remarks call it an ordering key, which is exactly what an extreme-value
+  aggregate is.
+- **Parents are locked in id order, in one place.** An update recomputes *both* the parent a child left and the
+  one it joined — the foreign key is writable — and a deterministic order is what stops two writers moving
+  children between the same two parents in opposite directions from deadlocking.
+
+The empty answer is the engine's: `0` for `count` and `NULL` for the other four. A `COALESCE(…, 0)` here would
+make "no children yet" indistinguishable from "children summing to zero" on a field an author declared
+nullable.
+
+**The ladder the two make together** is `baas-analyza:1358`'s invoice, and `AlvoDataComputedRollupTests` runs it
+on both engines: `invoice_items.line_total = unit_price * amount` is *computed*, `invoices.net_total =
+sum(line_total)` is a *rollup* over it, and `invoices.gross_total = net_total + vat_total` is *computed again
+over a column the framework maintains* — which works because a generated column tracks an application-written
+one. The fourth rung, `vat_total` as a before-hook, needs PR #160 and is named in that fact rather than skipped.
+
 ## `softDelete` is refused, not silently ignored
 
 The frozen descriptor schema states the guarantee in full: *"Framework-managed soft delete: a managed

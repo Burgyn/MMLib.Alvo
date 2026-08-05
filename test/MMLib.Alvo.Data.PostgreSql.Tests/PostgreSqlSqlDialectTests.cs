@@ -119,4 +119,13 @@ public class PostgreSqlSqlDialectTests : AlvoSqlDialectContractTests
     public void A_pre_image_reads_the_same_table_source_as_an_ordinary_read(PreImageMutation mutation)
         => _dialect.RenderTable(Entity("vehicle"), mutation)
             .ShouldBe(_dialect.RenderTable(Entity("vehicle"), lockedPreImageFor: null));
+
+    /// <summary>
+    /// The exact spelling, pinned per engine — PostgreSQL's own since 12, and it names the type, unlike
+    /// T-SQL's <c>PERSISTED</c> form.
+    /// </summary>
+    [Fact]
+    public void A_stored_generated_column_is_spelled_generated_always_as_stored()
+        => _dialect.GeneratedColumnDefinition("line_total", "numeric(18,2)", "\"unit_price\" * \"amount\"")
+            .ShouldBe("\"line_total\" numeric(18,2) GENERATED ALWAYS AS (\"unit_price\" * \"amount\") STORED");
 }

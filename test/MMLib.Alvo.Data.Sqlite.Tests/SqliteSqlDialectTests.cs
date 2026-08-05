@@ -98,4 +98,15 @@ public class SqliteSqlDialectTests : AlvoSqlDialectContractTests
     public void A_pre_image_reads_the_same_table_source_as_an_ordinary_read(PreImageMutation mutation)
         => _dialect.RenderTable(Entity("vehicle"), mutation)
             .ShouldBe(_dialect.RenderTable(Entity("vehicle"), lockedPreImageFor: null));
+
+    /// <summary>
+    /// The exact spelling, pinned per engine because the generic contract suite can only assert that the
+    /// column and the expression are present — the surrounding grammar differs by engine, and this is the one
+    /// this driver ships. <c>GENERATED ALWAYS</c> is optional in SQLite and spelled anyway, so a reviewer
+    /// comparing the two shipped engines' DDL sees one string rather than two dialects of it.
+    /// </summary>
+    [Fact]
+    public void A_stored_generated_column_is_spelled_generated_always_as_stored()
+        => _dialect.GeneratedColumnDefinition("line_total", "TEXT", "\"unit_price\" * \"amount\"")
+            .ShouldBe("\"line_total\" TEXT GENERATED ALWAYS AS (\"unit_price\" * \"amount\") STORED");
 }
