@@ -246,3 +246,103 @@ Q9  A `computed` expression's LITERALS become BIND PARAMETERS.
     through the ParameterBag, so `unit_price * 1.2` renders `(<col> * @p0)`. DDL
     cannot carry a bind parameter. Field-only arithmetic — which is every example
     in the sources, including baas-analyza:1358's ladder — renders clean.
+
+==============================================================================
+FOURTH PASS — the three review findings, measured, 2026-08-05
+==============================================================================
+Q10 TENANCY. Does the rollup recompute stay inside one tenant?
+  Descriptor: invoices/invoice_items, BOTH scoped, tenancy.enabled = true.
+  Acme creates invoice IA + child(10). Globex creates a child(5) whose `ref` names IA
+  (accepted: a `ref` is a foreign key on invoices.id alone, and the tenant scope judges
+  the CHILD's tenant_id, which is honestly Globex's). Then Acme creates a child(2).
+
+    predicates                                   Acme reads net_total / item_count
+    both statements narrowed by tenant_id        10 / 1   then  12 / 2   CORRECT
+    predicates removed (mutant)                  15 / 2   then  17 / 3   LEAK
+
+  Measured on BOTH engines through the shared suite:
+    sqlite      A_child_write_in_one_tenant_never_moves_another_tenants_rollup  FAILED (10 vs 15.00)
+                A_tenants_rollup_never_aggregates_another_tenants_children      FAILED (12 vs 17.00)
+    postgresql  same two facts, same values, FAILED
+  and 13 of 15 facts in the same class still passed, so the mutant is discriminated by
+  exactly the two facts written for it.
+
+  Removing the APPLY refusal (RollupResolver.EnsureTenancyDoesNotCross) instead:
+    RollupLadderTests  A_rollup_from_a_scoped_child_into_a_global_parent_is_refused  FAILED
+                       A_rollup_from_a_global_child_into_a_scoped_parent_is_refused  FAILED
+                       A_rollup_whose_parent_and_child_are_both_scoped_is_resolved   passed
+  The control still passing is what says the refusal is about the CROSSING, not about tenancy.
+
+------------------------------------------------------------------------------
+Q11 Can the SQLite generated column's STORE TYPE be emitted at all?  NO.
+------------------------------------------------------------------------------
+  Shipped DDL (golden snapshot):  "total" AS (("unit_price" * "amount")) STORED
+  PostgreSQL's:                   total numeric(18,2) GENERATED ALWAYS AS (...) STORED
+
+  Configuring the property with HasColumnType in DescriptorModelBuilder and re-running the
+  SQLite golden-SQL snapshot suite:
+
+    HasColumnType("TEXT")    -> snapshot GREEN, i.e. emitted DDL UNCHANGED (no type)
+    HasColumnType("ZZTOP")   -> snapshot GREEN, i.e. even a bogus type is dropped
+
+  VERDICT: EF Core 10's SQLite migrations generator omits the column type for a computed
+  column unconditionally. Neither the model builder nor IAlvoSqlDialect.GeneratedColumnDefinition
+  can make it appear; that member's returned text is a REFERENCE spelling only (Dev-12).
+
+------------------------------------------------------------------------------
+Q12 Would naming the type change the VALUE?  NO. The loss is in the arithmetic.
+------------------------------------------------------------------------------
+  Bundled e_sqlite3, one table with three generated columns over the same expression
+  ((unit_price * amount)), unit_price stored TEXT as EF stores a decimal:
+
+    unit_price  amount   untyped (no type)        TEXT-typed             REAL-typed
+    0.1         3        real 0.30000000000000004 text 0.30000000000000004  real 0.30000000000000004
+    0.7         3        real 2.0999999999999996  text 2.0999999999999996   real 2.0999999999999996
+    2.50        4        real 10                  text 10.0                 real 10
+    12345678901234.56 1  real 12345678901234.56   text 12345678901234.561   real 12345678901234.56
+
+    GetDecimal(untyped) = GetDecimal(typed) = GetDecimal(typed_real) = 0.30000000000000004
+    SUM(untyped) = SUM(typed) = SUM(typed_real) = 12345678901246.96
+
+  So a TEXT affinity stores the double's own text and changes nothing a reader sees — and for
+  the 16-digit value it stores one EXTRA spurious digit. SQLite has no decimal arithmetic, so
+  the expression is a double whatever the column declares.
+
+  Through the product, same descriptor, both engines:
+    postgresql  numeric(18,2) computed column, 0.1 * 3 -> 0.30
+    sqlite      untyped computed column,       0.1 * 3 -> 0.30000000000000004
+    sqlite      typeof(unit_price) = 'text'  (ordinary decimal column, exact)
+                typeof(line_total) = 'real'  (computed column, no affinity)
+
+  VERDICT: the divergence is real but its cause is SQLite's arithmetic plus the absent
+  rounding to the field's declared scale, NOT the column's affinity. Closing it means the
+  driver wrapping a computed decimal expression (CAST(ROUND(expr, scale) AS ...)), which is a
+  new port member. Pinned per engine by SqliteComputedDecimalStorageTests and filed as its own
+  issue instead. See Dev-13.
+
+------------------------------------------------------------------------------
+Q13 NON-VACUITY OF THE RACE FACT. Does PostgreSqlRollupRaceTests go red with the
+    lock step removed?  YES — 2 of 20.
+------------------------------------------------------------------------------
+  This had never been run. The design's acceptance criterion 4 requires it, and the fact
+  widens its window at a DIFFERENT seam from this spike's Q2 (a per-row delay inside the
+  recompute's aggregate, via a substituted IFieldSqlRenderer, rather than a pg_sleep before
+  the UPDATE), so the equivalence of the two widenings was unverified.
+
+  Mutant: RollupRecompute.LockStatement asks the dialect for nothing
+          (`var clause = dialect.RowLockClause(PreImageMutation.Update);` -> `string.Empty`),
+          which on PostgreSQL makes the method answer null and the locking read is skipped
+          entirely -- i.e. exactly the lock step removed, with everything else untouched.
+
+    unmutated   20 writers, per-row delay 0.01s   line_count 20, total 20   PASSED (7.4s)
+    mutant      same                              line_count  2            FAILED
+                                                  ("every child committed" -- all 20 writers
+                                                   DID commit, so this is 18 lost updates,
+                                                   not failed transactions)
+    mutant, second run                            line_count  2            FAILED (identical)
+    restored                                      line_count 20            PASSED
+
+  VERDICT: the fact is measuring the lock. The aggregate-side widening is at least as
+  effective as the spike's pre-UPDATE delay (2 of 20 here against 31 of 40 there), which
+  makes sense: the delay scales with the number of children, so the later writers -- the
+  ones most likely to collide -- hold the parent's row lock longest.

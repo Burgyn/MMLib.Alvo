@@ -44,6 +44,18 @@ namespace MMLib.Alvo.Data.PostgreSql.Tests.Integration;
 /// failing half its writers would satisfy the total alone — and SQLite's own measured failure mode
 /// (<c>SQLITE_BUSY_SNAPSHOT</c> for a read-then-write transaction) is exactly that shape.
 /// </para>
+/// <para>
+/// <b>The non-vacuity control has been RUN, and this is its number.</b> The widening here happens at a different
+/// seam from the spike's (a delay inside the recompute's aggregate, rather than a <c>pg_sleep</c> before the
+/// <c>UPDATE</c>), so the equivalence was not something to assume. Measured on 2026-08-05 by mutating
+/// <c>RollupRecompute.LockStatement</c> so the dialect is never asked for a lock — which makes it answer
+/// <see langword="null"/> on PostgreSQL and skip the locking read, i.e. exactly the lock step removed: this fact
+/// <b>failed</b>, with <c>line_count</c> reading <b>2</b> of 20 while all 20 writers committed, reproduced twice.
+/// So 18 of 20 recomputes were lost updates, the widening is doing its job, and the fact is measuring the lock
+/// rather than passing for an unrelated reason. Restored immediately afterwards, and the run is recorded in
+/// <c>docs/superpowers/specs/evidence/2026-08-04-f3-pr6-computed-rollup/spike.txt</c> (Q13). Re-run it if the
+/// widening seam, the writer count or the recompute's statement order ever changes.
+/// </para>
 /// </remarks>
 public sealed class PostgreSqlRollupRaceTests : IAsyncLifetime
 {

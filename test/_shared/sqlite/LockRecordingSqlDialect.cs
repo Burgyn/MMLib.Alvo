@@ -62,9 +62,9 @@ internal sealed class LockRecordingSqlDialect : IAlvoSqlDialect
         ((IAlvoSqlDialect)_inner).RowWindowClause(rowCountParameterMarker, rowOffsetParameterMarker);
 
     /// <summary>
-    /// Forwarded, and <b>not optional</b>: both generated-column members ship with a refusing default
-    /// (<see langword="null"/>, <see langword="false"/>), so a wrapper that merely forgot them would silently
-    /// turn every fixture built on it into an engine that "cannot express a generated column" and would make the
+    /// Forwarded, and <b>not optional</b>: this member ships with a refusing default
+    /// (<see langword="null"/> — "this engine cannot express a stored generated column"), so a wrapper that
+    /// merely forgot it would silently turn every fixture built on it into such an engine and would make the
     /// whole computed suite refuse at apply — while looking like a wrapper that only records locks.
     /// </summary>
     /// <param name="columnName">The column's name.</param>
@@ -75,7 +75,7 @@ internal sealed class LockRecordingSqlDialect : IAlvoSqlDialect
 
     /// <inheritdoc cref="IAlvoSqlDialect.MigrationFraming"/>
     /// <remarks>
-    /// Forwarded for the same reason the two generated-column members are: the default is "no framing", and a
+    /// Forwarded for the same reason the generated-column member is: the default is "no framing", and a
     /// wrapper that forgot it would silently take SQLite's foreign-key suspension away from every migration run
     /// through this fixture — which is data loss on a table rebuild, not a failing test.
     /// </remarks>

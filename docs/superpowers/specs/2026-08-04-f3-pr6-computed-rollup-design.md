@@ -211,8 +211,10 @@ ran inside Alvo's single migration transaction, where SQLite documents it as a *
 still enforced, `DROP TABLE parent` performs an implicit `DELETE FROM`, firing `ON DELETE CASCADE` on every
 reference to it. Measured: one invoice and one invoice item in, one invoice and **zero** items out. This is
 **pre-existing** — any `AlterColumn` on a parent table with cascading children hits it, computed or not — and
-#21 only made it reachable. Fixed by a third dialect member, `IAlvoSqlDialect.MigrationFraming`, run around the
-batch and restored in a `finally`.
+#21 only made it reachable. Fixed by a **second** new dialect member, `IAlvoSqlDialect.MigrationFraming`, run
+around the batch and restored in a `finally`. (Second, not third: Dev-1/Dev-2 withdrew the planned
+`GeneratedColumnAddRequiresTableRebuild`, so this PR adds exactly two — `GeneratedColumnDefinition` and
+`MigrationFraming`.)
 
 **Dev-3 — `FOR NO KEY UPDATE`, not `FOR UPDATE`.** As planned. The recompute provably never touches the
 parent's key, `PreImageMutation.Update` already means exactly that on this dialect, and the weaker mode still
@@ -261,6 +263,67 @@ definition on both shipped engines (Q5–Q7) and a second author for correct DDL
 documented contract — "`null` when the engine cannot express one, in which case the migrator refuses the field
 and names the engine" — is honoured exactly as written.
 
+**Dev-13 — a `decimal` computed field diverges per engine, and the store type is NOT the cause (fourth spike
+pass).** `0.1 * 3` answers `0.30` on PostgreSQL and `0.30000000000000004` on SQLite, measured on both engines
+through the port. The obvious reading — SQLite's shipped DDL names no store type, so the value lands as a float
+while every other `decimal` column on the table is exact `TEXT` — is only half right, and the actionable half is
+false:
+
+- EF Core 10's SQLite migrations generator emits a computed column as `"col" AS (<expr>) STORED` and **drops the
+  column type unconditionally**. Configuring `HasColumnType` on the property changes nothing: measured with the
+  real store type and with a deliberately bogus one, the emitted `CREATE TABLE` was byte-identical both times
+  (the golden snapshot stayed green). So neither the model builder nor `GeneratedColumnDefinition` can name it.
+- And naming it would not move the value. SQLite has no decimal arithmetic: measured on the bundled provider,
+  `'0.1' * 3` stores `0.30000000000000004` in an untyped, a `TEXT` **and** a `REAL` generated column alike, and
+  `SUM` over the three answers identically. A `TEXT` affinity merely stores the double's own text — and for a
+  16-digit value it stored one *extra* spurious digit (`12345678901234.561` against the untyped column's
+  `12345678901234.56`).
+
+So the residual divergence is SQLite's arithmetic plus the absent rounding to the field's declared scale, which
+is the same limitation `SqliteFieldSqlRenderer`'s remarks already record for every decimal comparison on that
+engine ("a storage change — a scaled integer — is the real fix and is a schema decision this port cannot make").
+Closing it here would mean a new port member wrapping a computed expression per driver
+(`CAST(ROUND(<expr>, <scale>) AS …)`), which is a public-contract addition with its own snapshot and contract-test
+surface — a PR, not a line. **Decision: pin the measured state per engine (`SqliteComputedDecimalStorageTests`),
+correct the dialect remark that read as though the shipped DDL named the type, and file the rounding as its own
+issue.** The shared suite keeps choosing values exact in binary floating point, so what it asserts is what the
+two engines genuinely agree on.
+
+
+**Dev-14 — tenancy is part of the rollup contract, and the design did not name it at all.** Neither D2 nor D3
+mentions `tenant_id`, and the first implementation carried no tenant predicate anywhere: the recompute wrote
+`UPDATE <parent> … WHERE <id> = @parent` with the row id on the outer statement and the foreign key on the inner
+aggregate, both unqualified by tenant. Because a `ref` is a foreign key on the parent's `id` alone — never
+`(tenant_id, id)`, which `DescriptorModelBuilder.ConfigureReferences` makes explicit — two reachable descriptor
+shapes broke:
+
+- **scoped parent + scoped child** — a caller in tenant A creates a child whose `ref` names tenant B's parent,
+  and the recompute writes B's row from an aggregate that includes A's child: a cross-tenant **write**.
+- **global parent + scoped child** — every tenant's children aggregate into one globally readable row, so a
+  `count` discloses how many rows other tenants hold and a `sum` discloses their values: a cross-tenant **read
+  oracle**, the same class as the unique-index one (#137).
+
+Every rollup fact in the branch used `Global`/`Global`, which is why the suite was green. Now:
+
+1. **A tenancy-crossing pair is refused at apply**, naming both entities and their modes with a fix suggestion
+   (`RollupResolver.EnsureTenancyDoesNotCross`), and refused again inside `RollupRecompute` as the fail-closed
+   belt for a `SchemaModel` that never came through the mapper — the same shape as
+   `EfAlvoData.EnsureNotSoftDeleted`. Supported shapes are therefore exactly two: scoped/scoped and
+   global/global (a project with tenancy off resolves to no `tenant_id` at all, which is the same thing as
+   global for every question here, so `null`-versus-`global` is not a crossing).
+2. **Both statements of a scoped recompute carry the tenant predicate** — the parent's `UPDATE` and its locking
+   read, plus the child aggregate's `SELECT`. The child's is **qualified by the child's table**: an unqualified
+   `tenant_id` inside that subquery binds to the parent's column the moment the child has none, which is true
+   for every child row and therefore aggregates every tenant's children with no error anywhere. The tenant value
+   is the written child row's own `tenant_id` — the aggregation key, and a value the synthesized tenant scope has
+   already checked — never the ambient context, which could narrow the parent to one tenant while aggregating a
+   child from another.
+3. **The wider hole is named rather than half-closed.** A scoped child may still name a parent in another tenant
+   *at all*, because the foreign key does not span `(tenant_id, id)`. With the predicate in place that child now
+   aggregates **nowhere** (the parent's `UPDATE` matches no row) instead of writing across the boundary. That is
+   the conservative outcome, and the real fix is a change to every `ref` on every scoped entity — plus the
+   accompanying question of whether the FK's existence check is itself an oracle — so it is filed as its own
+   issue rather than widened into this PR. See *Open, for the maintainer*.
 
 ## Acceptance
 
@@ -274,7 +337,15 @@ and names the engine" — is honoured exactly as written.
    with a widened window**, because SQLite cannot fail this and no delay means no defect.
 4. The non-vacuity control for 3: the same fact with the lock step removed must go **red**.
 5. The ladder end to end over `baas-analyza:1358`'s invoice: computed → rollup → before-hook →
-   computed, in one descriptor. PR5b-1 landed the before-hook rung, so this is now assemblable.
+   computed, in one descriptor — **minus the before-hook rung, which is not assemblable in this branch**
+   (Dev-6: PR5b-1 is PR #160 and still open, so the fact writes `vat_total` explicitly and its own remarks name
+   the gap and the assertion that replaces the write once #160 merges).
+6. **Cross-tenant isolation, per the security-core checklist.** A two-tenant adversarial fact in the shared
+   suite, so both engines run it: tenant A's child write must not move tenant B's parent, and tenant A's rollup
+   must not aggregate tenant B's children. Plus a fact per crossing direction that a tenancy-crossing rollup is
+   refused at apply. Both mutations were run and both killed their facts — removing the tenant predicates made
+   Acme's `sum` read 15 instead of 10 and 17 instead of 12 on **both** engines; removing the apply refusal made
+   both refusal facts fail while the same-tenancy control stayed green.
 
 ## Open, for the maintainer
 
@@ -286,3 +357,14 @@ and names the engine" — is honoured exactly as written.
 - **A stale rollup after an out-of-band child write** has no repair path in this design. A
   `POST /admin/entities/{e}/rollups/rebuild` would be the obvious one and belongs to the
   Management API, not here.
+- **A `ref` may name a row in another tenant, on every scoped entity** — the physical foreign key is on the
+  target's `id` alone. This PR makes the *rollup* safe against it (the child aggregates nowhere rather than
+  writing across the boundary) but does not close it: the reference is still stored, and the difference between
+  "no such row" (a foreign-key violation) and "a row another tenant owns" (accepted) is observable, which is an
+  existence oracle in the #137 family. Closing it means the foreign key spanning `(tenant_id, id)` for every
+  scoped `ref`, which touches the migration model, the destructive-change classification and every existing
+  descriptor. Filed as its own issue.
+- **A `decimal` computed field is not exact on SQLite, and rounds to no scale.** `0.1 * 3` is `0.30` on
+  PostgreSQL and `0.30000000000000004` on SQLite (Dev-13). The fix is the driver rounding a computed decimal
+  expression to the field's declared scale, which needs a port member this design does not have. Filed as its
+  own issue; the current behaviour is pinned per engine so it cannot drift unnoticed.
