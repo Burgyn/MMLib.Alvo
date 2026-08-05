@@ -85,3 +85,80 @@ Still to measure before the design is frozen
   * Whether a computed column may reference a rollup column on both engines, since
     the frozen schema's `computed` description explicitly allows it (gross_total =
     net_total + vat_total).
+
+==============================================================================
+SECOND PASS — the questions the first pass left open
+==============================================================================
+  bundled e_sqlite3   3.53.3  (via Microsoft.Data.Sqlite 10.0.3 + SQLitePCLRaw.lib.e_sqlite3 2.1.12)
+  system sqlite3 CLI  3.51.0  -- for comparison only
+
+Q1 RE-MEASURED against the bundled provider, which is what the product runs:
+
+    table state   STORED                                      VIRTUAL
+    empty         OK                                          OK
+    non-empty     REFUSED  [1] cannot add a STORED column     OK
+
+  Identical to the system CLI, so the first pass's finding stands for the product and
+  is not a CLI artefact.
+
+Q1b  A generated column declared in CREATE TABLE is read-only, enforced by the engine:
+    UPDATE t SET s = 999          -> REFUSED [1] cannot UPDATE generated column "s"
+    INSERT ... (id,a,b,s) VALUES  -> REFUSED [1] cannot INSERT into generated column "s"
+  This is the unbypassable property the computed/rollup ladder wants from `computed`:
+  no write path can set it, so no hook, no custom endpoint and no bug can.
+
+Q3  May a computed column reference a column the APPLICATION maintains (a rollup)?
+  Yes, and it tracks it — which is what makes the frozen schema's own example work:
+    CREATE TABLE inv (..., net_total, vat_total, gross_total GENERATED ALWAYS AS
+                      (net_total + vat_total) STORED)
+    net_total=100, vat_total=20  ->  gross_total = 120
+    app UPDATEs net_total = 250  ->  gross_total = 270
+
+------------------------------------------------------------------------------
+Q4  The rollup race on SQLite (bundled provider, WAL, busy_timeout=15000,
+    24 concurrent writers, one parent row)
+------------------------------------------------------------------------------
+    BEGIN IMMEDIATE, atomic subquery, 50 ms   committed=24 failed= 0  CORRECT
+    BEGIN (deferred), atomic subquery, 50 ms  committed=24 failed= 0  CORRECT
+    BEGIN (deferred), READ parent first       committed=12 failed=12  TX FAILURES
+                                              first error: [5/517] database is locked
+
+  517 is SQLITE_BUSY_SNAPSHOT — the unretryable shape PR5a's Q5 already measured for a
+  read-then-write transaction under WAL. Reproduced here from the other direction.
+
+  Deferred-with-atomic-subquery passes because the transaction's FIRST statement is the
+  child INSERT, so the write lock is taken there and the transaction is effectively
+  immediate. It is not passing because deferred is safe.
+
+  HARNESS CAVEAT, stated rather than hidden: in the failing row the post-run readback
+  reported children=0 while 12 transactions had returned from COMMIT without throwing,
+  which is self-inconsistent and means the harness is not trustworthy for that row's
+  COUNTS. The error CODE and the failure RATE are what this row establishes; its totals
+  are not evidence of anything.
+
+------------------------------------------------------------------------------
+THE CONSTRAINT THE TWO ENGINES JOINTLY IMPOSE
+------------------------------------------------------------------------------
+They pull in OPPOSITE directions, and this is the central design fact for `rollup`:
+
+  * PostgreSQL REQUIRES taking the parent's row lock BEFORE recomputing. Without it the
+    single-statement recompute is a lost update (Q2: 31 of 40).
+  * SQLite must NOT read the parent before writing inside a deferred transaction, or
+    half the writers die on SQLITE_BUSY_SNAPSHOT (Q4). It needs no explicit lock at all,
+    because the child INSERT has already taken the write lock and SQLite admits one
+    writer at a time.
+
+So "lock the parent, then recompute" is correct on PostgreSQL and harmful-as-a-read on
+SQLite. That is a per-engine difference in the STATEMENTS, not in the semantics, which
+is what the dialect port exists for — and `IAlvoSqlDialect.RowLockClause` is already the
+member of that shape, so the seam does not have to be invented.
+
+ALSO NOTE, because it inverts the usual assumption in this repo: for THIS question
+SQLite is the WEAKER engine. The concurrent-boot facts treat SQLite as the harder leg
+(one writer at a time exposes lock contention); here the same property makes the lost
+update structurally impossible, so a SQLite-only suite would never see the PostgreSQL
+defect. The rollup race fact must run on PostgreSQL to mean anything.
+
+AND: any rollup race fact must widen the window (the 50 ms delay). Without it the
+PostgreSQL lost update does not reproduce — 40 of 40 looked correct. The delay is the
+entire difference between a fact and an illusion.
