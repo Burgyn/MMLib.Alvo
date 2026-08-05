@@ -817,6 +817,19 @@ a value read back.
 `STORED`, and PostgreSQL 16 has no `VIRTUAL` at all — so letting each engine pick would make one descriptor
 produce a column one engine can index and filter on and the other cannot.
 
+**One §0 principle 3 divergence is left, and it is a property of SQLite's arithmetic rather than of the DDL.** A
+computed `decimal` answers `0.30` on PostgreSQL's `numeric(18,2)` and `0.30000000000000004` on SQLite for
+`0.1 * 3` — measured on both engines through the port. The cause is *not* the missing store type on SQLite's
+column, and that was measured too: EF's SQLite generator drops the column type for a computed column
+unconditionally (configuring `HasColumnType` with the real type and with a bogus one both left the emitted DDL
+byte-identical), and SQLite evaluates the expression as a double whatever affinity the column declares — an
+untyped, a `TEXT` and a `REAL` column all store `0.30000000000000004`, and `SUM` over each answers identically.
+So the dialect's `GeneratedColumnDefinition` naming the type is a *reference spelling*, not what ships, and its
+remarks say so. Closing the divergence means rounding a computed decimal expression to the field's declared
+scale in the driver, which needs a seam the ports do not have; the state as it stands is pinned per engine by
+`SqliteComputedDecimalStorageTests` and tracked as its own issue. The shared suite deliberately picks values
+exact in binary floating point, so it asserts what the two engines *do* agree on.
+
 Three things about `computed` are refusals rather than behaviour, each because the alternative is a stored
 number that looks like data:
 
@@ -843,11 +856,31 @@ only (SQLite serialises writers, so a lost update is structurally impossible the
 report a guarantee it never tested), and with the window widened, because without the widening the naive
 implementation measured 40 of 40 and looked correct.
 
-Four consequences worth naming:
+Five consequences worth naming:
+
+- **Both statements are narrowed by `tenant_id` when the pair is tenant-scoped, and neither may lean on the
+  foreign key.** A `ref` is a foreign key on the parent's `id` alone — not on `(tenant_id, id)` — so a child row
+  may legally name a parent in another tenant, and an id taken off a row image is not a promise about whose row
+  it is. Without the predicate the recompute *writes* that other tenant's parent from this tenant's children and
+  aggregates every tenant's children into it: a cross-tenant write and a cross-tenant read in one statement pair.
+  The child aggregate's predicate is **qualified by the child's table**, because an unqualified `tenant_id` inside
+  that subquery binds to the parent's column the moment the child has none — which is true for every child row
+  and therefore aggregates every tenant's. A pair that *disagrees* about tenancy cannot be narrowed at all and is
+  refused: at apply by `RollupResolver`, naming both entities and their modes, and again inside `RollupRecompute`
+  for a schema that never came through the mapper. Two two-tenant facts in the shared suite are the acceptance
+  bar, and both go red with either predicate removed (measured: Acme's `sum` read 15 instead of 10, then 17
+  instead of 12). What is *left* open is the cross-tenant `ref` itself: such a child now aggregates nowhere
+  instead of writing across the boundary, and the real fix — a foreign key spanning `(tenant_id, id)` — belongs
+  to every `ref`, not to rollups.
 
 - **The lock is the dialect's, and is a no-op on SQLite** — where reading the parent before writing inside a
-  deferred transaction killed 12 of 24 writers on `SQLITE_BUSY_SNAPSHOT`. So an empty `RowLockClause` means
-  "issue no locking read", not "issue an unlocked one", and the read is skipped entirely.
+  deferred transaction killed 12 of 24 writers on `SQLITE_BUSY_SNAPSHOT`. So a dialect that expresses no lock in
+  **either** of the port's two positions means "issue no locking read", not "issue an unlocked one", and the read
+  is skipped entirely. **Both positions, never only the trailing clause**: T-SQL locks with a table hint
+  (`FROM notes WITH (UPDLOCK, ROWLOCK)`) and legitimately returns an empty `RowLockClause`, so a single-position
+  rule skips the read on exactly the engine that needs it and silently reproduces the 31-of-40 lost update.
+  `LockStatement` therefore compares the locked table source against the plain one as well, and
+  `RollupLockStatementTests` pins all three shapes against `TSqlSqlDialect`.
 - **All five operations go through one recompute from scratch.** `total = total + delta` is commutative for
   `sum`/`count` only, drifts with no self-correction if one write is ever missed, and is simply wrong for
   `min`/`max`.

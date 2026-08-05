@@ -39,9 +39,17 @@ namespace MMLib.Alvo.Testing.Data;
 /// <para>
 /// <b>Decimal precision on SQLite is the engine's, not this suite's.</b> SQLite has no decimal storage class, so
 /// a computed decimal column holds a <c>real</c> (measured: <c>typeof()</c> answers <c>real</c> for the untyped
-/// generated column EF emits there) and a decimal rollup is summed as a double. Every value below is therefore
-/// chosen to be exact in binary floating point — halves and quarters — so a failure here is a defect rather than
-/// the last bit of a mantissa.
+/// generated column EF emits there, and it stays untyped even when the model configures a store type) and a
+/// decimal rollup is summed as a double. Every value below is therefore chosen to be exact in binary floating
+/// point — halves and quarters — so a failure here is a defect rather than the last bit of a mantissa.
+/// </para>
+/// <para>
+/// <b>Which means the one thing this shared suite deliberately does not assert is a value the two engines
+/// answer differently.</b> <c>0.1 * 3</c> is <c>0.30</c> on PostgreSQL's <c>numeric(18,2)</c> and
+/// <c>0.30000000000000004</c> on SQLite — a real §0 principle 3 divergence, and one that is a property of the
+/// engine's arithmetic rather than of anything here, so it is pinned per engine
+/// (<c>SqliteComputedDecimalStorageTests</c>) with its own open issue rather than asserted as if this suite
+/// could make the two agree.
 /// </para>
 /// </remarks>
 public abstract class AlvoDataComputedRollupTests

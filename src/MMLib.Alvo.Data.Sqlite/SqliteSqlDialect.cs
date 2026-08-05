@@ -51,9 +51,23 @@ public sealed class SqliteSqlDialect : IAlvoSqlDialect
     /// shipped engines' generated-column DDL is comparable by eye in a review and in a golden snapshot.
     /// </para>
     /// <para>
-    /// The store type is named even though SQLite would accept a generated column without one. An untyped
-    /// generated column has no type affinity, so a <c>decimal</c> — which this driver stores as <c>TEXT</c> —
-    /// would come back out of the same expression as a numeric value on one path and a string on another.
+    /// The store type is named even though SQLite would accept a generated column without one, because an
+    /// untyped generated column has no affinity at all and therefore holds whatever the expression evaluated
+    /// to, while an ordinary <c>decimal</c> column on this driver is <c>TEXT</c>.
+    /// </para>
+    /// <para>
+    /// <b>That paragraph describes this reference spelling, and NOT the DDL Alvo ships — measured, and stated
+    /// here because the two are easy to confuse.</b> The migrator reads this member for its
+    /// <see langword="null"/>ness only (see <c>EfCoreSchemaMigrator.EnsureExpressible</c>); the emitted DDL
+    /// comes from EF Core's own SQLite generator, which spells the short form <b>with no column type</b> and
+    /// drops one even when the model configures it explicitly — measured through the product's snapshot suite
+    /// with the real store type and with a deliberately bogus one, both leaving the emitted <c>CREATE TABLE</c>
+    /// byte-identical. So a shipped computed <c>decimal</c> column holds a <c>real</c>, which
+    /// <c>SqliteComputedDecimalStorageTests</c> pins, and naming the type would not change its <em>value</em>
+    /// in any case: SQLite has no decimal arithmetic, so <c>'0.1' * 3</c> is <c>0.30000000000000004</c> in an
+    /// untyped, a <c>TEXT</c> and a <c>REAL</c> column alike, where PostgreSQL's <c>numeric(18,2)</c> answers
+    /// <c>0.30</c>. Closing <em>that</em> needs the expression rounded to the field's declared scale, which is
+    /// a seam the ports do not have; it is tracked as its own issue.
     /// </para>
     /// </remarks>
     public string? GeneratedColumnDefinition(string columnName, string storeType, string renderedExpression)
