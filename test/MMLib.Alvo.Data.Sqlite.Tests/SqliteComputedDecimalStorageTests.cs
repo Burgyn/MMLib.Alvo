@@ -34,7 +34,7 @@ namespace MMLib.Alvo.Data.Sqlite.Tests;
 /// is <c>numeric(18,2)</c> and answers <c>0.30</c>, is therefore SQLite's arithmetic and the missing rounding to
 /// the field's declared scale, not the column's affinity. Closing it means the driver rounding a computed
 /// decimal expression to its scale, which needs a seam the ports do not have yet; it is tracked as its own
-/// issue and recorded in the design's open questions.
+/// issue (#162) and recorded in the design's open questions.
 /// </para>
 /// <para>
 /// So this fact exists to make the deviation <b>checkable</b> rather than described: if a provider bump starts
@@ -71,7 +71,7 @@ public sealed class SqliteComputedDecimalStorageTests : IAsyncDisposable
         stored[LineTotal].ShouldBe(
             0.30000000000000004m,
             "SQLite evaluates the expression as a double and rounds to no scale; PostgreSQL answers 0.30 for "
-            + "the same descriptor, and that difference is the open item this fact pins");
+            + "the same descriptor, and that difference is #162, the open item this fact pins");
     }
 
     private static async Task<AlvoRecord> CreateLineAsync(AlvoDataHost host, decimal unitPrice, int amount) =>

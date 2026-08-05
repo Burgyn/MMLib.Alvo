@@ -88,7 +88,7 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// predicate makes that write a no-op rather than a cross-tenant one — the parent's <c>UPDATE</c> matches no
 /// row — so the child exists and no rollup anywhere counts it. Closing it properly means the foreign key
 /// spanning <c>(tenant_id, id)</c>, which is a change to every <c>ref</c> on every scoped entity rather than
-/// to a rollup, so it is tracked as its own issue and named in the design's open questions. Refusing the
+/// to a rollup, so it is tracked as #161 and named in the design's open questions. Refusing the
 /// cross-tenant <c>ref</c> here instead would mean a read of the parent on every child write, to answer a
 /// question this layer is not the right one to ask.
 /// </para>

@@ -827,7 +827,7 @@ untyped, a `TEXT` and a `REAL` column all store `0.30000000000000004`, and `SUM`
 So the dialect's `GeneratedColumnDefinition` naming the type is a *reference spelling*, not what ships, and its
 remarks say so. Closing the divergence means rounding a computed decimal expression to the field's declared
 scale in the driver, which needs a seam the ports do not have; the state as it stands is pinned per engine by
-`SqliteComputedDecimalStorageTests` and tracked as its own issue. The shared suite deliberately picks values
+`SqliteComputedDecimalStorageTests` and tracked as #162. The shared suite deliberately picks values
 exact in binary floating point, so it asserts what the two engines *do* agree on.
 
 Three things about `computed` are refusals rather than behaviour, each because the alternative is a stored
@@ -871,7 +871,7 @@ Five consequences worth naming:
   bar, and both go red with either predicate removed (measured: Acme's `sum` read 15 instead of 10, then 17
   instead of 12). What is *left* open is the cross-tenant `ref` itself: such a child now aggregates nowhere
   instead of writing across the boundary, and the real fix — a foreign key spanning `(tenant_id, id)` — belongs
-  to every `ref`, not to rollups.
+  to every `ref`, not to rollups (#161).
 
 - **The lock is the dialect's, and is a no-op on SQLite** — where reading the parent before writing inside a
   deferred transaction killed 12 of 24 writers on `SQLITE_BUSY_SNAPSHOT`. So a dialect that expresses no lock in

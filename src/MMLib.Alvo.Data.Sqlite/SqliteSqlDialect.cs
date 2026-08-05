@@ -67,7 +67,7 @@ public sealed class SqliteSqlDialect : IAlvoSqlDialect
     /// in any case: SQLite has no decimal arithmetic, so <c>'0.1' * 3</c> is <c>0.30000000000000004</c> in an
     /// untyped, a <c>TEXT</c> and a <c>REAL</c> column alike, where PostgreSQL's <c>numeric(18,2)</c> answers
     /// <c>0.30</c>. Closing <em>that</em> needs the expression rounded to the field's declared scale, which is
-    /// a seam the ports do not have; it is tracked as its own issue.
+    /// a seam the ports do not have; it is tracked as #162.
     /// </para>
     /// </remarks>
     public string? GeneratedColumnDefinition(string columnName, string storeType, string renderedExpression)

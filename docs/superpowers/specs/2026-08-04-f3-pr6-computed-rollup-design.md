@@ -285,9 +285,9 @@ engine ("a storage change — a scaled integer — is the real fix and is a sche
 Closing it here would mean a new port member wrapping a computed expression per driver
 (`CAST(ROUND(<expr>, <scale>) AS …)`), which is a public-contract addition with its own snapshot and contract-test
 surface — a PR, not a line. **Decision: pin the measured state per engine (`SqliteComputedDecimalStorageTests`),
-correct the dialect remark that read as though the shipped DDL named the type, and file the rounding as its own
-issue.** The shared suite keeps choosing values exact in binary floating point, so what it asserts is what the
-two engines genuinely agree on.
+correct the dialect remark that read as though the shipped DDL named the type, and file the rounding as #162.**
+The shared suite keeps choosing values exact in binary floating point, so what it asserts is what the two engines
+genuinely agree on.
 
 
 **Dev-14 — tenancy is part of the rollup contract, and the design did not name it at all.** Neither D2 nor D3
@@ -322,8 +322,8 @@ Every rollup fact in the branch used `Global`/`Global`, which is why the suite w
    *at all*, because the foreign key does not span `(tenant_id, id)`. With the predicate in place that child now
    aggregates **nowhere** (the parent's `UPDATE` matches no row) instead of writing across the boundary. That is
    the conservative outcome, and the real fix is a change to every `ref` on every scoped entity — plus the
-   accompanying question of whether the FK's existence check is itself an oracle — so it is filed as its own
-   issue rather than widened into this PR. See *Open, for the maintainer*.
+   accompanying question of whether the FK's existence check is itself an oracle — so it is filed as **#161**
+   rather than widened into this PR. See *Open, for the maintainer*.
 
 ## Acceptance
 
@@ -363,8 +363,8 @@ Every rollup fact in the branch used `Global`/`Global`, which is why the suite w
   "no such row" (a foreign-key violation) and "a row another tenant owns" (accepted) is observable, which is an
   existence oracle in the #137 family. Closing it means the foreign key spanning `(tenant_id, id)` for every
   scoped `ref`, which touches the migration model, the destructive-change classification and every existing
-  descriptor. Filed as its own issue.
+  descriptor. Filed as **#161**.
 - **A `decimal` computed field is not exact on SQLite, and rounds to no scale.** `0.1 * 3` is `0.30` on
   PostgreSQL and `0.30000000000000004` on SQLite (Dev-13). The fix is the driver rounding a computed decimal
-  expression to the field's declared scale, which needs a port member this design does not have. Filed as its
-  own issue; the current behaviour is pinned per engine so it cannot drift unnoticed.
+  expression to the field's declared scale, which needs a port member this design does not have. Filed as
+  **#162**; the current behaviour is pinned per engine so it cannot drift unnoticed.
