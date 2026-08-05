@@ -1,16 +1,6 @@
 ﻿{
   OnAField: [
     {
-      Path: computed,
-      Consequence: Computed fields are not supported yet: the expression is never evaluated, so the column stays null.,
-      Fix: Remove 'computed' or track the CEL→SQL compiler in #21.
-    },
-    {
-      Path: rollup,
-      Consequence: Rollups are not supported yet: nothing maintains the aggregate, so the column reads as permanently null while looking like data.,
-      Fix: Remove 'rollup' and compute the aggregate in a query for now; rollups are deferred past F3.
-    },
-    {
       Path: validation,
       Consequence: Field 'validation' is not evaluated yet, so a value the expression forbids is accepted — the field is not constrained at all.,
       Fix: Remove 'validation'. Enforce the rule in a before-hook once #22 lands, or express it with a facet the API does validate — 'maxLength', 'precision'/'scale', enum 'values' or a 'format'.
@@ -29,17 +19,17 @@
     },
     {
       Path: hooks/beforeCreate,
-      Consequence: Lifecycle hooks are not supported yet, so the 'beforeCreate' hooks on this entity never run and every create proceeds as if they were not declared: a before-hook runs inside the write transaction and may reject or mutate the payload, so the write is neither vetted nor patched — a field the hook was meant to set stays permanently null, exactly as an unmaintained 'rollup' column does.,
+      Consequence: Lifecycle hooks are not supported yet, so the 'beforeCreate' hooks on this entity never run and every create proceeds as if they were not declared: a before-hook runs inside the write transaction and may reject or mutate the payload, so the write is neither vetted nor patched — a field the hook was meant to set stays permanently null, exactly as a dropped 'default' does.,
       Fix: Remove the 'beforeCreate' hooks, or track the hooks pipeline in #22. Refusing per hook point rather than per 'hooks' block is deliberate: each one is lifted the day it starts working, so declaring the others costs you nothing once 'beforeCreate' lands.
     },
     {
       Path: hooks/beforeUpdate,
-      Consequence: Lifecycle hooks are not supported yet, so the 'beforeUpdate' hooks on this entity never run and every update proceeds as if they were not declared: a before-hook runs inside the write transaction and may reject or mutate the payload, so the write is neither vetted nor patched — a field the hook was meant to set stays permanently null, exactly as an unmaintained 'rollup' column does.,
+      Consequence: Lifecycle hooks are not supported yet, so the 'beforeUpdate' hooks on this entity never run and every update proceeds as if they were not declared: a before-hook runs inside the write transaction and may reject or mutate the payload, so the write is neither vetted nor patched — a field the hook was meant to set stays permanently null, exactly as a dropped 'default' does.,
       Fix: Remove the 'beforeUpdate' hooks, or track the hooks pipeline in #22. Refusing per hook point rather than per 'hooks' block is deliberate: each one is lifted the day it starts working, so declaring the others costs you nothing once 'beforeUpdate' lands.
     },
     {
       Path: hooks/beforeDelete,
-      Consequence: Lifecycle hooks are not supported yet, so the 'beforeDelete' hooks on this entity never run and every delete proceeds as if they were not declared: a before-hook runs inside the write transaction and may reject or mutate the payload, so the write is neither vetted nor patched — a field the hook was meant to set stays permanently null, exactly as an unmaintained 'rollup' column does.,
+      Consequence: Lifecycle hooks are not supported yet, so the 'beforeDelete' hooks on this entity never run and every delete proceeds as if they were not declared: a before-hook runs inside the write transaction and may reject or mutate the payload, so the write is neither vetted nor patched — a field the hook was meant to set stays permanently null, exactly as a dropped 'default' does.,
       Fix: Remove the 'beforeDelete' hooks, or track the hooks pipeline in #22. Refusing per hook point rather than per 'hooks' block is deliberate: each one is lifted the day it starts working, so declaring the others costs you nothing once 'beforeDelete' lands.
     }
   ]

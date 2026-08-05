@@ -84,26 +84,42 @@ public class DescriptorToSchemaMapperTests
         archives.Fields.ShouldNotContain(field => field.Name == "deleted_at");
     }
 
-    // complex-crm's gross_total/line_total legitimately use 'computed' (a gross total SHOULD be
-    // computed) — that's the showcase's job. The rich managed-column mapping itself (tenant_id,
-    // generated audit/soft-delete columns, refs) is already fully covered, at 100% mutation
-    // coverage, by the other tests in this file, so this fixture's role is proving the computed
-    // guardrail fires on a real, schema-valid descriptor rather than re-snapshotting the mapping.
-    //
-    // The fixture declares three features this build does not honour ('default', 'rollup', 'computed'),
-    // and the mapper refuses at the first one it meets — which is 'default', on an earlier entity. The
-    // other two are stripped here so this fact is about the 'computed' arm specifically; the arms
-    // themselves get one fact each in Map_refuses_every_field_feature_it_does_not_honour below.
+    // complex-crm's gross_total/line_total legitimately use 'computed' (a gross total SHOULD be computed) —
+    // that's the showcase's job, and since #21 the mapper honours it. The fact therefore inverted: it used to
+    // prove the guardrail fired on a real, schema-valid descriptor, and now proves the feature reaches the
+    // applied schema from one. 'default' is still unhonoured and is stripped; 'rollup' is stripped only because
+    // this showcase's own rollup declares a 'where' filter, which the next fact is about.
     [Fact]
-    public void Complex_crm_mapping_rejects_computed()
+    public void Complex_crm_maps_the_computed_sources_it_declares()
     {
-        var json = ComplexCrmWithout("default", "rollup");
+        var model = MapInline(ComplexCrmWithout("default", "rollup"));
 
-        var ex = Should.Throw<InvalidDataException>(() => MapInline(json));
-
-        ex.Message.ShouldContain("computed");
-        ex.Message.ShouldContain("#21");
+        FieldOf(model, "invoice_items", "line_total").ComputedExpression.ShouldBe("unit_price * amount");
+        FieldOf(model, "invoices", "gross_total").ComputedExpression.ShouldBe("net_total + vat_total");
     }
+
+    /// <summary>
+    /// The showcase's own <c>companies.open_deals</c> rollup filters the child records
+    /// (<c>stage in ['lead', 'offer']</c>), and this build does not evaluate that filter — so the whole
+    /// declaration is refused rather than silently counting <em>every</em> deal.
+    /// </summary>
+    /// <remarks>
+    /// Asserted against the real showcase rather than a synthetic descriptor, because the value of this refusal
+    /// is precisely that a plausible, schema-valid, hand-authored rollup hits it: a count of open deals that
+    /// silently became a count of all deals is the failure mode the refusal exists for.
+    /// </remarks>
+    [Fact]
+    public void Complex_crm_rollup_with_a_where_filter_is_refused()
+    {
+        var ex = Should.Throw<InvalidDataException>(() => MapInline(ComplexCrmWithout("default")));
+
+        ex.Message.ShouldContain("open_deals");
+        ex.Message.ShouldContain("aggregates every record");
+    }
+
+    private static FieldSchema FieldOf(SchemaModel model, string entity, string field) =>
+        model.Entities.Single(candidate => candidate.Name == entity)
+            .Fields.Single(candidate => candidate.Name == field);
 
     /// <summary>
     /// <b>The tie between the two refusal passes.</b> Every entry in
@@ -527,15 +543,18 @@ public class DescriptorToSchemaMapperTests
     }
     """;
 
+    /// <summary>
+    /// The applied schema carries the <b>CEL source</b>, not a rendered expression — see
+    /// <see cref="FieldSchema.ComputedExpression"/>: a <see cref="SchemaModel"/> is persisted and read back by
+    /// whichever driver is registered, so one engine's spelling stored there would be DDL for the wrong engine
+    /// after a provider change.
+    /// </summary>
     [Fact]
-    public void Map_rejects_computed_until_cel_compiler()
+    public void Map_carries_the_computed_expression_as_cel_source()
     {
-        var descriptor = AlvoDescriptor.Parse(WithComputed);
+        var model = DescriptorToSchemaMapper.Map(AlvoDescriptor.Parse(WithComputed));
 
-        var ex = Should.Throw<InvalidDataException>(() => DescriptorToSchemaMapper.Map(descriptor));
-
-        ex.Message.ShouldContain("computed");
-        ex.Message.ShouldContain("#21");
+        FieldOf(model, "invoices", "gross").ComputedExpression.ShouldBe("net * 1.2");
     }
 
     private static SchemaModel MapInline(string descriptorJson)

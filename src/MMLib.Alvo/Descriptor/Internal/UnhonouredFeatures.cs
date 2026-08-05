@@ -34,10 +34,13 @@
 /// refusal with no alternative sends an agent hunting for a flag to flip.
 /// </para>
 /// <para>
-/// Entries leave as features land, and three already have: PR5a removed the three <c>after*</c> hook points
-/// it implements, PR5b owns the three <c>before*</c> ones, PR6 owns <c>computed</c>, <c>rollup</c> and
-/// <c>default</c>, and soft delete leaves with its own implementation. Shrinking this table is the whole of
-/// "implementing" one of them from this layer's point of view.
+/// Entries leave as features land, and five already have: PR5a removed the three <c>after*</c> hook points it
+/// implements, and PR6 removed <c>computed</c> and <c>rollup</c>. PR5b owns the three <c>before*</c> ones,
+/// <c>default</c> is still unowned, and soft delete leaves with its own implementation. Shrinking this table is
+/// the whole of "implementing" one of them from this layer's point of view — and note that <c>computed</c> and
+/// <c>rollup</c> did not leave as a bare deletion: their refusals were <em>replaced</em> by
+/// <see cref="RollupResolver"/>'s ladder checks, because a feature that is honoured in general and
+/// unresolvable in a particular descriptor still has to be refused at apply.
 /// </para>
 /// </remarks>
 internal static class UnhonouredFeatures
@@ -48,17 +51,6 @@ internal static class UnhonouredFeatures
     /// </summary>
     internal static IReadOnlyList<UnhonouredFeature<FieldDescriptor>> OnAField { get; } =
     [
-        new(
-            "computed",
-            field => field.Computed is not null,
-            "Computed fields are not supported yet: the expression is never evaluated, so the column stays null.",
-            "Remove 'computed' or track the CEL→SQL compiler in #21."),
-        new(
-            "rollup",
-            field => field.Rollup is not null,
-            "Rollups are not supported yet: nothing maintains the aggregate, so the column reads as "
-            + "permanently null while looking like data.",
-            "Remove 'rollup' and compute the aggregate in a query for now; rollups are deferred past F3."),
         new(
             "validation",
             field => field.Validation is not null,
@@ -124,8 +116,9 @@ internal static class UnhonouredFeatures
     /// write the author believes is being vetted or patched is neither: the clearest case in this repo's own
     /// examples is <c>simple-tasks</c>' <c>beforeUpdate</c>, which sets <c>completed_at</c> when a task is
     /// marked done — refuse the hook and <c>completed_at</c> is a permanently null column, the very same
-    /// silent-wrong-value outcome <c>rollup</c> is refused for. An author should not meet that surprise
-    /// twice, so it is named here rather than discovered.
+    /// silent-wrong-value outcome <c>default</c> is refused for. An author should not meet that surprise
+    /// twice, so it is named here rather than discovered. (It used to name <c>rollup</c>; #21 honours that
+    /// one now, so the comparison moved to a feature that is still refused rather than to one that works.)
     /// </para>
     /// </remarks>
     private static IEnumerable<UnhonouredFeature<EntityDescriptor>> HookPoints() =>
@@ -138,7 +131,7 @@ internal static class UnhonouredFeatures
     private const string InTransaction =
         "a before-hook runs inside the write transaction and may reject or mutate the payload, so the write "
         + "is neither vetted nor patched — a field the hook was meant to set stays permanently null, exactly "
-        + "as an unmaintained 'rollup' column does";
+        + "as a dropped 'default' does";
 
     /// <summary>Builds one hook point's entry, so the six differ only in the words that should differ.</summary>
     /// <param name="point">The hook point's key under <c>hooks</c>.</param>
@@ -157,6 +150,33 @@ internal static class UnhonouredFeatures
         $"Remove the '{point}' hooks, or track the hooks pipeline in #22. Refusing per hook point rather than "
         + "per 'hooks' block is deliberate: each one is lifted the day it starts working, so declaring the "
         + $"others costs you nothing once '{point}' lands.");
+
+    /// <summary>
+    /// A <c>rollup</c>'s optional <c>where</c> filter: the one part of the frozen rollup shape #21 does not
+    /// honour.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>An <see cref="UnhonouredSlot"/> rather than a table entry, for the reason that shape exists.</b> The
+    /// two-pass tie does not apply: the raw-JSON validator pass would have to walk into the <c>rollup</c> object
+    /// it does not parse to find the key, while the typed pass already holds the parsed declaration and the
+    /// field it belongs to. So the detection lives in <c>RollupResolver</c> and only the wording lives here.
+    /// </para>
+    /// <para>
+    /// Refused rather than ignored because ignoring it is the silent case: the aggregate is still maintained,
+    /// still transactionally consistent, and computed over <em>every</em> child record rather than the declared
+    /// subset. The parent's column then holds a number that is larger than the author asked for, by an amount
+    /// only the data knows — indistinguishable from a bug in whatever reads it.
+    /// </para>
+    /// </remarks>
+    internal static UnhonouredSlot RollupWhere { get; } = new(
+        "rollup.where",
+        "A rollup's 'where' filter is not evaluated yet: the aggregate is still maintained, but it aggregates "
+        + "every record of the child entity instead of the subset this filter declares — a stored number that "
+        + "is silently wrong rather than absent.",
+        "Remove 'where' and aggregate every child record, or move the distinction into the model: a separate "
+        + "child entity, or a second rollup once filtered rollups land. A partial implementation is "
+        + "deliberately not offered — an aggregate over the wrong row set costs more than this refusal.");
 
     /// <summary>
     /// A raw JSONata expression in any <c>$defs/jsonata</c>-typed slot: refused, never partially evaluated.
