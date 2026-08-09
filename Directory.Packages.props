@@ -19,19 +19,19 @@
          declares [Fact] test methods for downstream Exe test projects to
          inherit, so it takes the attribute/extensibility surface alone. -->
     <PackageVersion Include="xunit.v3.extensibility.core" Version="3.2.2" />
-    <PackageVersion Include="Corvus.Json.Validator" Version="5.2.9" />
+    <PackageVersion Include="Corvus.Json.Validator" Version="5.3.1" />
     <!-- Corvus.Json.SourceGenerator + Corvus.Json.ExtendedTypes replace JsonSchema.Net (whose 9.x
          line carries a maintenance-fee EULA on top of MIT) as the descriptor schema-pass
          validator: Apache-2.0, build-time source generation only (no runtime Roslyn, no
          PreserveCompilationContext), used by core MMLib.Alvo. -->
-    <PackageVersion Include="Corvus.Json.SourceGenerator" Version="5.2.9" />
-    <PackageVersion Include="Corvus.Json.ExtendedTypes" Version="5.2.9" />
-    <PackageVersion Include="CsCheck" Version="4.7.0" />
+    <PackageVersion Include="Corvus.Json.SourceGenerator" Version="5.3.1" />
+    <PackageVersion Include="Corvus.Json.ExtendedTypes" Version="5.3.1" />
+    <PackageVersion Include="CsCheck" Version="4.8.0" />
     <PackageVersion Include="NetArchTest.Rules" Version="1.3.2" />
     <PackageVersion Include="Shouldly" Version="4.3.0" />
-    <PackageVersion Include="NSubstitute" Version="6.0.0" />
+    <PackageVersion Include="NSubstitute" Version="6.1.0" />
     <PackageVersion Include="PublicApiGenerator" Version="11.5.4" />
-    <PackageVersion Include="Verify.XunitV3" Version="31.27.0" />
+    <PackageVersion Include="Verify.XunitV3" Version="31.28.0" />
     <PackageVersion Include="Microsoft.Extensions.FileSystemGlobbing" Version="10.0.10" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.10" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.10" />
@@ -53,7 +53,7 @@
          nuspec: <license type="expression">MIT</license>). Host-only by the package-boundary rule: a
          docs UI is a hosting decision (the F3 design's OpenAPI and Scalar section), so the core stays
          on Microsoft.AspNetCore.OpenApi alone and an embedded consumer picks its own UI or none. -->
-    <PackageVersion Include="Scalar.AspNetCore" Version="2.16.17" />
+    <PackageVersion Include="Scalar.AspNetCore" Version="2.16.18" />
     <!-- Test-only: an in-process TestServer for the Data API suite. WebApplicationFactory is
          deliberately not used — it needs an entry-point assembly, which does not exist until
          MMLib.Alvo.Host lands in PR4. -->
@@ -74,7 +74,7 @@
          design-time-only in modern EF Core, never registered by the runtime AddDbContext/UseX
          pipeline) so EfCoreSchemaIntrospector has a real factory to drive in-process, without a
          dotnet-ef dependency. See EfCoreSchemaMigratorApplyTests. -->
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.0" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.10" />
     <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
     <PackageVersion Include="Testcontainers.PostgreSql" Version="4.13.0" />
     <PackageVersion Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.12" />
@@ -90,7 +90,7 @@
        entries). Roslynator severities were already configured in .editorconfig;
        this makes them actually run. Apache-2.0. -->
   <ItemGroup>
-    <GlobalPackageReference Include="Roslynator.Analyzers" Version="4.15.0" />
+    <GlobalPackageReference Include="Roslynator.Analyzers" Version="4.16.0" />
   </ItemGroup>
 
 </Project>
