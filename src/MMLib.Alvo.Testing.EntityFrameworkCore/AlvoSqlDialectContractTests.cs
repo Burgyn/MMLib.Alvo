@@ -472,10 +472,19 @@ public abstract class AlvoSqlDialectContractTests
     /// empty string — which would produce <c>"" GENERATED ALWAYS AS () STORED</c>, DDL that fails at migration
     /// time with a syntax error naming nothing the author wrote.
     /// </summary>
+    /// <remarks>
+    /// Whitespace counts as missing for all three, not only the expression: a dialect guarding with
+    /// <c>IsNullOrEmpty</c> passes every null-and-empty case and still emits <c>" " " " GENERATED ALWAYS
+    /// AS (…) STORED</c>. Both shipped dialects use <c>ThrowIfNullOrWhiteSpace</c>; nothing made that a
+    /// requirement of the contract until these two cases.
+    /// </remarks>
     [Theory]
     [InlineData(null, "int", "(1 + 1)")]
     [InlineData("", "int", "(1 + 1)")]
+    [InlineData(" ", "int", "(1 + 1)")]
     [InlineData("total", null, "(1 + 1)")]
+    [InlineData("total", "", "(1 + 1)")]
+    [InlineData("total", " ", "(1 + 1)")]
     [InlineData("total", "int", " ")]
     public void A_generated_column_definition_refuses_a_missing_part(string? columnName, string? storeType, string? expression)
     {

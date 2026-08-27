@@ -85,7 +85,13 @@ public sealed class PostgreSqlRollupRaceTests : IAsyncLifetime
         var order = await CreateOrderAsync(data);
 
         var writes = Enumerable.Range(0, Writers).Select(_ => CreateLineAsync(data, order)).ToArray();
-        await Task.WhenAll(writes);
+
+        // Not `await Task.WhenAll(writes)`: that rethrows the first fault, so a run that "fixed" the race by
+        // failing writers would abort here with the driver's raw exception and the assertion below — the one
+        // that tells that outcome from a real fix — would never run. The faults are observed instead, and
+        // then asserted on, so the failure names the property this file exists to pin.
+        await Task.WhenAll(writes.Select(write => write.ContinueWith(
+            _ => { }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default)));
 
         writes.ShouldAllBe(write => write.IsCompletedSuccessfully, "a rollup that serialises by failing writers is not a fix");
         var stored = (await data.GetAsync(Orders, order, Caller, Ct))!;

@@ -86,8 +86,9 @@ public sealed class SqliteComputedDecimalStorageTests : IAsyncDisposable
             cancellationToken: Ct);
 
     /// <summary>
-    /// The engine's own storage class for the two columns, read on a connection of its own — <c>typeof()</c> is
-    /// the only way to ask SQLite what a value actually is, and it cannot be asked through the data port.
+    /// Asked on a connection of its own because the data port cannot answer it: the port materialises a CLR
+    /// value, and the question here is which storage class SQLite put behind it — which only <c>typeof()</c>,
+    /// evaluated by the engine, can say.
     /// </summary>
     private static async Task<(string UnitPrice, string LineTotal)> StorageClassesAsync(AlvoDataHost host)
     {

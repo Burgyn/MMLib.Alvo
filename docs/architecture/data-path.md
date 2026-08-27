@@ -814,8 +814,10 @@ engine maintains. That is why the load-bearing fact asserts **the engine refusin
 a value read back.
 
 `stored`, never `virtual`, and that is a portability decision: SQLite accepts `VIRTUAL` exactly where it refuses
-`STORED`, and PostgreSQL 16 has no `VIRTUAL` at all — so letting each engine pick would make one descriptor
-produce a column one engine can index and filter on and the other cannot.
+`STORED` — in `ALTER TABLE … ADD COLUMN`, which is the *only* place it refuses one; `CREATE TABLE` takes
+either, which is why the table rebuild above emits `STORED` and passes. PostgreSQL 16 has no `VIRTUAL` at all
+— so letting each engine pick would make one descriptor produce a column one engine can index and filter on
+and the other cannot.
 
 **One §0 principle 3 divergence is left, and it is a property of SQLite's arithmetic rather than of the DDL.** A
 computed `decimal` answers `0.30` on PostgreSQL's `numeric(18,2)` and `0.30000000000000004` on SQLite for

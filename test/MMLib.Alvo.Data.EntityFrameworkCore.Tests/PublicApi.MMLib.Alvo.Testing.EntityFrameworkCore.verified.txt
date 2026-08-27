@@ -8,8 +8,20 @@ namespace MMLib.Alvo.Testing.Data
         public void A_column_reference_is_bare() { }
         public void A_generated_column_definition_names_the_column_and_the_expression_it_was_handed() { }
         [Xunit.InlineData(new object?[]?[] {
+                " ",
+                "int",
+                "(1 + 1)"})]
+        [Xunit.InlineData(new object?[]?[] {
                 "",
                 "int",
+                "(1 + 1)"})]
+        [Xunit.InlineData(new object?[]?[] {
+                "total",
+                " ",
+                "(1 + 1)"})]
+        [Xunit.InlineData(new object?[]?[] {
+                "total",
+                "",
                 "(1 + 1)"})]
         [Xunit.InlineData(new object?[]?[] {
                 "total",
