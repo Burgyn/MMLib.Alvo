@@ -79,13 +79,22 @@ public class BeforeHookTransactionArchitectureTests
     /// The other half of the control: the scan can tell the two orderings apart. Handed a member whose
     /// pipeline call precedes the transaction, it reports it — which is the mutation this file exists to catch.
     /// </summary>
+    /// <remarks>
+    /// <b>Every row that expects <see langword="false"/> for an ordering reason carries a declaration line of
+    /// its own.</b> Without one the call lands on line 0, which the scan reads as a member declaration and
+    /// skips — so the row answered <see langword="false"/> because no call was found, not because the order was
+    /// wrong, and it would have gone on answering <see langword="false"/> however the ordering rule changed.
+    /// </remarks>
     [Theory]
-    [InlineData("RunBeforeCreate(db);\nawait using var transaction = await db.Database.BeginTransactionAsync();", false)]
+    [InlineData("private Task X()\nRunBeforeCreate(db);\nawait using var transaction = await db.Database.BeginTransactionAsync();", false)]
     [InlineData("await using var transaction = await db.Database.BeginTransactionAsync();\nRunBeforeCreate(db);", true)]
     [InlineData("var stored = await SingleAsync(db, PreImageMutation.Update);\nRunBeforeUpdate(db);", true)]
-    [InlineData("RunBeforeUpdate(db);\nvar stored = await SingleAsync(db, PreImageMutation.Update);", false)]
+    [InlineData("private Task X()\nRunBeforeUpdate(db);\nvar stored = await SingleAsync(db, PreImageMutation.Update);", false)]
     [InlineData("private Task X(IDbContextTransaction transaction)\nRunBeforeCreate(db);", true)]
-    [InlineData("RunBeforeCreate(db);\nprivate Task X(IDbContextTransaction transaction)", false)]
+    [InlineData("private Task X()\nRunBeforeCreate(db);\nprivate Task X(IDbContextTransaction transaction)", false)]
+    [InlineData("await using var transaction = await db.Database.BeginTransactionAsync();\nRunBeforeCreate(db);\nawait transaction.CommitAsync();", true)]
+    [InlineData("await using var transaction = await db.Database.BeginTransactionAsync();\nRunBeforeCreate(db);\nawait transaction.CommitAsync();\nRunBeforeCreate(db);", false)]
+    [InlineData("await using var transaction = await db.Database.BeginTransactionAsync();\nawait transaction.RollbackAsync();\nRunBeforeCreate(db);", false)]
     public void The_scan_reads_the_order_within_a_member(string body, bool expected)
         => IsGuarded(body).ShouldBe(expected);
 
@@ -116,35 +125,80 @@ public class BeforeHookTransactionArchitectureTests
     private sealed record CallSite(string Member, bool IsInsideATransaction);
 
     private static IReadOnlyList<CallSite> CallSites() =>
-        [.. Members()
-            .Where(member => IsACall(member.Body))
-            .Select(member => new CallSite(member.Name, IsGuarded(member.Body)))];
+        [.. Members().SelectMany(member =>
+            Calls(member.Body).Select(inside => new CallSite(member.Name, inside)))];
 
     /// <summary>
-    /// Whether a member body <em>calls</em> the pipeline, as opposed to declaring one of its helpers. A
-    /// declaration is the line the member starts with, so a body whose only mention is on its own first line is
-    /// the helper itself.
+    /// One answer per pipeline call in <paramref name="body"/>, in source order — never one per member.
     /// </summary>
-    private static bool IsACall(string body) =>
-        body.Split('\n').Skip(1).Any(line => line.Contains(PipelineCall, StringComparison.Ordinal));
+    /// <remarks>
+    /// <b>It used to be one per member, judged on the <em>first</em> call, and that left a hole wide enough to
+    /// walk a hook out of its transaction through.</b> A body that kept a correct first call and grew a second
+    /// one after <c>CommitAsync</c> satisfied all three facts: the member reported guarded, the member list was
+    /// unchanged, and the count still said four. A hook could then run outside its write transaction, or twice,
+    /// with the suite green. Per call, that body reports two sites and one of them is outside — and the count
+    /// fact becomes a real ceiling rather than only a floor.
+    /// </remarks>
+    /// <remarks>
+    /// The scan starts at line 1 because line 0 is the member's own declaration: a mention there is the
+    /// pipeline helper declaring itself, not a call, which is why the helper contributes no call site.
+    /// </remarks>
+    private static IEnumerable<bool> Calls(string body)
+    {
+        var lines = body.Split('\n');
+
+        for (var index = 1; index < lines.Length; index++)
+        {
+            if (lines[index].Contains(PipelineCall, StringComparison.Ordinal))
+            {
+                yield return IsInsideATransaction(lines, index);
+            }
+        }
+    }
 
     /// <summary>
-    /// Whether the first pipeline call in <paramref name="body"/> comes after something that only exists inside
-    /// a transaction.
+    /// Whether <paramref name="body"/> calls the pipeline at all and every one of those calls is inside a
+    /// transaction. "No call at all" is not guarded: it is the way this scan fails silently.
     /// </summary>
     private static bool IsGuarded(string body)
     {
-        var lines = body.Split('\n');
-        var call = Array.FindIndex(lines, 1, line => line.Contains(PipelineCall, StringComparison.Ordinal));
+        var calls = Calls(body).ToList();
 
-        return call >= 0 && _markers.Any(marker => FirstLineWith(lines, marker, call));
+        return calls.Count > 0 && calls.TrueForAll(inside => inside);
+    }
+
+    /// <summary>
+    /// Whether the <b>nearest</b> transaction event above <paramref name="call"/> opens one rather than ends
+    /// it.
+    /// </summary>
+    /// <remarks>
+    /// Nearest-wins rather than "a marker appears somewhere above", because the second reading is satisfied
+    /// for the whole rest of a member by an opener that has already been committed away — which is exactly the
+    /// shape of a call added after <c>CommitAsync</c>.
+    /// </remarks>
+    private static bool IsInsideATransaction(string[] lines, int call)
+    {
+        for (var index = call - 1; index >= 0; index--)
+        {
+            if (_closers.Any(closer => lines[index].Contains(closer, StringComparison.Ordinal)))
+            {
+                return false;
+            }
+
+            if (_markers.Any(marker => lines[index].Contains(marker, StringComparison.Ordinal)))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>Everything whose presence before the call proves a transaction is open around it.</summary>
     private static readonly string[] _markers = [TransactionOpened, PreImageRead, TransactionHeld];
 
-    private static bool FirstLineWith(string[] lines, string text, int before) =>
-        lines.Take(before).Any(line => line.Contains(text, StringComparison.Ordinal));
+    /// <summary>And everything that <em>ends</em> the transaction a marker above it opened.</summary>
+    private static readonly string[] _closers = ["CommitAsync", "RollbackAsync"];
 
     /// <summary>One member of <c>EfAlvoData</c>: its name and its body, comments stripped.</summary>
     /// <param name="Name">The member's name.</param>
