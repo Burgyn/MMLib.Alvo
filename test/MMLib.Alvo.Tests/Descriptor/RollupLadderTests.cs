@@ -33,8 +33,13 @@ public class RollupLadderTests
             Rollup = Sum("invoice_items", "line_total"),
         })));
 
-        refused.Message.ShouldContain("both 'computed' and 'rollup'");
-        refused.Message.ShouldContain("gross_total", Case.Insensitive);
+        // The whole phrase, field identity included, rather than the two halves separately. The
+        // second half used to read ShouldContain("gross_total") and pinned nothing: 'gross_total'
+        // is never the offending field here — it appears only in the refusal's closing advice,
+        // which quotes the schema's static "gross_total = net_total + vat_total" example. That
+        // assertion matched a hardcoded sentence and would have passed had the message named any
+        // other field, or none.
+        refused.Message.ShouldContain("Field 'invoices.net_total' declares both 'computed' and 'rollup'");
     }
 
     /// <summary>
