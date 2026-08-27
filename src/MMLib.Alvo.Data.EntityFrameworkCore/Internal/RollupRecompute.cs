@@ -399,8 +399,15 @@ internal sealed class RollupRecompute(IAlvoSqlDialect dialect, IFieldSqlRenderer
     /// <c>NULL</c> for the other four. That is the engine's empty answer rather than one this layer invented, and
     /// a <c>COALESCE(…, 0)</c> here would make "no children yet" indistinguishable from "children summing to
     /// zero" on a field an author declared nullable.
+    /// <para>
+    /// <b>Internal rather than private for the same reason <see cref="LockStatement"/> is:</b> the
+    /// composition is what a driver author gets wrong, and one of its arms — <see cref="Declared"/> —
+    /// answers a schema no mapper can produce, so no end-to-end write can reach it.
+    /// </para>
     /// </remarks>
-    private string Setter(EntitySchema child, FieldSchema field)
+    /// <param name="child">The child entity being aggregated.</param>
+    /// <param name="field">The parent's rollup field.</param>
+    internal string Setter(EntitySchema child, FieldSchema field)
     {
         var rollup = field.Rollup!;
         var fk = dialect.RenderColumn(rollup.Via);
@@ -453,11 +460,30 @@ internal sealed class RollupRecompute(IAlvoSqlDialect dialect, IFieldSqlRenderer
         }
 
         var column = fields.RenderField(child, rollup.Field!);
-        var declared = child.Fields.First(candidate => string.Equals(candidate.Name, rollup.Field, StringComparison.Ordinal));
+        var declared = Declared(child, rollup);
         var (repaired, _) = fields.RenderComparableOperands(column, column, CelFieldType.Of(declared));
 
         return $"{Function(rollup.Op)}({repaired})";
     }
+
+    /// <summary>
+    /// The aggregated column as the child declares it — the same belt as
+    /// <see cref="EnsureTenancyDoesNotCross"/>, for the same reason and against the same schema.
+    /// </summary>
+    /// <remarks>
+    /// <c>RollupResolver.EnsureAggregatedFieldIsResolvable</c> already refuses this pair at apply, so a
+    /// schema that came through the mapper cannot reach here. One a host assembled programmatically, or
+    /// one F7's dynamic registry produced, can — and <c>First</c> answered it with
+    /// <c>Sequence contains no matching element</c>, which names neither the entity, the field nor the
+    /// rollup, from inside a write transaction. <see cref="IFieldSqlRenderer.RenderField"/> on the line
+    /// above does not catch it first: it quotes whatever name it is handed and never consults the schema.
+    /// </remarks>
+    private static FieldSchema Declared(EntitySchema child, RollupSchema rollup) =>
+        child.Fields.FirstOrDefault(candidate => string.Equals(candidate.Name, rollup.Field, StringComparison.Ordinal))
+        ?? throw new InvalidOperationException(
+            $"A rollup aggregates '{child.Name}.{rollup.Field}', which '{child.Name}' does not declare. "
+            + $"Declared fields on '{child.Name}': {string.Join(", ", child.Fields.Select(field => field.Name))}. "
+            + "The descriptor mapper refuses this pair at apply, and this schema did not come through it.");
 
     /// <summary>
     /// The SQL aggregate function for one operation. Exhaustive by construction: an unmapped member throws
