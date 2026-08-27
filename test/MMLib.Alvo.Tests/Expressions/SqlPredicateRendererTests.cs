@@ -398,19 +398,16 @@ public class SqlPredicateRendererTests
 
     /// <summary>
     /// The <see cref="CelProfile.Mutate"/> profile's interpreter-only guarantee, asserted from the
-    /// renderer's side: a function call is refused <em>by name</em>, with a message naming the profile and
-    /// saying why, never by the generic "cannot be rendered by this entry point" default arm. Deleting the
-    /// explicit arm leaves a <see cref="NotSupportedException"/> of the same shape, so these two facts
-    /// assert the message and not merely the exception type — otherwise the guarantee would survive its own
-    /// removal.
+    /// renderer's side: the <b>profile</b> is refused at the entry point, before any node is walked, with a
+    /// message that names the profile, quotes the expression and says why.
     /// </summary>
     /// <remarks>
-    /// Both trees are assembled by hand rather than compiled from source, deliberately: the refusal has to
-    /// hold for any <see cref="CelCall"/> that reaches the renderer through any seam a provider may drive
-    /// directly, not only for the source shapes today's parser happens to produce.
+    /// The message is asserted and not merely the exception type. A <see cref="NotSupportedException"/> of
+    /// the same shape is what an unrenderable node produces anyway, so a type-only fact would survive the
+    /// guarantee's own removal.
     /// </remarks>
     [Fact]
-    public void A_mutate_function_call_is_refused_by_name_with_the_profile_and_the_reason()
+    public void A_mutate_expression_is_refused_at_the_entry_point_with_the_profile_and_the_reason()
     {
         var refused = Should.Throw<NotSupportedException>(
             () => _renderer.Render(MutateExpression(LowerAsciiOfTitle), CelFixtures.Alice, _fields));
@@ -420,8 +417,38 @@ public class SqlPredicateRendererTests
         refused.Message.ShouldContain("never rendered to SQL");
     }
 
+    /// <summary>
+    /// <b>The hole the entry-point guard closed, and the reason it is a guard on the profile rather than on a
+    /// node kind.</b> An earlier revision refused a <see cref="CelCall"/> by name inside the walk and
+    /// admitted the profile — so a <see cref="CelProfile.Mutate"/> expression containing no call was walked
+    /// like any other and came back as SQL.
+    /// </summary>
+    /// <remarks>
+    /// A bare <c>true</c> is the smallest such expression and is legal in that profile; it rendered to the
+    /// dialect's <c>TRUE</c>. Nothing in the suite saw it, because every fact about the guarantee drove the
+    /// renderer with a call — which is the shape the arm named. The guarantee therefore held for the shapes
+    /// it was tested with and not for the profile it claimed.
+    /// </remarks>
     [Fact]
-    public void A_mutate_function_call_is_refused_in_an_operand_position_too_not_only_at_the_root()
+    public void A_mutate_expression_with_no_function_call_in_it_is_refused_too()
+    {
+        var refused = Should.Throw<NotSupportedException>(() => _renderer.Render(
+            new CompiledExpression(
+                new CelLiteral(CelValueType.Bool, true), CelProfile.Mutate, CelValueType.Bool, "true",
+                CelFixtures.Orders),
+            CelFixtures.Alice,
+            _fields));
+
+        refused.Message.ShouldContain(nameof(CelProfile.Mutate));
+        refused.Message.ShouldContain("never rendered to SQL");
+    }
+
+    /// <summary>
+    /// And the refusal does not depend on where in the tree the offending construct sits, because the
+    /// profile is judged before the tree is read at all.
+    /// </summary>
+    [Fact]
+    public void A_mutate_expression_is_refused_with_the_call_in_an_operand_position_too()
     {
         var comparison = new CelBinary(
             CelBinaryOperator.Equal, LowerAsciiOfTitle, new CelLiteral(CelValueType.String, "alvo"));
