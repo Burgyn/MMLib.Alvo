@@ -1,0 +1,130 @@
+### What the rules actually do, measured with two keys that differ in EXACTLY ONE THING: whether the
+### caller holds `admin`. Same scopes, same tenant, same everything else — so anything the member
+### cannot do is the descriptor and can be nothing else.
+###
+### The rules under test:
+###   people.create      'admin' in @user.roles
+###   people.update      'admin' in @user.roles || user_id == @user.id
+###   people.list/get    'authenticated' in @user.roles
+###   tasks.create       'authenticated' in @user.roles
+###   tasks.delete       'admin' in @user.roles
+###   milestones.create  'admin' in @user.roles
+###
+### The headline finding is at the bottom: `'admin' in @user.roles` on CREATE answers 403, and the
+### same text on DELETE answers 404. Same rule, two statuses.
+
+### A profile linked to the member's identity — `user_id` is what the update rule compares with
+### @user.id, so this row is the one the member owns.
+# @name AdminCreatesMemberProfile
+## TEST-EXPECT-STATUS: [201]
+POST {{baseUrl}}/api/people
+X-Alvo-Api-Key: {{keyAdmin}}
+Content-Type: application/json
+
+{
+  "name": "{{runToken}}-auth Member Profile",
+  "email": "member-{{runToken}}@example.test",
+  "user_id": "{{userMember}}"
+}
+
+### And somebody else's, linked to no identity at all. The member owns nothing here.
+# @name AdminCreatesOtherProfile
+## TEST-EXPECT-STATUS: [201]
+POST {{baseUrl}}/api/people
+X-Alvo-Api-Key: {{keyAdmin}}
+Content-Type: application/json
+
+{
+  "name": "{{runToken}}-auth Other Profile",
+  "email": "other-{{runToken}}@example.test"
+}
+
+### The directory is open to any authenticated caller, so the member sees BOTH — including the row it
+### cannot edit. Read access and write access are separate questions, and this is the proof.
+# @name MemberReadsDirectory
+## TEST-EXPECT-STATUS: [200]
+GET {{baseUrl}}/api/people?name=like.{{runToken}}-auth%25&order=name.asc&limit=100
+X-Alvo-Api-Key: {{keyMember}}
+
+### `people.create` names `admin` and the member is not one. A create has no existing row to filter,
+### so the rule is evaluated against the CANDIDATE row and rejects it outright — 403.
+# @name MemberCannotCreatePerson
+## TEST-EXPECT-STATUS: [403]
+POST {{baseUrl}}/api/people
+X-Alvo-Api-Key: {{keyMember}}
+Content-Type: application/json
+
+{ "name": "{{runToken}}-auth Smuggled In" }
+
+### The other half of the `||`: the member is not an admin, but `user_id == @user.id` holds on this row.
+# @name MemberEditsOwnProfile
+## TEST-EXPECT-STATUS: [200]
+PATCH {{baseUrl}}/api/people/{{AdminCreatesMemberProfile.response.body.$.id}}
+X-Alvo-Api-Key: {{keyMember}}
+Content-Type: application/json
+
+{ "name": "{{runToken}}-auth Member Renamed Themselves" }
+
+### The same request against a row the member does not own. Not 403 — **404**. A row-level exclusion is
+### deliberately indistinguishable from a row that is not there, because telling them apart is an
+### existence oracle. The member can SEE this row in the directory above and still cannot write it.
+# @name MemberCannotEditAnother
+## TEST-EXPECT-STATUS: [404]
+PATCH {{baseUrl}}/api/people/{{AdminCreatesOtherProfile.response.body.$.id}}
+X-Alvo-Api-Key: {{keyMember}}
+Content-Type: application/json
+
+{ "name": "{{runToken}}-auth Hijacked" }
+
+### The control that makes the 404 above a statement about the CALLER: the same row, the same field,
+### the admin key — 200. Without this, "that row does not exist" would explain the 404 just as well.
+# @name AdminEditsAnotherProfile
+## TEST-EXPECT-STATUS: [200]
+PATCH {{baseUrl}}/api/people/{{AdminCreatesOtherProfile.response.body.$.id}}
+X-Alvo-Api-Key: {{keyAdmin}}
+Content-Type: application/json
+
+{ "name": "{{runToken}}-auth Other Profile Edited By Admin" }
+
+### Creating work is open to anyone authenticated — a PM tool where only admins may file a task is
+### not a PM tool.
+# @name MemberCreatesTask
+## TEST-EXPECT-STATUS: [201]
+POST {{baseUrl}}/api/tasks
+X-Alvo-Api-Key: {{keyMember}}
+Content-Type: application/json
+
+{ "title": "{{runToken}} m filed by a member", "status": "todo" }
+
+### And here is the finding. `tasks.delete` is `'admin' in @user.roles` — the SAME text as
+### `people.create` above, which answered 403. This answers **404**.
+###
+### Because a delete starts by LOOKING THE ROW UP under the rule as a predicate. For a non-admin the
+### predicate is constant-false, so no row matches, so there is nothing to delete — 404. A create has
+### no lookup, so its refusal is the only kind left: 403.
+# @name MemberCannotDeleteTask
+## TEST-EXPECT-STATUS: [404]
+DELETE {{baseUrl}}/api/tasks/{{MemberCreatesTask.response.body.$.id}}
+X-Alvo-Api-Key: {{keyMember}}
+
+### The control again: the row is there, and the admin removes it.
+# @name AdminDeletesTask
+## TEST-EXPECT-STATUS: [204]
+DELETE {{baseUrl}}/api/tasks/{{MemberCreatesTask.response.body.$.id}}
+X-Alvo-Api-Key: {{keyAdmin}}
+
+### One more create-shaped refusal, on a different entity, so "403 on create" is the rule's shape and
+### not something about `people`.
+# @name MemberCannotCreateMilestone
+## TEST-EXPECT-STATUS: [403]
+POST {{baseUrl}}/api/milestones
+X-Alvo-Api-Key: {{keyMember}}
+Content-Type: application/json
+
+{ "name": "{{runToken}}-auth Member's Plan", "status": "planned" }
+
+### Where the directory ended up
+# @name DirectoryAfter
+## TEST-EXPECT-STATUS: [200]
+GET {{baseUrl}}/api/people?name=like.{{runToken}}-auth%25&order=name.asc&limit=100
+X-Alvo-Api-Key: {{keyAdmin}}

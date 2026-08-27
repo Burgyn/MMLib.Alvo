@@ -1,0 +1,28 @@
+### The five rows 001 created, two at a time. They are still in the database — this case finds them by
+### the same run-token prefix rather than by ids it would have to be handed.
+###
+### Three pages, so "they all fit on one page" cannot be why this passes.
+# @name Page1
+## TEST-EXPECT-STATUS: [200]
+GET {{baseUrl}}/api/todos?title=like.{{runToken}}-page%25&order=title.asc&limit=2
+
+### `after` carries the cursor the previous page issued — opaque, and minted by the provider
+# @name Page2
+## TEST-EXPECT-STATUS: [200]
+GET {{baseUrl}}/api/todos?title=like.{{runToken}}-page%25&order=title.asc&limit=2&after={{Page1.response.body.$.next}}
+
+###
+# @name Page3
+## TEST-EXPECT-STATUS: [200]
+GET {{baseUrl}}/api/todos?title=like.{{runToken}}-page%25&order=title.asc&limit=2&after={{Page2.response.body.$.next}}
+
+### The whole set in one request, so the three pages can be compared with the truth rather than with
+### each other — three pages that consistently lost the same row would agree with themselves.
+# @name WholeSet
+## TEST-EXPECT-STATUS: [200]
+GET {{baseUrl}}/api/todos?title=like.{{runToken}}-page%25&order=title.asc&limit=100
+
+### The other paging mode: `offset` anchors the same window from the other end
+# @name OffsetWindow
+## TEST-EXPECT-STATUS: [200]
+GET {{baseUrl}}/api/todos?title=like.{{runToken}}-page%25&order=title.asc&limit=2&offset=2

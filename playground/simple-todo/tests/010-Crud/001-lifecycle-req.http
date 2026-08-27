@@ -1,0 +1,66 @@
+### One todo, created. The whole of "make a backend do something" from a 45-line descriptor.
+# @name Create
+## TEST-EXPECT-STATUS: [201]
+## TEST-HAS-HEADER: Location
+POST {{baseUrl}}/api/todos
+Content-Type: application/json
+
+{
+  "title": "Buy milk {{runToken}}-crud",
+  "status": "todo",
+  "description": "Two litres, semi-skimmed.",
+  "due_on": "2026-08-31"
+}
+
+### Read it back by the id the server assigned
+# @name Read
+## TEST-EXPECT-STATUS: [200]
+GET {{baseUrl}}/api/todos/{{Create.response.body.$.id}}
+
+### The same read, with the version the last one returned — nothing changed, so nothing is sent back.
+### `audit: true` on the entity is the whole reason this is reachable: it is what mints `updated_at`,
+### which is what an ETag is minted from.
+# @name ReadUnchanged
+## TEST-EXPECT-STATUS: [304]
+GET {{baseUrl}}/api/todos/{{Create.response.body.$.id}}
+If-None-Match: {{Read.response.headers.ETag}}
+
+### Move it along. A PATCH is partial: `title`, `description` and `due_on` go unmentioned and stay.
+# @name Update
+## TEST-EXPECT-STATUS: [200]
+PATCH {{baseUrl}}/api/todos/{{Create.response.body.$.id}}
+If-Match: {{Read.response.headers.ETag}}
+Content-Type: application/json
+
+{ "status": "doing" }
+
+### The tag the read handed out is now stale, and a stale precondition is refused rather than applied.
+### This is the lost update `If-Match` exists to prevent: without the header the write below would
+### land, and the caller would read the 200 as proof nobody else had touched the row.
+# @name UpdateWithStaleTag
+## TEST-EXPECT-STATUS: [412]
+PATCH {{baseUrl}}/api/todos/{{Create.response.body.$.id}}
+If-Match: {{Read.response.headers.ETag}}
+Content-Type: application/json
+
+{ "status": "done" }
+
+### The tag the accepted write returned is the one the next write must carry
+# @name Finish
+## TEST-EXPECT-STATUS: [200]
+PATCH {{baseUrl}}/api/todos/{{Create.response.body.$.id}}
+If-Match: {{Update.response.headers.ETag}}
+Content-Type: application/json
+
+{ "status": "done" }
+
+### Gone
+# @name Delete
+## TEST-EXPECT-STATUS: [204]
+DELETE {{baseUrl}}/api/todos/{{Create.response.body.$.id}}
+
+### And a read of a deleted row is 404 — the same 404 an id that never existed answers, deliberately:
+### the entity declares no `softDelete`, so there is nothing left to distinguish.
+# @name ReadDeleted
+## TEST-EXPECT-STATUS: [404]
+GET {{baseUrl}}/api/todos/{{Create.response.body.$.id}}
