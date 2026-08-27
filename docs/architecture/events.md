@@ -1,4 +1,4 @@
-﻿# The event backbone
+# The event backbone
 
 How a committed write becomes a delivered after-hook action, and the decisions that shape it. Written
 during F3 PR5a (#22); the *Before-hooks* section was added by PR5b (#114).

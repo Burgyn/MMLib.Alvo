@@ -87,39 +87,13 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
     }
 
     /// <summary>
-    /// Refuses everything this entry point can never render — and the two arms mean different things, so
-    /// they carry different exceptions.
+    /// Refuses everything this entry point can never render: <see cref="CelProfile.Mutate"/> outright (see
+    /// <see cref="RefuseMutate"/>), and <see cref="CelProfile.Computed"/> as a caller mistake — that one
+    /// renders perfectly, at the other entry point, so its message names the one to use.
     /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <b><see cref="CelProfile.Computed"/> is a caller mistake</b> — the expression renders perfectly, at
-    /// the other entry point — so it is an <see cref="InvalidOperationException"/> that names the one to
-    /// use. <b><see cref="CelProfile.Mutate"/> is not</b>: no entry point will ever render it, which is a
-    /// <see cref="NotSupportedException"/>.
-    /// </para>
-    /// <para>
-    /// <b>The profile is refused here rather than per node, and that is the fix for a real hole.</b> An
-    /// earlier revision refused a <see cref="CelCall"/> by name inside the walk and admitted the profile
-    /// itself — so every <see cref="CelProfile.Mutate"/> expression whose tree contains no call reached the
-    /// renderer and came back as SQL. A bare <c>true</c> is legal in that profile and rendered to
-    /// <c>TRUE</c>, which made the interpreter-only guarantee hold for the shapes the arm happened to name
-    /// and not for the profile. Guarding the profile before the tree is walked is what makes the guarantee
-    /// structural, and it is also why the per-node arms are gone: with this in place nothing could reach
-    /// them, and an unreachable refusal is one no test can hold to its claim.
-    /// </para>
-    /// </remarks>
     private static void RequirePredicateProfile(CompiledExpression expression)
     {
-        if (expression.Profile == CelProfile.Mutate)
-        {
-            throw new NotSupportedException(
-                $"'{expression.Source}' was compiled for the {CelProfile.Mutate} profile, which is evaluated "
-                + "by the in-memory interpreter inside the write transaction and is never rendered to SQL. "
-                + "Rendering it would bring the two-valued null fold and the string-collation caveat back "
-                + $"into scope, and '{CelCall.Now}()' would answer with the engine's own clock — "
-                + "PostgreSQL's transaction-start time, SQLite's second-precision text — instead of the "
-                + "instant the write bound once.");
-        }
+        RefuseMutate(expression);
 
         if (expression.Profile == CelProfile.Computed)
         {
@@ -131,12 +105,49 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
 
     private static void RequireScalarProfile(CompiledExpression expression)
     {
+        RefuseMutate(expression);
+
         if (expression.Profile != CelProfile.Computed)
         {
             throw new InvalidOperationException(
                 $"'{expression.Source}' was compiled for the {expression.Profile} profile; use the predicate " +
                 $"{nameof(IPredicateRenderer)}.{nameof(Render)}(expression, context, fields) entry point instead.");
         }
+    }
+
+    /// <summary>
+    /// <b><see cref="CelProfile.Mutate"/> is refused by <em>both</em> entry points, before either walks a
+    /// tree.</b> No entry point will ever render it, which is what makes this a
+    /// <see cref="NotSupportedException"/> rather than the profile-mismatch
+    /// <see cref="InvalidOperationException"/> below it: those two say "you used the wrong one of the two",
+    /// and this one says "neither". Shared rather than written twice so the two entry points cannot drift
+    /// into disagreeing about it — and it has to be on the scalar side as well, because that guard's own
+    /// message sends a caller to the predicate entry point, which would then refuse them.
+    /// </summary>
+    /// <remarks>
+    /// <b>The profile is refused here rather than per node, and that is the fix for a real hole.</b> An
+    /// earlier revision refused a <see cref="CelCall"/> by name inside the walk and admitted the profile
+    /// itself — so every <see cref="CelProfile.Mutate"/> expression whose tree contains no call reached the
+    /// renderer and came back as SQL. A bare <c>true</c> is legal in that profile and rendered to
+    /// <c>TRUE</c>, which made the interpreter-only guarantee hold for the shapes the arm happened to name
+    /// and not for the profile. Guarding the profile before the tree is walked is what makes the guarantee
+    /// structural, and it is also why the per-node arms are gone: with this in place nothing could reach
+    /// them, and an unreachable refusal is one no test can hold to its claim.
+    /// </remarks>
+    private static void RefuseMutate(CompiledExpression expression)
+    {
+        if (expression.Profile != CelProfile.Mutate)
+        {
+            return;
+        }
+
+        throw new NotSupportedException(
+            $"'{expression.Source}' was compiled for the {CelProfile.Mutate} profile, which is evaluated "
+            + "by the in-memory interpreter inside the write transaction and is never rendered to SQL. "
+            + "Rendering it would bring the two-valued null fold and the string-collation caveat back "
+            + $"into scope, and '{CelCall.Now}()' would answer with the engine's own clock — "
+            + "PostgreSQL's transaction-start time, SQLite's second-precision text — instead of the "
+            + "instant the write bound once.");
     }
 
     private const string DefaultParameterPrefix = "p";

@@ -444,6 +444,22 @@ public class SqlPredicateRendererTests
     }
 
     /// <summary>
+    /// <b>The scalar entry point refuses it for the same reason, and that is not redundant.</b> Its own
+    /// profile-mismatch message sends a caller to the predicate entry point — which, since the guard
+    /// landed, refuses <see cref="CelProfile.Mutate"/> categorically. Without this arm the two guards
+    /// would send a <see cref="CelProfile.Mutate"/> caller back and forth, each naming the other.
+    /// </summary>
+    [Fact]
+    public void The_scalar_entry_point_refuses_a_mutate_expression_with_the_same_reason()
+    {
+        var refused = Should.Throw<NotSupportedException>(
+            () => _renderer.Render(MutateExpression(LowerAsciiOfTitle), _fields));
+
+        refused.Message.ShouldContain(nameof(CelProfile.Mutate));
+        refused.Message.ShouldContain("never rendered to SQL");
+    }
+
+    /// <summary>
     /// And the refusal does not depend on where in the tree the offending construct sits, because the
     /// profile is judged before the tree is read at all.
     /// </summary>
