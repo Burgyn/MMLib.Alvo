@@ -1,4 +1,4 @@
-# The event backbone
+﻿# The event backbone
 
 How a committed write becomes a delivered after-hook action, and the decisions that shape it. Written
 during F3 PR5a (#22); the *Before-hooks* section was added by PR5b (#114).
@@ -360,10 +360,14 @@ nothing at all. Added by **PR5b** (#114).
 
 Two actions, both from the frozen schema, and nothing else is expressible in-transaction:
 
-| Action | What it does | How the caller sees it |
-|---|---|---|
-| `reject` | refuses the write | `AlvoAuthorizationException` → **403** with the author's own text, and the hook's JSON pointer |
-| `mutate` | rewrites fields of the row about to be written | nothing, except the stored row and the emitted event |
+| Action | Valid on | What it does | How the caller sees it |
+|---|---|---|---|
+| `reject` | all three points | refuses the write | `AlvoAuthorizationException` → **403** with the author's own text, and the hook's JSON pointer |
+| `mutate` | `beforeCreate`, `beforeUpdate` | rewrites fields of the row about to be written | nothing, except the stored row and the emitted event |
+
+`mutate` is absent from `beforeDelete` because there is no row about to be written — the row is about to
+stop existing, so a patch has nowhere to land. It is refused at **apply**, not dropped at run time; the
+invariant that follows from that is at the end of this section.
 
 Everything is compiled at **apply** by `BeforeHookCompiler` into the same `PolicyCatalog` the rules
 and the after-hooks live on (`EntityBeforeHooks`), with a JSON Pointer an author can act on. That is
@@ -393,10 +397,13 @@ And from two places it must **not** be called:
 | `ReplayableCreateAsync` | it is the retry loop around that method, not a write path of its own |
 
 **A hook may not run where the candidate is built.** `AuthorizedCandidate` runs *before*
-`BeginTransactionAsync`, so a hook placed next to it would have nothing to roll back: a `reject` would
-refuse a write whose row the next site to open a transaction had already committed. Inside the
-transaction a refusal is a rolled-back write with **no row and no outbox event**, which is what #114's
-DoD asks of it.
+`BeginTransactionAsync`, so a hook placed next to it would judge outside the transaction its verdict is
+about — and every one of the four things that verdict has to be atomic with is inside: the row-locked
+pre-image its `old.` and `changed(...)` are answered from, the `WITH CHECK` re-test of the *patched*
+candidate, the row write itself, and the outbox insert. Judged outside, the pre-image is not locked, so
+another writer may move the row between the hook's judgement and the write; and a `mutate`'s patch is no
+longer part of the same unit as the row it patches. Inside the transaction a refusal is a rolled-back
+write with **no row and no outbox event**, which is what #114's DoD asks of it.
 
 **Update and delete hook in the private bodies (`WriteAsync`, `EraseAsync`), not in the public
 `UpdateAsync`/`DeleteAsync`, and that is where the pre-image is.** A hook's `old.` references and its
