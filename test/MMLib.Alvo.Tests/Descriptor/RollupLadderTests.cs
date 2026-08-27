@@ -43,6 +43,27 @@ public class RollupLadderTests
     }
 
     /// <summary>
+    /// A <c>storage: "dynamic"</c> child is refused, because the mapper keeps only physical entities: the
+    /// rollup would resolve, the child would never reach the applied schema, and the parent's column
+    /// would have no writer at all.
+    /// </summary>
+    /// <remarks>
+    /// The same stored-number-nothing-maintains outcome an unresolvable <c>from</c> is refused for,
+    /// reached by a different route — this resolver walks the whole descriptor, dynamic entities
+    /// included, while <c>Map</c> filters them out afterwards.
+    /// </remarks>
+    [Fact]
+    public void A_rollup_over_a_dynamic_child_is_refused()
+    {
+        var refused = Should.Throw<InvalidDataException>(() => Map(Invoicing(
+            netTotal: Rolled(Sum("invoice_items", "line_total")),
+            childStorage: StorageMode.Dynamic)));
+
+        refused.Message.ShouldContain("rolls up from 'invoice_items', which declares 'storage': 'dynamic'");
+        refused.Message.ShouldContain("nothing would ever maintain 'invoices.net_total'");
+    }
+
+    /// <summary>
     /// The design's ladder rule: a rollup aggregates the records of a child that <b>points back</b> at this
     /// entity. With no foreign key there is nothing to follow, so the column would simply never be maintained —
     /// and no write would ever look for it.
@@ -253,11 +274,13 @@ public class RollupLadderTests
     /// <param name="extraEntity">A third entity the fact needs, if any.</param>
     /// <param name="parentTenancy">The parent's declared tenancy, or <see langword="null"/> to declare none.</param>
     /// <param name="childTenancy">The child's declared tenancy, or <see langword="null"/> to declare none.</param>
+    /// <param name="childStorage">The child's declared storage, or <see langword="null"/> to declare none.</param>
     private static AlvoDescriptor Invoicing(
         FieldDescriptor netTotal,
         (string Name, EntityDescriptor Entity)? extraEntity = null,
         EntityTenancy? parentTenancy = null,
-        EntityTenancy? childTenancy = null)
+        EntityTenancy? childTenancy = null,
+        StorageMode? childStorage = null)
     {
         var entities = new Dictionary<string, EntityDescriptor>(StringComparer.Ordinal)
         {
@@ -273,6 +296,7 @@ public class RollupLadderTests
             ["invoice_items"] = new EntityDescriptor
             {
                 Tenancy = childTenancy,
+                Storage = childStorage,
                 Fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
                 {
                     ["invoice"] = new FieldDescriptor { Type = DescriptorFieldType.Ref, Entity = "invoices" },

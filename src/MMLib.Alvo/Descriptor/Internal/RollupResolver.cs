@@ -54,6 +54,7 @@ internal sealed class RollupResolver(AlvoDescriptor descriptor)
         }
 
         var child = ChildEntity(parent, fieldName, rollup);
+        EnsureChildIsPhysical(parent, fieldName, rollup, child);
         EnsureNoFilter(parent, fieldName, rollup);
         EnsureTenancyDoesNotCross(parent, declaring, fieldName, rollup, child);
         EnsureAggregatedFieldIsResolvable(parent, fieldName, rollup, child);
@@ -192,6 +193,33 @@ internal sealed class RollupResolver(AlvoDescriptor descriptor)
                 $"Field '{parent}.{fieldName}' rolls up from '{rollup.From}', which this descriptor does not "
                 + "declare as an entity. Declared entities: "
                 + $"{string.Join(", ", _entities.Keys.Order(StringComparer.Ordinal))}.");
+
+    /// <summary>
+    /// A rollup aggregates a child the applied schema contains, so a <c>storage: "dynamic"</c> child is
+    /// refused rather than resolved.
+    /// </summary>
+    /// <remarks>
+    /// <c>DescriptorToSchemaMapper.Map</c> keeps only physical entities, while this resolver reads the
+    /// <b>whole</b> descriptor — it has to, because resolving <c>via</c> needs the child's fields, which
+    /// the per-entity pass cannot see. A dynamic child therefore resolves cleanly and then never reaches
+    /// the model, leaving the parent's column with no entity writer to maintain it: the same
+    /// stored-number-nothing-maintains outcome an unresolvable <c>from</c> is refused for, arrived at by a
+    /// different route. F7's dynamic driver may lift this the day it can drive a recompute; until then a
+    /// refusal at apply is the only place an author finds out.
+    /// </remarks>
+    private static void EnsureChildIsPhysical(string parent, string fieldName, Rollup rollup, EntityDescriptor child)
+    {
+        if ((child.Storage ?? StorageMode.Physical) == StorageMode.Physical)
+        {
+            return;
+        }
+
+        throw new InvalidDataException(
+            $"Field '{parent}.{fieldName}' rolls up from '{rollup.From}', which declares "
+            + "'storage': 'dynamic'. A dynamic entity is not part of the applied schema, so nothing would "
+            + $"ever maintain '{parent}.{fieldName}' and it would read as a number while being none. Roll "
+            + $"up from a physical entity, or drop the rollup until '{rollup.From}' has one.");
+    }
 
     /// <summary>
     /// The child's foreign-key field pointing back to <paramref name="parent"/> — the descriptor's own
