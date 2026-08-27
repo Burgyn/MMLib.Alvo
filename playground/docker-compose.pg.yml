@@ -1,0 +1,41 @@
+# The `run --pg` overlay: the same playground stack, over a real PostgreSQL instead of the
+# container-local SQLite file.
+#
+# An OVERLAY rather than a second full stack, because the only thing that changes is the driver and
+# where it connects — the descriptor mount, the key, the port and the healthcheck are the same
+# facts, and stating them twice is how the two copies drift. Layered by `run`:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.pg.yml up --wait
+#
+# Why it is worth having at all: §0 principle 3 is that the rule engine, events and tenancy behave
+# identically on SQLite and PostgreSQL. That is a claim, and a playground where you can flip the
+# driver under an unchanged descriptor and an unchanged suite is how you spot the day it stops being
+# true. The engines really do differ underneath — `like` is case-insensitive on SQLite's default
+# collation and not on PostgreSQL, PostgreSQL keeps microseconds where SQLite keeps text — so a
+# suite that is green on one and red on the other is a finding, not a flake.
+#
+# PostgreSQL publishes no host port: nothing outside the compose network reads it, and `run --pg
+# --psql` goes in through `docker compose exec` rather than over the network.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: alvo
+      POSTGRES_USER: alvo
+      POSTGRES_PASSWORD: alvo
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alvo -d alvo"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  alvo:
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Overrides the base file's `sqlite`. The SqliteConnectionString the base file sets stays in
+      # the environment and is simply not read — AlvoDatabaseSelector branches on Provider.
+      Alvo__Database__Provider: postgresql
+      ConnectionStrings__Alvo: Host=postgres;Port=5432;Database=alvo;Username=alvo;Password=alvo

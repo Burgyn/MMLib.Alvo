@@ -1,0 +1,55 @@
+### Moving a card across a board, which is the one thing a PM tool does all day. Every step is
+### conditional on the version the previous step returned — which is what stops two people dragging
+### the same card from silently overwriting each other.
+# @name ReadCard
+## TEST-EXPECT-STATUS: [200]
+GET {{baseUrl}}/api/tasks/{{TaskBId}}
+X-Alvo-Api-Key: {{keyAdmin}}
+
+### todo → doing, with the version the read handed out
+# @name Start
+## TEST-EXPECT-STATUS: [200]
+PATCH {{baseUrl}}/api/tasks/{{TaskBId}}
+X-Alvo-Api-Key: {{keyAdmin}}
+If-Match: {{ReadCard.response.headers.ETag}}
+Content-Type: application/json
+
+{ "status": "doing", "estimate_hours": 8 }
+
+### A second editor who read the card at the same time and got there second. Same tag, now stale — so
+### their write is refused instead of quietly reverting the estimate above.
+# @name SecondEditorLoses
+## TEST-EXPECT-STATUS: [412]
+PATCH {{baseUrl}}/api/tasks/{{TaskBId}}
+X-Alvo-Api-Key: {{keyAdmin}}
+If-Match: {{ReadCard.response.headers.ETag}}
+Content-Type: application/json
+
+{ "status": "todo", "estimate_hours": 40 }
+
+### Reassign it and finish it, carrying the version the accepted write returned
+# @name HandOver
+## TEST-EXPECT-STATUS: [200]
+PATCH {{baseUrl}}/api/tasks/{{TaskBId}}
+X-Alvo-Api-Key: {{keyAdmin}}
+If-Match: {{Start.response.headers.ETag}}
+Content-Type: application/json
+
+{ "assignee_id": "{{GraceId}}", "status": "done" }
+
+### A card can leave its milestone: a `ref` is nullable, so null is a legal PATCH value and not an
+### "unchanged" signal. That distinction is worth knowing before you rely on either reading.
+# @name DropFromMilestone
+## TEST-EXPECT-STATUS: [200]
+PATCH {{baseUrl}}/api/tasks/{{TaskBId}}
+X-Alvo-Api-Key: {{keyAdmin}}
+If-Match: {{HandOver.response.headers.ETag}}
+Content-Type: application/json
+
+{ "milestone_id": null }
+
+### Where the card ended up
+# @name FinalState
+## TEST-EXPECT-STATUS: [200]
+GET {{baseUrl}}/api/tasks/{{TaskBId}}
+X-Alvo-Api-Key: {{keyAdmin}}

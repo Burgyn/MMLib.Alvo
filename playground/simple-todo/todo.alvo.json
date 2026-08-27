@@ -1,0 +1,44 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "simple-todo",
+  "description": "The smallest thing worth calling a backend: one entity, four fields, and no authorization at all. Everyone may do everything, so every request here is a plain HTTP call with no credential — which is what makes the descriptor the whole story.",
+  "entities": {
+    "todos": {
+      "description": "One thing to do.",
+      "audit": true,
+      "fields": {
+        "title": {
+          "type": "string",
+          "description": "What is to be done. Required, so a paged list may sort by it.",
+          "required": true,
+          "maxLength": 200
+        },
+        "status": {
+          "type": "enum",
+          "description": "Where the item stands. Required, so a paged list may sort by it too.",
+          "required": true,
+          "values": ["todo", "doing", "done"]
+        },
+        "description": {
+          "type": "text",
+          "description": "The longer version, if there is one."
+        },
+        "due_on": {
+          "type": "date",
+          "description": "When it is due. Nullable on purpose — which also makes it the field a paged `order=due_on` is refused on (issue #116), and the suite pins that."
+        }
+      },
+      "rules": {
+        "list": "true",
+        "get": "true",
+        "create": "true",
+        "update": "true",
+        "delete": "true"
+      },
+      "indexes": [
+        { "fields": ["status", "title"] }
+      ]
+    }
+  }
+}

@@ -502,3 +502,8 @@ affected.proj
 # Recovery state for an in-flight plan, not a deliverable: the durable record is the
 # commit history plus the docs the plan tells you to write.
 .superpowers/
+
+# playground per-project stack state: the dev key's secret (a credential, minted per stack), the port
+# it was published on, and the generated TeaPie environment. Recreated by playground/run on every
+# start; nothing here is a deliverable.
+playground/.run/

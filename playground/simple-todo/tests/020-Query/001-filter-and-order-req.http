@@ -1,0 +1,91 @@
+### Five todos, so a filter has something to discriminate and a page has something to leave out.
+###
+### Every title is PREFIXED with this run's token, and every read below filters on that prefix — which
+### is what makes `--test-only` repeatable: a second run sees its own five rows, not ten. The letter
+### after the prefix decides `order=title.asc`, so the expected sequence is a,b,c,d,e and not "whatever
+### the database happened to return".
+# @name CreateA
+## TEST-EXPECT-STATUS: [201]
+POST {{baseUrl}}/api/todos
+Content-Type: application/json
+
+{ "title": "{{runToken}}-page a", "status": "todo", "due_on": "2026-09-01" }
+
+###
+# @name CreateB
+## TEST-EXPECT-STATUS: [201]
+POST {{baseUrl}}/api/todos
+Content-Type: application/json
+
+{ "title": "{{runToken}}-page b", "status": "todo" }
+
+###
+# @name CreateC
+## TEST-EXPECT-STATUS: [201]
+POST {{baseUrl}}/api/todos
+Content-Type: application/json
+
+{ "title": "{{runToken}}-page c", "status": "doing", "due_on": "2026-09-03" }
+
+###
+# @name CreateD
+## TEST-EXPECT-STATUS: [201]
+POST {{baseUrl}}/api/todos
+Content-Type: application/json
+
+{ "title": "{{runToken}}-page d", "status": "done" }
+
+###
+# @name CreateE
+## TEST-EXPECT-STATUS: [201]
+POST {{baseUrl}}/api/todos
+Content-Type: application/json
+
+{ "title": "{{runToken}}-page e", "status": "done", "due_on": "2026-09-05" }
+
+### All five, in title order. `%25` is a literal `%` — the wildcard is SQL's, not PostgREST's `*`.
+# @name All
+## TEST-EXPECT-STATUS: [200]
+GET {{baseUrl}}/api/todos?title=like.{{runToken}}-page%25&order=title.asc&limit=100
+
+### The same five, the other way round — so "the order is the one requested" is measured rather than
+### assumed from a sequence the database might have returned anyway.
+# @name AllDescending
+## TEST-EXPECT-STATUS: [200]
+GET {{baseUrl}}/api/todos?title=like.{{runToken}}-page%25&order=title.desc&limit=100
+
+### One equality term, conjoined with the run's prefix
+# @name Done
+## TEST-EXPECT-STATUS: [200]
+GET {{baseUrl}}/api/todos?title=like.{{runToken}}-page%25&status=eq.done&order=title.asc&limit=100
+
+### `in.(...)`: membership, which is the terse spelling of the `or` below
+# @name NotFinished
+## TEST-EXPECT-STATUS: [200]
+GET {{baseUrl}}/api/todos?title=like.{{runToken}}-page%25&status=in.(todo,doing)&order=title.asc&limit=100
+
+### `not.` negates the term it prefixes, so this is the complement of `status=eq.done` inside the run
+# @name NotDone
+## TEST-EXPECT-STATUS: [200]
+GET {{baseUrl}}/api/todos?title=like.{{runToken}}-page%25&not.status=eq.done&order=title.asc&limit=100
+
+### `or=(...)` is the union of its terms, and a group conjoins with a top-level term
+# @name TodoOrDone
+## TEST-EXPECT-STATUS: [200]
+GET {{baseUrl}}/api/todos?title=like.{{runToken}}-page%25&or=(status.eq.todo,status.eq.done)&order=title.asc&limit=100
+
+### A range over a nullable field. Two of the five carry no `due_on` at all, and neither is here —
+### which is SQL's three-valued logic and not an omission: NULL is not less than a date, nor greater.
+# @name DueEarly
+## TEST-EXPECT-STATUS: [200]
+GET {{baseUrl}}/api/todos?title=like.{{runToken}}-page%25&due_on=lte.2026-09-03&order=title.asc&limit=100
+
+### `is.null` is how you ask for the rows a range cannot see
+# @name NoDueDate
+## TEST-EXPECT-STATUS: [200]
+GET {{baseUrl}}/api/todos?title=like.{{runToken}}-page%25&due_on=is.null&order=title.asc&limit=100
+
+### `select` narrows the ROW, not the set
+# @name Projection
+## TEST-EXPECT-STATUS: [200]
+GET {{baseUrl}}/api/todos?title=like.{{runToken}}-page%25&select=title,status&order=title.asc&limit=100
