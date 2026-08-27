@@ -295,7 +295,26 @@ public class BeforeHookCompilerTests
     /// An expression past <c>CelCompiler.MaxTreeDepth</c>. Written as a <c>+</c> chain because a flat source
     /// still builds a tree whose depth grows with its term count, which is the case the cap exists for.
     /// </summary>
-    private static string DeepExpression { get; } = string.Join(" + ", Enumerable.Repeat("new.title", 200));
+    /// <remarks>
+    /// <para>
+    /// <b>The terms are <c>1</c> and not <c>new.title</c>, and that is the whole fact.</b> Two hundred
+    /// <c>new.title</c> terms is 2397 characters, which is past the <em>source-length</em> cap of 2000 —
+    /// and that cap is checked before the source is parsed. So the row that claimed to exercise the depth
+    /// cap was refused for its length, never reached a tree at all, and passed anyway, because the theory
+    /// it feeds asserts the JSON pointer an author edits and every refusal in that member lands on the
+    /// same pointer. Two hundred <c>1</c> terms is 797 characters and two hundred levels deep, so the
+    /// depth cap is what answers.
+    /// </para>
+    /// <para>
+    /// Binary arithmetic is not admitted to the <see cref="CelProfile.Mutate"/> profile either, so the
+    /// source still has more than one possible refusal. The order in <c>CelCompiler.Compile</c> settles
+    /// which one answers: the length check, then parse, then the depth check, then the profile and type
+    /// check — so the cap fires and the profile never sees the tree.
+    /// <see cref="The_deep_expression_is_refused_for_its_depth_and_not_for_its_arithmetic"/> holds all of
+    /// that to its word by asserting the message.
+    /// </para>
+    /// </remarks>
+    private static string DeepExpression { get; } = string.Join(" + ", Enumerable.Repeat("1", 200));
 
     private const string Deals = "deals";
 
@@ -340,6 +359,26 @@ public class BeforeHookCompilerTests
             .TryGetEntity(Deals, out var policy).ShouldBeTrue();
 
         return policy.BeforeHooks;
+    }
+
+    /// <summary>
+    /// The depth-cap row of <see cref="RefusedAtApply"/> is refused <b>for its depth</b> — asserted here
+    /// because that row, like every other, asserts the slot an author edits, and every refusal in that member
+    /// lands on the same slot.
+    /// </summary>
+    /// <remarks>
+    /// Without this the row would go on passing after the cap was deleted: the profile table would refuse the
+    /// same <c>+</c> chain for its arithmetic instead, on the same pointer, with the same shape of error. See
+    /// <see cref="DeepExpression"/> for why the source has two possible refusals and which one the
+    /// compiler's order gives it.
+    /// </remarks>
+    [Fact]
+    public void The_deep_expression_is_refused_for_its_depth_and_not_for_its_arithmetic()
+    {
+        var error = CompileErrors(BeforeCreate(Mutate("title", Cel(DeepExpression)))).ShouldHaveSingleItem();
+
+        error.Message.ShouldContain("levels deep");
+        error.Message.ShouldContain("exceeding the maximum of");
     }
 
     private static IReadOnlyList<DescriptorValidationError> CompileErrors(EntityHooks hooks)

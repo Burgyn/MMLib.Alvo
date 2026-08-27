@@ -92,8 +92,11 @@ internal static class UnhonouredFeatures
     /// block as a whole would have forced PR5 into an all-or-nothing switch: it could not ship
     /// <c>afterUpdate</c> while <c>beforeUpdate</c> is still unimplemented without either lying about the rest
     /// or leaving the whole block refused. Six entries let each one leave on the day it starts working, and
-    /// three of them did. It is the same move PR2 made for <c>softDelete</c>: refuse the behaviour, keep the
-    /// declared shape, so the implementing issue inherits a shape rather than designing one.
+    /// <b>all six now have</b> — the three <c>after*</c> points with PR5a, the three <c>before*</c> points
+    /// with PR5b — which is why this table holds no hook entry at all. The shape is kept here as the record
+    /// of how they left, one at a time, rather than deleted with the last of them: it is the same move PR2
+    /// made for <c>softDelete</c> — refuse the behaviour, keep the declared shape, so the implementing issue
+    /// inherits a shape rather than designing one.
     /// </para>
     /// </remarks>
     internal static IReadOnlyList<UnhonouredFeature<EntityDescriptor>> OnAnEntity { get; } =
