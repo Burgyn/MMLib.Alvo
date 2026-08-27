@@ -205,6 +205,18 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator
     /// it propagates, because leaving enforcement off after a migration that otherwise worked is exactly the
     /// state nobody would notice.
     /// </para>
+    /// <para>
+    /// <b>Neither restore takes the caller's token, and that is the whole point of the pair.</b> The token is
+    /// already cancelled on exactly the path the restore exists for: cancel a migration and
+    /// <c>ExecuteAsync</c> throws, the catch runs, and a restore passed that same token would abort before
+    /// <c>PRAGMA foreign_keys = 1</c> ever reached the connection. The connection then goes back to the pool
+    /// with enforcement off and the next borrower writes children against no foreign key at all — the
+    /// suspension riding the connection into whatever a pool handed it to next, which the paragraph above
+    /// names as the thing this method is here to prevent. Honouring the token would have made the restore
+    /// skip itself precisely when it was needed. The cancellation is not swallowed by this: it is
+    /// <c>ExecuteAsync</c>'s <see cref="OperationCanceledException"/> that propagates, unchanged, once the
+    /// pragma is back.
+    /// </para>
     /// </remarks>
     private async Task ExecuteFramedAsync(DbConnection connection, MigrationPlan plan, CancellationToken ct)
     {
@@ -217,11 +229,12 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator
         }
         catch
         {
-            await TryRestoreAsync(connection, framing, ct).ConfigureAwait(false);
+            await TryRestoreAsync(connection, framing).ConfigureAwait(false);
             throw;
         }
 
-        await RelationalSqlBatch.ExecuteUntransactedAsync(connection, framing.After, ct).ConfigureAwait(false);
+        await RelationalSqlBatch.ExecuteUntransactedAsync(connection, framing.After, CancellationToken.None)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -232,14 +245,16 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator
     /// Only the two families a restore can realistically raise are swallowed — the provider's own
     /// (<see cref="DbException"/>, a connection the failed batch left unusable) and
     /// <see cref="InvalidOperationException"/> (a connection that can no longer be opened). Anything else still
-    /// propagates, because a restore failing for an unrelated reason is not something to hide. Cancellation is
-    /// not caught either: a cancelled migration wants the cancellation.
+    /// propagates, because a restore failing for an unrelated reason is not something to hide. A cancellation
+    /// cannot arrive from here at all — see <see cref="ExecuteFramedAsync"/> for why the restore does not
+    /// take the caller's token — so there is no cancellation arm to write.
     /// </remarks>
-    private static async Task TryRestoreAsync(DbConnection connection, MigrationBatchFraming framing, CancellationToken ct)
+    private static async Task TryRestoreAsync(DbConnection connection, MigrationBatchFraming framing)
     {
         try
         {
-            await RelationalSqlBatch.ExecuteUntransactedAsync(connection, framing.After, ct).ConfigureAwait(false);
+            await RelationalSqlBatch.ExecuteUntransactedAsync(connection, framing.After, CancellationToken.None)
+                .ConfigureAwait(false);
         }
         catch (Exception secondary) when (secondary is DbException or InvalidOperationException)
         {

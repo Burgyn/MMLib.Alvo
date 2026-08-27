@@ -10,6 +10,7 @@ using MMLib.Alvo.Data.EntityFrameworkCore;
 using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Schema;
+using System.Data.Common;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore.Tests;
 
@@ -24,6 +25,7 @@ public class EfCoreSchemaMigratorApplyTests : IDisposable
     private readonly string _connectionString = $"Data Source={Guid.NewGuid():N};Mode=Memory;Cache=Shared";
     private readonly SqliteConnection _keepAlive;
     private readonly RelationalConnectionFactory _connections;
+    private readonly DbContext _ctx;
     private readonly EfCoreSchemaMigrator _migrator;
     private readonly EfCoreSchemaIntrospector _introspector;
 
@@ -33,27 +35,36 @@ public class EfCoreSchemaMigratorApplyTests : IDisposable
         _keepAlive.Open();
         _connections = new RelationalConnectionFactory(() => new SqliteConnection(_connectionString));
 
-        var ctx = new DbContext(new DbContextOptionsBuilder().UseSqlite(_keepAlive).Options);
-        _migrator = new EfCoreSchemaMigrator(
-            ctx.GetService<IMigrationsModelDiffer>(),
-            ctx.GetService<IMigrationsSqlGenerator>(),
-            ctx.GetService<IModelRuntimeInitializer>(),
-            () => new ModelBuilder(SqliteConventionSetBuilder.Build()),
-            _connections,
-            new TestSqlDialect(),
-            computed: null);
+        _ctx = new DbContext(new DbContextOptionsBuilder().UseSqlite(_keepAlive).Options);
+        _migrator = CreateMigrator(_connections, new TestSqlDialect());
         // IDatabaseModelFactory is a design-time-only service (never registered by the runtime
         // UseSqlite pipeline), so it's resolved through the same reflective bootstrap `dotnet-ef`
         // itself uses: DesignTimeServicesBuilder reads the [DesignTimeProviderServices] attribute
         // off the Sqlite assembly and instantiates its (internal) SqliteDesignTimeServices.
         var designTimeServices = new DesignTimeServicesBuilder(
                 GetType().Assembly, GetType().Assembly, new OperationReporter(handler: null), [])
-            .Build(ctx);
+            .Build(_ctx);
         _introspector = new EfCoreSchemaIntrospector(designTimeServices.GetRequiredService<IDatabaseModelFactory>(), _connections);
     }
 
+    /// <summary>
+    /// Builds a migrator over this fixture's EF services, with the connection factory and dialect the
+    /// caller wants. Extracted because a fact about the framing needs both of those to differ, and
+    /// re-resolving the design-time services per test would cost more than it explains.
+    /// </summary>
+    private EfCoreSchemaMigrator CreateMigrator(RelationalConnectionFactory connections, IAlvoSqlDialect dialect) =>
+        new(
+            _ctx.GetService<IMigrationsModelDiffer>(),
+            _ctx.GetService<IMigrationsSqlGenerator>(),
+            _ctx.GetService<IModelRuntimeInitializer>(),
+            () => new ModelBuilder(SqliteConventionSetBuilder.Build()),
+            connections,
+            dialect,
+            computed: null);
+
     public void Dispose()
     {
+        _ctx.Dispose();
         _keepAlive.Dispose();
         GC.SuppressFinalize(this);
     }
@@ -250,6 +261,84 @@ public class EfCoreSchemaMigratorApplyTests : IDisposable
         var vehicles = (await _introspector.IntrospectAsync(ct)).Entities.ShouldHaveSingleItem();
         vehicles.Fields.ShouldContain(f => f.Name == "color");
         (await QueryScalarAsync($"SELECT color FROM vehicles WHERE id = '{RowId}'", ct)).ShouldBe("red");
+    }
+
+    /// <summary>The table the framing writes its marker into, so a test can see whether the restore ran.</summary>
+    private const string FramingLog = "alvo_framing_log";
+
+    /// <summary>
+    /// A migration cancelled once it is under way still restores the framing, and the cancellation is what
+    /// the caller sees.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>What goes wrong without it is not a failed migration but a poisoned connection.</b> The restore
+    /// used to run on the caller's token, which is already cancelled on precisely the path the restore
+    /// exists for — so <c>PRAGMA foreign_keys = 1</c> never reached the connection, and the connection went
+    /// back to the pool with enforcement suspended. The next borrower writes children against no foreign key
+    /// at all, in a request that has nothing to do with the migration and reports nothing wrong.
+    /// </para>
+    /// <para>
+    /// <b>The cancellation is armed by the connection factory, and it has to be.</b>
+    /// <see cref="EfCoreSchemaMigrator.ApplyAsync"/> guards on the token before it creates a connection, so a
+    /// token cancelled any earlier is refused there and the framed execution is never entered — the fact
+    /// would pass without measuring anything. Creating the connection is the last step before the framing
+    /// runs, which makes it the one seam that puts the cancellation exactly where the bug lives.
+    /// </para>
+    /// <para>
+    /// <b>The framing's <c>Before</c> half is deliberately empty.</b> Every statement in it would run on the
+    /// already-cancelled token and throw <em>outside</em> the try, where no restore is owed and none should
+    /// happen — a real dialect's suspension simply cannot be reached in this state. Leaving it empty isolates
+    /// the half under test: the restore, which must run regardless.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_cancelled_migration_still_restores_the_framing()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await ExecAsync($"CREATE TABLE {FramingLog} (marker TEXT NOT NULL)", ct);
+        var plan = await _migrator.PlanAsync(Empty, Vehicles, new MigrationOptions(), ct);
+
+        var cancelled = new CancellationTokenSource();
+        var connections = new RelationalConnectionFactory(() =>
+        {
+            cancelled.Cancel();
+            return new SqliteConnection(_connectionString);
+        });
+        var migrator = CreateMigrator(connections, new RestoreLoggingDialect());
+
+        await Should.ThrowAsync<OperationCanceledException>(
+            () => migrator.ApplyAsync(plan, new MigrationOptions(), cancelled.Token));
+
+        (await QueryScalarAsync($"SELECT marker FROM {FramingLog}", ct))
+            .ShouldBe("restored", "the restore must not take the token that cancelled the migration");
+    }
+
+    /// <summary>
+    /// <see cref="TestSqlDialect"/> with a restore that leaves a row behind, which is the only way a test can
+    /// see whether it ran: the real framing's <c>PRAGMA foreign_keys</c> is connection state, and the
+    /// migrator disposes its connection before returning.
+    /// </summary>
+    private sealed class RestoreLoggingDialect : IAlvoSqlDialect
+    {
+        private readonly TestSqlDialect _inner = new();
+
+        public MigrationBatchFraming MigrationFraming { get; } = new()
+        {
+            After = [$"INSERT INTO {FramingLog} (marker) VALUES ('restored')"],
+        };
+
+        public string RowLockClause(PreImageMutation mutation) => _inner.RowLockClause(mutation);
+
+        public string RenderTable(EntitySchema entity, PreImageMutation? lockedPreImageFor) =>
+            _inner.RenderTable(entity, lockedPreImageFor);
+
+        public string RenderColumn(string columnName) => _inner.RenderColumn(columnName);
+
+        public string RenderNullProjection(string storeType) => _inner.RenderNullProjection(storeType);
+
+        public SqlConstraintViolation? DecodeConstraintViolation(DbException failure) =>
+            _inner.DecodeConstraintViolation(failure);
     }
 
     private async Task ExecAsync(string sql, CancellationToken ct)
