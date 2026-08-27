@@ -345,17 +345,24 @@ public class DescriptorToSchemaMapperTests
     // Full-model regression freeze: the rich complex-crm fixture exercises every mapping
     // concern in one place (managed-column injection, ref FKs, tenancy, audit, softDelete,
     // renamedFrom, indexes, all field types) across multiple entities — a breadth the
-    // narrower, branch-level tests above don't give. The features this build does not honour
-    // ('computed' on gross_total/line_total, 'default' and 'rollup' elsewhere) are refused by
-    // the mapper, so they are stripped at the JSON level here before mapping; everything else in
-    // the fixture stays intact. None of the four ever reached the mapped model, so stripping them
-    // changes no snapshot line — the fixture keeps them because its job is to document the
-    // descriptor format, not to be applied. Drop the stripping per feature as each is implemented.
+    // narrower, branch-level tests above don't give. The features this build still does not
+    // honour ('validation', 'default', and 'rollup' only because this fixture's own rollup
+    // declares a 'where' filter) are refused by the mapper, so they are stripped at the JSON
+    // level here before mapping; everything else in the fixture stays intact. None of the three
+    // can reach the mapped model, so stripping them changes no snapshot line — the fixture keeps
+    // them because its job is to document the descriptor format, not to be applied.
+    //
+    // 'computed' was the fourth until #21, and is stripped no longer: the instruction below was
+    // "drop the stripping per feature as each is implemented", and this is that step. It is also
+    // the one feature whose stripping had stopped being free — a computed field now DOES reach
+    // the applied schema (Complex_crm_maps_the_computed_sources_it_declares is the proof), so
+    // leaving it stripped would have frozen a model the mapper no longer produces. Drop the
+    // stripping per feature as each is implemented.
     [Fact]
     public async Task Complex_crm_without_its_unhonoured_features_maps_to_a_stable_model()
     {
         var m = DescriptorToSchemaMapper.Map(
-            AlvoDescriptor.Parse(ComplexCrmWithout("computed", "rollup", "validation", "default")));
+            AlvoDescriptor.Parse(ComplexCrmWithout("rollup", "validation", "default")));
 
         await Verify(m);
     }
