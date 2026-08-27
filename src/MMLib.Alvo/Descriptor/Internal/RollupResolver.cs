@@ -199,17 +199,26 @@ internal sealed class RollupResolver(AlvoDescriptor descriptor)
     /// refused rather than resolved.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <c>DescriptorToSchemaMapper.Map</c> keeps only physical entities, while this resolver reads the
     /// <b>whole</b> descriptor — it has to, because resolving <c>via</c> needs the child's fields, which
     /// the per-entity pass cannot see. A dynamic child therefore resolves cleanly and then never reaches
     /// the model, leaving the parent's column with no entity writer to maintain it: the same
     /// stored-number-nothing-maintains outcome an unresolvable <c>from</c> is refused for, arrived at by a
-    /// different route. F7's dynamic driver may lift this the day it can drive a recompute; until then a
-    /// refusal at apply is the only place an author finds out.
+    /// different route.
+    /// </para>
+    /// <para>
+    /// <b>The condition is <see cref="DescriptorToSchemaMapper.IsPhysical"/> itself, called and not
+    /// restated, and that is deliberate.</b> The reason this pair is refused is not that the child says
+    /// <c>dynamic</c> — it is that the child does not reach the applied schema, and <c>Map</c>'s filter is
+    /// what decides that. Keyed on the reason, the refusal lifts itself the day F7's dynamic driver can
+    /// drive a recompute and the filter admits such a child; keyed on the declaration it would have had to
+    /// be remembered and deleted by hand. Recorded as Dev-15 in the design.
+    /// </para>
     /// </remarks>
     private static void EnsureChildIsPhysical(string parent, string fieldName, Rollup rollup, EntityDescriptor child)
     {
-        if ((child.Storage ?? StorageMode.Physical) == StorageMode.Physical)
+        if (DescriptorToSchemaMapper.IsPhysical(child))
         {
             return;
         }

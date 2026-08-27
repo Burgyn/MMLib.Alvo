@@ -95,7 +95,14 @@ internal static class DescriptorToSchemaMapper
     /// </remarks>
     private static TimeSpan PatternSyntaxCheckTimeout => TimeSpan.FromMilliseconds(100);
 
-    private static bool IsPhysical(EntityDescriptor e) => (e.Storage ?? StorageMode.Physical) == StorageMode.Physical;
+    /// <summary>
+    /// Whether an entity reaches the applied schema at all. <b>The one authority for that question</b>: it is
+    /// the filter <see cref="Map"/> applies, and <c>RollupResolver.EnsureChildIsPhysical</c> calls it rather
+    /// than restating the condition, so a rollup over an unreachable child is refused for the reason it is
+    /// unreachable — and the refusal lifts itself the day F7's dynamic driver makes such a child reachable,
+    /// instead of waiting to be remembered.
+    /// </summary>
+    internal static bool IsPhysical(EntityDescriptor e) => (e.Storage ?? StorageMode.Physical) == StorageMode.Physical;
 
     private static EntitySchema MapEntity(
         string name, EntityDescriptor e, bool tenancyEnabled, IReadOnlyDictionary<string, string> formats,

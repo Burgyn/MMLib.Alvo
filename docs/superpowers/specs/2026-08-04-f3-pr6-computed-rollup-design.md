@@ -1,4 +1,4 @@
-# F3 PR6 — computed & rollup fields (#21)
+﻿# F3 PR6 — computed & rollup fields (#21)
 
 Design for issue #21, *[17] Computed & rollup fields*. Every measurement cited here is
 recorded verbatim in `evidence/2026-08-04-f3-pr6-computed-rollup/spike.txt`.
@@ -324,6 +324,31 @@ Every rollup fact in the branch used `Global`/`Global`, which is why the suite w
    the conservative outcome, and the real fix is a change to every `ref` on every scoped entity — plus the
    accompanying question of whether the FK's existence check is itself an oracle — so it is filed as **#161**
    rather than widened into this PR. See *Open, for the maintainer*.
+
+**Dev-15 — a rollup over a `storage: "dynamic"` child is refused at apply, and the refusal is keyed so that
+F7 lifts it without being asked.** Not in the design, and not a case the design considered: `D3`'s ladder is
+about the *relationship* between parent and child, and this is about whether the child exists in the applied
+schema at all. `DescriptorToSchemaMapper.Map` has filtered dynamic entities out of the model since the mapper
+was written, while `RollupResolver` reads the whole descriptor — it must, because resolving `via` needs the
+child's fields, which the per-entity pass cannot see. So a rollup naming a dynamic child resolved cleanly, the
+child never reached the model, and the parent kept a stored column no writer maintains: exactly the
+number-that-reads-as-data outcome an unresolvable `from` is already refused for, reached by a different route.
+Refusing it at apply is the default-deny answer and closes a window in which a descriptor applies and lies.
+
+**What this does and does not foreclose for F7,** because that is the part worth getting right. It is a
+capability check on the *maintainer*, not an assumption about shape: nothing can drive a recompute over the
+shared partitioned store yet, so today there is no honest way to honour the declaration. PLAN §4's "one model,
+two drivers" is untouched — the entity model is not consulted and no physical-table assumption is added. The
+condition is `DescriptorToSchemaMapper.IsPhysical` **called rather than restated**, which is the whole point of
+the deviation: the refusal is keyed on *the reason* (the child does not reach the applied schema) and not on the
+declaration (`storage == dynamic`), so the day F7's driver makes such a child reachable and the filter admits
+it, this refusal disappears on its own. Keyed the other way it would have been a line someone had to remember
+to delete, which is how a temporary refusal becomes a permanent limit.
+
+Only the *child* case exists. A dynamic **parent**'s rollups are never resolved at all, because `MapField`
+runs only for entities the filter kept — so there is nothing to refuse and no second arm to write.
+
+Caught by CodeRabbit on #163 and by `alvo-plan-guard`, which asked for this entry.
 
 ## Acceptance
 
