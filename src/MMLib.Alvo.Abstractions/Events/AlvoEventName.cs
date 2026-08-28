@@ -132,7 +132,16 @@ public static partial class AlvoEventName
     /// name carries no dot (<c>schema/project.schema.json</c>, <c>entities</c>' <c>propertyNames</c>) and this
     /// requires at least one.
     /// </para>
+    /// <para>
+    /// <b>Anchored <c>\A…\z</c> and not <c>^…$</c>, which is a correctness fix rather than a style choice.</b>
+    /// In .NET, <c>$</c> matches at the end of the string <em>or immediately before a trailing</em> <c>\n</c> —
+    /// so <c>^…$</c> admitted <c>"orders.approved\n"</c>, and a name carrying a trailing newline would have
+    /// reached the <c>event_type</c> and <c>partition_key</c> columns: two event types that render
+    /// identically wherever they are printed, and a control character in any log line that ever names one.
+    /// <c>\z</c> is the absolute end of input and admits nothing after it. Measured, not reasoned: the
+    /// <c>\n</c> case was a failing fact before this change and a passing one after.
+    /// </para>
     /// </remarks>
-    [GeneratedRegex(@"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"\A[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+\z", RegexOptions.CultureInvariant)]
     private static partial Regex CustomName();
 }

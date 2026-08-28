@@ -76,6 +76,14 @@ public sealed class AlvoEventsTests
     [InlineData("orders.approved.")]
     [InlineData("orders approved")]
     [InlineData("9orders.approved")]
+
+    // A trailing control character is its own case: .NET's `$` matches before a trailing \n, so `^...$`
+    // admitted "orders.approved\n" and would have put a newline into event_type and partition_key —
+    // two event types that print identically, and a forged line in any log that names one. The guard
+    // anchors \A...\z for this reason, and these three are what hold it.
+    [InlineData("orders.approved\n")]
+    [InlineData("orders.approved\r\n")]
+    [InlineData("orders.approved\u0000")]
     public async Task Publish_refuses_a_malformed_name(string type)
     {
         var store = new RecordingOutboxStore();
