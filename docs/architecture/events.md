@@ -966,14 +966,18 @@ premise of refusing a host the `entity.` namespace, so the two must not be able 
   that **#153 now has two emit paths to populate, not one.** Whoever gives the envelope a tenant must thread
   it through here as well, or this becomes the single path whose events stay unattributed — and it would stay
   that way silently, because nothing subscribes to a custom event to notice.
-- **It is not ordered per entity key.** The key is `{type}:{subject}`, so per-subject ordering is the only
-  ordering a custom event can be given, under the same one-dispatcher, one-millisecond conditions as
-  everything else. **The type is in the key on purpose:** `partition_key` exists for F7's partitioned claim
-  (**#150**) to index, so a host publishing `subject: "deals:<guid>"` would order itself into a real entity's
-  partition the day that claim reads the column — the same "meaning silently widens when the feature lands"
-  hazard the wildcard refusal exists for, closed by shape instead of by a warning. The disjointness is
-  provable: an entity name is `^[a-z][a-z0-9_]{0,62}$` and carries no dot, and a custom type must contain
-  at least one.
+- **It is not ordered per entity key.** The key is `custom.event:{subject}` — a **fixed** marker, not the
+  event's type — so every event about one subject shares one partition, which is the per-subject ordering
+  this API promises, under the same one-dispatcher, one-millisecond conditions as everything else. An earlier
+  draft keyed it `{type}:{subject}` and that was wrong: it split `orders.approved` and `orders.shipped` for
+  one `orders/42` across partitions while the interface promised ordering per subject. Caught in review.
+  **Why a marker at all:** `partition_key` exists for F7's partitioned claim (**#150**) to index, so a host
+  publishing `subject: "deals:<guid>"` would order itself into a real entity's partition the day that claim
+  reads the column — the same "meaning silently widens when the feature lands" hazard the wildcard refusal
+  exists for, closed by shape instead of by a warning. The disjointness is provable and rests on the marker's
+  **dot**: an entity name is `^[a-z][a-z0-9_]{0,62}$` and carries none. `AlvoCustomEvent.Create` enforces the
+  general form of that rule for every caller — the segment before the first `:` must contain a dot — rather
+  than requiring the event's own type, which would have contradicted the fixed marker.
   **An obligation #150 inherits, surfaced by a security-checklist pass:** neither `type` nor `subject` is
   length-bounded, so `partition_key` is unbounded text — and #150 is the issue that will put an **index** on
   that column, where PostgreSQL's btree entry limit (~2704 bytes) turns an oversized key from a wide row into

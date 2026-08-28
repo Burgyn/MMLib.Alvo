@@ -124,7 +124,7 @@ internal sealed class AlvoEvents(IOutboxStore outbox, TimeProvider clock) : IAlv
     /// </para>
     /// <para>
     /// <b>Enforced at the door, not only produced here.</b> <see cref="AlvoCustomEvent.Create"/> refuses an
-    /// envelope whose partition key does not start with its own type, so a host appending through
+    /// envelope whose partition key's first segment carries no dot, so a host appending through
     /// <see cref="IOutboxStore.AppendAsync"/> directly cannot claim a data entity's partition either. This
     /// method is where a well-formed key is <em>built</em>; that check is where the guarantee <em>holds</em>.
     /// </para>
