@@ -129,6 +129,7 @@
           "hidden": "!('finance' in @user.roles)"
         },
         "owner_id": { "type": "ref", "entity": "users", "default": { "$cel": "@user.id" } },
+        "owner_email": { "type": "string", "format": "email" },
         "closed_at": { "type": "datetime", "readOnly": true }
       },
       "rules": {
@@ -206,7 +207,7 @@
   },
   "automation": {
     "deal-won": {
-      "description": "Notify ERP and the deal owner when a deal is won. The owner is addressed by id: an event envelope carries authentication and no identity claims, so no placeholder root resolves to an address yet (#146, #37).",
+      "description": "Notify ERP and the deal owner when a deal is won. The recipient is the deal's own 'owner_email' field: an event envelope carries authentication and no identity claims, so no placeholder root resolves to an address (#146, #37) and the address has to live on the record.",
       "trigger": { "event": "entity.deals.updated" },
       "condition": "changed(stage) && new.stage == 'won'",
       "actions": [
@@ -218,7 +219,7 @@
         {
           "type": "email",
           "template": "deal-won",
-          "to": "{{new.owner_id}}"
+          "to": "{{new.owner_email}}"
         }
       ]
     },

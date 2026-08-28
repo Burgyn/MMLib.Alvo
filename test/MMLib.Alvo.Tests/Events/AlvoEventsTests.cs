@@ -61,10 +61,10 @@ public sealed class AlvoEventsTests
         published.Type.ShouldBe("orders.approved");
         published.Subject.ShouldBe("orders/42");
         published.PartitionKey.ShouldBe(
-            "orders.approved:orders/42",
+            "custom.event:orders/42",
             customMessage:
-                "the type is in the partition key so a host publishing subject 'deals:<guid>' cannot order "
-                + "itself into a real entity's partition when F7's partitioned claim (#150) reads the column");
+                "a fixed dotted marker keeps the key out of any data entity's partition when F7's partitioned "
+                + "claim (#150) reads the column, without splitting one subject across partitions");
         published.AuthId.ShouldBe(Caller.User.Value.ToString());
         published.Data.Record!["total"].ShouldBe(99);
     }
@@ -174,16 +174,25 @@ public sealed class AlvoEventsTests
     [InlineData("deals:3f2504e0-4f89-41d3-9a0c-0305e82c3301")]
     [InlineData("orders/42")]
     [InlineData("")]
-    [InlineData("crm.other.thing:orders/42")]
+    [InlineData("deals:")]
     public void A_custom_event_cannot_claim_another_partition(string partitionKey)
         => Should.Throw<ArgumentException>(
                 () => AlvoCustomEvent.Create(WellNamed(partitionKey)))
-            .Message.ShouldContain("its own partition");
+            .Message.ShouldContain("data entity's partition");
 
-    [Fact]
-    public void A_custom_event_in_its_own_partition_is_accepted()
-        => AlvoCustomEvent.Create(WellNamed("crm.thing.happened:orders/42"))
-            .Envelope.PartitionKey.ShouldBe("crm.thing.happened:orders/42");
+    /// <summary>Any first segment carrying a dot is a host's own partition, and is accepted.</summary>
+    /// <remarks>
+    /// It need not be this event's own type — the first draft required that and refused host keys that were
+    /// never a hazard, while contradicting the fixed marker <c>PublishAsync</c> builds. What makes a key safe
+    /// is only that no entity can be named like its first segment.
+    /// </remarks>
+    /// <param name="partitionKey">A key whose first segment contains a dot.</param>
+    [Theory]
+    [InlineData("crm.thing.happened:orders/42")]
+    [InlineData("custom.event:orders/42")]
+    [InlineData("a.b:c")]
+    public void A_custom_event_in_its_own_partition_is_accepted(string partitionKey)
+        => AlvoCustomEvent.Create(WellNamed(partitionKey)).Envelope.PartitionKey.ShouldBe(partitionKey);
 
     /// <summary>
     /// <b>A payload the envelope cannot express is refused at the call, not from inside the queue.</b>
@@ -256,6 +265,40 @@ public sealed class AlvoEventsTests
         written.Data.Record["flag"].ShouldBe(true);
         written.Data.Record["nothing"].ShouldBeNull();
     }
+
+    /// <summary>
+    /// <b>Two event types about one subject share a partition, because ordering is promised per subject.</b>
+    /// </summary>
+    /// <remarks>
+    /// The first draft keyed the partition <c>{type}:{subject}</c>, which split <c>orders.approved</c> and
+    /// <c>orders.shipped</c> for one <c>orders/42</c> into different partitions while
+    /// <see cref="IAlvoEvents"/>' own contract promised ordering per subject. Caught in review, and this is
+    /// the fact that keeps the two from drifting apart again.
+    /// </remarks>
+    [Fact]
+    public async Task Two_types_about_one_subject_share_a_partition()
+    {
+        var store = new RecordingOutboxStore();
+        var publisher = Publisher(store);
+
+        await publisher.PublishAsync(
+            "orders.approved", "orders/42", null, Caller, TestContext.Current.CancellationToken);
+        await publisher.PublishAsync(
+            "orders.shipped", "orders/42", null, Caller, TestContext.Current.CancellationToken);
+
+        store.Appended.Select(e => e.PartitionKey).Distinct(StringComparer.Ordinal)
+            .ShouldHaveSingleItem("both events are about orders/42, so both order within one partition");
+    }
+
+    /// <summary>A null partition key is the factory's refusal, never a <see cref="NullReferenceException"/>.</summary>
+    /// <remarks>
+    /// <see cref="AlvoEvent.PartitionKey"/> is <c>required</c>, but <c>required</c> is satisfied by assigning
+    /// <c>null!</c> — so the check reached <c>StartsWith</c> on a null and threw the wrong exception type out
+    /// of a factory that promises <see cref="ArgumentException"/>. Caught in review.
+    /// </remarks>
+    [Fact]
+    public void A_null_partition_key_is_refused_rather_than_dereferenced()
+        => Should.Throw<ArgumentException>(() => AlvoCustomEvent.Create(WellNamed(null!)));
 
     /// <summary>A guarded name with a caller-chosen partition key, for the partition facts above.</summary>
     /// <param name="partitionKey">The key under test.</param>

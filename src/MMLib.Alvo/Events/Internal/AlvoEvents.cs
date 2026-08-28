@@ -107,7 +107,15 @@ internal sealed class AlvoEvents(IOutboxStore outbox, TimeProvider clock) : IAlv
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>The type is in the key so a custom event can never land in a data entity's partition.</b> A data
+    /// <b>A fixed marker, not the event's type — because the type broke the ordering this API promises.</b>
+    /// The first draft used <c>{type}:{subject}</c>, which put <c>orders.approved</c> and
+    /// <c>orders.shipped</c> for one <c>orders/42</c> into <em>different</em> partitions while
+    /// <see cref="IAlvoEvents"/> promised ordering per subject. Caught in review. A fixed marker satisfies
+    /// both: every event about one subject shares a key, and the marker's dot keeps the key out of any data
+    /// entity's partition.
+    /// </para>
+    /// <para>
+    /// <b>Why staying out of a data entity's partition matters.</b> A data
     /// event's key is <c>{entity}:{rowId}</c>, and <c>OutboxTable</c>'s <c>partition_key</c> column exists for
     /// F7's partitioned claim (<b>#150</b>) to index — so a host publishing <c>subject: "deals:&lt;guid&gt;"</c>
     /// would, on the day that claim reads the column, be ordering itself into a real entity's partition. That
@@ -131,9 +139,19 @@ internal sealed class AlvoEvents(IOutboxStore outbox, TimeProvider clock) : IAlv
     /// one-dispatcher, one-millisecond conditions as everything else on this queue.
     /// </para>
     /// </remarks>
-    /// <param name="type">The guarded event name.</param>
     /// <param name="subject">What the event is about, in the host's own vocabulary.</param>
-    private static string PartitionKeyFor(string type, string subject) => $"{type}:{subject}";
+    private static string PartitionKeyFor(string subject) => $"{CustomPartitionMarker}:{subject}";
+
+    /// <summary>
+    /// The fixed first segment of every custom event's partition key.
+    /// </summary>
+    /// <remarks>
+    /// <b>It contains a dot, and that is the entire mechanism.</b> An entity name is
+    /// <c>^[a-z][a-z0-9_]{0,62}$</c> (<c>schema/project.schema.json</c>, <c>entities</c>'
+    /// <c>propertyNames</c>) and therefore never contains one, so no custom event's key can equal a data
+    /// event's <c>{entity}:{rowId}</c> — whatever subject a host supplies.
+    /// </remarks>
+    private const string CustomPartitionMarker = "custom.event";
 
     /// <summary>The envelope one published event becomes.</summary>
     /// <param name="type">The guarded event name.</param>
@@ -153,7 +171,7 @@ internal sealed class AlvoEvents(IOutboxStore outbox, TimeProvider clock) : IAlv
             Type = type,
             Time = now,
             Subject = subject,
-            PartitionKey = PartitionKeyFor(type, subject),
+            PartitionKey = PartitionKeyFor(subject),
             AuthType = AlvoEventProvenance.AuthTypeOf(context),
             AuthId = AlvoEventProvenance.AuthIdOf(context),
             CorrelationId = AlvoEventProvenance.CorrelationIdOf(id),

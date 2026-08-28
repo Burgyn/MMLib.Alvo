@@ -159,6 +159,36 @@ public sealed class WildcardSubscriptionTests
             .Entities.ShouldNotBeEmpty();
     }
 
+    /// <summary>
+    /// <b>A name carrying <c>/</c> or <c>~</c> still produces a pointer that addresses the slot it refused.</b>
+    /// </summary>
+    /// <remarks>
+    /// JSON Pointer reserves both characters (RFC 6901 §3): <c>~</c> is written <c>~0</c> and <c>/</c> is
+    /// written <c>~1</c>, or the path resolves somewhere else entirely — and the schema's own
+    /// <c>propertyNames</c> forbids neither in a rule name. Interpolating the raw name gave an agent or a
+    /// dashboard a path to the wrong location. Caught in review.
+    /// </remarks>
+    /// <param name="ruleName">A rule name containing a character JSON Pointer reserves.</param>
+    /// <param name="expected">The escaped token the pointer must carry.</param>
+    [Theory]
+    [InlineData("a/b", "a~1b")]
+    [InlineData("a~b", "a~0b")]
+    [InlineData("a~/b", "a~0~1b")]
+    public void A_pointer_escapes_the_characters_json_pointer_reserves(string ruleName, string expected)
+    {
+        var json = Descriptor($$"""
+            "automation": {
+              "{{ruleName}}": {
+                "trigger": { "event": "entity.orders.*" },
+                "actions": [{ "type": "webhook", "endpoint": "invoicing" }]
+              }
+            }
+            """);
+
+        new DescriptorValidator().Validate(json).Errors
+            .ShouldContain(error => error.Path == $"/automation/{expected}/trigger/event");
+    }
+
     private static InvalidDataException Refusal(string descriptorJson)
         => Should.Throw<InvalidDataException>(
             () => DescriptorToSchemaMapper.Map(AlvoDescriptor.Parse(descriptorJson)));

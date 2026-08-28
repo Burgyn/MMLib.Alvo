@@ -227,11 +227,23 @@ internal sealed class DescriptorValidator : IDescriptorValidator
 
         var refusal = UnhonouredFeatures.WildcardSubscription;
         return new DescriptorValidationError(
-            $"/{block}/{entry.Name}/trigger/event",
+            $"/{block}/{PointerToken(entry.Name)}/trigger/event",
             $"'{pattern.GetString()}' subscribes with a wildcard. {refusal.Consequence}",
             refusal.Fix,
             DescriptorValidationSeverity.Error);
     }
+
+    /// <summary>One JSON Pointer reference token, escaped per RFC 6901 §3.</summary>
+    /// <param name="name">The rule or function name, exactly as the descriptor spells it.</param>
+    /// <remarks>
+    /// <c>~</c> becomes <c>~0</c> and <c>/</c> becomes <c>~1</c>, <b>in that order</b> — reversing them would
+    /// re-escape the tilde this method just introduced. Without it, a rule named <c>a/b</c> produced a pointer
+    /// addressing a different location than the one that was refused, so an agent or dashboard following the
+    /// path would land somewhere else entirely. The names are author-supplied and the schema's own
+    /// <c>propertyNames</c> does not forbid either character.
+    /// </remarks>
+    private static string PointerToken(string name) =>
+        name.Replace("~", "~0", StringComparison.Ordinal).Replace("/", "~1", StringComparison.Ordinal);
 
     /// <summary>
     /// The top-level blocks whose entries carry a <c>$defs/eventPattern</c>-typed trigger, in the order

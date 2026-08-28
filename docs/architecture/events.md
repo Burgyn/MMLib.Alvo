@@ -951,6 +951,15 @@ premise of refusing a host the `entity.` namespace, so the two must not be able 
   zmena"* is a guarantee about a **data** change; a custom event has none to be atomic with, and
   `AppendAsync` is one autocommit statement. A host needing its own write and its own event to commit
   together does not get that here. **Deviation 88.**
+- **It has no idempotency key, so a retried publish appends a second event.** `AlvoEvents` mints a fresh
+  `AlvoEventId` per call, so a `PublishAsync` whose `AppendAsync` succeeded but whose result was lost to
+  cancellation or a transport failure appends a *second* durable event when the host retries. Raised in
+  review and **deliberately not fixed here**: the obvious shape — derive the key from the event id — is the
+  one this document's own *What PR5b and F7 inherit* already refuses, because nothing prunes
+  `alvo_idempotency` (**#115**) and the table would then grow with event volume rather than with keyed
+  creates. Note also that a *duplicate publish* is a different problem from *duplicate delivery*: delivery is
+  at-least-once by design and the envelope's `id` is the consumer's dedup key, which does not help when the
+  two events have different ids. Whoever gives `PublishAsync` an idempotency key owes #115 with it.
 - **It carries no tenant, and that quietly enlarges #153.** `PublishAsync` takes an `AlvoContext` — which
   *does* carry `Tenant` — and never reads it, because the envelope has nowhere to put it. That is the same
   gap the wildcard ruling is built on, so it is consistent rather than new; the consequence worth recording is
@@ -998,8 +1007,11 @@ payloads this build already wrote — **#153** owns exactly that.
 applies and still only earns `UnhonouredSubsystems`' warning, which is what makes this a refusal of the
 wildcard rather than of subscriptions.
 
-`EventPattern` is the one authority for the frozen grammar — `HasWildcard` for this refusal,
-`ReservedNamespaces` for the publish guard — and `EventPatternTests.The_reserved_namespaces_are_the_schema_s_own`
+The frozen grammar has **two** authorities, split along the two contracts it serves: `EventPattern` owns
+`HasWildcard` for this refusal (a *descriptor* question — what a rule may subscribe to), and `AlvoEventName`
+owns `ReservedNamespaces` for the publish guard (a *wire* question — which names Alvo emits, so which a host
+may not mint). They live in different assemblies for that reason, and
+`EventPatternTests.The_reserved_namespaces_are_the_schema_s_own`
 reads the alternation out of `schema/project.schema.json` itself, so the schema stays the authority over the
 authority. A segment is a wildcard only when it is *entirely* `*`, because the grammar admits it nowhere else;
 the cheap `pattern.Contains('*')` passes every other fact and is killed by its own.

@@ -49,49 +49,57 @@ public sealed class AlvoCustomEvent
     {
         ArgumentNullException.ThrowIfNull(envelope);
         AlvoEventName.EnsureCustom(envelope.Type, nameof(envelope));
-        EnsureOwnPartition(envelope);
+        EnsureNotADataPartition(envelope);
         return new AlvoCustomEvent(envelope);
     }
 
     /// <summary>
-    /// Refuses an envelope whose partition key is not its own, so a custom event cannot be ordered into a
-    /// data entity's partition.
+    /// Refuses an envelope whose partition key could address a <b>data entity's</b> partition.
     /// </summary>
     /// <param name="envelope">The envelope, whose name is already guarded.</param>
     /// <remarks>
     /// <para>
     /// <b>The second half of the guard, and it exists because the documentation over-claimed without it.</b>
     /// <c>AlvoEvents.PartitionKeyFor</c> says the disjointness from a data event's <c>{entity}:{rowId}</c> is
-    /// <em>"provable, not probable … closed by shape rather than by a warning"</em> — but that was only true
-    /// for callers coming through <c>IAlvoEvents.PublishAsync</c>, and this type exists precisely so that is
-    /// not the only door. A host could <c>Create</c> a well-named <c>crm.thing.happened</c> carrying
-    /// <c>PartitionKey = "deals:&lt;rowId&gt;"</c> and land inside a real entity's partition the day F7's
-    /// partitioned claim (<b>#150</b>) reads the column. Found by review, and it is the same lesson as the
-    /// first bypass: a guarantee is only as strong as the narrowest door that can reach it.
+    /// <em>"provable, not probable"</em> — but that was only true for callers coming through
+    /// <c>IAlvoEvents.PublishAsync</c>, and this type exists precisely so that is not the only door. A host
+    /// could <c>Create</c> a well-named <c>crm.thing.happened</c> carrying <c>PartitionKey =
+    /// "deals:&lt;rowId&gt;"</c> and land inside a real entity's partition the day F7's partitioned claim
+    /// (<b>#150</b>) reads the column. Found by review.
     /// </para>
     /// <para>
-    /// <b>The prefix, not the whole key.</b> Requiring <c>{type}:</c> is what makes the disjointness hold —
-    /// an entity name cannot contain a dot (<c>schema/project.schema.json</c>, <c>entities</c>'
-    /// <c>propertyNames</c>) and a custom type must contain at least one — while leaving a host free to choose
-    /// what it orders by after it.
+    /// <b>The rule is "the first segment contains a dot", not "the first segment is this event's type".</b>
+    /// The narrower version was the first draft and it was wrong twice over: it contradicted the fixed
+    /// <c>custom.event</c> marker <c>PublishAsync</c> produces — the marker that keeps one subject's events in
+    /// <em>one</em> partition, which is the ordering this API promises — and it refused host keys that were
+    /// never a hazard. What actually makes a key safe is that no entity can be named like its first segment:
+    /// an entity name is <c>^[a-z][a-z0-9_]{0,62}$</c> (<c>schema/project.schema.json</c>, <c>entities</c>'
+    /// <c>propertyNames</c>) and so never contains a dot. That is the whole proof, and it holds for any key a
+    /// host chooses.
     /// </para>
     /// </remarks>
-    private static void EnsureOwnPartition(AlvoEvent envelope)
+    private static void EnsureNotADataPartition(AlvoEvent envelope)
     {
-        var required = envelope.Type + PartitionSeparator;
-        if (envelope.PartitionKey.StartsWith(required, StringComparison.Ordinal))
+        var key = envelope.PartitionKey;
+        var separator = key?.IndexOf(PartitionSeparator, StringComparison.Ordinal) ?? -1;
+        if (separator > 0 && key!.AsSpan(0, separator).Contains(NamespaceSeparator))
         {
             return;
         }
 
         throw new ArgumentException(
-            $"Custom event '{envelope.Type}' carries partition key '{envelope.PartitionKey}', which is not in "
-            + $"its own partition. A custom event's key must start with '{required}' so it cannot be ordered "
-            + "into a data entity's partition — those are keyed '{entity}:{rowId}', and an entity name carries "
-            + $"no dot while an event name must. Use '{required}{{whatever you order by}}', e.g. "
-            + $"'{required}orders/42'.",
+            $"Custom event '{envelope.Type}' carries partition key '{key}', which could address a data "
+            + "entity's partition. The part before the first ':' must contain a '.', because an entity name "
+            + "never does — that is what keeps a custom event out of '{entity}:{rowId}'. Use "
+            + $"'{CustomPartitionExample}', or the key IAlvoEvents.PublishAsync builds for you.",
             nameof(envelope));
     }
+
+    /// <summary>The separator inside an event name, which an entity name can never contain.</summary>
+    private const char NamespaceSeparator = '.';
+
+    /// <summary>A well-formed key, shown in the refusal so an author has one to copy.</summary>
+    private const string CustomPartitionExample = "custom.event:orders/42";
 
     /// <summary>The separator between an event's own namespace and what it is about, in a partition key.</summary>
     private const char PartitionSeparator = ':';
