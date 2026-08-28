@@ -31,6 +31,13 @@ internal static class EventsSetup
     /// (<c>WebhookDelivery.HttpClientName</c>) without the framework owning any of them.
     /// </para>
     /// <para>
+    /// <b><see cref="IAlvoEvents"/> is a singleton over the same <see cref="IOutboxStore"/> the dispatcher
+    /// drains</b>, so a host publishing a custom application event and the framework emitting a data event
+    /// reach one queue — the ordering, the attempt ceiling and the lease are then properties of the queue
+    /// rather than of who wrote to it. It is registered here rather than beside <c>IAlvoData</c> because
+    /// publishing is an event-subsystem concern: it never touches a driver, a schema or a policy.
+    /// </para>
+    /// <para>
     /// <b>The dispatcher is an <see cref="IHostedService"/> through <c>TryAddEnumerable</c></b>, so a host that
     /// called <c>AddAlvo</c> twice still drains the queue once — two dispatchers in one process would break
     /// per-entity-key ordering exactly as two replicas do. Registration order says nothing about when it runs:
@@ -52,6 +59,8 @@ internal static class EventsSetup
         services.TryAddSingleton<WebhookDelivery>();
         services.TryAddSingleton<IEmailSender, ConsoleEmailSender>();
         services.TryAddSingleton<EventActionExecutor>();
+        services.TryAddSingleton(TimeProvider.System);
+        services.TryAddSingleton<IAlvoEvents, AlvoEvents>();
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, OutboxDispatcher>());
 
         return services;

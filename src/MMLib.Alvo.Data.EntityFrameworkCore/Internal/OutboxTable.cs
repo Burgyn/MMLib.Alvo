@@ -184,7 +184,7 @@ internal static class OutboxTable
     /// </remarks>
     internal static async Task InsertAsync(
         DbConnection connection,
-        DbTransaction transaction,
+        DbTransaction? transaction,
         string tableName,
         AlvoEvent @event,
         CancellationToken ct)

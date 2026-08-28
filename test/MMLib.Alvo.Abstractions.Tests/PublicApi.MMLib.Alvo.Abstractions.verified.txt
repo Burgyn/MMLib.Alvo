@@ -787,6 +787,12 @@ namespace MMLib.Alvo.Events
         public static MMLib.Alvo.Events.AlvoEvent Read(string json) { }
         public static string Write(MMLib.Alvo.Events.AlvoEvent @event) { }
     }
+    public static class AlvoEventProvenance
+    {
+        public static string? AuthIdOf(MMLib.Alvo.AlvoContext context) { }
+        public static string AuthTypeOf(MMLib.Alvo.AlvoContext context) { }
+        public static string CorrelationIdOf(System.Guid eventId) { }
+    }
     public sealed class AlvoMailMessage : System.IEquatable<MMLib.Alvo.Events.AlvoMailMessage>
     {
         public AlvoMailMessage(string To, string Subject, string Body) { }
@@ -794,12 +800,17 @@ namespace MMLib.Alvo.Events
         public string Subject { get; init; }
         public string To { get; init; }
     }
+    public interface IAlvoEvents
+    {
+        System.Threading.Tasks.Task PublishAsync(string type, string subject, System.Collections.Generic.IReadOnlyDictionary<string, object?>? data, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default);
+    }
     public interface IEmailSender
     {
         System.Threading.Tasks.Task SendAsync(MMLib.Alvo.Events.AlvoMailMessage message, System.Threading.CancellationToken cancellationToken = default);
     }
     public interface IOutboxStore
     {
+        System.Threading.Tasks.Task AppendAsync(MMLib.Alvo.Events.AlvoEvent envelope, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.OutboxEntry>> ClaimAsync(string claimant, int batchSize, int maxAttempts, System.TimeSpan lease, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task EnsureAsync(System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task MarkDispatchedAsync(System.Guid id, System.Threading.CancellationToken cancellationToken = default);

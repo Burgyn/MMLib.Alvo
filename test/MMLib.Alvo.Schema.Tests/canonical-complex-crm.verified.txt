@@ -43,12 +43,12 @@
         },
         {
           "template": "deal-won",
-          "to": "{{@user.email}}",
+          "to": "{{new.owner_id}}",
           "type": "email"
         }
       ],
       "condition": "changed(stage) && new.stage == 'won'",
-      "description": "Notify ERP and the deal owner when a deal is won.",
+      "description": "Notify ERP and the deal owner when a deal is won. The owner is addressed by id: an event envelope carries authentication and no identity claims, so no placeholder root resolves to an address yet (#146, #37).",
       "trigger": {
         "event": "entity.deals.updated"
       }
@@ -260,7 +260,7 @@
             "action": {
               "reject": "Only a manager may change a closed deal"
             },
-            "condition": "old.stage in ['won', 'lost'] && !('manager' in @user.roles)"
+            "condition": "(old.stage == 'won' || old.stage == 'lost') && !('manager' in @user.roles)"
           },
           {
             "action": {
@@ -270,7 +270,7 @@
                 }
               }
             },
-            "condition": "changed(stage) && new.stage in ['won', 'lost']"
+            "condition": "changed(stage) && (new.stage == 'won' || new.stage == 'lost')"
           }
         ]
       },

@@ -93,6 +93,29 @@ public interface IOutboxStore
     Task EnsureAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Appends one <b>custom application event</b> to the queue, so the dispatcher claims it like any other.
+    /// </summary>
+    /// <param name="envelope">The event to append; its <see cref="AlvoEvent.Id"/> is the entry's own id.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <remarks>
+    /// <para>
+    /// <b>A data event never travels through here, and that asymmetry is the design rather than an
+    /// oversight.</b> A create, update or delete appends its event on <em>the caller's own transaction and
+    /// connection</em>, which is what makes "no lost and no phantom event" true at all; a driver does that
+    /// itself, with no port in the way. A custom application event has no data change to be atomic with, so it
+    /// is appended by one autocommit statement like every other member here — and a host that needs its own
+    /// write and its own event to commit together does not get that from this member.
+    /// </para>
+    /// <para>
+    /// <b>One statement, on the port's standing rule.</b> Never a read followed by a write in one
+    /// transaction: that is the single shape measured to fail unretryably on SQLite (spike Q5), and an append
+    /// that first checked whether the id was taken would be exactly it. A duplicate id is the caller's
+    /// mistake and surfaces as the primary key violation it is.
+    /// </para>
+    /// </remarks>
+    Task AppendAsync(AlvoEvent envelope, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Claims up to <paramref name="batchSize"/> undelivered entries for <paramref name="claimant"/>, oldest
     /// first, and returns them in the order they must be delivered in.
     /// </summary>

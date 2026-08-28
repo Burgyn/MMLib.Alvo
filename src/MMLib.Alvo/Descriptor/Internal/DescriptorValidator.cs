@@ -1,6 +1,7 @@
 ﻿using Corvus.Json;
 using MMLib.Alvo.Api.Internal;
 using MMLib.Alvo.Descriptor.SchemaGen;
+using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Rules;
@@ -84,6 +85,7 @@ internal sealed class DescriptorValidator : IDescriptorValidator
             var schemaErrors = SchemaErrors(document.RootElement);
             var errors = new List<DescriptorValidationError>(schemaErrors);
             errors.AddRange(SemanticErrors(document.RootElement));
+            errors.AddRange(WildcardSubscriptionErrors(document.RootElement));
             if (schemaErrors.Count == 0)
             {
                 errors.AddRange(RuleErrors(descriptorJson));
@@ -161,6 +163,71 @@ internal sealed class DescriptorValidator : IDescriptorValidator
             .LastOrDefault(segment => !int.TryParse(segment, out _));
 
     private static string PointerOrRoot(string? pointer) => string.IsNullOrEmpty(pointer) ? "/" : pointer;
+
+    /// <summary>
+    /// The structured half of the wildcard-subscription refusal <c>DescriptorToSchemaMapper</c> throws for.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The two-pass tie <see cref="UnhonouredFeatures"/>' remarks describe, for a slot that is top-level
+    /// rather than per entity.</b> The typed pass in the mapper is what an embedded host calling
+    /// <c>FromDescriptor</c> passes through; this raw-JSON pass is what gives a CLI, a dashboard or an agent
+    /// the JSON Pointer and the fix suggestion an exception message cannot carry. Both read
+    /// <see cref="UnhonouredFeatures.WildcardSubscription"/> for the words, so the two cannot describe the
+    /// same refusal differently.
+    /// </para>
+    /// <para>
+    /// It runs beside <see cref="SemanticErrors"/> rather than inside it because that walk is keyed on
+    /// <c>entities</c> and returns early for a descriptor without one — and a descriptor may declare
+    /// automation over an entity set this build is not mapping.
+    /// </para>
+    /// </remarks>
+    /// <param name="root">The descriptor's root object.</param>
+    private static List<DescriptorValidationError> WildcardSubscriptionErrors(JsonElement root)
+    {
+        var errors = new List<DescriptorValidationError>();
+        foreach (var block in _eventPatternBlocks)
+        {
+            if (!root.TryGetProperty(block, out var declared) || declared.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            errors.AddRange(declared.EnumerateObject()
+                .Select(entry => WildcardErrorFor(block, entry))
+                .OfType<DescriptorValidationError>());
+        }
+
+        return errors;
+    }
+
+    /// <summary>The error one automation rule or function earns, or <see langword="null"/> when it is exact.</summary>
+    /// <param name="block">The top-level block the entry sits in.</param>
+    /// <param name="entry">One rule or function, by its declared name.</param>
+    private static DescriptorValidationError? WildcardErrorFor(string block, JsonProperty entry)
+    {
+        if (!entry.Value.TryGetProperty("trigger", out var trigger)
+            || trigger.ValueKind != JsonValueKind.Object
+            || !trigger.TryGetProperty("event", out var pattern)
+            || pattern.ValueKind != JsonValueKind.String
+            || !EventPattern.HasWildcard(pattern.GetString()!))
+        {
+            return null;
+        }
+
+        var refusal = UnhonouredFeatures.WildcardSubscription;
+        return new DescriptorValidationError(
+            $"/{block}/{entry.Name}/trigger/event",
+            $"'{pattern.GetString()}' subscribes with a wildcard. {refusal.Consequence}",
+            refusal.Fix,
+            DescriptorValidationSeverity.Error);
+    }
+
+    /// <summary>
+    /// The top-level blocks whose entries carry a <c>$defs/eventPattern</c>-typed trigger, in the order
+    /// <c>schema/project.schema.json</c> declares them.
+    /// </summary>
+    private static readonly string[] _eventPatternBlocks = ["automation", "functions"];
 
     private static List<DescriptorValidationError> SemanticErrors(JsonElement root)
     {

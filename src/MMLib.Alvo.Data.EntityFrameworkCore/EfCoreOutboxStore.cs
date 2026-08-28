@@ -93,6 +93,27 @@ public sealed class EfCoreOutboxStore : IOutboxStore
     }
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// <b>The same INSERT a data event travels on, with no transaction under it.</b> The statement is
+    /// <see cref="OutboxTable.InsertAsync"/>'s, so the column list, the payload encoding and the initial
+    /// attempt count have one authority whichever path appended the entry; only the transaction differs, and
+    /// it differs because a custom application event has no data change to be atomic with.
+    /// </remarks>
+    public async Task AppendAsync(AlvoEvent envelope, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(envelope);
+
+        var connection = _connections.Create();
+        await using (connection.ConfigureAwait(false))
+        {
+            await RelationalSqlBatch.OpenAsync(connection, cancellationToken).ConfigureAwait(false);
+            await OutboxTable
+                .InsertAsync(connection, transaction: null, _tableName, envelope, cancellationToken)
+                .ConfigureAwait(false);
+        }
+    }
+
+    /// <inheritdoc/>
     public Task MarkDispatchedAsync(Guid id, CancellationToken cancellationToken = default) =>
         ExecuteAsync(
             OutboxTable.MarkDispatchedSql(_tableName),
