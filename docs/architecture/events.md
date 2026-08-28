@@ -879,11 +879,12 @@ IAlvoEvents.PublishAsync(type, subject, data, context)
         │
         ├─ AlvoEventName.EnsureCustom(type)   ← refuses first, before the clock is read
         │     1. blank
-        │     2. first segment in EventPattern.ReservedNamespaces  (entity | auth | storage)
+        │     2. first segment in AlvoEventName.ReservedNamespaces  (entity | auth | storage)
         │     3. not two or more lower-case dot-separated segments
         │
         ├─ AlvoEventId.Create(now) · AlvoEvent.DefaultSource · AlvoEventProvenance.*
-        └─ IOutboxStore.AppendAsync   ← one autocommit INSERT, the same statement OutboxTable emits
+        ├─ AlvoCustomEvent.Create             ← runs the SAME guard again; the only door to the queue
+        └─ IOutboxStore.AppendAsync           ← one autocommit INSERT, the statement OutboxTable emits
 ```
 
 **The guard is the whole point, and it is stated against a real reader rather than against strings.** Without
@@ -899,8 +900,26 @@ segment-count check before the prefix was compared, which was measured, not assu
 inverts the prefix comparison survived the two-segment version).
 
 **The refusal is an exception, not a returned result**, on `IBeforeHookRunner.Run`'s precedent (deviation 82):
-a refusal a caller can forget to check is a guard that is not one. It also runs before any clock read or id
-mint, so a refused name leaves no trace at all.
+a refusal a caller can forget to check is a guard that is not one.
+
+**The guard is on the type the port accepts, and that is a correction rather than the first design.** The
+first draft put it only in `PublishAsync` and let `AppendAsync` take a bare `AlvoEvent` — and `IOutboxStore`
+is public and DI-registered while `AlvoEvent` is a public record with public initializers, so a host could
+resolve the port and append `entity.orders.updated` with `authtype: system` and a payload of its choosing.
+The PR that added the guard had added the primitive that bypassed it. `AppendAsync` now takes
+**`AlvoCustomEvent`**, whose only door — `AlvoCustomEvent.Create` — runs the guard; a check inside a driver
+would have to be repeated by every other driver and be absent from the one that forgot. This is
+`IOutboxStore`'s own rule for the UUIDv7 id, *"the wrong implementation is unavailable rather than merely
+discouraged"*, applied to the caller. An intermediate draft made the constructor `internal` instead and was
+wrong twice over: it rested on a forgeable `InternalsVisibleTo`, and it locked out `OutboxStoreContractTests`,
+the **public** suite an external driver author inherits — which is what surfaced that the invariant is *"none
+carries a reserved name"*, not *"only the framework constructs one"*. `AlvoEventName` moved to `Abstractions`
+with it, because the reserved namespaces are wire contract; `EventPattern` kept the wildcard half, which is
+descriptor contract.
+
+**`AppendAsync` has two facts in the contract suite both engines inherit** — appended-then-claimable, and
+appended-then-retired — because it was, briefly, product code no engine ever ran. Deleting its INSERT turns
+`SqliteOutboxStoreTests` red.
 
 **Provenance is one authority across two assemblies now.** The derivation of `authtype`, `authid` and
 `correlationid` was private to `OutboxEventFactory` in the EF driver; a second emit path in the core would
@@ -923,9 +942,14 @@ premise of refusing a host the `entity.` namespace, so the two must not be able 
   zmena"* is a guarantee about a **data** change; a custom event has none to be atomic with, and
   `AppendAsync` is one autocommit statement. A host needing its own write and its own event to commit
   together does not get that here. **Deviation 88.**
-- **It is not ordered per entity key.** The partition key is the host-supplied `subject`, because there is no
-  entity and no row id to build `{entity}:{rowId}` from — so per-subject ordering is the only ordering a
-  custom event can be given, under the same one-dispatcher, one-millisecond conditions as everything else.
+- **It is not ordered per entity key.** The key is `{type}:{subject}`, so per-subject ordering is the only
+  ordering a custom event can be given, under the same one-dispatcher, one-millisecond conditions as
+  everything else. **The type is in the key on purpose:** `partition_key` exists for F7's partitioned claim
+  (**#150**) to index, so a host publishing `subject: "deals:<guid>"` would order itself into a real entity's
+  partition the day that claim reads the column — the same "meaning silently widens when the feature lands"
+  hazard the wildcard refusal exists for, closed by shape instead of by a warning. The disjointness is
+  provable: an entity name is `^[a-z][a-z0-9_]{0,62}$` and carries no dot, and a custom type must contain
+  at least one.
 
 **Why the guarantee ships before the feature it guards is useful.** The refusal costs nothing now and cannot
 be added later without breaking whichever host is already minting `entity.orders.updated` by then. A guard

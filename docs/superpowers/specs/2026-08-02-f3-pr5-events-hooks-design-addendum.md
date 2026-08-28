@@ -1170,6 +1170,16 @@ Continuing the series. 86–88 are this PR's; each names what an earlier decisio
     one added now is a rule nobody ever got to break. Stated on `IAlvoEvents`' own XML doc, where an author
     reads it before calling, rather than only here.
 
+    **The guard was bypassable in this PR's own first draft, and the fix is recorded because the near-miss
+    is the instructive part.** It lived only in the core's `PublishAsync` while `IOutboxStore.AppendAsync` —
+    added by the same PR, on a public DI-registered port, taking a public record with public initializers —
+    let a host append `entity.orders.updated` with `authtype: system` directly. Two independent reviews found
+    it. `AppendAsync` now takes `AlvoCustomEvent`, whose only door runs the guard, so the guarantee is
+    structural rather than documentary; `AlvoEventName` moved to `Abstractions` to make that possible, since
+    the reserved namespaces are wire contract. **The lesson worth carrying:** a PR that adds a guard and a new
+    write primitive at the same time has to check the primitive against its own guard, because the guard's
+    threat model was written before the primitive existed.
+
     **Also recorded: `Publish` was named in neither PR's content row and in neither Definition of Done.** The
     inherited bullet called that a gap in this document rather than a deferral, and it was — the feature had
     no owner, so it had no shape either, and PR5b-2 designed one (`IAlvoEvents`, `IOutboxStore.AppendAsync`,

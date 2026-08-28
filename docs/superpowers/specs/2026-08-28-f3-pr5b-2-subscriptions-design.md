@@ -73,10 +73,12 @@ appended by `OutboxTable.InsertAsync`, which is `internal` to the EF driver and 
 
 ### The shape
 
-- **`IOutboxStore.AppendAsync(AlvoEvent, CancellationToken)`** — the port grows one member, and it keeps the
-  port's own rule: *one statement, autocommit, never a read followed by a write in one transaction*
+- **`IOutboxStore.AppendAsync(AlvoCustomEvent, CancellationToken)`** — the port grows one member, and it keeps
+  the port's own rule: *one statement, autocommit, never a read followed by a write in one transaction*
   (spike Q5). It is the **custom-event** path only; a data event still never travels through it, which is
   what keeps `OutboxTable`'s transactional emit the single authority for "no lost and no phantom event".
+- **`AlvoCustomEvent`** — the parameter type, and the reason the guard cannot be routed around. See
+  *§2.1 The bypass two reviews found*.
 - **`IAlvoEvents.PublishAsync(string type, string subject, IReadOnlyDictionary<string, object?>? data,
   AlvoContext context, CancellationToken)`** in `Abstractions`, beside `IAlvoData`, whose parameter order it
   copies exactly — `AlvoContext` explicit and never an ambient accessor.
@@ -85,7 +87,8 @@ appended by `OutboxTable.InsertAsync`, which is `internal` to the EF driver and 
 
 ### The guard
 
-`AlvoEventName.EnsureCustom` refuses, with `ArgumentException`, in this order:
+`AlvoEventName.EnsureCustom` (in **`Abstractions`**, beside `AlvoEvent`, because the reserved namespaces are
+part of the *wire* contract) refuses, with `ArgumentException`, in this order:
 
 1. a name that is null, empty or whitespace;
 2. a name whose **first segment** is one of `EventPattern.ReservedNamespaces` (`entity`, `auth`, `storage`)
@@ -97,6 +100,36 @@ decided by exactly one reader — `EventSubscriptions.TryReadSubscription`, whic
 `"entity"` with `StringComparison.Ordinal`. `Entity.orders.updated` selects no hook there, so it is not the
 forgery the ruling is about. Rule 3 refuses it anyway, one rule later and for a different reason (the name
 is not well-formed), so nothing turns on the guard being loose.
+
+### 2.1 The bypass two reviews found, and the shape that closes it
+
+**The first draft put the guard only in `AlvoEvents.PublishAsync` and let `AppendAsync` take a bare
+`AlvoEvent`.** Both the plan guard and the C# review found the same hole independently, and the C# review
+reproduced it: `IOutboxStore` is **public** and DI-registered (`AlvoEfCoreProvider.cs:83`), and `AlvoEvent` is
+a public record with public `required` initializers — so a host could resolve the port and append
+`entity.orders.updated` with `authtype: system` and a payload of its choosing, firing every after-hook
+subscribed to the real name for a row nobody wrote. Precisely the forgery the guard exists to refuse,
+reachable one layer below it. Worse: nothing before this PR could insert an arbitrary envelope at all, so the
+PR that added the guard also added the primitive that bypassed it.
+
+**The fix is the parameter type, not a second check.** `AppendAsync` now takes `AlvoCustomEvent`, whose only
+door — `AlvoCustomEvent.Create` — runs `EnsureCustom` first. A check in the driver would have to be repeated
+by every other driver and be silently absent from the one that forgot; a check on an interface cannot be
+enforced at all. This is the house rule `IOutboxStore`'s own remarks state for the UUIDv7 id — *"the wrong
+implementation is unavailable rather than merely discouraged"* — applied to the **caller**.
+
+**An intermediate draft made the constructor `internal` instead, and that was wrong in both directions.** It
+rested on `InternalsVisibleTo`, which names a published assembly and is forgeable — the caveat this repo
+already documents — and it locked out the two callers that legitimately need to build one: a host assembling
+its own envelope, and `OutboxStoreContractTests`, the **public** suite an *external* driver author inherits to
+prove their `AppendAsync` works. That build failure is what surfaced the error: the invariant that matters is
+not *"only the framework constructs one"* but **"none carries a reserved name"**, and a public guarded factory
+holds exactly that, for everyone, with no forgeability caveat.
+
+**`AlvoEventName` therefore lives in `Abstractions` and `EventPattern` kept only the wildcard half.** The
+split is along the two contracts: reserved namespaces are the **wire** contract (which names Alvo emits, so
+which a host may not mint) and must be enforceable at the layer the port lives in; wildcards are the
+**descriptor** contract (what a rule may subscribe to) and belong next to the apply path that refuses them.
 
 **Rule 3 is well-formedness, not the designed namespace.** `events.md` is explicit that the real fix is *"a
 **designed** namespace, once — not a prefix bolted on under one PR's schedule"*, and this PR does not
@@ -168,6 +201,10 @@ kill, not a predicted one.
 | `Publish_appends_one_entry_carrying_the_guarded_name` | the envelope's `partitionkey` becomes the type | killed |
 | `An_event_a_host_published_selects_no_after_hook` | the prefix comparison in `TryReadSubscription` is inverted | killed |
 | `Every_example_marked_not_runnable_really_is_refused` | the refusal message stops carrying the feature's fix | killed |
+| `The_only_door_into_the_queue_refuses_a_reserved_name` | `AlvoCustomEvent.Create` stops calling the guard | killed |
+| `A_malformed_automation_entry_is_reported_rather_than_thrown_on` | the validator drops its `ValueKind` check | killed |
+| `Publish_appends_one_entry_carrying_the_guarded_name` | the partition key loses its type prefix | killed |
+| `An_appended_custom_event_is_claimable_like_an_emitted_one` | `EfCoreOutboxStore.AppendAsync` drops the entry | killed (on the **real SQLite driver**) |
 
 **One mutation survived first, and the fact was wrong rather than the mutation weak.** Inverting
 `TryReadSubscription`'s prefix comparison left `An_event_a_host_published_selects_no_after_hook` green,
