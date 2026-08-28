@@ -245,10 +245,12 @@ public class DescriptorValidatorTests
         entityTenancy is null ? string.Empty : $@"""tenancy"": ""{entityTenancy}"",";
 
     /// <summary>
-    /// The three hook points PR5a honours, named as a literal so the fact below can say which points are
-    /// <em>deliberately</em> absent from the table rather than merely missing from it.
+    /// Every hook point this build honours — the three <c>after*</c> since PR5a and the three <c>before*</c>
+    /// since PR5b, so all six — named as a literal so the fact below can say which points are
+    /// <em>deliberately</em> absent from the refusal table rather than merely missing from it.
     /// </summary>
-    private static readonly string[] _honouredHookPoints = ["afterCreate", "afterUpdate", "afterDelete"];
+    private static readonly string[] _honouredHookPoints =
+        ["afterCreate", "afterUpdate", "afterDelete", "beforeCreate", "beforeUpdate", "beforeDelete"];
 
     /// <summary>
     /// <b>Every hook point the frozen schema declares is either refused by the table or honoured by this
