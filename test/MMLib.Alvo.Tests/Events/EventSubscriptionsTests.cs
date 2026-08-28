@@ -191,13 +191,21 @@ public sealed class EventSubscriptionsTests : IDisposable
     /// The envelope comes from <c>AlvoEvents</c> rather than being hand-built, so the fact cannot pass because
     /// the test wrote a type the publisher would never produce.
     /// </para>
+    /// <para>
+    /// <b>The name is the nearest legal forgery, and that is load-bearing.</b> <c>crm.deals.updated</c> has
+    /// three segments, names an entity this catalog really has hooks on, and ends in a suffix this reader
+    /// really maps — everything a data event has except the reserved namespace. A shorter name such as
+    /// <c>deals.approved</c> would be turned away by the segment-count check before the prefix was ever
+    /// compared, so it would pin the wrong half: measured, by inverting the prefix comparison and watching the
+    /// two-segment version stay green.
+    /// </para>
     /// </remarks>
     [Fact]
     public async Task An_event_a_host_published_selects_no_after_hook()
     {
         var store = new CapturingOutboxStore();
         await new AlvoEvents(store, TimeProvider.System).PublishAsync(
-            "deals.approved", "deals/42", null, AlvoContext.Anonymous, TestContext.Current.CancellationToken);
+            "crm.deals.updated", "deals/42", null, AlvoContext.Anonymous, TestContext.Current.CancellationToken);
 
         Matching(CatalogWithAHookOnEveryPoint, store.Published.ShouldHaveSingleItem()).ShouldBeEmpty();
     }

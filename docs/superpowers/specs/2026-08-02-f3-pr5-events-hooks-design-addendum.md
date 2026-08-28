@@ -1060,6 +1060,16 @@ be stored, or a hook writing `owner_id` from a caller-controlled field would pla
     feared has not happened. Measured by applying the example on this branch, not inferred, and
     recorded in `DescriptorToSchemaMapperTests`' own remarks so it sits next to the fact that
     depends on it.
+
+    **Discharged by PR5b-2**, which is what this entry deferred them to. The two list literals are
+    now `(old.stage == 'won' || old.stage == 'lost')` and `(new.stage == 'won' || new.stage == 'lost')`;
+    `{{@user.email}}` is now `{{new.owner_id}}`, because an envelope carries authentication and no
+    identity claims, so *no* placeholder root resolves to an address (#146, #37) — the rule's own
+    `description` now says so rather than leaving a reader to discover it. And
+    `Every_example_marked_not_runnable_really_is_refused` asserts the refusal's **reason**: the message
+    must carry a fix suggestion from `UnhonouredFeatures.EveryFixSuggestion`, so the substitution
+    deviation 76 feared is now structurally impossible rather than merely measured to be absent.
+    **Deviation 76 is closed.**
 84. **A `reject` hook's gate keeps `EvaluatePredicate`'s "false on anything it cannot resolve"
     direction, which is *open* for a guard, and the direction is argued rather than inherited.**
     For an authorization predicate `false` means deny and the direction is closed; for a
@@ -1125,6 +1135,57 @@ Nothing below is decided by this document.
 7. **Whether PR5 adds a mail service to compose**, or the DoD's *"email end to end"* is
    explicitly recorded as console-provider-only in F3.
 8. **`payloadversion`, kept despite duplicating `type` + `dataschema`** (deviation 69).
+
+## Deviations added by PR5b-2 (wildcard ruling, the `Publish` guard, deviation 76's remainder)
+
+Continuing the series. 86–88 are this PR's; each names what an earlier decision said as well as what shipped.
+
+86. **A wildcard subscription is *refused* at apply, against `UnhonouredSubsystems`' own warn-versus-refuse
+    line, and the branch was forced rather than chosen.** `docs/architecture/events.md` gave PR5b two
+    branches: implement the matcher **with every subscription scoped to the envelope's tenant and a named
+    adversarial cross-tenant fact**, or refuse `*` at apply until that exists. The first is unavailable and
+    that is **measured, not argued**: `AlvoEvent` carries `authid` and no tenant attribute at all, so nothing
+    at delivery — the only place a subscription is evaluated — could scope one, and the adversarial fact the
+    ruling requires would have had no tenant on either side of its comparison. It would have asserted nothing
+    while reading as coverage. Giving the envelope a tenant is a public-API and wire-format change with a
+    compatibility question for the payloads already written: **#153**.
+
+    **The deviation proper is the refusal, not the deferral.** `UnhonouredSubsystems`' rule is *refuse what
+    silently produces wrong data, warn what is observably absent*, and an automation rule that never fires is
+    observably absent — so the rule as written says *warn*. It is refused anyway because the two halves of
+    "observable" come apart: the absence is observable **today**, the consequence **never**. The day
+    automation lands, a wildcard already sitting in a descriptor becomes a cross-tenant fan-out with nobody
+    re-reading the file that declared it, and a delivery that reached the wrong tenant is not an absence
+    anyone notices. That the descriptor outlives the build is the argument *for* tolerating one that runs
+    ahead in general, and the argument *against* it here. Cost, stated: a descriptor whose only defect is
+    being ahead of this build is refused, and the author has to spell out one rule per entity/operation pair.
+
+87. **`Publish` ships, and every event it can publish is subscribable by nothing.** `$defs/eventPattern` is
+    frozen to the three reserved namespaces the guard refuses, so a name this API accepts matches zero
+    descriptor rules and zero after-hooks — the dispatcher claims the entry, matches nothing, counts it
+    filtered and marks it dispatched. This document's own inherited bullet says the right fix is a
+    **designed namespace, once — not a prefix bolted on under one PR's schedule**, and PR5b-2 does not design
+    one; it ships the *guarantee* without it. The reason the guarantee cannot wait for the namespace: a guard
+    added after a host is already minting `entity.orders.updated` is a breaking change to that host, while
+    one added now is a rule nobody ever got to break. Stated on `IAlvoEvents`' own XML doc, where an author
+    reads it before calling, rather than only here.
+
+    **Also recorded: `Publish` was named in neither PR's content row and in neither Definition of Done.** The
+    inherited bullet called that a gap in this document rather than a deferral, and it was — the feature had
+    no owner, so it had no shape either, and PR5b-2 designed one (`IAlvoEvents`, `IOutboxStore.AppendAsync`,
+    `AlvoEventName`) under a PR whose brief was the guard.
+
+88. **A custom application event is not transactional with anything, against what a reader of the spec's
+    "transactional outbox" will assume.** *"Event sa publikuje v tej istej transakcii ako dátová zmena"*
+    (`alvo-specifikacia.md:141`) is a guarantee about a **data** change, and a custom event has none to be
+    atomic with. `IOutboxStore.AppendAsync` is therefore one autocommit statement, on the port's own standing
+    rule (never a read followed by a write in one transaction — spike Q5), and a host needing its own write
+    and its own event to commit together does not get that here. Named because the absence is invisible: the
+    call succeeds, the row is durable, and only a crash between the two shows the difference.
+
+    **One thing this deviation does *not* weaken:** a data event still never travels through `AppendAsync`.
+    It is appended by `OutboxTable.InsertAsync` on the caller's own transaction and connection, exactly as
+    before, so "no lost and no phantom event" is unchanged for every write `IAlvoData` performs.
 
 ---
 

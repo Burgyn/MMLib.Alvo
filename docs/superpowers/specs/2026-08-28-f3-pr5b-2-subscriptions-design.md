@@ -150,17 +150,35 @@ marker claims. It now asserts the **reason**: the refusal must name the unhonour
 `rollup.where`, so that line is refused by a structured unhonoured-feature error and is not a defect this PR
 can fix by editing.
 
-## 4. Every fact, and the mutation that kills it
+## 4. Every fact, and the mutation that killed it
 
-| Fact | Mutation that kills it |
-|---|---|
-| `A_wildcard_automation_trigger_is_refused_at_apply` | `EventPattern.HasWildcard` returns `false` unconditionally |
-| `A_wildcard_function_trigger_is_refused_at_apply` | the `functions` half of the apply walk is deleted |
-| `A_pattern_without_a_wildcard_still_applies` | `HasWildcard` returns `true` unconditionally |
-| `The_reserved_namespaces_are_the_schema_s_own` | drop `storage` from `ReservedNamespaces` |
-| `A_wildcard_trigger_is_reported_as_a_structured_error` | the validator's top-level pass is deleted |
-| `Publish_refuses_a_reserved_namespace` | `EnsureCustom` skips the reserved-prefix check |
-| `Publish_refuses_a_malformed_name` | `EnsureCustom` skips the grammar check |
-| `Publish_appends_one_entry_carrying_the_guarded_name` | `AlvoEvents.PublishAsync` returns before `AppendAsync` |
-| `A_published_event_selects_no_after_hook` | `TryReadSubscription` accepts any prefix |
-| `Every_example_marked_not_runnable_really_is_refused` | the refusal's message stops naming the feature |
+Each mutation was applied to the source, compiled, and the whole fast suite run; every one is a **measured**
+kill, not a predicted one.
+
+| Fact | Mutation | Result |
+|---|---|---|
+| `A_wildcard_automation_trigger_is_refused_at_apply` | `EventPattern.HasWildcard` returns `false` unconditionally | killed |
+| `A_wildcard_function_trigger_is_refused_at_apply` | the `functions` half of the apply walk is deleted | killed |
+| `A_pattern_without_a_wildcard_still_applies` | `HasWildcard` returns `true` unconditionally | killed |
+| `A_star_inside_a_segment_is_not_a_wildcard_segment` | `HasWildcard` becomes `pattern.Contains('*')` | killed |
+| `The_reserved_namespaces_are_the_schema_s_own` | `storage` dropped from `ReservedNamespaces` | killed |
+| `A_wildcard_trigger_is_reported_as_a_structured_error` | the validator's top-level pass is deleted | killed |
+| `Publish_refuses_a_reserved_namespace` | `EnsureCustom` skips the reserved-prefix check | killed |
+| `Publish_refuses_a_malformed_name` | `EnsureCustom` skips the grammar check | killed |
+| `Publish_appends_one_entry_carrying_the_guarded_name` | the envelope's `partitionkey` becomes the type | killed |
+| `An_event_a_host_published_selects_no_after_hook` | the prefix comparison in `TryReadSubscription` is inverted | killed |
+| `Every_example_marked_not_runnable_really_is_refused` | the refusal message stops carrying the feature's fix | killed |
+
+**One mutation survived first, and the fact was wrong rather than the mutation weak.** Inverting
+`TryReadSubscription`'s prefix comparison left `An_event_a_host_published_selects_no_after_hook` green,
+because the fact published `deals.approved` — **two** segments, so the segment-count check turned it away
+before the prefix was ever compared, and the fact was pinning the wrong half of the reader. The published
+name is now `crm.deals.updated`: three segments, an entity the catalog really has hooks on, a suffix the
+reader really maps — everything a data event has except the reserved namespace, which is the nearest legal
+forgery a host can attempt. The mutation is killed with the name corrected, and the reason is recorded on the
+fact itself so nobody shortens it back.
+
+**Two mutations are unrepresentable, which is worth recording rather than retrying.** "Return before
+`AppendAsync`" does not compile (`CS9113`: the `outbox` parameter becomes unread) and "drop the payload" does
+not compile (`IDE0060`: `data` becomes unused). The analyzer set makes those two defects unwritable rather
+than merely untested.
