@@ -1193,6 +1193,13 @@ Continuing the series. 86–88 are this PR's; each names what an earlier decisio
     and its own event to commit together does not get that here. Named because the absence is invisible: the
     call succeeds, the row is durable, and only a crash between the two shows the difference.
 
+    **Found by the `alvo-security-core-review` pass, and recorded rather than fixed:** `IAlvoEvents` is a
+    public singleton beside `IEmailSender`, and `AppendAsync` opens its own connection — so it joins the set
+    of ports the owed "a network call is inexpressible in a before-hook" guarantee has to cover, and it makes
+    that guarantee's shape wider than "network", since this one is a *data* port whose autocommit write inside
+    an open transaction is spike Q5's unretryable SQLite failure. Unreachable today: `BeforeHookRunner` takes
+    only `IPolicyCatalogProvider` and `Run` is synchronous (deviation 82). The C# hook face inherits it.
+
     **One thing this deviation does *not* weaken:** a data event still never travels through `AppendAsync`.
     It is appended by `OutboxTable.InsertAsync` on the caller's own transaction and connection, exactly as
     before, so "no lost and no phantom event" is unchanged for every write `IAlvoData` performs.

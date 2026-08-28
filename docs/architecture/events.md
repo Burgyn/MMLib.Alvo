@@ -951,6 +951,12 @@ premise of refusing a host the `entity.` namespace, so the two must not be able 
   zmena"* is a guarantee about a **data** change; a custom event has none to be atomic with, and
   `AppendAsync` is one autocommit statement. A host needing its own write and its own event to commit
   together does not get that here. **Deviation 88.**
+- **It carries no tenant, and that quietly enlarges #153.** `PublishAsync` takes an `AlvoContext` — which
+  *does* carry `Tenant` — and never reads it, because the envelope has nowhere to put it. That is the same
+  gap the wildcard ruling is built on, so it is consistent rather than new; the consequence worth recording is
+  that **#153 now has two emit paths to populate, not one.** Whoever gives the envelope a tenant must thread
+  it through here as well, or this becomes the single path whose events stay unattributed — and it would stay
+  that way silently, because nothing subscribes to a custom event to notice.
 - **It is not ordered per entity key.** The key is `{type}:{subject}`, so per-subject ordering is the only
   ordering a custom event can be given, under the same one-dispatcher, one-millisecond conditions as
   everything else. **The type is in the key on purpose:** `partition_key` exists for F7's partitioned claim
@@ -1122,6 +1128,16 @@ these live.
   transaction could resolve it and send mail mid-transaction. The guarantee has to become an *architectural*
   fact — nothing on the in-transaction path can reach a network port — for the same reason the JSONata ban's
   real test must be architectural rather than behavioural.
+  **PR5b-2 added a second port to that set, and one that is worse in a specific way.** `IAlvoEvents` is
+  registered `TryAddSingleton` beside `IEmailSender`, and `EfCoreOutboxStore.AppendAsync` opens **its own
+  connection** and commits one INSERT on autocommit — which, called from inside an open write transaction, is
+  the concurrent-writer shape spike Q5 measured as unretryable `SQLITE_BUSY_SNAPSHOT` rather than merely a
+  network call in the wrong place. **It is not reachable today**, and that is measured rather than assumed:
+  `BeforeHookRunner` is constructed with `IPolicyCatalogProvider` alone, and `IBeforeHookRunner.Run` is
+  **synchronous** — no `Task`, no `CancellationToken` — which is deviation 82's network ban stated at the
+  contract. So a declarative hook cannot reach either port. Whoever builds the **C# face** of the hook
+  pipeline inherits both, and the architectural fact they owe must now cover a *data* port as well as a
+  network one.
 
 ## What a provider owes, and where the port is
 
