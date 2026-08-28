@@ -1,32 +1,36 @@
 # CEL — profiles, two-valued rendering, and the storage-driver seam
 
 > How Alvo's one CEL compiler (`ICelCompiler`, `src/MMLib.Alvo/Expressions`) turns authored
-> condition strings into an enforceable predicate: the three profiles and what each allows, the
+> condition strings into an enforceable predicate: the four profiles and what each allows, the
 > `USING`/`WITH CHECK` mapping `PolicyCatalog` compiles rules into, the two-valued rendering rule
 > both backends must agree on, the `IFieldSqlRenderer` seam a new storage driver implements, and
 > every deliberate narrowing of conformant CEL Alvo's grammar makes. Spec §0 principle 6 (CEL for
 > conditions, JSONata for transforms — CEL is safe-by-construction and runs in-transaction).
 
-## The three profiles
+## The four profiles
 
 One CEL grammar, one lexer/parser, one type checker (`CelTypeChecker`) — but a construct's
 legality is deny-by-default and varies by which descriptor slot the source came from
 (`CelProfile`). The checker's `_allowedProfiles` table is the single positive list; a construct
 kind missing from it compiles in **no** profile rather than every profile.
 
-| Construct | Rule | Computed | Condition |
-|---|---|---|---|
-| Literal | ✓ | ✓ | ✓ |
-| Field ref, current row (`owner_id`) | ✓ | ✓ | ✓ |
-| Field ref, `old.`/`new.` | ✗ | ✗ | ✓ |
-| `@user`/`@tenant` context ref | ✓ | ✗ | ✓ |
-| `&&` / `\|\|` / `!` | ✓ | ✓ | ✓ |
-| Comparison (`==`, `!=`, `<`, `<=`, `>`, `>=`) | ✓ | ✓ | ✓ |
-| `in` (role membership) | ✓ | ✗ | ✓ |
-| `has(field)` | ✓ | ✓ | ✓ |
-| Arithmetic (`+ - * /`, unary `-`) | ✗ | ✓ | ✗ |
-| Ternary conditional | ✗ | ✓ | ✗ |
-| `changed(field)` | ✗ | ✗ | ✓ |
+**This table is the `_allowedProfiles` table as it is written today, not as any design document
+proposes it** — see *`Mutate`, the fourth profile* below for where the two differ and why.
+
+| Construct | Rule | Computed | Condition | Mutate |
+|---|---|---|---|---|
+| Literal | ✓ | ✓ | ✓ | ✓ |
+| Field ref, current row (`owner_id`) | ✓ | ✓ | ✓ | ✓ |
+| Field ref, `old.`/`new.` | ✗ | ✗ | ✓ | ✓ |
+| `@user`/`@tenant` context ref | ✓ | ✗ | ✓ | ✗ |
+| `&&` / `\|\|` / `!` | ✓ | ✓ | ✓ | ✗ |
+| Comparison (`==`, `!=`, `<`, `<=`, `>`, `>=`) | ✓ | ✓ | ✓ | ✗ |
+| `in` (role membership) | ✓ | ✗ | ✓ | ✗ |
+| `has(field)` | ✓ | ✓ | ✓ | ✗ |
+| Arithmetic (`+ - * /`, unary `-`) | ✗ | ✓ | ✗ | ✗ |
+| Ternary conditional | ✗ | ✓ | ✗ | ✗ |
+| `changed(field)` | ✗ | ✗ | ✓ | ✗ |
+| Allow-listed function call (`lowerAscii`, `now`) | ✗ | ✗ | ✗ | ✓ |
 
 - **Rule** — `entities.*.rules.*` (the `USING`/`WITH CHECK` predicates) and `hidden`/`readOnly`
   field flags. Must evaluate to `Bool`. Sees the current row and `@user`/`@tenant`; never `old.`/
@@ -40,8 +44,93 @@ kind missing from it compiles in **no** profile rather than every profile.
   context") and never role membership, since both are caller-dependent and a computed column has
   no caller. The only profile that allows arithmetic and the ternary.
 - **Condition** — a hook's `condition` (`hooks.beforeUpdate[].condition`, etc.). Must evaluate to
-  `Bool`. The only profile that sees `old.`/`new.` field references and `changed(field)`, since a
-  hook is the one place a "before" row exists to compare against.
+  `Bool`. The only profile that allows `changed(field)`, and one of the two — with `Mutate` — that
+  sees `old.`/`new.` field references, since a hook is the one place a "before" row exists to
+  compare against.
+- **Mutate** — a before-hook `mutate` value (`hooks.beforeUpdate[].action.mutate.<field>`). Must
+  evaluate to a value a field can hold: any scalar **or** a `Bool`, which is the one profile with no
+  constraint at all on the result shape — a `boolean` column is a legitimate `mutate` target, and
+  that is exactly the case `Computed` has to reject because a generated column cannot hold
+  "predicate" as a value. The only profile that admits a function call. See the next section.
+
+## `Mutate`, the fourth profile
+
+`Mutate` compiles a before-hook's `mutate` value — the one descriptor slot that is a *value*
+expression over a *hook* context, which the three-profile design had no cell for (`Rule` and
+`Condition` are predicates over a row; `Computed` is a value with no hook context).
+
+### Interpreter-only, and that is a guarantee rather than an accident
+
+A `Mutate` expression is evaluated by `CelInterpreter` and is **never** handed to
+`SqlPredicateRenderer`. Three things follow, and each is an absence a later reader could otherwise
+mistake for an omission:
+
+- **No `IFieldSqlRenderer` member.** Nothing in the profile has a SQL rendering, so the seam a
+  storage driver implements does not grow for it.
+- **No per-engine golden snapshot, and no row in the differential backend test.** Those facts prove
+  two backends agree; there is one backend here.
+- **The two-valued rendering rule below does not apply.** It is a rule *both backends must agree
+  on*, and with one backend there is nothing to agree with — so `Mutate` inherits
+  `CelInterpreter`'s semantics unchanged and states no separate null rule.
+
+The refusal is enforced rather than merely documented: `SqlPredicateRenderer` refuses a `CelCall`
+node **by name**, with a message that says the profile is interpreter-only, instead of falling
+through to a generic "unsupported node" arm. The moment somebody proposes rendering a `Mutate`
+expression to SQL, the two-valued fold and the `==`/`!=` collation caveat both come back into scope.
+
+### The function allow-list has exactly two entries
+
+`Mutate` is the only profile where an identifier followed by `(` is anything but a syntax error
+(deviation 7), and it admits exactly two names — positive and closed, on `_allowedProfiles`' own
+principle that a name missing from the list compiles in no profile rather than in every one:
+
+| Call | Result type | What it is |
+|---|---|---|
+| `lowerAscii(x)` | `String` | fold `A`–`Z` in `x`, and **nothing else** |
+| `now()` | `Timestamp` | the instant this write is already stamped with |
+
+`lowerAscii`'s argument is type-checked at apply: a non-string argument is a `CelTypeException` when
+the descriptor is applied, never a surprise inside a transaction. The fold is an explicit `A`–`Z`
+loop and deliberately **not** `ToLowerInvariant()`, which folds a long tail of non-ASCII code points
+(`Ž`, `Ä`, `ẞ`, `Σ` are measurably among them) — a culture-sensitive fold applied to a *stored* value
+is a permanently wrong row, not a display quirk.
+
+**Why `lower(...)` is refused with a fix suggestion naming `lowerAscii`.** Conformant CEL spells the
+ASCII fold `lowerAscii`, as the receiver-style macro `x.lowerAscii()`; there is no conformant
+`lower(x)` at all. Alvo's grammar cannot express the receiver shape — a bare identifier is always
+zero-dot and `old`/`new` are the only one-dot prefixes (deviation 8) — so the profile adopts the
+standard's **name and semantics** and deviates only on the **call shape**, which is the smaller of
+the two deviations and the same trade `has(...)` and `changed(...)` already make. An author who
+writes the SQL spelling `lower(...)` gets the standard's name back as the suggestion.
+
+**Why `now()` is not a clock read.** It resolves to the `DateTimeOffset` the write's own audit stamp
+already used, bound once per write by the caller and threaded in — `CelInterpreter` never touches
+`TimeProvider` itself. So `now()` twice in one write returns the same value, a value a hook writes
+and the row's own `created_at`/`updated_at` cannot disagree, and the whole thing is testable with a
+fake clock. It is also **never rendered to SQL**, and that is §0 principle 3 rather than a
+limitation: Postgres's `now()` is *transaction-start* time while SQLite's `CURRENT_TIMESTAMP` is
+second-precision *text*, so rendering it would let two engines answer differently for one descriptor.
+`@now` was considered and rejected — it would widen the closed `@`-context set and be its first
+memberless context reference.
+
+### The profile is narrower than the design addendum's table, deliberately
+
+The PR5 design addendum's *Decision 1* (deviation 79) prints a `Mutate` column with ✓ in **every** row:
+`@user`/`@tenant`, `&&`/`||`/`!`, comparison, `in`, `has`, arithmetic, the ternary and
+`changed(field)`. **As implemented, none of those are admitted.** `_allowedProfiles` gives `Mutate`
+four rows and no more — literals, current-row field references, `old.`/`new.` field references, and
+the allow-listed call — and the table at the top of this file is the one that is true.
+
+That is a deliberate deferral, not a half-finished table, and deny-by-default is what makes it safe:
+an unlisted pairing compiles in **no** profile, so nothing is silently permitted while it waits. Each
+construct arrives with the fact that needs it — a `mutate` such as
+`{"is_closed": {"$cel": "new.stage == 'won'"}}` will bring the comparison row with it, and the
+addendum's argument for why `Mutate` *may* hold it stands unchanged.
+
+**Measured, so the deferral is measured rather than convenient:** the only descriptor in the tree
+that declares a `mutate` is `examples/complex-crm/crm.alvo.json`, and its two values are
+`lowerAscii(new.email)` (`:110`) and `now()` (`:148`). Both compile. Nothing that ships is blocked by
+the narrowness, and the profile's own truth table records what a widening would have to add.
 
 ## `USING`/`WITH CHECK` per operation
 
@@ -124,9 +213,12 @@ descriptor at all.
 ## Two-valued rendering: the rule both backends must agree on
 
 Alvo has two `CompiledExpression` backends — `CelInterpreter` (in-memory, used for `WITH CHECK`
-when there is a candidate row but no stored row to filter: a `create`, or a hook `Condition`) and
-`SqlPredicateRenderer` (SQL, used for `USING`) — and a differential property test proves they never
-disagree on any well-typed expression and record. Both follow the **same** null rule, which is
+when there is a candidate row but no stored row to filter: a `create`, a hook `Condition`, or a
+before-hook `Mutate` value) and `SqlPredicateRenderer` (SQL, used for `USING`) — and a differential
+property test proves they never disagree on any well-typed expression and record **that both can
+hold**, which never includes a `Mutate` expression: the renderer refuses one by name, so the profile
+has one backend and this whole section is inapplicable to it. Both backends follow the **same** null
+rule, which is
 **two-valued, not SQL's native three-valued (`UNKNOWN`) logic**:
 
 > A comparison where either operand is `null` evaluates to `false` — never "unknown", never an
@@ -226,8 +318,8 @@ differ.
 ## Deliberate deviations from CEL
 
 Alvo deliberately adopts the CEL spec so agents recognize the grammar from training data — every
-deviation below is a stated narrowing (or, for the first three, an addition), not an invented
-variant of a standard:
+deviation below is a stated narrowing (or, for 1–3 and 15–16, an addition), not an invented variant
+of a standard:
 
 **Additions (constructs conformant CEL does not have):**
 
@@ -276,6 +368,25 @@ variant of a standard:
 14. **Relational operators are non-associative** (`a == b == c` throws) — **not** a narrowing;
     conformant CEL itself forbids chained relational operators, listed here only so this doc doesn't
     have to be re-derived from the spec by a future reader.
+
+**Added by the `Mutate` profile.** Numbered at the end of the series rather than inserted into the
+group they belong to, because other documents cite these numbers (*deviation 6*, *7*, *8*) and
+renumbering would silently repoint every citation:
+
+15. **`lowerAscii(x)` takes CEL's standard-library name in Alvo's own call shape** — an *addition* to
+    the grammar and a partial reversal of narrowing 7 for one profile. Conformant CEL spells the
+    ASCII fold as the receiver macro `x.lowerAscii()`, which narrowing 8's one-level dot rule cannot
+    express, so the standard's name and semantics are adopted and only the call shape deviates. The
+    SQL spelling `lower(...)` is refused, with `lowerAscii` as the fix suggestion. The fold is
+    ASCII-only *by definition*, hence an explicit `A`–`Z` loop and never `ToLowerInvariant()`.
+16. **`now()` as a nullary function** — conformant CEL has no `now`; a host supplies time as a
+    variable. Alvo spells it as a call because `Mutate` needs the call machinery for `lowerAscii`
+    regardless, and because `@now` would widen the closed `@`-context set and be its first
+    memberless member. It is a **bound instant** rather than a clock read, and never rendered to SQL
+    — both stated above.
+
+Neither is admitted outside `Mutate`, so narrowing 7 stands unchanged for every other profile: an
+identifier followed by `(` other than `has`/`changed` is still a syntax error there.
 
 **Residual caveat, not a narrowing:** the string-collation caveat on `==`/`!=` documented above — it
 is a real divergence *risk* between the two backends under a non-default collation, not a construct

@@ -84,8 +84,11 @@ internal static class UnhonouredFeatures
     /// block as a whole would have forced PR5 into an all-or-nothing switch: it could not ship
     /// <c>afterUpdate</c> while <c>beforeUpdate</c> is still unimplemented without either lying about the rest
     /// or leaving the whole block refused. Six entries let each one leave on the day it starts working, and
-    /// three of them did. It is the same move PR2 made for <c>softDelete</c>: refuse the behaviour, keep the
-    /// declared shape, so the implementing issue inherits a shape rather than designing one.
+    /// <b>all six now have</b> — the three <c>after*</c> points with PR5a, the three <c>before*</c> points
+    /// with PR5b — which is why this table holds no hook entry at all. The shape is kept here as the record
+    /// of how they left, one at a time, rather than deleted with the last of them: it is the same move PR2
+    /// made for <c>softDelete</c> — refuse the behaviour, keep the declared shape, so the implementing issue
+    /// inherits a shape rather than designing one.
     /// </para>
     /// </remarks>
     internal static IReadOnlyList<UnhonouredFeature<EntityDescriptor>> OnAnEntity { get; } =
@@ -97,59 +100,7 @@ internal static class UnhonouredFeatures
             + "exclude it, which is irrecoverable data loss where the schema promises recoverability.",
             "Remove 'softDelete' or track the soft-delete implementation issue. A flag written as false is "
             + "not a declaration and maps normally."),
-        .. HookPoints(),
     ];
-
-    /// <summary>One refusal per hook point, each naming the operation it would have run on.</summary>
-    /// <remarks>
-    /// <para>
-    /// <b>Three entries left when the after-hooks landed, and that is the per-hook-point shape paying for
-    /// itself.</b> PR5a compiles <c>afterCreate</c>/<c>afterUpdate</c>/<c>afterDelete</c> into the policy
-    /// catalog and dispatches them from the outbox, so their entries are gone; the three <c>before*</c>
-    /// points stay, because a before-hook runs <em>in the write transaction</em> and nothing in this build
-    /// does. No author of a <c>before*</c> hook sees a changed message — which is exactly what "each one is
-    /// lifted the day it starts working" was written to buy.
-    /// </para>
-    /// <para>
-    /// The consequence is worded per <em>phase</em> because the two lose different things. A
-    /// <c>before*</c> hook may reject or mutate <em>in the write transaction</em>, so dropping it means a
-    /// write the author believes is being vetted or patched is neither: the clearest case in this repo's own
-    /// examples is <c>simple-tasks</c>' <c>beforeUpdate</c>, which sets <c>completed_at</c> when a task is
-    /// marked done — refuse the hook and <c>completed_at</c> is a permanently null column, the very same
-    /// silent-wrong-value outcome <c>default</c> is refused for. An author should not meet that surprise
-    /// twice, so it is named here rather than discovered. (It used to name <c>rollup</c>; #21 honours that
-    /// one now, so the comparison moved to a feature that is still refused rather than to one that works.)
-    /// </para>
-    /// </remarks>
-    private static IEnumerable<UnhonouredFeature<EntityDescriptor>> HookPoints() =>
-    [
-        Hook("beforeCreate", "create", hooks => hooks.BeforeCreate, InTransaction),
-        Hook("beforeUpdate", "update", hooks => hooks.BeforeUpdate, InTransaction),
-        Hook("beforeDelete", "delete", hooks => hooks.BeforeDelete, InTransaction),
-    ];
-
-    private const string InTransaction =
-        "a before-hook runs inside the write transaction and may reject or mutate the payload, so the write "
-        + "is neither vetted nor patched — a field the hook was meant to set stays permanently null, exactly "
-        + "as a dropped 'default' does";
-
-    /// <summary>Builds one hook point's entry, so the six differ only in the words that should differ.</summary>
-    /// <param name="point">The hook point's key under <c>hooks</c>.</param>
-    /// <param name="operation">The operation it would run on.</param>
-    /// <param name="declared">Reads that point's list off the entity's hooks.</param>
-    /// <param name="consequence">What dropping a hook of this phase costs.</param>
-    private static UnhonouredFeature<EntityDescriptor> Hook<T>(
-        string point,
-        string operation,
-        Func<EntityHooks, IReadOnlyList<T>?> declared,
-        string consequence) => new(
-        $"hooks/{point}",
-        entity => entity.Hooks is { } hooks && declared(hooks) is { Count: > 0 },
-        $"Lifecycle hooks are not supported yet, so the '{point}' hooks on this entity never run and every "
-        + $"{operation} proceeds as if they were not declared: {consequence}.",
-        $"Remove the '{point}' hooks, or track the hooks pipeline in #22. Refusing per hook point rather than "
-        + "per 'hooks' block is deliberate: each one is lifted the day it starts working, so declaring the "
-        + $"others costs you nothing once '{point}' lands.");
 
     /// <summary>
     /// A <c>rollup</c>'s optional <c>where</c> filter: the one part of the frozen rollup shape #21 does not

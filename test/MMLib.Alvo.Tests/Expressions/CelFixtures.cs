@@ -92,6 +92,11 @@ internal static class CelFixtures
     /// <exception cref="InvalidOperationException">Compilation failed; the message joins every compiler error.</exception>
     internal static CompiledExpression CompileComputed(string source) => Compile(source, CelProfile.Computed);
 
+    /// <summary>Compiles CEL source against <see cref="Orders"/> for the <see cref="CelProfile.Mutate"/> profile.</summary>
+    /// <param name="source">The CEL expression source.</param>
+    /// <exception cref="InvalidOperationException">Compilation failed; the message joins every compiler error.</exception>
+    internal static CompiledExpression CompileMutate(string source) => Compile(source, CelProfile.Mutate);
+
     /// <summary>Builds an <see cref="AlvoRecord"/> from field/value pairs for an interpreter test.</summary>
     /// <param name="fields">The record's field values.</param>
     internal static AlvoRecord Row(params (string Field, object? Value)[] fields) =>

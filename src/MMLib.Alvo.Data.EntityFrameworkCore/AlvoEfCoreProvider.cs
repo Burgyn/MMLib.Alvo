@@ -88,6 +88,7 @@ public static class AlvoEfCoreProvider
     private static EfAlvoData CreateData(IServiceProvider services) => new(
         services.GetRequiredService<IPolicyEngine>(),
         services.GetRequiredService<IPredicateEvaluator>(),
+        services.GetRequiredService<IBeforeHookRunner>(),
         services.GetRequiredService<IPredicateRenderer>(),
         services.GetRequiredService<IFieldSqlRenderer>(),
         services.GetRequiredService<IAlvoSqlDialect>(),

@@ -55,16 +55,35 @@ public class CelProfileTests
         CelFixtures.CompileCondition("new.status == 'draft'").ResultType.ShouldBe(CelValueType.Bool);
     }
 
+    /// <summary>
+    /// Every profile there is, enumerated from the enum rather than listed — so a profile added later
+    /// cannot escape the claim this fact's name makes.
+    /// </summary>
+    /// <remarks>
+    /// It was three <c>InlineData</c> rows until <see cref="CelProfile.Mutate"/> landed, and a fourth row
+    /// is the fix that looks right and is not: the next profile would have been missing again, and the
+    /// fact would still have been named "in every profile". A fact whose coverage has to be remembered is
+    /// a fact that will eventually be wrong about itself.
+    /// </remarks>
     [Theory]
-    [InlineData(CelProfile.Rule)]
-    [InlineData(CelProfile.Condition)]
-    [InlineData(CelProfile.Computed)]
+    [MemberData(nameof(EveryProfile))]
     public void A_comprehension_macro_is_rejected_in_every_profile_toward_a_hook(CelProfile profile)
     {
         var result = CelFixtures.Compiler.Compile("all(f, f > 0)", profile, CelFixtures.Orders);
 
         result.IsSuccess.ShouldBeFalse();
         result.Errors[0].FixSuggestion.ShouldNotBeNull().ShouldContain("hooks.beforeUpdate");
+    }
+
+    public static TheoryData<CelProfile> EveryProfile()
+    {
+        TheoryData<CelProfile> profiles = [];
+        foreach (var profile in Enum.GetValues<CelProfile>())
+        {
+            profiles.Add(profile);
+        }
+
+        return profiles;
     }
 
     [Fact]

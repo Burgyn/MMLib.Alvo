@@ -123,6 +123,26 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task Update_of_another_users_row_reports_not_found() { }
         public static Xunit.TheoryData<MMLib.Alvo.Data.AlvoFilter> MalformedFilters() { }
     }
+    public abstract class AlvoDataBeforeHookTests
+    {
+        protected AlvoDataBeforeHookTests() { }
+        protected static System.DateTimeOffset Stamp { get; }
+        public System.Threading.Tasks.Task A_delete_no_hook_refuses_still_removes_the_row() { }
+        public System.Threading.Tasks.Task A_mutate_may_write_a_field_the_caller_is_refused() { }
+        public System.Threading.Tasks.Task A_mutate_on_an_update_reaches_the_stored_row_at_that_writes_instant() { }
+        public System.Threading.Tasks.Task A_mutate_reaches_the_stored_row() { }
+        public System.Threading.Tasks.Task A_mutate_reading_now_records_the_writes_own_audit_instant() { }
+        public System.Threading.Tasks.Task A_mutate_that_moves_a_row_out_of_the_create_rule_is_refused() { }
+        public System.Threading.Tasks.Task A_mutate_the_create_rule_accepts_still_lands() { }
+        public System.Threading.Tasks.Task A_mutate_writes_through_a_bound_parameter_like_every_other_value() { }
+        public System.Threading.Tasks.Task A_reject_on_a_delete_leaves_the_row_in_place() { }
+        public System.Threading.Tasks.Task A_reject_on_an_update_leaves_the_stored_row_untouched() { }
+        public System.Threading.Tasks.Task A_reject_refuses_the_create_and_stores_no_row() { }
+        public System.Threading.Tasks.Task A_reject_whose_condition_is_false_lets_the_create_through() { }
+        public System.Threading.Tasks.Task An_idempotent_replay_runs_no_hook_a_second_time() { }
+        public System.Threading.Tasks.Task Every_write_face_consults_the_hook_pipeline() { }
+        protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Testing.Data.IAlvoDataBeforeHookWorld> WorldAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, System.TimeProvider time);
+    }
     public abstract class AlvoDataComparisonTests
     {
         protected AlvoDataComparisonTests() { }
@@ -325,6 +345,11 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task The_policy_predicate_is_bound_inside_the_where_clause_of_one_statement() { }
         public System.Threading.Tasks.Task The_tenant_scope_is_bound_inside_the_same_where_clause() { }
         public System.Threading.Tasks.Task The_update_statement_itself_carries_the_policy_predicate() { }
+    }
+    public interface IAlvoDataBeforeHookWorld
+    {
+        MMLib.Alvo.Data.IAlvoData Data { get; }
+        System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Rules.DataOperation> HookRuns { get; }
     }
     public interface IAlvoDataOutboxWorld
     {

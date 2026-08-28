@@ -911,6 +911,7 @@ namespace MMLib.Alvo.Expressions
         Rule = 0,
         Computed = 1,
         Condition = 2,
+        Mutate = 3,
     }
     public enum CelRecordState
     {
@@ -1135,6 +1136,10 @@ namespace MMLib.Alvo.Rules
         Create = 2,
         Update = 3,
         Delete = 4,
+    }
+    public interface IBeforeHookRunner
+    {
+        System.Collections.Generic.IReadOnlyDictionary<string, object?> Run(string entity, MMLib.Alvo.Rules.DataOperation operation, MMLib.Alvo.Data.AlvoRecord candidate, MMLib.Alvo.Data.AlvoRecord? previous, MMLib.Alvo.AlvoContext context, System.DateTimeOffset now);
     }
     public interface IPolicyEngine
     {

@@ -18,6 +18,12 @@ internal static class RulesSetup
     /// <see cref="IPolicyEngine"/> must never itself fail or block — only an
     /// <see cref="IPolicyEngine.Resolve"/> call made before anything has been applied denies, with a
     /// message that says exactly that.
+    /// <para>
+    /// <see cref="IBeforeHookRunner"/> is registered here and not beside the data path because it reads the
+    /// <em>same</em> catalog instance <see cref="IPolicyEngine"/> resolves against: a driver calls it inside
+    /// the transaction it opened, and the hooks it runs have to come from the apply that compiled the rules
+    /// judging that same write.
+    /// </para>
     /// </summary>
     /// <remarks>
     /// <see cref="IRoleCatalogProvider"/> resolves to the <em>same instance</em> as
@@ -42,6 +48,7 @@ internal static class RulesSetup
         services.TryAddSingleton<ISchemaRegistry>(
             provider => provider.GetRequiredService<IPolicyCatalogProvider>());
         services.TryAddSingleton<IPolicyEngine, PolicyEngine>();
+        services.TryAddSingleton<IBeforeHookRunner, BeforeHookRunner>();
         return services;
     }
 }

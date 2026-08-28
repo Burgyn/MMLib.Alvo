@@ -123,13 +123,15 @@ public sealed class PolicyCatalog
 /// <param name="Hidden">The compiled <c>hidden</c> flag for every field that declares one, keyed by field name.</param>
 /// <param name="ReadOnly">The compiled <c>readOnly</c> flag for every field that declares one, keyed by field name.</param>
 /// <param name="AfterHooks">The compiled <c>after*</c> hooks, or <see cref="EntityAfterHooks.None"/> when the entity declares none.</param>
+/// <param name="BeforeHooks">The compiled <c>before*</c> hooks, or <see cref="EntityBeforeHooks.None"/> when the entity declares none.</param>
 internal sealed record EntityPolicy(
     TenancyMode? Tenancy,
     CompiledExpression? TenantScope,
     IReadOnlyDictionary<DataOperation, OperationPolicy> Operations,
     IReadOnlyDictionary<string, FieldMask> Hidden,
     IReadOnlyDictionary<string, FieldMask> ReadOnly,
-    EntityAfterHooks AfterHooks);
+    EntityAfterHooks AfterHooks,
+    EntityBeforeHooks BeforeHooks);
 
 /// <summary>
 /// One entity's compiled <c>after*</c> hooks, one list per hook point.

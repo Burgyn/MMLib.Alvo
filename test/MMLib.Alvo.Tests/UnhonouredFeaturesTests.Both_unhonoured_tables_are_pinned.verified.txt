@@ -16,21 +16,6 @@
       Path: softDelete,
       Consequence: Soft delete is not supported yet: a delete would remove the row outright and reads would not exclude it, which is irrecoverable data loss where the schema promises recoverability.,
       Fix: Remove 'softDelete' or track the soft-delete implementation issue. A flag written as false is not a declaration and maps normally.
-    },
-    {
-      Path: hooks/beforeCreate,
-      Consequence: Lifecycle hooks are not supported yet, so the 'beforeCreate' hooks on this entity never run and every create proceeds as if they were not declared: a before-hook runs inside the write transaction and may reject or mutate the payload, so the write is neither vetted nor patched — a field the hook was meant to set stays permanently null, exactly as a dropped 'default' does.,
-      Fix: Remove the 'beforeCreate' hooks, or track the hooks pipeline in #22. Refusing per hook point rather than per 'hooks' block is deliberate: each one is lifted the day it starts working, so declaring the others costs you nothing once 'beforeCreate' lands.
-    },
-    {
-      Path: hooks/beforeUpdate,
-      Consequence: Lifecycle hooks are not supported yet, so the 'beforeUpdate' hooks on this entity never run and every update proceeds as if they were not declared: a before-hook runs inside the write transaction and may reject or mutate the payload, so the write is neither vetted nor patched — a field the hook was meant to set stays permanently null, exactly as a dropped 'default' does.,
-      Fix: Remove the 'beforeUpdate' hooks, or track the hooks pipeline in #22. Refusing per hook point rather than per 'hooks' block is deliberate: each one is lifted the day it starts working, so declaring the others costs you nothing once 'beforeUpdate' lands.
-    },
-    {
-      Path: hooks/beforeDelete,
-      Consequence: Lifecycle hooks are not supported yet, so the 'beforeDelete' hooks on this entity never run and every delete proceeds as if they were not declared: a before-hook runs inside the write transaction and may reject or mutate the payload, so the write is neither vetted nor patched — a field the hook was meant to set stays permanently null, exactly as a dropped 'default' does.,
-      Fix: Remove the 'beforeDelete' hooks, or track the hooks pipeline in #22. Refusing per hook point rather than per 'hooks' block is deliberate: each one is lifted the day it starts working, so declaring the others costs you nothing once 'beforeDelete' lands.
     }
   ]
 }

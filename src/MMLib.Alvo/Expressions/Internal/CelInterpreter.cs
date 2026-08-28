@@ -173,6 +173,65 @@ internal static class CelInterpreter
         }
     }
 
+    /// <summary>
+    /// Evaluates a <see cref="CelProfile.Mutate"/> expression's value against the candidate row, inside the
+    /// write's own transaction. This is the <b>only</b> backend for that profile — a
+    /// <see cref="CelProfile.Mutate"/> expression is never handed to <see cref="SqlPredicateRenderer"/>,
+    /// which refuses its function calls by name — so the two-valued fold and the collation caveat this
+    /// class's remarks describe have no second backend to agree with here.
+    /// </summary>
+    /// <param name="expression">The compiled <see cref="CelProfile.Mutate"/> expression.</param>
+    /// <param name="current">
+    /// The candidate row the mutate value is derived from — the <b>complete post-image</b>, for the same
+    /// reason <see cref="EvaluatePredicate"/> requires one.
+    /// </param>
+    /// <param name="previous">The row as it was before the change, or <see langword="null"/> on a create.</param>
+    /// <param name="now">
+    /// The instant <c>now()</c> resolves to: the one this write is stamped with, bound <b>once</b> by the
+    /// caller that already computed the audit stamp — never read here. That is what makes a
+    /// <see cref="CelProfile.Mutate"/> expression referentially transparent within a write, and therefore
+    /// safe to evaluate inside a transaction that may be retried: a retry re-stamps, but one attempt cannot
+    /// disagree with itself, two hooks on one write agree, and the value a hook writes agrees with the row's
+    /// own <c>updated_at</c>. An interpreter that read <see cref="TimeProvider"/> itself would give up all
+    /// three, and could not be asserted on at all.
+    /// </param>
+    /// <returns>
+    /// The value to assign, or <see langword="null"/>. <see langword="null"/> is a value here rather than a
+    /// failure signal — a fold over a missing field yields a missing field, not an empty string — so it is
+    /// the caller's business whether writing it is allowed.
+    /// </returns>
+    /// <remarks>
+    /// <b>The <c>catch</c> collapses to the same <see langword="null"/> a legitimate missing value produces,
+    /// and that conflation is safe only because no input reaches it.</b> Written down because the two are
+    /// otherwise indistinguishable to a caller, and the create path turns a <see langword="null"/> patch value
+    /// into an <em>absent</em> key — so a reachable failure here would silently store a column default instead
+    /// of refusing the write, which is the class of outcome this framework refuses <c>default</c> and
+    /// <c>rollup</c> for. Nothing in a <see cref="CelProfile.Mutate"/> tree can throw: the profile admits only
+    /// literals, field references and the two allow-listed calls; <see cref="Evaluate"/>'s node switch ends in
+    /// <c>_ =&gt; null</c>; <c>lowerAscii</c> of a non-string is <see langword="null"/> rather than an error;
+    /// and <c>now()</c> reads a value the caller already bound. The <c>catch</c> is therefore the same
+    /// defence-in-depth as <see cref="EvaluatePredicate"/>'s, and admitting a construct that can throw into
+    /// this profile is what would make it a live decision.
+    /// </remarks>
+    public static object? EvaluateMutation(
+        CompiledExpression expression, AlvoRecord current, AlvoRecord? previous, DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(expression);
+        ArgumentNullException.ThrowIfNull(current);
+
+        try
+        {
+            var state = new EvalState(current, previous, null, now);
+            return Evaluate(expression.Root, state);
+        }
+#pragma warning disable CA1031
+        catch (Exception)
+#pragma warning restore CA1031
+        {
+            return null;
+        }
+    }
+
     private static object? Evaluate(CelNode node, in EvalState state) => node switch
     {
         CelLiteral literal => literal.Value,
@@ -183,8 +242,62 @@ internal static class CelInterpreter
         CelHas has => ResolveField(has.Field, state) is not null,
         CelConditional conditional => EvaluateConditional(conditional, state),
         CelChanged changed => EvaluateChanged(changed, state),
+        CelCall call => EvaluateCall(call, state),
         _ => null,
     };
+
+    /// <summary>
+    /// Evaluates one of the two allow-listed <see cref="CelProfile.Mutate"/> functions. <c>now()</c> reads the
+    /// instant the caller bound for this write — it is <b>not</b> a clock read, and there is deliberately no
+    /// <see cref="TimeProvider"/> in reach of this class to make one from.
+    /// </summary>
+    private static object? EvaluateCall(CelCall call, in EvalState state) => call switch
+    {
+        { Name: CelCall.LowerAscii, Argument: { } argument } => LowerAscii(Evaluate(argument, state)),
+        { Name: CelCall.Now, Argument: null } => state.Now,
+        _ => null,
+    };
+
+    /// <summary>
+    /// Applies <c>lowerAscii</c>. A value that is not a string is <see langword="null"/> rather than an
+    /// error: the type checker already refused a non-string argument, so this can only be reached by a
+    /// record whose stored value disagrees with its declared type, and this class never throws.
+    /// </summary>
+    private static string? LowerAscii(object? value) => value is string text ? FoldAsciiUpperCase(text) : null;
+
+    /// <summary>
+    /// Folds <c>A</c>–<c>Z</c> and nothing else — spelled out character by character, so nothing
+    /// culture- or Unicode-sensitive can creep in later.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b><see cref="string.ToLowerInvariant"/> is not equivalent and must never replace this.</b> It folds
+    /// every non-ASCII letter it has a mapping for — <c>Ž</c>→<c>ž</c>, <c>Ä</c>→<c>ä</c>, <c>Σ</c>→<c>σ</c>,
+    /// and <c>ẞ</c>→<c>ß</c>, which no reverse mapping recovers — and a stored value folded that way is a
+    /// permanently wrong row: fixing the expression afterwards does not restore the bytes.
+    /// </para>
+    /// <para>
+    /// <b>The set of characters it folds is a runtime detail, which is the deeper reason this loop is
+    /// positive rather than a list of exceptions.</b> <c>İ</c> (U+0130) is the famous trap and is exactly
+    /// where the reputation misleads: .NET 10's invariant casing leaves it <em>unchanged</em> (measured, not
+    /// assumed), while a full Unicode case mapping folds it to two code points. Either way an author asked
+    /// for an ASCII fold and must get one on every runtime and ICU version — which "fold A–Z" satisfies by
+    /// construction and "fold, but skip the ones we know about" cannot.
+    /// </para>
+    /// </remarks>
+    private static string FoldAsciiUpperCase(string value)
+    {
+        var folded = value.ToCharArray();
+        for (var index = 0; index < folded.Length; index++)
+        {
+            if (folded[index] is >= 'A' and <= 'Z')
+            {
+                folded[index] = (char)(folded[index] + 32);
+            }
+        }
+
+        return new string(folded);
+    }
 
     private static object? ResolveField(CelFieldRef fieldRef, in EvalState state)
     {
@@ -511,12 +624,23 @@ internal static class CelInterpreter
         ? -decimalValue
         : null;
 
-    private readonly struct EvalState(AlvoRecord current, AlvoRecord? previous, AlvoContext? context)
+    private readonly struct EvalState(
+        AlvoRecord current, AlvoRecord? previous, AlvoContext? context, DateTimeOffset? now = null)
     {
         public AlvoRecord Current { get; } = current;
 
         public AlvoRecord? Previous { get; } = previous;
 
         public AlvoContext? Context { get; } = context;
+
+        /// <summary>
+        /// The instant <c>now()</c> resolves to, bound once per write by the caller, or
+        /// <see langword="null"/> on every entry point that is not a <see cref="CelProfile.Mutate"/>
+        /// evaluation — where a call node cannot appear at all, because the type checker allows the call
+        /// construct in <see cref="CelProfile.Mutate"/> and nowhere else. <see langword="null"/> is
+        /// therefore unreachable rather than a default anyone can observe, and it evaluates to a missing
+        /// value rather than to some substitute instant if a defect ever makes it reachable.
+        /// </summary>
+        public DateTimeOffset? Now { get; } = now;
     }
 }

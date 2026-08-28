@@ -52,32 +52,62 @@ internal static class CelTypeChecker
         Arithmetic,
         Conditional,
         Changed,
+        Call,
     }
 
-    private static readonly IReadOnlySet<CelProfile> _allProfiles =
+    /// <summary>
+    /// Rule, Computed and Condition — the three profiles that predate <see cref="CelProfile.Mutate"/>.
+    /// Deliberately <b>not</b> "every profile": <see cref="CelProfile.Mutate"/> joins a row of
+    /// <see cref="_allowedProfiles"/> one at a time, with the fact that needs it, so the table never grants
+    /// a construct to a profile no test has exercised there.
+    /// </summary>
+    private static readonly IReadOnlySet<CelProfile> _ruleComputedCondition =
         new HashSet<CelProfile> { CelProfile.Rule, CelProfile.Computed, CelProfile.Condition };
+
+    private static readonly IReadOnlySet<CelProfile> _everyProfile =
+        new HashSet<CelProfile> { CelProfile.Rule, CelProfile.Computed, CelProfile.Condition, CelProfile.Mutate };
 
     private static readonly IReadOnlySet<CelProfile> _computedOnly = new HashSet<CelProfile> { CelProfile.Computed };
 
     private static readonly IReadOnlySet<CelProfile> _conditionOnly = new HashSet<CelProfile> { CelProfile.Condition };
 
+    private static readonly IReadOnlySet<CelProfile> _mutateOnly = new HashSet<CelProfile> { CelProfile.Mutate };
+
     private static readonly IReadOnlySet<CelProfile> _ruleAndCondition =
         new HashSet<CelProfile> { CelProfile.Rule, CelProfile.Condition };
 
+    /// <summary>
+    /// A hook <c>condition</c> and a before-hook <c>mutate</c> are the two slots evaluated against a
+    /// candidate row, so they are the two that may name the row's before/after images.
+    /// </summary>
+    private static readonly IReadOnlySet<CelProfile> _conditionAndMutate =
+        new HashSet<CelProfile> { CelProfile.Condition, CelProfile.Mutate };
+
+    /// <summary>
+    /// The one positive table that decides where each construct is legal. <see cref="CelProfile.Mutate"/>
+    /// holds four rows today — literals, current-row and <c>old.</c>/<c>new.</c> field references, and the
+    /// allow-listed function call — which is exactly what its two functions and their arguments need. The
+    /// remaining rows (logical, comparison, <c>in</c>, <c>has</c>, arithmetic, ternary, <c>changed</c>,
+    /// context references) are <b>not</b> a decision that <c>mutate</c> may never use them; they are simply
+    /// not admitted yet, and each arrives with the fact that needs it — a before-hook <c>mutate</c> like
+    /// <c>new.stage == 'won'</c> will bring the comparison row with it. Deny-by-default is what makes that
+    /// safe to defer: an unlisted pairing compiles in no profile rather than in every one.
+    /// </summary>
     private static readonly Dictionary<CelConstructKind, IReadOnlySet<CelProfile>> _allowedProfiles =
         new()
         {
-            [CelConstructKind.Literal] = _allProfiles,
-            [CelConstructKind.FieldRefCurrent] = _allProfiles,
-            [CelConstructKind.FieldRefPastFuture] = _conditionOnly,
+            [CelConstructKind.Literal] = _everyProfile,
+            [CelConstructKind.FieldRefCurrent] = _everyProfile,
+            [CelConstructKind.FieldRefPastFuture] = _conditionAndMutate,
             [CelConstructKind.ContextRef] = _ruleAndCondition,
-            [CelConstructKind.Logical] = _allProfiles,
-            [CelConstructKind.Comparison] = _allProfiles,
+            [CelConstructKind.Logical] = _ruleComputedCondition,
+            [CelConstructKind.Comparison] = _ruleComputedCondition,
             [CelConstructKind.In] = _ruleAndCondition,
-            [CelConstructKind.Has] = _allProfiles,
+            [CelConstructKind.Has] = _ruleComputedCondition,
             [CelConstructKind.Arithmetic] = _computedOnly,
             [CelConstructKind.Conditional] = _computedOnly,
             [CelConstructKind.Changed] = _conditionOnly,
+            [CelConstructKind.Call] = _mutateOnly,
         };
 
     private static bool IsAllowed(CelProfile profile, CelConstructKind kind) =>
@@ -108,6 +138,7 @@ internal static class CelTypeChecker
             CelHas has => CheckHas(has),
             CelConditional conditional => CheckConditional(conditional),
             CelChanged changed => CheckChanged(changed),
+            CelCall call => CheckCall(call),
             _ => UnrecognizedNode(node),
         };
 
@@ -134,8 +165,10 @@ internal static class CelTypeChecker
                 : CelConstructKind.FieldRefPastFuture;
             var stateBad = CheckConstruct(
                 kind,
-                $"'{StatePrefix(fieldRef.State)}{fieldRef.FieldName}' is legal only in the Condition profile (a hook condition).",
-                "Reference the current row instead, or move this check into a hook condition.",
+                $"'{StatePrefix(fieldRef.State)}{fieldRef.FieldName}' is legal only in the {CelProfile.Condition} and "
+                + $"{CelProfile.Mutate} profiles (a hook condition and a before-hook mutate value) — the two slots "
+                + "evaluated against a candidate row.",
+                "Reference the current row instead, or move this into a hook condition or a before-hook mutate.",
                 position);
 
             var field = ResolveField(fieldRef.FieldName);
@@ -471,6 +504,39 @@ internal static class CelTypeChecker
             return (changed, CelValueType.Bool, true, position);
         }
 
+        /// <summary>
+        /// Checks one of the two allow-listed <see cref="CelProfile.Mutate"/> functions. The profile gate
+        /// runs first and unconditionally, so a call outside <see cref="CelProfile.Mutate"/> is reported for
+        /// the profile it is in even when its argument is also wrong — one error per independent problem,
+        /// which is this checker's whole contract.
+        /// </summary>
+        private (CelNode, CelValueType, bool, int) CheckCall(CelCall call)
+        {
+            var position = FindPosition(call.Name);
+            var profileBad = CheckConstruct(
+                CelConstructKind.Call,
+                $"'{call.Name}(...)' is legal only in the {CelProfile.Mutate} profile (a before-hook mutate value).",
+                "Move this into hooks.before*.mutate, or write the value without a function call.",
+                position);
+
+            return call switch
+            {
+                { Name: CelCall.LowerAscii, Argument: { } argument } => CheckLowerAsciiCall(call, argument, profileBad, position),
+                { Name: CelCall.Now, Argument: null } => (call, CelValueType.Timestamp, profileBad, position),
+                _ => UnrecognizedNode(call),
+            };
+        }
+
+        private (CelNode, CelValueType, bool, int) CheckLowerAsciiCall(
+            CelCall call, CelNode argument, bool profileBad, int position)
+        {
+            var (checkedArgument, argumentType, argumentError, argumentPosition) = CheckNode(argument);
+            var argumentBad = RequireString(
+                argumentType, argumentError, $"{call.Name}(...)'s argument", argumentPosition);
+
+            return (call with { Argument = checkedArgument }, CelValueType.String, profileBad || argumentBad, position);
+        }
+
         private bool RequireBool(CelValueType type, bool childError, string subject, int position)
         {
             if (childError)
@@ -486,6 +552,25 @@ internal static class CelTypeChecker
             Errors.Add(new CelCompilationError(
                 $"{subject} must be boolean; found {type}.",
                 "Use a comparison (field == value) or has(field) so this operand evaluates to true/false.",
+                position));
+            return true;
+        }
+
+        private bool RequireString(CelValueType type, bool childError, string subject, int position)
+        {
+            if (childError)
+            {
+                return true;
+            }
+
+            if (type == CelValueType.String)
+            {
+                return false;
+            }
+
+            Errors.Add(new CelCompilationError(
+                $"{subject} must be a string; found {type}.",
+                "Pass a string, text or enum field, or drop the fold.",
                 position));
             return true;
         }
