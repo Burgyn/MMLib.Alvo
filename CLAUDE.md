@@ -117,6 +117,12 @@ today.
   last check — it flags drift from `docs/PLAN.md`, violated §0 principles,
   and shortcuts in the security core. It is read-only and advisory: it
   reports a verdict, it does not fix, tidy, or commit anything itself.
+- **Then build the PR report** via the `alvo-pr-report` skill, after
+  plan-guard and before `gh pr create`. It dispatches the `alvo-pr-reporter`
+  subagent, publishes the fixed 8-section page as an Artifact, and the PR
+  body becomes a five-line pointer to it. The maintainer reviews that page
+  instead of the diff, so a PR that changes what Alvo can do does not get
+  opened without one. Docs-only and dependency PRs skip it.
 - **Also run Claude Code's built-in reviews as the local inner loop** (once
   there is product code to review — from F3 on). They are the general
   correctness/security pass that `alvo-plan-guard` deliberately is not (it
