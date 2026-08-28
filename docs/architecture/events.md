@@ -965,6 +965,12 @@ premise of refusing a host the `entity.` namespace, so the two must not be able 
   hazard the wildcard refusal exists for, closed by shape instead of by a warning. The disjointness is
   provable: an entity name is `^[a-z][a-z0-9_]{0,62}$` and carries no dot, and a custom type must contain
   at least one.
+  **An obligation #150 inherits, surfaced by a security-checklist pass:** neither `type` nor `subject` is
+  length-bounded, so `partition_key` is unbounded text — and #150 is the issue that will put an **index** on
+  that column, where PostgreSQL's btree entry limit (~2704 bytes) turns an oversized key from a wide row into
+  a failing INSERT. A cap is deliberately not invented here, because the number that can be defended is the
+  index's, and the index does not exist yet; whoever adds it owes the bound with it. A data event is
+  unaffected — its key is `{entity}:{rowId}`, and both halves are already bounded by the schema.
 
 **Why the guarantee ships before the feature it guards is useful.** The refusal costs nothing now and cannot
 be added later without breaking whichever host is already minting `entity.orders.updated` by then. A guard
