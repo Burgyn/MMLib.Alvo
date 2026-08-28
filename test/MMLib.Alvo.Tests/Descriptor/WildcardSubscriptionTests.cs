@@ -92,6 +92,7 @@ public sealed class WildcardSubscriptionTests
     /// <b>A malformed entry is reported, never thrown on.</b>
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <c>JsonElement.TryGetProperty</c> throws on a non-object instead of answering <see langword="false"/>,
     /// and this pass walks raw input <em>before</em> the schema pass has gated anything — so a syntactically
     /// valid <c>"automation": { "deal-won": "not-an-object" }</c> took the whole validator down with an
@@ -99,22 +100,33 @@ public sealed class WildcardSubscriptionTests
     /// on arbitrary input and never throw; the apply path is reachable from a CLI, a dashboard and an agent,
     /// so a crash there is an availability bug on caller-controlled input. Found by review, not by this fact —
     /// which is why the fact exists.
-    /// </remarks>
-    /// <param name="malformed">One automation entry that is valid JSON and not an object.</param>
+    /// </para>
+    /// <para>
+    /// <b>Both blocks, though one guard serves them.</b> The re-review pointed out that covering only
+    /// <c>automation</c> leaves the <c>functions</c> half resting on the reader's knowledge that
+    /// <c>WildcardErrorFor</c> is shared — which is exactly the kind of thing a later refactor splits without
+    /// anything going red.
+    /// </para>
+    /// <param name="block">The top-level block the malformed entry sits in.</param>
+    /// <param name="malformed">One entry that is valid JSON and not an object.</param>
     [Theory]
-    [InlineData("\"not-an-object\"")]
-    [InlineData("42")]
-    [InlineData("null")]
-    [InlineData("[]")]
-    public void A_malformed_automation_entry_is_reported_rather_than_thrown_on(string malformed)
+    [InlineData("automation", "\"not-an-object\"")]
+    [InlineData("automation", "42")]
+    [InlineData("automation", "null")]
+    [InlineData("automation", "[]")]
+    [InlineData("functions", "\"not-an-object\"")]
+    [InlineData("functions", "42")]
+    [InlineData("functions", "null")]
+    [InlineData("functions", "[]")]
+    public void A_malformed_entry_is_reported_rather_than_thrown_on(string block, string malformed)
     {
         var json = Descriptor($$"""
-            "automation": { "deal-won": {{malformed}} }
+            "{{block}}": { "entry": {{malformed}} }
             """);
 
         var result = Should.NotThrow(() => new DescriptorValidator().Validate(json));
 
-        result.Errors.ShouldNotBeEmpty("the schema pass still has to refuse a non-object automation rule");
+        result.Errors.ShouldNotBeEmpty($"the schema pass still has to refuse a non-object '{block}' entry");
     }
 
     private static InvalidDataException Refusal(string descriptorJson)
