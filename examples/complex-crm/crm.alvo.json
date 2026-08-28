@@ -140,11 +140,11 @@
       "hooks": {
         "beforeUpdate": [
           {
-            "condition": "old.stage in ['won', 'lost'] && !('manager' in @user.roles)",
+            "condition": "(old.stage == 'won' || old.stage == 'lost') && !('manager' in @user.roles)",
             "action": { "reject": "Only a manager may change a closed deal" }
           },
           {
-            "condition": "changed(stage) && new.stage in ['won', 'lost']",
+            "condition": "changed(stage) && (new.stage == 'won' || new.stage == 'lost')",
             "action": { "mutate": { "closed_at": { "$cel": "now()" } } }
           }
         ]
@@ -206,7 +206,7 @@
   },
   "automation": {
     "deal-won": {
-      "description": "Notify ERP and the deal owner when a deal is won.",
+      "description": "Notify ERP and the sales-ops mailbox when a deal is won. The recipient is a fixed address written in this descriptor, which is the only kind that is safe today: it is authored here, not writable by whoever edits the deal. Notifying the OWNER is deliberately absent — an envelope carries authentication and no identity claims, so nothing resolves an owner to an address (#146, #37), and an address field on the record would be caller-writable, which turns a notification into mail sent wherever the writer chose.",
       "trigger": { "event": "entity.deals.updated" },
       "condition": "changed(stage) && new.stage == 'won'",
       "actions": [
@@ -218,7 +218,7 @@
         {
           "type": "email",
           "template": "deal-won",
-          "to": "{{@user.email}}"
+          "to": "sales-ops@firma.sk"
         }
       ]
     },

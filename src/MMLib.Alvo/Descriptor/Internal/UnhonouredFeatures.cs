@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Descriptor.Internal;
+﻿using System.Reflection;
+
+namespace MMLib.Alvo.Descriptor.Internal;
 
 /// <summary>
 /// <b>The one authority on what the frozen descriptor schema declares and this build does not honour.</b>
@@ -130,6 +132,42 @@ internal static class UnhonouredFeatures
         + "deliberately not offered — an aggregate over the wrong row set costs more than this refusal.");
 
     /// <summary>
+    /// A wildcard subscription — <c>entity.orders.*</c> — in either slot the frozen schema types as
+    /// <c>$defs/eventPattern</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The one entry in this file that refuses something whose absence <em>is</em> observable</b>, which is
+    /// <see cref="UnhonouredSubsystems"/>' line for warning rather than refusing. It is refused anyway because
+    /// the two halves of "observable" come apart here: the absence is observable <em>today</em> (no automation
+    /// rule fires at all, and the author sees that), while the consequence is observable <b>never</b>. The day
+    /// automation lands, a wildcard already sitting in a descriptor becomes a fan-out across every tenant with
+    /// nobody re-reading the file that declared it — and a delivery that went to the wrong tenant is not an
+    /// absence anyone notices. The descriptor is the durable artifact, which is the argument for tolerating one
+    /// that runs ahead of the build in general, and the argument against it in exactly this case.
+    /// </para>
+    /// <para>
+    /// <b>Why the wildcard and not the whole pattern.</b> An exact pattern names one entity, so whatever
+    /// scoping the rule engine gains later applies to it unchanged; a wildcard is the shape whose meaning
+    /// silently widens when a tenant is added, and it is the shape <c>baas-analyza.md:657</c> warns about. The
+    /// matcher itself is not built because it cannot be built correctly yet:
+    /// <see cref="Events.AlvoEvent"/> carries no tenant attribute, so nothing at delivery could scope a
+    /// subscription to the envelope's tenant, and the adversarial cross-tenant fact that ruling requires would
+    /// have no tenant on either side of its comparison. Giving the envelope one is issue <b>#153</b>.
+    /// </para>
+    /// </remarks>
+    internal static UnhonouredSlot WildcardSubscription { get; } = new(
+        "trigger.event",
+        "A wildcard event subscription is not matched yet: no rule fires for it today, and on the build that "
+        + "does implement matching it would subscribe to every entity or every operation of every tenant at "
+        + "once — a cross-tenant fan-out nobody re-reads this descriptor to catch, because the event envelope "
+        + "carries no tenant for a subscription to be scoped by (#153).",
+        "Name the entity and the operation exactly — 'entity.orders.created' rather than 'entity.orders.*' — "
+        + "and declare one rule per pair. Wildcards are refused rather than accepted-and-ignored because a "
+        + "descriptor outlives the build that applied it: accepted today, it becomes the fan-out above on the "
+        + "day matching lands, with nothing between it and delivery.");
+
+    /// <summary>
     /// A raw JSONata expression in any <c>$defs/jsonata</c>-typed slot: refused, never partially evaluated.
     /// </summary>
     /// <remarks>
@@ -192,6 +230,64 @@ internal static class UnhonouredFeatures
         + "than fail.",
         "Move the body inline into the template's 'body' — it takes the same '{{...}}' placeholders — or stop "
         + "referencing this template from an after-hook until bundle files are read.");
+
+    /// <summary>The action <c>type</c> discriminators this build declares and never runs.</summary>
+    /// <remarks>
+    /// Declared <b>before</b> <see cref="EveryFixSuggestion"/> deliberately: a static field initializer runs
+    /// in declaration order, so a list built above this line would enumerate <see langword="null"/>.
+    /// </remarks>
+    internal static IReadOnlyList<string> EveryActionType { get; } =
+        [FunctionType, HttpCallType, EntityUpdateType];
+
+    /// <summary>
+    /// Every fix suggestion this table can produce — the one thing common to every refusal it authors, and
+    /// therefore the way to ask whether a refusal came from <em>here</em> at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>It exists so a fact can assert a refusal's <em>reason</em> rather than its type.</b>
+    /// <c>DescriptorToSchemaMapperTests.Every_example_marked_not_runnable_really_is_refused</c> asserted only
+    /// <c>Should.Throw&lt;InvalidDataException&gt;</c>, so a CEL syntax error in a shipped example stood in
+    /// silently for the feature refusal the not-runnable marker claims — and the marker the test exists to
+    /// force to shrink would never have shrunk (deviation 76). Matching against this list is what makes the
+    /// assertion mean "refused by an unhonoured feature", which is the claim the marker actually makes.
+    /// </para>
+    /// <para>
+    /// <b>The <see cref="UnhonouredSlot"/> half is discovered by reflection, and that is the whole point of
+    /// the shape.</b> An enumeration that named <c>RollupWhere</c>, <c>RawJsonata</c> and the rest by hand
+    /// would be precisely the hand-copied list this file's own opening remark exists to forbid — and it would
+    /// fail in the worse direction: a new slot omitted from it does not break a build, it silently narrows
+    /// the assertion above back toward what deviation 76 complained about. Reflection over this type's own
+    /// static <see cref="UnhonouredSlot"/> properties makes a new slot join the list by being declared.
+    /// </para>
+    /// <para>
+    /// The two typed tables are enumerated directly because they already are collections, and the three
+    /// action refusals are generated rather than declared — so their types come from the same three constants
+    /// <see cref="ActionFix"/> switches on, whose <c>default</c> arm throws for an unmapped type.
+    /// </para>
+    /// </remarks>
+    internal static IReadOnlyList<string> EveryFixSuggestion { get; } =
+    [
+        .. OnAField.Select(feature => feature.Fix),
+        .. OnAnEntity.Select(feature => feature.Fix),
+        .. EveryDeclaredSlot().Select(slot => slot.Fix),
+        .. EveryActionType.Select(ActionFix),
+    ];
+
+    /// <summary>Every <see cref="UnhonouredSlot"/> this type declares, found rather than listed.</summary>
+    /// <remarks>
+    /// A slot declared <em>below</em> <see cref="EveryFixSuggestion"/> reflects as <see langword="null"/>,
+    /// because a static initializer runs in declaration order — so that case throws by name instead of
+    /// quietly contributing nothing, which would be the silent narrowing this whole shape exists to prevent.
+    /// </remarks>
+    private static IEnumerable<UnhonouredSlot> EveryDeclaredSlot() =>
+        typeof(UnhonouredFeatures)
+            .GetProperties(BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public)
+            .Where(property => property.PropertyType == typeof(UnhonouredSlot))
+            .Select(property => (UnhonouredSlot?)property.GetValue(obj: null)
+                ?? throw new InvalidOperationException(
+                    $"Unhonoured slot '{property.Name}' is declared below EveryFixSuggestion, so it "
+                    + "initializes after it and would contribute no fix suggestion. Move it above."));
 
     /// <summary>The refusal for one action type the frozen <c>$defs/action</c> declares and this build never runs.</summary>
     /// <param name="type">The action's <c>type</c> discriminator, exactly as the schema spells it.</param>

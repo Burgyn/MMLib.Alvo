@@ -451,6 +451,8 @@ namespace MMLib.Alvo.Testing.Events
         public System.Threading.Tasks.Task A_dispatched_entry_is_never_claimed_again() { }
         public System.Threading.Tasks.Task A_release_with_no_backoff_is_claimable_at_once() { }
         public System.Threading.Tasks.Task A_released_entry_is_held_for_its_backoff_and_not_for_the_lease() { }
+        public System.Threading.Tasks.Task An_appended_custom_event_is_claimable_like_an_emitted_one() { }
+        public System.Threading.Tasks.Task An_appended_custom_event_is_retired_like_an_emitted_one() { }
         public System.Threading.Tasks.Task An_entry_past_the_attempt_ceiling_is_no_longer_claimed() { }
         public System.Threading.Tasks.Task An_entry_whose_id_sorts_below_an_already_dispatched_one_is_still_claimed() { }
         protected virtual void EnsureEngineAvailable() { }

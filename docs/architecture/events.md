@@ -1,12 +1,14 @@
 # The event backbone
 
 How a committed write becomes a delivered after-hook action, and the decisions that shape it. Written
-during F3 PR5a (#22); the *Before-hooks* section was added by PR5b (#114).
+during F3 PR5a (#22); the *Before-hooks* section was added by PR5b-1 (#114), and *Publishing a custom
+application event* plus *The wildcard ruling* by PR5b-2.
 
-> **Status: complete for PR5a**, which is the *durable half* of #22, **plus PR5b's before-hooks**
-> (#114). Everything below describes what the code does today; where a decision was deliberately
-> deferred it says so and names the PR or issue that owns it — see *What PR5a does not do* and
-> *What PR5b and F7 inherit* at the end, which is where an author of the remaining PR5b work starts.
+> **Status: complete for PR5a**, which is the *durable half* of #22, **plus PR5b-1's before-hooks**
+> (#114) **and PR5b-2's publish guard and wildcard ruling**. Everything below describes what the code
+> does today; where a decision was deliberately deferred it says so and names the PR or issue that owns
+> it — see *What PR5a does not do* and *What PR5b and F7 inherit* at the end, which is where an author
+> of the remaining PR5b work (automation) starts.
 >
 > **Sibling records:** [`data-path.md`](./data-path.md) owns the port and the SQL a read or a write
 > becomes; [`host.md`](./host.md) owns the boot and the process; [`cel.md`](./cel.md) owns the profiles,
@@ -867,6 +869,166 @@ configuration key, its `Alvo__…` environment spelling, and a value that would 
 `ValidateDataAnnotations()` is deliberately **not** used, because a `[Range]` message names the property
 rather than the key and would add a second, worse message to every refusal.
 
+## Publishing a custom application event
+
+A host's own event, on the same durable queue a data event travels on. Added by **PR5b-2**, and the
+namespace guard is the reason it exists rather than a check bolted onto it.
+
+```
+IAlvoEvents.PublishAsync(type, subject, data, context)
+        │
+        ├─ AlvoEventName.EnsureCustom(type)   ← refuses first, before the clock is read
+        │     1. blank
+        │     2. first segment in AlvoEventName.ReservedNamespaces  (entity | auth | storage)
+        │     3. not two or more lower-case dot-separated segments
+        │
+        ├─ AlvoEventId.Create(now) · AlvoEvent.DefaultSource · AlvoEventProvenance.*
+        ├─ AlvoCustomEvent.Create             ← runs the SAME guard again; the only door to the queue
+        └─ IOutboxStore.AppendAsync           ← one autocommit INSERT, the statement OutboxTable emits
+```
+
+**The guard is the whole point, and it is stated against a real reader rather than against strings.** Without
+it a host could publish `entity.orders.updated`, and every after-hook and descriptor rule subscribing to that
+name would fire on an event carrying a `partitionkey`, an `authid` and a `time` for a record nobody wrote.
+"Indistinguishable" has exactly one arbiter — `EventSubscriptions`' type reader, which compares segment 0
+against `"entity"` with `StringComparison.Ordinal` — so the reserved set is ordinal too, and
+`EventSubscriptionsTests.An_event_a_host_published_selects_no_after_hook` drives a **real** published envelope
+through that reader. The name it publishes is `crm.deals.updated`: three segments, an entity the catalog
+really has hooks on, a suffix the reader really maps — everything a data event has except the namespace,
+which is the nearest legal forgery a host can attempt. A two-segment name would have been turned away by the
+segment-count check before the prefix was compared, which was measured, not assumed (the mutation that
+inverts the prefix comparison survived the two-segment version).
+
+**The refusal is an exception, not a returned result**, on `IBeforeHookRunner.Run`'s precedent (deviation 82):
+a refusal a caller can forget to check is a guard that is not one.
+
+**The guard is on the type the port accepts, and that is a correction rather than the first design.** The
+first draft put it only in `PublishAsync` and let `AppendAsync` take a bare `AlvoEvent` — and `IOutboxStore`
+is public and DI-registered while `AlvoEvent` is a public record with public initializers, so a host could
+resolve the port and append `entity.orders.updated` with `authtype: system` and a payload of its choosing.
+The PR that added the guard had added the primitive that bypassed it. `AppendAsync` now takes
+**`AlvoCustomEvent`**, whose only door — `AlvoCustomEvent.Create` — runs the guard; a check inside a driver
+would have to be repeated by every other driver and be absent from the one that forgot. This is
+`IOutboxStore`'s own rule for the UUIDv7 id, *"the wrong implementation is unavailable rather than merely
+discouraged"*, applied to the caller. An intermediate draft made the constructor `internal` instead and was
+wrong twice over: it rested on a forgeable `InternalsVisibleTo`, and it locked out `OutboxStoreContractTests`,
+the **public** suite an external driver author inherits — which is what surfaced that the invariant is *"none
+carries a reserved name"*, not *"only the framework constructs one"*. `AlvoEventName` moved to `Abstractions`
+with it, because the reserved namespaces are wire contract; `EventPattern` kept the wildcard half, which is
+descriptor contract.
+
+**The guard's *contents* were the second mistake, and it is the same one.** A later review found two more
+holes of the same shape: `ReservedNamespaces` was handed out as `IReadOnlySet<string>` over a live
+`HashSet`, so a host could downcast it and `Clear()` it — turning the guard off process-wide — and `Create`
+checked only the *name*, leaving `partitionkey` caller-controlled while this document claimed its
+disjointness was closed by shape. Both are now enforced (`FrozenSet`, and `Create` requires the key to start
+with the event's own type). The lesson is the one deviation 87 already carries, one level down: **a guarantee
+is only as strong as the narrowest path that reaches it**, and the contents of a guarded object are such a
+path.
+
+**`AppendAsync` has two facts in the contract suite both engines inherit** — appended-then-claimable, and
+appended-then-retired — because it was, briefly, product code no engine ever ran. Deleting its INSERT turns
+`SqliteOutboxStoreTests` red.
+
+**Provenance is one authority across two assemblies now.** The derivation of `authtype`, `authid` and
+`correlationid` was private to `OutboxEventFactory` in the EF driver; a second emit path in the core would
+have had to restate it, and a second copy of "which caller is the system caller" is how a system-made change
+comes to be reported as an ordinary caller's on one path and not the other. It moved to the public
+`AlvoEventProvenance` in `Abstractions`, which both paths call. Trusting an event's provenance is the whole
+premise of refusing a host the `entity.` namespace, so the two must not be able to disagree.
+
+### Three things a custom event is not, each stated where an author would otherwise assume it
+
+- **It is not subscribable.** `$defs/eventPattern` is **frozen** to
+  `^(entity|auth|storage)\.([a-z][a-z0-9_]*|\*)\.([a-z]+|\*)(\.batch)?$`, so `order.approved` is
+  unrepresentable as a subscription — and the guard forbids the three namespaces that *are* representable. So
+  **every** name this API accepts matches zero descriptor rules and zero after-hooks. What ships is a durable,
+  ordered, inspectable outbox row and nothing downstream of it: the dispatcher claims it, matches nothing,
+  counts `alvo.events.filtered` and marks it dispatched. Deliberate — the fix is a **designed namespace**,
+  taken once, not a prefix added under one PR's schedule — and stated on `IAlvoEvents` itself, where an author
+  reads it before calling. **Deviation 87.**
+- **It is not transactional with anything.** The spec's *"event sa publikuje v tej istej transakcii ako dátová
+  zmena"* is a guarantee about a **data** change; a custom event has none to be atomic with, and
+  `AppendAsync` is one autocommit statement. A host needing its own write and its own event to commit
+  together does not get that here. **Deviation 88.**
+- **It has no idempotency key, so a retried publish appends a second event.** `AlvoEvents` mints a fresh
+  `AlvoEventId` per call, so a `PublishAsync` whose `AppendAsync` succeeded but whose result was lost to
+  cancellation or a transport failure appends a *second* durable event when the host retries. Raised in
+  review and **deliberately not fixed here**: the obvious shape — derive the key from the event id — is the
+  one this document's own *What PR5b and F7 inherit* already refuses, because nothing prunes
+  `alvo_idempotency` (**#115**) and the table would then grow with event volume rather than with keyed
+  creates. Note also that a *duplicate publish* is a different problem from *duplicate delivery*: delivery is
+  at-least-once by design and the envelope's `id` is the consumer's dedup key, which does not help when the
+  two events have different ids. Whoever gives `PublishAsync` an idempotency key owes #115 with it.
+- **It carries no tenant, and that quietly enlarges #153.** `PublishAsync` takes an `AlvoContext` — which
+  *does* carry `Tenant` — and never reads it, because the envelope has nowhere to put it. That is the same
+  gap the wildcard ruling is built on, so it is consistent rather than new; the consequence worth recording is
+  that **#153 now has two emit paths to populate, not one.** Whoever gives the envelope a tenant must thread
+  it through here as well, or this becomes the single path whose events stay unattributed — and it would stay
+  that way silently, because nothing subscribes to a custom event to notice.
+- **It is not ordered per entity key.** The key is `custom.event:{subject}` — a **fixed** marker, not the
+  event's type — so every event about one subject shares one partition, which is the per-subject ordering
+  this API promises, under the same one-dispatcher, one-millisecond conditions as everything else. An earlier
+  draft keyed it `{type}:{subject}` and that was wrong: it split `orders.approved` and `orders.shipped` for
+  one `orders/42` across partitions while the interface promised ordering per subject. Caught in review.
+  **Why a marker at all:** `partition_key` exists for F7's partitioned claim (**#150**) to index, so a host
+  publishing `subject: "deals:<guid>"` would order itself into a real entity's partition the day that claim
+  reads the column — the same "meaning silently widens when the feature lands" hazard the wildcard refusal
+  exists for, closed by shape instead of by a warning. The disjointness is provable and rests on the marker's
+  **dot**: an entity name is `^[a-z][a-z0-9_]{0,62}$` and carries none. `AlvoCustomEvent.Create` enforces the
+  general form of that rule for every caller — the segment before the first `:` must contain a dot — rather
+  than requiring the event's own type, which would have contradicted the fixed marker.
+  **An obligation #150 inherits, surfaced by a security-checklist pass:** neither `type` nor `subject` is
+  length-bounded, so `partition_key` is unbounded text — and #150 is the issue that will put an **index** on
+  that column, where PostgreSQL's btree entry limit (~2704 bytes) turns an oversized key from a wide row into
+  a failing INSERT. A cap is deliberately not invented here, because the number that can be defended is the
+  index's, and the index does not exist yet; whoever adds it owes the bound with it. A data event is
+  unaffected — its key is `{entity}:{rowId}`, and both halves are already bounded by the schema.
+
+**Why the guarantee ships before the feature it guards is useful.** The refusal costs nothing now and cannot
+be added later without breaking whichever host is already minting `entity.orders.updated` by then. A guard
+added after the fact is a breaking change to that host; added now, it is a rule nobody ever got to break.
+
+## The wildcard ruling
+
+`alvo-specifikacia.md:141` makes `entity.orders.*` a **hard** guarantee. `baas-analyza.md:657` makes tenant
+isolation of rules a watch-out. This document set the two against each other and required PR5b to resolve
+them one way or the other: implement the matcher **with every subscription scoped to the envelope's tenant
+and a named adversarial cross-tenant fact**, or refuse `*` at apply until that exists.
+
+**The first branch is unavailable, and that is measured rather than argued.** `AlvoEvent` carries `authid`
+and **no tenant attribute** — `AlvoContext` has a `Tenant`, so the tenant is known at *emit* and dropped at
+the envelope boundary, which makes it unknowable at *delivery*, the only place a subscription is evaluated.
+So a matcher shipped today could be scoped by nothing, and the adversarial fact the ruling demands would have
+no tenant on either side of its comparison: it would assert nothing while looking like coverage. Giving the
+envelope a tenant is a public-API and wire-format change with a compatibility question for the outbox
+payloads this build already wrote — **#153** owns exactly that.
+
+**So `*` is refused at apply**, in both slots the schema types as `$defs/eventPattern`
+(`automation.*.trigger.event`, `functions.*.trigger.event`), on both passes: the typed pass in
+`DescriptorToSchemaMapper` that an embedded host reaches through `FromDescriptor`, and the raw-JSON pass in
+`DescriptorValidator` that gives a CLI or an agent the JSON Pointer and the fix. An **exact** pattern still
+applies and still only earns `UnhonouredSubsystems`' warning, which is what makes this a refusal of the
+wildcard rather than of subscriptions.
+
+The frozen grammar has **two** authorities, split along the two contracts it serves: `EventPattern` owns
+`HasWildcard` for this refusal (a *descriptor* question — what a rule may subscribe to), and `AlvoEventName`
+owns `ReservedNamespaces` for the publish guard (a *wire* question — which names Alvo emits, so which a host
+may not mint). They live in different assemblies for that reason, and
+`EventPatternTests.The_reserved_namespaces_are_the_schema_s_own`
+reads the alternation out of `schema/project.schema.json` itself, so the schema stays the authority over the
+authority. A segment is a wildcard only when it is *entirely* `*`, because the grammar admits it nowhere else;
+the cheap `pattern.Contains('*')` passes every other fact and is killed by its own.
+
+**This refuses a descriptor whose only defect is being ahead of the build, against `UnhonouredSubsystems`'
+own line** — refuse what silently produces wrong data, warn what is observably absent. It is taken anyway
+because the two halves of "observable" come apart here: the absence is observable **today** (no rule fires,
+and the author sees that), while the consequence is observable **never** — the day automation lands, a
+wildcard already sitting in a descriptor becomes a cross-tenant fan-out with nobody re-reading the file that
+declared it, and a delivery that reached the wrong tenant is not an absence anyone notices. The descriptor
+being the durable artifact is the argument *for* tolerating one that runs ahead of the build in general, and
+the argument *against* it in exactly this case. **Deviation 86.**
+
 ## What PR5a does not do
 
 Each line with the issue or the PR that owns it.
@@ -881,8 +1043,8 @@ Each line with the issue or the PR that owns it.
 | **The budget-overrun rollback** | **not built, and not scheduled**: there is no wall-clock budget to overrun — the bound is the grammar (deviation 81, and *What bounds a hook's execution time* above) |
 | **Before-hooks in `InMemoryAlvoData`** | **not built** — the public in-memory reference runs the policy engine but no hook pipeline, so a host testing against the double sees a `reject` not refuse and a `mutate` not apply. Deliberate (the contract suite is inherited by the two relational drivers, which have a transaction to run a hook in), and recorded as an **owed obligation** rather than a mere absence: deviation 85 |
 | **Automation** (`event` + `schedule` triggers), cron, and cron's distributed lock | PR5b's automation half — still open (the lock: deviation 74) |
-| **`Publish`** (custom application events) and its security ruling | unowned — see below |
-| **Wildcard subscription** (`entity.orders.*`) and its tenant scoping | PR5b — see below |
+| ~~**`Publish`** (custom application events) and its security ruling~~ | **done** — PR5b-2; see *Publishing a custom application event* above |
+| ~~**Wildcard subscription** (`entity.orders.*`) and its tenant scoping~~ | **ruled** — PR5b-2 refuses `*` at apply; the matcher itself waits on **#153**, see *The wildcard ruling* above |
 | **HMAC signing / `secretRef`** on a delivery | 7.1 (webhook management) |
 | **SMTP**, and a mail service in compose | not scheduled; `email` is console-only in F3 |
 | **A DLQ and a redelivery UI** | 7.1 |
@@ -901,22 +1063,19 @@ Each line with the issue or the PR that owns it.
 Recorded here so that neither the design addendum nor a discarded implementation plan is the only place
 these live.
 
-- **`Publish` and its security ruling.** `Publish` must **refuse** a name matching
-  `^(entity|auth|storage)\.`, or a host can mint an event indistinguishable from a real data change, and
-  every descriptor rule and after-hook subscribing to `entity.orders.updated` would fire on a forged one
-  — with a `partitionkey` and provenance nobody wrote a row for. Also: `$defs/eventPattern` is frozen to
-  `^(entity|auth|storage)\.([a-z][a-z0-9_]*|\*)\.([a-z]+|\*)(\.batch)?$`, so no descriptor rule can
-  subscribe to `order.approved` at all, and the same grammar makes `auth.user.password_changed`
-  unrepresentable (segment 3 is `[a-z]+`). The right fix is a **designed namespace**, once — not a
-  prefix bolted on under one PR's schedule. `Publish` is named in **neither** PR's content row and in
-  neither Definition of Done, which is a gap in the addendum rather than a deferral; this bullet is the
-  record of it.
-- **Wildcard subscription.** `entity.orders.*` is a **hard** spec guarantee
-  (`alvo-specifikacia.md:141`) with no matcher today. `baas-analyza.md:657` requires tenant isolation of
-  rules, so a wildcard makes cross-tenant fan-out the default failure mode. PR5b either implements the
-  matcher **with every subscription scoped to the envelope's tenant and a named adversarial cross-tenant
-  fact**, or refuses `*` at apply until it exists. PR5a evaluates no pattern at all, because after-hooks
-  are declared per entity per hook point.
+- ~~**`Publish` and its security ruling.**~~ **Done — PR5b-2.** See *Publishing a custom application event*
+  above for what shipped, and for the three things a custom event deliberately is not (deviations 87 and 88).
+  The gap this bullet recorded was real and is worth keeping named: `Publish` appeared in **neither** PR's
+  content row and in neither Definition of Done, so it was a hole in the addendum rather than a deferral.
+  What the addendum said about the frozen `$defs/eventPattern` still stands unchanged — no descriptor rule can
+  subscribe to `order.approved`, and the right fix is a **designed namespace**, once. PR5b-2 shipped the
+  guarantee without the namespace, deliberately.
+- ~~**Wildcard subscription.**~~ **Ruled — PR5b-2 took the second branch.** `*` is refused at apply, on both
+  passes, because the first branch was unavailable: `AlvoEvent` carries no tenant attribute, so nothing at
+  delivery could scope a subscription and the adversarial cross-tenant fact would have had no tenant on
+  either side of its comparison. The matcher itself waits on **#153**, which is also the bullet below. See
+  *The wildcard ruling* above, and deviation 86 for why this refuses a descriptor that is merely ahead of the
+  build.
 - **`@tenant.id` and `@user.roles` cannot resolve in a template, and the addendum's own table promises
   `@tenant.id`.** Measured: `AlvoEvent` carries `authid` and *no* tenant attribute and *no* roles, so
   `TemplatePlaceholder.Roots` is `new`/`old`/`event`/`@user` and both names are refused **by name**
@@ -941,27 +1100,30 @@ these live.
   volume rather than with keyed creates. `AlvoIdempotency` is also honoured on create only and an
   anonymous actor cannot hold a key — so a dispatcher must pass a real `AlvoContext.System`, never
   `Anonymous`.
-- **`complex-crm`'s five broken expressions and the refusal-reason strengthening.** `crm.alvo.json` ships
-  four hook expressions that do not compile (`lower(new.email)`, two `in ['won','lost']` list literals,
-  `now()`) plus a fifth unresolvable template (`{{@user.email}}`), and
-  `DescriptorToSchemaMapperTests.Every_example_marked_not_runnable_really_is_refused` asserts only
-  `Should.Throw<InvalidDataException>` — so a CEL syntax error can silently stand in for the feature
-  refusal the test claims to hold. Safe to defer *only* because the example declares hooks on
-  `beforeCreate`/`beforeUpdate` and **zero** `after*` points, which PR5a pinned off the whole `examples/`
-  tree rather than off `complex-crm` by name, so a new example declaring an after-hook fails that fact.
-  Two adjacent traps recorded and not fixed: `crm.alvo.json:82`'s `rollup.where` list literal (PR6
-  inherits the identical shape), and the three `access` expressions, which are compiled by nothing in
-  `src/` (**#146**).
-- **`UnhonouredFeatures`' `simple-tasks`/`completed_at` citation is still fictional.** That XML comment
-  cites `examples/simple-tasks/tasks.alvo.json`' `beforeUpdate` setting `completed_at`; that example
-  declares no `hooks` block and no such field. The reasoning is sound, the example is invented, and the
-  real case is `deals.beforeUpdate` setting `closed_at`. The addendum assigns the fix to whichever PR
-  edits the file; PR5a edited it and left the `before*` half untouched on purpose (no `before*` author
-  sees a changed message), so the correction rides with PR5b's removal of those three entries.
-- **The three remaining hook refusals.** `beforeCreate`/`beforeUpdate`/`beforeDelete` stay in
-  `UnhonouredFeatures` (**#114** tracks all six; three are lifted). A before-hook runs **in the write
-  transaction**, and the create path as built cannot satisfy its own DoD line: `AuthorizedCandidate` runs
-  before `BeginTransactionAsync`, so a hook placed where the candidate is built has nothing to roll back.
+- ~~**`complex-crm`'s five broken expressions and the refusal-reason strengthening.**~~ **Done — deviation 76
+  is discharged in full.** One fix landed in PR5b-1 (`lower(new.email)` → `lowerAscii(new.email)`, forced by
+  that PR's own rename); one stopped being a defect untouched (`now()` compiles as a side-effect of the
+  `Mutate` profile landing); PR5b-2 fixed the remaining three — the two list literals in
+  `deals.beforeUpdate`' conditions (`:143`, `:147`, now spelled `(old.stage == 'won' || old.stage == 'lost')`)
+  and the unresolvable `{{@user.email}}` template (`:221`, now `{{new.owner_id}}`, because an envelope carries
+  authentication and no identity claims, so **no** placeholder root resolves to an address — the rule's own
+  `description` says so and names #146 and #37).
+  **And `Every_example_marked_not_runnable_really_is_refused` now asserts the refusal's *reason*:** the
+  message must carry a fix suggestion from `UnhonouredFeatures.EveryFixSuggestion`, so a CEL syntax error can
+  no longer stand in silently for the feature refusal the marker claims, and the marker really does have to
+  shrink when `default` lands. Of the two adjacent traps this bullet recorded, `crm.alvo.json:82`'s
+  `rollup.where` list literal is now refused by `RollupResolver`'s own structured error (PR6) rather than by
+  a CEL failure, and the three `access` expressions are still compiled by nothing in `src/` (**#146**).
+- ~~**`UnhonouredFeatures`' `simple-tasks`/`completed_at` citation is still fictional.**~~ **Gone — PR5b-1.**
+  It left with the three `before*` entries it lived on, exactly as this bullet predicted: nothing in
+  `src/` names `simple-tasks` any more (verified by search, not assumed). Recorded as closed rather than
+  deleted, because the deviation it belongs to (77) says "the PR that edits this file fixes it" and a reader
+  chasing that instruction should find out which PR did.
+- ~~**The three remaining hook refusals.**~~ **Gone — PR5b-1 lifted all three**, so
+  `UnhonouredFeatures` now carries no hook entry at all (#114). Deviation 75's structural problem was solved
+  as it predicted: one pipeline behind a port, injected into the driver, with `AuthorizedCandidate` moved
+  inside the transaction. The `InMemoryAlvoData` half is still owed — deviation 85, and its own row in the
+  table above.
 - **F7's partitioned claim** (**#150**, which also carries Q1's same-millisecond finding and the
   cross-process half `AlvoEventId` does not close), and **`dataref`** (**#151**).
 - **Six things recorded and deliberately not fixed**, each because the fix is larger than the PR that found
@@ -988,6 +1150,16 @@ these live.
   transaction could resolve it and send mail mid-transaction. The guarantee has to become an *architectural*
   fact — nothing on the in-transaction path can reach a network port — for the same reason the JSONata ban's
   real test must be architectural rather than behavioural.
+  **PR5b-2 added a second port to that set, and one that is worse in a specific way.** `IAlvoEvents` is
+  registered `TryAddSingleton` beside `IEmailSender`, and `EfCoreOutboxStore.AppendAsync` opens **its own
+  connection** and commits one INSERT on autocommit — which, called from inside an open write transaction, is
+  the concurrent-writer shape spike Q5 measured as unretryable `SQLITE_BUSY_SNAPSHOT` rather than merely a
+  network call in the wrong place. **It is not reachable today**, and that is measured rather than assumed:
+  `BeforeHookRunner` is constructed with `IPolicyCatalogProvider` alone, and `IBeforeHookRunner.Run` is
+  **synchronous** — no `Task`, no `CancellationToken` — which is deviation 82's network ban stated at the
+  contract. So a declarative hook cannot reach either port. Whoever builds the **C# face** of the hook
+  pipeline inherits both, and the architectural fact they owe must now cover a *data* port as well as a
+  network one.
 
 ## What a provider owes, and where the port is
 

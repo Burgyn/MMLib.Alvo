@@ -1,6 +1,7 @@
 ﻿using Corvus.Json;
 using MMLib.Alvo.Api.Internal;
 using MMLib.Alvo.Descriptor.SchemaGen;
+using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Rules;
@@ -84,6 +85,7 @@ internal sealed class DescriptorValidator : IDescriptorValidator
             var schemaErrors = SchemaErrors(document.RootElement);
             var errors = new List<DescriptorValidationError>(schemaErrors);
             errors.AddRange(SemanticErrors(document.RootElement));
+            errors.AddRange(WildcardSubscriptionErrors(document.RootElement));
             if (schemaErrors.Count == 0)
             {
                 errors.AddRange(RuleErrors(descriptorJson));
@@ -161,6 +163,100 @@ internal sealed class DescriptorValidator : IDescriptorValidator
             .LastOrDefault(segment => !int.TryParse(segment, out _));
 
     private static string PointerOrRoot(string? pointer) => string.IsNullOrEmpty(pointer) ? "/" : pointer;
+
+    /// <summary>
+    /// The structured half of the wildcard-subscription refusal <c>DescriptorToSchemaMapper</c> throws for.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The two-pass tie <see cref="UnhonouredFeatures"/>' remarks describe, for a slot that is top-level
+    /// rather than per entity.</b> The typed pass in the mapper is what an embedded host calling
+    /// <c>FromDescriptor</c> passes through; this raw-JSON pass is what gives a CLI, a dashboard or an agent
+    /// the JSON Pointer and the fix suggestion an exception message cannot carry. Both read
+    /// <see cref="UnhonouredFeatures.WildcardSubscription"/> for the words, so the two cannot describe the
+    /// same refusal differently.
+    /// </para>
+    /// <para>
+    /// It runs beside <see cref="SemanticErrors"/> rather than inside it because that walk is keyed on
+    /// <c>entities</c> and returns early for a descriptor without one — and a descriptor may declare
+    /// automation over an entity set this build is not mapping.
+    /// </para>
+    /// </remarks>
+    /// <param name="root">The descriptor's root object.</param>
+    private static List<DescriptorValidationError> WildcardSubscriptionErrors(JsonElement root)
+    {
+        var errors = new List<DescriptorValidationError>();
+        foreach (var block in _eventPatternBlocks)
+        {
+            if (!root.TryGetProperty(block, out var declared) || declared.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            errors.AddRange(declared.EnumerateObject()
+                .Select(entry => WildcardErrorFor(block, entry))
+                .OfType<DescriptorValidationError>());
+        }
+
+        return errors;
+    }
+
+    /// <summary>The error one automation rule or function earns, or <see langword="null"/> when it is exact.</summary>
+    /// <remarks>
+    /// <b>Every step checks <see cref="JsonElement.ValueKind"/> before reading, including the entry itself.</b>
+    /// <see cref="JsonElement.TryGetProperty(string, out JsonElement)"/> <em>throws</em> on a non-object rather
+    /// than answering <see langword="false"/>, and this walk runs on raw input before the schema pass has
+    /// gated anything — so <c>"automation": { "deal-won": "not-an-object" }</c> is syntactically valid JSON
+    /// that would take the whole validator down. <see cref="IDescriptorValidator"/>'s contract is to
+    /// <em>report</em> on arbitrary input and never throw, and a crash on the apply path is an availability
+    /// bug on caller-controlled input. Matches <c>Declares</c>' convention in this same file.
+    /// </remarks>
+    /// <param name="block">The top-level block the entry sits in.</param>
+    /// <param name="entry">One rule or function, by its declared name.</param>
+    private static DescriptorValidationError? WildcardErrorFor(string block, JsonProperty entry)
+    {
+        if (entry.Value.ValueKind != JsonValueKind.Object
+            || !entry.Value.TryGetProperty("trigger", out var trigger)
+            || trigger.ValueKind != JsonValueKind.Object
+            || !trigger.TryGetProperty("event", out var pattern)
+            || pattern.ValueKind != JsonValueKind.String
+            || !EventPattern.HasWildcard(pattern.GetString()!))
+        {
+            return null;
+        }
+
+        var refusal = UnhonouredFeatures.WildcardSubscription;
+        return new DescriptorValidationError(
+            $"/{block}/{PointerToken(entry.Name)}/trigger/event",
+            $"'{pattern.GetString()}' subscribes with a wildcard. {refusal.Consequence}",
+            refusal.Fix,
+            DescriptorValidationSeverity.Error);
+    }
+
+    /// <summary>One JSON Pointer reference token, escaped per RFC 6901 §3.</summary>
+    /// <param name="name">The rule or function name, exactly as the descriptor spells it.</param>
+    /// <remarks>
+    /// <c>~</c> becomes <c>~0</c> and <c>/</c> becomes <c>~1</c>, <b>in that order</b> — reversing them would
+    /// re-escape the tilde this method just introduced. Without it, a rule named <c>a/b</c> produced a pointer
+    /// addressing a different location than the one that was refused, so an agent or dashboard following the
+    /// path would land somewhere else entirely.
+    /// <para>
+    /// <b>Why it is needed even though the schema forbids both characters.</b> An earlier version of this
+    /// remark claimed <c>propertyNames</c> permits them; it does not — <c>automation</c> and <c>functions</c>
+    /// keys are both <c>^[a-z][a-z0-9_-]{0,62}$</c>. The reason escaping is still required is that this walk
+    /// runs over <b>raw JSON, before the schema pass has gated anything</b>: a name the schema will
+    /// independently refuse still reaches this code and still has to be pointed at correctly, or the two
+    /// errors a caller receives disagree about where the problem is.
+    /// </para>
+    /// </remarks>
+    private static string PointerToken(string name) =>
+        name.Replace("~", "~0", StringComparison.Ordinal).Replace("/", "~1", StringComparison.Ordinal);
+
+    /// <summary>
+    /// The top-level blocks whose entries carry a <c>$defs/eventPattern</c>-typed trigger, in the order
+    /// <c>schema/project.schema.json</c> declares them.
+    /// </summary>
+    private static readonly string[] _eventPatternBlocks = ["automation", "functions"];
 
     private static List<DescriptorValidationError> SemanticErrors(JsonElement root)
     {

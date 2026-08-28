@@ -199,6 +199,13 @@ internal sealed partial class SystemSchemaInitializer
         }
     }
 
-    [GeneratedRegex("^[a-z][a-z0-9_]{0,15}$")]
+    /// <remarks>
+    /// <c>\A…\z</c> rather than <c>^…$</c>: in .NET <c>$</c> also matches immediately before a trailing
+    /// <c>\n</c>, so <c>"alvo\n"</c> passed this check and reached the <b>interpolated</b> table name in the
+    /// DDL below. Benign as it stands — a newline is SQL whitespace, so it yields a syntax error rather than a
+    /// second statement, and the prefix comes from configuration rather than from a caller — but it is the
+    /// identical defect found in <c>AlvoEventName</c>'s guard in the same PR, and the fix is two characters.
+    /// </remarks>
+    [GeneratedRegex(@"\A[a-z][a-z0-9_]{0,15}\z")]
     private static partial Regex SchemaPrefixPattern();
 }
