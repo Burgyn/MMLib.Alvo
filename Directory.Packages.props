@@ -90,7 +90,7 @@
        entries). Roslynator severities were already configured in .editorconfig;
        this makes them actually run. Apache-2.0. -->
   <ItemGroup>
-    <GlobalPackageReference Include="Roslynator.Analyzers" Version="4.16.1" />
+    <GlobalPackageReference Include="Roslynator.Analyzers" Version="5.0.0" />
   </ItemGroup>
 
 </Project>
