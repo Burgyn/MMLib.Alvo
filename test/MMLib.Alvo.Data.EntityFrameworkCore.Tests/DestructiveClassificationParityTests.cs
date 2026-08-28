@@ -55,7 +55,9 @@ public class DestructiveClassificationParityTests
             ctx.GetService<IMigrationsSqlGenerator>(),
             ctx.GetService<IModelRuntimeInitializer>(),
             () => new ModelBuilder(SqliteConventionSetBuilder.Build()),
-            new RelationalConnectionFactory(() => connection));
+            new RelationalConnectionFactory(() => connection),
+            new TestSqlDialect(),
+            computed: null);
     }
 
     private static EntitySchema Widgets(params FieldSchema[] fields) => new() { Name = "widgets", Fields = fields };

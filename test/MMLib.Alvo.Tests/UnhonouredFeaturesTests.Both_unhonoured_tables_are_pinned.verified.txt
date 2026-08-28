@@ -1,16 +1,6 @@
 ﻿{
   OnAField: [
     {
-      Path: computed,
-      Consequence: Computed fields are not supported yet: the expression is never evaluated, so the column stays null.,
-      Fix: Remove 'computed' or track the CEL→SQL compiler in #21.
-    },
-    {
-      Path: rollup,
-      Consequence: Rollups are not supported yet: nothing maintains the aggregate, so the column reads as permanently null while looking like data.,
-      Fix: Remove 'rollup' and compute the aggregate in a query for now; rollups are deferred past F3.
-    },
-    {
       Path: validation,
       Consequence: Field 'validation' is not evaluated yet, so a value the expression forbids is accepted — the field is not constrained at all.,
       Fix: Remove 'validation'. Enforce the rule in a before-hook once #22 lands, or express it with a facet the API does validate — 'maxLength', 'precision'/'scale', enum 'values' or a 'format'.

@@ -59,6 +59,12 @@ internal sealed class EfAlvoData : IAlvoData
     /// <see cref="ConstraintViolationTranslator"/>.
     /// </summary>
     private readonly IAlvoSqlDialect _dialect;
+
+    /// <summary>
+    /// The rollup maintainer, called inside every child write's own transaction — see
+    /// <see cref="RollupRecompute"/> for why the parent's lock has to precede the recompute.
+    /// </summary>
+    private readonly RollupRecompute _rollups;
     private readonly AlvoDataContextFactory _contexts;
     private readonly TimeProvider _time;
     private readonly string _idempotencyTable;
@@ -89,6 +95,7 @@ internal sealed class EfAlvoData : IAlvoData
         _hooks = hooks;
         _statements = new ReadStatementComposer(predicates, fields, dialect);
         _dialect = dialect;
+        _rollups = new RollupRecompute(dialect, fields);
         _contexts = contexts;
         _time = time;
         _idempotencyTable = IdempotencyTable.NameFor(options.SchemaPrefix);
@@ -198,6 +205,7 @@ internal sealed class EfAlvoData : IAlvoData
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         candidate = RunBeforeCreate(db, schema, decision, context, candidate, now);
         var stored = await InsertAsync(db, schema, decision, context, candidate, cancellationToken);
+        await RecomputeRollupsAsync(db, schema, [stored!], cancellationToken);
         await EmitAsync(
             db, transaction, schema, OutboxOperation.Created, context, now, Unmasked(stored), preImage: null,
             cancellationToken);
@@ -473,6 +481,7 @@ internal sealed class EfAlvoData : IAlvoData
     {
         candidate = RunBeforeCreate(db, schema, decision, context, candidate, now);
         var stored = await InsertAsync(db, schema, decision, context, candidate, cancellationToken);
+        await RecomputeRollupsAsync(db, schema, [stored!], cancellationToken);
         await EmitAsync(
             db, transaction, schema, OutboxOperation.Created, context, now, Unmasked(stored), preImage: null,
             cancellationToken);
@@ -701,6 +710,33 @@ internal sealed class EfAlvoData : IAlvoData
         }
     }
 
+    /// <summary>
+    /// Recomputes every rollup this child write can have changed, inside the write's own transaction and
+    /// <b>after</b> the child row has been written.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// One method rather than four call sites' worth of the same three lines, and the images are what differ:
+    /// a create has only a post-image, a delete only a pre-image, and an <em>update</em> has both — which is
+    /// the case that matters, because the foreign key is writable, so moving a child from one parent to
+    /// another changes two aggregates and only the pre-image knows about the first.
+    /// </para>
+    /// <para>
+    /// The fast path is a schema question, not a row question: an entity nothing rolls up issues no statement
+    /// at all, which is nearly every write this port performs.
+    /// </para>
+    /// </remarks>
+    /// <param name="db">The context whose open transaction the recompute joins.</param>
+    /// <param name="schema">The child entity that was written.</param>
+    /// <param name="images">The child row's images — post, pre, or both.</param>
+    /// <param name="cancellationToken">The caller's token.</param>
+    private Task RecomputeRollupsAsync(
+        AlvoDataContext db, EntitySchema schema, IReadOnlyList<IReadOnlyDictionary<string, object?>> images,
+        CancellationToken cancellationToken) =>
+        RollupRecompute.IsRolledUp(db.AppliedSchema, schema)
+            ? _rollups.ForChildWriteAsync(db, schema, images, cancellationToken)
+            : Task.CompletedTask;
+
     /// <inheritdoc/>
     /// <remarks>
     /// Merge-then-check inside one transaction, never write-then-rollback: the pre-image is read under
@@ -863,6 +899,8 @@ internal sealed class EfAlvoData : IAlvoData
             throw new AlvoRecordNotFoundException();
         }
 
+        await RecomputeRollupsAsync(db, schema, [stored!], cancellationToken);
+
         return Unmasked(stored);
     }
 
@@ -961,6 +999,7 @@ internal sealed class EfAlvoData : IAlvoData
         var postImage = await SingleAsync(
             db, schema, decision, context, id, lockFor: null, cancellationToken, unmasked: true)
             ?? throw new AlvoRecordNotFoundException();
+        await RecomputeRollupsAsync(db, schema, [preImage.Values, postImage!], cancellationToken);
 
         return (preImage, postImage);
     }

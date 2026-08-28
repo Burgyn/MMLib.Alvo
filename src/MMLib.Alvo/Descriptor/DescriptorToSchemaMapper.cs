@@ -34,9 +34,14 @@ internal static class DescriptorToSchemaMapper
     {
         bool tenancyEnabled = d.Tenancy?.Enabled == true;
         var formats = DeclaredFormats(d);
+
+        // Built once, from the WHOLE descriptor: resolving a rollup's foreign key needs the CHILD entity's
+        // fields, which the per-entity pass below cannot see. See RollupResolver's own remarks for why the
+        // resolution and the refusal have to be one walk.
+        var rollups = new RollupResolver(d);
         var entities = d.Entities
             .Where(kvp => IsPhysical(kvp.Value))
-            .Select(kvp => MapEntity(kvp.Key, kvp.Value, tenancyEnabled, formats))
+            .Select(kvp => MapEntity(kvp.Key, kvp.Value, tenancyEnabled, formats, rollups))
             .ToList();
         return new SchemaModel(entities);
     }
@@ -90,17 +95,25 @@ internal static class DescriptorToSchemaMapper
     /// </remarks>
     private static TimeSpan PatternSyntaxCheckTimeout => TimeSpan.FromMilliseconds(100);
 
-    private static bool IsPhysical(EntityDescriptor e) => (e.Storage ?? StorageMode.Physical) == StorageMode.Physical;
+    /// <summary>
+    /// Whether an entity reaches the applied schema at all. <b>The one authority for that question</b>: it is
+    /// the filter <see cref="Map"/> applies, and <c>RollupResolver.EnsureChildIsPhysical</c> calls it rather
+    /// than restating the condition, so a rollup over an unreachable child is refused for the reason it is
+    /// unreachable — and the refusal lifts itself the day F7's dynamic driver makes such a child reachable,
+    /// instead of waiting to be remembered.
+    /// </summary>
+    internal static bool IsPhysical(EntityDescriptor e) => (e.Storage ?? StorageMode.Physical) == StorageMode.Physical;
 
     private static EntitySchema MapEntity(
-        string name, EntityDescriptor e, bool tenancyEnabled, IReadOnlyDictionary<string, string> formats)
+        string name, EntityDescriptor e, bool tenancyEnabled, IReadOnlyDictionary<string, string> formats,
+        RollupResolver rollups)
     {
         var fields = new List<FieldSchema>();
         AddManagedColumn(fields, e, AlvoManagedColumns.Id, IdColumn);
 
         foreach (var (fname, f) in e.Fields)
         {
-            fields.Add(MapField(fname, f, formats));
+            fields.Add(MapField(name, e, fname, f, formats, rollups));
         }
 
         EnsureEveryDeclaredFeatureIsHonoured(name, e, UnhonouredFeatures.OnAnEntity);
@@ -254,7 +267,18 @@ internal static class DescriptorToSchemaMapper
     private static FieldSchema ActorColumn(string name) =>
         new() { Name = name, Type = SchemaFieldType.Uuid, Nullable = true };
 
-    private static TenancyMode? ResolveTenancy(EntityTenancy? entityTenancy, bool tenancyEnabled) =>
+    /// <summary>
+    /// One entity's resolved tenancy, from its own declaration and the project's switch.
+    /// </summary>
+    /// <remarks>
+    /// <see langword="internal"/> rather than private because <see cref="RollupResolver"/> asks the same
+    /// question of the same inputs: a rollup whose parent and child disagree about tenancy is refused at
+    /// apply, and deciding that from a second copy of the defaulting rule is how the refusal comes to
+    /// disagree with the columns this mapper actually injects.
+    /// </remarks>
+    /// <param name="entityTenancy">The entity's own declared tenancy, or <see langword="null"/> for none.</param>
+    /// <param name="tenancyEnabled">Whether the project's <c>tenancy.enabled</c> is on.</param>
+    internal static TenancyMode? ResolveTenancy(EntityTenancy? entityTenancy, bool tenancyEnabled) =>
         ResolveTenancy(
             entityTenancy switch
             {
@@ -294,7 +318,8 @@ internal static class DescriptorToSchemaMapper
         declared ?? (projectTenancyEnabled ? TenancyMode.Scoped : null);
 
     private static FieldSchema MapField(
-        string name, FieldDescriptor f, IReadOnlyDictionary<string, string> formats)
+        string entity, EntityDescriptor declaring, string name, FieldDescriptor f,
+        IReadOnlyDictionary<string, string> formats, RollupResolver rollups)
     {
         EnsureEveryDeclaredFeatureIsHonoured(name, f, UnhonouredFeatures.OnAField);
 
@@ -318,7 +343,12 @@ internal static class DescriptorToSchemaMapper
             Format = f.Format,
             FormatPattern = ResolveFormatPattern(name, f.Format, formats),
             Indexed = f.Index == true,
-            // ComputedExpression intentionally not set — revived by #21 (CEL→SQL).
+
+            // The CEL SOURCE, not the rendered SQL: the applied schema is engine-agnostic and is persisted,
+            // so the translation to a generated column's DDL happens per driver when the migration model is
+            // built. See FieldSchema.ComputedExpression.
+            ComputedExpression = f.Computed,
+            Rollup = rollups.Resolve(entity, declaring, name, f),
         };
     }
 

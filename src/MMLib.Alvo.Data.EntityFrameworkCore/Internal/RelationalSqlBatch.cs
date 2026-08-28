@@ -18,8 +18,30 @@ internal static class RelationalSqlBatch
         }
     }
 
+    /// <summary>
+    /// Opens <paramref name="connection"/> and runs <paramref name="sql"/> with <b>no transaction at all</b>,
+    /// each statement committing on its own.
+    /// </summary>
+    /// <remarks>
+    /// For the statements an engine only honours outside a transaction — see
+    /// <see cref="IAlvoSqlDialect.MigrationFraming"/>, whose whole existence is that SQLite's
+    /// <c>PRAGMA foreign_keys</c> is a documented no-op inside one. Deliberately not "in the caller's
+    /// transaction if there is one": a statement that is a no-op inside a transaction has to be run outside
+    /// one or not at all, and running it inside would look like it worked.
+    /// </remarks>
+    public static async Task ExecuteUntransactedAsync(DbConnection connection, IReadOnlyList<string> sql, CancellationToken ct)
+    {
+        if (sql.Count == 0)
+        {
+            return;
+        }
+
+        await OpenAsync(connection, ct).ConfigureAwait(false);
+        await ExecuteAsync(connection, sql, transaction: null, ct).ConfigureAwait(false);
+    }
+
     /// <summary>Runs <paramref name="sql"/> against an already-open connection within <paramref name="transaction"/>.</summary>
-    public static async Task ExecuteAsync(DbConnection connection, IReadOnlyList<string> sql, DbTransaction transaction, CancellationToken ct)
+    public static async Task ExecuteAsync(DbConnection connection, IReadOnlyList<string> sql, DbTransaction? transaction, CancellationToken ct)
     {
         foreach (var commandText in sql)
         {

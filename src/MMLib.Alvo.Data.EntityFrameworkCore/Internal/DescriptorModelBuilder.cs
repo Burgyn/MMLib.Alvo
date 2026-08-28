@@ -13,13 +13,21 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// </summary>
 internal static class DescriptorModelBuilder
 {
-    public static IModel Build(SchemaModel model, Func<ModelBuilder> newBuilder)
+    /// <summary>Builds the migration model for <paramref name="model"/>.</summary>
+    /// <param name="model">The applied schema the physical model is built from.</param>
+    /// <param name="newBuilder">Creates a conventionless builder seeded with the provider's convention set.</param>
+    /// <param name="computed">
+    /// Renders a <c>computed</c> field's CEL to this driver's SQL, or <see langword="null"/> when the container
+    /// registered no expression services — see <see cref="EnsureComputedIsRenderable"/> for why that is a
+    /// refusal here rather than a silently plain column.
+    /// </param>
+    public static IModel Build(SchemaModel model, Func<ModelBuilder> newBuilder, ComputedColumnSql? computed = null)
     {
         var builder = newBuilder();
 
         foreach (var entity in model.Entities)
         {
-            ConfigureEntity(builder, entity);
+            ConfigureEntity(builder, entity, computed);
         }
 
         var knownEntityNames = model.Entities.Select(e => e.Name).ToHashSet(StringComparer.Ordinal);
@@ -31,14 +39,14 @@ internal static class DescriptorModelBuilder
         return builder.FinalizeModel();
     }
 
-    private static void ConfigureEntity(ModelBuilder builder, EntitySchema entity)
+    private static void ConfigureEntity(ModelBuilder builder, EntitySchema entity, ComputedColumnSql? computed)
     {
         var entityBuilder = builder.Entity(entity.Name);
         entityBuilder.ToTable(entity.Name);
 
         foreach (var field in entity.Fields)
         {
-            ConfigureField(entityBuilder, field);
+            ConfigureField(entityBuilder, entity, field, computed);
         }
 
         entityBuilder.HasKey("id");
@@ -118,7 +126,8 @@ internal static class DescriptorModelBuilder
             ? [AlvoManagedColumns.TenantId, .. fields]
             : fields;
 
-    private static void ConfigureField(EntityTypeBuilder entityBuilder, FieldSchema field)
+    private static void ConfigureField(
+        EntityTypeBuilder entityBuilder, EntitySchema entity, FieldSchema field, ComputedColumnSql? computed)
     {
         var property = entityBuilder.Property(FieldClrTypeMap.Exact(field), field.Name).IsRequired(!field.Nullable);
 
@@ -132,12 +141,71 @@ internal static class DescriptorModelBuilder
             property = field.Scale is { } scale ? property.HasPrecision(precision, scale) : property.HasPrecision(precision);
         }
 
+        ConfigureComputed(property, entity, field, computed);
+
         // A unique field's index is emitted by ConfigureIndexes, after this loop — see its remarks: on a
         // scoped entity it spans tenant_id, which is not a property of the entity type yet. `!field.Unique`
         // preserves the previous if/else: a field declaring both facets earns the unique index only.
         if (!field.Unique && field.Indexed)
         {
             entityBuilder.HasIndex(field.Name);
+        }
+    }
+
+    /// <summary>
+    /// Marks a <c>computed</c> field a <b>stored</b> generated column, so <em>EF's own per-provider migrations
+    /// generator</em> spells the DDL.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This is what satisfies "the core never spells the DDL", and it is not a shortcut.</b> Measured
+    /// (spike Q5–Q7): from this one annotation EF emits <c>numeric(18,2) GENERATED ALWAYS AS (…) STORED</c> in
+    /// PostgreSQL's <c>CREATE TABLE</c> and its in-place <c>ALTER TABLE … ADD</c>, the legal short form
+    /// <c>AS (…) STORED</c> on SQLite, and — the finding this whole seam turns on — SQLite's create-new / copy /
+    /// drop / rename rebuild, whose <c>INSERT … SELECT</c> correctly omits the generated column. None of that
+    /// could be assembled here without also owning every column's type mapping.
+    /// </para>
+    /// <para>
+    /// <b><c>stored: true</c>, never virtual.</b> SQLite accepts <c>VIRTUAL</c> exactly where it refuses
+    /// <c>STORED</c>, and PostgreSQL 16 has no <c>VIRTUAL</c> at all, so letting each engine pick would make
+    /// one descriptor produce a column one engine can index and filter on and the other cannot — §0 principle
+    /// 3's failure mode, silently.
+    /// </para>
+    /// </remarks>
+    private static void ConfigureComputed(
+        PropertyBuilder property, EntitySchema entity, FieldSchema field, ComputedColumnSql? computed)
+    {
+        if (field.ComputedExpression is null)
+        {
+            return;
+        }
+
+        EnsureComputedIsRenderable(entity, field, computed);
+        property.HasComputedColumnSql(computed!.For(entity, field), stored: true);
+    }
+
+    /// <summary>
+    /// Refuses a <c>computed</c> field when no expression services reached this model builder, naming the
+    /// registration that is missing.
+    /// </summary>
+    /// <remarks>
+    /// A driver's <c>UseSqlite</c>/<c>UsePostgreSql</c> can be attached to a bare builder that never called
+    /// <c>AddAlvo()</c>, and in that container there is no CEL compiler and no renderer. Falling through to a
+    /// plain column would be the worst available outcome: the descriptor says the database maintains the value,
+    /// the column would hold whatever anyone wrote, and nothing would report it. A missing registration is a
+    /// composition mistake, so it is named as one rather than surfacing as a
+    /// <see cref="NullReferenceException"/> or as an <c>InvalidOperationException</c> about a service the
+    /// author never asked for.
+    /// </remarks>
+    private static void EnsureComputedIsRenderable(EntitySchema entity, FieldSchema field, ComputedColumnSql? computed)
+    {
+        if (computed is null)
+        {
+            throw new InvalidOperationException(
+                $"Field '{entity.Name}.{field.Name}' declares 'computed', which becomes a stored generated "
+                + "column whose SQL is rendered from CEL — but this container registered no expression "
+                + "services, so there is nothing to render it with. Call AddAlvo() on the same service "
+                + "collection as UseSqlite()/UsePostgreSql().");
         }
     }
 

@@ -32,12 +32,21 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore
     }
     public interface IAlvoSqlDialect
     {
+        MMLib.Alvo.Data.EntityFrameworkCore.MigrationBatchFraming MigrationFraming { get; }
         MMLib.Alvo.Data.EntityFrameworkCore.SqlConstraintViolation? DecodeConstraintViolation(System.Data.Common.DbException failure);
+        string? GeneratedColumnDefinition(string columnName, string storeType, string renderedExpression);
         string RenderColumn(string columnName);
         string RenderNullProjection(string storeType);
         string RenderTable(MMLib.Alvo.Schema.EntitySchema entity, MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation? lockedPreImageFor);
         string RowLockClause(MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation mutation);
         string RowWindowClause(string rowCountParameterMarker, string? rowOffsetParameterMarker = null);
+    }
+    public sealed class MigrationBatchFraming : System.IEquatable<MMLib.Alvo.Data.EntityFrameworkCore.MigrationBatchFraming>
+    {
+        public MigrationBatchFraming() { }
+        public System.Collections.Generic.IReadOnlyList<string> After { get; init; }
+        public System.Collections.Generic.IReadOnlyList<string> Before { get; init; }
+        public static MMLib.Alvo.Data.EntityFrameworkCore.MigrationBatchFraming None { get; }
     }
     public enum PreImageMutation
     {

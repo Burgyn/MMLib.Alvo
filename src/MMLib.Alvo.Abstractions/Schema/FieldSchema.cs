@@ -99,6 +99,33 @@ public sealed record FieldSchema
     /// <summary>Gets a value indicating whether the field is indexed.</summary>
     public bool Indexed { get; init; }
 
-    /// <summary>Gets the computed expression for computed fields.</summary>
+    /// <summary>
+    /// Gets the <b>CEL source</b> of this field's <c>computed</c> expression, or <see langword="null"/> when
+    /// the field is not computed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>CEL, never the rendered SQL.</b> A <see cref="SchemaModel"/> is engine-agnostic and is persisted as
+    /// the applied schema, so it must not carry one provider's spelling: the same stored schema is read by
+    /// whichever driver is registered, and a SQLite-rendered expression restored under PostgreSQL would be
+    /// DDL for the wrong engine. The translation happens per driver, at the point the migration model is
+    /// built.
+    /// </para>
+    /// <para>
+    /// A field carrying one becomes a <b>stored generated column</b>: the database computes and maintains the
+    /// value, and refuses any write to it, so no hook, custom endpoint or bug can set it.
+    /// </para>
+    /// </remarks>
     public string? ComputedExpression { get; init; }
+
+    /// <summary>
+    /// Gets the aggregate over a child entity's records this field holds, or <see langword="null"/> when the
+    /// field is not a rollup.
+    /// </summary>
+    /// <remarks>
+    /// Mutually exclusive with <see cref="ComputedExpression"/>, and refused at apply when both are declared:
+    /// the two disagree about who owns the value — the engine maintains a generated column, the framework
+    /// maintains a rollup — so whichever won, the other declaration would be a lie about a stored number.
+    /// </remarks>
+    public RollupSchema? Rollup { get; init; }
 }

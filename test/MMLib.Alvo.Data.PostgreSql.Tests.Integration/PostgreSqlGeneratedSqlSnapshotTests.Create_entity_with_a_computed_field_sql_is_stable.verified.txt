@@ -1,0 +1,7 @@
+﻿CREATE TABLE lines (
+    id uuid NOT NULL,
+    amount bigint NOT NULL,
+    total numeric(18,2) GENERATED ALWAYS AS (("unit_price" * "amount")) STORED,
+    unit_price numeric(18,2) NOT NULL,
+    CONSTRAINT "PK_lines" PRIMARY KEY (id)
+);

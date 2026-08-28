@@ -28,7 +28,9 @@ public class EfCoreSchemaMigratorPlanTests
             ctx.GetService<IMigrationsSqlGenerator>(),
             ctx.GetService<IModelRuntimeInitializer>(),
             () => new ModelBuilder(SqliteConventionSetBuilder.Build()),
-            new RelationalConnectionFactory(() => connection));
+            new RelationalConnectionFactory(() => connection),
+            new TestSqlDialect(),
+            computed: null);
     }
 
     private static EntitySchema Vehicles(params FieldSchema[] fields) =>

@@ -1218,6 +1218,7 @@ namespace MMLib.Alvo.Schema
         public MMLib.Alvo.Schema.RefSchema? Reference { get; init; }
         public string? RenamedFrom { get; init; }
         public bool Required { get; init; }
+        public MMLib.Alvo.Schema.RollupSchema? Rollup { get; init; }
         public int? Scale { get; init; }
         public required MMLib.Alvo.Schema.FieldType Type { get; init; }
         public bool Unique { get; init; }
@@ -1261,6 +1262,22 @@ namespace MMLib.Alvo.Schema
         public RefSchema(string TargetEntity, MMLib.Alvo.Schema.OnDelete OnDelete) { }
         public MMLib.Alvo.Schema.OnDelete OnDelete { get; init; }
         public string TargetEntity { get; init; }
+    }
+    public enum RollupOperation
+    {
+        Sum = 0,
+        Count = 1,
+        Avg = 2,
+        Min = 3,
+        Max = 4,
+    }
+    public sealed class RollupSchema : System.IEquatable<MMLib.Alvo.Schema.RollupSchema>
+    {
+        public RollupSchema() { }
+        public string? Field { get; init; }
+        public required string From { get; init; }
+        public required MMLib.Alvo.Schema.RollupOperation Op { get; init; }
+        public required string Via { get; init; }
     }
     public sealed class SchemaModel : System.IEquatable<MMLib.Alvo.Schema.SchemaModel>
     {

@@ -20,6 +20,7 @@ namespace MMLib.Alvo.Data.PostgreSql
     {
         public PostgreSqlSqlDialect() { }
         public MMLib.Alvo.Data.EntityFrameworkCore.SqlConstraintViolation? DecodeConstraintViolation(System.Data.Common.DbException failure) { }
+        public string? GeneratedColumnDefinition(string columnName, string storeType, string renderedExpression) { }
         public string RenderColumn(string columnName) { }
         public string RenderNullProjection(string storeType) { }
         public string RenderTable(MMLib.Alvo.Schema.EntitySchema entity, MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation? lockedPreImageFor) { }

@@ -32,20 +32,27 @@ public class DescriptorValidatorTests
         result.Errors.ShouldAllBe(e => e.Message.Length > 0);
     }
 
+    /// <summary>
+    /// <c>computed</c> is <b>no longer</b> reported: #21 honours it as a stored generated column, so the
+    /// validator has nothing to warn about. Kept as a fact rather than deleted, because the interesting half is
+    /// that the validator's report is driven off <see cref="UnhonouredFeatures.OnAField"/> — a feature that
+    /// leaves the table has to stop being reported, and a validator carrying its own copy of the list would
+    /// keep telling authors to remove a key that works.
+    /// </summary>
     [Fact]
-    public void Computed_field_is_rejected_with_fix_suggestion()
+    public void A_computed_field_is_no_longer_reported_now_that_it_is_honoured()
     {
         var json = """
         { "apiVersion": "alvo.dev/v1", "name": "demo",
           "entities": { "invoices": { "fields": {
-            "gross": { "type": "decimal", "precision": 18, "scale": 2, "computed": "net * 1.2" } } } } }
+            "net": { "type": "decimal", "precision": 18, "scale": 2 },
+            "gross": { "type": "decimal", "precision": 18, "scale": 2, "computed": "net + net" } } } } }
         """;
 
         var result = _validator.Validate(json);
 
-        var computed = result.Errors.ShouldHaveSingleItem();
-        computed.Path.ShouldContain("gross");
-        computed.FixSuggestion.ShouldNotBeNull().ShouldContain("#21");
+        result.Errors.ShouldBeEmpty();
+        result.IsValid.ShouldBeTrue();
     }
 
     /// <summary>

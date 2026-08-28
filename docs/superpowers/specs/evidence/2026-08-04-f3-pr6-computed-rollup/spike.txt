@@ -1,0 +1,348 @@
+F3 PR6 (#21) — computed & rollup spike
+=====================================
+Provenance
+  Date              2026-08-04
+  Host              Darwin arm64
+  sqlite3 CLI       3.51.0 (2025-06-12)  -- system CLI, NOT the bundled e_sqlite3
+  PostgreSQL        16.14 on aarch64-unknown-linux-musl (postgres:16-alpine)
+  Isolation         PostgreSQL default, READ COMMITTED
+
+CAVEAT ON THE SQLITE LEG
+  Measured with the system sqlite3 CLI. The product runs the BUNDLED e_sqlite3 via
+  SQLitePCLRaw, and PR5a's Q3 already found the two disagree about build options
+  (SQLITE_ENABLE_UPDATE_DELETE_LIMIT). Q1 below MUST be re-measured against the
+  bundled provider before the design is frozen. Recorded here so the gap is visible
+  rather than assumed away.
+
+------------------------------------------------------------------------------
+Q1  Can a generated column be ADDED to an existing table?
+------------------------------------------------------------------------------
+SQLite, isolating the only variable that differs (table empty vs holding one row):
+
+    table state   STORED                              VIRTUAL
+    empty         OK                                  OK
+    non-empty     Error: stepping,                    OK
+                  cannot add a STORED column
+
+PostgreSQL 16, non-empty table:
+
+    ALTER TABLE t ADD COLUMN s numeric GENERATED ALWAYS AS (a*b) STORED;
+      -> ALTER TABLE, and the EXISTING row is backfilled:  id=1  s=6.00
+    UPDATE t SET s = 999 WHERE id = 1;
+      -> ERROR: column "s" can only be updated to DEFAULT
+         DETAIL: Column "s" is a generated column.        (read-only enforced by the DB)
+    ALTER TABLE t ADD COLUMN v numeric GENERATED ALWAYS AS (a*b) VIRTUAL;
+      -> ERROR: syntax error at or near "VIRTUAL"          (no VIRTUAL before PG 18)
+
+VERDICT: the two shipped engines are asymmetric in opposite directions. There is NO
+single spelling that adds a computed field to an entity that already holds rows on
+both engines. SQLite takes VIRTUAL but refuses STORED; PostgreSQL 16 takes STORED and
+has no VIRTUAL at all.
+
+WHY THIS IS THE FINDING AND NOT A FOOTNOTE: on an EMPTY table SQLite accepts STORED.
+A test built on a fresh fixture therefore passes, and the production migration — the
+only case that matters, an entity that already has data — fails. The empty/non-empty
+split is the whole content of this question.
+
+------------------------------------------------------------------------------
+Q2  Is "UPDATE parent SET total = (SELECT SUM(child.v) ...)" safe under
+    concurrent child writes?  (PostgreSQL, READ COMMITTED, 40 writers, 1 parent)
+------------------------------------------------------------------------------
+    A) atomic UPDATE, no delay                     children=40  total=40   CORRECT
+    B) the SAME UPDATE, pg_sleep(0.05) before it   children=40  total=31   LOST UPDATE
+    C) value computed outside the UPDATE           children=40  total=33   LOST UPDATE
+    D) SELECT ... FOR UPDATE the parent first,
+       then recompute, same 0.05s window           children=40  total=40   CORRECT
+
+VERDICT: the atomic single-statement recompute IS a lost update, and the hypothesis
+that "the row lock serialises and the subquery re-evaluates" is FALSE. Under READ
+COMMITTED the SET expression is evaluated from the snapshot taken at statement start;
+when the row lock is finally acquired, EvalPlanQual re-checks only the outer WHERE
+(id = 1, still true), so the stale SET value is written.
+
+This is the SAME EvalPlanQual mechanism that bit the outbox claim in PR5a — the outer
+predicate is re-checked, nothing else is. Second occurrence in this codebase.
+
+Run A is the trap: without the delay the window is too small to lose an update, so the
+naive implementation LOOKS correct. The pg_sleep is the entire difference between a
+fact and an illusion, and any rollup fact must carry an equivalent widening or it
+proves nothing.
+
+D is what holds: take the parent's row lock BEFORE recomputing. After the lock is
+granted the following statement gets a fresh snapshot, so the aggregate sees every
+committed child. Note this also generalises to all five ops the frozen schema allows
+(sum|count|avg|min|max), which a "total = total + delta" shortcut does not — delta is
+commutative for sum and count, drifts with no self-correction, and is simply wrong for
+min/max.
+
+------------------------------------------------------------------------------
+Still to measure before the design is frozen
+------------------------------------------------------------------------------
+  * Q1 against the bundled e_sqlite3, not the system CLI.
+  * The same Q2 sequence on SQLite (one writer at a time under WAL — the lock
+    behaviour differs and the PR5a spike Q5 found SQLITE_BUSY_SNAPSHOT unretryable
+    for a read-then-write transaction, which is exactly this shape).
+  * Whether a computed column may reference a rollup column on both engines, since
+    the frozen schema's `computed` description explicitly allows it (gross_total =
+    net_total + vat_total).
+
+==============================================================================
+SECOND PASS — the questions the first pass left open
+==============================================================================
+  bundled e_sqlite3   3.53.3  (via Microsoft.Data.Sqlite 10.0.3 + SQLitePCLRaw.lib.e_sqlite3 2.1.12)
+  system sqlite3 CLI  3.51.0  -- for comparison only
+
+Q1 RE-MEASURED against the bundled provider, which is what the product runs:
+
+    table state   STORED                                      VIRTUAL
+    empty         OK                                          OK
+    non-empty     REFUSED  [1] cannot add a STORED column     OK
+
+  Identical to the system CLI, so the first pass's finding stands for the product and
+  is not a CLI artefact.
+
+Q1b  A generated column declared in CREATE TABLE is read-only, enforced by the engine:
+    UPDATE t SET s = 999          -> REFUSED [1] cannot UPDATE generated column "s"
+    INSERT ... (id,a,b,s) VALUES  -> REFUSED [1] cannot INSERT into generated column "s"
+  This is the unbypassable property the computed/rollup ladder wants from `computed`:
+  no write path can set it, so no hook, no custom endpoint and no bug can.
+
+Q3  May a computed column reference a column the APPLICATION maintains (a rollup)?
+  Yes, and it tracks it — which is what makes the frozen schema's own example work:
+    CREATE TABLE inv (..., net_total, vat_total, gross_total GENERATED ALWAYS AS
+                      (net_total + vat_total) STORED)
+    net_total=100, vat_total=20  ->  gross_total = 120
+    app UPDATEs net_total = 250  ->  gross_total = 270
+
+------------------------------------------------------------------------------
+Q4  The rollup race on SQLite (bundled provider, WAL, busy_timeout=15000,
+    24 concurrent writers, one parent row)
+------------------------------------------------------------------------------
+    BEGIN IMMEDIATE, atomic subquery, 50 ms   committed=24 failed= 0  CORRECT
+    BEGIN (deferred), atomic subquery, 50 ms  committed=24 failed= 0  CORRECT
+    BEGIN (deferred), READ parent first       committed=12 failed=12  TX FAILURES
+                                              first error: [5/517] database is locked
+
+  517 is SQLITE_BUSY_SNAPSHOT — the unretryable shape PR5a's Q5 already measured for a
+  read-then-write transaction under WAL. Reproduced here from the other direction.
+
+  Deferred-with-atomic-subquery passes because the transaction's FIRST statement is the
+  child INSERT, so the write lock is taken there and the transaction is effectively
+  immediate. It is not passing because deferred is safe.
+
+  HARNESS CAVEAT, stated rather than hidden: in the failing row the post-run readback
+  reported children=0 while 12 transactions had returned from COMMIT without throwing,
+  which is self-inconsistent and means the harness is not trustworthy for that row's
+  COUNTS. The error CODE and the failure RATE are what this row establishes; its totals
+  are not evidence of anything.
+
+------------------------------------------------------------------------------
+THE CONSTRAINT THE TWO ENGINES JOINTLY IMPOSE
+------------------------------------------------------------------------------
+They pull in OPPOSITE directions, and this is the central design fact for `rollup`:
+
+  * PostgreSQL REQUIRES taking the parent's row lock BEFORE recomputing. Without it the
+    single-statement recompute is a lost update (Q2: 31 of 40).
+  * SQLite must NOT read the parent before writing inside a deferred transaction, or
+    half the writers die on SQLITE_BUSY_SNAPSHOT (Q4). It needs no explicit lock at all,
+    because the child INSERT has already taken the write lock and SQLite admits one
+    writer at a time.
+
+So "lock the parent, then recompute" is correct on PostgreSQL and harmful-as-a-read on
+SQLite. That is a per-engine difference in the STATEMENTS, not in the semantics, which
+is what the dialect port exists for — and `IAlvoSqlDialect.RowLockClause` is already the
+member of that shape, so the seam does not have to be invented.
+
+ALSO NOTE, because it inverts the usual assumption in this repo: for THIS question
+SQLite is the WEAKER engine. The concurrent-boot facts treat SQLite as the harder leg
+(one writer at a time exposes lock contention); here the same property makes the lost
+update structurally impossible, so a SQLite-only suite would never see the PostgreSQL
+defect. The rollup race fact must run on PostgreSQL to mean anything.
+
+AND: any rollup race fact must widen the window (the 50 ms delay). Without it the
+PostgreSQL lost update does not reproduce — 40 of 40 looked correct. The delay is the
+entire difference between a fact and an illusion.
+
+==============================================================================
+THIRD PASS — measured against the PRODUCT's own migrator, 2026-08-05
+==============================================================================
+The first two passes measured the ENGINES with raw SQL. This pass measures what
+EF Core's own migrations SQL generator does when Alvo's model marks a property
+`HasComputedColumnSql(expr, stored: true)`, because that decides whether the
+design's "the core must never spell the DDL" is satisfiable at all.
+
+Harness: a throwaway test in test/MMLib.Alvo.Data.Sqlite.Tests and
+test/MMLib.Alvo.Data.PostgreSql.Tests.Integration driving the real
+EfCoreSchemaMigrator through UseSqlite / UsePostgreSql, with
+DescriptorModelBuilder.ConfigureField temporarily honouring ComputedExpression.
+Both files were deleted after measuring; the product diff carries none of it.
+
+Q5  What DDL does EF emit for a stored generated column?
+    SQLite   CREATE TABLE ... "line_total" AS (unit_price * amount) STORED
+             (no type, and no GENERATED ALWAYS keyword — both optional in SQLite)
+    Postgres CREATE TABLE ... line_total numeric(18,2)
+                             GENERATED ALWAYS AS (unit_price * amount) STORED
+
+  So PostgreSQL's spelling is EXACTLY the one the design names. SQLite's is the
+  legal short form of it.
+
+Q6  Adding the field to an entity that ALREADY HOLDS A ROW, through the migrator:
+    Postgres ALTER TABLE spike_items ADD line_total numeric(18,2)
+                          GENERATED ALWAYS AS (unit_price * amount) STORED
+             -> applied, row backfilled (3 * 2 = 6.00), and
+                UPDATE ... SET line_total = 999 -> 428C9 "can only be updated to DEFAULT"
+    SQLite   ALTER TABLE "items" ADD "line_total" AS (unit_price * amount) STORED
+             -> SqliteException 1: 'cannot add a STORED column'   (Q1 reproduced
+                through the product, not just through the CLI)
+
+  And the plan's own step for it is `AddField ... destructive=False`, so the
+  destructive gate does not stand between the descriptor and this crash. The
+  refusal is a raw provider exception out of ApplyAsync.
+
+Q7  THE FINDING THIS PASS EXISTS FOR. EF Core's SQLite generator ALREADY
+    implements the create-new / copy / drop / rename rebuild — but it triggers on
+    an AlterColumnOperation, never on an AddColumnOperation. Diffing a model whose
+    column is PLAIN against one whose column is COMPUTED emits:
+
+        CREATE TABLE "ef_temp_items" (
+            "id" TEXT NOT NULL CONSTRAINT "PK_items" PRIMARY KEY,
+            "amount" INTEGER NOT NULL,
+            "line_total" AS (unit_price * amount) STORED,
+            "unit_price" TEXT NOT NULL);
+        INSERT INTO "ef_temp_items" ("id", "amount", "unit_price")
+        SELECT "id", "amount", "unit_price" FROM "items";
+        PRAGMA foreign_keys = 0;
+        DROP TABLE "items";
+        ALTER TABLE "ef_temp_items" RENAME TO "items";
+        PRAGMA foreign_keys = 1;
+
+    Applied against a table HOLDING A ROW: succeeded. line_total = 6,
+    UPDATE ... SET line_total = 999 -> 'cannot UPDATE generated column'.
+    Note the INSERT ... SELECT correctly OMITS the generated column.
+
+  So the documented sequence does not have to be written: it has to be REACHED,
+  by planning the change as two hops (add the column plain, then alter it into a
+  generated one) so EF sees an AlterColumnOperation. On PostgreSQL the same two-hop
+  emits DROP COLUMN + ADD (measured, and it also works, value 20.00) — more DDL
+  than the one-hop ADD that engine already accepts, so the hop count is per engine.
+
+Q8  CONSEQUENCE FOR THE DESIGN, stated rather than worked around. The design's
+    D1 asks for ONE new dialect member returning the column definition, and for the
+    core never to spell the DDL. Both are satisfiable, but not by the same mechanism
+    for both engines:
+
+      * the REBUILD can only come from EF (it needs every column's DDL, which only
+        EF's type mapping knows), so on SQLite EF spells the generated column;
+      * the IN-PLACE ADD is one statement, so the dialect member can and does spell
+        it, which is the path PostgreSQL takes.
+
+    The single member the design specifies therefore cannot also carry the second
+    bit the measurements demand — "can this engine add a stored generated column to
+    a table that already holds rows" — so a second, default-implemented member
+    carries it. Recorded here because it is a gap in the design, not a preference.
+
+Q9  A `computed` expression's LITERALS become BIND PARAMETERS.
+    SqlPredicateRenderer.RenderLiteralOperand routes every non-boolean literal
+    through the ParameterBag, so `unit_price * 1.2` renders `(<col> * @p0)`. DDL
+    cannot carry a bind parameter. Field-only arithmetic — which is every example
+    in the sources, including baas-analyza:1358's ladder — renders clean.
+
+==============================================================================
+FOURTH PASS — the three review findings, measured, 2026-08-05
+==============================================================================
+Q10 TENANCY. Does the rollup recompute stay inside one tenant?
+  Descriptor: invoices/invoice_items, BOTH scoped, tenancy.enabled = true.
+  Acme creates invoice IA + child(10). Globex creates a child(5) whose `ref` names IA
+  (accepted: a `ref` is a foreign key on invoices.id alone, and the tenant scope judges
+  the CHILD's tenant_id, which is honestly Globex's). Then Acme creates a child(2).
+
+    predicates                                   Acme reads net_total / item_count
+    both statements narrowed by tenant_id        10 / 1   then  12 / 2   CORRECT
+    predicates removed (mutant)                  15 / 2   then  17 / 3   LEAK
+
+  Measured on BOTH engines through the shared suite:
+    sqlite      A_child_write_in_one_tenant_never_moves_another_tenants_rollup  FAILED (10 vs 15.00)
+                A_tenants_rollup_never_aggregates_another_tenants_children      FAILED (12 vs 17.00)
+    postgresql  same two facts, same values, FAILED
+  and 13 of 15 facts in the same class still passed, so the mutant is discriminated by
+  exactly the two facts written for it.
+
+  Removing the APPLY refusal (RollupResolver.EnsureTenancyDoesNotCross) instead:
+    RollupLadderTests  A_rollup_from_a_scoped_child_into_a_global_parent_is_refused  FAILED
+                       A_rollup_from_a_global_child_into_a_scoped_parent_is_refused  FAILED
+                       A_rollup_whose_parent_and_child_are_both_scoped_is_resolved   passed
+  The control still passing is what says the refusal is about the CROSSING, not about tenancy.
+
+------------------------------------------------------------------------------
+Q11 Can the SQLite generated column's STORE TYPE be emitted at all?  NO.
+------------------------------------------------------------------------------
+  Shipped DDL (golden snapshot):  "total" AS (("unit_price" * "amount")) STORED
+  PostgreSQL's:                   total numeric(18,2) GENERATED ALWAYS AS (...) STORED
+
+  Configuring the property with HasColumnType in DescriptorModelBuilder and re-running the
+  SQLite golden-SQL snapshot suite:
+
+    HasColumnType("TEXT")    -> snapshot GREEN, i.e. emitted DDL UNCHANGED (no type)
+    HasColumnType("ZZTOP")   -> snapshot GREEN, i.e. even a bogus type is dropped
+
+  VERDICT: EF Core 10's SQLite migrations generator omits the column type for a computed
+  column unconditionally. Neither the model builder nor IAlvoSqlDialect.GeneratedColumnDefinition
+  can make it appear; that member's returned text is a REFERENCE spelling only (Dev-12).
+
+------------------------------------------------------------------------------
+Q12 Would naming the type change the VALUE?  NO. The loss is in the arithmetic.
+------------------------------------------------------------------------------
+  Bundled e_sqlite3, one table with three generated columns over the same expression
+  ((unit_price * amount)), unit_price stored TEXT as EF stores a decimal:
+
+    unit_price  amount   untyped (no type)        TEXT-typed             REAL-typed
+    0.1         3        real 0.30000000000000004 text 0.30000000000000004  real 0.30000000000000004
+    0.7         3        real 2.0999999999999996  text 2.0999999999999996   real 2.0999999999999996
+    2.50        4        real 10                  text 10.0                 real 10
+    12345678901234.56 1  real 12345678901234.56   text 12345678901234.561   real 12345678901234.56
+
+    GetDecimal(untyped) = GetDecimal(typed) = GetDecimal(typed_real) = 0.30000000000000004
+    SUM(untyped) = SUM(typed) = SUM(typed_real) = 12345678901246.96
+
+  So a TEXT affinity stores the double's own text and changes nothing a reader sees — and for
+  the 16-digit value it stores one EXTRA spurious digit. SQLite has no decimal arithmetic, so
+  the expression is a double whatever the column declares.
+
+  Through the product, same descriptor, both engines:
+    postgresql  numeric(18,2) computed column, 0.1 * 3 -> 0.30
+    sqlite      untyped computed column,       0.1 * 3 -> 0.30000000000000004
+    sqlite      typeof(unit_price) = 'text'  (ordinary decimal column, exact)
+                typeof(line_total) = 'real'  (computed column, no affinity)
+
+  VERDICT: the divergence is real but its cause is SQLite's arithmetic plus the absent
+  rounding to the field's declared scale, NOT the column's affinity. Closing it means the
+  driver wrapping a computed decimal expression (CAST(ROUND(expr, scale) AS ...)), which is a
+  new port member. Pinned per engine by SqliteComputedDecimalStorageTests and filed as its own
+  issue instead. See Dev-13.
+
+------------------------------------------------------------------------------
+Q13 NON-VACUITY OF THE RACE FACT. Does PostgreSqlRollupRaceTests go red with the
+    lock step removed?  YES — 2 of 20.
+------------------------------------------------------------------------------
+  This had never been run. The design's acceptance criterion 4 requires it, and the fact
+  widens its window at a DIFFERENT seam from this spike's Q2 (a per-row delay inside the
+  recompute's aggregate, via a substituted IFieldSqlRenderer, rather than a pg_sleep before
+  the UPDATE), so the equivalence of the two widenings was unverified.
+
+  Mutant: RollupRecompute.LockStatement asks the dialect for nothing
+          (`var clause = dialect.RowLockClause(PreImageMutation.Update);` -> `string.Empty`),
+          which on PostgreSQL makes the method answer null and the locking read is skipped
+          entirely -- i.e. exactly the lock step removed, with everything else untouched.
+
+    unmutated   20 writers, per-row delay 0.01s   line_count 20, total 20   PASSED (7.4s)
+    mutant      same                              line_count  2            FAILED
+                                                  ("every child committed" -- all 20 writers
+                                                   DID commit, so this is 18 lost updates,
+                                                   not failed transactions)
+    mutant, second run                            line_count  2            FAILED (identical)
+    restored                                      line_count 20            PASSED
+
+  VERDICT: the fact is measuring the lock. The aggregate-side widening is at least as
+  effective as the spike's pre-UPDATE delay (2 of 20 here against 31 of 40 there), which
+  makes sense: the delay scales with the number of children, so the later writers -- the
+  ones most likely to collide -- hold the parent's row lock longest.
