@@ -164,9 +164,14 @@ public sealed class WildcardSubscriptionTests
     /// </summary>
     /// <remarks>
     /// JSON Pointer reserves both characters (RFC 6901 §3): <c>~</c> is written <c>~0</c> and <c>/</c> is
-    /// written <c>~1</c>, or the path resolves somewhere else entirely — and the schema's own
-    /// <c>propertyNames</c> forbids neither in a rule name. Interpolating the raw name gave an agent or a
-    /// dashboard a path to the wrong location. Caught in review.
+    /// written <c>~1</c>, or the path resolves somewhere else entirely. Interpolating the raw name gave an
+    /// agent or a dashboard a path to the wrong location. Caught in review.
+    /// <para>
+    /// The schema <em>does</em> forbid both characters in a rule name — an earlier version of this remark said
+    /// otherwise and was wrong. Escaping still matters because this pass reads raw JSON before the schema pass
+    /// has gated anything, so a name the schema will refuse anyway still arrives here and still needs a
+    /// pointer that addresses it.
+    /// </para>
     /// </remarks>
     /// <param name="ruleName">A rule name containing a character JSON Pointer reserves.</param>
     /// <param name="expected">The escaped token the pointer must carry.</param>

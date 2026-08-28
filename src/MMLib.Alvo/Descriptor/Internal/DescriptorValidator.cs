@@ -239,8 +239,15 @@ internal sealed class DescriptorValidator : IDescriptorValidator
     /// <c>~</c> becomes <c>~0</c> and <c>/</c> becomes <c>~1</c>, <b>in that order</b> — reversing them would
     /// re-escape the tilde this method just introduced. Without it, a rule named <c>a/b</c> produced a pointer
     /// addressing a different location than the one that was refused, so an agent or dashboard following the
-    /// path would land somewhere else entirely. The names are author-supplied and the schema's own
-    /// <c>propertyNames</c> does not forbid either character.
+    /// path would land somewhere else entirely.
+    /// <para>
+    /// <b>Why it is needed even though the schema forbids both characters.</b> An earlier version of this
+    /// remark claimed <c>propertyNames</c> permits them; it does not — <c>automation</c> and <c>functions</c>
+    /// keys are both <c>^[a-z][a-z0-9_-]{0,62}$</c>. The reason escaping is still required is that this walk
+    /// runs over <b>raw JSON, before the schema pass has gated anything</b>: a name the schema will
+    /// independently refuse still reaches this code and still has to be pointed at correctly, or the two
+    /// errors a caller receives disagree about where the problem is.
+    /// </para>
     /// </remarks>
     private static string PointerToken(string name) =>
         name.Replace("~", "~0", StringComparison.Ordinal).Replace("/", "~1", StringComparison.Ordinal);
