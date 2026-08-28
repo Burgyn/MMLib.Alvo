@@ -205,6 +205,10 @@ kill, not a predicted one.
 | `A_malformed_automation_entry_is_reported_rather_than_thrown_on` | the validator drops its `ValueKind` check | killed |
 | `Publish_appends_one_entry_carrying_the_guarded_name` | the partition key loses its type prefix | killed |
 | `An_appended_custom_event_is_claimable_like_an_emitted_one` | `EfCoreOutboxStore.AppendAsync` drops the entry | killed (on the **real SQLite driver**) |
+| `The_reserved_namespaces_cannot_be_emptied_by_a_host` | the reserved set goes back to a `HashSet` behind a read-only interface | killed |
+| `A_custom_event_cannot_claim_another_partition` | `Create`'s partition check weakened to "contains a colon" | killed |
+| `A_null_trigger_does_not_crash_the_apply_path` | the mapper dereferences `rule.Trigger` unguarded | killed |
+| `Publish_refuses_a_payload_the_envelope_cannot_express` | the payload probe swallows its refusal | killed |
 
 **One mutation survived first, and the fact was wrong rather than the mutation weak.** Inverting
 `TryReadSubscription`'s prefix comparison left `An_event_a_host_published_selects_no_after_hook` green,
@@ -214,6 +218,19 @@ name is now `crm.deals.updated`: three segments, an entity the catalog really ha
 reader really maps — everything a data event has except the reserved namespace, which is the nearest legal
 forgery a host can attempt. The mutation is killed with the name corrected, and the reason is recorded on the
 fact itself so nobody shortens it back.
+
+**A third review pass found four more, all real, and the two security ones are the same mistake twice.**
+`ReservedNamespaces` was an `IReadOnlySet<string>` over a live `HashSet`, so a host could downcast it once at
+startup and `Clear()` it — disabling the guard process-wide and making `Create` accept `entity.orders.updated`
+again. And `Create` guarded only the *name*, while `AlvoEvents.PartitionKeyFor`'s own doc claimed the
+partition disjointness was *"provable … closed by shape"* — true only for callers coming through
+`PublishAsync`, which is the one door this type exists to stop being the only one. Both are the lesson
+deviation 87 already records, applied to the *contents* of the guarded object rather than to the door: **a
+guarantee is only as strong as the narrowest path that reaches it.** Fixed by a `FrozenSet` and by
+`EnsureOwnPartition`. The other two were an unguarded `rule.Trigger` dereference (`required` in
+`System.Text.Json` enforces presence, never non-null, so `"trigger": null` was a `NullReferenceException` out
+of the apply path) and a `PublishAsync` payload parameter wider than the wire format, whose refusal surfaced
+from inside the queue advising the caller about schema field types a custom event does not have.
 
 **Two mutations are unrepresentable, which is worth recording rather than retrying.** "Return before
 `AppendAsync`" does not compile (`CS9113`: the `outbox` parameter becomes unread) and "drop the payload" does

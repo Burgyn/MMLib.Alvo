@@ -2,6 +2,7 @@
 using MMLib.Alvo.Events.Internal;
 
 using System.Globalization;
+using System.Text.Json;
 
 namespace MMLib.Alvo.Tests.Events;
 
@@ -119,6 +120,142 @@ public sealed class AlvoEventsTests
     public void The_only_door_into_the_queue_refuses_a_reserved_name(string type)
         => Should.Throw<ArgumentException>(() => AlvoCustomEvent.Create(Forged(type)))
             .Message.ShouldContain("reserved");
+
+    /// <summary>
+    /// <b>The reserved set cannot be emptied through the interface it is handed out as.</b>
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// It was an <c>IReadOnlySet&lt;string&gt;</c> over a live <c>HashSet</c>, so a host could downcast it once
+    /// at startup, call <c>Clear()</c>, and disable the guard process-wide — after which
+    /// <see cref="AlvoCustomEvent.Create"/> accepts <c>entity.orders.updated</c> again. A read-only
+    /// <em>interface</em> over a mutable set is not a read-only set, and the whole structural guarantee rests
+    /// on this one collection.
+    /// </para>
+    /// <para>
+    /// <b>The fact asserts that mutating throws, not that the cast fails</b>, because
+    /// <see cref="System.Collections.Frozen.FrozenSet{T}"/> <em>does</em> implement
+    /// <c>ICollection&lt;string&gt;</c> — its mutators throw instead of being absent. A first draft asserted
+    /// the downcast returned <see langword="null"/> and went red for the right reason. The guarantee is then
+    /// stated end to end: the set still reserves the name, and the forgery is still refused.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void The_reserved_namespaces_cannot_be_emptied_by_a_host()
+    {
+        var downcast = (ICollection<string>)AlvoEventName.ReservedNamespaces;
+
+        Should.Throw<NotSupportedException>(() => downcast.Clear());
+        Should.Throw<NotSupportedException>(() => downcast.Remove("entity"));
+        AlvoEventName.IsReservedNamespace("entity").ShouldBeTrue();
+        Should.Throw<ArgumentException>(
+            () => AlvoCustomEvent.Create(Forged("entity.orders.updated")));
+    }
+
+    /// <summary>
+    /// <b>A well-named custom event still cannot claim a data entity's partition.</b>
+    /// </summary>
+    /// <remarks>
+    /// The name guard alone left this open: <c>crm.thing.happened</c> passes it, and nothing stopped the
+    /// envelope carrying <c>PartitionKey = "deals:&lt;rowId&gt;"</c> — which orders the custom event inside a
+    /// real entity's partition the day F7's partitioned claim (#150) reads the column. The same lesson as the
+    /// first bypass: a guarantee is only as strong as the narrowest door that reaches it, and
+    /// <see cref="IOutboxStore.AppendAsync"/> is a door.
+    /// </remarks>
+    [Theory]
+    [InlineData("deals:3f2504e0-4f89-41d3-9a0c-0305e82c3301")]
+    [InlineData("orders/42")]
+    [InlineData("")]
+    [InlineData("crm.other.thing:orders/42")]
+    public void A_custom_event_cannot_claim_another_partition(string partitionKey)
+        => Should.Throw<ArgumentException>(
+                () => AlvoCustomEvent.Create(WellNamed(partitionKey)))
+            .Message.ShouldContain("its own partition");
+
+    [Fact]
+    public void A_custom_event_in_its_own_partition_is_accepted()
+        => AlvoCustomEvent.Create(WellNamed("crm.thing.happened:orders/42"))
+            .Envelope.PartitionKey.ShouldBe("crm.thing.happened:orders/42");
+
+    /// <summary>
+    /// <b>A payload the envelope cannot express is refused at the call, not from inside the queue.</b>
+    /// </summary>
+    /// <remarks>
+    /// <c>IReadOnlyDictionary&lt;string, object?&gt;</c> accepts the obvious things to relay from inbound JSON
+    /// — a nested dictionary, an array, a <c>JsonElement</c> — and the envelope writer accepts none of them.
+    /// Before this, the refusal surfaced from inside <see cref="IOutboxStore.AppendAsync"/> as a
+    /// <c>NotSupportedException</c> advising the caller to use "one of the field types the schema allows",
+    /// which says nothing to someone publishing a custom event that has no schema.
+    /// </remarks>
+    /// <param name="unwritable">One payload value the wire format cannot carry.</param>
+    [Theory]
+    [MemberData(nameof(UnwritablePayloads))]
+    public async Task Publish_refuses_a_payload_the_envelope_cannot_express(object unwritable)
+    {
+        var store = new RecordingOutboxStore();
+
+        var refusal = await Should.ThrowAsync<ArgumentException>(
+            () => Publisher(store).PublishAsync(
+                "orders.approved",
+                "orders/42",
+                new Dictionary<string, object?> { ["value"] = unwritable },
+                Caller,
+                TestContext.Current.CancellationToken));
+
+        refusal.ParamName.ShouldBe("data");
+        store.Appended.ShouldBeEmpty("a refused payload must leave no entry behind");
+    }
+
+    public static TheoryData<object> UnwritablePayloads() =>
+    [
+        new Dictionary<string, object?> { ["nested"] = 1 },
+        new[] { 1, 2, 3 },
+        JsonDocument.Parse("{}").RootElement,
+        new Uri("https://example.com"),
+        TimeSpan.FromMinutes(1),
+    ];
+
+    /// <summary>
+    /// <b>Every scalar the payload does accept survives the real serializer.</b>
+    /// </summary>
+    /// <remarks>
+    /// The other half of the refusal above, and the round trip nothing exercised: the publish facts assert
+    /// against an in-memory store, so a payload that the envelope writer would reject — or silently reshape —
+    /// never reached it.
+    /// </remarks>
+    [Fact]
+    public async Task A_scalar_payload_survives_the_envelope_round_trip()
+    {
+        var store = new RecordingOutboxStore();
+        var payload = new Dictionary<string, object?>
+        {
+            ["text"] = "approved",
+            ["flag"] = true,
+            ["count"] = 42,
+            ["amount"] = 99.50m,
+            ["id"] = Guid.Parse("3f2504e0-4f89-41d3-9a0c-0305e82c3301"),
+            ["at"] = new DateTimeOffset(2026, 8, 28, 9, 30, 0, TimeSpan.Zero),
+            ["nothing"] = null,
+        };
+
+        await Publisher(store).PublishAsync(
+            "orders.approved", "orders/42", payload, Caller, TestContext.Current.CancellationToken);
+
+        var written = AlvoEventJson.Read(AlvoEventJson.Write(store.Appended.ShouldHaveSingleItem()));
+        written.Data.Record!.Values.Keys.Order(StringComparer.Ordinal)
+            .ShouldBe(payload.Keys.Order(StringComparer.Ordinal));
+        written.Data.Record["text"].ShouldBe("approved");
+        written.Data.Record["flag"].ShouldBe(true);
+        written.Data.Record["nothing"].ShouldBeNull();
+    }
+
+    /// <summary>A guarded name with a caller-chosen partition key, for the partition facts above.</summary>
+    /// <param name="partitionKey">The key under test.</param>
+    private static AlvoEvent WellNamed(string partitionKey)
+    {
+        var envelope = Forged("crm.thing.happened");
+        return envelope with { PartitionKey = partitionKey };
+    }
 
     /// <summary>An envelope shaped exactly like a real data event, which is what makes the refusal matter.</summary>
     /// <param name="type">The name being forged.</param>

@@ -1,4 +1,5 @@
-﻿using System.Text.RegularExpressions;
+﻿using System.Collections.Frozen;
+using System.Text.RegularExpressions;
 
 namespace MMLib.Alvo.Events;
 
@@ -39,13 +40,24 @@ public static partial class AlvoEventName
     /// The namespaces Alvo emits into, and therefore the ones a host may never mint an event into.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// These are exactly the namespaces the frozen <c>$defs/eventPattern</c> grammar admits as a
     /// subscription's first segment — asserted against <c>schema/project.schema.json</c> itself by
     /// <c>EventPatternTests.The_reserved_namespaces_are_the_schema_s_own</c>, because a hand-copied
     /// alternation that drifts from the schema does not fail, it silently reserves the wrong names.
+    /// </para>
+    /// <para>
+    /// <b>A <see cref="FrozenSet{T}"/>, and the type is load-bearing rather than a micro-optimisation.</b>
+    /// Handed out as <c>IReadOnlySet&lt;string&gt;</c> over a live <see cref="HashSet{T}"/> — which is what
+    /// this was — a host could downcast it once at startup and call <c>Clear()</c>, disabling the
+    /// reserved-namespace guard process-wide and making <see cref="AlvoCustomEvent.Create"/> accept
+    /// <c>entity.orders.updated</c> again. That is the exact forgery <see cref="AlvoCustomEvent"/> exists to
+    /// make structurally impossible, so the set that decides it must be immutable in fact and not only in the
+    /// interface it is declared through. Found by review, after the first bypass had already been fixed.
+    /// </para>
     /// </remarks>
-    public static IReadOnlySet<string> ReservedNamespaces { get; } =
-        new HashSet<string>(StringComparer.Ordinal) { "entity", "auth", "storage" };
+    public static FrozenSet<string> ReservedNamespaces { get; } =
+        new[] { "entity", "auth", "storage" }.ToFrozenSet(StringComparer.Ordinal);
 
     /// <summary>Whether <paramref name="segment"/> is one of the framework's own namespaces.</summary>
     /// <param name="segment">One event-name segment, normally the first.</param>

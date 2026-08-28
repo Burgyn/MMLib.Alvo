@@ -795,7 +795,7 @@ namespace MMLib.Alvo.Events
     public static class AlvoEventName
     {
         public const char Separator = '.';
-        public static System.Collections.Generic.IReadOnlySet<string> ReservedNamespaces { get; }
+        public static System.Collections.Frozen.FrozenSet<string> ReservedNamespaces { get; }
         public static void EnsureCustom(string? type, string parameterName) { }
         public static bool IsReservedNamespace(string segment) { }
     }

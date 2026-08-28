@@ -64,6 +64,15 @@ internal static class DescriptorToSchemaMapper
     /// The reason it is refused rather than warned about, and why the matcher is not simply built, is on
     /// <see cref="UnhonouredFeatures.WildcardSubscription"/> — it is a ruling, not a mechanic.
     /// </para>
+    /// <para>
+    /// <b>Every hop is null-tolerant, including the entry itself.</b> <c>AutomationRule.Trigger</c> is
+    /// <c>required</c>, but <c>System.Text.Json</c>'s <c>required</c> enforces <em>presence</em> and never
+    /// non-null on a reference type — so <c>"automation": { "r": { "trigger": null, … } }</c> and
+    /// <c>"automation": { "r": null }</c> both parse cleanly and would leave this walk throwing
+    /// <see cref="NullReferenceException"/> instead of the structured refusal. This is the apply path a host
+    /// that skips <c>IDescriptorValidator</c> still takes, so a crash here is the same availability bug the
+    /// validator's own <c>ValueKind</c> guard exists to prevent. Found by review.
+    /// </para>
     /// </remarks>
     /// <param name="d">The parsed descriptor.</param>
     /// <exception cref="InvalidDataException">A trigger subscribes with a wildcard.</exception>
@@ -71,12 +80,12 @@ internal static class DescriptorToSchemaMapper
     {
         foreach (var (name, rule) in d.Automation ?? Empty<AutomationRule>.Map)
         {
-            RefuseWildcard($"Automation rule '{name}'", rule.Trigger.Event);
+            RefuseWildcard($"Automation rule '{name}'", rule?.Trigger?.Event);
         }
 
         foreach (var (name, function) in d.Functions ?? Empty<FunctionDescriptor>.Map)
         {
-            RefuseWildcard($"Function '{name}'", function.Trigger?.Event);
+            RefuseWildcard($"Function '{name}'", function?.Trigger?.Event);
         }
     }
 

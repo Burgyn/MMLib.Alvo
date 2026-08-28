@@ -917,6 +917,15 @@ carries a reserved name"*, not *"only the framework constructs one"*. `AlvoEvent
 with it, because the reserved namespaces are wire contract; `EventPattern` kept the wildcard half, which is
 descriptor contract.
 
+**The guard's *contents* were the second mistake, and it is the same one.** A later review found two more
+holes of the same shape: `ReservedNamespaces` was handed out as `IReadOnlySet<string>` over a live
+`HashSet`, so a host could downcast it and `Clear()` it — turning the guard off process-wide — and `Create`
+checked only the *name*, leaving `partitionkey` caller-controlled while this document claimed its
+disjointness was closed by shape. Both are now enforced (`FrozenSet`, and `Create` requires the key to start
+with the event's own type). The lesson is the one deviation 87 already carries, one level down: **a guarantee
+is only as strong as the narrowest path that reaches it**, and the contents of a guarded object are such a
+path.
+
 **`AppendAsync` has two facts in the contract suite both engines inherit** — appended-then-claimable, and
 appended-then-retired — because it was, briefly, product code no engine ever ran. Deleting its INSERT turns
 `SqliteOutboxStoreTests` red.

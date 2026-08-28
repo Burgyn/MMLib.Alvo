@@ -129,6 +129,36 @@ public sealed class WildcardSubscriptionTests
         result.Errors.ShouldNotBeEmpty($"the schema pass still has to refuse a non-object '{block}' entry");
     }
 
+    /// <summary>
+    /// <b>A null trigger, or a null entry, is not a crash on the apply path.</b>
+    /// </summary>
+    /// <remarks>
+    /// <c>AutomationRule.Trigger</c> is <c>required</c>, but <c>System.Text.Json</c>'s <c>required</c>
+    /// enforces <em>presence</em> and never non-null on a reference type — so all four shapes below parse
+    /// cleanly through <c>AlvoDescriptor.Parse</c> and reached the wildcard walk as a
+    /// <see cref="NullReferenceException"/> out of <c>Map</c> rather than as a structured refusal. The mapper
+    /// is documented as the apply path a host that skips <see cref="IDescriptorValidator"/> still takes, so
+    /// this is the same availability bug as the validator's own <c>ValueKind</c> crash. Found by review.
+    /// </remarks>
+    /// <param name="block">The top-level block the entry sits in.</param>
+    /// <param name="entry">One entry whose trigger, or whose own value, is null.</param>
+    [Theory]
+    [InlineData("automation", """{ "trigger": null, "actions": [] }""")]
+    [InlineData("automation", "null")]
+    [InlineData("functions", """{ "script": "x.csx", "trigger": null }""")]
+    [InlineData("functions", "null")]
+    public void A_null_trigger_does_not_crash_the_apply_path(string block, string entry)
+    {
+        var json = Descriptor($$"""
+            "{{block}}": { "entry": {{entry}} }
+            """);
+
+        var descriptor = AlvoDescriptor.Parse(json);
+
+        Should.NotThrow(() => DescriptorToSchemaMapper.Map(descriptor))
+            .Entities.ShouldNotBeEmpty();
+    }
+
     private static InvalidDataException Refusal(string descriptorJson)
         => Should.Throw<InvalidDataException>(
             () => DescriptorToSchemaMapper.Map(AlvoDescriptor.Parse(descriptorJson)));

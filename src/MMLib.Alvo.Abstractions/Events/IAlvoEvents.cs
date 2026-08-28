@@ -43,11 +43,19 @@ public interface IAlvoEvents
     /// partition key, because it is the only thing here that identifies the subject two events might share —
     /// so per-subject ordering is the only ordering a custom event can be given.
     /// </param>
-    /// <param name="data">The event's payload, or <see langword="null"/> for an event that carries none.</param>
+    /// <param name="data">
+    /// The event's payload, or <see langword="null"/> for an event that carries none. <b>Values must be
+    /// scalars the envelope can express</b> — <see cref="string"/>, <see cref="bool"/>, <see cref="Guid"/>,
+    /// <see cref="DateTimeOffset"/>, <see cref="DateTime"/>, <see cref="DateOnly"/>, the numeric types, or
+    /// <see langword="null"/>. A nested dictionary, an array, a <c>JsonElement</c> or any other type is
+    /// refused: the envelope is a flat record on the wire, so there is nothing for a nested value to become.
+    /// Flatten it, or serialize it to a string yourself.
+    /// </param>
     /// <param name="context">The caller publishing it, recorded as the event's provenance. Never ambient.</param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <exception cref="ArgumentException">
-    /// <paramref name="type"/> is blank, sits in a reserved namespace, or is not a well-formed event name.
+    /// <paramref name="type"/> is blank, sits in a reserved namespace, or is not a well-formed event name;
+    /// or <paramref name="data"/> carries a value the envelope cannot express.
     /// </exception>
     Task PublishAsync(
         string type,
