@@ -313,14 +313,6 @@
           Indexed: false
         },
         {
-          Name: owner_email,
-          Required: false,
-          Unique: false,
-          Nullable: true,
-          Format: email,
-          Indexed: false
-        },
-        {
           Name: closed_at,
           Type: DateTime,
           Required: false,
