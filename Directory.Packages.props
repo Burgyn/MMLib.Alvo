@@ -18,7 +18,7 @@
          in-process runner); MMLib.Alvo.Testing is a class library that only
          declares [Fact] test methods for downstream Exe test projects to
          inherit, so it takes the attribute/extensibility surface alone. -->
-    <PackageVersion Include="xunit.v3.extensibility.core" Version="3.2.2" />
+    <PackageVersion Include="xunit.v3.extensibility.core" Version="4.0.0" />
     <PackageVersion Include="Corvus.Json.Validator" Version="5.4.1" />
     <!-- Corvus.Json.SourceGenerator + Corvus.Json.ExtendedTypes replace JsonSchema.Net (whose 9.x
          line carries a maintenance-fee EULA on top of MIT) as the descriptor schema-pass
