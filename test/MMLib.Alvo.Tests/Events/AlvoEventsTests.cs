@@ -59,7 +59,11 @@ public sealed class AlvoEventsTests
         var published = store.Appended.ShouldHaveSingleItem();
         published.Type.ShouldBe("orders.approved");
         published.Subject.ShouldBe("orders/42");
-        published.PartitionKey.ShouldBe("orders/42");
+        published.PartitionKey.ShouldBe(
+            "orders.approved:orders/42",
+            customMessage:
+                "the type is in the partition key so a host publishing subject 'deals:<guid>' cannot order "
+                + "itself into a real entity's partition when F7's partitioned claim (#150) reads the column");
         published.AuthId.ShouldBe(Caller.User.Value.ToString());
         published.Data.Record!["total"].ShouldBe(99);
     }
@@ -89,6 +93,54 @@ public sealed class AlvoEventsTests
         => await Should.ThrowAsync<ArgumentException>(
             () => Publisher(new RecordingOutboxStore()).PublishAsync(type!, "orders/42", null, Caller));
 
+    /// <summary>
+    /// <b>The guard is on the type the port accepts, so resolving <see cref="IOutboxStore"/> directly does not
+    /// get around it.</b>
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the fact the first draft of this PR did not have, and two independent reviews found the hole it
+    /// left: <see cref="IOutboxStore"/> is public and DI-registered and <see cref="AlvoEvent"/> is a public
+    /// record with public initializers, so when <c>AppendAsync</c> took a bare envelope a host could append
+    /// <c>entity.orders.updated</c> with <c>authtype: system</c> and a payload of its choosing — firing every
+    /// after-hook subscribed to the real name, one layer below the guard.
+    /// </para>
+    /// <para>
+    /// It asserts the refusal at <see cref="AlvoCustomEvent.Create"/> rather than through the publisher,
+    /// because that is the claim: the queue has exactly one door and the door is guarded. A fact that only
+    /// went through <c>PublishAsync</c> would stay green if the check were moved back out of the type.
+    /// </para>
+    /// </remarks>
+    /// <param name="type">A reserved name a host might try to forge.</param>
+    [Theory]
+    [InlineData("entity.orders.updated")]
+    [InlineData("auth.user.login")]
+    [InlineData("storage.file.uploaded")]
+    public void The_only_door_into_the_queue_refuses_a_reserved_name(string type)
+        => Should.Throw<ArgumentException>(() => AlvoCustomEvent.Create(Forged(type)))
+            .Message.ShouldContain("reserved");
+
+    /// <summary>An envelope shaped exactly like a real data event, which is what makes the refusal matter.</summary>
+    /// <param name="type">The name being forged.</param>
+    private static AlvoEvent Forged(string type)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var id = AlvoEventId.Create(now);
+
+        return new AlvoEvent
+        {
+            Id = id,
+            Source = AlvoEvent.DefaultSource,
+            Type = type,
+            Time = now,
+            Subject = "orders/42",
+            PartitionKey = "orders:42",
+            AuthType = AlvoEventAuthType.System,
+            CorrelationId = id.ToString(),
+            Data = new AlvoEventData(),
+        };
+    }
+
     private static AlvoEvents Publisher(IOutboxStore store) => new(store, TimeProvider.System);
 
     private static AlvoContext Caller { get; } = new()
@@ -104,9 +156,9 @@ public sealed class AlvoEventsTests
 
         internal IReadOnlyList<AlvoEvent> Appended => _appended;
 
-        public Task AppendAsync(AlvoEvent envelope, CancellationToken cancellationToken = default)
+        public Task AppendAsync(AlvoCustomEvent customEvent, CancellationToken cancellationToken = default)
         {
-            _appended.Add(envelope);
+            _appended.Add(customEvent.Envelope);
             return Task.CompletedTask;
         }
 

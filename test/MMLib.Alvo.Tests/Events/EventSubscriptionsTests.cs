@@ -217,9 +217,9 @@ public sealed class EventSubscriptionsTests : IDisposable
 
         internal IReadOnlyList<AlvoEvent> Published => _published;
 
-        public Task AppendAsync(AlvoEvent envelope, CancellationToken cancellationToken = default)
+        public Task AppendAsync(AlvoCustomEvent customEvent, CancellationToken cancellationToken = default)
         {
-            _published.Add(envelope);
+            _published.Add(customEvent.Envelope);
             return Task.CompletedTask;
         }
 

@@ -202,11 +202,21 @@ internal sealed class DescriptorValidator : IDescriptorValidator
     }
 
     /// <summary>The error one automation rule or function earns, or <see langword="null"/> when it is exact.</summary>
+    /// <remarks>
+    /// <b>Every step checks <see cref="JsonElement.ValueKind"/> before reading, including the entry itself.</b>
+    /// <see cref="JsonElement.TryGetProperty(string, out JsonElement)"/> <em>throws</em> on a non-object rather
+    /// than answering <see langword="false"/>, and this walk runs on raw input before the schema pass has
+    /// gated anything — so <c>"automation": { "deal-won": "not-an-object" }</c> is syntactically valid JSON
+    /// that would take the whole validator down. <see cref="IDescriptorValidator"/>'s contract is to
+    /// <em>report</em> on arbitrary input and never throw, and a crash on the apply path is an availability
+    /// bug on caller-controlled input. Matches <c>Declares</c>' convention in this same file.
+    /// </remarks>
     /// <param name="block">The top-level block the entry sits in.</param>
     /// <param name="entry">One rule or function, by its declared name.</param>
     private static DescriptorValidationError? WildcardErrorFor(string block, JsonProperty entry)
     {
-        if (!entry.Value.TryGetProperty("trigger", out var trigger)
+        if (entry.Value.ValueKind != JsonValueKind.Object
+            || !entry.Value.TryGetProperty("trigger", out var trigger)
             || trigger.ValueKind != JsonValueKind.Object
             || !trigger.TryGetProperty("event", out var pattern)
             || pattern.ValueKind != JsonValueKind.String

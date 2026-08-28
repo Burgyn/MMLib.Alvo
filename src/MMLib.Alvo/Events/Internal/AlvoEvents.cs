@@ -37,8 +37,36 @@ internal sealed class AlvoEvents(IOutboxStore outbox, TimeProvider clock) : IAlv
         ArgumentException.ThrowIfNullOrWhiteSpace(subject);
         ArgumentNullException.ThrowIfNull(context);
 
-        return outbox.AppendAsync(Envelope(type, subject, data, context), cancellationToken);
+        return outbox.AppendAsync(
+            AlvoCustomEvent.Create(Envelope(type, subject, data, context)), cancellationToken);
     }
+
+    /// <summary>
+    /// The partition a custom event orders within: its type and its subject, joined.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The type is in the key so a custom event can never land in a data entity's partition.</b> A data
+    /// event's key is <c>{entity}:{rowId}</c>, and <c>OutboxTable</c>'s <c>partition_key</c> column exists for
+    /// F7's partitioned claim (<b>#150</b>) to index — so a host publishing <c>subject: "deals:&lt;guid&gt;"</c>
+    /// would, on the day that claim reads the column, be ordering itself into a real entity's partition. That
+    /// is the same "meaning silently widens when the feature lands, with nobody re-reading the artifact"
+    /// hazard the wildcard refusal exists for, and it is closed by shape rather than by a warning.
+    /// </para>
+    /// <para>
+    /// <b>The disjointness is provable, not probable.</b> An entity name is
+    /// <c>^[a-z][a-z0-9_]{0,62}$</c> (<c>schema/project.schema.json</c>, <c>entities</c>' <c>propertyNames</c>)
+    /// and so contains no dot; <see cref="AlvoEventName"/> requires a custom type to contain <em>at least
+    /// one</em>. So the two key spaces cannot collide, whatever subject a host supplies.
+    /// </para>
+    /// <para>
+    /// Ordering is still per subject, because the type is fixed for a given subject's stream — under the same
+    /// one-dispatcher, one-millisecond conditions as everything else on this queue.
+    /// </para>
+    /// </remarks>
+    /// <param name="type">The guarded event name.</param>
+    /// <param name="subject">What the event is about, in the host's own vocabulary.</param>
+    private static string PartitionKeyFor(string type, string subject) => $"{type}:{subject}";
 
     /// <summary>The envelope one published event becomes.</summary>
     /// <param name="type">The guarded event name.</param>
@@ -58,7 +86,7 @@ internal sealed class AlvoEvents(IOutboxStore outbox, TimeProvider clock) : IAlv
             Type = type,
             Time = now,
             Subject = subject,
-            PartitionKey = subject,
+            PartitionKey = PartitionKeyFor(type, subject),
             AuthType = AlvoEventProvenance.AuthTypeOf(context),
             AuthId = AlvoEventProvenance.AuthIdOf(context),
             CorrelationId = AlvoEventProvenance.CorrelationIdOf(id),

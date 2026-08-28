@@ -88,6 +88,35 @@ public sealed class WildcardSubscriptionTests
         error.FixSuggestion.ShouldBe(UnhonouredFeatures.WildcardSubscription.Fix);
     }
 
+    /// <summary>
+    /// <b>A malformed entry is reported, never thrown on.</b>
+    /// </summary>
+    /// <remarks>
+    /// <c>JsonElement.TryGetProperty</c> throws on a non-object instead of answering <see langword="false"/>,
+    /// and this pass walks raw input <em>before</em> the schema pass has gated anything — so a syntactically
+    /// valid <c>"automation": { "deal-won": "not-an-object" }</c> took the whole validator down with an
+    /// unhandled <c>InvalidOperationException</c>. <see cref="IDescriptorValidator"/>'s contract is to report
+    /// on arbitrary input and never throw; the apply path is reachable from a CLI, a dashboard and an agent,
+    /// so a crash there is an availability bug on caller-controlled input. Found by review, not by this fact —
+    /// which is why the fact exists.
+    /// </remarks>
+    /// <param name="malformed">One automation entry that is valid JSON and not an object.</param>
+    [Theory]
+    [InlineData("\"not-an-object\"")]
+    [InlineData("42")]
+    [InlineData("null")]
+    [InlineData("[]")]
+    public void A_malformed_automation_entry_is_reported_rather_than_thrown_on(string malformed)
+    {
+        var json = Descriptor($$"""
+            "automation": { "deal-won": {{malformed}} }
+            """);
+
+        var result = Should.NotThrow(() => new DescriptorValidator().Validate(json));
+
+        result.Errors.ShouldNotBeEmpty("the schema pass still has to refuse a non-object automation rule");
+    }
+
     private static InvalidDataException Refusal(string descriptorJson)
         => Should.Throw<InvalidDataException>(
             () => DescriptorToSchemaMapper.Map(AlvoDescriptor.Parse(descriptorJson)));

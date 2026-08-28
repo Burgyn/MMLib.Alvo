@@ -95,7 +95,12 @@ public interface IOutboxStore
     /// <summary>
     /// Appends one <b>custom application event</b> to the queue, so the dispatcher claims it like any other.
     /// </summary>
-    /// <param name="envelope">The event to append; its <see cref="AlvoEvent.Id"/> is the entry's own id.</param>
+    /// <param name="customEvent">
+    /// The event to append. It is an <see cref="AlvoCustomEvent"/> rather than a bare <see cref="AlvoEvent"/>
+    /// <b>so that the reserved-namespace guard cannot be routed around by resolving this port directly</b> —
+    /// that type cannot be constructed outside the framework, and the only thing that constructs it guards
+    /// the name first. Its <see cref="AlvoEvent.Id"/> is the entry's own id.
+    /// </param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <remarks>
     /// <para>
@@ -107,13 +112,18 @@ public interface IOutboxStore
     /// write and its own event to commit together does not get that from this member.
     /// </para>
     /// <para>
+    /// <b>An implementation must not re-guard the name, and must not need to.</b> The parameter type is the
+    /// guarantee (see <see cref="AlvoCustomEvent"/>); a driver repeating the check would be a second authority
+    /// on which namespaces are reserved, and the driver that forgot it would lose the guarantee silently.
+    /// </para>
+    /// <para>
     /// <b>One statement, on the port's standing rule.</b> Never a read followed by a write in one
     /// transaction: that is the single shape measured to fail unretryably on SQLite (spike Q5), and an append
     /// that first checked whether the id was taken would be exactly it. A duplicate id is the caller's
     /// mistake and surfaces as the primary key violation it is.
     /// </para>
     /// </remarks>
-    Task AppendAsync(AlvoEvent envelope, CancellationToken cancellationToken = default);
+    Task AppendAsync(AlvoCustomEvent customEvent, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Claims up to <paramref name="batchSize"/> undelivered entries for <paramref name="claimant"/>, oldest

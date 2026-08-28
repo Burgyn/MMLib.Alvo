@@ -1,19 +1,18 @@
 ﻿namespace MMLib.Alvo.Events.Internal;
 
 /// <summary>
-/// <b>The one authority on the frozen <c>$defs/eventPattern</c> grammar</b>: which namespaces it reserves,
-/// and whether one pattern subscribes with a wildcard.
+/// <b>The authority on the wildcard half of the frozen <c>$defs/eventPattern</c> grammar</b>: whether one
+/// declared pattern subscribes to more than a single exact event name.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Two unrelated-looking rules read the same vocabulary, which is why it is a type rather than two
-/// literals.</b> <see cref="HasWildcard"/> is what refuses <c>entity.orders.*</c> at apply
-/// (<c>DescriptorToSchemaMapper</c>); <see cref="ReservedNamespaces"/> is what refuses a host publishing
-/// <c>entity.orders.updated</c> as a custom event (<see cref="AlvoEventName"/>). They were a hand-copied
-/// alternation in two files in the first draft, which is the defect <c>UnhonouredFeatures</c>' own remarks
-/// describe: two copies of one list with nothing tying them, so a namespace added to one side is silently
-/// unreserved on the other. <c>EventPatternTests.The_reserved_namespaces_are_the_schema_s_own</c> ties this
-/// set to <c>schema/project.schema.json</c> itself, so the schema stays the authority over even this one.
+/// <b>Only the wildcard half lives here, and the split is along the two contracts.</b> The reserved
+/// namespaces are part of the <em>wire</em> contract — which names Alvo emits, and therefore which a host may
+/// not mint — so they live in <see cref="AlvoEventName"/> in <c>Abstractions</c>, where
+/// <see cref="AlvoCustomEvent.Create"/> can enforce them for every caller. The wildcard is part of the
+/// <em>descriptor</em> contract — what a rule may subscribe to — so it lives here, next to the apply path
+/// that refuses it. An earlier draft kept both in this type and had to be split when the guard moved to the
+/// only layer that could enforce it structurally.
 /// </para>
 /// <para>
 /// <b>A segment is a wildcard only when it is <em>entirely</em> <c>*</c>.</b> The frozen grammar admits
@@ -24,35 +23,15 @@
 /// </remarks>
 internal static class EventPattern
 {
-    /// <summary>The segment separator, as the grammar spells it.</summary>
-    internal const char Separator = '.';
-
     /// <summary>A segment that subscribes to every value of its position.</summary>
     internal const string Wildcard = "*";
-
-    /// <summary>
-    /// The namespaces the frozen grammar's first segment admits — and therefore the ones a host may never
-    /// mint an event into.
-    /// </summary>
-    /// <remarks>
-    /// Ordinal, because the one reader that decides whether an event <em>is</em> a data event —
-    /// <c>EventSubscriptions.TryReadSubscription</c> — compares its first segment with
-    /// <see cref="StringComparison.Ordinal"/>. A case-insensitive set here would reserve names that reader
-    /// does not recognise, which is a different rule than "indistinguishable from a real data change".
-    /// </remarks>
-    internal static IReadOnlySet<string> ReservedNamespaces { get; } =
-        new HashSet<string>(StringComparer.Ordinal) { "entity", "auth", "storage" };
-
-    /// <summary>Whether <paramref name="segment"/> is one of the framework's own namespaces.</summary>
-    /// <param name="segment">One event-name segment, normally the first.</param>
-    internal static bool IsReservedNamespace(string segment) => ReservedNamespaces.Contains(segment);
 
     /// <summary>Whether <paramref name="pattern"/> subscribes to more than one exact event name.</summary>
     /// <param name="pattern">A <c>$defs/eventPattern</c>-typed value, as the descriptor declares it.</param>
     internal static bool HasWildcard(string pattern)
     {
         ArgumentNullException.ThrowIfNull(pattern);
-        foreach (var segment in pattern.Split(Separator))
+        foreach (var segment in pattern.Split(AlvoEventName.Separator))
         {
             if (string.Equals(segment, Wildcard, StringComparison.Ordinal))
             {

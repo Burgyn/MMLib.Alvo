@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Descriptor.Internal;
+﻿using System.Reflection;
+
+namespace MMLib.Alvo.Descriptor.Internal;
 
 /// <summary>
 /// <b>The one authority on what the frozen descriptor schema declares and this build does not honour.</b>
@@ -229,6 +231,14 @@ internal static class UnhonouredFeatures
         "Move the body inline into the template's 'body' — it takes the same '{{...}}' placeholders — or stop "
         + "referencing this template from an after-hook until bundle files are read.");
 
+    /// <summary>The action <c>type</c> discriminators this build declares and never runs.</summary>
+    /// <remarks>
+    /// Declared <b>before</b> <see cref="EveryFixSuggestion"/> deliberately: a static field initializer runs
+    /// in declaration order, so a list built above this line would enumerate <see langword="null"/>.
+    /// </remarks>
+    internal static IReadOnlyList<string> EveryActionType { get; } =
+        [FunctionType, HttpCallType, EntityUpdateType];
+
     /// <summary>
     /// Every fix suggestion this table can produce — the one thing common to every refusal it authors, and
     /// therefore the way to ask whether a refusal came from <em>here</em> at all.
@@ -243,22 +253,41 @@ internal static class UnhonouredFeatures
     /// assertion mean "refused by an unhonoured feature", which is the claim the marker actually makes.
     /// </para>
     /// <para>
-    /// Enumerated <em>here</em> rather than rebuilt in the test for this file's own founding reason: a second
-    /// copy of the list is how one side comes to be extended and the other not, and an entry missing from the
-    /// test's copy would silently weaken the assertion instead of failing it.
+    /// <b>The <see cref="UnhonouredSlot"/> half is discovered by reflection, and that is the whole point of
+    /// the shape.</b> An enumeration that named <c>RollupWhere</c>, <c>RawJsonata</c> and the rest by hand
+    /// would be precisely the hand-copied list this file's own opening remark exists to forbid — and it would
+    /// fail in the worse direction: a new slot omitted from it does not break a build, it silently narrows
+    /// the assertion above back toward what deviation 76 complained about. Reflection over this type's own
+    /// static <see cref="UnhonouredSlot"/> properties makes a new slot join the list by being declared.
+    /// </para>
+    /// <para>
+    /// The two typed tables are enumerated directly because they already are collections, and the three
+    /// action refusals are generated rather than declared — so their types come from the same three constants
+    /// <see cref="ActionFix"/> switches on, whose <c>default</c> arm throws for an unmapped type.
     /// </para>
     /// </remarks>
     internal static IReadOnlyList<string> EveryFixSuggestion { get; } =
     [
         .. OnAField.Select(feature => feature.Fix),
         .. OnAnEntity.Select(feature => feature.Fix),
-        RollupWhere.Fix,
-        RawJsonata.Fix,
-        EmailData.Fix,
-        TemplateBodyFile.Fix,
-        WildcardSubscription.Fix,
-        .. new[] { FunctionType, HttpCallType, EntityUpdateType }.Select(ActionFix),
+        .. EveryDeclaredSlot().Select(slot => slot.Fix),
+        .. EveryActionType.Select(ActionFix),
     ];
+
+    /// <summary>Every <see cref="UnhonouredSlot"/> this type declares, found rather than listed.</summary>
+    /// <remarks>
+    /// A slot declared <em>below</em> <see cref="EveryFixSuggestion"/> reflects as <see langword="null"/>,
+    /// because a static initializer runs in declaration order — so that case throws by name instead of
+    /// quietly contributing nothing, which would be the silent narrowing this whole shape exists to prevent.
+    /// </remarks>
+    private static IEnumerable<UnhonouredSlot> EveryDeclaredSlot() =>
+        typeof(UnhonouredFeatures)
+            .GetProperties(BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public)
+            .Where(property => property.PropertyType == typeof(UnhonouredSlot))
+            .Select(property => (UnhonouredSlot?)property.GetValue(obj: null)
+                ?? throw new InvalidOperationException(
+                    $"Unhonoured slot '{property.Name}' is declared below EveryFixSuggestion, so it "
+                    + "initializes after it and would contribute no fix suggestion. Move it above."));
 
     /// <summary>The refusal for one action type the frozen <c>$defs/action</c> declares and this build never runs.</summary>
     /// <param name="type">The action's <c>type</c> discriminator, exactly as the schema spells it.</param>

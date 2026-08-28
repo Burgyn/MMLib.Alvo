@@ -644,9 +644,9 @@ public sealed class OutboxDispatcherTests : IDisposable
         /// The port's own append and the seeding these facts already did are one operation, so it delegates
         /// rather than keeping a second list: a published event has to be claimable exactly like an emitted one.
         /// </remarks>
-        public Task AppendAsync(AlvoEvent envelope, CancellationToken cancellationToken = default)
+        public Task AppendAsync(AlvoCustomEvent customEvent, CancellationToken cancellationToken = default)
         {
-            Append(envelope);
+            Append(customEvent.Envelope);
             return Task.CompletedTask;
         }
 

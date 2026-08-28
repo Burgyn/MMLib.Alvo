@@ -1,38 +1,56 @@
 ﻿using System.Text.RegularExpressions;
 
-namespace MMLib.Alvo.Events.Internal;
+namespace MMLib.Alvo.Events;
 
 /// <summary>
-/// <b>The guard that keeps a host from minting an event indistinguishable from a real data change.</b> Every
-/// name reaching <see cref="IAlvoEvents.PublishAsync"/> passes through here first.
+/// <b>The one authority on which event names a host may mint, and the guard that keeps it from minting one
+/// indistinguishable from a real data change.</b>
 /// </summary>
 /// <remarks>
 /// <para>
 /// <b>The reserved-namespace rule is the whole reason this type exists.</b> Without it a host could publish
 /// <c>entity.orders.updated</c>, and every descriptor rule and after-hook subscribing to that name would fire
 /// on a forged event — carrying a <c>partitionkey</c>, an <c>authid</c> and a <c>time</c> for a row nobody
-/// wrote. The three namespaces are read off <see cref="EventPattern.ReservedNamespaces"/> rather than spelled
-/// here, so the set that is <em>refused</em> and the set the frozen <c>$defs/eventPattern</c> grammar
-/// <em>admits</em> cannot drift apart.
+/// wrote.
+/// </para>
+/// <para>
+/// <b>It lives in <c>Abstractions</c>, beside <see cref="AlvoEvent"/>, because the reserved namespaces are
+/// part of the <em>wire</em> contract rather than of the descriptor.</b> That is also what lets
+/// <see cref="AlvoCustomEvent.Create"/> — the only door to <see cref="IOutboxStore.AppendAsync"/> — enforce
+/// the rule for every caller, including a host building its own envelope and an external driver's contract
+/// tests. The descriptor-side grammar (wildcards, the <c>.batch</c> suffix) is a different question and stays
+/// in the core, next to the apply path that refuses it.
 /// </para>
 /// <para>
 /// <b>Ordinal, not case-insensitive, and that is the tight rule rather than the loose one.</b>
-/// "Indistinguishable from a real data change" has exactly one arbiter:
-/// <see cref="EventSubscriptions"/>'s type reader, which compares the first segment with
-/// <see cref="StringComparison.Ordinal"/>. <c>Entity.orders.updated</c> selects no hook there, so it is not
-/// the forgery this rule is about — it is refused one rule later, by <see cref="CustomName"/>, for being
-/// malformed. Matching the arbiter exactly is what keeps this guard a statement about a real reader instead
-/// of a superstition about strings.
-/// </para>
-/// <para>
-/// <b><see cref="CustomName"/> is well-formedness, not a namespace design.</b>
-/// <c>docs/architecture/events.md</c> is explicit that the real answer is a <em>designed</em> namespace,
-/// once — not a prefix bolted on under one PR's schedule. This only keeps the outbox's <c>event_type</c>
-/// column to the shape everything downstream already reads: two or more dot-separated lower-case segments.
+/// "Indistinguishable from a real data change" has exactly one arbiter: the core's subscription reader, which
+/// compares the first segment with <see cref="StringComparison.Ordinal"/>.
+/// <c>Entity.orders.updated</c> selects no hook there, so it is not the forgery this rule is about — it is
+/// refused one rule later, by <see cref="CustomName"/>, for being malformed. Matching the arbiter exactly is
+/// what keeps this guard a statement about a real reader instead of a superstition about strings.
 /// </para>
 /// </remarks>
-internal static partial class AlvoEventName
+public static partial class AlvoEventName
 {
+    /// <summary>The segment separator every event name uses.</summary>
+    public const char Separator = '.';
+
+    /// <summary>
+    /// The namespaces Alvo emits into, and therefore the ones a host may never mint an event into.
+    /// </summary>
+    /// <remarks>
+    /// These are exactly the namespaces the frozen <c>$defs/eventPattern</c> grammar admits as a
+    /// subscription's first segment — asserted against <c>schema/project.schema.json</c> itself by
+    /// <c>EventPatternTests.The_reserved_namespaces_are_the_schema_s_own</c>, because a hand-copied
+    /// alternation that drifts from the schema does not fail, it silently reserves the wrong names.
+    /// </remarks>
+    public static IReadOnlySet<string> ReservedNamespaces { get; } =
+        new HashSet<string>(StringComparer.Ordinal) { "entity", "auth", "storage" };
+
+    /// <summary>Whether <paramref name="segment"/> is one of the framework's own namespaces.</summary>
+    /// <param name="segment">One event-name segment, normally the first.</param>
+    public static bool IsReservedNamespace(string segment) => ReservedNamespaces.Contains(segment);
+
     /// <summary>
     /// Refuses <paramref name="type"/> unless a host may publish it as a custom application event.
     /// </summary>
@@ -41,7 +59,7 @@ internal static partial class AlvoEventName
     /// <exception cref="ArgumentException">
     /// It is blank, sits in one of the framework's reserved namespaces, or is not a well-formed event name.
     /// </exception>
-    internal static void EnsureCustom(string? type, string parameterName)
+    public static void EnsureCustom(string? type, string parameterName)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(type, parameterName);
         EnsureNotReserved(type, parameterName);
@@ -53,8 +71,8 @@ internal static partial class AlvoEventName
     /// <param name="parameterName">The caller's own parameter name.</param>
     private static void EnsureNotReserved(string type, string parameterName)
     {
-        var first = type.Split(EventPattern.Separator)[0];
-        if (!EventPattern.IsReservedNamespace(first))
+        var first = type.Split(Separator)[0];
+        if (!IsReservedNamespace(first))
         {
             return;
         }
@@ -91,10 +109,17 @@ internal static partial class AlvoEventName
     /// The shape a custom event name must have: two or more <c>[a-z][a-z0-9_]*</c> segments.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Deliberately <em>not</em> <c>$defs/eventPattern</c>: that grammar is a <b>subscription</b> pattern —
     /// it admits <c>*</c> and the <c>.batch</c> suffix, and it requires one of the reserved namespaces this
     /// guard refuses. The two would be one regular expression only if publishing and subscribing were the
     /// same act, which is exactly the confusion the designed namespace has to resolve.
+    /// </para>
+    /// <para>
+    /// It is also what makes a custom event's partition key provably disjoint from a data event's: an entity
+    /// name carries no dot (<c>schema/project.schema.json</c>, <c>entities</c>' <c>propertyNames</c>) and this
+    /// requires at least one.
+    /// </para>
     /// </remarks>
     [GeneratedRegex(@"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$", RegexOptions.CultureInvariant)]
     private static partial Regex CustomName();

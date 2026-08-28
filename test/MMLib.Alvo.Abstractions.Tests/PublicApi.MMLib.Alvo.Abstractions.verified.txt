@@ -721,6 +721,11 @@ namespace MMLib.Alvo.Descriptor
 }
 namespace MMLib.Alvo.Events
 {
+    public sealed class AlvoCustomEvent
+    {
+        public MMLib.Alvo.Events.AlvoEvent Envelope { get; }
+        public static MMLib.Alvo.Events.AlvoCustomEvent Create(MMLib.Alvo.Events.AlvoEvent envelope) { }
+    }
     public sealed class AlvoEvent : System.IEquatable<MMLib.Alvo.Events.AlvoEvent>
     {
         public const int CurrentPayloadVersion = 1;
@@ -787,6 +792,13 @@ namespace MMLib.Alvo.Events
         public static MMLib.Alvo.Events.AlvoEvent Read(string json) { }
         public static string Write(MMLib.Alvo.Events.AlvoEvent @event) { }
     }
+    public static class AlvoEventName
+    {
+        public const char Separator = '.';
+        public static System.Collections.Generic.IReadOnlySet<string> ReservedNamespaces { get; }
+        public static void EnsureCustom(string? type, string parameterName) { }
+        public static bool IsReservedNamespace(string segment) { }
+    }
     public static class AlvoEventProvenance
     {
         public static string? AuthIdOf(MMLib.Alvo.AlvoContext context) { }
@@ -810,7 +822,7 @@ namespace MMLib.Alvo.Events
     }
     public interface IOutboxStore
     {
-        System.Threading.Tasks.Task AppendAsync(MMLib.Alvo.Events.AlvoEvent envelope, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task AppendAsync(MMLib.Alvo.Events.AlvoCustomEvent customEvent, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.OutboxEntry>> ClaimAsync(string claimant, int batchSize, int maxAttempts, System.TimeSpan lease, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task EnsureAsync(System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task MarkDispatchedAsync(System.Guid id, System.Threading.CancellationToken cancellationToken = default);

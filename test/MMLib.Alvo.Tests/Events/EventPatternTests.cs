@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Events.Internal;
+﻿using MMLib.Alvo.Events;
+using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Testing;
 
 using System.Text.Json;
@@ -7,8 +8,10 @@ using System.Text.RegularExpressions;
 namespace MMLib.Alvo.Tests.Events;
 
 /// <summary>
-/// The frozen <c>$defs/eventPattern</c> grammar's two readable properties: which namespaces it reserves, and
-/// whether one pattern subscribes with a wildcard.
+/// The frozen <c>$defs/eventPattern</c> grammar's two readable properties: which namespaces it reserves
+/// (<see cref="AlvoEventName"/>, in <c>Abstractions</c>, because that is the wire contract) and whether one
+/// pattern subscribes with a wildcard (<see cref="EventPattern"/>, in the core, because that is the
+/// descriptor contract).
 /// </summary>
 /// <remarks>
 /// Both are read by rules that look unrelated — the apply-time wildcard refusal and the guard on a host's own
@@ -29,7 +32,7 @@ public sealed class EventPatternTests
     /// </remarks>
     [Fact]
     public void The_reserved_namespaces_are_the_schema_s_own()
-        => EventPattern.ReservedNamespaces.Order(StringComparer.Ordinal).ToList().ShouldBe(
+        => AlvoEventName.ReservedNamespaces.Order(StringComparer.Ordinal).ToList().ShouldBe(
             NamespacesTheSchemaAdmits(),
             customMessage:
                 "The namespaces a host is refused must be exactly the ones $defs/eventPattern admits, or a "
@@ -69,7 +72,7 @@ public sealed class EventPatternTests
     [InlineData("orders", false)]
     [InlineData("Entity", false)]
     public void Only_the_frameworks_own_namespaces_are_reserved(string segment, bool reserved)
-        => EventPattern.IsReservedNamespace(segment).ShouldBe(reserved);
+        => AlvoEventName.IsReservedNamespace(segment).ShouldBe(reserved);
 
     /// <summary>The alternation <c>$defs/eventPattern</c>'s first group spells, read from the schema file.</summary>
     private static IReadOnlyList<string> NamespacesTheSchemaAdmits()
