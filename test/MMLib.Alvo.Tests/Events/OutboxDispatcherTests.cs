@@ -254,25 +254,38 @@ public sealed class OutboxDispatcherTests : IDisposable
     /// A shutdown ends the pump in milliseconds, not at the host's 30-second <c>ShutdownTimeout</c>.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The poll interval is deliberately far longer than the assertion's budget: the pump spends almost all of
     /// its life inside the idle wait, so a wait that ignored its token would keep the host's
     /// <c>StopAsync</c> blocked for the whole interval. That is the measurement — a version of this fact with a
     /// short poll interval would pass on a pump that ignores cancellation entirely.
+    /// </para>
+    /// <para>
+    /// <b>The budget is half the interval rather than the milliseconds a stop really takes, and the slack is
+    /// the point.</b> What is measured is wall-clock on a machine running nine other test assemblies at once,
+    /// and the cancelled <see cref="Task.Delay(TimeSpan, TimeProvider, CancellationToken)"/>'s continuation
+    /// needs a thread-pool thread to resume on. A saturated CI runner has none free for seconds at a time —
+    /// this measured <c>6.9 s</c> on windows-latest against a 5-second budget, on a pump that had observed its
+    /// token correctly. A budget tight enough to catch that reports the runner's scheduling, not the loop's
+    /// behaviour. Half the interval keeps every bit of the discriminating power that matters: a loop that
+    /// ignores the token cannot finish before the interval is out, so it fails this no matter how idle the
+    /// machine is.
+    /// </para>
     /// </remarks>
     [Fact]
     public async Task A_shutdown_returns_promptly_rather_than_waiting_out_the_poll_interval()
     {
         var store = new FakeOutboxStore();
         await using var pump = await StartAsync(
-            store, Ready, options => options.PollInterval = TimeSpan.FromSeconds(30));
+            store, Ready, options => options.PollInterval = _idlePollInterval);
         await UntilAsync(() => store.ClaimCount > 0, "the pump to reach its idle wait");
 
         var elapsed = await pump.MeasureStopAsync();
 
         elapsed.ShouldBeLessThan(
-            TimeSpan.FromSeconds(5),
+            _stopBudget,
             "the host blocks in StopAsync waiting for ExecuteAsync, with a 30 s ShutdownTimeout, so the loop "
-            + "must observe its cancellation token promptly");
+            + $"must observe its cancellation token rather than wait out its {_idlePollInterval} poll interval");
         pump.Service.ExecuteTask!.IsCompletedSuccessfully.ShouldBeTrue("a shutdown is not a failure");
     }
 
@@ -367,6 +380,12 @@ public sealed class OutboxDispatcherTests : IDisposable
     private static readonly TimeSpan _pollInterval = TimeSpan.FromMilliseconds(20);
     private static readonly TimeSpan _manyPollIntervals = TimeSpan.FromMilliseconds(300);
     private static readonly TimeSpan _waitBudget = TimeSpan.FromSeconds(10);
+
+    /// <summary>The idle wait a shutdown must not sit through, long enough that sitting through it is obvious.</summary>
+    private static readonly TimeSpan _idlePollInterval = TimeSpan.FromSeconds(30);
+
+    /// <summary>Half of <see cref="_idlePollInterval"/> — see the shutdown fact for why the slack is deliberate.</summary>
+    private static readonly TimeSpan _stopBudget = TimeSpan.FromSeconds(15);
 
     private readonly CapturingLogger _logs = new();
     private readonly ILoggerFactory _loggers;
