@@ -47,6 +47,37 @@ reasoning; use it.
    call it coverage.
 9. Only now, the source diff, and only to answer a question the above left open.
 
+## Language
+
+The invoking message names the report's language. **No language named means
+English** — the default, and the only thing that changes for it is nothing.
+
+For any other code, **read `.claude/skills/alvo-pr-report/references/labels.<code>.md`
+before you write a word.** It carries the chrome strings as a fixed table, and
+they are fixed for a reason: the template's value is that the maintainer never
+re-orients, which a report free to re-translate `Forecloses` every time destroys.
+Use the table verbatim; do not improve it. No file for the requested code means
+you cannot honour the request — write the report in English and say so in what
+you return, rather than inventing a glossary nobody will match next time.
+
+**Translate the prose. Never translate the evidence.** Identifiers, the literals
+the product emits (violation codes, problem-type slugs, config and descriptor
+keys, **and every message text you quote** — a `message`, a `fixSuggestion`, a
+startup refusal), section 2's code blocks, gate names and their output, and the
+titles of specs, plans and issues all stay exactly as the repo spells them — a
+page that translates `read-only-required-field` is not a foreign report, it is a
+wrong one. The message texts are the ones you will be tempted by, because they
+read as prose and land in yours; they are public API, and a translated one cannot
+be grepped for or judged as shipped. The full list is in the labels file.
+
+**Name every string you had to translate without the table's help** in your
+`GAPS` line, so it gets added and the next report matches yours. `TITLE` and `HEADLINE` follow the page's
+language; **`PR-BODY` stays English regardless**, because it lands on GitHub
+beside English commits and a bot's review.
+
+The honesty rules below do not relax in translation. A hedge is easier to write
+in a second language, and it is still a hedge.
+
 ## Filling the template
 
 Copy the template and fill the `{{...}}` slots. **The 8 sections are fixed** —
@@ -91,6 +122,8 @@ Re-read the file you wrote and confirm, literally:
 4. Section 4 rows all trace to a baseline diff line.
 5. Word caps respected — count section 2 and 5 if unsure.
 6. No praise adjectives.
+7. On a non-English report: every chrome string matches the labels file, and no
+   identifier, violation code, gate name or code block was translated.
 
 ## What you return
 
@@ -98,10 +131,12 @@ Short, in this shape — the caller publishes the page:
 
 ```
 REPORT: <absolute path to the written html>
-TITLE: <2–4 word artifact title>
-HEADLINE: <the one-sentence "what Alvo learned">
+LANGUAGE: <the code you actually wrote the page in>
+TITLE: <2–4 word artifact title, in the page's language>
+HEADLINE: <the one-sentence "what Alvo learned", in the page's language>
 PR-BODY:
-<5–8 line English PR body: what it implements + closes, the one decision that
-matters, gates status, and a "Full report: <link>" line the caller fills in>
+<5–8 line English PR body — English even when the page is not: what it
+implements + closes, the one decision that matters, gates status, and a
+"Full report: <link>" line the caller fills in>
 GAPS: <inputs you could not observe, or "none">
 ```
