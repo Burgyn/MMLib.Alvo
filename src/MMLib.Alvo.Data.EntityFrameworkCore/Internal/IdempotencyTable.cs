@@ -58,7 +58,7 @@ internal static class IdempotencyTable
 {
     /// <summary>The framework's idempotency table for a prefix, e.g. <c>alvo_idempotency</c>.</summary>
     /// <param name="schemaPrefix">The validated <see cref="AlvoOptions.SchemaPrefix"/>.</param>
-    internal static string NameFor(string schemaPrefix) => $"{schemaPrefix}_idempotency";
+    internal static string NameFor(string schemaPrefix) => schemaPrefix + AlvoFrameworkTables.IdempotencySuffix;
 
     /// <summary>
     /// The <c>CREATE TABLE IF NOT EXISTS</c> for <paramref name="tableName"/>, safe to run repeatedly.

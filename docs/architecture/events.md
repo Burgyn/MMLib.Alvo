@@ -157,8 +157,10 @@ refused with the field named, never stringified through `ToString()`.
 
 One table, `{prefix}_outbox` (`alvo_outbox` by default), created by `SystemSchemaInitializer` alongside
 the descriptor-versions and idempotency tables — a framework bookkeeping table, not a product of the
-declarative diff engine. Its name is in `SystemSchemaInitializer.FrameworkTableNames`, so the
-introspector does not plan a `DROP` for it and a second apply produces an empty plan.
+declarative diff engine. Its name comes from `AlvoFrameworkTables.NamesFor` (in
+`MMLib.Alvo.Abstractions`, so the core can see it without referencing a provider), which is why the
+introspector does not plan a `DROP` for it *and* why `DescriptorValidator` refuses an entity that would map
+onto it (#156).
 
 ```sql
 CREATE TABLE IF NOT EXISTS alvo_outbox (
@@ -1052,7 +1054,6 @@ Each line with the issue or the PR that owns it.
 | **`dataref`** for an envelope over 64 KB | **#151** |
 | **Retention / pruning of `alvo_outbox`** — rows are never deleted, and the payload holds every entity's and tenant's unmasked images forever | **#154** |
 | **Validation of a rendered `email.to`** — the recipient is caller-controlled row text, unchecked; inert only because the shipped sender delivers nowhere | **#155** |
-| **Reserving the framework's own table names** against an entity declaration (they are excluded from introspection, not reserved) | **#156** |
 | **`email.data`** — refused at apply, because nothing rendered it | the PR that gives `email` a `data.*` placeholder root |
 | **Bulk coalescing** (`entity.orders.created.batch`) | unscheduled; the base design places it with automation, and `baas-analyza.md:682` is its criterion. Every write emits its own event today |
 
@@ -1138,9 +1139,11 @@ these live.
   - **`AlvoMailMessage.To` is unvalidated rendered row text** reaching a host's SMTP implementation: CRLF
     header injection in any sender that concatenates it into a header. One paragraph on the port's own
     remarks, written while the port is new; filed with the `To: ""` half as **#155**.
-  - **Framework table names are excluded from introspection but not *reserved* against an entity
-    declaration.** Nothing stops a descriptor declaring an entity that maps onto `alvo_outbox`. Filed as
-    **#156**.
+  - ~~**Framework table names are excluded from introspection but not *reserved* against an entity
+    declaration.**~~ **Closed by #156.** The names now come from `AlvoFrameworkTables.NamesFor` in
+    `MMLib.Alvo.Abstractions` — one authority the provider names its tables from *and* the core reserves
+    against — and `DescriptorValidator` refuses an entity that maps onto one, with its pointer and a fix
+    naming `AlvoOptions.SchemaPrefix`.
   - **Conditions are type-checked against CLR types at apply and evaluated against the JSON view at
     delivery.** The recommended pin is **one fact per scalar family** (number, boolean, timestamp, uuid,
     string) driven end to end through a real engine, so a family whose JSON round trip changes shape fails by

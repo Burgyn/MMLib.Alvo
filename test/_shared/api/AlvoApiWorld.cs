@@ -721,7 +721,17 @@ internal sealed record AlvoApiWorldSetup(
 internal sealed record TestApiKey(
     string KeyId, IReadOnlyList<string> Roles, IReadOnlyList<string> Scopes, Guid? Tenant = null)
 {
-    private const string Secret = "s3cret-value";
+    /// <summary>
+    /// The shared secret every test key presents, long enough to clear
+    /// <c>AlvoAuthOptionsValidator.MinimumSecretLength</c>.
+    /// </summary>
+    /// <remarks>
+    /// It was <c>"s3cret-value"</c> — twelve characters — until #125 put a 32-character floor under a dev
+    /// key's secret, at which point every world in this file failed to start. Lengthened rather than
+    /// exempted: a fixture that starts under a rule production cannot start under is a fixture measuring a
+    /// configuration nobody can deploy.
+    /// </remarks>
+    private const string Secret = "s3cret-value-long-enough-for-the-floor";
 
     /// <summary>The credential as a caller presents it: <c>&lt;keyId&gt;.&lt;secret&gt;</c>.</summary>
     internal string Presented => $"{KeyId}.{Secret}";

@@ -625,7 +625,7 @@
         "maxLength": {
           "type": "integer",
           "minimum": 1,
-          "description": "type=string only."
+          "description": "type=string only. Counted in Unicode code points — the unit a varchar(n) column and JSON Schema's own maxLength keyword both use — not UTF-16 code units, so a character outside the Basic Multilingual Plane counts once."
         },
         "precision": {
           "type": "integer",

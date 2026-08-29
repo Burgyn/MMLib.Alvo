@@ -31,7 +31,17 @@ public sealed record FieldDescriptor
     /// <summary>Default value: a JSON literal or a tagged CEL expression evaluated at insert time.</summary>
     public ValueOrExpr? Default { get; init; }
 
-    /// <summary>Maximum length; applies to <see cref="FieldType.String"/> only.</summary>
+    /// <summary>
+    /// Maximum length in <b>Unicode code points</b>; applies to <see cref="FieldType.String"/> only.
+    /// </summary>
+    /// <remarks>
+    /// The unit is stated because "characters" is ambiguous enough to have produced a bug: it is code
+    /// points, the unit SQL's own <c>character_length</c> and a <c>varchar(n)</c> column count in, and the
+    /// unit JSON Schema's <c>maxLength</c> keyword is defined in — so the descriptor, the generated OpenAPI
+    /// document and the column all bound the same thing. A character outside the Basic Multilingual Plane
+    /// counts once, not twice; a grapheme cluster built from several code points (a ZWJ emoji sequence)
+    /// counts as its code points, because that is what the column charges for.
+    /// </remarks>
     public int? MaxLength { get; init; }
 
     /// <summary>Total digits; required for and applies to <see cref="FieldType.Decimal"/> only.</summary>

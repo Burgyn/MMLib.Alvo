@@ -51,7 +51,15 @@ public sealed record FieldSchema
     /// </summary>
     public bool Nullable { get; init; }
 
-    /// <summary>Gets the maximum length for string fields.</summary>
+    /// <summary>
+    /// Gets the maximum length for string fields, in <b>Unicode code points</b>.
+    /// </summary>
+    /// <remarks>
+    /// Code points rather than UTF-16 code units, because that is what a <c>varchar(n)</c> column bounds
+    /// and what JSON Schema's <c>maxLength</c> keyword means — so the validator, the column and the
+    /// published document agree by construction. See <c>RecordValidator.TooLong</c> for why grapheme
+    /// clusters are the wrong unit here even though they are the human one.
+    /// </remarks>
     public int? MaxLength { get; init; }
 
     /// <summary>Gets the precision for decimal fields.</summary>

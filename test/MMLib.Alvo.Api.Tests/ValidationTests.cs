@@ -939,6 +939,125 @@ public sealed class ValidationTests
         return body;
     }
 
+    /// <summary>
+    /// A value inside its declared <c>maxLength</c> in <b>code points</b> is accepted even though it is
+    /// twice that in UTF-16 code units (#123).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Ten astral-plane characters are twenty <see cref="char"/>s, so the pre-#123 check refused a value a
+    /// <c>varchar(10)</c> stores happily — the caller told to shorten something already short enough. The
+    /// eleventh is the control: without it the fact passes for a check that stopped counting altogether.
+    /// </para>
+    /// <para>
+    /// The accepted row is read back, because "the create returned 201" would also be true of a build that
+    /// truncated the value on the way in.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_string_is_measured_in_code_points_not_utf16_code_units()
+    {
+        const string Astral = "\U0001F600";
+        await using var world = await WorldAsync();
+
+        using var accepted = await world.SendAsync(
+            HttpMethod.Post, "/api/items", _admin, body: Item(name: string.Concat(Enumerable.Repeat(Astral, 10))));
+        using var refused = await world.SendAsync(
+            HttpMethod.Post, "/api/items", _admin, body: Item(name: string.Concat(Enumerable.Repeat(Astral, 11))));
+
+        accepted.StatusCode.ShouldBe(
+            HttpStatusCode.Created,
+            "ten code points are inside maxLength: 10, however many UTF-16 units they occupy");
+        (await accepted.ReadJsonObjectAsync())["name"]!.GetValue<string>()
+            .ShouldBe(string.Concat(Enumerable.Repeat(Astral, 10)), "and the value is stored whole");
+        refused.StatusCode.ShouldBe(
+            HttpStatusCode.UnprocessableEntity, "the eleventh code point is still over the bound");
+        (await refused.ReadViolationsAsync()).ShouldBe([("/name", "max-length")]);
+    }
+
+    /// <summary>
+    /// A create of a required field this caller's own <c>readOnly</c> expression froze is refused as
+    /// <c>read-only-required-field</c> — not as <c>required</c>, which would send them to supply a field no
+    /// value of theirs can be stored in (#124).
+    /// </summary>
+    /// <remarks>
+    /// The same descriptor and the same request succeed for the role the expression does not freeze, which
+    /// is what makes this the per-caller case rather than a descriptor an apply-time check should have
+    /// refused outright.
+    /// </remarks>
+    [Fact]
+    public async Task A_required_field_frozen_for_this_caller_is_refused_as_unsatisfiable_not_as_missing()
+    {
+        await using var world = await WorldAsync([_admin, _auditor]);
+
+        using var refused = await world.SendAsync(
+            HttpMethod.Post, "/api/ledgers", _admin, body: new JsonObject { ["memo"] = "opening" });
+        using var accepted = await world.SendAsync(
+            HttpMethod.Post,
+            "/api/ledgers",
+            _auditor,
+            body: new JsonObject { ["memo"] = "opening", ["posted_by"] = "the-auditor" });
+
+        refused.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
+        (await refused.ReadViolationsAsync()).ShouldBe([("/posted_by", "read-only-required-field")]);
+        accepted.StatusCode.ShouldBe(
+            HttpStatusCode.Created,
+            "the same create is satisfiable for the role the readOnly expression does not freeze");
+    }
+
+    /// <summary>
+    /// A caller who <em>writes</em> the frozen field still gets <c>read-only-field</c>: the new violation
+    /// narrows the missing-value case only.
+    /// </summary>
+    /// <remarks>
+    /// Without this, <c>read-only-required-field</c> could have replaced the read-only refusal wholesale and
+    /// nothing would say so — and the two are different requests, one attempting a write and one not.
+    /// </remarks>
+    [Fact]
+    public async Task A_caller_who_writes_the_frozen_required_field_still_gets_the_read_only_violation()
+    {
+        await using var world = await WorldAsync();
+
+        using var refused = await world.SendAsync(
+            HttpMethod.Post,
+            "/api/ledgers",
+            _admin,
+            body: new JsonObject { ["memo"] = "opening", ["posted_by"] = "not-mine-to-write" });
+
+        refused.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
+        (await refused.ReadViolationsAsync()).ShouldBe([("/posted_by", "read-only-field")]);
+    }
+
+    /// <summary>
+    /// A field the <em>store</em> fills in is never "missing" on a create, even when it is <c>required</c>
+    /// and even when this caller's <c>readOnly</c> mask froze it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The three-way shape — <c>required</c> + <c>computed</c> + an expression-valued <c>readOnly</c> — is
+    /// where "the caller cannot supply it" and "the create is impossible" come apart, and it is the one case
+    /// <c>read-only-required-field</c> must <b>not</b> claim. The database computes the column on the INSERT,
+    /// so <c>NOT NULL</c> is satisfied with nothing in the body.
+    /// </para>
+    /// <para>
+    /// The computed value is read back, because a 201 alone would also be true of a build that stored null
+    /// into a column the descriptor declares NOT NULL.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_required_computed_field_frozen_for_this_caller_does_not_make_the_create_impossible()
+    {
+        await using var world = await WorldAsync();
+
+        using var created = await world.SendAsync(
+            HttpMethod.Post, "/api/meters", _admin, body: new JsonObject { ["reading"] = 1.5m });
+
+        created.StatusCode.ShouldBe(
+            HttpStatusCode.Created,
+            "the store fills the column in, so omitting it is correct behaviour and not a missing value");
+        (await created.ReadJsonObjectAsync())["doubled"]!.GetValue<decimal>().ShouldBe(3.00m);
+    }
+
     private static Task<AlvoApiWorld> WorldAsync(IReadOnlyList<TestApiKey>? keys = null) =>
         AlvoApiWorld.FromDescriptorAsync("validated-records.alvo.json", keys ?? [_admin]);
 

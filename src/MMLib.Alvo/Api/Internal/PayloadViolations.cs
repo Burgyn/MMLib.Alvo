@@ -201,7 +201,21 @@ internal static class PayloadViolations
             $"A value is longer than the {field.MaxLength} characters the field declares."),
         string.Create(
             CultureInfo.InvariantCulture,
-            $"Shorten it to at most {field.MaxLength} characters. The bound is the column's own width, so a longer value cannot be stored."));
+            $"Shorten it to at most {field.MaxLength} characters. {MaxLengthUnitNote}"));
+
+    /// <summary>
+    /// The unit <c>maxLength</c> is measured in, said in the refusal itself.
+    /// </summary>
+    /// <remarks>
+    /// "Characters" is the word the descriptor uses and it is ambiguous enough to have produced a bug
+    /// (#123), so the message that asks a caller to shorten a value says which unit it is counting. Code
+    /// points is the unit a <c>varchar(n)</c> column and JSON Schema's own <c>maxLength</c> keyword both
+    /// use, so the refusal, the column and the published document all mean the same number.
+    /// </remarks>
+    private const string MaxLengthUnitNote =
+        "Length is counted in Unicode code points rather than UTF-16 units, so a character outside the "
+        + "Basic Multilingual Plane counts once and not twice. The bound is the column's own width, so a "
+        + "longer value cannot be stored.";
 
     /// <summary>The refusal for a decimal carrying more fractional digits than the field's <c>scale</c>.</summary>
     /// <param name="field">The declared field, whose own scale the message names.</param>
@@ -319,6 +333,40 @@ internal static class PayloadViolations
         "The request writes a field this caller may read but not change.",
         "Remove the field from the request body. It is read-only for your roles, so no value you send can "
         + "be stored — which is why this is refused rather than ignored.");
+
+    /// <summary>
+    /// The refusal for a <b>create</b> whose caller cannot satisfy it: the entity declares the field
+    /// required, and this caller's own <c>readOnly</c> mask froze it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A third answer, because the other two are both dishonest here.</b> Telling this caller
+    /// <c>required</c> sends them to supply a field no value of theirs can be stored in; telling them
+    /// <c>read-only-field</c> names a write they did not attempt. The create is impossible <em>for them</em>,
+    /// and that is the only sentence that is true of the request.
+    /// </para>
+    /// <para>
+    /// <b>Reachable only through an expression-valued <c>readOnly</c>.</b> A field declaring the static pair
+    /// <c>required: true</c> + <c>readOnly: true</c> is refused when the descriptor is applied
+    /// (<c>DescriptorValidator</c>), because then <em>no</em> caller could ever create the row and the author
+    /// can still fix it. What survives to here is the per-caller case: satisfiable for one role, impossible
+    /// for another, which no apply-time check can decide.
+    /// </para>
+    /// <para>
+    /// <b>Refused rather than let through with the field absent</b>, which is the shape #124 first proposed.
+    /// A required field is a <c>NOT NULL</c> column, so omitting it moves the failure into the engine and
+    /// turns an actionable 422 into a 500 — a worse answer to the same impossible request.
+    /// </para>
+    /// </remarks>
+    /// <param name="field">The declared field this caller's policy froze on a create.</param>
+    internal static AlvoViolation ReadOnlyRequired(FieldSchema field) => new(
+        PointerTo(field.Name),
+        "read-only-required-field",
+        "The entity declares this field required, and it is read-only for this caller — so no create of "
+        + "this entity can succeed with these roles.",
+        "Ask for a role that may write the field, or have the descriptor give it a value the caller does "
+        + "not supply — a 'computed' expression, or a 'default'. Omitting it is not an option: the field "
+        + "is NOT NULL.");
 
     /// <summary>
     /// The refusal for a reference naming a row the caller cannot resolve — because it does not exist,

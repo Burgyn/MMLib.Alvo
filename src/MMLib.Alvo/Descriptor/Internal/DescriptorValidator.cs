@@ -1,4 +1,5 @@
 ﻿using Corvus.Json;
+using Microsoft.Extensions.Options;
 using MMLib.Alvo.Api.Internal;
 using MMLib.Alvo.Descriptor.SchemaGen;
 using MMLib.Alvo.Events.Internal;
@@ -44,6 +45,7 @@ namespace MMLib.Alvo.Descriptor.Internal;
 internal sealed class DescriptorValidator : IDescriptorValidator
 {
     private readonly ICelCompiler _compiler;
+    private readonly IReadOnlySet<string> _frameworkTableNames;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DescriptorValidator"/> class with the default CEL
@@ -61,9 +63,32 @@ internal sealed class DescriptorValidator : IDescriptorValidator
     /// <summary>Initializes a new instance of the <see cref="DescriptorValidator"/> class.</summary>
     /// <param name="compiler">The CEL compiler every rule and field flag is compiled through.</param>
     public DescriptorValidator(ICelCompiler compiler)
+        : this(compiler, Options.Create(new AlvoOptions()))
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DescriptorValidator"/> class, reserving the framework's
+    /// own table names under the configured <see cref="AlvoOptions.SchemaPrefix"/>.
+    /// </summary>
+    /// <remarks>
+    /// <b>The prefix is a constructor dependency rather than a parameter of <see cref="Validate"/>,</b> because
+    /// it is a property of the deployment and not of the descriptor being validated — the same descriptor is
+    /// legal under one prefix and refused under another, and the caller who knows which is the host, not the
+    /// author. The two convenience constructors default it to <see cref="AlvoOptions"/>'s own default, so a
+    /// CLI <c>validate</c> with no host still reserves the <c>alvo_*</c> names every project that never
+    /// changes the prefix actually uses.
+    /// </remarks>
+    /// <param name="compiler">The CEL compiler every rule and field flag is compiled through.</param>
+    /// <param name="options">Supplies the validated <see cref="AlvoOptions.SchemaPrefix"/> the framework tables are named from.</param>
+    public DescriptorValidator(ICelCompiler compiler, IOptions<AlvoOptions> options)
     {
         ArgumentNullException.ThrowIfNull(compiler);
+        ArgumentNullException.ThrowIfNull(options);
+
         _compiler = compiler;
+        _frameworkTableNames =
+            AlvoFrameworkTables.NamesFor(options.Value.SchemaPrefix).ToHashSet(StringComparer.Ordinal);
     }
 
     public DescriptorValidationResult Validate(string descriptorJson)
@@ -258,7 +283,7 @@ internal sealed class DescriptorValidator : IDescriptorValidator
     /// </summary>
     private static readonly string[] _eventPatternBlocks = ["automation", "functions"];
 
-    private static List<DescriptorValidationError> SemanticErrors(JsonElement root)
+    private List<DescriptorValidationError> SemanticErrors(JsonElement root)
     {
         if (!root.TryGetProperty("entities", out var entities) || entities.ValueKind != JsonValueKind.Object)
         {
@@ -270,7 +295,7 @@ internal sealed class DescriptorValidator : IDescriptorValidator
         var errors = new List<DescriptorValidationError>();
         foreach (var entity in entities.EnumerateObject())
         {
-            errors.AddRange(EntitySemanticErrors(entity, entityNames, tenancyEnabled));
+            errors.AddRange(EntitySemanticErrors(entity, entityNames, tenancyEnabled, _frameworkTableNames));
         }
 
         return errors;
@@ -295,11 +320,19 @@ internal sealed class DescriptorValidator : IDescriptorValidator
         && enabled.ValueKind == JsonValueKind.True;
 
     private static IEnumerable<DescriptorValidationError> EntitySemanticErrors(
-        JsonProperty entity, HashSet<string> entityNames, bool tenancyEnabled)
+        JsonProperty entity,
+        HashSet<string> entityNames,
+        bool tenancyEnabled,
+        IReadOnlySet<string> frameworkTableNames)
     {
         foreach (var error in Unhonoured($"/entities/{entity.Name}", entity.Value, UnhonouredFeatures.OnAnEntity))
         {
             yield return error;
+        }
+
+        if (frameworkTableNames.Contains(entity.Name))
+        {
+            yield return CollidesWithAFrameworkTable(entity.Name);
         }
 
         if (!entity.Value.TryGetProperty("fields", out var fields) || fields.ValueKind != JsonValueKind.Object)
@@ -401,7 +434,37 @@ internal sealed class DescriptorValidator : IDescriptorValidator
         {
             yield return ShadowsAReservedQueryParameter(path, field.Name);
         }
+
+        if (IsRequiredAndStaticallyReadOnly(field.Value))
+        {
+            yield return CannotEverBeCreated(path);
+        }
     }
+
+    /// <summary>
+    /// Whether the field declares the literal pair <c>required: true</c> + <c>readOnly: true</c>, which makes
+    /// every create of its entity unsatisfiable.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The literal <see langword="true"/>, and nothing else.</b> <c>readOnly</c> may be a per-caller CEL
+    /// expression, in which case the combination is legal for one role and impossible for another — no
+    /// apply-time check can decide that, and the request-time half reports it as
+    /// <c>read-only-required-field</c> against the caller whose own mask froze the field.
+    /// </para>
+    /// <para>
+    /// <b><c>computed</c> and <c>rollup</c> also make a field read-only, and are deliberately not here.</b>
+    /// Those are maintained by the database on the INSERT itself, so <c>NOT NULL</c> is satisfied without
+    /// the caller ever writing the field — refusing them would refuse a shape that works.
+    /// </para>
+    /// </remarks>
+    /// <param name="field">The field's raw JSON.</param>
+    private static bool IsRequiredAndStaticallyReadOnly(JsonElement field) =>
+        field.ValueKind == JsonValueKind.Object
+        && field.TryGetProperty("required", out var required)
+        && required.ValueKind == JsonValueKind.True
+        && field.TryGetProperty("readOnly", out var readOnly)
+        && readOnly.ValueKind == JsonValueKind.True;
 
     /// <summary>
     /// Reports every feature <see cref="UnhonouredFeatures"/> records as declared-and-unhonoured that this
@@ -467,6 +530,62 @@ internal sealed class DescriptorValidator : IDescriptorValidator
             _ => true,
         };
     }
+
+    /// <summary>
+    /// The refusal for a field no create can ever satisfy: required and unconditionally read-only.
+    /// </summary>
+    /// <remarks>
+    /// <b>Refused at apply, not left to be discovered one 422 at a time.</b> Supplying the field is a
+    /// <c>read-only-field</c> violation and omitting it is a <c>required</c> one, so there is no third
+    /// request and no create on the entity can succeed — while the published OpenAPI document describes a
+    /// create the API will not accept, because <c>SchemaComponentBuilder</c> drops a read-only field from
+    /// the create schema. That is the sharper half for an agent-first framework (#124): the contract and the
+    /// endpoint disagree, and only the author can fix it.
+    /// </remarks>
+    /// <param name="path">The field's JSON pointer.</param>
+    private static DescriptorValidationError CannotEverBeCreated(string path) => new(
+        path,
+        "Field is both 'required' and unconditionally 'readOnly', so no create of this entity can ever "
+        + "succeed: supplying the field is refused as read-only and omitting it is refused as missing.",
+        "Drop one of the two. Keep 'required' and give the field a value the caller does not send — a "
+        + "'computed' expression, or a 'default' — or make 'readOnly' a CEL expression over '@user' so the "
+        + "role that creates the record may still write it.",
+        DescriptorValidationSeverity.Error);
+
+    /// <summary>
+    /// The refusal for an entity whose table name is one of Alvo's own.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Reserved, not merely excluded.</b> <see cref="AlvoFrameworkTables"/> keeps these names out of
+    /// introspection so a re-apply plans no <c>DROP</c> for them; without a matching refusal, an entity
+    /// mapped onto one of them (<c>DescriptorModelBuilder</c> maps an entity to its own name verbatim) leaves
+    /// the diff engine and the framework each believing they own the table — the framework's writes appear
+    /// as rows of the user's entity, and the entity's schema is never applied at all.
+    /// </para>
+    /// <para>
+    /// <b>This refusal has only the validator leg, and that is a deliberate narrowing of the two-pass tie
+    /// every other apply-time refusal in this codebase keeps.</b> <c>DescriptorToSchemaMapper</c> cannot
+    /// carry the matching throw, because the reserved set depends on <see cref="AlvoOptions.SchemaPrefix"/>
+    /// — deployment state the mapper has no way to see, and defaulting it there would refuse the wrong
+    /// names under a non-default prefix, which is worse than refusing none. What makes the single leg
+    /// sufficient rather than merely convenient: the mapper is <c>internal</c>, so no host reaches it, and
+    /// both apply paths — <c>DescriptorBootPlan.LoadAsync</c> and <c>RuntimeSchemaService.ApplyAsync</c> —
+    /// run this validator and throw on any <c>Error</c> before they map. The residue is a <em>test</em>
+    /// that maps without validating: it gets no refusal, and several such tests exist.
+    /// </para>
+    /// </remarks>
+    /// <param name="name">The colliding entity name, which is also the table name.</param>
+    private static DescriptorValidationError CollidesWithAFrameworkTable(string name) => new(
+        $"/entities/{PointerToken(name)}",
+        $"Entity '{name}' maps to a table the framework already owns, so Alvo's own bookkeeping and this "
+        + "entity would share one table — the entity's schema is never applied, and the framework's rows "
+        + "surface as its records.",
+        "Rename the entity, or move the framework's tables out of the way by setting a different "
+        + "AlvoOptions.SchemaPrefix (the reserved names are that prefix plus "
+        + $"'{AlvoFrameworkTables.DescriptorVersionsSuffix}', '{AlvoFrameworkTables.IdempotencySuffix}' and "
+        + $"'{AlvoFrameworkTables.OutboxSuffix}').",
+        DescriptorValidationSeverity.Error);
 
     /// <summary>
     /// A field whose name the Data API's query string reserves, refused at <b>apply</b> time.

@@ -46,7 +46,7 @@ Where, not how — see the design brief for the reasoning behind each bullet.
 
 ## 3. Phase map F0–F7
 
-`← YOU ARE HERE` sits on **F3**. Each phase = one GitHub milestone; issues
+`← YOU ARE HERE` sits on **F4**. Each phase = one GitHub milestone; issues
 are numbered independently of the plan's own bracketed `[N]` step numbers
 (see `docs/superpowers/` for the distinction).
 
@@ -61,12 +61,12 @@ are numbered independently of the plan's own bracketed `[N]` step numbers
   from the start — F2 must not bake in a physical-table-only assumption,
   even though the dynamic *store* itself lands in F7.
   ([milestone #3](https://github.com/Burgyn/MMLib.Alvo/milestone/3))
-- [ ] **F3 — Vertical slice (CRUD)** — the smallest thing that actually
+- [x] **F3 — Vertical slice (CRUD)** — the smallest thing that actually
   works: project → table → CRUD API + validations.
-  ← YOU ARE HERE ([milestone #4](https://github.com/Burgyn/MMLib.Alvo/milestone/4))
+  ([milestone #4](https://github.com/Burgyn/MMLib.Alvo/milestone/4))
 - [ ] **F4 — Demo from the start** — proof of intent + a testing surface, in
   parallel with F3, not after it.
-  ([milestone #5](https://github.com/Burgyn/MMLib.Alvo/milestone/5))
+  ← YOU ARE HERE ([milestone #5](https://github.com/Burgyn/MMLib.Alvo/milestone/5))
 - [ ] **F5 — Admin mode** — dashboard, rules/automation builder, AI agent.
   ([milestone #6](https://github.com/Burgyn/MMLib.Alvo/milestone/6))
 - [ ] **F6 — v0.1** — documentation, logo, release.
