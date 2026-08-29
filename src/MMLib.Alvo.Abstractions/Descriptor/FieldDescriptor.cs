@@ -36,11 +36,13 @@ public sealed record FieldDescriptor
     /// </summary>
     /// <remarks>
     /// The unit is stated because "characters" is ambiguous enough to have produced a bug: it is code
-    /// points, the unit SQL's own <c>character_length</c> and a <c>varchar(n)</c> column count in, and the
-    /// unit JSON Schema's <c>maxLength</c> keyword is defined in — so the descriptor, the generated OpenAPI
-    /// document and the column all bound the same thing. A character outside the Basic Multilingual Plane
-    /// counts once, not twice; a grapheme cluster built from several code points (a ZWJ emoji sequence)
-    /// counts as its code points, because that is what the column charges for.
+    /// points, the unit JSON Schema's <c>maxLength</c> keyword is defined in and the unit PostgreSQL's
+    /// <c>varchar(n)</c> charges for — so the descriptor, the generated OpenAPI document and the column
+    /// bound the same thing. A character outside the Basic Multilingual Plane counts once, not twice; a
+    /// grapheme cluster built from several code points (a ZWJ emoji sequence) counts as its code points.
+    /// <b>The agreement with the column is a two-engine guarantee, not a universal one</b> — SQLite bounds
+    /// nothing and PostgreSQL bounds code points, but T-SQL's <c>nvarchar(n)</c> bounds UTF-16 units, so a
+    /// SQL Server dialect owes its own answer (#175) before it can honour this.
     /// </remarks>
     public int? MaxLength { get; init; }
 

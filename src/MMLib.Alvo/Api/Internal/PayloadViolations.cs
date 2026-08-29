@@ -209,8 +209,9 @@ internal static class PayloadViolations
     /// <remarks>
     /// "Characters" is the word the descriptor uses and it is ambiguous enough to have produced a bug
     /// (#123), so the message that asks a caller to shorten a value says which unit it is counting. Code
-    /// points is the unit a <c>varchar(n)</c> column and JSON Schema's own <c>maxLength</c> keyword both
-    /// use, so the refusal, the column and the published document all mean the same number.
+    /// points is the unit PostgreSQL's <c>varchar(n)</c> and JSON Schema's own <c>maxLength</c> keyword
+    /// both use, so on the shipped drivers the refusal, the column and the published document all mean the
+    /// same number; a dialect whose column counts otherwise owes its own answer (#175).
     /// </remarks>
     private const string MaxLengthUnitNote =
         "Length is counted in Unicode code points rather than UTF-16 units, so a character outside the "

@@ -164,10 +164,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`maxLength` is counted in Unicode code points, not UTF-16 code units** (#123). Ten astral-plane
   characters are twenty UTF-16 units, so a value well inside a `varchar(10)` was refused with a 422
-  telling the caller to shorten something already short enough. Code points is the unit a `varchar(n)`
-  column and JSON Schema's own `maxLength` keyword both use, so the validator, the column and the
-  published document now bound the same thing. Grapheme clusters were rejected as the unit: they count
-  *fewer* than the column does, which would have admitted values the engine refuses.
+  telling the caller to shorten something already short enough. Code points is the unit PostgreSQL's
+  `varchar(n)` and JSON Schema's own `maxLength` keyword both use, so the validator, the column and the
+  published document now bound the same thing on both shipped drivers. Grapheme clusters were rejected
+  as the unit: they count *fewer* than the column does, which would have admitted values the engine
+  refuses. The agreement is a two-engine guarantee and is recorded as one — T-SQL's `nvarchar(n)`
+  bounds UTF-16 units, so a SQL Server dialect owes its own answer before it can honour this (#175).
 
 - **A format check that times out is now its own violation code, `format-not-evaluated`, and no
   longer reported as `format`.** A client branching on the `format` code will no longer see the

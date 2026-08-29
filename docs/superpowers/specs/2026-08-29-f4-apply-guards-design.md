@@ -47,8 +47,15 @@ would pass this validator and fail the INSERT. This is correct today with the tw
 and inverts the moment a T-SQL dialect is registered. Whoever registers one owes the answer — a
 per-dialect length unit on `IAlvoSqlDialect`, or a widened column — and it is **a port member, never
 an `if` in `RecordValidator`**, on the standing rule that per-engine behaviour lives in the dialect.
-The obligation is stated on `TooLong`'s own remarks as well as here, alongside the T-SQL follow-up
-already filed as #92.
+The obligation is stated on `TooLong`'s own remarks as well as here, and **filed as #175** alongside
+the T-SQL follow-up already open as #92. The five author-facing sites that publish the unit —
+`FieldDescriptor.MaxLength`, `FieldSchema.MaxLength`, `schema/project.schema.json`,
+`PayloadViolations.MaxLength` and `CHANGELOG.md` — scope the claim to the shipped drivers rather than
+stating it as universal, which is the half of CodeRabbit's review finding on #174 that was acted on.
+The half that was **not**: it asked for the port member (or widened columns) now. There is no SQL
+Server driver in this repository, so that is a contract with no implementer and no test — owed by the
+PR that adds the third dialect, per the package-boundary rule, and #175 carries the two candidate
+shapes for it.
 
 ### What ships
 
