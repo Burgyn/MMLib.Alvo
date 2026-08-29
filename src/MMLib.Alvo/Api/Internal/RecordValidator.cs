@@ -226,8 +226,12 @@ internal static class RecordValidator
     /// with code points: PostgreSQL's <c>varchar(n)</c> counts characters, and SQLite enforces no length at
     /// all. <b>T-SQL does not.</b> <c>nvarchar(n)</c> bounds UTF-16 units, so on Azure SQL — which §0
     /// principle 3 names as a production engine — ten astral characters would pass this check and fail the
-    /// INSERT. Whoever registers a T-SQL <c>IAlvoSqlDialect</c> owes the answer (a per-dialect length unit on
-    /// the port, or a wider column); it is not an <c>if</c> in this method.
+    /// INSERT. The answer is the <b>dialect widening the column</b> so the store holds what the descriptor
+    /// promises, never a per-dialect unit read here: <c>IAlvoSqlDialect</c> lives in the Entity Framework Core
+    /// adapter, which the core must not reference, and a per-engine unit would make one descriptor mean
+    /// different things per engine. It is not an <c>if</c> in this method either way. Tracked as <b>#175</b>,
+    /// which is provable before a real driver exists — <c>TSqlSqlDialect</c> ships for exactly that, and
+    /// <c>RowLockClause</c> is the precedent where the same exercise caught a silent defect.
     /// </para>
     /// <para>
     /// <b>The UTF-16 length is checked first, and that is a short circuit rather than a second rule.</b>

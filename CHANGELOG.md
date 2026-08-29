@@ -24,8 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `alvo_idempotency` and `alvo_outbox` — or the same three under a non-default `AlvoOptions.SchemaPrefix`
   — were excluded from introspection but not *reserved*, so a descriptor could declare an entity that
   mapped straight onto one and the framework and the entity would share a table. Such a descriptor is
-  now refused at apply, with the entity's JSON pointer and a fix. The names come from the new public
-  `MMLib.Alvo.AlvoFrameworkTables`, which is the one authority both the provider and the core read.
+  now refused at apply, with the entity's JSON pointer and a fix. The names come from one internal
+  authority both the provider and the core read; no public surface changed.
 
 - **A field declared both `required` and unconditionally `readOnly` is now refused at apply** (#124).
   The combination made every create of its entity unsatisfiable — supplying the field was refused as

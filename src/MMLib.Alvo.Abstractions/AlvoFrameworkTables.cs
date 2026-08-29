@@ -20,21 +20,33 @@
 /// re-apply, and a name the validator does not know about is quietly co-owned.
 /// </para>
 /// <para>
+/// <b>Internal, not public, and that is the decision rather than an oversight.</b> The information was
+/// never public before this type existed either — it lived on <c>SystemSchemaInitializer</c>, an
+/// <c>internal</c> class — so publishing it here would have been a new commitment, not a move. The shipped
+/// seam for a new engine is <c>IAlvoSqlDialect</c>, which plugs in <em>under</em> the Entity Framework Core
+/// adapter and never sees a table name: the adapter does the creating and the introspection-excluding for
+/// every dialect. The one consumer who would need this is someone writing an
+/// <see cref="Schema.ISchemaIntrospector"/> from scratch, and nothing in this repository is evidence that
+/// anyone does. Making it public later is additive; making a <c>const</c> internal again is breaking, so
+/// the asymmetry settles it — and a public <c>const</c> would be inlined into a consumer at compile time,
+/// which is the sharper half: a renamed suffix would break them silently, on upgrade, until they rebuilt.
+/// </para>
+/// <para>
 /// The names are lower snake_case by construction — <see cref="AlvoOptions.SchemaPrefix"/> is validated
 /// against <c>^[a-z][a-z0-9_]{0,15}$</c> and the suffixes are literals — so a caller interpolating one
 /// into DDL is placing a validated identifier, never caller-supplied data.
 /// </para>
 /// </remarks>
-public static class AlvoFrameworkTables
+internal static class AlvoFrameworkTables
 {
     /// <summary>The suffix of the table holding the append-only descriptor-version history.</summary>
-    public const string DescriptorVersionsSuffix = "_descriptor_versions";
+    internal const string DescriptorVersionsSuffix = "_descriptor_versions";
 
     /// <summary>The suffix of the table holding idempotency records.</summary>
-    public const string IdempotencySuffix = "_idempotency";
+    internal const string IdempotencySuffix = "_idempotency";
 
     /// <summary>The suffix of the table holding the transactional outbox.</summary>
-    public const string OutboxSuffix = "_outbox";
+    internal const string OutboxSuffix = "_outbox";
 
     /// <summary>
     /// Every table the framework owns under <paramref name="schemaPrefix"/> — the set an introspector
@@ -42,7 +54,7 @@ public static class AlvoFrameworkTables
     /// </summary>
     /// <param name="schemaPrefix">The validated <see cref="AlvoOptions.SchemaPrefix"/>.</param>
     /// <returns>The fully-prefixed table names, in no significant order.</returns>
-    public static IReadOnlyList<string> NamesFor(string schemaPrefix)
+    internal static IReadOnlyList<string> NamesFor(string schemaPrefix)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(schemaPrefix);
 

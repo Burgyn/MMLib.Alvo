@@ -1,5 +1,6 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/Burgyn/MMLib.Alvo")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Data.EntityFrameworkCore")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Tests")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace MMLib.Alvo
@@ -13,13 +14,6 @@ namespace MMLib.Alvo
         public static MMLib.Alvo.AlvoContext Anonymous { get; }
         public bool HasRole(MMLib.Alvo.Role role) { }
         public static MMLib.Alvo.AlvoContext System(MMLib.Alvo.TenantId? tenant) { }
-    }
-    public static class AlvoFrameworkTables
-    {
-        public const string DescriptorVersionsSuffix = "_descriptor_versions";
-        public const string IdempotencySuffix = "_idempotency";
-        public const string OutboxSuffix = "_outbox";
-        public static System.Collections.Generic.IReadOnlyList<string> NamesFor(string schemaPrefix) { }
     }
     public enum AlvoMode
     {

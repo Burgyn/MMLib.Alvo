@@ -52,10 +52,22 @@ the T-SQL follow-up already open as #92. The five author-facing sites that publi
 `FieldDescriptor.MaxLength`, `FieldSchema.MaxLength`, `schema/project.schema.json`,
 `PayloadViolations.MaxLength` and `CHANGELOG.md` — scope the claim to the shipped drivers rather than
 stating it as universal, which is the half of CodeRabbit's review finding on #174 that was acted on.
-The half that was **not**: it asked for the port member (or widened columns) now. There is no SQL
-Server driver in this repository, so that is a contract with no implementer and no test — owed by the
-PR that adds the third dialect, per the package-boundary rule, and #175 carries the two candidate
-shapes for it.
+
+**The other half — build the seam now — was deferred, and the first reason given for deferring it was
+wrong.** That reason was "there is no SQL Server driver in this repository, so a port member would have
+no implementer and no test". `MMLib.Alvo.Testing.EntityFrameworkCore` ships **`TSqlSqlDialect`**, a
+public T-SQL fake whose whole purpose is to prove a seam sufficient for T-SQL *before* a real driver
+exists, and `AlvoSqlDialectContractTests` is the suite that holds it. The repo has already run this
+exact exercise once, for `RowLockClause`, and it found that a T-SQL author following the contract would
+have shipped silently unlocked `WITH CHECK` pre-images. So the implementer and the test both exist.
+
+**The deferral stands on the honest reason instead:** this is a separate change with a different shape
+and a different risk — a new member on the public `IAlvoSqlDialect`, three implementations, both
+`HasMaxLength` call sites, a contract fact, two approval baselines — plus an unresolved design question
+(`nvarchar` caps at 4000, so a doubled `maxLength` over 2000 needs `nvarchar(max)`, which an `int`
+return cannot express). Bolting that onto a PR of four small guards that has already passed plan-guard,
+a review round and green CI would put an undesigned change through a review that was not about it.
+**#175 carries the seam's shape, the precedent and the open cap question.**
 
 ### What ships
 
@@ -157,7 +169,7 @@ this PR.
 It does not *reserve* them: `DescriptorModelBuilder.ToTable(entity.Name)` maps an entity onto its
 own name verbatim, so an entity named `alvo_outbox` and the framework believe they own one table.
 
-### The authority moves to `MMLib.Alvo.Abstractions`
+### The authority moves to `MMLib.Alvo.Abstractions` — internal, not public
 
 The refusal belongs at apply, in the **core**; the names are built in
 **`MMLib.Alvo.Data.EntityFrameworkCore`**, which the core does not (and must not) reference. A
@@ -170,8 +182,26 @@ MMLib.Alvo.Abstractions/AlvoFrameworkTables.NamesFor(string schemaPrefix)
 
 `SystemSchemaInitializer.DescriptorVersionsTableName`, `IdempotencyTable.NameFor` and
 `OutboxTable.NameFor` are then spellings *of* that authority rather than three peers of it, and
-a fourth framework table added later reserves itself by being named there. This is public API in
-Abstractions and lands with its approval-baseline update.
+a fourth framework table added later reserves itself by being named there.
+
+**`internal`, with a third `InternalsVisibleTo` on Abstractions — not public.** The first draft made it
+public and the maintainer challenged it; the challenge was right and the evidence is one-sided:
+
+- The information was **never public**. It lived on `SystemSchemaInitializer`, an `internal sealed`
+  class, so its `public` members were public-on-internal. Publishing it here would have been a new
+  commitment, not a move — and the PR's public-API delta is therefore **zero**, not `+1 type`.
+- **The shipped seam for a new engine is `IAlvoSqlDialect`**, which plugs in *under* the Entity Framework
+  Core adapter and never sees a table name — `MMLib.Alvo.Data.Sqlite` contains a dialect, a field
+  renderer and DI extensions, and no introspector. The adapter does the creating and the
+  introspection-excluding for every dialect, so a third engine joining the intended way never needs
+  this list.
+- The one consumer who would is someone writing an `ISchemaIntrospector` from scratch. Nothing in the
+  repository is evidence that anyone does, and the package-boundary rule's own logic — a package is
+  *earned* — applies to public surface for the same reason.
+- **The asymmetry settles it.** `internal` → `public` later is additive; a `public const` cannot be
+  taken back, and worse, C# inlines it into a consuming assembly at compile time, so renaming a suffix
+  would break a host silently on upgrade until it rebuilt. That risk was written into this PR's own
+  report as a section-7 line; making the type internal removes it rather than documenting it.
 
 ### Threading the prefix
 
