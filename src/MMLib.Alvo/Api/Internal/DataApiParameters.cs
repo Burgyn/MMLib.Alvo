@@ -293,9 +293,9 @@ internal static class DataApiParameters
         Description =
             "`<field>[.asc|.desc][.nullsfirst|.nullslast]`, comma-separated for several keys, outermost "
             + "first. The modifiers must appear in that order and each at most once, so one sort key has one "
-            + "spelling; an unrecognised modifier is refused rather than ignored. **A nullable field is "
-            + "refused as a sort key** — see the operation description for why, and for what that means for "
-            + "the two null-placement modifiers.",
+            + "spelling; an unrecognised modifier is refused rather than ignored. A **nullable** field is a "
+            + "sort key like any other and defaults to `nullslast`; paging honours the same placement — see "
+            + "the operation description for what it costs.",
         Schema = new OpenApiSchema { Type = JsonSchemaType.String },
         Example = JsonValue.Create("id.desc"),
     };

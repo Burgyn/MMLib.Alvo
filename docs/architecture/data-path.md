@@ -248,47 +248,76 @@ because SQLite and PostgreSQL disagree on where `NULL` sorts for a given directi
 the raw column, not the repaired one — a cast `NULL` is still `NULL`.
 
 **It is emitted only where the key is nullable**, which is the one index-defeating construct in this data path
-and it used to be on **every** read. On a paged read that was provably pointless:
-`EnsureSortKeysCanBePaged` refuses a nullable paged sort key three frames earlier, so the rank expression was
-a compile-time constant `0` that could not change a single row of the answer — while being the one thing
-standing between this port and §2.1's *p95 < 50 ms on an indexed column*. A PR3 author measuring that
-criterion would have started reworking where `ORDER BY` and paging live. Dropped where it cannot matter, kept
-where it is load-bearing (an unpaged sorted read over a nullable key, where `AlvoSort.Nulls` is a real
-promise); `SortSqlRendererTests.The_null_placement_rank_is_emitted_only_for_a_nullable_key` pins both arms.
+and it used to be on **every** read — including a required key, where the rank was a compile-time constant that
+could not change a single row of the answer, while being the one thing standing between this port and §2.1's
+*p95 < 50 ms on an indexed column*. Dropped where it cannot matter;
+`SortSqlRendererTests.The_null_placement_rank_is_emitted_only_for_a_nullable_key` pins both arms.
+`KeysetSqlRenderer` reads the **same** `FieldSchema.Nullable` to decide whether its boundary compares the
+`(rank, value)` pair or the value alone, so the two renderers cannot disagree about which keys are ranked.
 
-**A paged read over a nullable sort key is refused, not answered.** `KeysetSqlRenderer` models no null
-placement of its own: its boundary is a chain of comparisons with no `IS NULL` arm, so a `NULL` on either side
-makes the term `NULL` and a `WHERE` treats that as false. Under `nullslast` the null-keyed tail became
-unreachable; under `nullsfirst` the first page's anchor had a null key and page two came back empty. Paging
-just stopped, silently.
+**A paged read over a nullable sort key was refused, not answered — until F4 (#116), which answers it.**
+`KeysetSqlRenderer` modelled no null placement of its own: its boundary was a chain of comparisons with no
+`IS NULL` arm, so a `NULL` on either side made the term `NULL` and a `WHERE` treated that as false. Under
+`nullslast` the null-keyed tail became unreachable; under `nullsfirst` the first page's anchor had a null key
+and page two came back empty. Paging just stopped, silently. F3's ruling was that a nullable sort column must
+declare its null placement **or be rejected**, and since `AlvoSort.Nulls` alone could not deliver the first
+half while only the `ORDER BY` honoured it, `AlvoQuery.EnsureSortKeysCanBePaged` took the second.
 
-The design's ruling is that a nullable sort column must declare its null placement **or be rejected**, and
-`AlvoSort.Nulls` alone cannot deliver the first half while only the `ORDER BY` honours it — so
-`AlvoQuery.EnsureSortKeysCanBePaged` takes the second: a read with a `Limit` or an `After` whose sort key
-names a `Nullable` field is refused with an `ArgumentException`. **It lives in `Abstractions`, called by both
-implementations**, on this codebase's own `AlvoFilter.EnsureWithinLimits` precedent — it was written twice,
-verbatim including its three-line message, in two shipped assemblies, and F7's dynamic driver would have made
-a third copy. That is the port's malformed-query channel,
-not an authorization refusal — the field is one the caller can read, nothing is hidden, and a request layer
-above this port turns it into a 422 with a fix suggestion.
+Every HTTP list is paged, so that refusal meant `?order=<any nullable field>` was a 422 and half the
+published order grammar was unobservable. **F4 delivers the first half instead**: the boundary compares the
+same `(rank, value)` pair the `ORDER BY` ranks by, and the guard is deleted — there is nothing left for it to
+refuse, and a guard that guards nothing is a member every future `IAlvoData` keeps calling forever.
 
-Scoped to a paged read deliberately: an **unpaged** sorted read has no boundary, so its ordering over nulls is
-already correct and stays legal. Making such a page work needs an `IS NULL`-aware boundary whose predicate
-form depends on the anchor's own null-ness (so `KeysetAnchor` has to carry it), which doubles that renderer's
-test matrix and must stay in lockstep with `SortSqlRenderer`'s rank expression or it reintroduces exactly the
-order/boundary divergence above. **PR3 owns that**, together with the paging surface and the cursor contract.
+**The four shapes, derived rather than chosen.** Expanding `(rank, value) > (rank₀, value₀)` for one key and
+folding away the arms that are constant:
 
-The consequence for fixtures is real and worth knowing: a suite that pages has to sort by a **required**
-column, which is why `AlvoDataWorlds` grew a required `label` on `notes` and a purpose-built `ledger` entity
-whose `amount` and `occurred_at` are both required.
+| anchor value | placement | boundary term |
+|---|---|---|
+| not null | `nullsfirst` | `(col ⊘ @v OR (col = @v AND tail))` — **identical to the non-nullable form** |
+| not null | `nullslast` | `(col IS NULL OR col ⊘ @v OR (col = @v AND tail))` |
+| null | `nullsfirst` | `(col IS NOT NULL OR tail)` |
+| null | `nullslast` | `(col IS NULL AND tail)` |
 
-**It is a rule of the port, not of one backend.** `AlvoDataAdversarialTests`
-`A_paged_read_sorted_by_a_nullable_field_is_refused_rather_than_dropping_rows` is inherited, so every
-implementation is held to it — and `InMemoryAlvoData` refuses too, although it compares rows in memory and
-could page over a null key correctly. That is deliberate: a reference implementation answering where the
-shipped backends refuse would give the port two contracts, and a driver author reading the inherited suite
-would learn the wrong one. Its sibling fact pins that an **unpaged** sorted read still answers, so the refusal
-cannot be implemented as "reject a nullable sort key".
+`⊘` is `<` for a descending key and `>` for an ascending one; `tail` is the next key's term, ending in the
+ascending `id` tie-breaker. Three consequences are worth stating because each is where a hand-written version
+would go wrong:
+
+- **The direction never reaches the null arms.** Where nulls sort is decided by the rank, which is always
+  ascending; `DESC` reverses only the value comparison.
+- **`nullsfirst` past a valued anchor adds nothing.** The nulls sort *before* the anchor and `col ⊘ @v` is
+  already `NULL`→false for them, so they are excluded for free.
+- **`col = @v` is never emitted against a null anchor.** The surviving rows are exactly the ones whose key is
+  also null, so they tie by construction and the term collapses to `tail` — never to `col = NULL`, which is
+  the three-valued trap the F3 renderer fell into.
+
+The `IS NULL` test reads the **raw** column, exactly as the `ORDER BY` rank does; every value comparison still
+runs on the repaired pair.
+
+**Keeping the two renderers in lockstep is the real risk, and it is answered behaviourally.** Both read the
+same `FieldSchema.Nullable` to decide whether a key has a rank at all, so they cannot disagree about *which*
+keys are ranked; that they agree about *where* the nulls go is not provable from either file. A shared helper
+was rejected — the two need different artifacts from the same fact (a `CASE` expression vs. a choice between
+SQL shapes), so it would be a seam with one caller per output, the shape this codebase has already recorded as
+how a member ends up with zero real callers while its tests pass. The mechanism is
+`AlvoDataPagingTests.Paging_a_nullable_sort_key_walks_out_exactly_the_unpaged_order`: walk a null-bearing set
+to exhaustion and compare the concatenation with the unpaged sorted read, for `{asc,desc} × {nullsfirst,
+nullslast}` at two page sizes, over a fixture carrying three nulls and two runs of duplicates. It is inherited,
+so SQLite, PostgreSQL and the in-memory reference are all held to it — and an order/boundary divergence is
+observable there and nowhere else.
+
+**The cost moved with it.** The `CASE` rank is the one index-defeating construct in this data path, and F3
+could argue it was inert on a paged read because the guard had refused the only case that made it matter. It
+is now load-bearing there, so a paged sort over a nullable column pays it. That is the price of the query
+being answerable at all rather than refused; sorting by a **required** column emits no rank and is unchanged.
+The index-friendly fix is per-dialect native `NULLS FIRST`/`NULLS LAST` behind `IAlvoSqlDialect`, which both
+shipped engines support — the same seam this document already names for §2.1's *p95 < 50 ms* criterion, beside
+the row-value-constructor question (#100). Filed as a follow-up, deliberately not bundled here: a public port
+member with three implementations and a contract fact is not something to slip into the change that made the
+read legal.
+
+The consequence for fixtures F3 grew is now a preference rather than a requirement: a suite that pages *may*
+sort by a nullable column, and `AlvoDataWorlds`' required `label` on `notes` and the purpose-built `ledger`
+entity stay because paging by a required key is still the shape with no rank expression in it.
 
 ### Collation belongs to the host — two rulings that need the maintainer's sign-off
 
@@ -1067,9 +1096,9 @@ indistinguishable.
 
 The reference implementation moved as much as the real one did, and that is deliberate: it could answer
 `mileage=gt.12.7` exactly, because it compares in memory with no column type in the way. It refuses anyway,
-for the reason `EnsureSortKeysCanBePaged` already gave — a reference implementation that answers where the
-shipped backends refuse gives the port two contracts, and a driver author reading the inherited suite learns
-the wrong one. `A_malformed_filter_is_refused_on_the_malformed_query_channel` is the shipped fact, with
+for the reason the retired nullable-sort-key guard also gave — a reference implementation that answers where
+the shipped backends refuse gives the port two contracts, and a driver author reading the inherited suite
+learns the wrong one. `A_malformed_filter_is_refused_on_the_malformed_query_channel` is the shipped fact, with
 `A_well_formed_filter_over_the_same_fields_still_answers` as its counterweight.
 
 `Limit = 0` is *accepted* and renders `LIMIT 0`, which both engines answer with an empty page. That is
@@ -1582,9 +1611,9 @@ reconstruct the reasoning from a scattered set of remarks.
 
 | Item | Why it is not PR2's | Where the seam is |
 |---|---|---|
-| An **`IS NULL`-aware keyset boundary**, so a paged read can sort by a nullable column instead of being refused | The boundary's predicate form depends on the anchor's own null-ness, so `KeysetAnchor` has to carry it, and it must stay in lockstep with `SortSqlRenderer`'s rank expression or it reintroduces the order/boundary divergence that skips rows | `KeysetSqlRenderer` + `SortSqlRenderer`; the refusal it would replace is `EfAlvoData.EnsureSortKeysCanBePaged` |
+| ~~An **`IS NULL`-aware keyset boundary**, so a paged read can sort by a nullable column instead of being refused~~ — **done in F4 (#116)**, see *Null placement* above. One prediction here was wrong and is worth keeping: `KeysetAnchor` did **not** have to carry the anchor's null-ness, because its `Values` already hold `null` for a null-keyed anchor | The boundary's predicate form depends on the anchor's own null-ness, and it must stay in lockstep with `SortSqlRenderer`'s rank expression or it reintroduces the order/boundary divergence that skips rows | `KeysetSqlRenderer` + `SortSqlRenderer`; the refusal it replaced was `AlvoQuery.EnsureSortKeysCanBePaged`, now deleted |
 | The **coercion policy for a fractional bound against an integral column** — is `mileage=gt.12.7` a 422, or floored/ceiled per operator? | There *is* a correct answer but it is per-operator (floor for `gt`, ceiling for `lt`, no match for `eq`), which makes it request validation, not binding. `Convert.ChangeType` rounds midpoint-to-even, so binding `13` would drop the row with `mileage = 13` from a request whose stated predicate included it | `PredicateParameterBinder` refuses the conversion today rather than performing it |
-| ***"p95 latencia filtrovaného listu nad 100k riadkov (indexovaný stĺpec) < 50 ms lokálne"*** and *"keyset pagination stabilná nad 1M riadkov"* (§2.1) | An explicit non-goal of #20; and `AlvoSort.Nulls`' portable `CASE WHEN` emulation is known to defeat an index on the sort key, so the target cannot be met without revisiting it | The whole statement text is composed in **one** place (`ReadStatementComposer`), so moving `ORDER BY`/paging fully into the raw root — or adopting native `NULLS FIRST`/`NULLS LAST` per dialect — is a change to one file |
+| ***"p95 latencia filtrovaného listu nad 100k riadkov (indexovaný stĺpec) < 50 ms lokálne"*** and *"keyset pagination stabilná nad 1M riadkov"* (§2.1) | An explicit non-goal of #20; and `AlvoSort.Nulls`' portable `CASE WHEN` emulation is known to defeat an index on the sort key, so the target cannot be met without revisiting it — **and F4 made that emulation load-bearing on a paged read rather than inert**, so the follow-up is now a real cost rather than a latent one | The whole statement text is composed in **one** place (`ReadStatementComposer`), so moving `ORDER BY`/paging fully into the raw root — or adopting native `NULLS FIRST`/`NULLS LAST` per dialect — is a change to one file |
 | A **missing required value** surfaces as EF's `DbUpdateException`, not as RFC 7807 | Schema-derived request validation belongs above this port; the all-optional read model deliberately does not enforce required-ness | Pinned by `SqliteAlvoDataCreateTests.A_missing_required_value_is_refused_by_the_database_constraint` |
 | On a **create**, an explicit `null` is indistinguishable from an omitted key | `WritePropertyBag` drops nulls, and for an insert "absent" and "null" mean the same thing to the database. On an **update** they do not, and that path uses `ExecuteUpdate` setters where a `null` is a real `SET col = NULL` | `WritePropertyBag.For`; the asymmetry is stated in its own remarks |
 | `Limit = 0` is accepted and renders `LIMIT 0` | Both engines agree on it, so it is not an engine-agnosticism defect — but whether "give me nothing" is an empty page or a refusal is a request-layer decision | `ReadStatementComposer` |

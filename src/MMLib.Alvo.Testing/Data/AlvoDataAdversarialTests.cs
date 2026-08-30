@@ -878,40 +878,63 @@ public abstract class AlvoDataAdversarialTests
         Enumerable.Range(0, candidates).Select(index => $"absent-{index}").ToList());
 
     /// <summary>
-    /// A keyset cursor's boundary is a chain of comparisons with no <c>IS NULL</c> arm, so a <see langword="null"/>
-    /// on either side makes the whole term <see langword="null"/> and a <c>WHERE</c> treats that as false —
-    /// paging over a nullable sort key stops at the first null-keyed row and <b>silently drops the rest</b>.
-    /// Measured under <c>nullslast</c> three visible rows walked out as two; under <c>nullsfirst</c>, as one.
+    /// A keyset cursor's boundary used to be a chain of comparisons with no <c>IS NULL</c> arm, so a
+    /// <see langword="null"/> on either side made the whole term <see langword="null"/> and a <c>WHERE</c>
+    /// treated that as false — paging over a nullable sort key stopped at the first null-keyed row and
+    /// <b>silently dropped the rest</b>. Measured under <c>nullslast</c>, three visible rows walked out as
+    /// two; under <c>nullsfirst</c>, as one. F3 refused such a read rather than answer it wrongly; F4 answers
+    /// it, because the boundary now compares the same <em>(rank, value)</em> pair the <c>ORDER BY</c> ranks by.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The design's ruling is that a nullable sort column must declare its null placement <b>or be rejected</b>,
-    /// and <see cref="AlvoSort.Nulls"/> cannot deliver the first half while only the <c>ORDER BY</c> honours it.
-    /// So a <em>paged</em> read over one is refused. This is the port's malformed-query channel, not an
-    /// authorization refusal: the field is one the caller may read, nothing is hidden, and a request layer above
-    /// turns it into a 422 with a fix suggestion.
+    /// This fact keeps the <b>adversarial</b> half of that history: a paged read over a nullable key answers,
+    /// and walking it to exhaustion loses nothing. It is here rather than only in the paging suite because
+    /// "the read is refused" and "the read silently drops rows" are the two failures an implementation can
+    /// choose between when it cannot express the boundary, and both are visible from this suite's own fixture.
+    /// The four-way <c>{asc,desc} × {nullsfirst,nullslast}</c> walk over a fixture that really contains nulls
+    /// lives in <c>AlvoDataPagingTests</c>, which builds its own.
     /// </para>
     /// <para>
-    /// It is a fact here, on the inherited suite, because it is a property of the <em>port</em> — every
-    /// implementation pages, and one that answered instead of refusing would drop rows exactly as the first one
-    /// did. An <b>unpaged</b> sorted read has no boundary, so it stays legal, and this fact asserts that too:
-    /// without it the refusal could be implemented as "reject a nullable sort key", which would break sorting.
+    /// An <b>unpaged</b> sorted read stays legal and is asserted alongside — without it, the fact could be
+    /// satisfied by an implementation that had stopped sorting by a nullable key at all.
     /// </para>
     /// </remarks>
     [Fact]
-    public async Task A_paged_read_sorted_by_a_nullable_field_is_refused_rather_than_dropping_rows()
+    public async Task A_paged_read_sorted_by_a_nullable_field_answers_and_loses_no_row()
     {
         var fixture = await NotesFixtureAsync();
         var sort = new[] { new AlvoSort("title") };
 
-        await Should.ThrowAsync<ArgumentException>(() => fixture.Data.QueryAsync(
-            new AlvoQuery { Entity = "notes", Sort = sort, Limit = 1 }, fixture.Alice));
-        await Should.ThrowAsync<ArgumentException>(() => fixture.Data.QueryAsync(
-            new AlvoQuery { Entity = "notes", Sort = sort, After = "any-cursor" }, fixture.Alice));
-
+        var first = await fixture.Data.QueryAsync(
+            new AlvoQuery { Entity = "notes", Sort = sort, Limit = 1 }, fixture.Alice);
+        var second = await fixture.Data.QueryAsync(
+            new AlvoQuery { Entity = "notes", Sort = sort, Limit = 1, After = first.NextCursor }, fixture.Alice);
         var unpaged = (await fixture.Data.QueryAsync(
             new AlvoQuery { Entity = "notes", Sort = sort }, fixture.Alice)).Items;
+
         unpaged.Count.ShouldBe(2);
+        first.NextCursor.ShouldNotBeNull();
+        second.NextCursor.ShouldBeNull();
+        first.Items.Concat(second.Items).Select(row => row["id"])
+            .ShouldBe(unpaged.Select(row => row["id"]));
+    }
+
+    /// <summary>
+    /// A cursor no page issued still finds no anchor and answers with an empty page — the property the
+    /// nullable-key boundary must not have broken, since a null-keyed anchor is now a shape the renderer
+    /// handles rather than one it refuses.
+    /// </summary>
+    [Fact]
+    public async Task A_forged_cursor_over_a_nullable_sort_key_is_still_an_empty_page()
+    {
+        var fixture = await NotesFixtureAsync();
+
+        var page = await fixture.Data.QueryAsync(
+            new AlvoQuery { Entity = "notes", Sort = [new AlvoSort("title")], Limit = 1, After = "any-cursor" },
+            fixture.Alice);
+
+        page.Items.ShouldBeEmpty();
+        page.NextCursor.ShouldBeNull();
     }
 
     /// <summary>

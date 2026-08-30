@@ -1,6 +1,4 @@
-﻿using MMLib.Alvo.Schema;
-
-namespace MMLib.Alvo.Data;
+﻿namespace MMLib.Alvo.Data;
 
 /// <summary>
 /// A request to list an entity's rows through <see cref="IAlvoData.QueryAsync"/>: which entity,
@@ -50,80 +48,15 @@ public sealed record AlvoQuery
     /// rejects it.
     /// </summary>
     /// <remarks>
-    /// A key naming a <b>nullable</b> field is only usable on an <em>unpaged</em> read: a keyset cursor's
-    /// boundary is a chain of comparisons that cannot express where nulls sort, so an implementation refuses a
-    /// paged read (<see cref="Limit"/> or <see cref="After"/> set) sorted by one rather than silently losing
-    /// the null-keyed rows. <see cref="EnsureSortKeysCanBePaged"/> is that refusal, and every implementation
-    /// calls it rather than writing its own.
+    /// A key naming a <b>nullable</b> field is usable on a paged read like any other, and
+    /// <see cref="AlvoSort.Nulls"/> is what makes it so: the ordering over nulls is total and known, so a
+    /// keyset boundary can be expressed for it. That was not always true — until F4 a paged read over a
+    /// nullable key was refused outright, because the boundary was a chain of comparisons with no
+    /// <c>IS NULL</c> arm and answering would have silently lost rows. An implementation that cannot compare
+    /// the pair <em>(where the null sorts, then the value)</em> must still refuse rather than answer; losing
+    /// rows quietly is the one option this port has never allowed.
     /// </remarks>
     public IReadOnlyList<AlvoSort> Sort { get; init; } = [];
-
-    /// <summary>
-    /// Throws when <paramref name="query"/> is <b>paged</b> and sorts by a nullable field. Every
-    /// <see cref="IAlvoData"/> implementation must call this before composing a page.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// A keyset boundary is a chain of comparisons with no <c>IS NULL</c> arm, so a <see langword="null"/> on
-    /// either side makes the term <see langword="null"/> and a <c>WHERE</c> treats that as false: the page
-    /// stops early and <b>silently</b>, losing every null-keyed row under <c>nullslast</c> and every row but
-    /// the first under <c>nullsfirst</c>. The design's ruling is that a nullable sort column must declare its
-    /// null placement <em>or be rejected</em>; the third option — accept the query and lose rows — is what this
-    /// refuses.
-    /// </para>
-    /// <para>
-    /// <b>It lives here because it is a rule of the port, not of one backend</b>, and it was written twice —
-    /// verbatim, message included — in two shipped assemblies before it lived anywhere. This codebase's own
-    /// precedent is <see cref="AlvoFilter.EnsureWithinLimits"/>: a public static guard in the ports, called by
-    /// every implementation, so a third one (F7's dynamic driver) inherits the rule instead of making a third
-    /// copy of it. The reference implementation calls it too, although it compares rows in memory and could
-    /// page over a null key correctly — a reference that answered where the shipped backends refuse would give
-    /// this port two contracts.
-    /// </para>
-    /// <para>
-    /// Scoped to a paged read deliberately: an <b>unpaged</b> sorted read has no boundary, so its ordering over
-    /// nulls is already correct and refusing it would break whole-set reads for no gain.
-    /// </para>
-    /// </remarks>
-    /// <param name="query">The query about to be served.</param>
-    /// <param name="entity">
-    /// The entity as the implementation's own applied schema declares it, or <see langword="null"/> when it
-    /// declares none — in which case there is no nullability to read and the check does not apply. An entity
-    /// the implementation does not know is refused elsewhere, before any row is touched.
-    /// </param>
-    /// <exception cref="ArgumentException"><paramref name="query"/> is paged and a sort key names a nullable field.</exception>
-    public static void EnsureSortKeysCanBePaged(AlvoQuery query, EntitySchema? entity)
-    {
-        ArgumentNullException.ThrowIfNull(query);
-        if (entity is null || !query.IsPaged)
-        {
-            return;
-        }
-
-        foreach (var key in query.Sort.Where(key => IsNullable(entity, key.Field)))
-        {
-            throw new ArgumentException(
-                $"Sorting a paged read by '{key.Field}' is not supported, because that field is nullable and a "
-                + "keyset cursor cannot express where its null values sort. Page by a required field, or read the "
-                + "whole set without a limit or a cursor.",
-                nameof(query));
-        }
-    }
-
-    /// <summary>
-    /// Whether this query asks for a page rather than the whole visible set — any of the three paging
-    /// signals is enough, because each makes the boundary observable.
-    /// </summary>
-    private bool IsPaged => Limit is not null || After is not null || Offset is not null;
-
-    /// <summary>
-    /// Whether <paramref name="entity"/> declares <paramref name="field"/> nullable. A field the entity does
-    /// not declare is not this check's business: an undeclared filter or sort key is refused, by name, before
-    /// this runs.
-    /// </summary>
-    private static bool IsNullable(EntitySchema entity, string field) =>
-        entity.Fields.FirstOrDefault(candidate => string.Equals(candidate.Name, field, StringComparison.Ordinal))
-            is { Nullable: true };
 
     /// <summary>Gets the maximum number of rows to return, or <see langword="null"/> for no explicit limit.</summary>
     public int? Limit { get; init; }
@@ -156,8 +89,8 @@ public sealed record AlvoQuery
     /// <remarks>
     /// Every <see cref="IAlvoData"/> implementation calls this before composing a page, in place of the
     /// private negative-<see cref="Limit"/> check PR2 wrote twice, once per implementation. A rule of the
-    /// port belongs here, beside <see cref="EnsureSortKeysCanBePaged"/>, for the same reason that one
-    /// does — so a third implementation inherits the rule instead of writing a fourth copy of it.
+    /// port belongs here, on the same <see cref="AlvoFilter.EnsureWithinLimits"/> precedent — so a third
+    /// implementation inherits the rule instead of writing a fourth copy of it.
     /// </remarks>
     /// <param name="query">The query about to be served.</param>
     /// <exception cref="ArgumentException"><paramref name="query"/>'s paging window is malformed.</exception>

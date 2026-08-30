@@ -203,6 +203,159 @@ public abstract class AlvoDataPagingTests
     }
 
     /// <summary>
+    /// <b>The lockstep fact: an <c>ORDER BY</c> and a keyset boundary that describe different sequences is
+    /// exactly what a page cannot survive</b>, and a nullable sort key is where the two used to disagree —
+    /// the order ranks nulls, the boundary compared the value alone, and rows went missing between pages.
+    /// Walking a null-bearing set to exhaustion and comparing the concatenation with the unpaged read of the
+    /// same query is the one observation that catches that; the SQL of neither renderer shows it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Both null placements, both directions, and two page sizes — a page size of 1 makes <b>every</b> row an
+    /// anchor in turn (the null-keyed ones included, which is the case that used to return an empty page),
+    /// while 3 lands the boundary inside the null bucket and inside a run of duplicates rather than always at
+    /// its edge.
+    /// </para>
+    /// <para>
+    /// The fixture carries three null-keyed rows and two pairs of duplicates deliberately: the null bucket and
+    /// a run of equal values are the two places the order is decided by the row-key tie-breaker rather than by
+    /// the key, and a boundary that dropped the tie-breaker would still pass a fixture whose keys were all
+    /// distinct.
+    /// </para>
+    /// </remarks>
+    /// <param name="nulls">Where the null-keyed rows sort.</param>
+    /// <param name="descending">Whether the key is sorted descending.</param>
+    /// <param name="pageSize">The page size to walk with.</param>
+    [Theory]
+    [InlineData(AlvoNullPlacement.Last, false, 1)]
+    [InlineData(AlvoNullPlacement.Last, true, 1)]
+    [InlineData(AlvoNullPlacement.First, false, 1)]
+    [InlineData(AlvoNullPlacement.First, true, 1)]
+    [InlineData(AlvoNullPlacement.Last, false, 3)]
+    [InlineData(AlvoNullPlacement.Last, true, 3)]
+    [InlineData(AlvoNullPlacement.First, false, 3)]
+    [InlineData(AlvoNullPlacement.First, true, 3)]
+    public async Task Paging_a_nullable_sort_key_walks_out_exactly_the_unpaged_order(
+        AlvoNullPlacement nulls, bool descending, int pageSize)
+    {
+        var world = await NullKeyedWorldAsync();
+        var sort = new[] { new AlvoSort("label", descending, nulls) };
+        var unpaged = await world.Data.QueryAsync(new AlvoQuery { Entity = "notes", Sort = sort }, world.Alice);
+
+        var walked = await WalkAsync(world, sort, pageSize);
+
+        walked.ShouldBe([.. unpaged.Items.Select(row => row["id"])]);
+    }
+
+    /// <summary>
+    /// The non-vacuity control for the fact above: the fixture really does put nulls where the placement says,
+    /// so a walk agreeing with an unpaged read that was itself mis-ordered would not pass.
+    /// </summary>
+    /// <param name="nulls">Where the null-keyed rows sort.</param>
+    /// <param name="descending">Whether the key is sorted descending.</param>
+    [Theory]
+    [InlineData(AlvoNullPlacement.Last, false)]
+    [InlineData(AlvoNullPlacement.Last, true)]
+    [InlineData(AlvoNullPlacement.First, false)]
+    [InlineData(AlvoNullPlacement.First, true)]
+    public async Task The_null_keyed_rows_sit_where_the_placement_puts_them(AlvoNullPlacement nulls, bool descending)
+    {
+        var world = await NullKeyedWorldAsync();
+
+        var rows = (await world.Data.QueryAsync(
+            new AlvoQuery { Entity = "notes", Sort = [new AlvoSort("label", descending, nulls)] },
+            world.Alice)).Items;
+
+        var nullPositions = rows.Index().Where(pair => pair.Item["label"] is null).Select(pair => pair.Index);
+        nullPositions.ShouldBe(nulls == AlvoNullPlacement.First ? [0, 1, 2] : [4, 5, 6]);
+    }
+
+    /// <summary>
+    /// Walks <paramref name="sort"/>'s whole visible set <paramref name="pageSize"/> rows at a time, following
+    /// each page's own cursor, and returns the row keys in the order they came out. Bounded by the seeded row
+    /// count so a boundary that never advanced fails as a wrong answer rather than as a hung test.
+    /// </summary>
+    private static async Task<List<object?>> WalkAsync(SeededWorld world, IReadOnlyList<AlvoSort> sort, int pageSize)
+    {
+        var walked = new List<object?>();
+        string? cursor = null;
+        for (var page = 0; page <= NullKeyedRowCount; page++)
+        {
+            var current = await world.Data.QueryAsync(
+                new AlvoQuery { Entity = "notes", Sort = sort, Limit = pageSize, After = cursor }, world.Alice);
+            walked.AddRange(current.Items.Select(row => row["id"]));
+            if (current.NextCursor is null)
+            {
+                return walked;
+            }
+
+            cursor = current.NextCursor;
+        }
+
+        throw new InvalidOperationException(
+            $"The walk issued more than {NullKeyedRowCount} pages over {NullKeyedRowCount} rows, so a cursor "
+            + "is not advancing.");
+    }
+
+    /// <summary>The number of rows <see cref="NullKeyedWorldAsync"/> seeds.</summary>
+    private const int NullKeyedRowCount = 7;
+
+    /// <summary>
+    /// A global <c>notes</c> entity whose <c>label</c> is <b>nullable</b>: three null-keyed rows, two pairs of
+    /// duplicates and one singleton, seeded in an order that matches none of the four sorted orders — so a
+    /// walk that accidentally returned insertion order would not pass.
+    /// </summary>
+    private async Task<SeededWorld> NullKeyedWorldAsync()
+    {
+        var descriptor = new AlvoDescriptor
+        {
+            ApiVersion = "alvo.dev/v1",
+            Name = "null-key-paging-fixture",
+            Entities = new Dictionary<string, EntityDescriptor>(StringComparer.Ordinal)
+            {
+                ["notes"] = new EntityDescriptor
+                {
+                    Tenancy = EntityTenancy.Global,
+                    Fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
+                    {
+                        ["label"] = new() { Type = DescField.String },
+                    },
+                    Rules = new AccessRules { List = "true", Get = "true" },
+                },
+            },
+        };
+
+        var schema = new SchemaModel([
+            new EntitySchema
+            {
+                Name = "notes",
+                Tenancy = TenancyMode.Global,
+                Fields =
+                [
+                    new FieldSchema { Name = "id", Type = SchemaField.Uuid, Required = true },
+                    new FieldSchema { Name = "label", Type = SchemaField.String, Nullable = true, MaxLength = 32 },
+                ],
+            },
+        ]);
+
+        string?[] labels = ["beta", null, "alpha", "beta", null, "alpha", null];
+        var seed = labels
+            .Select(label => new AlvoRecord(new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["id"] = Guid.NewGuid(),
+                ["label"] = label,
+            }))
+            .ToList();
+
+        var data = await CreateAsync(
+            schema,
+            descriptor,
+            new Dictionary<string, IReadOnlyList<AlvoRecord>>(StringComparer.Ordinal) { ["notes"] = seed });
+
+        return new SeededWorld(data, Caller);
+    }
+
+    /// <summary>
     /// A fresh, global <c>notes</c> entity with <paramref name="rowCount"/> rows, titled so a sort by
     /// <c>title</c> is deterministic and total.
     /// </summary>

@@ -253,7 +253,6 @@ namespace MMLib.Alvo.Data
         public int? Offset { get; init; }
         public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoSort> Sort { get; init; }
         public static void EnsurePagingWindowIsSane(MMLib.Alvo.Data.AlvoQuery query) { }
-        public static void EnsureSortKeysCanBePaged(MMLib.Alvo.Data.AlvoQuery query, MMLib.Alvo.Schema.EntitySchema? entity) { }
     }
     public sealed class AlvoRecord : System.IEquatable<MMLib.Alvo.Data.AlvoRecord>
     {

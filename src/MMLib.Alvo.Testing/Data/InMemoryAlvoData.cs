@@ -91,7 +91,6 @@ public sealed class InMemoryAlvoData : IAlvoData
         AlvoFilter.EnsureWithinLimits(query.Filter);
         AlvoQuery.EnsurePagingWindowIsSane(query);
         EnsureQueryFieldsAvailable(query, decision);
-        AlvoQuery.EnsureSortKeysCanBePaged(query, FindEntity(query.Entity));
 
         List<AlvoRecord> snapshot;
         lock (_gate)

@@ -154,6 +154,26 @@ own semantics and the only reading in which adding a term narrows the set.
 - Negation: a single leading `not.` on a key or a group member. `not.not.` is not in the grammar.
 - `order=<field>[.asc|.desc][.nullsfirst|.nullslast][,…]`, `select=a,b`, `limit`, `offset`, `after`.
 
+### Sorting over nulls
+
+Where a `NULL` sorts is **never** left to the database: SQLite and PostgreSQL disagree on the default for a
+given direction, so the placement is always explicit in the emitted statement — `nullslast` unless the key
+says otherwise — and it is emitted as the portable `CASE WHEN <key> IS NULL THEN 0/1 ELSE 1/0 END` rank
+(spike `Q3c`), always ascending, ahead of the value term the direction applies to.
+
+**The keyset boundary compares that same pair**, which is what makes a nullable key pageable. It is not the
+value comparison plus a special case: expanding `(rank, value) > (rank₀, value₀)` and folding away the arms
+that are constant leaves four shapes, two of which are identical to the non-nullable form. The full
+derivation is in `docs/architecture/data-path.md`; the property that matters here is that order and boundary
+are two renderings of one fact, and the inherited paging walk — page a null-bearing set one row at a time and
+compare with the unpaged read — is what holds them together.
+
+**The cost is real and it is a reason to sort by a required column.** The `CASE` rank cannot be served by an
+index on the sort key, so a paged sort over a nullable field is slower than one over a required field, which
+emits no rank at all. The index-friendly fix is per-dialect native `NULLS FIRST`/`NULLS LAST` behind
+`IAlvoSqlDialect` — both shipped engines support it — and it is a follow-up, deliberately not bundled with
+the change that made the read legal.
+
 `select` is applied to the **response**, not to the `SELECT` list — the port has no projection member yet,
 so `?select=id` costs the database exactly what a full read costs (**#117**).
 
@@ -239,9 +259,11 @@ means no explicit limit; the EF driver returns the whole visible set with no cur
 calling `IAlvoData` directly may still read a whole set. Both halves are stated here so that neither is
 "fixed": the port keeps the capability, the HTTP surface deliberately does not expose it.
 
-One consequence worth knowing: a nullable field cannot be a sort key on a *paged* read, and every HTTP
-list is paged — so `?order=<any nullable field>` is refused outright, and `nullsfirst`/`nullslast` parse
-but are currently **unobservable**. Both are issue **#116**, and it will be hit on day one.
+One consequence used to follow and no longer does: because every HTTP list is paged and a paged read over
+a nullable sort key was refused, `?order=<any nullable field>` was a 422 and `nullsfirst`/`nullslast` were
+unobservable — half the published sort grammar, unreachable. **#116** closed that: the keyset boundary now
+compares the same *(where the null sorts, then the value)* pair the `ORDER BY` ranks by, so a nullable key
+pages like any other. See *Sorting over nulls* below for what it costs.
 
 ## Paging: keyset over an opaque cursor, and its real cost
 

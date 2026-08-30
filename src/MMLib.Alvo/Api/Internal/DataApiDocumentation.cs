@@ -16,9 +16,9 @@ namespace MMLib.Alvo.Api.Internal;
 /// <c>If-Match</c> is ignored on a read and neither precondition header is honoured on a list
 /// (<see cref="DataApiEndpoints"/>' <c>Representation</c>); a create carrying either one is refused with 412
 /// (<c>EnsureUnconditional</c>); <c>Idempotency-Key</c> is honoured on a create and ignored on an update and
-/// a delete (<c>IdempotencyKeyHeader</c>); and a nullable field cannot be a sort key on a paged read
-/// (<c>AlvoQuery.EnsureSortKeysCanBePaged</c>), which is every list over HTTP. An integrator reads none of
-/// those files. §0 principle 4 makes the published document the contract an agent reads, so this is where
+/// a delete (<c>IdempotencyKeyHeader</c>); and where a <see langword="null"/> sorts on a nullable sort key,
+/// which is a choice the caller makes and the server never guesses (<c>SortSqlRenderer</c>,
+/// <c>KeysetSqlRenderer</c>). An integrator reads none of those files. §0 principle 4 makes the published document the contract an agent reads, so this is where
 /// they belong.
 /// </para>
 /// <para>
@@ -320,7 +320,8 @@ internal static class DataApiDocumentation
 
     /// <summary>
     /// The list operation's prose, carrying two of the four gaps this type exists for — preconditions on a
-    /// list, and a nullable sort key — plus the 200-not-403 behaviour a reader otherwise misreads.
+    /// list, and where nulls sort on a nullable key — plus the 200-not-403 behaviour a reader otherwise
+    /// misreads.
     /// </summary>
     private static string List =>
         "Reads a page of rows the caller's policy admits.\n\n"
@@ -337,13 +338,16 @@ internal static class DataApiDocumentation
         + "**Neither precondition header is honoured on a list.** A page has no version of its own to compare, "
         + "so `If-Match` and `If-None-Match` are ignored here — not refused, as they would be on a write. "
         + "Condition a single row's read or write instead.\n\n"
-        + "**A nullable field cannot be a sort key**, and since every list over HTTP is paged (`limit` always "
-        + "resolves, to a configured default when the request names none), that is every list: `order` over a "
-        + "nullable field is refused with 422. A keyset cursor is a chain of comparisons with no `IS NULL` arm, "
-        + "so paging over a nullable key silently drops rows — which is why it is refused rather than answered. "
-        + "The consequence for the two null-placement modifiers is that `nullsfirst` and `nullslast` parse, and "
-        + "their effect is currently unobservable: the only reads that could show it are the unpaged ones this "
-        + "endpoint does not offer.";
+        + "**A nullable field is a sort key like any other, and `nullslast` is what it gets if you do not say "
+        + "otherwise.** Where a null sorts is never left to the database: SQLite and PostgreSQL disagree on "
+        + "the default for a given direction, so the placement is always explicit in the statement Alvo emits "
+        + "and `nullsfirst`/`nullslast` are how you change it. Paging honours the same placement, so a cursor "
+        + "walks the null-keyed rows too — which was not true before: such a read used to be refused with 422 "
+        + "rather than answered, because a keyset boundary that compared the value alone dropped rows "
+        + "silently.\n\n"
+        + "**Sorting by a nullable field costs more than sorting by a required one.** The null placement is "
+        + "emitted as a `CASE` expression over the key, which an index on that key cannot serve. Page by a "
+        + "required column where latency matters.";
 
     /// <summary>
     /// The filter, sort and paging grammar, stated once on the list operation rather than repeated on each of

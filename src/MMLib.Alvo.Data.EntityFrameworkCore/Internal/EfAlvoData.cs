@@ -116,7 +116,6 @@ internal sealed class EfAlvoData : IAlvoData
         using var db = _contexts.Create();
         var entity = Entity(db, query.Entity);
         QueryFieldGuard.EnsureAvailable(QueryFields(query), entity, decision.HiddenFields);
-        AlvoQuery.EnsureSortKeysCanBePaged(query, entity);
 
         var anchor = await AnchorAsync(db, entity, decision, context, query, cancellationToken);
         if (query.After is not null && anchor is null)
