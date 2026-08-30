@@ -315,6 +315,118 @@ public class ReadStatementComposerTests
         Should.Throw<ArgumentNullException>(() => new ReadStatementComposer(predicates, new TestFieldSqlRenderer(), null!));
     }
 
+    /// <summary>
+    /// The count is composed over the <b>same</b> <c>WHERE</c> terms as the page, in the same order and with
+    /// the same parameter names: the whole point of it sharing one term composer rather than being a second
+    /// statement that has to be kept in step.
+    /// </summary>
+    [Fact]
+    public void A_count_carries_exactly_the_reads_own_where_clause()
+    {
+        var options = new ReadStatementComposer.ReadStatementOptions
+        {
+            Filter = new AlvoComparison("plate", AlvoFilterOperator.Eq, "ACME-001"),
+        };
+
+        var read = Compose(options);
+        var count = ComposeCount(options);
+
+        WhereOf(count).ShouldBe(WhereOf(read));
+        count.Parameters.Keys.Order(StringComparer.Ordinal)
+            .ShouldBe(read.Parameters.Keys.Order(StringComparer.Ordinal));
+    }
+
+    /// <summary>
+    /// It projects <c>COUNT(*)</c> and nothing else. No column is read, so a masked field has nothing to leak
+    /// through it and the field mask never has to be consulted.
+    /// </summary>
+    [Fact]
+    public void A_count_projects_no_column_at_all()
+        => ComposeCount(new ReadStatementComposer.ReadStatementOptions()).Sql
+            .ShouldStartWith("SELECT COUNT(*) FROM \"vehicle\" WHERE (");
+
+    /// <summary>
+    /// A count has no order and is not truncated by the page it accompanies, so the ordering, the row window
+    /// and the row lock are all absent — a <c>LIMIT</c> on the count would make it the page's size.
+    /// </summary>
+    [Fact]
+    public void A_count_carries_no_ordering_no_window_and_no_lock()
+    {
+        var sql = ComposeCount(new ReadStatementComposer.ReadStatementOptions
+        {
+            Sort = [new AlvoSort("plate")],
+            Limit = 10,
+            Offset = 5,
+            LockFor = PreImageMutation.Update,
+        }).Sql;
+
+        sql.ShouldNotContain("ORDER BY");
+        sql.ShouldNotContain("LIMIT");
+        sql.ShouldNotContain("FOR TEST");
+    }
+
+    /// <summary>
+    /// <b>The cursor boundary is dropped, and this is the fact that matters most.</b> The anchor narrows the
+    /// statement to the rows <em>after</em> the cursor, so a count carrying it would report the tail rather
+    /// than the set — and would shrink page by page, which is exactly the number a caller asked for a total
+    /// to avoid.
+    /// </summary>
+    [Fact]
+    public void A_count_drops_the_cursor_boundary_so_it_counts_the_set_and_not_the_tail()
+    {
+        var options = new ReadStatementComposer.ReadStatementOptions
+        {
+            Anchor = new KeysetAnchor([new AlvoSort("plate")], ["ACME-001"], Guid.NewGuid()),
+            Limit = 2,
+        };
+
+        var read = Compose(options);
+        var count = ComposeCount(options);
+
+        read.Sql.ShouldContain(PolicyParameterPrefix.Keyset);
+        count.Sql.ShouldNotContain(PolicyParameterPrefix.Keyset);
+        count.Parameters.Keys.ShouldNotContain(name => name.StartsWith(PolicyParameterPrefix.Keyset, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Composing_a_count_requires_every_argument()
+    {
+        using var services = Services();
+        var composer = new ReadStatementComposer(
+            services.GetRequiredService<IPredicateRenderer>(), new TestFieldSqlRenderer(), new TestSqlDialect());
+        var decision = SnapshotFixture.Decision(
+            services, SnapshotFixture.VehicleWith(list: "owner_id == @user.id"), DataOperation.List);
+        var options = new ReadStatementComposer.ReadStatementOptions();
+
+        Should.Throw<ArgumentNullException>(() => composer.ComposeCount(
+            null!, decision, AlvoDataFixtures.Caller, options));
+        Should.Throw<ArgumentNullException>(() => composer.ComposeCount(
+            AlvoDataFixtures.Vehicle, null!, AlvoDataFixtures.Caller, options));
+        Should.Throw<ArgumentNullException>(() => composer.ComposeCount(
+            AlvoDataFixtures.Vehicle, decision, null!, options));
+        Should.Throw<ArgumentNullException>(() => composer.ComposeCount(
+            AlvoDataFixtures.Vehicle, decision, AlvoDataFixtures.Caller, null!));
+    }
+
+    /// <summary>Everything between <c>WHERE</c> and whatever follows the terms.</summary>
+    private static string WhereOf(ReadStatement statement)
+    {
+        var where = statement.Sql[(statement.Sql.IndexOf(" WHERE ", StringComparison.Ordinal) + 7)..];
+        var tail = where.IndexOf(" ORDER BY ", StringComparison.Ordinal);
+        return tail < 0 ? where : where[..tail];
+    }
+
+    private static ReadStatement ComposeCount(ReadStatementComposer.ReadStatementOptions options)
+    {
+        using var services = Services();
+        var composer = new ReadStatementComposer(
+            services.GetRequiredService<IPredicateRenderer>(), new TestFieldSqlRenderer(), new TestSqlDialect());
+        var decision = SnapshotFixture.Decision(
+            services, SnapshotFixture.VehicleWith(list: "owner_id == @user.id"), DataOperation.List);
+
+        return composer.ComposeCount(AlvoDataFixtures.Vehicle, decision, AlvoDataFixtures.Caller, options);
+    }
+
     private static ReadStatement Compose(
         ReadStatementComposer.ReadStatementOptions options,
         AlvoDescriptor? descriptor = null,

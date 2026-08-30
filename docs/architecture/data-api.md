@@ -267,14 +267,15 @@ pages like any other. See *Sorting over nulls* below for what it costs.
 
 ## Paging: keyset over an opaque cursor, and its real cost
 
-The response is a JSON envelope, always both members:
+The response is a JSON envelope, always all three members:
 
 ```json
-{ "items": [ … ], "next": "3q2-796tvE-cKTMlvKYbGw" }
+{ "items": [ … ], "next": "3q2-796tvE-cKTMlvKYbGw", "count": null }
 ```
 
-`next` is `null` on the last page rather than omitted, which is why the published schema marks both
-`required` — a statement about the bytes, not an aspiration.
+`next` is `null` on the last page rather than omitted, which is why the published schema marks all three
+`required` — a statement about the bytes, not an aspiration. `count` follows the same rule and is `null`
+unless the request opted in; see *The count is opt-in* below.
 
 ### The cursor's contract, and why the API layer cannot mint one
 
@@ -315,6 +316,49 @@ The fix is a row-constructor comparison (`(a, b) > (@a, @b)`) where the engine s
 `offset` is the opt-in second mode. A request may not combine `after` and `offset` — they anchor the same
 window two different ways, and answering with one would silently resolve an ambiguous request
 (`AlvoQuery.EnsurePagingWindowIsSane`).
+
+### The count is opt-in: `Prefer: count=exact` (#110)
+
+`Prefer: count=exact` fills the envelope's `count` with **how many rows the query matches**, not how many
+this page holds. `Preference-Applied: count=exact` reports what was done (RFC 7240 §3).
+
+- **Opt-in, and the default is no count.** An exact count is a second full scan of the matching set on every
+  page; as a default it would make every list roughly twice the work for a number most callers never read.
+  §2.1 requires it to be opt-in and the analysis names `count(*)` over a large table as the expense. A
+  request that sends no preference composes and executes no count statement at all.
+- **`planned` and `estimated` are accepted and degrade to `exact`.** A planner estimate is engine-specific —
+  PostgreSQL has `EXPLAIN`, SQLite has no equivalent worth the name — and §0 principle 3 makes identical
+  behaviour the contract, so a mode real on one driver and fictional on the other belongs on neither.
+  `Preference-Applied` is where the caller who asked for an estimate learns they received the real count.
+- **The port models the capability, not the preference.** `AlvoQuery.IncludeTotalCount` is a `bool`. The
+  three RFC 7240 spellings are HTTP vocabulary and the degradation is an HTTP decision, taken where the
+  header is read. When a driver can honestly estimate, the port grows a mode and `AlvoPage` grows the applied
+  one — additively, at the point the distinction becomes true.
+- **The count is over the policy-filtered set.** It is composed by `ReadStatementComposer.ComposeCount` from
+  the *same* `WHERE` terms as the page — the resolved `USING` predicate, the synthesized tenant scope, the
+  caller's filter — with the projection, the ordering, the row window and the **cursor boundary** all
+  dropped. A count over the bare table returns a plausible integer and passes every row-level test while
+  telling a caller how many rows exist outside what they may read; `AlvoDataStatementTests` asserts the
+  second statement carries the policy prefixes in its own `WHERE`.
+
+**One deviation, stated.** PostgREST computes its count in the same statement, with `COUNT(*) OVER ()`. Alvo
+cannot: that window is evaluated after `WHERE`, and Alvo's `WHERE` carries the keyset boundary, so on any
+page but the first it would count the rows *after* the cursor rather than the set. (It would work for offset
+paging, which is exactly how you end up with two shapes and one of them wrong.) So it is a second statement,
+on the same connection, in no transaction — and a write interleaving the two can make the number disagree
+with the rows by one. **`exact` means "not an estimate", not "atomically consistent with `items`"**; read
+committed would not deliver the latter anyway without escalating every counted list to `REPEATABLE READ`.
+
+**Unrecognised preferences are ignored, not refused** — the one deliberate departure from this API's own
+"refuse, never ignore" rule. RFC 7240 §2 makes `Prefer` advisory and requires a server to ignore a preference
+it does not recognise or cannot satisfy, and §3 gives `Preference-Applied` as the channel for saying so. So
+`Prefer: count=exakt` yields no count and no `Preference-Applied`, which is precisely how the standard says
+that is reported. Adopting a known spec and then tightening it into a variant is a defect, not a shortcut;
+the detection the house rule protects is present, in the standard's place rather than ours.
+
+**No `Vary: Prefer`.** RFC 7240 suggests it where a response varies by the header, and this one does — but
+every generated response already carries `Cache-Control: no-store`, so no cache may store the representation
+and a `Vary` has no addressee.
 
 ## Optimistic concurrency: a strong `ETag` over the row version
 

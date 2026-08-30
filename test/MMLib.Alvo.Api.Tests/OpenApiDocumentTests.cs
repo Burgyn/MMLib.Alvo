@@ -368,6 +368,47 @@ public sealed class OpenApiDocumentTests
     }
 
     /// <summary>
+    /// The list is the one operation that reads <c>Prefer</c>, and the one whose 200 can answer with
+    /// <c>Preference-Applied</c>. Both are published, because an opt-in nothing announces is one no agent
+    /// finds — and neither appears on an operation that would ignore them.
+    /// </summary>
+    [Fact]
+    public async Task The_count_preference_is_documented_on_the_list_and_nowhere_else()
+    {
+        await using var world = await StoreAsync();
+        var document = await world.OpenApiDocumentAsync();
+
+        ListParameter(document, "products", PreferHeader.Name)["in"]!.GetValue<string>().ShouldBe("header");
+        ResponseHeaders(document, "/api/products", "get", "200").ShouldContain(PreferHeader.AppliedName);
+
+        ResponseHeaders(document, "/api/products", "post", "201").ShouldNotContain(PreferHeader.AppliedName);
+        Parameters(document, "/api/products", "post").ShouldNotContain(PreferHeader.Name);
+    }
+
+    /// <summary>The envelope publishes the count as a required, nullable member, exactly like <c>next</c>.</summary>
+    [Fact]
+    public async Task The_page_envelope_publishes_the_count_as_a_required_nullable_member()
+    {
+        await using var world = await StoreAsync();
+        var document = await world.OpenApiDocumentAsync();
+        var page = Component(document, "schemas", "productsPage");
+
+        page["required"]!.AsArray().Select(name => name!.GetValue<string>())
+            .ShouldBe(["items", "next", "count"], ignoreOrder: true);
+        page["properties"]!["count"]!["type"]!.AsArray().Select(type => type!.GetValue<string>())
+            .ShouldBe(["integer", "null"], ignoreOrder: true);
+    }
+
+    private static IEnumerable<string> ResponseHeaders(
+        JsonObject document, string path, string verb, string status) =>
+        (document["paths"]![path]![verb]!["responses"]![status]!["headers"]?.AsObject()
+            ?? new JsonObject()).Select(header => header.Key);
+
+    private static IEnumerable<string> Parameters(JsonObject document, string path, string verb) =>
+        (document["paths"]![path]![verb]!["parameters"]?.AsArray() ?? [])
+        .Select(parameter => Dereference(document, parameter!.AsObject())["name"]!.GetValue<string>());
+
+    /// <summary>
     /// A shared parameter or header no mapped operation could ever reference is not published — an orphan
     /// component is the same defect the <c>ProducesProblem</c> deviation avoids for a schema.
     /// </summary>
@@ -770,8 +811,15 @@ public sealed class OpenApiDocumentTests
                 .Where(parameter => parameter["$ref"] is null));
 
     /// <summary>One list route's parameter names, with every <c>$ref</c> followed.</summary>
+    /// <summary>
+    /// Every <b>query</b> parameter the list route documents. Scoped to the query string on purpose: a list
+    /// also carries a <c>Prefer</c> header parameter, and the fact this feeds is that the filter/sort/paging
+    /// grammar is published in full, not that a list takes no headers.
+    /// </summary>
     private static IEnumerable<string> ListParameterNames(JsonObject document, string entity) =>
-        ListParameters(document, entity).Select(parameter => parameter["name"]!.GetValue<string>());
+        ListParameters(document, entity)
+            .Where(parameter => string.Equals(parameter["in"]!.GetValue<string>(), "query", StringComparison.Ordinal))
+            .Select(parameter => parameter["name"]!.GetValue<string>());
 
     private static JsonObject ListParameter(JsonObject document, string entity, string name) =>
         ListParameters(document, entity).FirstOrDefault(

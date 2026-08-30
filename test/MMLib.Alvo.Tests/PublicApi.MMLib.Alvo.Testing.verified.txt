@@ -70,6 +70,9 @@ namespace MMLib.Alvo.Testing.Data
     public abstract class AlvoDataAdversarialTests
     {
         protected AlvoDataAdversarialTests() { }
+        public System.Threading.Tasks.Task A_count_is_narrowed_by_the_row_rule_and_by_the_callers_own_filter() { }
+        public System.Threading.Tasks.Task A_count_is_taken_over_the_policy_filtered_set_and_never_over_the_table() { }
+        public System.Threading.Tasks.Task A_count_over_a_hidden_field_filter_is_refused_like_the_read_itself() { }
         public System.Threading.Tasks.Task A_delete_on_a_soft_delete_entity_is_refused_rather_than_hard_deleting() { }
         public System.Threading.Tasks.Task A_delete_on_an_ordinary_entity_still_removes_the_row() { }
         public System.Threading.Tasks.Task A_filter_naming_a_hidden_field_is_rejected_rather_than_answered() { }
@@ -314,10 +317,13 @@ namespace MMLib.Alvo.Testing.Data
     public abstract class AlvoDataPagingTests
     {
         protected AlvoDataPagingTests() { }
+        public System.Threading.Tasks.Task A_forged_cursor_answers_an_empty_page_that_still_carries_the_count() { }
         public System.Threading.Tasks.Task A_negative_offset_is_refused_as_malformed() { }
         public System.Threading.Tasks.Task A_page_that_is_not_the_last_carries_a_cursor_and_the_last_one_does_not() { }
         public System.Threading.Tasks.Task A_query_asking_for_both_a_cursor_and_an_offset_is_refused_as_malformed() { }
+        public System.Threading.Tasks.Task A_read_that_did_not_ask_for_a_count_carries_none() { }
         public System.Threading.Tasks.Task An_offset_page_skips_exactly_that_many_rows_of_the_same_order() { }
+        public System.Threading.Tasks.Task An_opted_in_count_is_of_the_whole_filtered_set_and_not_of_the_page() { }
         protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Data.IAlvoData> CreateAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, System.Collections.Generic.IReadOnlyDictionary<string, System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRecord>> seed);
         [Xunit.InlineData(new object[] {
                 MMLib.Alvo.Data.AlvoNullPlacement.First,
@@ -353,6 +359,7 @@ namespace MMLib.Alvo.Testing.Data
                 3})]
         public System.Threading.Tasks.Task Paging_a_nullable_sort_key_walks_out_exactly_the_unpaged_order(MMLib.Alvo.Data.AlvoNullPlacement nulls, bool descending, int pageSize) { }
         public System.Threading.Tasks.Task Paging_the_whole_set_by_cursor_visits_every_row_exactly_once() { }
+        public System.Threading.Tasks.Task The_count_does_not_shrink_as_the_walk_advances() { }
         public System.Threading.Tasks.Task The_last_page_of_an_exactly_divisible_set_carries_no_cursor() { }
         [Xunit.InlineData(new object[] {
                 MMLib.Alvo.Data.AlvoNullPlacement.First,
@@ -384,6 +391,8 @@ namespace MMLib.Alvo.Testing.Data
     public abstract class AlvoDataStatementTests
     {
         protected AlvoDataStatementTests() { }
+        public System.Threading.Tasks.Task A_counted_read_composes_its_count_with_the_same_policy_predicate() { }
+        public System.Threading.Tasks.Task A_read_that_did_not_ask_for_a_count_sends_no_count_statement() { }
         public System.Threading.Tasks.Task A_rule_with_no_operands_binds_no_policy_parameter() { }
         public System.Threading.Tasks.Task A_rule_with_no_operands_binds_no_policy_parameter_on_the_write_path() { }
         public System.Threading.Tasks.Task A_single_row_read_carries_the_predicate_rather_than_checking_after_the_fetch() { }

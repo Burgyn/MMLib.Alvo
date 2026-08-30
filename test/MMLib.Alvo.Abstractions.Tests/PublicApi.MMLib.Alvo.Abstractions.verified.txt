@@ -249,6 +249,7 @@ namespace MMLib.Alvo.Data
         public string? After { get; init; }
         public required string Entity { get; init; }
         public MMLib.Alvo.Data.AlvoFilter? Filter { get; init; }
+        public bool IncludeTotalCount { get; init; }
         public int? Limit { get; init; }
         public int? Offset { get; init; }
         public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoSort> Sort { get; init; }

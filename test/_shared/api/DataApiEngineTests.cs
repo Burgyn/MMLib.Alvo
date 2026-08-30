@@ -227,6 +227,36 @@ public abstract class DataApiEngineTests
     }
 
     /// <summary>
+    /// <c>Prefer: count=exact</c> answered by a <b>real engine</b>, which is where it can go wrong in a way
+    /// no in-memory fact sees: the count is a second statement, and <c>COUNT(*)</c> comes back as PostgreSQL's
+    /// <c>bigint</c> and SQLite's 64-bit <c>INTEGER</c>. A driver materialising it as the wrong CLR type
+    /// throws from inside a list, on one engine only.
+    /// </summary>
+    /// <remarks>
+    /// The limit is deliberately smaller than the seeded set, so a count that was secretly the page's own row
+    /// count is a different number from this one.
+    /// </remarks>
+    [Fact]
+    public async Task An_exact_count_is_the_size_of_the_matching_set_on_this_engine()
+    {
+        await using var world = await StartAsync();
+        foreach (var index in Enumerable.Range(0, 5))
+        {
+            await CreateOwnerAsync(world, Owner($"Owner {index:D2}"));
+        }
+
+        using var response = await world.SendAsync(
+            HttpMethod.Get, "/api/owners?order=name&limit=2", _admin,
+            headers: new Dictionary<string, string> { ["Prefer"] = "count=exact" });
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, await response.ReadTextAsync());
+        var body = await response.ReadJsonObjectAsync();
+        body["items"]!.AsArray().Count.ShouldBe(2);
+        body["count"]!.GetValue<long>().ShouldBe(5);
+        response.Headers.GetValues("Preference-Applied").ShouldBe(["count=exact"]);
+    }
+
+    /// <summary>
     /// A read of an audited row hands out a <b>strong</b> entity tag denoting the row's stored version.
     /// </summary>
     /// <remarks>

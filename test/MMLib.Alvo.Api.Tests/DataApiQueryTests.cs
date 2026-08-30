@@ -223,6 +223,101 @@ public sealed class DataApiQueryTests
     }
 
     /// <summary>
+    /// <c>Prefer: count=exact</c> fills the envelope's <c>count</c> with the size of the matching set — not
+    /// of the page — and RFC 7240's <c>Preference-Applied</c> says so.
+    /// </summary>
+    [Fact]
+    public async Task A_count_preference_fills_the_envelope_and_is_reported_as_applied()
+    {
+        await using var world = await SeededAsync();
+
+        using var response = await world.SendAsync(
+            HttpMethod.Get, "/api/vehicles?order=make&limit=2", _admin,
+            headers: new Dictionary<string, string> { ["Prefer"] = "count=exact" });
+
+        var body = await response.ReadJsonObjectAsync();
+        body["items"]!.AsArray().Count.ShouldBe(2);
+        body["count"]!.GetValue<long>().ShouldBe(3);
+        response.Headers.GetValues("Preference-Applied").ShouldBe(["count=exact"]);
+    }
+
+    /// <summary>
+    /// <b>Opt-in, and this is the fact that makes it one over HTTP.</b> A request that sends no preference
+    /// gets <c>count: null</c> — present, because the envelope's members are a statement about the bytes —
+    /// and no <c>Preference-Applied</c> at all.
+    /// </summary>
+    [Fact]
+    public async Task A_request_that_asks_for_no_count_gets_a_null_one_and_no_applied_header()
+    {
+        await using var world = await SeededAsync();
+
+        using var response = await world.SendAsync(HttpMethod.Get, "/api/vehicles?order=make", _admin);
+
+        var body = await response.ReadJsonObjectAsync();
+        body.ContainsKey("count").ShouldBeTrue("the envelope's members are a statement about the bytes");
+        body["count"].ShouldBeNull();
+        response.Headers.Contains("Preference-Applied").ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// <c>planned</c> and <c>estimated</c> degrade to an exact count — a planner estimate exists on one
+    /// supported engine and not the other — and the caller is <em>told</em>, which is the whole reason
+    /// <c>Preference-Applied</c> is sent.
+    /// </summary>
+    [Theory]
+    [InlineData("count=planned")]
+    [InlineData("count=estimated")]
+    public async Task An_estimate_preference_degrades_to_an_exact_count_and_says_so(string preference)
+    {
+        await using var world = await SeededAsync();
+
+        using var response = await world.SendAsync(
+            HttpMethod.Get, "/api/vehicles", _admin,
+            headers: new Dictionary<string, string> { ["Prefer"] = preference });
+
+        (await response.ReadJsonObjectAsync())["count"]!.GetValue<long>().ShouldBe(3);
+        response.Headers.GetValues("Preference-Applied").ShouldBe(["count=exact"]);
+    }
+
+    /// <summary>
+    /// <b>A preference this server does not recognise is ignored, not refused</b> — RFC 7240 §2 requires it,
+    /// and the absence of <c>Preference-Applied</c> is how the standard reports it. The one deliberate
+    /// departure from this API's "refuse, never ignore" rule, so it is asserted end to end rather than only
+    /// at the parser.
+    /// </summary>
+    [Theory]
+    [InlineData("count=exakt")]
+    [InlineData("respond-async")]
+    public async Task An_unrecognised_preference_is_ignored_rather_than_refused(string preference)
+    {
+        await using var world = await SeededAsync();
+
+        using var response = await world.SendAsync(
+            HttpMethod.Get, "/api/vehicles", _admin,
+            headers: new Dictionary<string, string> { ["Prefer"] = preference });
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, await response.ReadTextAsync());
+        (await response.ReadJsonObjectAsync())["count"].ShouldBeNull();
+        response.Headers.Contains("Preference-Applied").ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// The count is over the caller's <b>filtered</b> set, not the table: a filter that halves the rows
+    /// halves the count. Without this, a count taken over everything visible would pass the facts above.
+    /// </summary>
+    [Fact]
+    public async Task A_count_is_narrowed_by_the_requests_own_filter()
+    {
+        await using var world = await SeededAsync();
+
+        using var response = await world.SendAsync(
+            HttpMethod.Get, "/api/vehicles?make=eq.vw", _admin,
+            headers: new Dictionary<string, string> { ["Prefer"] = "count=exact" });
+
+        (await response.ReadJsonObjectAsync())["count"]!.GetValue<long>().ShouldBe(1);
+    }
+
+    /// <summary>
     /// An unrecognized parameter is refused rather than ignored: an ignored <c>oder=name</c> answers 200 with
     /// unsorted data and the agent that sent it has no way to notice.
     /// </summary>

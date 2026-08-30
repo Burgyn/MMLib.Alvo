@@ -319,6 +319,43 @@ The consequence for fixtures F3 grew is now a preference rather than a requireme
 sort by a nullable column, and `AlvoDataWorlds`' required `label` on `notes` and the purpose-built `ledger`
 entity stay because paging by a required key is still the shape with no rank expression in it.
 
+### The opt-in count is a second statement, and its shape is the point (#110)
+
+`AlvoQuery.IncludeTotalCount` asks for `AlvoPage.TotalCount`, and `ReadStatementComposer.ComposeCount`
+answers it. It shares the page's own term composition — the resolved `USING`, the synthesized tenant scope,
+the caller's filter, in that order and under the same reserved prefixes — so there is exactly one answer to
+"which rows are visible" rather than two that have to be kept in step. It differs in three ways, each
+deliberate:
+
+- **no projection.** `COUNT(*)` reads no column, so a masked field has nothing to leak through it and
+  `ReadProjection`/`QueryFieldGuard.EnsureMaskable` are never reached.
+- **no `ORDER BY`, no row window, no row lock.** A count has no order and is not truncated by the page it
+  accompanies; a `LIMIT` on it would make it report the page size.
+- **no keyset anchor.** The anchor narrows the statement to the rows *after* the cursor, so a count carrying
+  it would report the tail and shrink page by page — which is exactly the number a caller asked for a total
+  in order to avoid.
+
+**Why not one statement.** PostgREST computes its count as `COUNT(*) OVER ()` beside the rows. That window
+is evaluated after `WHERE`, and Alvo's `WHERE` carries the cursor boundary, so it would be wrong on every
+page but the first. (It would be right for offset paging — which is how you end up with two shapes and one of
+them wrong.) The price of one shape is that the count is not atomic with the page: a write landing between
+the two statements can make the number differ by one. *Exact* is RFC 7240's word for "not an estimate", not
+for "consistent with `items`", and read committed would not deliver the latter without escalating every
+counted list to `REPEATABLE READ`.
+
+**It executes through EF's own `SqlQueryRaw<long>`**, not a raw command on the context's connection. Same
+binder, no second execution path — and, decisively, `SqlCapture` observes EF's `DiagnosticListener`, so a raw
+command would be invisible to `AlvoDataStatementTests`. "The count carries the policy predicate" is a claim
+no returned number can carry: a count over the bare table returns a plausible integer and passes every
+row-level fact in the adversarial suite while telling a caller how many rows exist outside what they may
+read. `A_counted_read_composes_its_count_with_the_same_policy_predicate` is the fact, and
+`A_count_is_taken_over_the_policy_filtered_set_and_never_over_the_table` is its outcome-level sibling over a
+three-tenant store.
+
+`ToListAsync` rather than `SingleAsync`: a `SqlQueryRaw` with nothing composed over it is emitted verbatim,
+while composing a LINQ operator wraps it in a subquery whose output column EF then requires to be named
+`Value` — an EF artifact in a statement that is otherwise Alvo's own.
+
 ### Collation belongs to the host — two rulings that need the maintainer's sign-off
 
 > **⚠ SIGN-OFF REQUIRED — the two knowing exceptions to §0 principle 3 ("identical behaviour on

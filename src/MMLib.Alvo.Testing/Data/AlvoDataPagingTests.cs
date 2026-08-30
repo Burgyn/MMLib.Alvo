@@ -203,6 +203,95 @@ public abstract class AlvoDataPagingTests
     }
 
     /// <summary>
+    /// <c>TotalCount</c> counts the <b>set</b>, not the page — the whole distinction the member carries, and
+    /// the one an implementation that returned <c>Items.Count</c> would pass every other fact while getting
+    /// wrong. Asserted with a limit that is neither the whole set nor a divisor of it, so a count that was
+    /// secretly the page size, the limit, or the number of pages is a different number from this one.
+    /// </summary>
+    [Fact]
+    public async Task An_opted_in_count_is_of_the_whole_filtered_set_and_not_of_the_page()
+    {
+        var world = await SeededWorldAsync(rowCount: 7);
+
+        var page = await world.Data.QueryAsync(
+            new AlvoQuery
+            {
+                Entity = "notes",
+                Sort = [new AlvoSort("title")],
+                Limit = 3,
+                IncludeTotalCount = true,
+            },
+            world.Alice);
+
+        page.Items.Count.ShouldBe(3);
+        page.TotalCount.ShouldBe(7);
+    }
+
+    /// <summary>
+    /// The count follows the <em>cursor</em> nowhere: page two of the same query reports the same total, so a
+    /// client can size a scrollbar once instead of watching it shrink as it pages.
+    /// </summary>
+    [Fact]
+    public async Task The_count_does_not_shrink_as_the_walk_advances()
+    {
+        var world = await SeededWorldAsync(rowCount: 7);
+        var query = new AlvoQuery
+        {
+            Entity = "notes",
+            Sort = [new AlvoSort("title")],
+            Limit = 3,
+            IncludeTotalCount = true,
+        };
+
+        var first = await world.Data.QueryAsync(query, world.Alice);
+        var second = await world.Data.QueryAsync(query with { After = first.NextCursor }, world.Alice);
+        var offset = await world.Data.QueryAsync(query with { Offset = 4 }, world.Alice);
+
+        second.TotalCount.ShouldBe(7);
+        offset.TotalCount.ShouldBe(7);
+    }
+
+    /// <summary>
+    /// <b>Opt-in, and the negative is the fact that makes it one.</b> A read that did not ask carries no
+    /// count at all — not a zero, not the page size — because an exact count is a second full scan of the
+    /// filtered set and §2.1 requires it to be something a caller asks for.
+    /// </summary>
+    [Fact]
+    public async Task A_read_that_did_not_ask_for_a_count_carries_none()
+    {
+        var world = await SeededWorldAsync(rowCount: 7);
+
+        var page = await world.Data.QueryAsync(
+            new AlvoQuery { Entity = "notes", Sort = [new AlvoSort("title")], Limit = 3 }, world.Alice);
+
+        page.TotalCount.ShouldBeNull();
+    }
+
+    /// <summary>
+    /// A cursor no page issued is an empty page, and it still carries the count: the total is a property of
+    /// the query's visible set, not of the window a stale cursor failed to open.
+    /// </summary>
+    [Fact]
+    public async Task A_forged_cursor_answers_an_empty_page_that_still_carries_the_count()
+    {
+        var world = await SeededWorldAsync(rowCount: 7);
+
+        var page = await world.Data.QueryAsync(
+            new AlvoQuery
+            {
+                Entity = "notes",
+                Sort = [new AlvoSort("title")],
+                Limit = 3,
+                After = "not-a-cursor-any-page-issued",
+                IncludeTotalCount = true,
+            },
+            world.Alice);
+
+        page.Items.ShouldBeEmpty();
+        page.TotalCount.ShouldBe(7);
+    }
+
+    /// <summary>
     /// <b>The lockstep fact: an <c>ORDER BY</c> and a keyset boundary that describe different sequences is
     /// exactly what a page cannot survive</b>, and a nullable sort key is where the two used to disagree —
     /// the order ranks nulls, the boundary compared the value alone, and rows went missing between pages.

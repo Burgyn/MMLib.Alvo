@@ -117,10 +117,16 @@ internal sealed class EfAlvoData : IAlvoData
         var entity = Entity(db, query.Entity);
         QueryFieldGuard.EnsureAvailable(QueryFields(query), entity, decision.HiddenFields);
 
+        var total = await TotalCountAsync(db, entity, decision, context, query, cancellationToken);
         var anchor = await AnchorAsync(db, entity, decision, context, query, cancellationToken);
+
+        // A cursor this provider never issued — stale, forged, or from another tenant — finds no anchor and
+        // is answered with an empty page rather than the first one. The count still comes back, because it is
+        // a property of the query's visible set and not of the window the cursor failed to open: answering
+        // null there would make the HTTP layer's `Preference-Applied: count=exact` a lie.
         if (query.After is not null && anchor is null)
         {
-            return AlvoPage.Empty;
+            return AlvoPage.Empty with { TotalCount = total };
         }
 
         var fetched = await PageAsync(db, entity, decision, context, query, anchor, cancellationToken);
@@ -129,7 +135,48 @@ internal sealed class EfAlvoData : IAlvoData
         {
             Items = [.. kept.Select(row => RecordMaterializer.ToRecord(row, decision.HiddenFields))],
             NextCursor = nextCursor,
+            TotalCount = total,
         };
+    }
+
+    /// <summary>
+    /// How many rows the query matches in total, or <see langword="null"/> when
+    /// <see cref="AlvoQuery.IncludeTotalCount"/> did not ask — in which case <b>no statement is composed and
+    /// none is executed</b>, which is what makes the count opt-in rather than merely optional.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Run through EF's own <c>SqlQueryRaw</c> rather than a raw command on the context's connection, so the
+    /// count binds its values through the same <see cref="PredicateParameterBinder"/> as the page, needs no
+    /// second execution path, and — the reason that decides it — is <b>visible to the same diagnostic
+    /// listener the statement suite observes</b>. "The count carries the policy predicate" is a claim no
+    /// returned number can carry, so it has to be assertable on the statement.
+    /// </para>
+    /// <para>
+    /// <c>ToListAsync</c> rather than <c>SingleAsync</c>: a <c>SqlQueryRaw</c> with nothing composed over it
+    /// is emitted verbatim, while composing a LINQ operator wraps it in a subquery whose output column EF
+    /// then requires to be named <c>Value</c> — an EF artifact in a statement that is otherwise Alvo's own.
+    /// The result set is one row by construction, so <c>Single</c> here is a fact about <c>COUNT(*)</c>, not
+    /// a bound imposed on the query.
+    /// </para>
+    /// </remarks>
+    private async Task<long?> TotalCountAsync(
+        AlvoDataContext db, EntitySchema? entity, PolicyDecision decision, AlvoContext context,
+        AlvoQuery query, CancellationToken cancellationToken)
+    {
+        if (!query.IncludeTotalCount)
+        {
+            return null;
+        }
+
+        var schema = entity ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
+        var statement = _statements.ComposeCount(
+            schema, decision, context, new ReadStatementComposer.ReadStatementOptions { Filter = query.Filter });
+        var parameters = new PredicateParameterBinder(db).Bind(
+            db.Rows(schema.Name).EntityType, statement.Parameters);
+
+        var counted = await db.Database.SqlQueryRaw<long>(statement.Sql, parameters).ToListAsync(cancellationToken);
+        return counted.Single();
     }
 
     /// <summary>

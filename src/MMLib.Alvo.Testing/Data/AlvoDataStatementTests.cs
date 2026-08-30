@@ -99,6 +99,48 @@ public abstract class AlvoDataStatementTests
     }
 
     /// <summary>
+    /// An opted-in count is a <b>second</b> statement, and it carries the policy predicate in its own
+    /// <c>WHERE</c>. The claim no returned number can carry: a count taken over the bare table returns a
+    /// plausible integer and passes every outcome-level fact while telling a caller how many rows exist
+    /// outside what they may read.
+    /// </summary>
+    /// <remarks>
+    /// The two-statement shape is asserted alongside, because it is the reason the anchor and the window are
+    /// dropped rather than reused: a count composed into the page's own statement would be a window function
+    /// over a <c>WHERE</c> that already carries the cursor boundary, and would count the tail instead of the
+    /// set on every page but the first.
+    /// </remarks>
+    [Fact]
+    public async Task A_counted_read_composes_its_count_with_the_same_policy_predicate()
+    {
+        var world = await OwnedNotesAsync();
+        world.Probe.ClearStatements();
+
+        await world.Probe.Data.QueryAsync(
+            new AlvoQuery { Entity = Entity, IncludeTotalCount = true }, world.Alice, Token);
+
+        world.Probe.Statements.Count.ShouldBe(2);
+        var count = world.Probe.Statements.Single(statement => statement.Contains("COUNT(*)", StringComparison.Ordinal));
+        WhereClauseOf(count).ShouldContain(UsingPrefix);
+        WhereClauseOf(count).ShouldContain(TenantPrefix);
+    }
+
+    /// <summary>
+    /// The negative that makes the count opt-in observable in the statements rather than only in the answer:
+    /// a read that did not ask sends <b>one</b> statement, and no <c>COUNT</c> at all.
+    /// </summary>
+    [Fact]
+    public async Task A_read_that_did_not_ask_for_a_count_sends_no_count_statement()
+    {
+        var world = await OwnedNotesAsync();
+        world.Probe.ClearStatements();
+
+        await world.Probe.Data.QueryAsync(new AlvoQuery { Entity = Entity }, world.Alice, Token);
+
+        world.Probe.Statements.ShouldHaveSingleItem().ShouldNotContain("COUNT(*)");
+    }
+
+    /// <summary>
     /// The non-vacuity control: with a bare <c>"true"</c> rule there is nothing to bind, so the prefix is
     /// <b>absent</b>. Without this, the facts above would also pass for an implementation that happened to put
     /// the string <c>alvo_u</c> in every statement it ever sent.

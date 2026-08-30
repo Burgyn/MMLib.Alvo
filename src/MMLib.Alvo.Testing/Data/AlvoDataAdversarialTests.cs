@@ -189,6 +189,80 @@ public abstract class AlvoDataAdversarialTests
     }
 
     /// <summary>
+    /// <b>The count is an aggregate over rows, which is exactly what makes it a disclosure channel.</b> A
+    /// caller learns nothing from an empty page, but "there are 3 rows" over a set they can see one of tells
+    /// them two rows exist somewhere they cannot read. So the count is composed over the <em>same</em>
+    /// <c>WHERE</c> terms as the page — the resolved <c>USING</c> predicate and the synthesized tenant scope
+    /// included — and every tenant here counts exactly its own row over a store holding three.
+    /// </summary>
+    /// <remarks>
+    /// A count taken over the bare table would return 3 to all three callers while every row-level fact in
+    /// this suite kept passing: no row crosses a tenant boundary, only the number does. That is the shape of
+    /// leak an outcome-level suite cannot see, which is why this is a fact of its own rather than an
+    /// assertion bolted onto the paging suite's count facts, whose fixture is single-tenant.
+    /// </remarks>
+    [Fact]
+    public async Task A_count_is_taken_over_the_policy_filtered_set_and_never_over_the_table()
+    {
+        var fixture = await DocumentsFixtureAsync();
+        var counted = new List<long?>();
+
+        foreach (var tenant in new[] { fixture.Acme, fixture.Globex, fixture.Third })
+        {
+            var page = await fixture.Data.QueryAsync(
+                new AlvoQuery { Entity = "documents", IncludeTotalCount = true }, NewContext(tenant));
+            counted.Add(page.TotalCount);
+        }
+
+        counted.ShouldAllBe(total => total == 1);
+    }
+
+    /// <summary>
+    /// The row-rule half of the same claim, on a fixture whose visible subset is decided by a
+    /// <c>USING</c> predicate rather than by tenancy: Alice owns two of the three <c>notes</c> rows, so her
+    /// count is 2 and never 3.
+    /// </summary>
+    [Fact]
+    public async Task A_count_is_narrowed_by_the_row_rule_and_by_the_callers_own_filter()
+    {
+        var fixture = await NotesFixtureAsync();
+
+        var byRule = await fixture.Data.QueryAsync(
+            new AlvoQuery { Entity = "notes", IncludeTotalCount = true }, fixture.Alice);
+        var byFilter = await fixture.Data.QueryAsync(
+            new AlvoQuery
+            {
+                Entity = "notes",
+                Filter = new AlvoComparison("title", AlvoFilterOperator.Eq, "Alice-1"),
+                IncludeTotalCount = true,
+            },
+            fixture.Alice);
+
+        byRule.TotalCount.ShouldBe(2);
+        byFilter.TotalCount.ShouldBe(1);
+    }
+
+    /// <summary>
+    /// A count over a field the caller may not read is refused exactly as the read itself is — the count adds
+    /// no second path into the query, so a filter naming a hidden field cannot become a counting oracle that
+    /// answers where the page refuses.
+    /// </summary>
+    [Fact]
+    public async Task A_count_over_a_hidden_field_filter_is_refused_like_the_read_itself()
+    {
+        var fixture = await NotesFixtureAsync();
+
+        await Should.ThrowAsync<AlvoAuthorizationException>(() => fixture.Data.QueryAsync(
+            new AlvoQuery
+            {
+                Entity = "notes",
+                Filter = new AlvoComparison("nosuchfield", AlvoFilterOperator.Eq, "x"),
+                IncludeTotalCount = true,
+            },
+            fixture.Alice));
+    }
+
+    /// <summary>
     /// The §4 acceptance criterion, made into a real, independently failing assertion: a tenantless
     /// caller's query throws with no rows ever assigned to the caller's variable (an implementation
     /// that throws only after materializing the rows would still fail this), <b>and</b> no

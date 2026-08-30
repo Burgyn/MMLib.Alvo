@@ -112,6 +112,75 @@ internal sealed class ReadStatementComposer
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(rows);
 
+        var (terms, parameters) = Terms(entity, decision, context, options);
+
+        var sql = new StringBuilder("SELECT ")
+            .Append(ReadProjection.Compose(entity, Mask(decision, options), _dialect, rows))
+            .Append(" FROM ")
+            .Append(_dialect.RenderTable(entity, options.LockFor))
+            .Append(" WHERE ")
+            .Append(Where(terms))
+            .Append(OrderByClause(entity, options))
+            .Append(WindowClause(parameters, options))
+            .Append(LockClause(options))
+            .ToString();
+
+        return new ReadStatement(sql, parameters);
+    }
+
+    /// <summary>
+    /// Composes the <c>COUNT</c> that answers <see cref="AlvoQuery.IncludeTotalCount"/> — <b>how many rows
+    /// the caller can see</b>, over the same <c>WHERE</c> terms as the page and in the same order, so the
+    /// number and the rows are filtered by one predicate rather than by two that have to be kept in step.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// It differs from <see cref="Compose"/> in exactly three ways, and each of them is the point. There is
+    /// no projection — <c>COUNT(*)</c> reads no column, so a masked field has nothing to leak through and
+    /// <see cref="ReadProjection"/> is never reached. There is no <c>ORDER BY</c> and no row window: a count
+    /// has no order, and it is a count of the <em>set</em>, not of the page that is a window onto it. And the
+    /// <b>keyset anchor is not composed</b>: the anchor narrows the statement to the rows after the cursor,
+    /// which is precisely what a total must not be.
+    /// </para>
+    /// <para>
+    /// <b>Why the anchor's absence is a decision rather than an omission.</b> The natural one-statement form
+    /// — PostgREST's <c>COUNT(*) OVER ()</c> beside the rows — evaluates after <c>WHERE</c>, and Alvo's
+    /// <c>WHERE</c> carries the cursor boundary, so it would count the tail rather than the set on every page
+    /// but the first. Two statements is the price of the count meaning the same thing on page one and page
+    /// nine; the cost is that a write interleaving them can make the number disagree with the rows by one.
+    /// </para>
+    /// </remarks>
+    /// <param name="entity">The entity being counted, as the applied schema declares it.</param>
+    /// <param name="decision">The verdict <see cref="IPolicyEngine"/> returned for this caller.</param>
+    /// <param name="context">The caller the predicates' context values are resolved against.</param>
+    /// <param name="options">
+    /// The same options the page was composed from. <see cref="ReadStatementOptions.Anchor"/>,
+    /// <see cref="ReadStatementOptions.Sort"/>, <see cref="ReadStatementOptions.Limit"/> and
+    /// <see cref="ReadStatementOptions.Offset"/> are deliberately ignored; the caller passes the whole record
+    /// rather than a narrowed copy so that a term added to the read cannot be silently missed here.
+    /// </param>
+    internal ReadStatement ComposeCount(
+        EntitySchema entity, PolicyDecision decision, AlvoContext context, ReadStatementOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        ArgumentNullException.ThrowIfNull(decision);
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(options);
+
+        var (terms, parameters) = Terms(entity, decision, context, options with { Anchor = null });
+        var sql = $"SELECT COUNT(*) FROM {_dialect.RenderTable(entity, lockedPreImageFor: null)} WHERE {Where(terms)}";
+
+        return new ReadStatement(sql, parameters);
+    }
+
+    /// <summary>
+    /// The <c>WHERE</c> terms every read of this entity carries, in one place so the page and its count
+    /// cannot come to disagree about what "the visible set" is. The caller's own terms are only ever
+    /// <c>AND</c>-ed onto a fully parenthesised policy predicate, so they can only narrow.
+    /// </summary>
+    private (List<string> Terms, Dictionary<string, BoundValue> Parameters) Terms(
+        EntitySchema entity, PolicyDecision decision, AlvoContext context, ReadStatementOptions options)
+    {
         var terms = new List<string>();
         var parameters = new Dictionary<string, BoundValue>(StringComparer.Ordinal);
 
@@ -121,19 +190,10 @@ internal sealed class ReadStatementComposer
         AddFilter(terms, parameters, entity, options.Filter);
         AddAnchor(terms, parameters, entity, options.Anchor);
 
-        var sql = new StringBuilder("SELECT ")
-            .Append(ReadProjection.Compose(entity, Mask(decision, options), _dialect, rows))
-            .Append(" FROM ")
-            .Append(_dialect.RenderTable(entity, options.LockFor))
-            .Append(" WHERE ")
-            .Append(string.Join(" AND ", terms.Select(term => $"({term})")))
-            .Append(OrderByClause(entity, options))
-            .Append(WindowClause(parameters, options))
-            .Append(LockClause(options))
-            .ToString();
-
-        return new ReadStatement(sql, parameters);
+        return (terms, parameters);
     }
+
+    private static string Where(List<string> terms) => string.Join(" AND ", terms.Select(term => $"({term})"));
 
     /// <inheritdoc cref="ReadStatementOptions.Unmasked"/>
     private static IReadOnlySet<string> Mask(PolicyDecision decision, ReadStatementOptions options) =>

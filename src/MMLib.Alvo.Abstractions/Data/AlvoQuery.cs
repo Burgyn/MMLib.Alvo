@@ -82,6 +82,37 @@ public sealed record AlvoQuery
     public int? Offset { get; init; }
 
     /// <summary>
+    /// Gets whether this read also asks for <see cref="AlvoPage.TotalCount"/> — how many rows the query
+    /// matches in total, not how many this page carries. <see langword="false"/> by default, and that default
+    /// is the whole point.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Opt-in because an exact count is a second full scan of the filtered set, on every page.</b> §2.1
+    /// requires it to be opt-in and the domain analysis names <c>count(*)</c> over a large table as the
+    /// specific expense; as a default it would make every list roughly twice the work for a number most
+    /// callers never read. An implementation that is not asked for one must not compute one.
+    /// </para>
+    /// <para>
+    /// <b>The count is over the <em>policy-filtered</em> set, and over the caller's filter — never over the
+    /// table, and never over the page.</b> It ignores <see cref="Limit"/>, <see cref="Offset"/> and
+    /// <see cref="After"/> entirely: "how many rows are there" is a question about the set the caller can
+    /// see, which is the same set the page is a window onto. A count composed any other way is an oracle
+    /// about rows the caller cannot read.
+    /// </para>
+    /// <para>
+    /// <b>A boolean rather than an <c>exact | planned | estimated</c> mode, deliberately.</b> A planner
+    /// estimate is engine-specific — PostgreSQL has <c>EXPLAIN</c>, SQLite has no equivalent worth the name
+    /// — and §0 principle 3 says the behaviour is identical on every engine, so a mode that is real on one
+    /// driver and a lie on the other belongs on neither. The three RFC 7240 spellings are an HTTP
+    /// vocabulary; the layer that reads the header degrades them and says so in
+    /// <c>Preference-Applied</c>. When a driver can honestly estimate, this port grows a mode and
+    /// <see cref="AlvoPage"/> grows the applied one — additively, at the point the distinction becomes true.
+    /// </para>
+    /// </remarks>
+    public bool IncludeTotalCount { get; init; }
+
+    /// <summary>
     /// Throws when <paramref name="query"/>'s paging window is self-contradictory or out of range —
     /// a negative <see cref="Limit"/> or <see cref="Offset"/>, or both <see cref="After"/> and
     /// <see cref="Offset"/> set at once.

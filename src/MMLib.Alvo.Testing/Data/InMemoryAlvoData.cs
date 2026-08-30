@@ -108,6 +108,11 @@ public sealed class InMemoryAlvoData : IAlvoData
         {
             Items = [.. page.Select(row => Mask(row, decision.HiddenFields))],
             NextCursor = nextCursor,
+
+            // Counted over the ordered, policy-filtered set — before paging, which is the whole distinction
+            // the member carries: `Items.Count` is the window, this is the set the window looks onto. The
+            // shipped drivers reach the same number with a second statement over the same WHERE terms.
+            TotalCount = query.IncludeTotalCount ? ordered.Count : null,
         });
     }
 

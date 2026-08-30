@@ -118,6 +118,7 @@ internal static class DataApiParameters
             (IfMatchId, IfMatch),
             (IfNoneMatchId, IfNoneMatch),
             (IdempotencyKeyId, IdempotencyKey(options)),
+            (PreferId, Prefer),
             (SelectId, Select),
             (OrderId, Order),
             (LimitId, Limit(options)),
@@ -137,6 +138,8 @@ internal static class DataApiParameters
     private const string IfNoneMatchId = "ifNoneMatch";
 
     private const string IdempotencyKeyId = "idempotencyKey";
+
+    private const string PreferId = "prefer";
 
     private const string SelectId = "select";
 
@@ -215,6 +218,7 @@ internal static class DataApiParameters
     private static IEnumerable<string> HeaderNames(DataOperation operation, EntitySchema entity) =>
         operation switch
         {
+            DataOperation.List => [PreferId],
             DataOperation.Get when AlvoManagedColumns.VersionColumn(entity) is not null => [IfNoneMatchId],
             DataOperation.Create => [IdempotencyKeyId],
             DataOperation.Update or DataOperation.Delete
@@ -273,6 +277,32 @@ internal static class DataApiParameters
             MaxLength = options.MaxIdempotencyKeyBytes,
             MinLength = 1,
         },
+    };
+
+    /// <summary>
+    /// The RFC 7240 preference header, for the one preference a list honours.
+    /// </summary>
+    /// <remarks>
+    /// Published even though an unrecognised preference is <em>ignored</em> rather than refused: that is
+    /// RFC 7240's own rule, and a document that did not name the one preference this endpoint acts on would
+    /// leave an agent with no way to discover a count is available at all. What was applied comes back in
+    /// <c>Preference-Applied</c>, which is described with the 200 response.
+    /// </remarks>
+    private static OpenApiParameter Prefer => new()
+    {
+        Name = PreferHeader.Name,
+        In = ParameterLocation.Header,
+        Required = false,
+        Description =
+            "`count=exact` fills the page envelope's `count` with the number of rows the query matches in "
+            + "total. Opt-in, because it is a second scan of the matching set on every request. `planned` "
+            + "and `estimated` are accepted and **degrade to an exact count** — a planner estimate exists on "
+            + "one supported engine and not the other, and this API answers identically on both — and the "
+            + "response says so in `Preference-Applied`. Per RFC 7240 a preference this server does not "
+            + "recognise is ignored rather than refused, and its absence from `Preference-Applied` is how "
+            + "that is reported.",
+        Schema = new OpenApiSchema { Type = JsonSchemaType.String },
+        Example = JsonValue.Create("count=exact"),
     };
 
     private static OpenApiParameter Select => new()
