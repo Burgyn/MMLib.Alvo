@@ -16,15 +16,21 @@ Run it **after `alvo-plan-guard`** (its verdict is an input) and **before
 
 ## Pipeline
 
-1. **Read the language off the arguments** — a bare argument is a language code
-   when it is `en`, or when `references/labels.<it>.md` exists. **`en` is the
-   default** when none is given, and anything that is neither is the PR number or
-   branch — so `/pr-report 174 sk`, `/pr-report sk` and `/pr-report 174` are all
-   unambiguous, and a new language becomes selectable by its labels file landing,
-   with no parser to update. A code with no labels file is *not* silently treated
-   as a branch name: say the language is not available and ask, because a typo'd
-   `sl` would otherwise become a branch nobody has. See *Language* below for what
-   a non-English report does and does not translate.
+1. **Read the language off the arguments.** A **language token is exactly two
+   lowercase ASCII letters** (`^[a-z]{2}$`) — ISO 639-1, and the grammar is what
+   keeps `174`, `f4/pr-a-apply-guards` and `feature/foo` from ever being mistaken
+   for one. Then, in order:
+   - not a language token → it is the PR number or branch;
+   - `en`, or a token with a `references/labels.<token>.md` → that language;
+   - a token with no labels file → **stop and say the language is not available**,
+     listing the ones that are. Do not fall back and do not treat it as a branch:
+     a two-letter branch name is vanishingly rare, while a typo'd `sl` for `sk` is
+     not, and silently writing English would hide the typo.
+
+   **`en` is the default** when no token is given, so `/pr-report 174 sk`,
+   `/pr-report sk` and `/pr-report 174` are all unambiguous, and a new language
+   becomes selectable by its labels file landing — no parser to update. See
+   *Language* below for what a non-English report does and does not translate.
 2. **Pick the output path** — `<scratchpad>/pr-report-<number-or-branch>.html`.
    Same path on every regeneration of the same PR: the Artifact then redeploys
    to the same URL instead of claiming a new one. **The language is not part of

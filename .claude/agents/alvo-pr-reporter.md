@@ -56,9 +56,14 @@ For any other code, **read `.claude/skills/alvo-pr-report/references/labels.<cod
 before you write a word.** It carries the chrome strings as a fixed table, and
 they are fixed for a reason: the template's value is that the maintainer never
 re-orients, which a report free to re-translate `Forecloses` every time destroys.
-Use the table verbatim; do not improve it. No file for the requested code means
-you cannot honour the request — write the report in English and say so in what
-you return, rather than inventing a glossary nobody will match next time.
+Use the table verbatim; do not improve it.
+
+**No file for the requested code is a last-resort case, not a second policy.** The
+caller resolves the language before dispatching you and refuses an unavailable one
+by name, so you should never see this. If you do — you were dispatched with a code
+nobody checked — write the report in **English** and say so plainly in what you
+return. Never invent a glossary: one nobody will match next time is worse than an
+English page, which is the failure the caller's refusal exists to prevent upstream.
 
 **Translate the prose. Never translate the evidence.** Identifiers, the literals
 the product emits (violation codes, problem-type slugs, config and descriptor

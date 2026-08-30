@@ -6,11 +6,18 @@ allowed-tools: Agent, Read, Bash(gh pr view:*), Bash(gh pr diff:*), Bash(gh pr c
 
 Build the Alvo PR report for: **$ARGUMENTS** (empty → the current branch against `main`).
 
-Split the arguments first: a bare argument is a language code when it is `en` or when
-`.claude/skills/alvo-pr-report/references/labels.<it>.md` exists — **defaulting to
-`en`**; whatever remains is the PR number or branch. So `174 sk`, `sk` and `174` are
-all unambiguous, and a new language needs only its labels file. A code with no labels
-file is not treated as a branch name: say so and ask.
+Split the arguments first. A **language token is exactly two lowercase ASCII letters**
+(`^[a-z]{2}$`), which is what keeps `174`, `f4/pr-a-apply-guards` and `feature/foo`
+from ever being read as one. An argument that is not a language token is the PR number
+or branch. A token that is `en`, or that has a
+`.claude/skills/alvo-pr-report/references/labels.<token>.md`, selects that language —
+**`en` is the default** when no token is given. A token with no labels file stops the
+command: say the language is not available and list the ones that are, rather than
+falling back to English or treating it as a branch, because a typo'd `sl` for `sk` is
+far likelier than a two-letter branch name.
+
+So `174 sk`, `sk` and `174` are all unambiguous, and a new language needs only its
+labels file.
 
 Follow the `alvo-pr-report` skill (`.claude/skills/alvo-pr-report/SKILL.md`) end to
 end: dispatch the `alvo-pr-reporter` subagent with an output path of
