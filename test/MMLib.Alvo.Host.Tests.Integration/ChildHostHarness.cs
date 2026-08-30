@@ -531,7 +531,7 @@ internal sealed class ChildHostHarness : IAsyncDisposable
     }
 
     private const string AdminKeyId = "killed-host-admin";
-    private const string AdminSecret = "killed-host-admin-secret";
+    private const string AdminSecret = "killed-host-admin-secret-long-enough-for-the-floor";
     private const string ApiKeyHeader = "X-Alvo-Api-Key";
     private const string OrdersPath = "/api/orders";
     private const string DescriptorFileName = "killed-host.alvo.json";

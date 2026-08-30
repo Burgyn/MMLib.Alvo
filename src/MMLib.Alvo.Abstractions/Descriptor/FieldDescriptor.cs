@@ -31,7 +31,19 @@ public sealed record FieldDescriptor
     /// <summary>Default value: a JSON literal or a tagged CEL expression evaluated at insert time.</summary>
     public ValueOrExpr? Default { get; init; }
 
-    /// <summary>Maximum length; applies to <see cref="FieldType.String"/> only.</summary>
+    /// <summary>
+    /// Maximum length in <b>Unicode code points</b>; applies to <see cref="FieldType.String"/> only.
+    /// </summary>
+    /// <remarks>
+    /// The unit is stated because "characters" is ambiguous enough to have produced a bug: it is code
+    /// points, the unit JSON Schema's <c>maxLength</c> keyword is defined in and the unit PostgreSQL's
+    /// <c>varchar(n)</c> charges for — so the descriptor, the generated OpenAPI document and the column
+    /// bound the same thing. A character outside the Basic Multilingual Plane counts once, not twice; a
+    /// grapheme cluster built from several code points (a ZWJ emoji sequence) counts as its code points.
+    /// <b>The agreement with the column is a two-engine guarantee, not a universal one</b> — SQLite bounds
+    /// nothing and PostgreSQL bounds code points, but T-SQL's <c>nvarchar(n)</c> bounds UTF-16 units, so a
+    /// SQL Server dialect owes its own answer (#175) before it can honour this.
+    /// </remarks>
     public int? MaxLength { get; init; }
 
     /// <summary>Total digits; required for and applies to <see cref="FieldType.Decimal"/> only.</summary>

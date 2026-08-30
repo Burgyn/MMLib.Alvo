@@ -64,7 +64,7 @@ internal static class OutboxTable
 {
     /// <summary>The framework's outbox table for a prefix, e.g. <c>alvo_outbox</c>.</summary>
     /// <param name="schemaPrefix">The validated <see cref="AlvoOptions.SchemaPrefix"/>.</param>
-    internal static string NameFor(string schemaPrefix) => $"{schemaPrefix}_outbox";
+    internal static string NameFor(string schemaPrefix) => schemaPrefix + AlvoFrameworkTables.OutboxSuffix;
 
     /// <summary>
     /// The <c>CREATE TABLE IF NOT EXISTS</c> for <paramref name="tableName"/>, safe to run repeatedly.

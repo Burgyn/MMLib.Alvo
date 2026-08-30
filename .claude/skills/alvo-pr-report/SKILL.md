@@ -16,23 +16,45 @@ Run it **after `alvo-plan-guard`** (its verdict is an input) and **before
 
 ## Pipeline
 
-1. **Pick the output path** — `<scratchpad>/pr-report-<number-or-branch>.html`.
+1. **Read the language off the arguments.** A **language token is exactly two
+   lowercase ASCII letters** (`^[a-z]{2}$`) — ISO 639-1, and the grammar is what
+   keeps `174`, `f4/pr-a-apply-guards` and `feature/foo` from ever being mistaken
+   for one. Then, in order:
+   - not a language token → it is the PR number or branch;
+   - `en`, or a token with a `references/labels.<token>.md` → that language;
+   - a token with no labels file → **stop and say the language is not available**,
+     listing the ones that are. Do not fall back and do not treat it as a branch:
+     a two-letter branch name is vanishingly rare, while a typo'd `sl` for `sk` is
+     not, and silently writing English would hide the typo.
+
+   **`en` is the default** when no token is given, so `/pr-report 174 sk`,
+   `/pr-report sk` and `/pr-report 174` are all unambiguous, and a new language
+   becomes selectable by its labels file landing — no parser to update. See
+   *Language* below for what a non-English report does and does not translate.
+2. **Pick the output path** — `<scratchpad>/pr-report-<number-or-branch>.html`.
    Same path on every regeneration of the same PR: the Artifact then redeploys
-   to the same URL instead of claiming a new one.
-2. **Dispatch `alvo-pr-reporter`** (Agent tool) with: the output path, the PR
-   number or branch, the plan-guard verdict, and any review output from this
-   session. It re-derives everything else from the repo. Dispatching it as a
+   to the same URL instead of claiming a new one. **The language is not part of
+   the path** — a report regenerated in another language replaces the page rather
+   than forking it, because two half-maintained translations of one PR is the
+   outcome nobody wants.
+3. **Dispatch `alvo-pr-reporter`** (Agent tool) with: the output path, the PR
+   number or branch, **the language code**, the plan-guard verdict, and any
+   review output from this session. It re-derives everything else from the repo. Dispatching it as a
    subagent is the point — it starts with no memory of writing the code, so it
    has nothing to defend, and its input-gathering never enters your context.
-3. **Read the returned file** before publishing it. You are publishing content;
+4. **Read the returned file** before publishing it. You are publishing content;
    you check it first. Verify the self-check list actually holds — 8 sections,
-   no `{{` slots, section 7 non-empty, gates not optimistically green.
-4. **Publish** with the Artifact tool: the returned `TITLE`, a one-sentence
-   `description`, favicon `📐` on first publish (omit it on every redeploy).
-   Load the `artifact-design` skill first, as its own rules require.
-5. **Write the PR body** — the reporter's `PR-BODY` block, English, with the
-   artifact URL on a `Full report:` line. Five to eight lines. The page carries
-   the detail; the body is a pointer, not a second copy of it.
+   no `{{` slots, section 7 non-empty, gates not optimistically green. On a
+   non-English report also check that no identifier, violation code or gate name
+   was translated.
+5. **Publish** with the Artifact tool: the returned `TITLE` and `DESCRIPTION`
+   (both already in the page's language — the reporter returns the description so
+   the gallery card is not written twice, differently), favicon `📐` on first
+   publish (omit it on every redeploy). Load the `artifact-design` skill first, as
+   its own rules require.
+6. **Write the PR body** — the reporter's `PR-BODY` block, **always English**,
+   with the artifact URL on a `Full report:` line. Five to eight lines. The page
+   carries the detail; the body is a pointer, not a second copy of it.
 
 ## The contract that makes it useful
 
@@ -57,6 +79,27 @@ Three rules carry most of the quality:
   source is admissible, and no baseline diff means nothing public moved.
 - **Section 7 is adversarial and never empty.** If nothing is risky, it names the
   assumption whose failure would cost most.
+
+## Language
+
+The report page is written for **one reader**, so it is written in his language
+when he asks for it. The PR body is not: it sits on GitHub beside English
+commits, English docs and CodeRabbit's own review, and a contributor or a bot
+reading the PR is not the maintainer. **So the page and its artifact title follow
+the requested language; the PR body, the commit messages and the issue text stay
+English.**
+
+`references/labels.sk.md` holds the Slovak chrome strings as a **fixed** table.
+Translating them per report would undo the thing the fixed template buys — the
+maintainer never re-orienting — so the glossary is the authority and a new
+report does not get to improve on it. Adding a language means adding a
+`references/labels.<code>.md` beside it, not loosening this rule.
+
+What a translated report must **not** touch is the same list every time, and it
+is in that file: identifiers, the literals the product emits (violation codes,
+problem-type slugs, config and descriptor keys), section 2's code blocks, gate
+names and their output, and the titles of specs, plans and issues. A page that
+translates `read-only-required-field` is not a Slovak report, it is a wrong one.
 
 ## When it is not worth it
 

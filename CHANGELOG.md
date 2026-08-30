@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (breaking)
 
+- **A dev API key's `Secret` must now be at least 32 characters** (#125). `AlvoAuthOptionsValidator`
+  required only that it be non-empty, so `Secret = "password"` was accepted — and `ApiKeyHash` is a
+  single unsalted SHA-256 pass, which is only as strong as the assumption that the secret is random.
+  A host configured with a short dev secret now fails at startup, naming the key and both lengths,
+  rather than starting silently weak. Generate the secret rather than choosing it —
+  `openssl rand -hex 16`, the recipe this repository already publishes in `scripts/test-e2e`,
+  `playground/run` and the examples' READMEs, is 128 bits written as exactly 32 characters, which
+  is why the floor is set *at* that length rather than above it. Length is a proxy for entropy and
+  not a measure of it — which is why this remains a **dev** mechanism, and why the real issuance
+  path (#36) must not inherit this hash.
+
+- **An entity may no longer be named after one of Alvo's own tables** (#156). `alvo_descriptor_versions`,
+  `alvo_idempotency` and `alvo_outbox` — or the same three under a non-default `AlvoOptions.SchemaPrefix`
+  — were excluded from introspection but not *reserved*, so a descriptor could declare an entity that
+  mapped straight onto one and the framework and the entity would share a table. Such a descriptor is
+  now refused at apply, with the entity's JSON pointer and a fix. The names come from one internal
+  authority both the provider and the core read; no public surface changed.
+
+- **A field declared both `required` and unconditionally `readOnly` is now refused at apply** (#124).
+  The combination made every create of its entity unsatisfiable — supplying the field was refused as
+  read-only, omitting it as missing — while the published OpenAPI document described a create the API
+  would not accept. An expression-valued `readOnly` is unaffected: it is legal for one role and
+  impossible for another, and the request-time half below answers that caller.
+
 - **Alvo applies the descriptor on boot by default, and the host no longer applies anything itself.**
   The boot sequence runs as part of the host lifecycle, before the server binds: it loads and
   validates the descriptor, brings the schema up as far as the startup mode allows, primes the policy
@@ -130,6 +154,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the warning is dropped silently — a startup crash traded for a silent drop.
 
 ### Changed
+
+- **A create whose caller cannot satisfy it now answers `read-only-required-field`, not `required`**
+  (#124). When a field is `required` and this caller's own expression-valued `readOnly` mask froze it,
+  telling them to supply it sends them to fix something no value of theirs can be stored in. The new
+  violation says the create is impossible for these roles and names the two ways out. A caller who
+  *writes* the frozen field still gets `read-only-field` — the new code narrows the missing-value case
+  only.
+
+- **`maxLength` is counted in Unicode code points, not UTF-16 code units** (#123). Ten astral-plane
+  characters are twenty UTF-16 units, so a value well inside a `varchar(10)` was refused with a 422
+  telling the caller to shorten something already short enough. Code points is the unit PostgreSQL's
+  `varchar(n)` and JSON Schema's own `maxLength` keyword both use, so the validator, the column and the
+  published document now bound the same thing on both shipped drivers. Grapheme clusters were rejected
+  as the unit: they count *fewer* than the column does, which would have admitted values the engine
+  refuses. The agreement is a two-engine guarantee and is recorded as one — T-SQL's `nvarchar(n)`
+  bounds UTF-16 units, so a SQL Server dialect owes its own answer before it can honour this (#175).
 
 - **A format check that times out is now its own violation code, `format-not-evaluated`, and no
   longer reported as `format`.** A client branching on the `format` code will no longer see the

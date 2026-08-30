@@ -11,6 +11,15 @@ namespace MMLib.Alvo.Tests.Auth;
 
 public class ApiKeyContextResolverTests
 {
+    /// <summary>
+    /// A secret clearing <see cref="Auth.Internal.AlvoAuthOptionsValidator.MinimumSecretLength"/>, so a
+    /// fact about resolution or storage is not refused at options validation first (#125).
+    /// </summary>
+    private const string LongEnoughSecret = "s3cret-value-long-enough-for-the-floor";
+
+    /// <summary>The credential as a caller presents it: <c>&lt;keyId&gt;.&lt;secret&gt;</c>.</summary>
+    private const string PresentedKey = "dev." + LongEnoughSecret;
+
     private static readonly Guid _user = Guid.Parse("22222222-2222-2222-2222-222222222222");
     private static readonly Guid _tenant = Guid.Parse("33333333-3333-3333-3333-333333333333");
 
@@ -20,7 +29,7 @@ public class ApiKeyContextResolverTests
         options.DevKeys.Add(new AlvoDevApiKey
         {
             KeyId = "dev",
-            Secret = "s3cret",
+            Secret = LongEnoughSecret,
             User = _user,
             Roles = { "authenticated", "editor" },
             Tenant = _tenant,
@@ -39,7 +48,7 @@ public class ApiKeyContextResolverTests
     [Fact]
     public async Task A_valid_key_resolves_to_its_identity_roles_tenant_and_scopes()
     {
-        var principal = await Resolver().ResolveAsync("dev.s3cret", requestedTenant: null, TestContext.Current.CancellationToken);
+        var principal = await Resolver().ResolveAsync(PresentedKey, requestedTenant: null, TestContext.Current.CancellationToken);
 
         principal.ShouldNotBeNull();
         principal.Context.User.ShouldBe(new UserId(_user));
@@ -54,7 +63,7 @@ public class ApiKeyContextResolverTests
     [InlineData("dev")]
     [InlineData("dev.wrong")]
     [InlineData("unknown.s3cret")]
-    [InlineData("dev.s3cret.extra")]
+    [InlineData(PresentedKey + ".extra")]
     public async Task Every_bad_credential_denies_rather_than_degrading(string? presented)
     {
         var principal = await Resolver().ResolveAsync(presented, requestedTenant: null, TestContext.Current.CancellationToken);
@@ -67,7 +76,7 @@ public class ApiKeyContextResolverTests
     {
         var resolver = Resolver(options => options.DevKeys[0].ExpiresAt = DateTimeOffset.UnixEpoch);
 
-        var principal = await resolver.ResolveAsync("dev.s3cret", requestedTenant: null, TestContext.Current.CancellationToken);
+        var principal = await resolver.ResolveAsync(PresentedKey, requestedTenant: null, TestContext.Current.CancellationToken);
 
         principal.ShouldBeNull();
     }
@@ -79,7 +88,7 @@ public class ApiKeyContextResolverTests
         options.DevKeys.Add(new AlvoDevApiKey
         {
             KeyId = "dev",
-            Secret = "s3cret",
+            Secret = LongEnoughSecret,
             User = _user,
             Roles = { "edtior" },
             Scopes = { "orders:read" },
@@ -91,7 +100,7 @@ public class ApiKeyContextResolverTests
             new TenantResolver(),
             new PolicyCatalogProvider());
 
-        var principal = await resolver.ResolveAsync("dev.s3cret", requestedTenant: null, TestContext.Current.CancellationToken);
+        var principal = await resolver.ResolveAsync(PresentedKey, requestedTenant: null, TestContext.Current.CancellationToken);
 
         principal.ShouldBeNull();
     }
@@ -100,7 +109,7 @@ public class ApiKeyContextResolverTests
     public async Task Requesting_another_tenant_than_the_key_owns_denies()
     {
         var principal = await Resolver().ResolveAsync(
-            "dev.s3cret", requestedTenant: Guid.NewGuid().ToString(), TestContext.Current.CancellationToken);
+            PresentedKey, requestedTenant: Guid.NewGuid().ToString(), TestContext.Current.CancellationToken);
 
         principal.ShouldBeNull();
     }
@@ -110,7 +119,7 @@ public class ApiKeyContextResolverTests
     {
         var resolver = Resolver(options => options.DevKeys[0].Scopes.Clear());
 
-        var principal = await resolver.ResolveAsync("dev.s3cret", requestedTenant: null, TestContext.Current.CancellationToken);
+        var principal = await resolver.ResolveAsync(PresentedKey, requestedTenant: null, TestContext.Current.CancellationToken);
 
         principal.ShouldNotBeNull();
         new ScopeGate().Allows(principal, "orders", MMLib.Alvo.Rules.DataOperation.List).ShouldBeFalse();
@@ -129,12 +138,12 @@ public class ApiKeyContextResolverTests
         using var host = HostGranting("editor");
         var resolver = host.GetRequiredService<IAlvoContextResolver>();
 
-        var beforeApply = await resolver.ResolveAsync("dev.s3cret", requestedTenant: null, TestContext.Current.CancellationToken);
+        var beforeApply = await resolver.ResolveAsync(PresentedKey, requestedTenant: null, TestContext.Current.CancellationToken);
 
         beforeApply.ShouldBeNull();
 
         Apply(host, DescriptorDeclaringRoles("editor"));
-        var afterApply = await resolver.ResolveAsync("dev.s3cret", requestedTenant: null, TestContext.Current.CancellationToken);
+        var afterApply = await resolver.ResolveAsync(PresentedKey, requestedTenant: null, TestContext.Current.CancellationToken);
 
         afterApply.ShouldNotBeNull();
         afterApply.Context.Roles.Select(role => role.Name).ShouldContain("editor");
@@ -189,7 +198,7 @@ public class ApiKeyContextResolverTests
 
     private static async Task<AlvoPrincipal?> ResolveDevKeyAsync(ServiceProvider host) =>
         await host.GetRequiredService<IAlvoContextResolver>()
-            .ResolveAsync("dev.s3cret", requestedTenant: null, TestContext.Current.CancellationToken);
+            .ResolveAsync(PresentedKey, requestedTenant: null, TestContext.Current.CancellationToken);
 
     private static ServiceProvider HostGranting(string roleName)
     {
@@ -202,7 +211,7 @@ public class ApiKeyContextResolverTests
     private static AlvoDevApiKey DevKeyGranting(string roleName) => new()
     {
         KeyId = "dev",
-        Secret = "s3cret",
+        Secret = LongEnoughSecret,
         User = _user,
         Roles = { roleName },
         Scopes = { "orders:read" },

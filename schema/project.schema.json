@@ -625,7 +625,7 @@
         "maxLength": {
           "type": "integer",
           "minimum": 1,
-          "description": "type=string only."
+          "description": "type=string only. Counted in Unicode code points — the unit JSON Schema's own maxLength keyword and PostgreSQL's varchar(n) both use — not UTF-16 code units, so a character outside the Basic Multilingual Plane counts once. Both shipped drivers honour that bound; a dialect whose column counts UTF-16 units owes its own answer."
         },
         "precision": {
           "type": "integer",

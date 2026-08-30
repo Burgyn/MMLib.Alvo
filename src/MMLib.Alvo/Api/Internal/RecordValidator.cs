@@ -1,6 +1,7 @@
 ﻿using MMLib.Alvo.Data;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
+using System.Text;
 
 namespace MMLib.Alvo.Api.Internal;
 
@@ -92,7 +93,9 @@ internal static class RecordValidator
 
         if (IsMissingRequiredValue(field, request, supplied, value))
         {
-            violations.Add(PayloadViolations.Required(field));
+            violations.Add(IsUnsatisfiableForThisCaller(field, request, supplied)
+                ? PayloadViolations.ReadOnlyRequired(field)
+                : PayloadViolations.Required(field));
             return;
         }
 
@@ -117,7 +120,55 @@ internal static class RecordValidator
     /// </remarks>
     private static bool IsMissingRequiredValue(
         FieldSchema field, RecordValidationRequest request, bool supplied, object? value) =>
-        field.Required && (supplied ? value is null : request.IsCreate);
+        field.Required
+        && (supplied ? value is null : request.IsCreate && !IsFilledInByTheStore(field));
+
+    /// <summary>
+    /// Whether the framework, not the caller, is the source of this field's value — a <c>computed</c>
+    /// expression (a stored generated column) or a <c>rollup</c> the write path maintains.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A create that omits one of these is not missing a value; it is behaving correctly.</b> The database
+    /// fills the column in on the INSERT itself, so <c>NOT NULL</c> is satisfied without the caller writing
+    /// anything — which is the same reason <c>DescriptorValidator</c> deliberately does <em>not</em> refuse
+    /// <c>required</c> + <c>computed</c> at apply. Demanding the field would refuse a create that works.
+    /// </para>
+    /// <para>
+    /// <b>The create branch only.</b> An explicit <see langword="null"/> is a write to a framework-maintained
+    /// field, which is a different request from omitting it, and refusing it stays correct.
+    /// </para>
+    /// <para>
+    /// <b>It also keeps <c>read-only-required-field</c> honest.</b> That violation is only reachable through
+    /// this predicate, and it asserts an <em>impossibility</em> — so a field declaring <c>required</c>,
+    /// <c>computed</c> and an expression-valued <c>readOnly</c> together would otherwise be refused with a
+    /// confidently wrong message for a create that would have succeeded.
+    /// </para>
+    /// </remarks>
+    /// <param name="field">The declared field.</param>
+    private static bool IsFilledInByTheStore(FieldSchema field) =>
+        field.ComputedExpression is not null || field.Rollup is not null;
+
+    /// <summary>
+    /// Whether the missing required value is one this caller could not have supplied — a create of a
+    /// required field their own <c>readOnly</c> mask froze.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// It narrows an already-reported violation rather than adding a check, so it runs only on the path
+    /// that was going to refuse anyway. The three conditions are exactly what makes the request
+    /// unsatisfiable: a create (a partial update may leave the field alone), a value the caller did
+    /// <em>not</em> send (one they did send is the ordinary <c>read-only-field</c> refusal above), and a
+    /// mask that freezes it.
+    /// </para>
+    /// <para>
+    /// A caller who sent an explicit <see langword="null"/> is deliberately not here: that is a write to a
+    /// frozen field, already refused by <see cref="PayloadViolations.ReadOnly"/> before this runs.
+    /// </para>
+    /// </remarks>
+    private static bool IsUnsatisfiableForThisCaller(
+        FieldSchema field, RecordValidationRequest request, bool supplied) =>
+        request.IsCreate && !supplied && request.ReadOnlyFields.Contains(field.Name);
 
     /// <summary>Runs the value-shaped checks, at most one of which can report.</summary>
     /// <remarks>
@@ -149,10 +200,72 @@ internal static class RecordValidator
         }
     }
 
+    /// <summary>
+    /// Whether the value overruns the field's declared <c>maxLength</c>, measured in <b>Unicode code
+    /// points</b>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Code points, because that is the unit the column itself bounds.</b> PostgreSQL's
+    /// <c>varchar(n)</c> — and SQL's <c>character_length</c> generally — counts characters in the SQL
+    /// sense, which is code points. <see cref="string.Length"/> counts UTF-16 code units, so six
+    /// astral-plane characters are twelve of those and a value well inside a <c>varchar(10)</c> was
+    /// refused with a 422 telling the caller to shorten something already short enough.
+    /// </para>
+    /// <para>
+    /// <b>Not grapheme clusters (<c>StringInfo</c>), and the difference is not cosmetic.</b> A family
+    /// emoji is one grapheme cluster and seven code points, so counting clusters would admit a value
+    /// seven times over its column's bound — an INSERT the engine refuses, which is the one direction the
+    /// UTF-16 bug did <em>not</em> fail in. SQLite enforces no length at all and so cannot break the tie;
+    /// it is broken by the engine that does enforce, because the bound has to be the tightest any
+    /// registered driver applies.
+    /// </para>
+    /// <para>
+    /// <b>The tie-break is "the tightest bound any registered driver applies", and that answer is
+    /// engine-dependent — an obligation the third engine inherits.</b> Both drivers this build ships agree
+    /// with code points: PostgreSQL's <c>varchar(n)</c> counts characters, and SQLite enforces no length at
+    /// all. <b>T-SQL does not.</b> <c>nvarchar(n)</c> bounds UTF-16 units, so on Azure SQL — which §0
+    /// principle 3 names as a production engine — ten astral characters would pass this check and fail the
+    /// INSERT. The answer is the <b>dialect widening the column</b> so the store holds what the descriptor
+    /// promises, never a per-dialect unit read here: <c>IAlvoSqlDialect</c> lives in the Entity Framework Core
+    /// adapter, which the core must not reference, and a per-engine unit would make one descriptor mean
+    /// different things per engine. It is not an <c>if</c> in this method either way. Tracked as <b>#175</b>,
+    /// which is provable before a real driver exists — <c>TSqlSqlDialect</c> ships for exactly that, and
+    /// <c>RowLockClause</c> is the precedent where the same exercise caught a silent defect.
+    /// </para>
+    /// <para>
+    /// <b>The UTF-16 length is checked first, and that is a short circuit rather than a second rule.</b>
+    /// A string never has more code points than code units, so one that already fits in code units
+    /// cannot overrun in code points — the ordinary value keeps its O(1) answer and only a string that
+    /// was going to be refused pays the walk.
+    /// </para>
+    /// </remarks>
     private static AlvoViolation? TooLong(FieldSchema field, object value) =>
-        field.MaxLength is { } maxLength && value is string text && text.Length > maxLength
+        field.MaxLength is { } maxLength
+        && value is string text
+        && text.Length > maxLength
+        && CodePointsIn(text) > maxLength
             ? PayloadViolations.MaxLength(field)
             : null;
+
+    /// <summary>
+    /// Counts <paramref name="text"/>'s Unicode code points.
+    /// </summary>
+    /// <remarks>
+    /// An unpaired surrogate — which a JSON string may legally carry — enumerates as
+    /// <see cref="Rune.ReplacementChar"/> and therefore counts as one code point, the same as the
+    /// replacement character the engine would store for it.
+    /// </remarks>
+    private static int CodePointsIn(string text)
+    {
+        var count = 0;
+        foreach (var _ in text.EnumerateRunes())
+        {
+            count++;
+        }
+
+        return count;
+    }
 
     /// <summary>
     /// The two bounds a <c>decimal</c> field declares: how many fractional digits it keeps, and how many
@@ -179,10 +292,22 @@ internal static class RecordValidator
     /// Whether <paramref name="number"/> needs more fractional digits than the field keeps.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Measured by rounding rather than by counting the digits of the literal, because
     /// <see cref="decimal"/> preserves trailing zeros: <c>1.230</c> has a scale of three and a value
     /// perfectly representable at a scale of two. Counting digits would refuse it, which is a refusal the
     /// caller cannot act on — their number <em>is</em> within the bound.
+    /// </para>
+    /// <para>
+    /// <b>The <c>&lt;= 28</c> bound is a decision, not a typo</b> — stated because the sibling
+    /// <see cref="ExceedsPrecision"/> carries the same clause with its reasoning and this one did not, so
+    /// it read as one and the next reader would either "fix" it or copy it (#123). A
+    /// <see cref="decimal"/> holds at most 28 fractional digits, so a value that bound at all cannot
+    /// exceed a declared scale <em>above</em> 28: the comparison's answer is already known, and skipping
+    /// it is what keeps <see cref="decimal.Round(decimal, int)"/> from throwing for a scale it cannot
+    /// express. A declared <c>scale</c> over 28 is therefore <b>not</b> refused at apply — it is a legal
+    /// <c>NUMERIC(38,30)</c> column, and every value this build can bind is checked against it correctly.
+    /// </para>
     /// </remarks>
     private static bool ExceedsScale(FieldSchema field, decimal number) =>
         field.Scale is { } scale and >= 0 and <= 28 && number != decimal.Round(number, scale);
