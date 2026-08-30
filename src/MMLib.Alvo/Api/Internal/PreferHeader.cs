@@ -63,10 +63,12 @@ internal static class PreferHeader
     /// <c>count</c> preference this server recognises.
     /// </summary>
     /// <remarks>
-    /// The <b>first</b> recognised <c>count</c> wins when the header repeats it. A repeat is a malformed
-    /// request rather than a choice, and RFC 7240 §2 says the first occurrence of a repeated preference is
-    /// the one that applies — answering with the last would let a value appended by an intermediary override
-    /// the client's own.
+    /// <b>The <em>first</em> <c>count</c> decides, whether or not its value is one this server knows.</b>
+    /// RFC 7240 §2 says a preference should not be repeated and that where one is, the first occurrence
+    /// applies — so scanning past an unrecognised <c>count=exakt</c> to honour a later <c>count=exact</c>
+    /// would let a value appended by an intermediary override the client's own. A repeat whose first
+    /// occurrence is unrecognised therefore applies nothing, which is also what a lone <c>count=exakt</c>
+    /// does.
     /// </remarks>
     /// <param name="header">Every value of the request's <c>Prefer</c> header, in arrival order.</param>
     internal static CountPreference? Count(StringValues header)
@@ -75,9 +77,9 @@ internal static class PreferHeader
         {
             foreach (var preference in Preferences(value))
             {
-                if (Recognised(preference) is { } count)
+                if (NamesCount(preference))
                 {
-                    return count;
+                    return Recognised(preference);
                 }
             }
         }
@@ -86,18 +88,26 @@ internal static class PreferHeader
     }
 
     /// <summary>
-    /// The <c>count</c> preference one <c>token[=word]</c> names, or <see langword="null"/> for anything
-    /// else — another preference entirely, or a <c>count</c> whose value is not one of the three spellings.
+    /// Whether one <c>token[=word]</c> is the <c>count</c> preference at all — read from the token alone, so
+    /// that a <c>count</c> carrying a word this server does not know is still <em>the</em> count preference
+    /// and still the one the first-occurrence rule applies to.
+    /// </summary>
+    private static bool NamesCount(ReadOnlySpan<char> preference)
+    {
+        var separator = preference.IndexOf('=');
+        var token = separator < 0 ? preference : preference[..separator];
+
+        return token.Trim().Equals(CountToken, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// What one <c>count</c> preference asks for, or <see langword="null"/> when its word is not one of the
+    /// three spellings — a bare <c>count</c> with no word included.
     /// </summary>
     private static CountPreference? Recognised(ReadOnlySpan<char> preference)
     {
         var separator = preference.IndexOf('=');
         if (separator < 0)
-        {
-            return null;
-        }
-
-        if (!preference[..separator].Trim().Equals(CountToken, StringComparison.OrdinalIgnoreCase))
         {
             return null;
         }
@@ -116,10 +126,25 @@ internal static class PreferHeader
         word.Length >= 2 && word[0] == '"' && word[^1] == '"' ? word[1..^1] : word;
 
     /// <summary>
-    /// Splits one header value into its preferences: on top-level commas, with anything inside a
-    /// quoted-string kept whole, and each preference's <c>;</c>-delimited parameters dropped — they qualify
-    /// a preference rather than name one.
+    /// Splits one header value into its preferences — on top-level commas, with each preference truncated at
+    /// its first top-level <c>;</c>, since what follows qualifies a preference rather than names one.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>One scan, and both delimiters are found by it.</b> An earlier revision split the commas with this
+    /// quote-tracking loop and then cut the parameters with a plain <c>IndexOf(';')</c>, which is a different
+    /// grammar for the same string: <c>count="a;b", count=exact</c> truncated inside the quoted word, left an
+    /// unterminated quote, and dropped a <c>count</c> the header really carried. A separator is either
+    /// structural or literal, and only one pass can know which.
+    /// </para>
+    /// <para>
+    /// RFC 7230's <c>quoted-pair</c> is honoured as an <em>escape</em> — a backslash inside a quoted string
+    /// makes the next character literal, so <c>\"</c> does not end the string. The escaped character is
+    /// deliberately <b>not</b> unescaped in <see cref="Unquote"/>: none of the three words this reads
+    /// contains a character that would ever need escaping, so a value carrying one is not one of them
+    /// whichever way it is read, and an unescaper here would be code no input can distinguish.
+    /// </para>
+    /// </remarks>
     private static IEnumerable<string> Preferences(string? value)
     {
         if (string.IsNullOrEmpty(value))
@@ -128,26 +153,39 @@ internal static class PreferHeader
         }
 
         var quoted = false;
+        var escaped = false;
         var start = 0;
+        var parameters = -1;
         for (var index = 0; index < value.Length; index++)
         {
-            if (value[index] == '"')
+            var character = value[index];
+            if (escaped)
+            {
+                escaped = false;
+            }
+            else if (quoted && character == '\\')
+            {
+                escaped = true;
+            }
+            else if (character == '"')
             {
                 quoted = !quoted;
             }
-            else if (value[index] == ',' && !quoted)
+            else if (quoted)
             {
-                yield return WithoutParameters(value[start..index]);
-                start = index + 1;
+                continue;
+            }
+            else if (character == ';' && parameters < 0)
+            {
+                parameters = index;
+            }
+            else if (character == ',')
+            {
+                yield return value[start..(parameters < 0 ? index : parameters)];
+                (start, parameters) = (index + 1, -1);
             }
         }
 
-        yield return WithoutParameters(value[start..]);
-    }
-
-    private static string WithoutParameters(string preference)
-    {
-        var parameters = preference.IndexOf(';', StringComparison.Ordinal);
-        return parameters < 0 ? preference : preference[..parameters];
+        yield return value[start..(parameters < 0 ? value.Length : parameters)];
     }
 }

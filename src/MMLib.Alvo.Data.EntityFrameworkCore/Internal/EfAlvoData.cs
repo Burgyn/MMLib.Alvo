@@ -117,8 +117,9 @@ internal sealed class EfAlvoData : IAlvoData
         var entity = Entity(db, query.Entity);
         QueryFieldGuard.EnsureAvailable(QueryFields(query), entity, decision.HiddenFields);
 
-        var total = await TotalCountAsync(db, entity, decision, context, query, cancellationToken);
         var anchor = await AnchorAsync(db, entity, decision, context, query, cancellationToken);
+        var options = ReadOptions(query, anchor);
+        var total = await TotalCountAsync(db, entity, decision, context, query, options, cancellationToken);
 
         // A cursor this provider never issued — stale, forged, or from another tenant — finds no anchor and
         // is answered with an empty page rather than the first one. The count still comes back, because it is
@@ -129,7 +130,7 @@ internal sealed class EfAlvoData : IAlvoData
             return AlvoPage.Empty with { TotalCount = total };
         }
 
-        var fetched = await PageAsync(db, entity, decision, context, query, anchor, cancellationToken);
+        var fetched = await PageAsync(db, entity, decision, context, options, cancellationToken);
         var (kept, nextCursor) = Paginated(fetched, query.Limit);
         return new AlvoPage
         {
@@ -162,7 +163,7 @@ internal sealed class EfAlvoData : IAlvoData
     /// </remarks>
     private async Task<long?> TotalCountAsync(
         AlvoDataContext db, EntitySchema? entity, PolicyDecision decision, AlvoContext context,
-        AlvoQuery query, CancellationToken cancellationToken)
+        AlvoQuery query, ReadStatementComposer.ReadStatementOptions options, CancellationToken cancellationToken)
     {
         if (!query.IncludeTotalCount)
         {
@@ -170,8 +171,7 @@ internal sealed class EfAlvoData : IAlvoData
         }
 
         var schema = entity ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
-        var statement = _statements.ComposeCount(
-            schema, decision, context, new ReadStatementComposer.ReadStatementOptions { Filter = query.Filter });
+        var statement = _statements.ComposeCount(schema, decision, context, options);
         var parameters = new PredicateParameterBinder(db).Bind(
             db.Rows(schema.Name).EntityType, statement.Parameters);
 
@@ -1230,25 +1230,44 @@ internal sealed class EfAlvoData : IAlvoData
     /// </remarks>
     private async Task<List<Dictionary<string, object>>> PageAsync(
         AlvoDataContext db, EntitySchema? entity, PolicyDecision decision, AlvoContext context,
-        AlvoQuery query, KeysetAnchor? anchor, CancellationToken cancellationToken)
+        ReadStatementComposer.ReadStatementOptions options, CancellationToken cancellationToken)
     {
         var schema = entity ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
         var statement = _statements.Compose(
-            schema,
-            decision,
-            context,
-            new ReadStatementComposer.ReadStatementOptions
-            {
-                Filter = query.Filter,
-                Anchor = anchor,
-                Sort = query.Sort,
-                Limit = OverFetched(query.Limit),
-                Offset = query.Offset,
-            },
-            db.Rows(schema.Name).EntityType);
+            schema, decision, context, options, db.Rows(schema.Name).EntityType);
 
         return await Materialize(db, schema, statement).ToListAsync(cancellationToken);
     }
+
+    /// <summary>
+    /// The <b>one</b> options record a list read composes from, built once and handed to both the page and
+    /// its count.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Two literals here would defeat the property <c>ComposeCount</c> is written around.</b> That method
+    /// takes the whole record and strips the cursor anchor itself, precisely so a term added to the read
+    /// cannot be silently missed by the count — and a second, independently maintained options literal for
+    /// the count would reintroduce exactly the drift it prevents. Today the two would agree (a list sets no
+    /// <c>RowId</c>, no <c>LockFor</c>, no <c>Unmasked</c>); the next term added to a read's <c>WHERE</c> —
+    /// a soft-delete predicate, an archive scope, F7's dynamic-entity discriminator — is where they would
+    /// stop agreeing, and the count would silently describe a wider set than the page.
+    /// </para>
+    /// <para>
+    /// <c>ReadStatementOptions.Limit</c> carries the over-fetch, not the caller's own limit, so the
+    /// page can tell "more rows exist" from "the set ended here". The count ignores it, as it ignores the
+    /// ordering and the anchor.
+    /// </para>
+    /// </remarks>
+    private static ReadStatementComposer.ReadStatementOptions ReadOptions(AlvoQuery query, KeysetAnchor? anchor) =>
+        new()
+        {
+            Filter = query.Filter,
+            Anchor = anchor,
+            Sort = query.Sort,
+            Limit = OverFetched(query.Limit),
+            Offset = query.Offset,
+        };
 
     /// <summary>
     /// One past <paramref name="limit"/>, so <see cref="Paginated"/> can tell a page that ends exactly at the

@@ -153,7 +153,7 @@ things follow, and both are recorded rather than fixed here:
 - The real fix for the nullable case is a per-dialect native `NULLS FIRST`/`NULLS LAST` behind
   `IAlvoSqlDialect`, which both shipped engines support and which an index can serve. That is the
   same seam `docs/architecture/data-path.md` already names for this criterion (beside the
-  row-value-constructor question, **#100**). Filed as a follow-up; deliberately not in this PR,
+  row-value-constructor question, **#100**). Filed as **#178**; deliberately not in this PR,
   because it is a public port member with three implementations and a contract fact, and it would
   put an undesigned change through a review that is about something else.
 
@@ -291,8 +291,8 @@ for a caller who sends no `Prefer` header: no second statement is composed and n
 ## What this PR does not do
 
 - **No native `NULLS FIRST`/`NULLS LAST`** per dialect (the index-friendly fix for Part 1's cost) —
-  a public `IAlvoSqlDialect` member with three implementations and a contract fact; filed as a
-  follow-up.
+  a public `IAlvoSqlDialect` member with three implementations and a contract fact; filed as
+  **#178**, beside **#100**.
 - **No planner-estimate count** — `planned`/`estimated` degrade, and the port gains no mode for
   them until an engine can honour one.
 - **No `#175`** (T-SQL `nvarchar(n)` vs. `maxLength` in code points) — deliberately deferred, open

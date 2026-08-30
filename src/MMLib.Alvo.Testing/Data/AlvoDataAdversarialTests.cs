@@ -247,20 +247,37 @@ public abstract class AlvoDataAdversarialTests
     /// no second path into the query, so a filter naming a hidden field cannot become a counting oracle that
     /// answers where the page refuses.
     /// </summary>
+    /// <remarks>
+    /// <b>Over a genuinely <c>hidden</c> field, and over an undeclared one, because they are two branches of
+    /// one guard and only the first is about confidentiality.</b> An earlier revision of this fact asked only
+    /// the undeclared name, which pins the wrong branch: it would still have passed had the masked branch
+    /// been broken for a counted read. The counting oracle is the sharper of the two — a caller who cannot
+    /// read <c>secret</c> but can learn how many rows carry a given value of it has the field one comparison
+    /// at a time, without a single row ever appearing in a response. The admin arm is the control: the field
+    /// is refused because it is hidden <em>from this caller</em>, not because counting over it is banned.
+    /// </remarks>
     [Fact]
     public async Task A_count_over_a_hidden_field_filter_is_refused_like_the_read_itself()
     {
-        var fixture = await NotesFixtureAsync();
+        var fixture = await AccountsFixtureAsync();
+        var member = NewContext(tenant: null);
+        var admin = NewContext(tenant: null, Role.Admin);
+        var byNote = CountedQueryFilteredBy(new AlvoComparison("note", AlvoFilterOperator.Eq, "internal"));
 
         await Should.ThrowAsync<AlvoAuthorizationException>(() => fixture.Data.QueryAsync(
-            new AlvoQuery
-            {
-                Entity = "notes",
-                Filter = new AlvoComparison("nosuchfield", AlvoFilterOperator.Eq, "x"),
-                IncludeTotalCount = true,
-            },
-            fixture.Alice));
+            CountedQueryFilteredBy(new AlvoComparison("secret", AlvoFilterOperator.Eq, "shh")), member));
+        await Should.ThrowAsync<AlvoAuthorizationException>(() => fixture.Data.QueryAsync(byNote, member));
+        await Should.ThrowAsync<AlvoAuthorizationException>(() => fixture.Data.QueryAsync(
+            CountedQueryFilteredBy(new AlvoComparison("nosuchfield", AlvoFilterOperator.Eq, "x")), member));
+
+        // `note` is hidden by an expression that admits an admin, so the same counted query answers for one
+        // — the refusal above is per-caller masking, not a ban on counting over that field.
+        (await fixture.Data.QueryAsync(byNote, admin)).TotalCount.ShouldBe(1);
     }
+
+    /// <inheritdoc cref="QueryFilteredBy"/>
+    private static AlvoQuery CountedQueryFilteredBy(AlvoFilter filter) =>
+        QueryFilteredBy(filter) with { IncludeTotalCount = true };
 
     /// <summary>
     /// The §4 acceptance criterion, made into a real, independently failing assertion: a tenantless

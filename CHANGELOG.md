@@ -215,7 +215,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a null sorts is never left to the database, because SQLite and PostgreSQL disagree on it.
   **The cost is real and worth knowing:** the null placement is emitted as a `CASE` expression over
   the key, which an index on that key cannot serve, so page by a required column where latency
-  matters. Per-dialect native `NULLS FIRST`/`NULLS LAST` is the follow-up.
+  matters. Per-dialect native `NULLS FIRST`/`NULLS LAST` is the follow-up (#178).
 
 - **`Prefer: count=exact` fills the page envelope's `count`** (#110), with the number of rows the
   query matches in total — narrowed by your policy and your filter, and *not* by `limit`, `offset`

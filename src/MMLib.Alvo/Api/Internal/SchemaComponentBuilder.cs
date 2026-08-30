@@ -255,7 +255,9 @@ internal sealed class SchemaComponentBuilder(
                     + "unless the request sent `Prefer: count=exact`. It is narrowed by the caller's policy "
                     + "and by the filter, and not by `limit`, `offset` or `after`, so it does not shrink as "
                     + "you page. Opt-in because an exact count is a second scan of the matching set on every "
-                    + "request.",
+                    + "request. **Exact means \"not an estimate\", not \"consistent with `items`\"**: it is "
+                    + "taken in a second statement, so a write landing between the two can make it differ "
+                    + "from the rows by one.",
             },
         },
         Required = new HashSet<string>(StringComparer.Ordinal) { "items", "next", "count" },

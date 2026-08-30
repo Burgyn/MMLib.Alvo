@@ -311,7 +311,7 @@ is now load-bearing there, so a paged sort over a nullable column pays it. That 
 being answerable at all rather than refused; sorting by a **required** column emits no rank and is unchanged.
 The index-friendly fix is per-dialect native `NULLS FIRST`/`NULLS LAST` behind `IAlvoSqlDialect`, which both
 shipped engines support — the same seam this document already names for §2.1's *p95 < 50 ms* criterion, beside
-the row-value-constructor question (#100). Filed as a follow-up, deliberately not bundled here: a public port
+the row-value-constructor question (#100). Filed as **#178**, deliberately not bundled here: a public port
 member with three implementations and a contract fact is not something to slip into the change that made the
 read legal.
 

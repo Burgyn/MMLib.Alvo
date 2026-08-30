@@ -171,7 +171,7 @@ compare with the unpaged read — is what holds them together.
 **The cost is real and it is a reason to sort by a required column.** The `CASE` rank cannot be served by an
 index on the sort key, so a paged sort over a nullable field is slower than one over a required field, which
 emits no rank at all. The index-friendly fix is per-dialect native `NULLS FIRST`/`NULLS LAST` behind
-`IAlvoSqlDialect` — both shipped engines support it — and it is a follow-up, deliberately not bundled with
+`IAlvoSqlDialect` — both shipped engines support it — and it is **#178**, deliberately not bundled with
 the change that made the read legal.
 
 `select` is applied to the **response**, not to the `SELECT` list — the port has no projection member yet,
@@ -359,6 +359,15 @@ the detection the house rule protects is present, in the standard's place rather
 **No `Vary: Prefer`.** RFC 7240 suggests it where a response varies by the header, and this one does — but
 every generated response already carries `Cache-Control: no-store`, so no cache may store the representation
 and a `Vary` has no addressee.
+
+**A gap worth naming: the count is the client's opt-in, and the operator has no say (#179).** `MaxPageSize`
+is the operator's control over the sibling concern — "an unbounded `limit` is a denial of service one query
+long" — and it bounds the *rows* a request returns, not the work a `COUNT(*)` does. So any caller authorized
+to `list` can roughly double the cost of every list request, and keep doing it on every page of a deep walk.
+This is availability only: the count is composed over the caller's own policy-filtered set, so nothing
+crosses a boundary. It is stated rather than fixed because the answer is a host-facing option (refuse the
+preference, or degrade past a row threshold), and inventing one before an operator has asked for a shape
+would be guessing at the shape.
 
 ## Optimistic concurrency: a strong `ETag` over the row version
 
