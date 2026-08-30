@@ -228,7 +228,7 @@ internal sealed class SchemaComponentBuilder(
         Title = PageId(entity.Name),
         Description =
             "One page of rows, the cursor that reads the page after it, and — when the request opted in with "
-            + "`Prefer: count=exact` — how many rows the query matches in total.",
+            + "a `Prefer: count` preference — how many rows the query matches in total.",
         Properties = new Dictionary<string, IOpenApiSchema>(StringComparer.Ordinal)
         {
             ["items"] = new OpenApiSchema
@@ -252,7 +252,9 @@ internal sealed class SchemaComponentBuilder(
                 Minimum = "0",
                 Description =
                     "How many rows the query matches in total — **not** the size of this page — or null "
-                    + "unless the request sent `Prefer: count=exact`. It is narrowed by the caller's policy "
+                    + "unless the request sent a recognised `Prefer: count` preference — `exact`, or "
+                    + "`planned`/`estimated`, which degrade to an exact count. It is narrowed by the "
+                    + "caller's policy "
                     + "and by the filter, and not by `limit`, `offset` or `after`, so it does not shrink as "
                     + "you page. Opt-in because an exact count is a second scan of the matching set on every "
                     + "request. **Exact means \"not an estimate\", not \"consistent with `items`\"**: it is "

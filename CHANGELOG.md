@@ -17,7 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that used to earn it is now answered.
 
 - **The list response envelope gained a third member, `count`** (#110). It is always present and is
-  `null` unless the request sent `Prefer: count=exact`, exactly as `next` is always present and null
+  `null` unless the request sent a recognised `Prefer: count` preference, exactly as `next` is always
+  present and null
   on the last page — the envelope's members are a statement about the bytes. A client that rejects
   unknown members, or that pins the published schema's `required` list, sees the change.
 

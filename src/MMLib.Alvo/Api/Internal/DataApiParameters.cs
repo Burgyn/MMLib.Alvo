@@ -295,12 +295,14 @@ internal static class DataApiParameters
         Required = false,
         Description =
             "`count=exact` fills the page envelope's `count` with the number of rows the query matches in "
-            + "total. Opt-in, because it is a second scan of the matching set on every request. `planned` "
-            + "and `estimated` are accepted and **degrade to an exact count** — a planner estimate exists on "
-            + "one supported engine and not the other, and this API answers identically on both — and the "
-            + "response says so in `Preference-Applied`. Per RFC 7240 a preference this server does not "
-            + "recognise is ignored rather than refused, and its absence from `Preference-Applied` is how "
-            + "that is reported.",
+            + "total. Opt-in, because it is a second scan of the matching set on every request; a request "
+            + "sending no recognised `count` preference gets `null` there.\n\n"
+            + "`count=planned` and `count=estimated` are accepted and **degrade to an exact count**, so they "
+            + "fill `count` too — a planner estimate exists on one supported engine and not the other, and "
+            + "this API answers identically on both. The response says which was applied in "
+            + "`Preference-Applied`, and it is always `count=exact`. Per RFC 7240 a preference this server "
+            + "does not recognise is ignored rather than refused, and its absence from `Preference-Applied` "
+            + "is how that is reported.",
         Schema = new OpenApiSchema { Type = JsonSchemaType.String },
         Example = JsonValue.Create("count=exact"),
     };

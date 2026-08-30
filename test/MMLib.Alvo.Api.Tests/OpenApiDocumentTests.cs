@@ -810,11 +810,10 @@ public sealed class OpenApiDocumentTests
                 .Select(parameter => parameter!.AsObject())
                 .Where(parameter => parameter["$ref"] is null));
 
-    /// <summary>One list route's parameter names, with every <c>$ref</c> followed.</summary>
     /// <summary>
-    /// Every <b>query</b> parameter the list route documents. Scoped to the query string on purpose: a list
-    /// also carries a <c>Prefer</c> header parameter, and the fact this feeds is that the filter/sort/paging
-    /// grammar is published in full, not that a list takes no headers.
+    /// One list route's <b>query</b> parameter names, with every <c>$ref</c> followed. Scoped to the query
+    /// string on purpose: a list also carries a <c>Prefer</c> header parameter, and the fact this feeds is
+    /// that the filter/sort/paging grammar is published in full, not that a list takes no headers.
     /// </summary>
     private static IEnumerable<string> ListParameterNames(JsonObject document, string entity) =>
         ListParameters(document, entity)

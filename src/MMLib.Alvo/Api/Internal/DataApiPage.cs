@@ -36,8 +36,8 @@ internal sealed record DataApiPage
     public string? Next { get; init; }
 
     /// <summary>
-    /// How many rows the query matches in total, or <see langword="null"/> when the request did not send
-    /// <c>Prefer: count=exact</c>. Never the size of this page.
+    /// How many rows the query matches in total, or <see langword="null"/> when the request sent no
+    /// <c>count</c> preference this server recognises. Never the size of this page.
     /// </summary>
     /// <remarks>
     /// <b>Always present, and <see langword="null"/> when unasked</b> — the same rule <see cref="Next"/>
