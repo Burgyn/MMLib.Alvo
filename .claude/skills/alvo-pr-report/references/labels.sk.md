@@ -87,9 +87,12 @@ Translating any of these makes the report wrong, not merely foreign:
 - **Every literal the product emits** — violation codes (`read-only-required-field`),
   problem-type slugs, error messages quoted from the code, config keys
   (`Alvo__Auth__DevKeys__0__Secret`), descriptor keys (`maxLength`, `readOnly`).
-- **Section 2's code blocks entirely** — JSON, HTTP, SQL, C#. A caption above a
-  block is Slovak; the block itself is verbatim. A `//` comment *inside* a block
-  may be Slovak, and should be, since it is prose.
+- **Section 2's code blocks** — JSON, HTTP, SQL, C#. A caption above a block is
+  Slovak; the block itself is verbatim. **One narrow exception:** a `//` comment
+  *the report writes itself* to explain the demo is the report's own prose and is
+  Slovak. A comment copied out of the repo is not — it is part of what is being
+  shown. `alvo-pr-reporter.md` states the same exception in the same words; if
+  they ever disagree, the block is verbatim.
 - **Gate names and their output** — `ring0`, `dotnet format`, `CodeQL`,
   `CodeRabbit`, `E2E (compose + TeaPie)`, `needs-deep-review`, and any number or
   status they produced.

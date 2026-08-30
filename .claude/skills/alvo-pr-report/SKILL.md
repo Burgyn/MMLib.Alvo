@@ -16,12 +16,15 @@ Run it **after `alvo-plan-guard`** (its verdict is an input) and **before
 
 ## Pipeline
 
-1. **Read the language off the arguments** — a bare language code among them
-   (`sk`, `en`) selects the page's language; **`en` is the default** when none is
-   given. Everything else in the arguments is the PR number or branch, so
-   `/pr-report 174 sk`, `/pr-report sk` and `/pr-report 174` are all unambiguous.
-   See *Language* below for what a non-English report does and does not
-   translate.
+1. **Read the language off the arguments** — a bare argument is a language code
+   when it is `en`, or when `references/labels.<it>.md` exists. **`en` is the
+   default** when none is given, and anything that is neither is the PR number or
+   branch — so `/pr-report 174 sk`, `/pr-report sk` and `/pr-report 174` are all
+   unambiguous, and a new language becomes selectable by its labels file landing,
+   with no parser to update. A code with no labels file is *not* silently treated
+   as a branch name: say the language is not available and ask, because a typo'd
+   `sl` would otherwise become a branch nobody has. See *Language* below for what
+   a non-English report does and does not translate.
 2. **Pick the output path** — `<scratchpad>/pr-report-<number-or-branch>.html`.
    Same path on every regeneration of the same PR: the Artifact then redeploys
    to the same URL instead of claiming a new one. **The language is not part of
@@ -38,10 +41,11 @@ Run it **after `alvo-plan-guard`** (its verdict is an input) and **before
    no `{{` slots, section 7 non-empty, gates not optimistically green. On a
    non-English report also check that no identifier, violation code or gate name
    was translated.
-5. **Publish** with the Artifact tool: the returned `TITLE`, a one-sentence
-   `description` **in the page's language**, favicon `📐` on first publish (omit
-   it on every redeploy). Load the `artifact-design` skill first, as its own
-   rules require.
+5. **Publish** with the Artifact tool: the returned `TITLE` and `DESCRIPTION`
+   (both already in the page's language — the reporter returns the description so
+   the gallery card is not written twice, differently), favicon `📐` on first
+   publish (omit it on every redeploy). Load the `artifact-design` skill first, as
+   its own rules require.
 6. **Write the PR body** — the reporter's `PR-BODY` block, **always English**,
    with the artifact URL on a `Full report:` line. Five to eight lines. The page
    carries the detail; the body is a pointer, not a second copy of it.

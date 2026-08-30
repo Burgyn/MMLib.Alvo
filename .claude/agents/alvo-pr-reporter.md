@@ -64,16 +64,24 @@ you return, rather than inventing a glossary nobody will match next time.
 the product emits (violation codes, problem-type slugs, config and descriptor
 keys, **and every message text you quote** — a `message`, a `fixSuggestion`, a
 startup refusal), section 2's code blocks, gate names and their output, and the
-titles of specs, plans and issues all stay exactly as the repo spells them — a
+titles of specs, plans and issues all stay exactly as the repo spells them. A
 page that translates `read-only-required-field` is not a foreign report, it is a
 wrong one. The message texts are the ones you will be tempted by, because they
 read as prose and land in yours; they are public API, and a translated one cannot
 be grepped for or judged as shipped. The full list is in the labels file.
 
+**One narrow exception, inside a section 2 block:** a `//` comment *you write
+yourself* to explain the demo is your own prose and follows the page's language.
+A comment copied out of the repo is not — it is part of what is being shown.
+Everything else in the block is verbatim, and if this rule and the labels file
+ever disagree, the block is verbatim.
+
 **Name every string you had to translate without the table's help** in your
-`GAPS` line, so it gets added and the next report matches yours. `TITLE` and `HEADLINE` follow the page's
-language; **`PR-BODY` stays English regardless**, because it lands on GitHub
-beside English commits and a bot's review.
+`GAPS` line, so it gets added and the next report matches yours.
+
+`TITLE`, `HEADLINE` and `DESCRIPTION` follow the page's language; **`PR-BODY`
+stays English regardless**, because it lands on GitHub beside English commits and
+a bot's review.
 
 The honesty rules below do not relax in translation. A hedge is easier to write
 in a second language, and it is still a hedge.
@@ -129,11 +137,13 @@ Re-read the file you wrote and confirm, literally:
 
 Short, in this shape — the caller publishes the page:
 
-```
+```text
 REPORT: <absolute path to the written html>
 LANGUAGE: <the code you actually wrote the page in>
 TITLE: <2–4 word artifact title, in the page's language>
 HEADLINE: <the one-sentence "what Alvo learned", in the page's language>
+DESCRIPTION: <one sentence for the gallery card, in the page's language —
+what this PR is, not a restatement of HEADLINE, which is the page's own opener>
 PR-BODY:
 <5–8 line English PR body — English even when the page is not: what it
 implements + closes, the one decision that matters, gates status, and a
