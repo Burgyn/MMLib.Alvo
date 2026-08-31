@@ -237,6 +237,17 @@ Whether the schema is applied. That is `AlvoSchemaHealthCheck`'s, already regist
 and the readiness body still publishes the boot phase and nothing else, so a reachability failure is
 a 503 whose reason is in the log and not on the wire (design deviation 59, unchanged).
 
+### One cost this creates, found by the security-core checklist
+
+`/health/ready` used to do **no I/O**. It now opens a connection per request, from the pool the Data
+API shares, on a route that is anonymous by construction. So an unauthenticated caller who can reach
+the port spends pool slots at their chosen rate, and a saturated pool times the probe out and drains
+the pod — availability loss caused by a request rate rather than by the database. Bounded by the
+two-second registration timeout, disposed per probe, and ordinary for a reachability probe rather than
+unique to Alvo. **Filed as #183 rather than fixed here**, because the fix is a design decision of its
+own (a short probe-result cache is the likely answer, and it buys a staleness window) and bundling it
+would put an unmeasured cache inside the PR that introduces the probe.
+
 Cache and message-bus reachability stay out of scope, as the issue says: neither subsystem exists,
 and each should bring its own probe when it lands. The tag is what makes that additive.
 

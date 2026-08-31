@@ -434,6 +434,15 @@ Four decisions inside that are worth stating:
 - **`/health/live` is untouched** and still evaluates no check at all. A database outage must drain
   the pod's traffic, never restart-loop the container.
 
+One cost is created here and is recorded rather than fixed: `/health/ready` used to do **no I/O**,
+and it now opens a connection per request from the pool the Data API shares — while being anonymous
+by construction, because a container probe presents nothing to authenticate with. An unauthenticated
+caller who can reach the port can therefore spend pool slots at their chosen rate, and the outcome is
+self-limiting in an unhelpful direction: a saturated pool times the probe out and the orchestrator
+drains the pod. Bounded by the two-second registration timeout, ordinary for a reachability probe
+(every `AspNetCore.HealthChecks.*` deployment has the property), and tracked as **#183** — where
+caching the probe result for a short window is the likely answer.
+
 Deviation 38 is **superseded in its liveness-only part** and preserved in its guarantee: a boot that
 refuses never binds the socket, so nothing ever answers healthy with no schema. **Cache and
 message-bus reachability remain owed** — neither subsystem exists, and the readiness tag is what
