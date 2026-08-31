@@ -244,6 +244,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     bound — the framework cancels the token and awaits the check — so a probe that honours its token
     becomes a 503 and one that ignores it holds the request; honouring it is the port's documented
     obligation.
+  - **It costs a database round trip per request, on a route that carries no credential.** Readiness was
+    a pure in-memory read before; a caller who can reach the port now makes the process spend a connection
+    from the pool the Data API shares, at their chosen rate, and a saturated pool times the probe out and
+    has the pod drained. The assumed caller is a private orchestrator polling at an interval — which is
+    what every readiness probe assumes and nothing here enforces. Bounded, disposed per probe, and tracked
+    as **#183**, where caching the answer for a short window is the likely resolution.
   - Cache and message-bus reachability remain owed; the readiness tag is what makes each additive.
 
 - **`?order=<nullable field>` works, and `nullsfirst`/`nullslast` finally do something** (#116).

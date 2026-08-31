@@ -266,8 +266,8 @@ whole design was to have none.
 
 A convention added **after** materialisation must throw. It cannot be honoured (the table is frozen
 by design, for the reason `AlvoEndpointDataSource` records), and silently dropping a
-`RequireRateLimiting` is a rate limiter a host believes it has. This is what the framework's own
-convention builders do, and the message names the cause.
+`RequireRateLimiting` is a rate limiter a host believes it has. The framework itself is *quiet* in
+that situation — see deviation 7 — so this is a deliberate departure, and the message names the cause.
 
 **`MapAlvo()` keeps returning `IEndpointRouteBuilder`, and `MapAlvoHealth()` is not made
 chainable.** The umbrella maps the probes *and* the Data API, so one convention builder over both
@@ -318,7 +318,9 @@ compares endpoint data sources, not return types.
    `MapGroup("")`, and is anyway true of a host that substitutes `IPolicyEngine`, so nothing is
    weakened — but three rationales that read as unconditional are corrected rather than left to age
    (`DataApiRoutingTests`, `AlvoDataApiEndpointRouteBuilderExtensions`, and the new `data-api.md`
-   section).
+   section). Whether the invariant should be made *enforceable* again rather than only correctly
+   worded — an Alvo `Finally` convention that verifies its own filter factory survived — is **#184**,
+   filed rather than decided here.
 
 ## What this PR does not do
 
@@ -349,7 +351,7 @@ compares endpoint data sources, not return types.
 | `test/MMLib.Alvo.Api.Tests/OpenApiServersTests.cs` (new) | #130, core leg |
 | `test/MMLib.Alvo.Host.Tests/AlvoHostPathBaseTests.cs` | #130, proxy leg |
 | `test/MMLib.Alvo.Api.Tests/AlvoHealthTests.cs` | reachability → 200/503, absent port, hanging probe (#133) |
-| `test/MMLib.Alvo.Host.Tests/AlvoHealthTests.cs` | the provider really registers one (#133) |
+| ~~`test/MMLib.Alvo.Host.Tests/AlvoHealthTests.cs`~~ | **not changed.** "The provider really registers a probe" is covered by `SqliteReachabilityTests.The_public_entry_point_alone_yields_a_resolvable_reachability_port`, and the standalone host's existing `Readiness_answers_an_unauthenticated_probe_over_a_booted_host` now exercises the real probe transitively — a third fact would have measured the same thing a third time. |
 | `test/MMLib.Alvo.Data.Sqlite.Tests/*` | reachable and unreachable on a real engine (#133) |
 | `test/MMLib.Alvo.Data.PostgreSql.Tests.Integration/*` | the same on PostgreSQL (#133) |
 | `test/MMLib.Alvo.Api.Tests/DataApiConventionTests.cs` (new) | "D" |

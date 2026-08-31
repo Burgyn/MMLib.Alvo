@@ -5,9 +5,10 @@ using Xunit;
 namespace MMLib.Alvo.Testing.Data;
 
 /// <summary>
-/// Behavioural contract every <see cref="IAlvoDataReachability"/> implementation must satisfy — the three
-/// obligations that port's remarks impose on an implementer, asserted generically so a third-party driver has
-/// something to verify against.
+/// Behavioural contract every <see cref="IAlvoDataReachability"/> implementation must satisfy — the four
+/// obligations below, asserted generically so a third-party driver has something to verify against. Three come
+/// from that port's own remarks; the fourth, repeatability, is what a readiness endpoint that probes on every
+/// request needs and what the port's prose leaves implicit.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -15,7 +16,7 @@ namespace MMLib.Alvo.Testing.Data;
 /// (<see cref="Migrations.SchemaMigratorContractTests"/>,
 /// <see cref="Migrations.DescriptorVersionStoreContractTests"/>, <see cref="Events.OutboxStoreContractTests"/>):
 /// §0 principle 1 asks for the contract before the implementation, and prose obligations that nothing asserts
-/// are obligations an implementer discovers in production. The three here are not stylistic — a health check
+/// are obligations an implementer discovers in production. None of the four is stylistic — a health check
 /// built on this port answers wrongly if any of them is broken.
 /// </para>
 /// <para>

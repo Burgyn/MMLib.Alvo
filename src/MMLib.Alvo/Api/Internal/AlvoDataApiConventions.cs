@@ -17,8 +17,16 @@ namespace MMLib.Alvo.Api.Internal;
 /// <para>
 /// <b>After that they are refused, not dropped.</b> The table is frozen once materialised — for the reason
 /// <see cref="AlvoEndpointDataSource"/> records — so a late convention cannot be honoured, and a
-/// <c>RequireRateLimiting</c> that silently did nothing would be a rate limiter a host believes it has. This
-/// is what the framework's own convention builders do, and the message names the call to move.
+/// <c>RequireRateLimiting</c> that silently did nothing would be a rate limiter a host believes it has, so the
+/// message names the call to move.
+/// </para>
+/// <para>
+/// <b>That is a deliberate deviation from the framework, not conformance to it.</b>
+/// <c>RouteEndpointDataSource</c> and <c>RouteHandlerBuilder</c> silently <em>ignore</em> a convention added
+/// after the endpoint is built. Alvo throws because its table is frozen once materialised and cannot be
+/// amended at all, which makes silence a strictly worse answer here than it is there. The cost is real and
+/// stated: a host applying conventions from an <c>IStartupFilter</c> or a hosted service now gets an exception
+/// where every other <c>Map*</c> is quiet.
 /// </para>
 /// <para>
 /// <b><see cref="Finally"/> is implemented rather than inherited.</b> Its default interface implementation

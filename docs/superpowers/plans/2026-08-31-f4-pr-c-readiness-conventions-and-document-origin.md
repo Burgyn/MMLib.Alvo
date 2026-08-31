@@ -2215,6 +2215,22 @@ found and what was done about it, so a later reader can tell a decision from an 
 19. **The probe's per-request connection cost is stated in `AlvoReachabilityHealthCheck`'s own
     remarks**, not only in `host.md` and the spec — that file is where a reader of the check lands.
 
+## Amendments after the final `alvo-plan-guard` pass
+
+20. **Six documentation inconsistencies, all real, all fixed.** The retracted "this is what the
+    framework's own convention builders do" claim survived in the shipped XML doc and in the spec's
+    own Part 4 while deviation 7 retracted it two sections later; `AlvoEndpointDataSource`'s remarks
+    still credited `Build()` with sealing after the fix moved it; the contract suite said "three
+    obligations" over four facts — the same prose-vs-code count drift this PR fixes for the problem
+    slugs; the `CHANGELOG` omitted the per-anonymous-request database I/O that `host.md`, the spec and
+    the check's own remarks all state; the spec's "Files this touches" listed a Host test file that
+    was never changed; and `extensibility.md` had an unwrapped line.
+21. **The enforceable-invariant question is filed as #184**, not left as a caveat. Making "a marked
+    endpoint is a gated endpoint" true by construction again (an Alvo `Finally` convention that
+    verifies its own filter factory survived the host's) is a decision with open questions —
+    `Finally` ordering, what the identity check is over — and it belongs in an issue rather than
+    bundled into the PR that created the seam.
+
 ## Self-review notes
 
 - **Spec coverage.** #130 → Tasks 2, 3, 8. #119 → Task 1. #133 → Tasks 4, 5, 6, 8. "D" → Tasks 7, 8. Every

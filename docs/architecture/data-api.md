@@ -774,6 +774,12 @@ so could substituting `IPolicyEngine` in the host's own container. "A marked end
 is a statement about *this framework's* construction. An embedded host owns its pipeline; treating its code
 as an attacker is not this project's threat model.
 
+It could nevertheless be made a *construction* guarantee again — an Alvo `Finally` convention that runs after
+the host's and verifies its own filter factory survived — which would catch an *accidental* dismantling (a
+convention that rebuilds `FilterFactories` rather than appending to it) without changing the threat model.
+Whether that is worth the cost is **#184**, filed so the prose-only invariant is a recorded decision rather
+than a caveat nobody weighed.
+
 ## Route generation happens at *enumeration* time — half of #103 is delivered
 
 `MapAlvoDataApi` registers **one empty `AlvoEndpointDataSource`** and returns. `EntityRouteCatalog` reads

@@ -68,7 +68,7 @@ namespace MMLib.Alvo.Api.Internal;
 /// </para>
 /// <para>
 /// <b>A host's conventions are collected here and applied at materialisation.</b> <c>MapAlvoDataApi</c>
-/// returns <see cref="Conventions"/>, and <see cref="Build"/> seals it before mapping, so a convention
+/// returns <see cref="Conventions"/>, and <see cref="BuildOrRefuseToRoute"/> seals it, so a convention
 /// arriving after the table is frozen is refused rather than dropped — <em>including</em> when the schema
 /// guards refused and the frozen table is the empty one, which is the case the sealing's position outside
 /// <see cref="BuildOrRefuseToRoute"/>'s <c>try</c> exists for. They are applied inside
