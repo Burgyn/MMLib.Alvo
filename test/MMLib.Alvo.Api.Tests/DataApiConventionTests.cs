@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using MMLib.Alvo.Api.Internal;
 using MMLib.Alvo.Migrations;
+using MMLib.Alvo.Schema;
 using System.Net;
 
 namespace MMLib.Alvo.Api.Tests;
@@ -167,6 +168,33 @@ public class DataApiConventionTests
     }
 
     private const string HostsOwnBug = "the policy this host named was never registered";
+
+    /// <summary>
+    /// A convention added after a schema the data source <b>refused</b> is refused too — the materialisation
+    /// attempt seals whatever its outcome.
+    /// </summary>
+    /// <remarks>
+    /// The sibling fact above covers the happy path, and covering only that was a real gap: a refused schema
+    /// installs the empty route table permanently, so <c>Build()</c> never runs again — and sealing from
+    /// inside <c>Build()</c> would leave the conventions open forever, silently collecting into a list nothing
+    /// will ever read. "Refused, not dropped" has to hold on both outcomes or it is not a contract.
+    /// </remarks>
+    [Fact]
+    public async Task A_convention_added_after_a_refused_schema_is_refused_too()
+    {
+        IEndpointConventionBuilder? routes = null;
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin], new AlvoApiWorldSetup(
+            ConfigureServices: services =>
+                services.AddSingleton<ISchemaRegistry>(new RegistryShadowingAReservedKey()),
+            ConfigureDataApiRoutes: builder => routes = builder));
+
+        using var response = await world.SendAsync(HttpMethod.Get, "/api/owners", _admin);
+
+        response.StatusCode.ShouldBe(
+            HttpStatusCode.NotFound, "the applied schema was refused, so nothing is routed");
+
+        Should.Throw<InvalidOperationException>(() => routes!.WithMetadata(new HostMarker()));
+    }
 
     /// <summary>Every endpoint Alvo generated, identified by the marker it attaches to each of them.</summary>
     private static List<RouteEndpoint> Generated(AlvoApiWorld world) =>

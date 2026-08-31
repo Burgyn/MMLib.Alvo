@@ -2196,6 +2196,25 @@ found and what was done about it, so a later reader can tell a decision from an 
     executes a per-dialect constant that names no table, carries no `WHERE` and binds no parameter.
 15. **Staging is explicit, never `git add -A src test`.**
 
+## Amendments after `csharp-reviewer`
+
+16. **A real bug both earlier passes missed: `Seal()` did not run when the schema was refused.** It sat
+    inside `Build()`, after `ReservedQueryKeys.EnsureNoneIsShadowed` and `FormatCatalog.Build` — so a
+    schema those guards refuse installs the empty route table permanently, `Build()` never runs again,
+    and the conventions stay open forever, silently collecting into a list nothing will ever read. That
+    is exactly the "refused, not dropped" contract the type's own docs claim. Sealing moved to the top
+    of `BuildOrRefuseToRoute`, outside the `try`, and pinned by
+    `A_convention_added_after_a_refused_schema_is_refused_too` — verified non-vacuous by reverting the
+    fix and watching that one fact go red.
+17. **`RegistryShadowingAReservedKey` is now shared** rather than copied: the new fact needs the same
+    refused-schema substitute `AlvoHealthTests` had privately, and two copies is how the two suites
+    would come to be refused for different reasons.
+18. **`A_host_supplied_probe_wins_over_the_drivers_default` now resolves the instance**, not only the
+    descriptor count — a count of one proves the claim only by an argument about `TryAdd` semantics and
+    would survive a refactor that registered the driver's probe first.
+19. **The probe's per-request connection cost is stated in `AlvoReachabilityHealthCheck`'s own
+    remarks**, not only in `host.md` and the spec — that file is where a reader of the check lands.
+
 ## Self-review notes
 
 - **Spec coverage.** #130 → Tasks 2, 3, 8. #119 → Task 1. #133 → Tasks 4, 5, 6, 8. "D" → Tasks 7, 8. Every

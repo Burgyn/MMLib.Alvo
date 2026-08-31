@@ -36,6 +36,16 @@ namespace MMLib.Alvo.Api.Internal;
 /// the one answer here that could mislead a reader of the log.
 /// </para>
 /// <para>
+/// <b>It costs a database round trip per request, on a route that carries no credential.</b>
+/// <see cref="AlvoHealth.ReadinessPath"/> used to be a pure in-memory read, and a container probe presents
+/// nothing to authenticate with — so a caller who can reach the port makes this process spend a connection
+/// from the pool the Data API shares, at their chosen rate, and a saturated pool times the probe out and has
+/// the pod drained. The assumed caller is a private orchestrator or load balancer polling at an interval, which
+/// is what every readiness probe in the ecosystem assumes; nothing here enforces it. Bounded by
+/// <see cref="AlvoHealth.DatabaseProbeTimeout"/> and disposed per probe, recorded rather than fixed here, and
+/// tracked as #183 — where caching the answer for a short window is the likely resolution.
+/// </para>
+/// <para>
 /// <b>Nothing is caught.</b> An unreachable store is a return value, not an exception
 /// (<see cref="IAlvoDataReachability.ProbeAsync"/> says so), and anything a probe does throw is either the
 /// registration's timeout or a defect — both of which the health-check service reports as this registration's

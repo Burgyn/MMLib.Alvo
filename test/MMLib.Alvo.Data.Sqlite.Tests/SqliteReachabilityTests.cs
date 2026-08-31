@@ -41,6 +41,12 @@ public class SqliteReachabilityTests : AlvoDataReachabilityContractTests, IDispo
     /// A host that registered its own probe keeps it — <c>TryAdd</c> means the driver supplies a default, not
     /// an override, exactly as it does for the dialect.
     /// </summary>
+    /// <remarks>
+    /// The <em>resolved</em> instance is asserted, not only that one descriptor survived. A count of one is
+    /// logically sufficient under <c>TryAdd</c>, but it proves the claim in the test's name only by way of an
+    /// argument about DI semantics — and it would keep passing if a future refactor registered the driver's
+    /// probe first and the host's second.
+    /// </remarks>
     [Fact]
     public void A_host_supplied_probe_wins_over_the_drivers_default()
     {
@@ -48,7 +54,10 @@ public class SqliteReachabilityTests : AlvoDataReachabilityContractTests, IDispo
         collection.AddSingleton<IAlvoDataReachability>(new AlwaysReachable());
         collection.AddAlvo(alvo => alvo.UseSqlite("Data Source=:memory:"));
 
+        using var container = collection.BuildServiceProvider();
+
         collection.Count(service => service.ServiceType == typeof(IAlvoDataReachability)).ShouldBe(1);
+        container.GetRequiredService<IAlvoDataReachability>().ShouldBeOfType<AlwaysReachable>();
     }
 
     /// <summary>

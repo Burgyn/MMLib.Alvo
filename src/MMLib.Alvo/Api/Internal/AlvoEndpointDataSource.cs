@@ -69,7 +69,9 @@ namespace MMLib.Alvo.Api.Internal;
 /// <para>
 /// <b>A host's conventions are collected here and applied at materialisation.</b> <c>MapAlvoDataApi</c>
 /// returns <see cref="Conventions"/>, and <see cref="Build"/> seals it before mapping, so a convention
-/// arriving after the table is frozen is refused rather than dropped. They are applied inside
+/// arriving after the table is frozen is refused rather than dropped — <em>including</em> when the schema
+/// guards refused and the frozen table is the empty one, which is the case the sealing's position outside
+/// <see cref="BuildOrRefuseToRoute"/>'s <c>try</c> exists for. They are applied inside
 /// <c>DataApiEndpoints.Protect</c> — the same call that attaches the authorization filter and the operation
 /// marker — so no generated route can be mapped without them. A convention that <em>throws</em> is a distinct
 /// diagnosis from a schema that cannot be routed (<see cref="AlvoDataApiConventionException"/>): both end in
@@ -202,6 +204,11 @@ internal sealed partial class AlvoEndpointDataSource : EndpointDataSource
     /// </remarks>
     private RouteTable BuildOrRefuseToRoute()
     {
+        // Outside the try, so the one materialisation attempt seals whatever its outcome: a schema the
+        // guards refuse installs the empty table permanently, and conventions left unsealed there would go
+        // on being silently collected into a list nothing will ever read.
+        _conventions.Seal();
+
         try
         {
             return Build();
@@ -273,7 +280,6 @@ internal sealed partial class AlvoEndpointDataSource : EndpointDataSource
 
         var formats = FormatCatalog.Build(entities);
         var inner = new NestedRouteBuilder(_services);
-        _conventions.Seal();
         foreach (var entity in entities)
         {
             DataApiEndpoints.Map(inner, entity, _prefix, _options, _filters, formats, _conventions);

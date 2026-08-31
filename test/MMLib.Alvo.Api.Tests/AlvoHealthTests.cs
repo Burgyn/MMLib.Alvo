@@ -304,27 +304,6 @@ public class AlvoHealthTests
     ];
 
     /// <summary>
-    /// An applied schema that never passed descriptor validation, declaring a field the query string reserves —
-    /// the substituted-registry shape the route-materialisation belt exists for.
-    /// </summary>
-    private sealed class RegistryShadowingAReservedKey : ISchemaRegistry
-    {
-        private readonly SchemaModel _schema = new([
-            new EntitySchema
-            {
-                Name = "widgets",
-                Fields =
-                [
-                    new FieldSchema { Name = "id", Type = FieldType.Uuid },
-                    new FieldSchema { Name = ReservedQueryKeys.Limit, Type = FieldType.Integer },
-                ],
-            },
-        ]);
-
-        public SchemaModel GetSchema() => _schema;
-    }
-
-    /// <summary>
     /// A store that fails the way a driver whose exception message carries its connection string would.
     /// </summary>
     private sealed class StoreThatLeaksItsConnectionString : IAppliedSchemaStore
