@@ -224,31 +224,6 @@ internal static class QueryViolations
         + "order, and each at most once.");
 
     /// <summary>
-    /// The refusal for a sort key a paged read cannot use, carrying the port's own wording.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// This one <em>does</em> name the field, because the port's message does and because the field is
-    /// provably declared and unmasked by the time this is reachable — the availability check runs first, so
-    /// naming it answers nothing the caller did not already know.
-    /// </para>
-    /// <para>
-    /// <b>The fix names only the achievable action.</b> The port's own message offers a second one — read the
-    /// whole set with no limit, offset or cursor — which <em>this surface cannot do</em>: every list gets
-    /// <see cref="AlvoApiOptions.DefaultPageSize"/>, so a caller following that advice sends the identical
-    /// request, is refused identically, and has nowhere left to go. Repeating a suggestion the layer forbids is
-    /// worse than omitting it. The underlying limitation belongs in the Data API's own documentation, not in a
-    /// per-request message.
-    /// </para>
-    /// </remarks>
-    /// <param name="message">The port's own refusal text.</param>
-    internal static AlvoViolation UnpageableSortKey(string message) => new(
-        ReservedQueryKeys.Order,
-        "unpageable-sort-key",
-        message,
-        "Sort by a field the entity declares required.");
-
-    /// <summary>
     /// The refusal for a sort key named twice. A repeated key can never change the order — the first
     /// occurrence already decides it — so it is a mistake rather than a request, and admitting it would let a
     /// caller make the server compose an unbounded <c>ORDER BY</c>.

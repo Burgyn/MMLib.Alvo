@@ -1,0 +1,59 @@
+### `Prefer: count=exact` fills the page envelope's `count` with the size of the MATCHING SET, not of the
+### page — seven work orders are visible here and the page holds two, so a count that was secretly the
+### page's own row count is a different number.
+# @name CountExact
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=2&order=reference.asc
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Prefer: count=exact
+
+### The count is narrowed by the caller's own filter, exactly as the rows are
+# @name CountFiltered
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=2&order=reference.asc&status=eq.scheduled
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Prefer: count=exact
+
+### The same filter without the preference, so "the filter narrows the count" is compared with something
+# @name FilteredWithoutCount
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=100&order=reference.asc&status=eq.scheduled
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### The count does not shrink as the walk advances: page two of the same query reports the same total
+# @name CountOnPageTwo
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=2&order=reference.asc&after={{CountExact.response.body.$.next}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Prefer: count=exact
+
+### `planned` and `estimated` degrade to a real count — a planner estimate exists on one supported engine
+### and not the other — and `Preference-Applied` tells the caller what was actually done
+# @name CountPlanned
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=2&order=reference.asc
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Prefer: count=planned
+
+### Opt-in: a request that sends no preference gets `count: null` — PRESENT and null, never absent
+# @name NoCountAsked
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=2&order=reference.asc
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### RFC 7240 §2: a preference the server does not recognise is IGNORED, not refused — the one deliberate
+### departure from this API's "refuse, never ignore" rule, and the absence of `Preference-Applied` is how
+### the standard says it is reported
+# @name UnrecognisedPreference
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=2&order=reference.asc
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Prefer: count=exakt
+
+### The count is over the POLICY-FILTERED set: a technician sees only the work orders assigned to them, so
+### their count is their own subset and never the seven rows the dispatcher can see
+# @name CountAsTechnician
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=100
+X-Alvo-Api-Key: {{keyTechNorth}}
+Prefer: count=exact

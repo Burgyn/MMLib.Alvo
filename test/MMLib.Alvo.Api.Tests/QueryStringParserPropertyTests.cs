@@ -264,7 +264,6 @@ public sealed class QueryStringParserPropertyTests
 
         AlvoFilter.EnsureWithinLimits(parsed!.Query.Filter);
         AlvoQuery.EnsurePagingWindowIsSane(parsed.Query);
-        AlvoQuery.EnsureSortKeysCanBePaged(parsed.Query, _vehicles);
         parsed.Query.Limit!.Value.ShouldBeInRange(1, _options.MaxPageSize);
         return true;
     }

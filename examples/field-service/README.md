@@ -58,7 +58,8 @@ secrets in `docker-compose.yml` would break the README quickstart for anyone who
 | Field types | `work_orders` | `string`, `text`, `integer`, `decimal(10,2)`, `boolean`, `date`, `datetime`, `uuid`, `json`, `enum`, `ref` — one of each, so the OpenAPI wire-shape mapping is exercised end to end. |
 | Built-in `format` | `contact_email` (email), `customers.phone` (phone) | A format violation is a reachable, per-field 422. |
 | Declared `format` | `work-order-ref` | A descriptor-declared pattern publishes as `pattern` (not `format`) and is **anchored by Alvo**, not by the author — the pattern is written without `^…$` on purpose. |
-| Nullable sort key | `scheduled_for` | A *paged* read sorted by it is refused (`unpageable-sort-key`): a keyset cursor cannot express where nulls sort. |
+| Nullable sort key | `scheduled_for` | Set on two of seven rows, so a *paged* read sorted by it walks both a valued anchor and a null-keyed one — the two shapes a keyset boundary over nulls has to get right, and the two that used to be refused outright. |
+| Opt-in count | `Prefer: count=exact` | Seven rows behind a `limit=2` page, and a technician whose row rule shows fewer — so a count that was the page size, or one taken over the table, is a different number in each case. |
 | Required sort key | `priority` | The paging key the suite walks four pages of, with deliberate ties so the `id` tie-breaker is what makes the order total. |
 | `indexes` | `["status","priority"]`, `["assigned_to"]` | Cover exactly the fields the suite filters and orders on. |
 

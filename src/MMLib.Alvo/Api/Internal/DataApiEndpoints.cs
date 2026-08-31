@@ -98,10 +98,39 @@ internal static class DataApiEndpoints
                         return ProblemResultFactory.MalformedQuery(violations);
                     }
 
-                    var page = await data.QueryAsync(request!.Query, context, ct).ConfigureAwait(false);
+                    var counted = PreferHeader.Count(http.Request.Headers[PreferHeader.Name]);
+                    var query = request!.Query with { IncludeTotalCount = counted is not null };
+                    var page = await data.QueryAsync(query, context, ct).ConfigureAwait(false);
+                    ApplyCountPreference(http.Response, counted);
                     return Json(DataApiPage.From(page, request.Select));
                 }))
             .Protect(entity, DataOperation.List, filters);
+
+    /// <summary>
+    /// Reports what was done with the caller's <c>count</c> preference, per RFC 7240 §3 — and always
+    /// <c>count=exact</c>, because <c>planned</c> and <c>estimated</c> degrade to a real count.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The degradation is the reason this header is sent at all.</b> A caller who asked for an estimate
+    /// and silently received an exact count would have no way to know their preference was not honoured, and
+    /// RFC 7240 gives exactly this channel for saying so. A preference this server does not recognise sets no
+    /// header, which is how the standard says "ignored" is reported.
+    /// </para>
+    /// <para>
+    /// <b>No <c>Vary: Prefer</c>.</b> RFC 7240 suggests it where a response varies by the header, and this
+    /// one does — but every generated response already carries <c>Cache-Control: no-store</c> from
+    /// <see cref="NoStoreResponseFilter"/>, so no cache may store the representation and a <c>Vary</c> has no
+    /// addressee. Stated so its absence does not read as an oversight.
+    /// </para>
+    /// </remarks>
+    private static void ApplyCountPreference(HttpResponse response, CountPreference? counted)
+    {
+        if (counted is not null)
+        {
+            response.Headers[PreferHeader.AppliedName] = "count=exact";
+        }
+    }
 
     private static void MapGet(
         IEndpointRouteBuilder endpoints,

@@ -40,10 +40,10 @@ internal sealed record ParsedListQuery(AlvoQuery Query, IReadOnlyList<string>? S
 /// </para>
 /// <para>
 /// <b>The port's own guards are called, not re-implemented</b> —
-/// <see cref="AlvoFilter.EnsureWithinLimits"/>, <see cref="AlvoQuery.EnsurePagingWindowIsSane"/> and
-/// <see cref="AlvoQuery.EnsureSortKeysCanBePaged"/>. They are the rules of the port and they throw; here they
-/// are run early so a caller gets a structured violation with a fix suggestion instead of the port's bare
-/// <c>ArgumentException</c> text, and so the same refusal happens whether or not the API is in front.
+/// <see cref="AlvoFilter.EnsureWithinLimits"/> and <see cref="AlvoQuery.EnsurePagingWindowIsSane"/>. They are
+/// the rules of the port and they throw; here they are run early so a caller gets a structured violation with
+/// a fix suggestion instead of the port's bare <c>ArgumentException</c> text, and so the same refusal happens
+/// whether or not the API is in front.
 /// </para>
 /// </remarks>
 internal static class QueryStringParser
@@ -354,7 +354,7 @@ internal static class QueryStringParser
         };
 
         /// <summary>
-        /// Runs the port's own rules over what this parse produced — all three, unconditionally.
+        /// Runs the port's own rules over what this parse produced — both of them, unconditionally.
         /// </summary>
         /// <remarks>
         /// <b><see cref="AlvoFilter.EnsureWithinLimits"/> runs even when this parse has already refused, and that
@@ -370,7 +370,6 @@ internal static class QueryStringParser
         private void EnsureWithinPortRules(AlvoQuery query)
         {
             Record(() => AlvoQuery.EnsurePagingWindowIsSane(query), QueryViolations.ConflictingPagingWindow);
-            Record(() => AlvoQuery.EnsureSortKeysCanBePaged(query, entity), QueryViolations.UnpageableSortKey);
             Record(() => AlvoFilter.EnsureWithinLimits(query.Filter), QueryViolations.FilterBeyondPortLimits);
         }
 

@@ -116,21 +116,67 @@ internal sealed class EfAlvoData : IAlvoData
         using var db = _contexts.Create();
         var entity = Entity(db, query.Entity);
         QueryFieldGuard.EnsureAvailable(QueryFields(query), entity, decision.HiddenFields);
-        AlvoQuery.EnsureSortKeysCanBePaged(query, entity);
 
         var anchor = await AnchorAsync(db, entity, decision, context, query, cancellationToken);
+        var options = ReadOptions(query, anchor);
+        var total = await TotalCountAsync(db, entity, decision, context, query, options, cancellationToken);
+
+        // A cursor this provider never issued — stale, forged, or from another tenant — finds no anchor and
+        // is answered with an empty page rather than the first one. The count still comes back, because it is
+        // a property of the query's visible set and not of the window the cursor failed to open: answering
+        // null there would make the HTTP layer's `Preference-Applied: count=exact` a lie.
         if (query.After is not null && anchor is null)
         {
-            return AlvoPage.Empty;
+            return AlvoPage.Empty with { TotalCount = total };
         }
 
-        var fetched = await PageAsync(db, entity, decision, context, query, anchor, cancellationToken);
+        var fetched = await PageAsync(db, entity, decision, context, options, cancellationToken);
         var (kept, nextCursor) = Paginated(fetched, query.Limit);
         return new AlvoPage
         {
             Items = [.. kept.Select(row => RecordMaterializer.ToRecord(row, decision.HiddenFields))],
             NextCursor = nextCursor,
+            TotalCount = total,
         };
+    }
+
+    /// <summary>
+    /// How many rows the query matches in total, or <see langword="null"/> when
+    /// <see cref="AlvoQuery.IncludeTotalCount"/> did not ask — in which case <b>no statement is composed and
+    /// none is executed</b>, which is what makes the count opt-in rather than merely optional.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Run through EF's own <c>SqlQueryRaw</c> rather than a raw command on the context's connection, so the
+    /// count binds its values through the same <see cref="PredicateParameterBinder"/> as the page, needs no
+    /// second execution path, and — the reason that decides it — is <b>visible to the same diagnostic
+    /// listener the statement suite observes</b>. "The count carries the policy predicate" is a claim no
+    /// returned number can carry, so it has to be assertable on the statement.
+    /// </para>
+    /// <para>
+    /// <c>ToListAsync</c> rather than <c>SingleAsync</c>: a <c>SqlQueryRaw</c> with nothing composed over it
+    /// is emitted verbatim, while composing a LINQ operator wraps it in a subquery whose output column EF
+    /// then requires to be named <c>Value</c> — an EF artifact in a statement that is otherwise Alvo's own.
+    /// The result set is one row by construction, so <c>Single</c> here is a fact about <c>COUNT(*)</c>, not
+    /// a bound imposed on the query.
+    /// </para>
+    /// </remarks>
+    private async Task<long?> TotalCountAsync(
+        AlvoDataContext db, EntitySchema? entity, PolicyDecision decision, AlvoContext context,
+        AlvoQuery query, ReadStatementComposer.ReadStatementOptions options, CancellationToken cancellationToken)
+    {
+        if (!query.IncludeTotalCount)
+        {
+            return null;
+        }
+
+        var schema = entity ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
+        var statement = _statements.ComposeCount(schema, decision, context, options);
+        var parameters = new PredicateParameterBinder(db).Bind(
+            db.Rows(schema.Name).EntityType, statement.Parameters);
+
+        var counted = await db.Database.SqlQueryRaw<long>(statement.Sql, parameters).ToListAsync(cancellationToken);
+        return counted.Single();
     }
 
     /// <summary>
@@ -1184,25 +1230,44 @@ internal sealed class EfAlvoData : IAlvoData
     /// </remarks>
     private async Task<List<Dictionary<string, object>>> PageAsync(
         AlvoDataContext db, EntitySchema? entity, PolicyDecision decision, AlvoContext context,
-        AlvoQuery query, KeysetAnchor? anchor, CancellationToken cancellationToken)
+        ReadStatementComposer.ReadStatementOptions options, CancellationToken cancellationToken)
     {
         var schema = entity ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
         var statement = _statements.Compose(
-            schema,
-            decision,
-            context,
-            new ReadStatementComposer.ReadStatementOptions
-            {
-                Filter = query.Filter,
-                Anchor = anchor,
-                Sort = query.Sort,
-                Limit = OverFetched(query.Limit),
-                Offset = query.Offset,
-            },
-            db.Rows(schema.Name).EntityType);
+            schema, decision, context, options, db.Rows(schema.Name).EntityType);
 
         return await Materialize(db, schema, statement).ToListAsync(cancellationToken);
     }
+
+    /// <summary>
+    /// The <b>one</b> options record a list read composes from, built once and handed to both the page and
+    /// its count.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Two literals here would defeat the property <c>ComposeCount</c> is written around.</b> That method
+    /// takes the whole record and strips the cursor anchor itself, precisely so a term added to the read
+    /// cannot be silently missed by the count — and a second, independently maintained options literal for
+    /// the count would reintroduce exactly the drift it prevents. Today the two would agree (a list sets no
+    /// <c>RowId</c>, no <c>LockFor</c>, no <c>Unmasked</c>); the next term added to a read's <c>WHERE</c> —
+    /// a soft-delete predicate, an archive scope, F7's dynamic-entity discriminator — is where they would
+    /// stop agreeing, and the count would silently describe a wider set than the page.
+    /// </para>
+    /// <para>
+    /// <c>ReadStatementOptions.Limit</c> carries the over-fetch, not the caller's own limit, so the
+    /// page can tell "more rows exist" from "the set ended here". The count ignores it, as it ignores the
+    /// ordering and the anchor.
+    /// </para>
+    /// </remarks>
+    private static ReadStatementComposer.ReadStatementOptions ReadOptions(AlvoQuery query, KeysetAnchor? anchor) =>
+        new()
+        {
+            Filter = query.Filter,
+            Anchor = anchor,
+            Sort = query.Sort,
+            Limit = OverFetched(query.Limit),
+            Offset = query.Offset,
+        };
 
     /// <summary>
     /// One past <paramref name="limit"/>, so <see cref="Paginated"/> can tell a page that ends exactly at the

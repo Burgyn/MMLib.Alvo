@@ -111,8 +111,8 @@ public sealed class DataApiQueryTests
     }
 
     /// <summary>
-    /// The default page size is applied to a request that names none — which is also why a nullable sort key is
-    /// unusable over HTTP, since the port refuses a paged read sorted by one.
+    /// The default page size is applied to a request that names none — which is why there is no way to ask
+    /// this surface for an unpaged read, and why a sort key that could not be paged could not be used at all.
     /// </summary>
     [Fact]
     public async Task A_request_naming_no_page_size_gets_the_configured_default()
@@ -173,29 +173,148 @@ public sealed class DataApiQueryTests
 
     /// <summary>
     /// A port guard's refusal reaches the caller in the port's own words with the .NET argument machinery
-    /// stripped off, and its fix suggestion names something this surface can actually do.
+    /// stripped off, and with a fix suggestion.
     /// </summary>
     /// <remarks>
-    /// The live leg of two defects. <c>(Parameter 'query')</c> shipped in this body, because the method meant to
-    /// strip it cut at a newline the suffix is not behind — <c>AlvoApiWorld</c> now screens every response for
-    /// it. And the fix suggestion used to offer "ask for the whole set with no limit", which this surface
-    /// forbids: every list gets a default page size, so an agent following it would retry the identical request
-    /// forever.
+    /// The live leg of a shipped defect: <c>(Parameter 'query')</c> reached a response body, because the
+    /// method meant to strip it cut at a newline the suffix is not behind — <c>AlvoApiWorld</c> now screens
+    /// every response for it. Asserted over the conflicting-window guard because that is the port refusal
+    /// this surface can still provoke; it used to be asserted over the nullable-sort-key guard, which F4
+    /// deleted along with the refusal itself.
     /// </remarks>
     [Fact]
-    public async Task A_paged_read_sorted_by_a_nullable_field_is_refused_in_the_ports_own_words()
+    public async Task A_port_guards_refusal_reaches_the_caller_in_the_ports_own_words()
     {
         await using var world = await SeededAsync();
 
-        using var response = await world.SendAsync(HttpMethod.Get, "/api/vehicles?order=color", _admin);
+        using var response = await world.SendAsync(
+            HttpMethod.Get, "/api/vehicles?after=abc&offset=1", _admin);
 
         response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
         var violation = (await response.ReadJsonObjectAsync())["violations"]!.AsArray()
             .ShouldHaveSingleItem()!.AsObject();
-        violation["code"]!.GetValue<string>().ShouldBe("unpageable-sort-key");
+        violation["code"]!.GetValue<string>().ShouldBe("conflicting-paging");
         violation["message"]!.GetValue<string>().ShouldNotContain("(Parameter '");
-        violation["fixSuggestion"]!.GetValue<string>().ShouldNotContain(
-            "no limit", Case.Insensitive, "this surface always applies a page size, so that is not achievable");
+        violation["fixSuggestion"]!.GetValue<string>().ShouldNotBeNullOrWhiteSpace();
+    }
+
+    /// <summary>
+    /// <c>?order=&lt;nullable field&gt;</c> is the single most obvious thing an agent asks a generated list
+    /// for, and until F4 it was a 422 — every HTTP list is paged, and the port refused a paged read over a
+    /// nullable sort key. Both null placements are asserted, because their being unobservable was the second
+    /// half of the same defect: <c>nullsfirst</c>/<c>nullslast</c> parsed, validated and could not change an
+    /// answer.
+    /// </summary>
+    [Theory]
+    [InlineData("nullsfirst", "")]
+    [InlineData("nullslast", "red")]
+    public async Task A_list_sorted_by_a_nullable_field_answers_and_honours_the_null_placement(
+        string placement, string expectedFirstColor)
+    {
+        await using var world = await SeededAsync();
+
+        using var response = await world.SendAsync(
+            HttpMethod.Get, $"/api/vehicles?order=color.{placement}", _admin);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, await response.ReadTextAsync());
+        var items = (await response.ReadJsonObjectAsync())["items"]!.AsArray();
+        items.Count.ShouldBe(_fleet.Length);
+        (items[0]!["color"]?.GetValue<string>() ?? string.Empty).ShouldBe(expectedFirstColor);
+    }
+
+    /// <summary>
+    /// <c>Prefer: count=exact</c> fills the envelope's <c>count</c> with the size of the matching set — not
+    /// of the page — and RFC 7240's <c>Preference-Applied</c> says so.
+    /// </summary>
+    [Fact]
+    public async Task A_count_preference_fills_the_envelope_and_is_reported_as_applied()
+    {
+        await using var world = await SeededAsync();
+
+        using var response = await world.SendAsync(
+            HttpMethod.Get, "/api/vehicles?order=make&limit=2", _admin,
+            headers: new Dictionary<string, string> { ["Prefer"] = "count=exact" });
+
+        var body = await response.ReadJsonObjectAsync();
+        body["items"]!.AsArray().Count.ShouldBe(2);
+        body["count"]!.GetValue<long>().ShouldBe(3);
+        response.Headers.GetValues("Preference-Applied").ShouldBe(["count=exact"]);
+    }
+
+    /// <summary>
+    /// <b>Opt-in, and this is the fact that makes it one over HTTP.</b> A request that sends no preference
+    /// gets <c>count: null</c> — present, because the envelope's members are a statement about the bytes —
+    /// and no <c>Preference-Applied</c> at all.
+    /// </summary>
+    [Fact]
+    public async Task A_request_that_asks_for_no_count_gets_a_null_one_and_no_applied_header()
+    {
+        await using var world = await SeededAsync();
+
+        using var response = await world.SendAsync(HttpMethod.Get, "/api/vehicles?order=make", _admin);
+
+        var body = await response.ReadJsonObjectAsync();
+        body.ContainsKey("count").ShouldBeTrue("the envelope's members are a statement about the bytes");
+        body["count"].ShouldBeNull();
+        response.Headers.Contains("Preference-Applied").ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// <c>planned</c> and <c>estimated</c> degrade to an exact count — a planner estimate exists on one
+    /// supported engine and not the other — and the caller is <em>told</em>, which is the whole reason
+    /// <c>Preference-Applied</c> is sent.
+    /// </summary>
+    [Theory]
+    [InlineData("count=planned")]
+    [InlineData("count=estimated")]
+    public async Task An_estimate_preference_degrades_to_an_exact_count_and_says_so(string preference)
+    {
+        await using var world = await SeededAsync();
+
+        using var response = await world.SendAsync(
+            HttpMethod.Get, "/api/vehicles", _admin,
+            headers: new Dictionary<string, string> { ["Prefer"] = preference });
+
+        (await response.ReadJsonObjectAsync())["count"]!.GetValue<long>().ShouldBe(3);
+        response.Headers.GetValues("Preference-Applied").ShouldBe(["count=exact"]);
+    }
+
+    /// <summary>
+    /// <b>A preference this server does not recognise is ignored, not refused</b> — RFC 7240 §2 requires it,
+    /// and the absence of <c>Preference-Applied</c> is how the standard reports it. The one deliberate
+    /// departure from this API's "refuse, never ignore" rule, so it is asserted end to end rather than only
+    /// at the parser.
+    /// </summary>
+    [Theory]
+    [InlineData("count=exakt")]
+    [InlineData("respond-async")]
+    public async Task An_unrecognised_preference_is_ignored_rather_than_refused(string preference)
+    {
+        await using var world = await SeededAsync();
+
+        using var response = await world.SendAsync(
+            HttpMethod.Get, "/api/vehicles", _admin,
+            headers: new Dictionary<string, string> { ["Prefer"] = preference });
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, await response.ReadTextAsync());
+        (await response.ReadJsonObjectAsync())["count"].ShouldBeNull();
+        response.Headers.Contains("Preference-Applied").ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// The count is over the caller's <b>filtered</b> set, not the table: a filter that halves the rows
+    /// halves the count. Without this, a count taken over everything visible would pass the facts above.
+    /// </summary>
+    [Fact]
+    public async Task A_count_is_narrowed_by_the_requests_own_filter()
+    {
+        await using var world = await SeededAsync();
+
+        using var response = await world.SendAsync(
+            HttpMethod.Get, "/api/vehicles?make=eq.vw", _admin,
+            headers: new Dictionary<string, string> { ["Prefer"] = "count=exact" });
+
+        (await response.ReadJsonObjectAsync())["count"]!.GetValue<long>().ShouldBe(1);
     }
 
     /// <summary>
@@ -356,15 +475,20 @@ public sealed class DataApiQueryTests
     /// used to live in this file; it now lives in <see cref="DataApiEngineTests"/>, over its own seed, so
     /// nothing left here depends on it.
     /// </remarks>
-    private static readonly (string Make, int Year)[] _fleet = [("skoda", 300), ("vw", 1999), ("audi", 2020)];
+    /// <remarks>
+    /// One row carries a <c>color</c> and two leave it unset, which is what makes a sort by that nullable
+    /// field observable in both placements rather than merely legal.
+    /// </remarks>
+    private static readonly (string Make, int Year, string? Color)[] _fleet =
+        [("skoda", 300, null), ("vw", 1999, "red"), ("audi", 2020, null)];
 
     private static async Task SeedAsync(AlvoApiWorld world)
     {
         var owner = await CreateAsync(world, "owners", new JsonObject { ["name"] = "Acme Ltd" });
 
-        foreach (var (make, year) in _fleet)
+        foreach (var (make, year, color) in _fleet)
         {
-            await CreateAsync(world, "vehicles", new JsonObject
+            var body = new JsonObject
             {
                 ["vin"] = $"VIN-{make}",
                 ["plate"] = $"PLATE-{make}",
@@ -372,7 +496,13 @@ public sealed class DataApiQueryTests
                 ["model"] = "model",
                 ["year"] = year,
                 ["owner_id"] = owner,
-            });
+            };
+            if (color is not null)
+            {
+                body["color"] = color;
+            }
+
+            await CreateAsync(world, "vehicles", body);
         }
     }
 

@@ -46,10 +46,17 @@ X-Alvo-Api-Key: {{keyDispatcherNorth}}
 GET {{fsBaseUrl}}/api/work_orders?select=reference,priority&order=reference.asc&limit=100
 X-Alvo-Api-Key: {{keyDispatcherNorth}}
 
-### A paged read sorted by a NULLABLE field is refused: a keyset cursor cannot place its nulls
-# @name UnpageableSortKey
-## TEST-EXPECT-STATUS: [422]
+### A paged read sorted by a NULLABLE field: answered, with the two dated rows ahead of the five null ones
+# @name NullableSortKeyLast
+## TEST-EXPECT-STATUS: [200]
 GET {{fsBaseUrl}}/api/work_orders?order=scheduled_for.desc.nullslast&limit=3
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### The same key with the placement flipped, which is the half of the order grammar that used to be
+### unreachable: a nullable key was refused on a paged read, and every list over HTTP is paged
+# @name NullableSortKeyFirst
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?order=scheduled_for.desc.nullsfirst&limit=3
 X-Alvo-Api-Key: {{keyDispatcherNorth}}
 
 ### An unrecognised sort modifier is refused rather than ignored — an ignored one is a silent re-sort

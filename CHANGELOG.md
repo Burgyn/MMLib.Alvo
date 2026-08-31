@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (breaking)
 
+- **`AlvoQuery.EnsureSortKeysCanBePaged` is removed** (#116). It refused a paged read sorted by a
+  nullable field, because a keyset boundary could not express where nulls sort. That boundary now
+  can, so the guard has nothing left to refuse — and keeping it as a no-op would leave a member every
+  `IAlvoData` implementation goes on calling forever. Delete the call; nothing replaces it. The
+  API-layer refusal it produced, the `unpageable-sort-key` violation code, is gone with it: a request
+  that used to earn it is now answered.
+
+- **The list response envelope gained a third member, `count`** (#110). It is always present and is
+  `null` unless the request sent a recognised `Prefer: count` preference, exactly as `next` is always
+  present and null
+  on the last page — the envelope's members are a statement about the bytes. A client that rejects
+  unknown members, or that pins the published schema's `required` list, sees the change.
+
 - **A dev API key's `Secret` must now be at least 32 characters** (#125). `AlvoAuthOptionsValidator`
   required only that it be non-empty, so `Secret = "password"` was accepted — and `ApiKeyHash` is a
   single unsalted SHA-256 pass, which is only as strong as the assumption that the secret is random.
@@ -193,6 +206,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a path base (#130), and the Scalar UI's own behaviour there is unmeasured (#134).
 
 ### Added
+
+- **`?order=<nullable field>` works, and `nullsfirst`/`nullslast` finally do something** (#116).
+  Every list over HTTP is paged, and a paged read sorted by a nullable field used to be refused with
+  422 — so sorting by a `display_name` that may be null was impossible, and half the published sort
+  grammar could not be reached. The keyset boundary now compares the same *(where the null sorts,
+  then the value)* pair the `ORDER BY` ranks by, so a nullable key pages like any other and a cursor
+  walks the null-keyed rows too. `nullslast` is the default when a key does not say otherwise; where
+  a null sorts is never left to the database, because SQLite and PostgreSQL disagree on it.
+  **The cost is real and worth knowing:** the null placement is emitted as a `CASE` expression over
+  the key, which an index on that key cannot serve, so page by a required column where latency
+  matters. Per-dialect native `NULLS FIRST`/`NULLS LAST` is the follow-up (#178).
+
+- **`Prefer: count=exact` fills the page envelope's `count`** (#110), with the number of rows the
+  query matches in total — narrowed by your policy and your filter, and *not* by `limit`, `offset`
+  or `after`, so it does not shrink as you page. Opt-in, because an exact count is a second scan of
+  the matching set on every request; a request that sends no preference costs exactly what it did
+  before. `count=planned` and `count=estimated` are accepted and **degrade to an exact count** — a
+  planner estimate exists on one supported engine and not the other, and this API answers identically
+  on both — and `Preference-Applied: count=exact` (RFC 7240 §3) tells the caller what was done. Per
+  RFC 7240 a preference this server does not recognise is ignored rather than refused; its absence
+  from `Preference-Applied` is how that is reported. *Exact* means "not an estimate", not
+  "atomically consistent with `items`": the count is a second statement, so a write landing between
+  the two can make the number differ by one.
 
 - **A standalone host you can run without writing any code.** `docker compose up` brings up a
   working backend defined entirely by a JSON descriptor mounted at `/alvo/descriptor.json` — no

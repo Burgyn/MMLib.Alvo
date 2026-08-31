@@ -17,9 +17,12 @@
           "categories"
         ],
         "summary": "List 'categories' rows",
-        "description": "Reads a page of rows the caller's policy admits.\n\n**Filtering** follows PostgREST's spelling: every query parameter that is not one of the reserved names (order, limit, offset, after, select, or, and, not) names a field, and its value is `<operator>.<operand>` — `?year=gte.2020`. The operators are eq, neq, gt, gte, lt, lte, like, ilike, in, is. `in` takes a bracketed candidate list (`in.(skoda,vw)`) and `is` takes exactly `null`, `true` or `false`; `like`/`ilike` take a pattern. An unrecognised operator is refused with 422, never quietly read as equality, and an ordering operator applied to a type this API defines no total order over is refused too — so one filter means the same thing on every engine.\n\nSeveral parameters are one **conjunction** (AND), which is the only reading that keeps a filter narrowing as terms are added. `or=(…)` and `and=(…)` group terms explicitly and may nest, and prefixing any parameter name or group keyword with `not.` negates it (`not.color=eq.red`, `not.or=(…)`).\n\n**A field that is unavailable to the caller is refused exactly like one that does not exist**, in `filter`, `order` and `select` alike — the refusal names the parameter's role and never the field, so filtering, ordering or selecting cannot be used to discover a hidden field's name. The one exception is a field the descriptor also marks `required`: its name is published in the write schemas below, because a mandatory field a caller cannot see could not be supplied — see the overview.\n\nThe response is an envelope — `{ \"items\": [ … ], \"next\": <cursor or null> }` — and never a bare array. `next` is the cursor for the page after this one, and it is the *only* place that cursor appears: there is deliberately no `Link` or `Content-Range` header, so an agent reading the body never has to parse HTTP headers to keep paging.\n\n**A caller whose rule excludes every row is answered 200 with an empty page, not 403.** A rule compiles to a row-level `USING` predicate, so a caller who fails it receives an *allow* carrying a predicate that matches nothing. A 403 here means something else entirely: the operation is unconfigured for this entity, the entity is unknown to the applied descriptor, the caller has no tenant on a tenant-scoped entity, or the policy reads a caller value this caller does not carry.\n\n**Neither precondition header is honoured on a list.** A page has no version of its own to compare, so `If-Match` and `If-None-Match` are ignored here — not refused, as they would be on a write. Condition a single row's read or write instead.\n\n**A nullable field cannot be a sort key**, and since every list over HTTP is paged (`limit` always resolves, to a configured default when the request names none), that is every list: `order` over a nullable field is refused with 422. A keyset cursor is a chain of comparisons with no `IS NULL` arm, so paging over a nullable key silently drops rows — which is why it is refused rather than answered. The consequence for the two null-placement modifiers is that `nullsfirst` and `nullslast` parse, and their effect is currently unobservable: the only reads that could show it are the unpaged ones this endpoint does not offer.",
+        "description": "Reads a page of rows the caller's policy admits.\n\n**Filtering** follows PostgREST's spelling: every query parameter that is not one of the reserved names (order, limit, offset, after, select, or, and, not) names a field, and its value is `<operator>.<operand>` — `?year=gte.2020`. The operators are eq, neq, gt, gte, lt, lte, like, ilike, in, is. `in` takes a bracketed candidate list (`in.(skoda,vw)`) and `is` takes exactly `null`, `true` or `false`; `like`/`ilike` take a pattern. An unrecognised operator is refused with 422, never quietly read as equality, and an ordering operator applied to a type this API defines no total order over is refused too — so one filter means the same thing on every engine.\n\nSeveral parameters are one **conjunction** (AND), which is the only reading that keeps a filter narrowing as terms are added. `or=(…)` and `and=(…)` group terms explicitly and may nest, and prefixing any parameter name or group keyword with `not.` negates it (`not.color=eq.red`, `not.or=(…)`).\n\n**A field that is unavailable to the caller is refused exactly like one that does not exist**, in `filter`, `order` and `select` alike — the refusal names the parameter's role and never the field, so filtering, ordering or selecting cannot be used to discover a hidden field's name. The one exception is a field the descriptor also marks `required`: its name is published in the write schemas below, because a mandatory field a caller cannot see could not be supplied — see the overview.\n\nThe response is an envelope — `{ \"items\": [ … ], \"next\": <cursor or null>, \"count\": <total or null> }` — and never a bare array. All three members are always present: `next` is the cursor for the page after this one and is null on the last, and `count` is null unless the request opted into it. `next` is the *only* place that cursor appears: there is deliberately no `Link` or `Content-Range` header, so an agent reading the body never has to parse HTTP headers to keep paging.\n\n**A caller whose rule excludes every row is answered 200 with an empty page, not 403.** A rule compiles to a row-level `USING` predicate, so a caller who fails it receives an *allow* carrying a predicate that matches nothing. A 403 here means something else entirely: the operation is unconfigured for this entity, the entity is unknown to the applied descriptor, the caller has no tenant on a tenant-scoped entity, or the policy reads a caller value this caller does not carry.\n\n**Neither precondition header is honoured on a list.** A page has no version of its own to compare, so `If-Match` and `If-None-Match` are ignored here — not refused, as they would be on a write. Condition a single row's read or write instead.\n\n**A nullable field is a sort key like any other, and `nullslast` is what it gets if you do not say otherwise.** Where a null sorts is never left to the database: SQLite and PostgreSQL disagree on the default for a given direction, so the placement is always explicit in the statement Alvo emits and `nullsfirst`/`nullslast` are how you change it. Paging honours the same placement, so a cursor walks the null-keyed rows too — which was not true before: such a read used to be refused with 422 rather than answered, because a keyset boundary that compared the value alone dropped rows silently.\n\n**Sorting by a nullable field costs more than sorting by a required one.** The null placement is emitted as a `CASE` expression over the key, which an index on that key cannot serve. Page by a required column where latency matters.\n\n**A `Prefer: count` preference is the only thing that fills the envelope's `count`.** It is the number of rows the query matches in total — narrowed by your policy and your filter, and *not* by `limit`, `offset` or `after` — so it does not shrink as you page. It is opt-in because it costs a second scan of the matching set on every request, and `count` is null on a request that did not ask. `count=planned` and `count=estimated` are accepted and degrade to an exact count: a planner estimate exists on one supported engine and not the other, and this API answers identically on both. What was applied comes back in `Preference-Applied`, and per RFC 7240 a preference this server does not recognise is ignored rather than refused — its absence from `Preference-Applied` is how that is reported.\n\nThe count is taken in a second statement over the same filtered set, not in the page's own, because the page's statement carries the cursor boundary and a count composed into it would report the rows after the cursor. So *exact* means \"not an estimate\", not \"atomically consistent with `items`\": a write landing between the two can make the number differ by one.",
         "operationId": "categories.list",
         "parameters": [
+          {
+            "$ref": "#/components/parameters/prefer"
+          },
           {
             "$ref": "#/components/parameters/select"
           },
@@ -72,6 +75,9 @@
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/Cache-Control"
+              },
+              "Preference-Applied": {
+                "$ref": "#/components/headers/Preference-Applied"
               }
             },
             "content": {
@@ -329,9 +335,12 @@
           "products"
         ],
         "summary": "List 'products' rows",
-        "description": "Reads a page of rows the caller's policy admits.\n\n**Filtering** follows PostgREST's spelling: every query parameter that is not one of the reserved names (order, limit, offset, after, select, or, and, not) names a field, and its value is `<operator>.<operand>` — `?year=gte.2020`. The operators are eq, neq, gt, gte, lt, lte, like, ilike, in, is. `in` takes a bracketed candidate list (`in.(skoda,vw)`) and `is` takes exactly `null`, `true` or `false`; `like`/`ilike` take a pattern. An unrecognised operator is refused with 422, never quietly read as equality, and an ordering operator applied to a type this API defines no total order over is refused too — so one filter means the same thing on every engine.\n\nSeveral parameters are one **conjunction** (AND), which is the only reading that keeps a filter narrowing as terms are added. `or=(…)` and `and=(…)` group terms explicitly and may nest, and prefixing any parameter name or group keyword with `not.` negates it (`not.color=eq.red`, `not.or=(…)`).\n\n**A field that is unavailable to the caller is refused exactly like one that does not exist**, in `filter`, `order` and `select` alike — the refusal names the parameter's role and never the field, so filtering, ordering or selecting cannot be used to discover a hidden field's name. The one exception is a field the descriptor also marks `required`: its name is published in the write schemas below, because a mandatory field a caller cannot see could not be supplied — see the overview.\n\nThe response is an envelope — `{ \"items\": [ … ], \"next\": <cursor or null> }` — and never a bare array. `next` is the cursor for the page after this one, and it is the *only* place that cursor appears: there is deliberately no `Link` or `Content-Range` header, so an agent reading the body never has to parse HTTP headers to keep paging.\n\n**A caller whose rule excludes every row is answered 200 with an empty page, not 403.** A rule compiles to a row-level `USING` predicate, so a caller who fails it receives an *allow* carrying a predicate that matches nothing. A 403 here means something else entirely: the operation is unconfigured for this entity, the entity is unknown to the applied descriptor, the caller has no tenant on a tenant-scoped entity, or the policy reads a caller value this caller does not carry.\n\n**Neither precondition header is honoured on a list.** A page has no version of its own to compare, so `If-Match` and `If-None-Match` are ignored here — not refused, as they would be on a write. Condition a single row's read or write instead.\n\n**A nullable field cannot be a sort key**, and since every list over HTTP is paged (`limit` always resolves, to a configured default when the request names none), that is every list: `order` over a nullable field is refused with 422. A keyset cursor is a chain of comparisons with no `IS NULL` arm, so paging over a nullable key silently drops rows — which is why it is refused rather than answered. The consequence for the two null-placement modifiers is that `nullsfirst` and `nullslast` parse, and their effect is currently unobservable: the only reads that could show it are the unpaged ones this endpoint does not offer.",
+        "description": "Reads a page of rows the caller's policy admits.\n\n**Filtering** follows PostgREST's spelling: every query parameter that is not one of the reserved names (order, limit, offset, after, select, or, and, not) names a field, and its value is `<operator>.<operand>` — `?year=gte.2020`. The operators are eq, neq, gt, gte, lt, lte, like, ilike, in, is. `in` takes a bracketed candidate list (`in.(skoda,vw)`) and `is` takes exactly `null`, `true` or `false`; `like`/`ilike` take a pattern. An unrecognised operator is refused with 422, never quietly read as equality, and an ordering operator applied to a type this API defines no total order over is refused too — so one filter means the same thing on every engine.\n\nSeveral parameters are one **conjunction** (AND), which is the only reading that keeps a filter narrowing as terms are added. `or=(…)` and `and=(…)` group terms explicitly and may nest, and prefixing any parameter name or group keyword with `not.` negates it (`not.color=eq.red`, `not.or=(…)`).\n\n**A field that is unavailable to the caller is refused exactly like one that does not exist**, in `filter`, `order` and `select` alike — the refusal names the parameter's role and never the field, so filtering, ordering or selecting cannot be used to discover a hidden field's name. The one exception is a field the descriptor also marks `required`: its name is published in the write schemas below, because a mandatory field a caller cannot see could not be supplied — see the overview.\n\nThe response is an envelope — `{ \"items\": [ … ], \"next\": <cursor or null>, \"count\": <total or null> }` — and never a bare array. All three members are always present: `next` is the cursor for the page after this one and is null on the last, and `count` is null unless the request opted into it. `next` is the *only* place that cursor appears: there is deliberately no `Link` or `Content-Range` header, so an agent reading the body never has to parse HTTP headers to keep paging.\n\n**A caller whose rule excludes every row is answered 200 with an empty page, not 403.** A rule compiles to a row-level `USING` predicate, so a caller who fails it receives an *allow* carrying a predicate that matches nothing. A 403 here means something else entirely: the operation is unconfigured for this entity, the entity is unknown to the applied descriptor, the caller has no tenant on a tenant-scoped entity, or the policy reads a caller value this caller does not carry.\n\n**Neither precondition header is honoured on a list.** A page has no version of its own to compare, so `If-Match` and `If-None-Match` are ignored here — not refused, as they would be on a write. Condition a single row's read or write instead.\n\n**A nullable field is a sort key like any other, and `nullslast` is what it gets if you do not say otherwise.** Where a null sorts is never left to the database: SQLite and PostgreSQL disagree on the default for a given direction, so the placement is always explicit in the statement Alvo emits and `nullsfirst`/`nullslast` are how you change it. Paging honours the same placement, so a cursor walks the null-keyed rows too — which was not true before: such a read used to be refused with 422 rather than answered, because a keyset boundary that compared the value alone dropped rows silently.\n\n**Sorting by a nullable field costs more than sorting by a required one.** The null placement is emitted as a `CASE` expression over the key, which an index on that key cannot serve. Page by a required column where latency matters.\n\n**A `Prefer: count` preference is the only thing that fills the envelope's `count`.** It is the number of rows the query matches in total — narrowed by your policy and your filter, and *not* by `limit`, `offset` or `after` — so it does not shrink as you page. It is opt-in because it costs a second scan of the matching set on every request, and `count` is null on a request that did not ask. `count=planned` and `count=estimated` are accepted and degrade to an exact count: a planner estimate exists on one supported engine and not the other, and this API answers identically on both. What was applied comes back in `Preference-Applied`, and per RFC 7240 a preference this server does not recognise is ignored rather than refused — its absence from `Preference-Applied` is how that is reported.\n\nThe count is taken in a second statement over the same filtered set, not in the page's own, because the page's statement carries the cursor boundary and a count composed into it would report the rows after the cursor. So *exact* means \"not an estimate\", not \"atomically consistent with `items`\": a write landing between the two can make the number differ by one.",
         "operationId": "products.list",
         "parameters": [
+          {
+            "$ref": "#/components/parameters/prefer"
+          },
           {
             "$ref": "#/components/parameters/select"
           },
@@ -507,6 +516,9 @@
               },
               "ETag": {
                 "$ref": "#/components/headers/ETag"
+              },
+              "Preference-Applied": {
+                "$ref": "#/components/headers/Preference-Applied"
               }
             },
             "content": {
@@ -846,7 +858,8 @@
         "title": "categoriesPage",
         "required": [
           "items",
-          "next"
+          "next",
+          "count"
         ],
         "type": "object",
         "properties": {
@@ -864,9 +877,18 @@
               "string"
             ],
             "description": "The opaque cursor for the next page, or null when this page is the last. Send it back verbatim as `after`; it is the provider's to interpret and must not be decoded."
+          },
+          "count": {
+            "minimum": 0,
+            "type": [
+              "null",
+              "integer"
+            ],
+            "description": "How many rows the query matches in total — **not** the size of this page — or null unless the request sent a recognised `Prefer: count` preference — `exact`, or `planned`/`estimated`, which degrade to an exact count. It is narrowed by the caller's policy and by the filter, and not by `limit`, `offset` or `after`, so it does not shrink as you page. Opt-in because an exact count is a second scan of the matching set on every request. **Exact means \"not an estimate\", not \"consistent with `items`\"**: it is taken in a second statement, so a write landing between the two can make it differ from the rows by one.",
+            "format": "int64"
           }
         },
-        "description": "One page of rows, plus the cursor that reads the page after it."
+        "description": "One page of rows, the cursor that reads the page after it, and — when the request opted in with a `Prefer: count` preference — how many rows the query matches in total."
       },
       "categoriesPageItem": {
         "title": "categoriesPageItem",
@@ -1276,7 +1298,8 @@
         "title": "productsPage",
         "required": [
           "items",
-          "next"
+          "next",
+          "count"
         ],
         "type": "object",
         "properties": {
@@ -1294,9 +1317,18 @@
               "string"
             ],
             "description": "The opaque cursor for the next page, or null when this page is the last. Send it back verbatim as `after`; it is the provider's to interpret and must not be decoded."
+          },
+          "count": {
+            "minimum": 0,
+            "type": [
+              "null",
+              "integer"
+            ],
+            "description": "How many rows the query matches in total — **not** the size of this page — or null unless the request sent a recognised `Prefer: count` preference — `exact`, or `planned`/`estimated`, which degrade to an exact count. It is narrowed by the caller's policy and by the filter, and not by `limit`, `offset` or `after`, so it does not shrink as you page. Opt-in because an exact count is a second scan of the matching set on every request. **Exact means \"not an estimate\", not \"consistent with `items`\"**: it is taken in a second statement, so a write landing between the two can make it differ from the rows by one.",
+            "format": "int64"
           }
         },
-        "description": "One page of rows, plus the cursor that reads the page after it."
+        "description": "One page of rows, the cursor that reads the page after it, and — when the request opted in with a `Prefer: count` preference — how many rows the query matches in total."
       },
       "productsPageItem": {
         "title": "productsPageItem",
@@ -1679,6 +1711,15 @@
           "type": "string"
         }
       },
+      "prefer": {
+        "name": "Prefer",
+        "in": "header",
+        "description": "`count=exact` fills the page envelope's `count` with the number of rows the query matches in total. Opt-in, because it is a second scan of the matching set on every request; a request sending no recognised `count` preference gets `null` there.\n\n`count=planned` and `count=estimated` are accepted and **degrade to an exact count**, so they fill `count` too — a planner estimate exists on one supported engine and not the other, and this API answers identically on both. The response says which was applied in `Preference-Applied`, and it is always `count=exact`. Per RFC 7240 a preference this server does not recognise is ignored rather than refused, and its absence from `Preference-Applied` is how that is reported.",
+        "schema": {
+          "type": "string"
+        },
+        "example": "count=exact"
+      },
       "select": {
         "name": "select",
         "in": "query",
@@ -1690,7 +1731,7 @@
       "order": {
         "name": "order",
         "in": "query",
-        "description": "`<field>[.asc|.desc][.nullsfirst|.nullslast]`, comma-separated for several keys, outermost first. The modifiers must appear in that order and each at most once, so one sort key has one spelling; an unrecognised modifier is refused rather than ignored. **A nullable field is refused as a sort key** — see the operation description for why, and for what that means for the two null-placement modifiers.",
+        "description": "`<field>[.asc|.desc][.nullsfirst|.nullslast]`, comma-separated for several keys, outermost first. The modifiers must appear in that order and each at most once, so one sort key has one spelling; an unrecognised modifier is refused rather than ignored. A **nullable** field is a sort key like any other and defaults to `nullslast`; paging honours the same placement — see the operation description for what it costs.",
         "schema": {
           "type": "string"
         },
@@ -1771,6 +1812,13 @@
         "schema": {
           "type": "string"
         }
+      },
+      "Preference-Applied": {
+        "description": "What was done with the request's `Prefer` header (RFC 7240 §3). Present only when a preference was applied, and always `count=exact` — `count=planned` and `count=estimated` degrade to a real count, and this is where a caller who asked for an estimate learns they received the exact one. Absent means no preference was applied, which is how RFC 7240 reports one this server does not recognise.",
+        "schema": {
+          "type": "string"
+        },
+        "example": "count=exact"
       }
     },
     "securitySchemes": {

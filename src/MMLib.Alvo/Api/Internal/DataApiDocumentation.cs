@@ -16,9 +16,9 @@ namespace MMLib.Alvo.Api.Internal;
 /// <c>If-Match</c> is ignored on a read and neither precondition header is honoured on a list
 /// (<see cref="DataApiEndpoints"/>' <c>Representation</c>); a create carrying either one is refused with 412
 /// (<c>EnsureUnconditional</c>); <c>Idempotency-Key</c> is honoured on a create and ignored on an update and
-/// a delete (<c>IdempotencyKeyHeader</c>); and a nullable field cannot be a sort key on a paged read
-/// (<c>AlvoQuery.EnsureSortKeysCanBePaged</c>), which is every list over HTTP. An integrator reads none of
-/// those files. §0 principle 4 makes the published document the contract an agent reads, so this is where
+/// a delete (<c>IdempotencyKeyHeader</c>); and where a <see langword="null"/> sorts on a nullable sort key,
+/// which is a choice the caller makes and the server never guesses (<c>SortSqlRenderer</c>,
+/// <c>KeysetSqlRenderer</c>). An integrator reads none of those files. §0 principle 4 makes the published document the contract an agent reads, so this is where
 /// they belong.
 /// </para>
 /// <para>
@@ -320,15 +320,18 @@ internal static class DataApiDocumentation
 
     /// <summary>
     /// The list operation's prose, carrying two of the four gaps this type exists for — preconditions on a
-    /// list, and a nullable sort key — plus the 200-not-403 behaviour a reader otherwise misreads.
+    /// list, and where nulls sort on a nullable key — plus the 200-not-403 behaviour a reader otherwise
+    /// misreads.
     /// </summary>
     private static string List =>
         "Reads a page of rows the caller's policy admits.\n\n"
         + Grammar + "\n\n"
-        + "The response is an envelope — `{ \"items\": [ … ], \"next\": <cursor or null> }` — and never a bare "
-        + "array. `next` is the cursor for the page after this one, and it is the *only* place that cursor "
-        + "appears: there is deliberately no `Link` or `Content-Range` header, so an agent reading the body "
-        + "never has to parse HTTP headers to keep paging.\n\n"
+        + "The response is an envelope — `{ \"items\": [ … ], \"next\": <cursor or null>, \"count\": "
+        + "<total or null> }` — and never a bare array. All three members are always present: `next` is the "
+        + "cursor for the page after this one and is null on the last, and `count` is null unless the request "
+        + "opted into it. `next` is the *only* place that cursor appears: there is deliberately no `Link` or "
+        + "`Content-Range` header, so an agent reading the body never has to parse HTTP headers to keep "
+        + "paging.\n\n"
         + "**A caller whose rule excludes every row is answered 200 with an empty page, not 403.** A rule "
         + "compiles to a row-level `USING` predicate, so a caller who fails it receives an *allow* carrying a "
         + "predicate that matches nothing. A 403 here means something else entirely: the operation is "
@@ -337,13 +340,30 @@ internal static class DataApiDocumentation
         + "**Neither precondition header is honoured on a list.** A page has no version of its own to compare, "
         + "so `If-Match` and `If-None-Match` are ignored here — not refused, as they would be on a write. "
         + "Condition a single row's read or write instead.\n\n"
-        + "**A nullable field cannot be a sort key**, and since every list over HTTP is paged (`limit` always "
-        + "resolves, to a configured default when the request names none), that is every list: `order` over a "
-        + "nullable field is refused with 422. A keyset cursor is a chain of comparisons with no `IS NULL` arm, "
-        + "so paging over a nullable key silently drops rows — which is why it is refused rather than answered. "
-        + "The consequence for the two null-placement modifiers is that `nullsfirst` and `nullslast` parse, and "
-        + "their effect is currently unobservable: the only reads that could show it are the unpaged ones this "
-        + "endpoint does not offer.";
+        + "**A nullable field is a sort key like any other, and `nullslast` is what it gets if you do not say "
+        + "otherwise.** Where a null sorts is never left to the database: SQLite and PostgreSQL disagree on "
+        + "the default for a given direction, so the placement is always explicit in the statement Alvo emits "
+        + "and `nullsfirst`/`nullslast` are how you change it. Paging honours the same placement, so a cursor "
+        + "walks the null-keyed rows too — which was not true before: such a read used to be refused with 422 "
+        + "rather than answered, because a keyset boundary that compared the value alone dropped rows "
+        + "silently.\n\n"
+        + "**Sorting by a nullable field costs more than sorting by a required one.** The null placement is "
+        + "emitted as a `CASE` expression over the key, which an index on that key cannot serve. Page by a "
+        + "required column where latency matters.\n\n"
+        + "**A `Prefer: count` preference is the only thing that fills the envelope's `count`.** It is the "
+        + "number of "
+        + "rows the query matches in total — narrowed by your policy and your filter, and *not* by `limit`, "
+        + "`offset` or `after` — so it does not shrink as you page. It is opt-in because it costs a second "
+        + "scan of the matching set on every request, and `count` is null on a request that did not ask. "
+        + "`count=planned` and `count=estimated` are accepted and degrade to an exact count: a planner "
+        + "estimate exists on one supported engine and not the other, and this API answers identically on "
+        + "both. What was applied comes back in `Preference-Applied`, and per RFC 7240 a preference this "
+        + "server does not recognise is ignored rather than refused — its absence from `Preference-Applied` "
+        + "is how that is reported.\n\n"
+        + "The count is taken in a second statement over the same filtered set, not in the page's own, "
+        + "because the page's statement carries the cursor boundary and a count composed into it would "
+        + "report the rows after the cursor. So *exact* means \"not an estimate\", not \"atomically "
+        + "consistent with `items`\": a write landing between the two can make the number differ by one.";
 
     /// <summary>
     /// The filter, sort and paging grammar, stated once on the list operation rather than repeated on each of

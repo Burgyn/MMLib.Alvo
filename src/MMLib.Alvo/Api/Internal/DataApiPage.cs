@@ -4,8 +4,8 @@ using System.Text.Json.Serialization;
 namespace MMLib.Alvo.Api.Internal;
 
 /// <summary>
-/// The wire shape of a list response: a JSON object carrying the rows and the cursor for the page after
-/// this one.
+/// The wire shape of a list response: a JSON object carrying the rows, the cursor for the page after this
+/// one, and the total the caller opted into.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -35,6 +35,19 @@ internal sealed record DataApiPage
     [JsonPropertyName("next")]
     public string? Next { get; init; }
 
+    /// <summary>
+    /// How many rows the query matches in total, or <see langword="null"/> when the request sent no
+    /// <c>count</c> preference this server recognises. Never the size of this page.
+    /// </summary>
+    /// <remarks>
+    /// <b>Always present, and <see langword="null"/> when unasked</b> — the same rule <see cref="Next"/>
+    /// already follows, and for the same reason: the envelope's members are a statement about the bytes, so
+    /// all three are <c>required</c> in the published schema. A third member that appeared only sometimes
+    /// would be one a client has to probe for.
+    /// </remarks>
+    [JsonPropertyName("count")]
+    public long? Count { get; init; }
+
     /// <summary>Wraps one page the port returned, projected to the fields the request selected.</summary>
     /// <param name="page">The page to render.</param>
     /// <param name="select">The fields to keep, or <see langword="null"/> to keep every field the port returned.</param>
@@ -45,6 +58,7 @@ internal sealed record DataApiPage
         {
             Items = [.. page.Items.Select(row => Project(row.Values, select))],
             Next = page.NextCursor,
+            Count = page.TotalCount,
         };
     }
 

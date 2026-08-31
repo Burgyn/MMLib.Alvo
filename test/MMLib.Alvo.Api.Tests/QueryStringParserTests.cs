@@ -207,7 +207,6 @@ public sealed class QueryStringParserTests
     [InlineData("after=abc&offset=1", "conflicting-paging")]
     [InlineData("order=year.sideways", "malformed-order")]
     [InlineData("order=year,year", "repeated-sort-key")]
-    [InlineData("order=color", "unpageable-sort-key")]
     [InlineData("select=", "malformed-select")]
     [InlineData("select=nosuchfield", "unavailable-field")]
     [InlineData("limit=1&limit=2", "repeated-parameter")]
@@ -327,7 +326,7 @@ public sealed class QueryStringParserTests
         "nosuchfield=eq.1", "secret=eq.1", "year=nosuchop.1", "year=eq", "year=gte.notanumber",
         "make=eq.a%00b", "notes=is.hello", "make=in.skoda", "or=(", "or=()", "year=like.2",
         "limit=0", "offset=-1", "after=", "after=abc&offset=1", "order=", "order=year.sideways",
-        "order=year,year", "order=color", "select=", "select=nosuchfield", "limit=1&limit=2",
+        "order=year,year", "select=", "select=nosuchfield", "limit=1&limit=2",
     ];
 
     /// <summary>
@@ -479,17 +478,19 @@ public sealed class QueryStringParserTests
         OnlyViolation(queryString).Code.ShouldBe("malformed-order");
 
     /// <summary>
-    /// Every list is paged — the default page size is always applied — so the port's rule that a paged read
-    /// cannot sort by a nullable field makes a nullable sort key unusable over HTTP. Asserted rather than
-    /// discovered: the required control is what turns this from a bug report into a stated contract.
+    /// Every list is paged — the default page size is always applied — and a <b>nullable</b> field is a sort
+    /// key like any other, which it was not before F4: the port refused a paged read over one, so half the
+    /// published order grammar (<c>nullsfirst</c>/<c>nullslast</c>) could not be reached over HTTP at all.
+    /// The required key is kept beside it as the control, so this cannot pass by admitting everything.
     /// </summary>
     [Fact]
-    public void A_sort_by_a_nullable_field_is_refused_because_every_list_is_paged()
+    public void A_sort_by_a_nullable_field_is_accepted_and_keeps_its_null_placement()
     {
-        TryParse("order=color", out _, out var refused).ShouldBeFalse();
+        TryParse("order=color.desc.nullsfirst", out var nullable, out var refusals).ShouldBeTrue(Because(refusals));
         TryParse("order=year", out var required, out var violations).ShouldBeTrue(Because(violations));
 
-        refused.Single().Code.ShouldBe("unpageable-sort-key");
+        nullable!.Query.Sort.Single().ShouldBe(new AlvoSort("color", Descending: true, Nulls: AlvoNullPlacement.First));
+        nullable.Query.Limit.ShouldNotBeNull("every list is paged, which is what used to make this unreachable");
         required!.Query.Sort.Single().Field.ShouldBe("year");
     }
 
@@ -541,9 +542,9 @@ public sealed class QueryStringParserTests
     {
         var flooded = string.Join("&", Enumerable.Repeat("year=gte.1", 300));
 
-        TryParse($"{flooded}&limit=0&order=color", out _, out var violations).ShouldBeFalse();
+        TryParse($"{flooded}&limit=0&order=year.sideways", out _, out var violations).ShouldBeFalse();
 
-        Codes(violations).ShouldBe(["filter-too-wide", "invalid-page-size", "unpageable-sort-key"]);
+        Codes(violations).ShouldBe(["filter-too-wide", "invalid-page-size", "malformed-order"]);
     }
 
     /// <summary>

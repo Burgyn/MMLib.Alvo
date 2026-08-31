@@ -118,6 +118,7 @@ internal static class DataApiParameters
             (IfMatchId, IfMatch),
             (IfNoneMatchId, IfNoneMatch),
             (IdempotencyKeyId, IdempotencyKey(options)),
+            (PreferId, Prefer),
             (SelectId, Select),
             (OrderId, Order),
             (LimitId, Limit(options)),
@@ -137,6 +138,8 @@ internal static class DataApiParameters
     private const string IfNoneMatchId = "ifNoneMatch";
 
     private const string IdempotencyKeyId = "idempotencyKey";
+
+    private const string PreferId = "prefer";
 
     private const string SelectId = "select";
 
@@ -215,6 +218,7 @@ internal static class DataApiParameters
     private static IEnumerable<string> HeaderNames(DataOperation operation, EntitySchema entity) =>
         operation switch
         {
+            DataOperation.List => [PreferId],
             DataOperation.Get when AlvoManagedColumns.VersionColumn(entity) is not null => [IfNoneMatchId],
             DataOperation.Create => [IdempotencyKeyId],
             DataOperation.Update or DataOperation.Delete
@@ -275,6 +279,34 @@ internal static class DataApiParameters
         },
     };
 
+    /// <summary>
+    /// The RFC 7240 preference header, for the one preference a list honours.
+    /// </summary>
+    /// <remarks>
+    /// Published even though an unrecognised preference is <em>ignored</em> rather than refused: that is
+    /// RFC 7240's own rule, and a document that did not name the one preference this endpoint acts on would
+    /// leave an agent with no way to discover a count is available at all. What was applied comes back in
+    /// <c>Preference-Applied</c>, which is described with the 200 response.
+    /// </remarks>
+    private static OpenApiParameter Prefer => new()
+    {
+        Name = PreferHeader.Name,
+        In = ParameterLocation.Header,
+        Required = false,
+        Description =
+            "`count=exact` fills the page envelope's `count` with the number of rows the query matches in "
+            + "total. Opt-in, because it is a second scan of the matching set on every request; a request "
+            + "sending no recognised `count` preference gets `null` there.\n\n"
+            + "`count=planned` and `count=estimated` are accepted and **degrade to an exact count**, so they "
+            + "fill `count` too — a planner estimate exists on one supported engine and not the other, and "
+            + "this API answers identically on both. The response says which was applied in "
+            + "`Preference-Applied`, and it is always `count=exact`. Per RFC 7240 a preference this server "
+            + "does not recognise is ignored rather than refused, and its absence from `Preference-Applied` "
+            + "is how that is reported.",
+        Schema = new OpenApiSchema { Type = JsonSchemaType.String },
+        Example = JsonValue.Create("count=exact"),
+    };
+
     private static OpenApiParameter Select => new()
     {
         Name = ReservedQueryKeys.Select,
@@ -293,9 +325,9 @@ internal static class DataApiParameters
         Description =
             "`<field>[.asc|.desc][.nullsfirst|.nullslast]`, comma-separated for several keys, outermost "
             + "first. The modifiers must appear in that order and each at most once, so one sort key has one "
-            + "spelling; an unrecognised modifier is refused rather than ignored. **A nullable field is "
-            + "refused as a sort key** — see the operation description for why, and for what that means for "
-            + "the two null-placement modifiers.",
+            + "spelling; an unrecognised modifier is refused rather than ignored. A **nullable** field is a "
+            + "sort key like any other and defaults to `nullslast`; paging honours the same placement — see "
+            + "the operation description for what it costs.",
         Schema = new OpenApiSchema { Type = JsonSchemaType.String },
         Example = JsonValue.Create("id.desc"),
     };

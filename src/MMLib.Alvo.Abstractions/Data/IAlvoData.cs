@@ -285,8 +285,10 @@ public interface IAlvoData
     /// <see cref="AlvoPage.NextCursor"/> is an opaque, provider-issued token — only the implementation that
     /// issued it may interpret a later <see cref="AlvoQuery.After"/> carrying it back, and it is
     /// <see langword="null"/> exactly when this page is the last one the query has. <see cref="AlvoPage.TotalCount"/>
-    /// is always <see langword="null"/> in F3: no implementation runs a <c>COUNT</c> query, because nothing
-    /// here has asked for one yet.
+    /// is <see langword="null"/> unless <see cref="AlvoQuery.IncludeTotalCount"/> asked for it, and when it did it
+    /// counts the <b>policy-filtered</b> set narrowed by the caller's filter — never the table, and never this
+    /// page: an implementation composes the count over the same <c>WHERE</c> terms as the page and drops the
+    /// ordering, the window and the cursor boundary.
     /// </returns>
     /// <exception cref="AlvoAuthorizationException">
     /// No policy allows <c>list</c> on this entity for <paramref name="context"/>, or

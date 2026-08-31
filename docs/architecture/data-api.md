@@ -154,6 +154,26 @@ own semantics and the only reading in which adding a term narrows the set.
 - Negation: a single leading `not.` on a key or a group member. `not.not.` is not in the grammar.
 - `order=<field>[.asc|.desc][.nullsfirst|.nullslast][,…]`, `select=a,b`, `limit`, `offset`, `after`.
 
+### Sorting over nulls
+
+Where a `NULL` sorts is **never** left to the database: SQLite and PostgreSQL disagree on the default for a
+given direction, so the placement is always explicit in the emitted statement — `nullslast` unless the key
+says otherwise — and it is emitted as the portable `CASE WHEN <key> IS NULL THEN 0/1 ELSE 1/0 END` rank
+(spike `Q3c`), always ascending, ahead of the value term the direction applies to.
+
+**The keyset boundary compares that same pair**, which is what makes a nullable key pageable. It is not the
+value comparison plus a special case: expanding `(rank, value) > (rank₀, value₀)` and folding away the arms
+that are constant leaves four shapes, two of which are identical to the non-nullable form. The full
+derivation is in `docs/architecture/data-path.md`; the property that matters here is that order and boundary
+are two renderings of one fact, and the inherited paging walk — page a null-bearing set one row at a time and
+compare with the unpaged read — is what holds them together.
+
+**The cost is real and it is a reason to sort by a required column.** The `CASE` rank cannot be served by an
+index on the sort key, so a paged sort over a nullable field is slower than one over a required field, which
+emits no rank at all. The index-friendly fix is per-dialect native `NULLS FIRST`/`NULLS LAST` behind
+`IAlvoSqlDialect` — both shipped engines support it — and it is **#178**, deliberately not bundled with
+the change that made the read legal.
+
 `select` is applied to the **response**, not to the `SELECT` list — the port has no projection member yet,
 so `?select=id` costs the database exactly what a full read costs (**#117**).
 
@@ -239,20 +259,23 @@ means no explicit limit; the EF driver returns the whole visible set with no cur
 calling `IAlvoData` directly may still read a whole set. Both halves are stated here so that neither is
 "fixed": the port keeps the capability, the HTTP surface deliberately does not expose it.
 
-One consequence worth knowing: a nullable field cannot be a sort key on a *paged* read, and every HTTP
-list is paged — so `?order=<any nullable field>` is refused outright, and `nullsfirst`/`nullslast` parse
-but are currently **unobservable**. Both are issue **#116**, and it will be hit on day one.
+One consequence used to follow and no longer does: because every HTTP list is paged and a paged read over
+a nullable sort key was refused, `?order=<any nullable field>` was a 422 and `nullsfirst`/`nullslast` were
+unobservable — half the published sort grammar, unreachable. **#116** closed that: the keyset boundary now
+compares the same *(where the null sorts, then the value)* pair the `ORDER BY` ranks by, so a nullable key
+pages like any other. See *Sorting over nulls* below for what it costs.
 
 ## Paging: keyset over an opaque cursor, and its real cost
 
-The response is a JSON envelope, always both members:
+The response is a JSON envelope, always all three members:
 
 ```json
-{ "items": [ … ], "next": "3q2-796tvE-cKTMlvKYbGw" }
+{ "items": [ … ], "next": "3q2-796tvE-cKTMlvKYbGw", "count": null }
 ```
 
-`next` is `null` on the last page rather than omitted, which is why the published schema marks both
-`required` — a statement about the bytes, not an aspiration.
+`next` is `null` on the last page rather than omitted, which is why the published schema marks all three
+`required` — a statement about the bytes, not an aspiration. `count` follows the same rule and is `null`
+unless the request opted in; see *The count is opt-in* below.
 
 ### The cursor's contract, and why the API layer cannot mint one
 
@@ -293,6 +316,58 @@ The fix is a row-constructor comparison (`(a, b) > (@a, @b)`) where the engine s
 `offset` is the opt-in second mode. A request may not combine `after` and `offset` — they anchor the same
 window two different ways, and answering with one would silently resolve an ambiguous request
 (`AlvoQuery.EnsurePagingWindowIsSane`).
+
+### The count is opt-in: `Prefer: count=exact` (#110)
+
+`Prefer: count=exact` fills the envelope's `count` with **how many rows the query matches**, not how many
+this page holds. `Preference-Applied: count=exact` reports what was done (RFC 7240 §3).
+
+- **Opt-in, and the default is no count.** An exact count is a second full scan of the matching set on every
+  page; as a default it would make every list roughly twice the work for a number most callers never read.
+  §2.1 requires it to be opt-in and the analysis names `count(*)` over a large table as the expense. A
+  request that sends no preference composes and executes no count statement at all.
+- **`planned` and `estimated` are accepted and degrade to `exact`.** A planner estimate is engine-specific —
+  PostgreSQL has `EXPLAIN`, SQLite has no equivalent worth the name — and §0 principle 3 makes identical
+  behaviour the contract, so a mode real on one driver and fictional on the other belongs on neither.
+  `Preference-Applied` is where the caller who asked for an estimate learns they received the real count.
+- **The port models the capability, not the preference.** `AlvoQuery.IncludeTotalCount` is a `bool`. The
+  three RFC 7240 spellings are HTTP vocabulary and the degradation is an HTTP decision, taken where the
+  header is read. When a driver can honestly estimate, the port grows a mode and `AlvoPage` grows the applied
+  one — additively, at the point the distinction becomes true.
+- **The count is over the policy-filtered set.** It is composed by `ReadStatementComposer.ComposeCount` from
+  the *same* `WHERE` terms as the page — the resolved `USING` predicate, the synthesized tenant scope, the
+  caller's filter — with the projection, the ordering, the row window and the **cursor boundary** all
+  dropped. A count over the bare table returns a plausible integer and passes every row-level test while
+  telling a caller how many rows exist outside what they may read; `AlvoDataStatementTests` asserts the
+  second statement carries the policy prefixes in its own `WHERE`.
+
+**One deviation, stated.** PostgREST computes its count in the same statement, with `COUNT(*) OVER ()`. Alvo
+cannot: that window is evaluated after `WHERE`, and Alvo's `WHERE` carries the keyset boundary, so on any
+page but the first it would count the rows *after* the cursor rather than the set. (It would work for offset
+paging, which is exactly how you end up with two shapes and one of them wrong.) So it is a second statement,
+on the same connection, in no transaction — and a write interleaving the two can make the number disagree
+with the rows by one. **`exact` means "not an estimate", not "atomically consistent with `items`"**; read
+committed would not deliver the latter anyway without escalating every counted list to `REPEATABLE READ`.
+
+**Unrecognised preferences are ignored, not refused** — the one deliberate departure from this API's own
+"refuse, never ignore" rule. RFC 7240 §2 makes `Prefer` advisory and requires a server to ignore a preference
+it does not recognise or cannot satisfy, and §3 gives `Preference-Applied` as the channel for saying so. So
+`Prefer: count=exakt` yields no count and no `Preference-Applied`, which is precisely how the standard says
+that is reported. Adopting a known spec and then tightening it into a variant is a defect, not a shortcut;
+the detection the house rule protects is present, in the standard's place rather than ours.
+
+**No `Vary: Prefer`.** RFC 7240 suggests it where a response varies by the header, and this one does — but
+every generated response already carries `Cache-Control: no-store`, so no cache may store the representation
+and a `Vary` has no addressee.
+
+**A gap worth naming: the count is the client's opt-in, and the operator has no say (#179).** `MaxPageSize`
+is the operator's control over the sibling concern — "an unbounded `limit` is a denial of service one query
+long" — and it bounds the *rows* a request returns, not the work a `COUNT(*)` does. So any caller authorized
+to `list` can roughly double the cost of every list request, and keep doing it on every page of a deep walk.
+This is availability only: the count is composed over the caller's own policy-filtered set, so nothing
+crosses a boundary. It is stated rather than fixed because the answer is a host-facing option (refuse the
+preference, or degrade past a row threshold), and inventing one before an operator has asked for a shape
+would be guessing at the shape.
 
 ## Optimistic concurrency: a strong `ETag` over the row version
 

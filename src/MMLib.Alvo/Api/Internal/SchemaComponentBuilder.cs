@@ -211,18 +211,24 @@ internal sealed class SchemaComponentBuilder(
         : "The row to create. A field declared `required` by the descriptor must be present; the row's `id` "
         + "and the framework's own columns are assigned by Alvo and are refused if supplied.";
 
-    /// <summary>The page envelope: the rows, and the cursor for the page after this one.</summary>
+    /// <summary>
+    /// The page envelope: the rows, the cursor for the page after this one, and the total the caller opted
+    /// into.
+    /// </summary>
     /// <remarks>
-    /// Both members are always present — <c>next</c> is written as <see langword="null"/> on the last page
-    /// rather than omitted (<c>DataApiJson</c> never ignores a null), so requiring them is a statement about
-    /// the bytes and not an aspiration.
+    /// All three members are always present — <c>next</c> is written as <see langword="null"/> on the last
+    /// page and <c>count</c> whenever no count was asked for (<c>DataApiJson</c> never ignores a null), so
+    /// requiring them is a statement about the bytes and not an aspiration. A member that appeared only
+    /// sometimes would be one a client has to probe for.
     /// </remarks>
     /// <param name="document">The document the row component is referenced from.</param>
     private OpenApiSchema Page(OpenApiDocument document) => new()
     {
         Type = JsonSchemaType.Object,
         Title = PageId(entity.Name),
-        Description = "One page of rows, plus the cursor that reads the page after it.",
+        Description =
+            "One page of rows, the cursor that reads the page after it, and — when the request opted in with "
+            + "a `Prefer: count` preference — how many rows the query matches in total.",
         Properties = new Dictionary<string, IOpenApiSchema>(StringComparer.Ordinal)
         {
             ["items"] = new OpenApiSchema
@@ -239,8 +245,24 @@ internal sealed class SchemaComponentBuilder(
                     "The opaque cursor for the next page, or null when this page is the last. Send it back "
                     + "verbatim as `after`; it is the provider's to interpret and must not be decoded.",
             },
+            ["count"] = new OpenApiSchema
+            {
+                Type = JsonSchemaType.Integer | JsonSchemaType.Null,
+                Format = "int64",
+                Minimum = "0",
+                Description =
+                    "How many rows the query matches in total — **not** the size of this page — or null "
+                    + "unless the request sent a recognised `Prefer: count` preference — `exact`, or "
+                    + "`planned`/`estimated`, which degrade to an exact count. It is narrowed by the "
+                    + "caller's policy "
+                    + "and by the filter, and not by `limit`, `offset` or `after`, so it does not shrink as "
+                    + "you page. Opt-in because an exact count is a second scan of the matching set on every "
+                    + "request. **Exact means \"not an estimate\", not \"consistent with `items`\"**: it is "
+                    + "taken in a second statement, so a write landing between the two can make it differ "
+                    + "from the rows by one.",
+            },
         },
-        Required = new HashSet<string>(StringComparer.Ordinal) { "items", "next" },
+        Required = new HashSet<string>(StringComparer.Ordinal) { "items", "next", "count" },
     };
 
     /// <summary>Every field of the entity that belongs in one of the four schemas, in the schema's own order.</summary>

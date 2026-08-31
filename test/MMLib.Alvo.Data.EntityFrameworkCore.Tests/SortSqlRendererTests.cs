@@ -21,12 +21,14 @@ public class SortSqlRendererTests
 
     /// <summary>
     /// The null-placement rank is emitted <b>only</b> where the key is nullable. It defeats an index on the
-    /// sort key, and over a non-nullable key it is a compile-time constant <c>0</c> that cannot change a single
-    /// row — which is what it used to be on <em>every paged read</em>, because
-    /// <c>EnsureSortKeysCanBePaged</c> refuses a nullable paged key three frames earlier. So the one
-    /// index-defeating construct in this data path was unavoidable in exactly the case §2.1's latency criterion
-    /// is about.
+    /// sort key, and over a non-nullable key it is a compile-time constant that cannot change a single row.
     /// </summary>
+    /// <remarks>
+    /// This is also the condition <c>KeysetSqlRenderer</c> reads to decide whether its boundary compares the
+    /// <em>(rank, value)</em> pair or the value alone. The two arms below are therefore the same two arms that
+    /// renderer has, and one of them moving without the other is what makes a page skip or repeat a row —
+    /// which the inherited paging walk, not this fact, is what catches.
+    /// </remarks>
     /// <param name="field">The key to sort by — <c>plate</c> is required, <c>status</c> nullable.</param>
     /// <param name="expected">The rendered term list.</param>
     [Theory]
