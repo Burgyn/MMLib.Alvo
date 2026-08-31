@@ -39,7 +39,8 @@ the whole failure this file exists to prevent.
 | `YOU ARE HERE:` | `TU SME:` |
 | `unverified` (span) | `neoverené` |
 | `not run` (gate chip) | `nebežalo` |
-| `added` / `changed` / `removed` (API tags) | `pridané` / `zmenené` / `odstránené` |
+| `not run (post-merge on main)` (gate chip, mutation) | `nebežalo (post-merge na main)` |
+| `added` / `changed` / `removed` / `renamed` (API tags) | `pridané` / `zmenené` / `odstránené` / `premenované` |
 | `yes` / `no` (Breaking column) | `áno` / `nie` |
 | `before` / `after` (`.pair .lbl`) | `pred` / `po` |
 | `files` (header chip) | `súbory` |
@@ -54,6 +55,15 @@ beside it are GitHub's. `draft` stays for the same reason.
 The risk value is a **scale**, so it is the one word here that must never be
 paraphrased — `stredné` every time, never `priemerné`, or two reports cannot be
 compared.
+
+The mutation gate's chip carries its own parenthetical because `nebežalo` alone
+reads as an omission, and mutation not running on a PR is the *design*
+(`CLAUDE.md`: Stryker runs post-merge on `main`). `main` keeps its spelling — it
+is a branch name — and `post-merge` keeps its, being the repo's own term.
+
+`renamed` is a distinct API tag from `zmenené`: a rename is the one change that
+breaks a consumer's *source* while leaving the shape intact, so collapsing it
+into "changed" hides exactly the consequence section 4 exists to report.
 
 ## The footer
 
