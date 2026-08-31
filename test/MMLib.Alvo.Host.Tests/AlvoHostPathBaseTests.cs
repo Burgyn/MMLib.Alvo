@@ -132,6 +132,50 @@ public class AlvoHostPathBaseTests
     }
 
     /// <summary>
+    /// #130 in the pipeline it matters in: behind a trusted proxy the served document advertises the prefix,
+    /// and a client that resolves a path key against it reaches the collection <b>through the proxy</b>.
+    /// </summary>
+    /// <remarks>
+    /// The document's <c>servers[0].url</c> is built by ASP.NET Core from <c>Request.Scheme</c>,
+    /// <c>Request.Host</c> and <c>Request.PathBase</c>; the first two halves are pinned by
+    /// <see cref="AlvoHostForwardedOriginTests"/> and the third by nothing until now. The follow-up goes
+    /// through <see cref="FollowThroughTheProxyAsync"/> for the reason this file's header gives: the 404 an
+    /// unprefixed URL produces happens at the proxy, and the host cannot produce it.
+    /// </remarks>
+    [Fact]
+    public async Task A_trusted_proxys_forwarded_prefix_reaches_the_documents_advertised_origin()
+    {
+        await using var world = await AlvoHostWorld.StartAsync(overrides: ForwardedHeadersEnabled());
+
+        var document = await DocumentAsync(world, ForwardedPrefix());
+        var origin = Origin(document);
+        var resolved = Resolve(origin, CollectionPathKey(document));
+
+        var followed = await FollowThroughTheProxyAsync(world, LocalPathOf(resolved));
+
+        followed.ShouldBe(
+            HttpStatusCode.OK,
+            $"a client behind the proxy resolves '{resolved}' from the document and must reach the collection");
+        origin.ShouldBe($"http://localhost{Prefix}");
+    }
+
+    /// <summary>
+    /// The control, and the security half: with the switch off — the default — a caller cannot talk the host
+    /// into advertising a base URL of their choosing to the next client that reads the document.
+    /// </summary>
+    [Fact]
+    public async Task An_untrusted_forwarded_prefix_does_not_reach_the_documents_advertised_origin()
+    {
+        await using var world = await AlvoHostWorld.StartAsync();
+
+        var origin = Origin(await DocumentAsync(world, ForwardedPrefix()));
+
+        origin.ShouldBe(
+            "http://localhost/",
+            "an untrusted caller must not choose the base URL the document hands the next client");
+    }
+
+    /// <summary>
     /// Follows <paramref name="location"/> the way a client behind the proxy does, because that is where #121's
     /// 404 happens and the host cannot produce it.
     /// </summary>
@@ -154,6 +198,41 @@ public class AlvoHostPathBaseTests
 
         return forwarded.StatusCode;
     }
+
+    private static async Task<JsonObject> DocumentAsync(
+        AlvoHostWorld world, IReadOnlyDictionary<string, string> headers)
+    {
+        using var response = await world.SendAsync(
+            HttpMethod.Get, AlvoHost.OpenApiDocumentPath, body: null, headers);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        var text = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        return JsonNode.Parse(text)!.AsObject();
+    }
+
+    /// <summary>The one origin the served document advertises.</summary>
+    private static string Origin(JsonObject document)
+    {
+        var servers = document["servers"]!.AsArray();
+
+        servers.Count.ShouldBe(
+            1, $"the document must advertise exactly one server; it advertised {servers.Count}");
+
+        return servers[0]!["url"]!.GetValue<string>();
+    }
+
+    /// <summary>The <c>warehouses</c> collection path key, taken from the document rather than written here.</summary>
+    private static string CollectionPathKey(JsonObject document) =>
+        document["paths"]!.AsObject()
+            .Select(path => path.Key)
+            .First(key => key.EndsWith("/api/warehouses", StringComparison.Ordinal));
+
+    private static string Resolve(string origin, string pathKey) =>
+        new Uri(new Uri(origin.EndsWith('/') ? origin : origin + "/"), pathKey.TrimStart('/')).ToString();
+
+    /// <summary>The path-and-query a client would send, taken off an absolute URL the document produced.</summary>
+    private static string LocalPathOf(string absolute) => new Uri(absolute).PathAndQuery;
 
     private static Dictionary<string, string> ForwardedPrefix() =>
         new(StringComparer.Ordinal) { ["X-Forwarded-Prefix"] = Prefix };
