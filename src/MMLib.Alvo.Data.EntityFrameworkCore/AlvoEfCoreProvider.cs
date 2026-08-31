@@ -80,6 +80,7 @@ public static class AlvoEfCoreProvider
         builder.Services.TryAddSingleton(registration.Fields);
         builder.Services.TryAddSingleton(registration.Dialect);
         builder.Services.TryAddSingleton<IAlvoData>(CreateData);
+        builder.Services.TryAddSingleton<IAlvoDataReachability>(CreateReachability);
         builder.Services.TryAddSingleton<IOutboxStore>(CreateOutboxStore);
 
         return builder;
@@ -95,6 +96,17 @@ public static class AlvoEfCoreProvider
         services.GetRequiredService<AlvoDataContextFactory>(),
         services.GetRequiredService<TimeProvider>(),
         services.GetRequiredService<IOptions<AlvoOptions>>().Value);
+
+    /// <summary>Creates the readiness probe every EF-backed driver shares (#133).</summary>
+    /// <remarks>
+    /// A singleton beside the other stores, holding no connection of its own: it opens one per probe through
+    /// <see cref="Internal.RelationalConnectionFactory"/>, for the reason
+    /// <see cref="Internal.RelationalReachability"/>'s own remarks give.
+    /// </remarks>
+    /// <param name="services">The application's services.</param>
+    private static RelationalReachability CreateReachability(IServiceProvider services) => new(
+        services.GetRequiredService<RelationalConnectionFactory>(),
+        services.GetRequiredService<IAlvoSqlDialect>());
 
     /// <summary>Creates the relational outbox store the dispatcher claims through.</summary>
     /// <remarks>

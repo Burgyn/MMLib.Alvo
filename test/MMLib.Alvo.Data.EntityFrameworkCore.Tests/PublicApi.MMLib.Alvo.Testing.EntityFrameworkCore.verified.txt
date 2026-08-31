@@ -55,6 +55,7 @@ namespace MMLib.Alvo.Testing.Data
                 ""})]
         [Xunit.InlineData(null)]
         public void A_null_projection_refuses_a_missing_store_type(string? storeType) { }
+        public void A_reachability_probe_statement_is_complete_and_unterminated() { }
         [Xunit.MemberData("CelValueTypes", new object[0])]
         public void A_repair_is_a_function_of_its_inputs_alone(MMLib.Alvo.Expressions.CelValueType type) { }
         [Xunit.MemberData("CelValueTypes", new object[0])]

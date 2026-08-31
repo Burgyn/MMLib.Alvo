@@ -267,6 +267,33 @@ public interface IAlvoSqlDialect
             : $"LIMIT {rowCountParameterMarker} OFFSET {rowOffsetParameterMarker}";
 
     /// <summary>
+    /// The cheapest statement that proves this engine <em>answered</em> — the round trip a readiness probe
+    /// makes, and nothing more.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A <b>default interface member</b>, like <see cref="RowWindowClause"/> and for the same reason: the
+    /// default is right for every engine that spells a bare projection the ANSI way — both engines Alvo ships,
+    /// and T-SQL — so only a dialect that genuinely differs implements it (Oracle's
+    /// <c>SELECT 1 FROM DUAL</c>), and adding it breaks no existing implementation. It is a port member rather
+    /// than a literal in the shared data path because per-engine SQL is always a port member here; the shared
+    /// path never branches on the engine.
+    /// </para>
+    /// <para>
+    /// <b>Opening a connection is not the probe.</b> A pool hands back a connection it believes is live, so
+    /// only a round trip distinguishes "the pool has an entry" from "the database is answering". The statement
+    /// therefore has to be one the engine really executes, and it must touch <b>no table</b>: a probe over
+    /// <c>alvo.*</c> would report a schema problem as unreachability, which is a different question with its
+    /// own health check.
+    /// </para>
+    /// <para>
+    /// <b>Return grammar.</b> One complete, self-contained statement: no terminator, no surrounding
+    /// whitespace, no bind parameters, and nothing a caller could influence.
+    /// </para>
+    /// </remarks>
+    string ReachabilityProbeStatement => "SELECT 1";
+
+    /// <summary>
     /// The column definition this engine spells for a <b>stored generated column</b> — the mechanism a
     /// descriptor's <c>field.computed</c> is honoured by — or <see langword="null"/> when the engine cannot
     /// express one, in which case the migrator refuses the field and names the engine.

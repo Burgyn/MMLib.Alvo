@@ -5,5 +5,5 @@
 # src/MMLib.Alvo.Testing/Rules/.editorconfig does for PolicyEngineContractTests. Scoped to those
 # files, not the whole folder, so InMemoryAlvoData still gets the normal naming rule.
 
-[{AlvoDataAdversarialTests.cs,AlvoDataSqlSnapshotTests.cs,AlvoDataComparisonTests.cs,AlvoDataDifferentialTests.cs,AlvoDataOrderingTests.cs,AlvoDataStatementTests.cs,AlvoDataPagingTests.cs,AlvoDataConcurrencyTests.cs,AlvoDataConstraintTests.cs,AlvoDataOutboxTests.cs,AlvoDataBeforeHookTests.cs,AlvoDataComputedRollupTests.cs}]
+[{AlvoDataAdversarialTests.cs,AlvoDataSqlSnapshotTests.cs,AlvoDataComparisonTests.cs,AlvoDataDifferentialTests.cs,AlvoDataOrderingTests.cs,AlvoDataStatementTests.cs,AlvoDataPagingTests.cs,AlvoDataConcurrencyTests.cs,AlvoDataConstraintTests.cs,AlvoDataOutboxTests.cs,AlvoDataBeforeHookTests.cs,AlvoDataComputedRollupTests.cs,AlvoDataReachabilityContractTests.cs}]
 dotnet_diagnostic.CA1707.severity = none

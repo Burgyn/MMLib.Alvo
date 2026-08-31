@@ -34,6 +34,7 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore
     public interface IAlvoSqlDialect
     {
         MMLib.Alvo.Data.EntityFrameworkCore.MigrationBatchFraming MigrationFraming { get; }
+        string ReachabilityProbeStatement { get; }
         MMLib.Alvo.Data.EntityFrameworkCore.SqlConstraintViolation? DecodeConstraintViolation(System.Data.Common.DbException failure);
         string? GeneratedColumnDefinition(string columnName, string storeType, string renderedExpression);
         string RenderColumn(string columnName);

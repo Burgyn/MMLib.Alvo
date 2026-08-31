@@ -376,6 +376,17 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task The_null_keyed_rows_sit_where_the_placement_puts_them(MMLib.Alvo.Data.AlvoNullPlacement nulls, bool descending) { }
         public System.Threading.Tasks.Task Walking_an_exactly_divisible_set_by_cursor_stops_after_the_full_last_page() { }
     }
+    public abstract class AlvoDataReachabilityContractTests
+    {
+        protected AlvoDataReachabilityContractTests() { }
+        public System.Threading.Tasks.Task A_cancelled_probe_throws_rather_than_answering_unreachable() { }
+        public System.Threading.Tasks.Task A_store_that_answers_is_reachable_and_carries_no_failure() { }
+        public System.Threading.Tasks.Task A_store_that_cannot_be_reached_is_answered_rather_than_thrown() { }
+        protected abstract MMLib.Alvo.Data.IAlvoDataReachability CreateReachable();
+        protected abstract MMLib.Alvo.Data.IAlvoDataReachability CreateUnreachable();
+        protected virtual void EnsureEngineAvailable() { }
+        public System.Threading.Tasks.Task Probing_twice_answers_twice() { }
+    }
     public abstract class AlvoDataSqlSnapshotTests
     {
         protected AlvoDataSqlSnapshotTests() { }
