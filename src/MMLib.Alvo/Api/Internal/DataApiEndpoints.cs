@@ -53,22 +53,24 @@ internal static class DataApiEndpoints
     /// <param name="options">The API options the delegates read paging defaults from.</param>
     /// <param name="filters">Builds the authorization filter each endpoint carries.</param>
     /// <param name="formats">The applied descriptor's compiled field formats, shared by every endpoint.</param>
+    /// <param name="conventions">The conventions the host attached to <c>MapAlvoDataApi()</c>.</param>
     internal static void Map(
         IEndpointRouteBuilder endpoints,
         EntitySchema entity,
         string prefix,
         AlvoApiOptions options,
         AlvoContextFilterFactory filters,
-        FormatCatalog formats)
+        FormatCatalog formats,
+        AlvoDataApiConventions conventions)
     {
         var collection = $"{prefix}/{entity.Name}";
         var item = $"{collection}/{{id:guid}}";
 
-        MapList(endpoints, entity, collection, options, filters);
-        MapGet(endpoints, entity, item, filters);
-        MapCreate(endpoints, entity, collection, options, filters, formats);
-        MapUpdate(endpoints, entity, item, options, filters, formats);
-        MapDelete(endpoints, entity, item, filters);
+        MapList(endpoints, entity, collection, options, filters, conventions);
+        MapGet(endpoints, entity, item, filters, conventions);
+        MapCreate(endpoints, entity, collection, options, filters, formats, conventions);
+        MapUpdate(endpoints, entity, item, options, filters, formats, conventions);
+        MapDelete(endpoints, entity, item, filters, conventions);
     }
 
     private static void MapList(
@@ -76,7 +78,8 @@ internal static class DataApiEndpoints
         EntitySchema entity,
         string pattern,
         AlvoApiOptions options,
-        AlvoContextFilterFactory filters) =>
+        AlvoContextFilterFactory filters,
+        AlvoDataApiConventions conventions) =>
         endpoints.MapGet(pattern, (
                     HttpContext http,
                     IAlvoData data,
@@ -104,7 +107,7 @@ internal static class DataApiEndpoints
                     ApplyCountPreference(http.Response, counted);
                     return Json(DataApiPage.From(page, request.Select));
                 }))
-            .Protect(entity, DataOperation.List, filters);
+            .Protect(entity, DataOperation.List, filters, conventions);
 
     /// <summary>
     /// Reports what was done with the caller's <c>count</c> preference, per RFC 7240 §3 — and always
@@ -136,7 +139,8 @@ internal static class DataApiEndpoints
         IEndpointRouteBuilder endpoints,
         EntitySchema entity,
         string pattern,
-        AlvoContextFilterFactory filters) =>
+        AlvoContextFilterFactory filters,
+        AlvoDataApiConventions conventions) =>
         endpoints.MapGet(pattern, (
                     Guid id,
                     HttpContext http,
@@ -167,7 +171,7 @@ internal static class DataApiEndpoints
                         ? ProblemResultFactory.NotFound()
                         : Representation(http.Request, record, entity);
                 }))
-            .Protect(entity, DataOperation.Get, filters);
+            .Protect(entity, DataOperation.Get, filters, conventions);
 
     private static void MapCreate(
         IEndpointRouteBuilder endpoints,
@@ -175,7 +179,8 @@ internal static class DataApiEndpoints
         string pattern,
         AlvoApiOptions options,
         AlvoContextFilterFactory filters,
-        FormatCatalog formats) =>
+        FormatCatalog formats,
+        AlvoDataApiConventions conventions) =>
         endpoints.MapPost(pattern, (
                     HttpContext http,
                     IAlvoData data,
@@ -202,7 +207,7 @@ internal static class DataApiEndpoints
                         .ConfigureAwait(false);
                     return Created(pattern, record, entity);
                 }))
-            .Protect(entity, DataOperation.Create, filters);
+            .Protect(entity, DataOperation.Create, filters, conventions);
 
     private static void MapUpdate(
         IEndpointRouteBuilder endpoints,
@@ -210,7 +215,8 @@ internal static class DataApiEndpoints
         string pattern,
         AlvoApiOptions options,
         AlvoContextFilterFactory filters,
-        FormatCatalog formats) =>
+        FormatCatalog formats,
+        AlvoDataApiConventions conventions) =>
         endpoints.MapPatch(pattern, (
                     Guid id,
                     HttpContext http,
@@ -236,13 +242,14 @@ internal static class DataApiEndpoints
                         .UpdateAsync(entity.Name, id, body.Values, context, precondition, ct).ConfigureAwait(false);
                     return Row(record, entity);
                 }))
-            .Protect(entity, DataOperation.Update, filters);
+            .Protect(entity, DataOperation.Update, filters, conventions);
 
     private static void MapDelete(
         IEndpointRouteBuilder endpoints,
         EntitySchema entity,
         string pattern,
-        AlvoContextFilterFactory filters) =>
+        AlvoContextFilterFactory filters,
+        AlvoDataApiConventions conventions) =>
         endpoints.MapDelete(pattern, (
                     Guid id,
                     HttpContext http,
@@ -259,7 +266,7 @@ internal static class DataApiEndpoints
                     await data.DeleteAsync(entity.Name, id, context, precondition, ct).ConfigureAwait(false);
                     return Results.NoContent();
                 }))
-            .Protect(entity, DataOperation.Delete, filters);
+            .Protect(entity, DataOperation.Delete, filters, conventions);
 
     /// <summary>
     /// Attaches the authorization filter <b>and</b> the operation marker in one call, so an endpoint
@@ -276,12 +283,21 @@ internal static class DataApiEndpoints
     /// <param name="entity">The entity the endpoint serves.</param>
     /// <param name="operation">The operation the endpoint performs, and the one to gate it as.</param>
     /// <param name="filters">Builds the filter for that entity and operation.</param>
+    /// <param name="conventions">
+    /// The host's own conventions, applied <b>last</b> and in this same call. A route that is gated therefore
+    /// also carries whatever the host attached to <c>MapAlvoDataApi()</c>, so "some endpoints were
+    /// rate-limited and some were not" is unrepresentable — the same construction argument the authorization
+    /// filter and the operation marker already rest on. Last, so a host's convention observes Alvo's own
+    /// metadata and can override what it means to.
+    /// </param>
     private static RouteHandlerBuilder Protect(
         this RouteHandlerBuilder builder,
         EntitySchema entity,
         DataOperation operation,
-        AlvoContextFilterFactory filters) =>
-        builder
+        AlvoContextFilterFactory filters,
+        AlvoDataApiConventions conventions)
+    {
+        var route = builder
             // First, so it wraps the authorization filter and stamps the 401 and 403 that filter answers
             // with too — see NoStoreResponseFilter for why an uncacheable response is what pays for a
             // strong entity tag minted over a row version rather than over the response bytes.
@@ -289,6 +305,11 @@ internal static class DataApiEndpoints
             .AddEndpointFilter(filters.For(entity.Name, operation))
             .WithMetadata(new DataApiOperationMetadata(entity.Name, operation))
             .Documenting(entity, operation);
+
+        conventions.ApplyTo(route);
+
+        return route;
+    }
 
     /// <summary>
     /// Declares, as endpoint metadata, exactly the statuses this endpoint can answer with — so ApiExplorer, and

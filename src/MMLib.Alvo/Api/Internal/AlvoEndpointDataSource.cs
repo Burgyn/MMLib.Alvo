@@ -67,6 +67,16 @@ namespace MMLib.Alvo.Api.Internal;
 /// judged exactly once and no second enumeration can reach a different answer.
 /// </para>
 /// <para>
+/// <b>A host's conventions are collected here and applied at materialisation.</b> <c>MapAlvoDataApi</c>
+/// returns <see cref="Conventions"/>, and <see cref="Build"/> seals it before mapping, so a convention
+/// arriving after the table is frozen is refused rather than dropped. They are applied inside
+/// <c>DataApiEndpoints.Protect</c> — the same call that attaches the authorization filter and the operation
+/// marker — so no generated route can be mapped without them. A convention that <em>throws</em> is a distinct
+/// diagnosis from a schema that cannot be routed (<see cref="AlvoDataApiConventionException"/>): both end in
+/// an empty table and a failed readiness, because an exception escaping this enumeration would take down the
+/// composite every probe is matched through, but only one of them is the descriptor's fault.
+/// </para>
+/// <para>
 /// <b>Constructed per <c>MapAlvoDataApi</c> call, never as a process singleton</b>, so serving several projects
 /// from one host (#141, parked) needs a second data source rather than a different design here.
 /// </para>
@@ -80,6 +90,7 @@ internal sealed partial class AlvoEndpointDataSource : EndpointDataSource
     private readonly AlvoBootState _boot;
     private readonly ILogger<AlvoEndpointDataSource> _logger;
     private readonly string _prefix;
+    private readonly AlvoDataApiConventions _conventions = new();
     private readonly Lock _gate = new();
     private RouteTable? _routes;
 
@@ -120,6 +131,12 @@ internal sealed partial class AlvoEndpointDataSource : EndpointDataSource
         _logger = logger;
         _prefix = RoutePrefix.Normalize(options.RoutePrefix);
     }
+
+    /// <summary>
+    /// The conventions seam <c>MapAlvoDataApi</c> hands back, so a host can decorate the routes this source
+    /// materialises.
+    /// </summary>
+    internal AlvoDataApiConventions Conventions => _conventions;
 
     /// <inheritdoc/>
     public override IReadOnlyList<Endpoint> Endpoints => Materialise().Endpoints;
@@ -189,6 +206,13 @@ internal sealed partial class AlvoEndpointDataSource : EndpointDataSource
         {
             return Build();
         }
+        catch (AlvoDataApiConventionException failure)
+        {
+            _boot.Failed(failure.Message);
+            AHostConventionFailed(_logger, failure.InnerException, failure.Message);
+
+            return RouteTable.NothingIsRoutable;
+        }
         catch (InvalidOperationException refusal)
         {
             _boot.Failed(refusal.Message);
@@ -214,6 +238,26 @@ internal sealed partial class AlvoEndpointDataSource : EndpointDataSource
     private static partial void TheSchemaCannotBeRouted(ILogger logger, string refusal);
 
     /// <summary>
+    /// The record of a convention the <em>host</em> attached to <c>MapAlvoDataApi()</c> throwing while the
+    /// endpoints were being built.
+    /// </summary>
+    /// <remarks>
+    /// Critical for the same reason as the schema refusal — the table is frozen empty for the life of the
+    /// process — but a separate record, because the fix is in the host's own code and a message blaming the
+    /// applied schema would send an operator to the descriptor. The exception is logged with its stack trace,
+    /// which is the only place it survives: the endpoint table cannot carry it and the readiness body publishes
+    /// the phase alone.
+    /// </remarks>
+    /// <param name="logger">The logger this source writes through.</param>
+    /// <param name="failure">What the host's convention threw.</param>
+    /// <param name="reason">The failure, as the message the boot state records.</param>
+    [LoggerMessage(
+        Level = LogLevel.Critical,
+        Message = "A convention the host attached to MapAlvoDataApi() failed, so the Data API has no endpoints "
+            + "and readiness reports Failed. {Reason}")]
+    private static partial void AHostConventionFailed(ILogger logger, Exception? failure, string reason);
+
+    /// <summary>
     /// Maps one entity's five routes for every entity the applied schema declares, and flattens what the
     /// <c>Map*</c> helpers produced.
     /// </summary>
@@ -229,9 +273,10 @@ internal sealed partial class AlvoEndpointDataSource : EndpointDataSource
 
         var formats = FormatCatalog.Build(entities);
         var inner = new NestedRouteBuilder(_services);
+        _conventions.Seal();
         foreach (var entity in entities)
         {
-            DataApiEndpoints.Map(inner, entity, _prefix, _options, _filters, formats);
+            DataApiEndpoints.Map(inner, entity, _prefix, _options, _filters, formats, _conventions);
         }
 
         return RouteTable.Of(inner);

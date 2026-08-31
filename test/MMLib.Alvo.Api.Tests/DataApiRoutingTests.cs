@@ -266,10 +266,21 @@ public sealed class DataApiRoutingTests
     /// be covered by nothing. This one is written over the endpoint table, so it covers whatever is mapped.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// It asserts the marker rather than the filter because <c>AddEndpointFilter</c> leaves nothing in
     /// <c>Endpoint.Metadata</c>. What makes the marker sufficient evidence is
-    /// <c>DataApiEndpoints.Protect</c>: it attaches both in one call, so a marker without a filter cannot be
-    /// written.
+    /// <c>DataApiEndpoints.Protect</c>: it attaches both in one call, so no code <em>in this framework</em> can
+    /// produce a marker without a filter.
+    /// </para>
+    /// <para>
+    /// <b>Host code is a different matter, and always was.</b> A convention a host attaches to
+    /// <c>MapAlvoDataApi()</c> receives the <c>EndpointBuilder</c> and could clear its filter factories — as it
+    /// could before that seam existed, through <c>app.MapGroup("").MapAlvoDataApi()</c> and conventions on the
+    /// group, and as it could anyway by substituting <c>IPolicyEngine</c> in its own container. The guarantee
+    /// this fact carries is therefore about the framework's own construction, not about a host that decides to
+    /// dismantle it: an embedded host owns its pipeline, and treating its own code as an attacker is not this
+    /// project's threat model.
+    /// </para>
     /// </remarks>
     [Fact]
     public async Task Every_generated_endpoint_carries_an_operation_marker_matching_its_verb()

@@ -52,7 +52,7 @@ public class OpenApiServersTests
         await using var world = await AlvoApiWorld.VehicleRegistryAsync(
             [_admin], new AlvoApiWorldSetup(MapOpenApiDocument: true, PathBase: PathBase));
 
-        var document = await DocumentAsync(world, $"{PathBase}/openapi/v1.json");
+        var document = await world.OpenApiDocumentAsync($"{PathBase}/openapi/v1.json");
         var origin = Origin(document);
         var resolved = Resolve(origin, CollectionPathKey(document));
 
@@ -72,7 +72,7 @@ public class OpenApiServersTests
         await using var world = await AlvoApiWorld.VehicleRegistryAsync(
             [_admin], new AlvoApiWorldSetup(MapOpenApiDocument: true, RouteGroupPrefix: "/backend"));
 
-        var document = await DocumentAsync(world, "/openapi/v1.json");
+        var document = await world.OpenApiDocumentAsync("/openapi/v1.json");
         var resolved = Resolve(Origin(document), CollectionPathKey(document));
 
         await FollowingItAnswersOkAsync(world, resolved);
@@ -81,17 +81,7 @@ public class OpenApiServersTests
     }
 
     private static async Task<string> OriginAsync(AlvoApiWorld world, string path) =>
-        Origin(await DocumentAsync(world, path));
-
-    private static async Task<JsonObject> DocumentAsync(AlvoApiWorld world, string path)
-    {
-        using var response = await world.SendAsync(HttpMethod.Get, path);
-        var text = await response.ReadTextAsync();
-
-        response.StatusCode.ShouldBe(HttpStatusCode.OK, text);
-
-        return JsonNode.Parse(text)!.AsObject();
-    }
+        Origin(await world.OpenApiDocumentAsync(path));
 
     /// <summary>The one origin the document advertises, read the way a generated client reads it.</summary>
     private static string Origin(JsonObject document)
