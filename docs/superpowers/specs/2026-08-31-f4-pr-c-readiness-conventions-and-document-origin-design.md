@@ -2,8 +2,8 @@
 
 Issues: **#130** (the OpenAPI document's `servers` behind a path base), **#119** (a standalone
 500 carrying an Alvo `type` slug), **#133** (`/health/ready` and the database-reachability port),
-plus one item that had no issue: **`MapAlvoDataApi` hands a host nothing it can attach a
-convention to**.
+plus **#182**, filed while this design was under review, for the item that had no issue:
+**`MapAlvoDataApi` hands a host nothing it can attach a convention to**.
 
 Grouped because all four sit on the *deployment* surface rather than on the data path: what a
 document advertises to the next client, what a 500 says, what an orchestrator is told, and what a
@@ -50,6 +50,11 @@ Deleting the `PathBase` argument from the framework's own server-URL constructio
 transformer that overwrote `Servers`, would leave the whole suite green while every path in the
 document became wrong by the prefix — which is exactly what the issue describes and exactly what it
 turns out nobody could observe.
+
+A consequence worth stating rather than discovering: with no production change, these facts pin a
+*third-party package's* behaviour, so a Dependabot bump of `Microsoft.AspNetCore.OpenApi` is
+henceforth gated by them. That is the point — they are the only thing standing between a framework
+regression and a document whose every path is wrong by a prefix.
 
 ### #119 — delivered by PR4, in both pipelines
 
@@ -156,6 +161,14 @@ anonymous caller may not have it, and a port that returned a bare `bool` would h
 exception inside an implementation that has no logger and no business having one. `HealthCheckResult`
 itself carries an exception for the same reason, so the shape has precedent in the same domain.
 
+**The three obligations are asserted, not merely written.** `AlvoDataReachabilityContractTests` in
+`MMLib.Alvo.Testing` holds every implementation to them — unreachable is an answer, a cancelled probe
+throws, and the probe is repeatable — which is what every other port in `Abstractions` already has (§0
+principle 1) and what a third-party driver otherwise has nothing to verify against. The classification
+`RelationalReachability` performs on top of them — which failures are an answer, which propagate, and
+what a provider exception raised *after* the bound elapsed is reported as — is pinned directly over a
+scripted connection, because no real engine can be driven into those branches on demand.
+
 **There is no `Unknown`.** The issue asks whether a provider that cannot answer cheaply may opt out;
 the answer is *yes, by not registering the port at all* — which needs no enum member. A third state
 would have to be mapped to a status: `Healthy` is fail-open and `Unhealthy` is a pod that never
@@ -171,10 +184,23 @@ deliberately.
 ### Who imposes the bound
 
 `HealthCheckRegistration.Timeout`, not a timeout inside the check and not a new options type. The
-framework already links a cancellation source per registration, so the bound is one property on the
-registration Alvo already writes, and a probe that hangs is reported as the registration's
-`FailureStatus` — `Unhealthy`, and therefore 503 — rather than holding the request. A fact pins that
-rather than the documentation being taken on trust: a probe that never returns must answer 503.
+framework links a cancellation source per registration, so the bound is one property on the
+registration Alvo already writes.
+
+**It is a *cooperative* bound, and this section's first draft overclaimed it.**
+`DefaultHealthCheckService` cancels the token it handed the check and then awaits it — so a probe that
+**honours** its token is reported as the registration's `FailureStatus` (`Unhealthy`, therefore 503),
+while one that ignores the token holds the request for as long as it likes. That matters precisely
+because this port is designed to admit a third-party implementation. Two things answer it, and neither
+is a hard deadline inside the check: honouring the token is stated as an obligation on
+`IAlvoDataReachability.ProbeAsync` and asserted for every implementation by the contract suite; and for
+a probe that breaks the obligation anyway, the backstop is the orchestrator's own probe timeout, which
+is outside this process either way. A hard deadline — answering while the probe runs on — would abandon
+a task holding a database connection, which is worse than the failure it prevents.
+
+Two facts pin what can be pinned rather than the documentation being taken on trust: a probe that waits
+on its token answers 503, and the contract suite refuses an implementation that answers "unreachable"
+for a bound that has already elapsed.
 
 Two seconds. A refused connection fails in milliseconds; the case a bound exists for is a *hanging*
 one — packet loss to a database whose driver would otherwise wait out its own 15-second connect
@@ -258,7 +284,30 @@ compares endpoint data sources, not return types.
 5. **#133's timeout is a constant, not configuration.** `HealthCheckRegistration.Timeout` carries it;
    the tunable that matters is the orchestrator's probe timeout, outside this process.
 6. **"D" is framed as DX, not capability.** `app.MapGroup("")` already works; measured. The fix is
-   the idiomatic, discoverable return type.
+   the idiomatic, discoverable return type. Filed as **#182** rather than left unfiled, so the
+   PLAN → issue → plan → PR chain holds; the non-breaking alternative
+   (`MapAlvoDataApi(Action<IEndpointConventionBuilder>)`) is rejected because it would be permanent
+   API debt — two ways to do one thing — in a package that has not shipped.
+7. **Throwing on a late convention is a deviation from the framework, not conformance to it.** An
+   earlier draft of this design claimed "this is what the framework's own convention builders do"; it
+   is not. `RouteEndpointDataSource`/`RouteHandlerBuilder` silently ignore a convention added after
+   the endpoint is built. Alvo throws because its table is frozen once materialised and a dropped
+   `RequireRateLimiting` is a rate limiter a host believes it has. The cost is stated: a host applying
+   conventions from an `IStartupFilter` or a hosted service now gets an exception where every other
+   `Map*` is silent.
+8. **A host convention that throws gets its own diagnosis, not the schema's.** Conventions run inside
+   the data source's materialisation, where an `InvalidOperationException` already means "this applied
+   schema cannot be routed". The consequence stays identical — empty table, readiness `Failed`,
+   because an exception escaping an `EndpointDataSource` enumeration takes down the composite every
+   probe is matched through — but the log record names `MapAlvoDataApi()` instead of sending an
+   operator to their descriptor.
+9. **The authorization seam's wording moves with the seam.** "A marked endpoint is a gated endpoint"
+   is a statement about this framework's construction, not a guarantee against host code: a convention
+   receives the `EndpointBuilder` and can clear its filter factories. That was already true through
+   `MapGroup("")`, and is anyway true of a host that substitutes `IPolicyEngine`, so nothing is
+   weakened — but three rationales that read as unconditional are corrected rather than left to age
+   (`DataApiRoutingTests`, `AlvoDataApiEndpointRouteBuilderExtensions`, and the new `data-api.md`
+   section).
 
 ## What this PR does not do
 
@@ -307,4 +356,10 @@ compares endpoint data sources, not return types.
   generated route; a convention added after the first request throws.
 - `MapAlvo()` and `MapAlvoHealth()` are unchanged, and the umbrella-equivalence fact still passes.
 - #119 and #130 are closed with the facts that hold them named; #133 is closed; #134 stays open.
-- ring2 green; the three public-API baselines moved deliberately and judged.
+- ring2 green; the public-API baselines moved deliberately and judged.
+- The change is labelled **needs-deep-review** and run against `alvo-security-core-review`: it
+  modifies `DataApiEndpoints.Protect`, where the authorization filter is attached, and
+  `AlvoEndpointDataSource`, which carries the "no ungated path to `IAlvoData`" guarantee. The
+  checklist is earned by the *area*, not by whether a defect was found.
+- `CHANGELOG.md` records the breaking return type, the new port and dialect member, and — the sharp
+  one operationally — that `/health/ready` can now answer 503 on a running host.

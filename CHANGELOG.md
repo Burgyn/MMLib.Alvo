@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (breaking)
 
+- **`MapAlvoDataApi()` now returns `IEndpointConventionBuilder` instead of `IEndpointRouteBuilder`**
+  (#182), so a host can attach `RequireRateLimiting`, an authorization policy, output caching or a
+  telemetry tag to Alvo's generated routes and to nothing else — which is what every other ASP.NET
+  Core `Map*` over a *set* of endpoints returns. A caller that discarded the result (every in-repo
+  one, and the shape the docs show) is unaffected; one that chained a second `Map*` off it, or stored
+  it in an `IEndpointRouteBuilder`, is a source and binary break. Two things about the seam are
+  contract rather than implementation: conventions must be attached **before** the first request
+  materialises the route table, and one attached after **throws** — a deliberate deviation from the
+  framework, which ignores late conventions, because Alvo's table is frozen once built and a silently
+  dropped `RequireRateLimiting` is a rate limiter a host believes it has. `MapAlvo()` still returns
+  the route builder and `MapAlvoHealth()` is deliberately not chainable: one builder over the probes
+  *and* the Data API would let an authorization policy reach `/health/live`, which is a container
+  restart-looped by its own liveness gate.
+
 - **`AlvoQuery.EnsureSortKeysCanBePaged` is removed** (#116). It refused a paged read sorted by a
   nullable field, because a keyset boundary could not express where nulls sort. That boundary now
   can, so the guard has nothing left to refuse — and keeping it as a no-op would leave a member every
@@ -202,10 +216,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   base, and the direction is that URLs which used to be wrong are now right: following the header
   works where it previously did not. No released version is affected — both the header and the fix
   land in this same unreleased cycle. A host with no path base is unaffected, byte for byte. The
-  **OpenAPI document** still declares no `servers` entry, so its paths remain root-relative behind
-  a path base (#130), and the Scalar UI's own behaviour there is unmeasured (#134).
+  **OpenAPI document** names the origin its paths are resolved against, path base included — see
+  #130 under *Fixed* — while the Scalar UI's own behaviour there is still unmeasured (#134).
 
 ### Added
+
+- **`/health/ready` now reports whether the database can *still* be reached** (#133), so a store that
+  goes away after boot drains the pod's traffic instead of being invisible. **This changes what an
+  orchestrator does with a running host:** readiness answered 200 for the life of the process once
+  the boot had primed the schema, and it can now answer 503 while the process keeps running and
+  `/health/live` keeps answering 200 — which is the point, and which a deployment whose readiness
+  probe gates traffic will notice. Liveness is unchanged and still evaluates no check at all.
+  - The core opens no connection of its own: **`IAlvoDataReachability`** is a new port in
+    `MMLib.Alvo.Abstractions`, answering **`AlvoReachability`** — reachable, or not plus the reason,
+    which goes to the log at `Error` and never onto the anonymous probe's body. Unreachable is a
+    return value rather than an exception, and a cancelled probe throws; both are asserted by
+    `MMLib.Alvo.Testing.Data.AlvoDataReachabilityContractTests`, which every implementation inherits.
+  - Both shipped drivers get one implementation, registered by `AddRelationalProvider`, over a fresh
+    connection per probe and one dialect-owned statement: **`IAlvoSqlDialect.ReachabilityProbeStatement`**
+    is a new default interface member answering `SELECT 1`, so an out-of-repo dialect for an engine
+    that spells it differently (Oracle's `SELECT 1 FROM DUAL`) overrides it and every other one is
+    unaffected.
+  - A driver with nothing cheap to ask **opts out by not registering the port**, and readiness is then
+    exactly what it was before. That is fail-open on purpose: readiness is an availability gate, not
+    an authorization one.
+  - The probe is bounded by `HealthCheckRegistration.Timeout` (two seconds). It is a *cooperative*
+    bound — the framework cancels the token and awaits the check — so a probe that honours its token
+    becomes a 503 and one that ignores it holds the request; honouring it is the port's documented
+    obligation.
+  - Cache and message-bus reachability remain owed; the readiness tag is what makes each additive.
 
 - **`?order=<nullable field>` works, and `nullsfirst`/`nullslast` finally do something** (#116).
   Every list over HTTP is paged, and a paged read sorted by a nullable field used to be refused with
@@ -417,6 +456,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   comment-style rules).
 
 ### Fixed
+
+- **The OpenAPI document's advertised origin carries the request's path base** (#130) — and it always
+  did. `Microsoft.AspNetCore.OpenApi` builds `servers[0].url` from the request's scheme, host **and
+  `PathBase`**, per request rather than once per document name, so a client resolving a path key
+  against it reaches the endpoint under `app.UsePathBase("/alvo")` and behind a proxy that sets
+  `X-Forwarded-Prefix` for a host told to trust it. What was broken was the record: the defect was
+  documented as open in two architecture notes and in this changelog, and **nothing measured the
+  path-base half of that value** — the scheme and host halves were pinned, so deleting `PathBase`
+  from the framework's own server-URL construction would have left the whole suite green while every
+  path in the document became wrong by the prefix. Two facts now pin it, one per package. No
+  production code changed; a bump of `Microsoft.AspNetCore.OpenApi` is henceforth gated by them.
+
+- **A 500 from the standalone host carries `alvo.dev/errors/internal`** (#119) — closed by
+  verification rather than by a change. The slug, the opt-in `AddAlvoProblemDetails()` registration,
+  the handler that logs the exception with its stack trace *and* renders Alvo's document, and the
+  standalone-pipeline facts that hold all of it were delivered with the host itself. The one thing
+  left behind was a stale sentence in `docs/architecture/data-api.md` claiming nine problem-type
+  slugs over an eleven-row table; the prose now names `AlvoProblemTypes.All` instead of a number.
 
 - **A database constraint violation is now `409`, naming the field, instead of `500 internal`** (#138).
   A value another record already holds on a `unique` field, and a delete an `onDelete: "restrict"`

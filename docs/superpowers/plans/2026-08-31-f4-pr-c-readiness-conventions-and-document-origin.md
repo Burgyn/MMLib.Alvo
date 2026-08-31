@@ -2115,10 +2115,12 @@ git commit -m "docs: record the reachability port, the convention seam and #130'
 
 1. **`scripts/test-ring2`** — green, with the output kept for the PR notes.
 2. **Reviewer subagents as the local inner loop**, since `/code-review` and `/security-review` are
-   user-only commands here: dispatch `csharp-reviewer` over the diff and, because the diff touches a
-   readiness gate and an endpoint-convention seam rather than the rule engine, note explicitly in the PR
-   that `alvo-security-core-review` does **not** apply — no CEL, no tenancy, no policy resolution changed.
-   Fix findings before opening the PR.
+   user-only commands here: dispatch `csharp-reviewer` over the diff, **and run
+   `alvo-security-core-review` rather than skipping it** — the diff modifies
+   `DataApiEndpoints.Protect`, where the authorization filter is attached, and `AlvoEndpointDataSource`,
+   which carries the "no ungated path to `IAlvoData`" guarantee. The checklist is earned by the area,
+   not by whether a defect is found; label the change `needs-deep-review`. Fix findings before
+   opening the PR.
 3. **`alvo-plan-guard`** — the read-only pre-PR check for drift from `docs/PLAN.md` and the §0 principles.
 4. **`alvo-pr-report`** — the fixed 8-section Artifact; the PR body is a five-line pointer to it.
 5. **`gh pr create`**, with the closing keyword repeated per issue:
@@ -2127,6 +2129,72 @@ git commit -m "docs: record the reachability port, the convention seam and #130'
 6. **After the merge**: `main` lives in a worktree, so `gh pr merge` may exit 1 on its local step while
    the server-side merge succeeded. Confirm with `gh pr view --json state,mergeCommit` and delete the
    remote branch by hand.
+
+## Amendments after `alvo-plan-guard`
+
+The plan above is kept as written; this section records what the read-only pre-implementation review
+found and what was done about it, so a later reader can tell a decision from an oversight.
+
+1. **`AlvoHealthTests.Registering_Alvo_twice_leaves_one_readiness_check` pins the readiness registry
+   to `[alvo-schema]`** and was in no task's Files list, while Task 5 Step 6 claimed the class passes
+   in full. It is now `Registering_Alvo_twice_leaves_one_of_each_readiness_check`, expecting
+   `[alvo-database, alvo-schema]` written out — not relaxed to a count or a "contains", because the
+   fact's real claim is "no *duplicate* under one name", and a count would let a second registration
+   of one check hide behind the arrival of another.
+2. **Task 4 Step 1's `new SqliteSqlDialect().ReachabilityProbeStatement` cannot compile** — a default
+   interface member is not a member of the implementing class. Read through the interface, as
+   `test/_shared/sqlite/LockRecordingSqlDialect.cs` already does for `RowWindowClause`.
+3. **`PublicApi.MMLib.Alvo.Testing.EntityFrameworkCore.verified.txt` does move**, contrary to the
+   plan's "it should not": `AlvoSqlDialectContractTests` is a `public abstract class` in a shipped
+   package and the added fact is public. Four baselines move, not three.
+4. **`HealthCheckRegistration.Timeout` is a cooperative bound, not a hard deadline.** The framework
+   cancels the token it handed the check and then awaits it, so a probe that ignores its token holds
+   the request. The plan's own stub did exactly that and had to thread the token. The spec's "who
+   imposes the bound" section and `AlvoHealth.DatabaseProbeTimeout`'s remarks are corrected rather
+   than the escape hatch taken: a hard deadline would answer while the probe runs on, abandoning a
+   task that holds a database connection. Honouring the token is instead an obligation on the port,
+   asserted for every implementation by the new contract suite.
+5. **A host convention that throws was mis-diagnosed as an unroutable schema.** Conventions run inside
+   `Build()`, inside `catch (InvalidOperationException)`, so a host's own broken
+   `RequireRateLimiting` was logged at `Critical` as "Alvo cannot route the applied schema".
+   `AlvoDataApiConventions` now wraps each convention and raises
+   `AlvoDataApiConventionException`, which the data source catches first and logs with its own
+   message. The consequence is unchanged and has to be — an exception escaping an
+   `EndpointDataSource` enumeration takes down the composite every probe is matched through.
+   Pinned by `A_convention_that_throws_leaves_no_routes_and_blames_the_host_not_the_schema`.
+6. **Three authorization-seam rationales went stale** and are corrected: `DataApiRoutingTests`'
+   "a marker without a filter cannot be written", `AlvoDataApiEndpointRouteBuilderExtensions`' "no
+   path to `IAlvoData` that skips the authorization seam", and the new `data-api.md` section. Each
+   now says what it means — a statement about *this framework's* construction, not a guarantee
+   against host code, which could already clear filter factories through `MapGroup("")`.
+7. **`alvo-security-core-review` is not skipped.** The diff modifies `DataApiEndpoints.Protect` and
+   `AlvoEndpointDataSource`; the checklist is earned by the area. Gate 2 below is corrected.
+8. **Item "D" is filed as #182** and `#130` was given the F4 milestone, so the
+   PLAN → issue → plan → PR chain holds. The non-breaking overload alternative is rejected in the
+   spec's deviation 6, with its reason.
+9. **`CHANGELOG.md` is updated** — the breaking return type, the new port and dialect member, and the
+   operationally sharpest line: `/health/ready` can now answer 503 on a running host.
+10. **The port gets a reusable contract suite** (`AlvoDataReachabilityContractTests` in
+    `MMLib.Alvo.Testing`), as every other `Abstractions` port has, inherited by the SQLite and
+    PostgreSQL legs. Its four obligations replace the per-engine duplicates the plan had written.
+11. **`RelationalReachability`'s classification is pinned directly** by
+    `RelationalReachabilityTests` over a scripted `DbConnection`: which failures are an answer, which
+    propagate, and — the branch no real engine reaches on demand, and the guaranteed surviving
+    mutant — that a provider exception raised after the bound elapsed is reported as cancellation.
+    The guard also moved from a `when` filter to
+    `cancellationToken.ThrowIfCancellationRequested()` inside the catch, so the *type* thrown is
+    `OperationCanceledException` rather than the driver's own exception.
+12. **Stale prose corrected**: `AlvoSchemaHealthCheck`'s "the one contributor",
+    `AlvoHealthEndpointRouteBuilderExtensions`' "Alvo's own contributor", `AlvoHealth.ReadinessPath`'s
+    remark, `docs/architecture/extensibility.md` rule 10, and the `CHANGELOG` line that still said
+    the document declares no `servers` entry.
+13. **Task 5 Step 2's red-state prediction is wrong** for
+    `A_readiness_body_never_carries_the_reason_the_store_gave`: it passes before implementation,
+    because the body is already the boot phase. It is a guard, not a driver.
+14. **`RelationalReachability.cs` had to be added to `ChangeTrackerReachTests`' SQL-composing
+    allow-list**, which the plan did not anticipate. It earns its place for a stated reason: it
+    executes a per-dialect constant that names no table, carries no `WHERE` and binds no parameter.
+15. **Staging is explicit, never `git add -A src test`.**
 
 ## Self-review notes
 
