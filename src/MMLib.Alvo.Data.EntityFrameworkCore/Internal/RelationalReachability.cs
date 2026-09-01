@@ -45,11 +45,19 @@ internal sealed class RelationalReachability(RelationalConnectionFactory connect
     /// <para>
     /// <b>A constant here rather than a member on <see cref="IAlvoSqlDialect"/>, deliberately reversed from
     /// the first draft of this file.</b> That draft added a default interface member so a dialect for an
-    /// engine spelling a bare projection differently (Oracle's <c>SELECT 1 FROM DUAL</c>) could override it —
-    /// and then no dialect overrode it: SQLite, PostgreSQL and <c>TSqlSqlDialect</c> all inherited the
-    /// default, so the only thing the member bought was one more obligation on a public interface every
-    /// out-of-repo dialect author reads. A default interface member can be added on the day a driver needs
-    /// it <em>without breaking anyone</em>, which is exactly the asymmetry that says not to add it now.
+    /// engine spelling a bare projection differently could override it — and then no dialect overrode it:
+    /// SQLite, PostgreSQL and <c>TSqlSqlDialect</c> all inherited the default, so the only thing the member
+    /// bought was one more obligation on a public interface every out-of-repo dialect author reads. A default
+    /// interface member — or a non-<c>required</c> member on <see cref="RelationalProviderRegistration"/> —
+    /// can be added on the day a driver needs it <em>without breaking anyone</em>, which is exactly the
+    /// asymmetry that says not to add it now.
+    /// </para>
+    /// <para>
+    /// <b>The engine that will need it, named so the next author does not have to rediscover it:</b> Oracle
+    /// before 23ai requires a <c>FROM</c> clause, so <c>SELECT 1</c> fails there on a perfectly healthy
+    /// database and this probe would report it unreachable. <c>SELECT 1 FROM DUAL</c> is that engine's
+    /// spelling. Nothing here is wrong for the two engines Alvo ships or for T-SQL; the note exists so the
+    /// seam is reopened deliberately rather than after someone debugs a false outage.
     /// </para>
     /// <para>
     /// It touches <b>no table</b>, so a schema problem can never be reported as unreachability — that is a
