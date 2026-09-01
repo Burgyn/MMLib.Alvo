@@ -227,16 +227,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the boot had primed the schema, and it can now answer 503 while the process keeps running and
   `/health/live` keeps answering 200 — which is the point, and which a deployment whose readiness
   probe gates traffic will notice. Liveness is unchanged and still evaluates no check at all.
-  - The core opens no connection of its own: **`IAlvoDataReachability`** is a new port in
-    `MMLib.Alvo.Abstractions`, answering **`AlvoReachability`** — reachable, or not plus the reason,
-    which goes to the log at `Error` and never onto the anonymous probe's body. Unreachable is a
-    return value rather than an exception, and a cancelled probe throws; both are asserted by
-    `MMLib.Alvo.Testing.Data.AlvoDataReachabilityContractTests`, which every implementation inherits.
-  - Both shipped drivers get one implementation, registered by `AddRelationalProvider`, over a fresh
-    connection per probe and one dialect-owned statement: **`IAlvoSqlDialect.ReachabilityProbeStatement`**
-    is a new default interface member answering `SELECT 1`, so an out-of-repo dialect for an engine
-    that spells it differently (Oracle's `SELECT 1 FROM DUAL`) overrides it and every other one is
-    unaffected.
+  - **No new public API.** The core opens no connection of its own — the probe is a port,
+    `IAlvoDataReachability` — but that port and its answer are `internal` to
+    `MMLib.Alvo.Abstractions`, reached by the four in-family assemblies through
+    `InternalsVisibleTo`. Nothing about it is a contract you can depend on or need to implement: the
+    shared EF path implements it once, so every EF-backed driver inherits a working probe, and the
+    statement it runs is a `const` in that implementation rather than a member on `IAlvoSqlDialect`.
+    `public` is one word away on the day a non-EF driver or a host substituting the probe needs it;
+    un-publishing an interface is the breaking direction, so the asymmetry decides it.
   - A driver with nothing cheap to ask **opts out by not registering the port**, and readiness is then
     exactly what it was before. That is fail-open on purpose: readiness is an availability gate, not
     an authorization one.

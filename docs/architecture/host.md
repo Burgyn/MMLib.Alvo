@@ -410,11 +410,20 @@ that went away afterwards was invisible to both.
 The core opens no connection. `IAlvoDataReachability` is a port in `MMLib.Alvo.Abstractions`,
 answering `AlvoReachability` — reachable, or not plus the reason — and it is implemented **once**, at
 the shared EF seam, over the same `RelationalConnectionFactory` every other store here uses plus one
-dialect-owned statement (`IAlvoSqlDialect.ReachabilityProbeStatement`, `SELECT 1` by default). So
-every EF-backed driver inherits a correct probe, §0 principle 2 holds, and per-engine SQL stays a port
-member rather than an `if` in the shared path. A fresh connection per probe, deliberately: a pool
-hands back a connection it believes is live, and only a round trip distinguishes "the pool has an
-entry" from "the database is answering".
+`const` — `SELECT 1`, which names no table, so a schema problem can never be reported as
+unreachability. So every EF-backed driver inherits a correct probe and §0 principle 2 holds. A fresh
+connection per probe, deliberately: a pool hands back a connection it believes is live, and only a
+round trip distinguishes "the pool has an entry" from "the database is answering".
+
+**Both the port and the statement are deliberately *not* public.** `IAlvoDataReachability` and
+`AlvoReachability` are `internal` to `MMLib.Alvo.Abstractions` with `InternalsVisibleTo` for the four
+in-family assemblies that need them, for the reason `AlvoFrameworkTables` is internal: no driver and
+no host has been shown to need the type, because the shared EF path implements it once and an
+opt-out is "do not register it". The first draft put the statement on `IAlvoSqlDialect` as a default
+interface member so an Oracle dialect could override it — and then no dialect overrode it, so the
+member bought nothing but one more obligation on an interface every out-of-repo dialect author reads.
+A default interface member can be added later *without breaking anyone*, which is the asymmetry that
+says not to add it now; the same asymmetry says `public` stays one word away for the port.
 
 Four decisions inside that are worth stating:
 

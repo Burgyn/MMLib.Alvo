@@ -138,7 +138,7 @@ drain traffic on — and the core may not open a connection itself (§0 principl
 ### Where the port lives, and what it may depend on
 
 `MMLib.Alvo.Abstractions`, beside `IAlvoData`, because the **core's** health check consumes it and
-the core depends on `Abstractions` alone. It must therefore be expressible without a relational
+the core depends on `Abstractions` alone — but **`internal`**, not public; see deviation 10. It must therefore be expressible without a relational
 connection, a `DbConnection` or EF — which it is: "can you still be reached" is a question a
 document store or F7's dynamic driver answers as readily as a relational one.
 
@@ -220,12 +220,13 @@ out-of-repo EF driver already pass through — registers it once, over the
 strictly better than two identical ones, and it means a third relational driver inherits a correct
 probe rather than owing one.
 
-The engine-specific half is one statement, and it *is* engine-specific — `SELECT 1` is right for
-both engines Alvo ships and for T-SQL, and wrong for Oracle (`SELECT 1 FROM DUAL`). So it is a
-**default interface member on `IAlvoSqlDialect`**, exactly like `RowWindowClause`: the majority
-spelling is the default, only a dialect that genuinely differs overrides it, and adding it breaks no
-existing implementation. Per the standing rule, per-engine SQL is a port member and never an `if` in
-the shared path.
+The statement is one `const` in that implementation. The first draft made it a **default interface
+member on `IAlvoSqlDialect`**, reasoning from `RowWindowClause` and from the standing rule that
+per-engine SQL is a port member rather than an `if` in the shared path. That was wrong twice, and
+deviation 10 records why: the rule is about *branching*, and one ANSI literal branches on nothing;
+and measured after the fact, **no dialect overrode it** — SQLite, PostgreSQL and `TSqlSqlDialect` all
+inherited the default, so the member's only effect was one more obligation on a public interface
+every out-of-repo dialect author reads.
 
 Opening a pooled connection alone is not the probe. A pool hands back a connection it believes is
 live, so a round-trip is what distinguishes "the pool has an entry" from "the database answers".
@@ -312,7 +313,25 @@ compares endpoint data sources, not return types.
    because an exception escaping an `EndpointDataSource` enumeration takes down the composite every
    probe is matched through — but the log record names `MapAlvoDataApi()` instead of sending an
    operator to their descriptor.
-9. **The authorization seam's wording moves with the seam.** "A marked endpoint is a gated endpoint"
+10. **The port is `internal`, and the dialect member is gone — both reversed after the fact.** The
+    first version of this design shipped three new public members (`IAlvoDataReachability`,
+    `AlvoReachability`, `IAlvoSqlDialect.ReachabilityProbeStatement`). None of them is a contract a
+    consumer needs: the shared EF path implements the probe once, so every EF-backed driver — F7's
+    dynamic one included, being a dialect under that same path — inherits it without implementing
+    anything, and a driver that cannot answer cheaply opts out by not registering it. The dialect
+    member was measured to be overridden by nobody. So the port and its answer are now `internal`
+    with `InternalsVisibleTo` for the four in-family assemblies, on the precedent
+    `AlvoFrameworkTables` set in the same file and for its stated reason, and the statement is a
+    `const` in `RelationalReachability`. The asymmetry is what decides both: `internal → public` and
+    "add a default interface member" are free, their reverses are breaking. **The whole PR's shipped
+    API delta is consequently one signature** — `MapAlvoDataApi`'s return type.
+
+    One cost, paid deliberately: `AlvoDataReachabilityContractTests` can no longer expose the port in
+    its own signature (CS0050 — a public method cannot return a less-accessible type), so the suite
+    takes `IServiceProvider` and resolves the probe inside its bodies. That is the better shape
+    anyway: it asks what a host gets from the driver's public entry point rather than what a test can
+    construct by hand.
+11. **The authorization seam's wording moves with the seam.** "A marked endpoint is a gated endpoint"
    is a statement about this framework's construction, not a guarantee against host code: a convention
    receives the `EndpointBuilder` and can clear its filter factories. That was already true through
    `MapGroup("")`, and is anyway true of a host that substitutes `IPolicyEngine`, so nothing is
@@ -338,7 +357,7 @@ compares endpoint data sources, not return types.
 |---|---|
 | `src/MMLib.Alvo.Abstractions/Data/IAlvoDataReachability.cs` (new) | the port (#133) |
 | `src/MMLib.Alvo.Abstractions/Data/AlvoReachability.cs` (new) | its two-state answer (#133) |
-| `src/MMLib.Alvo.Data.EntityFrameworkCore/IAlvoSqlDialect.cs` | `ReachabilityProbeStatement` default member (#133) |
+| ~~`src/MMLib.Alvo.Data.EntityFrameworkCore/IAlvoSqlDialect.cs`~~ | **reverted, see deviation 10.** The member was added, then removed: no dialect overrode it. |
 | `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/RelationalReachability.cs` (new) | the one implementation (#133) |
 | `src/MMLib.Alvo.Data.EntityFrameworkCore/AlvoEfCoreProvider.cs` | registers it for every EF driver (#133) |
 | `src/MMLib.Alvo/Api/AlvoHealth.cs` | the check's name and the probe bound (#133) |

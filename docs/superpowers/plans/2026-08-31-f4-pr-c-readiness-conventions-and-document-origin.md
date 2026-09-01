@@ -2225,7 +2225,30 @@ found and what was done about it, so a later reader can tell a decision from an 
     slugs; the `CHANGELOG` omitted the per-anonymous-request database I/O that `host.md`, the spec and
     the check's own remarks all state; the spec's "Files this touches" listed a Host test file that
     was never changed; and `extensibility.md` had an unwrapped line.
-21. **The enforceable-invariant question is filed as #184**, not left as a caveat. Making "a marked
+## Amendment after the maintainer's review
+
+22. **The maintainer asked whether the public-API moves were necessary; three of them were not.**
+    Re-examined honestly rather than defended:
+    - `IAlvoSqlDialect.ReachabilityProbeStatement` — **removed.** Measured: no dialect overrode it.
+      SQLite, PostgreSQL and `TSqlSqlDialect` all inherited `SELECT 1`, and two of this plan's own
+      tests existed only to assert that the default was the default. The rule invoked to justify it
+      ("per-engine SQL is a port member, never an `if` in the core") is about *branching*; one ANSI
+      literal branches on nothing. It is now a `private const` in `RelationalReachability`, and a
+      default interface member can be added the day a driver needs it without breaking anyone.
+    - `IAlvoDataReachability` and `AlvoReachability` — **`internal`** with `InternalsVisibleTo` for
+      the four in-family assemblies, on the `AlvoFrameworkTables` precedent in the same
+      `AssemblyInfo.cs` and for its stated reason. Nothing outside the family needs the type.
+    - `AlvoDataReachabilityContractTests`'s abstract members take `IServiceProvider` instead of the
+      port (CS0050 forces it, and it is the better question to ask). Its assembly is
+      `IsPackable=false`, as is `MMLib.Alvo.Testing.EntityFrameworkCore`'s — two of the five moved
+      baselines were never shipped API, which the earlier reporting of "five public-API baselines"
+      overstated.
+
+    Net: the PR's shipped API delta is **one signature** (`MapAlvoDataApi`'s return type) plus four
+    `InternalsVisibleTo` attributes. `AlvoReachability` stays as a type because the alternative —
+    `ValueTask<bool>` with the implementation logging — puts an `ILogger` in every driver and makes
+    "did it report the reason" untestable through the port.
+23. **The enforceable-invariant question is filed as #184**, not left as a caveat. Making "a marked
     endpoint is a gated endpoint" true by construction again (an Alvo `Finally` convention that
     verifies its own filter factory survived the host's) is a decision with open questions —
     `Finally` ordering, what the identity check is over — and it belongs in an issue rather than
