@@ -88,26 +88,10 @@ public class RelationalReachabilityTests
     }
 
     private static RelationalReachability Probe(DbConnection connection) =>
-        new(new RelationalConnectionFactory(() => connection), new ProbeStatementDialect());
+        new(new RelationalConnectionFactory(() => connection));
 
     /// <summary>A real provider exception, so the answered path is asserted against a genuine one.</summary>
     private static SqliteException SqliteFailure() => new("unable to open database file", 14, 14);
-
-    /// <summary>A dialect that answers only the probe statement; nothing else here composes SQL.</summary>
-    private sealed class ProbeStatementDialect : IAlvoSqlDialect
-    {
-        public string RenderTable(Schema.EntitySchema entity, PreImageMutation? lockedPreImageFor) =>
-            throw new NotSupportedException();
-
-        public string RenderColumn(string columnName) => throw new NotSupportedException();
-
-        public string RenderNullProjection(string storeType) => throw new NotSupportedException();
-
-        public string RowLockClause(PreImageMutation mutation) => throw new NotSupportedException();
-
-        public SqlConstraintViolation? DecodeConstraintViolation(DbException failure) =>
-            throw new NotSupportedException();
-    }
 
     /// <summary>
     /// A connection that does exactly one scripted thing when it is opened, and refuses everything else.

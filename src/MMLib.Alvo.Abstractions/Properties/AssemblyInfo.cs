@@ -18,3 +18,16 @@
 // third-party ISchemaIntrospector needs it; un-publishing a const is a breaking change, so the
 // asymmetry decides it.
 [assembly: InternalsVisibleTo("MMLib.Alvo.Data.EntityFrameworkCore")]
+
+// IAlvoDataReachability and AlvoReachability (#133) are internal for the reason the port's own remarks give:
+// the shared EF path implements the probe once, so no driver and no host has been shown to need the type.
+// The assemblies that DO need it are all in this family — the core consumes the port from its readiness
+// check, the EF adapter implements it, MMLib.Alvo.Testing holds the contract suite both engines inherit
+// (IsPackable=false, so no surface ships), and two test projects name it directly: one stubs it to reach the
+// states no real store produces on demand, the other pins that a host-supplied probe beats the driver's
+// TryAdd default, and one pins RelationalReachability's own failure classification over a scripted
+// DbConnection. The first two grants are already above.
+[assembly: InternalsVisibleTo("MMLib.Alvo.Testing")]
+[assembly: InternalsVisibleTo("MMLib.Alvo.Api.Tests")]
+[assembly: InternalsVisibleTo("MMLib.Alvo.Data.Sqlite.Tests")]
+[assembly: InternalsVisibleTo("MMLib.Alvo.Data.EntityFrameworkCore.Tests")]

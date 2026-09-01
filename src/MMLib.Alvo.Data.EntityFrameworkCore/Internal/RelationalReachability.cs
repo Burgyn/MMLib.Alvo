@@ -12,8 +12,7 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 /// per <c>MMLib.Alvo.Data.*</c> package"; it was written before the shared EF path became the place
 /// <see cref="IAlvoData"/>, <see cref="MMLib.Alvo.Events.IOutboxStore"/> and the three schema services are
 /// all composed. Two identical implementations are the drift that seam exists to prevent, and one means a
-/// third relational driver inherits a correct probe instead of owing one. The engine-specific half is
-/// <see cref="IAlvoSqlDialect.ReachabilityProbeStatement"/>.
+/// third relational driver inherits a correct probe instead of owing one.
 /// </para>
 /// <para>
 /// <b>A fresh connection per probe, from the same factory every other store here uses.</b> A held connection
@@ -39,10 +38,28 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 /// </para>
 /// </remarks>
 /// <param name="connections">The factory every other store in this package opens through.</param>
-/// <param name="dialect">The driver whose one probe statement this executes.</param>
-internal sealed class RelationalReachability(RelationalConnectionFactory connections, IAlvoSqlDialect dialect)
-    : IAlvoDataReachability
+internal sealed class RelationalReachability(RelationalConnectionFactory connections) : IAlvoDataReachability
 {
+    /// <summary>The round trip: the cheapest statement that proves the engine answered.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A constant here rather than a member on <see cref="IAlvoSqlDialect"/>, deliberately reversed from
+    /// the first draft of this file.</b> That draft added a default interface member so a dialect for an
+    /// engine spelling a bare projection differently (Oracle's <c>SELECT 1 FROM DUAL</c>) could override it —
+    /// and then no dialect overrode it: SQLite, PostgreSQL and <c>TSqlSqlDialect</c> all inherited the
+    /// default, so the only thing the member bought was one more obligation on a public interface every
+    /// out-of-repo dialect author reads. A default interface member can be added on the day a driver needs
+    /// it <em>without breaking anyone</em>, which is exactly the asymmetry that says not to add it now.
+    /// </para>
+    /// <para>
+    /// It touches <b>no table</b>, so a schema problem can never be reported as unreachability — that is a
+    /// different question with its own health check — and it carries no parameter and nothing a caller could
+    /// influence, which is why this file's place on <c>ChangeTrackerReachTests</c>' SQL-composing allow-list
+    /// costs nothing.
+    /// </para>
+    /// </remarks>
+    private const string ProbeStatement = "SELECT 1";
+
     /// <inheritdoc/>
     public async ValueTask<AlvoReachability> ProbeAsync(CancellationToken cancellationToken = default)
     {
@@ -66,7 +83,7 @@ internal sealed class RelationalReachability(RelationalConnectionFactory connect
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         await using var command = connection.CreateCommand();
-        command.CommandText = dialect.ReachabilityProbeStatement;
+        command.CommandText = ProbeStatement;
 
         await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
     }

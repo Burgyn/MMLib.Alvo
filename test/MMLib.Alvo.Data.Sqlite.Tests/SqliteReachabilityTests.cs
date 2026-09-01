@@ -1,19 +1,19 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
-using MMLib.Alvo.Data.EntityFrameworkCore;
+using MMLib.Alvo.Data;
 using MMLib.Alvo.Testing.Data;
 
 namespace MMLib.Alvo.Data.Sqlite.Tests;
 
 /// <summary>
 /// #133's port over a real engine: the whole <see cref="AlvoDataReachabilityContractTests"/> suite plus the
-/// wiring facts, over SQLite — where "unreachable" is a file that cannot be created.
+/// wiring fact, over SQLite — where "unreachable" is a file that cannot be created.
 /// </summary>
 /// <remarks>
 /// The port's implementation is shared by every EF driver
 /// (<c>AlvoEfCoreProvider.AddRelationalProvider</c> registers one), so the engine here is the cheap one that
-/// needs no container; the PostgreSQL leg runs the same suite where "unreachable" is a refused TCP connection.
-/// Everything is wired through the public <c>UseSqlite</c> entry point, so a probe the driver failed to
-/// register fails on resolution rather than passing silently.
+/// needs no container; the PostgreSQL leg runs the same suite where "unreachable" is a refused TCP
+/// connection. Everything is wired through the public <c>UseSqlite</c> entry point, so a probe the driver
+/// failed to register fails on resolution rather than passing silently.
 /// </remarks>
 public class SqliteReachabilityTests : AlvoDataReachabilityContractTests, IDisposable
 {
@@ -21,21 +21,16 @@ public class SqliteReachabilityTests : AlvoDataReachabilityContractTests, IDispo
     private readonly List<ServiceProvider> _containers = [];
 
     /// <inheritdoc/>
-    protected override IAlvoDataReachability CreateReachable() =>
-        Probe($"Data Source={Path.Combine(_directory.FullName, "alvo.db")}");
+    protected override IServiceProvider CreateReachable() =>
+        Container($"Data Source={Path.Combine(_directory.FullName, "alvo.db")}");
 
     /// <summary>
     /// A database under a directory that does not exist: SQLite creates a missing <em>file</em> but not a
     /// missing directory, so opening it fails with the driver's own exception.
     /// </summary>
     /// <inheritdoc/>
-    protected override IAlvoDataReachability CreateUnreachable() =>
-        Probe($"Data Source={Path.Combine(_directory.FullName, "no-such-directory", "alvo.db")}");
-
-    /// <summary>The driver's public entry point alone yields a resolvable probe, as it does a data port.</summary>
-    [Fact]
-    public void The_public_entry_point_alone_yields_a_resolvable_reachability_port() =>
-        CreateReachable().ShouldNotBeNull();
+    protected override IServiceProvider CreateUnreachable() =>
+        Container($"Data Source={Path.Combine(_directory.FullName, "no-such-directory", "alvo.db")}");
 
     /// <summary>
     /// A host that registered its own probe keeps it — <c>TryAdd</c> means the driver supplies a default, not
@@ -60,14 +55,6 @@ public class SqliteReachabilityTests : AlvoDataReachabilityContractTests, IDispo
         container.GetRequiredService<IAlvoDataReachability>().ShouldBeOfType<AlwaysReachable>();
     }
 
-    /// <summary>
-    /// SQLite inherits the dialect's default probe statement, which is the ANSI one — read through the
-    /// interface, because a default interface member is not a member of the implementing class.
-    /// </summary>
-    [Fact]
-    public void The_dialects_probe_statement_is_a_bare_select() =>
-        ((IAlvoSqlDialect)new SqliteSqlDialect()).ReachabilityProbeStatement.ShouldBe("SELECT 1");
-
     /// <inheritdoc/>
     public void Dispose()
     {
@@ -86,9 +73,9 @@ public class SqliteReachabilityTests : AlvoDataReachabilityContractTests, IDispo
             ValueTask.FromResult(AlvoReachability.Reachable);
     }
 
-    /// <summary>The probe a host gets from <c>UseSqlite</c> alone, over one owned container.</summary>
-    /// <param name="connectionString">The store this probe asks.</param>
-    private IAlvoDataReachability Probe(string connectionString)
+    /// <summary>The container a host gets from <c>UseSqlite</c> alone, owned and disposed by this fixture.</summary>
+    /// <param name="connectionString">The store this container's probe asks.</param>
+    private ServiceProvider Container(string connectionString)
     {
         var collection = new ServiceCollection();
         collection.AddAlvo(alvo => alvo.UseSqlite(connectionString));
@@ -96,6 +83,6 @@ public class SqliteReachabilityTests : AlvoDataReachabilityContractTests, IDispo
         var container = collection.BuildServiceProvider();
         _containers.Add(container);
 
-        return container.GetRequiredService<IAlvoDataReachability>();
+        return container;
     }
 }

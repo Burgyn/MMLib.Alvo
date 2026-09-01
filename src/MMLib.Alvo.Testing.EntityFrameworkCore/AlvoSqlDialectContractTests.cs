@@ -265,26 +265,6 @@ public abstract class AlvoSqlDialectContractTests
     }
 
     /// <summary>
-    /// The reachability probe statement is a complete statement and carries no terminator, so the data path
-    /// can execute it verbatim.
-    /// </summary>
-    /// <remarks>
-    /// It cannot be asserted by value — a dialect for an engine with no bare projection answers something
-    /// else — so what is pinned is the grammar every caller depends on: non-empty, trimmed, and unterminated.
-    /// A dialect answering <c>"SELECT 1;"</c> would break a driver that batches it, and one answering
-    /// whitespace would send an empty command the engine may or may not refuse.
-    /// </remarks>
-    [Fact]
-    public void A_reachability_probe_statement_is_complete_and_unterminated()
-    {
-        var statement = CreateDialect().ReachabilityProbeStatement;
-
-        statement.ShouldNotBeNullOrWhiteSpace();
-        statement.ShouldBe(statement.Trim(), "a probe statement carries no surrounding whitespace");
-        statement.ShouldNotEndWith(";", "a probe statement carries no terminator");
-    }
-
-    /// <summary>
     /// The offset is bound, never formatted, so the clause has to name the marker it was handed too — the
     /// same reasoning as <see cref="A_row_window_clause_names_the_row_count_marker_and_carries_no_separator_of_its_own"/>,
     /// for the second argument. Answered generically rather than only over the two shipped dialects' shared

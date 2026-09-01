@@ -20,13 +20,23 @@
 /// registered reports exactly the readiness it reported before this port existed.
 /// </para>
 /// <para>
+/// <b><see langword="internal"/> rather than public, and the asymmetry decides it.</b> Nothing outside this
+/// family has been shown to need it: the shared EF data path implements it once, so <em>every</em> EF-backed
+/// driver — including F7's dynamic one, which is a dialect under that same path — inherits a working probe
+/// without implementing anything, and a driver that cannot answer cheaply opts out by not registering it.
+/// That leaves no obligation for a provider author to discover and nothing for a host to call. The same
+/// reasoning <see cref="MMLib.Alvo.AlvoFrameworkTables"/> is internal for: <c>public</c> is one word away on
+/// the day a non-EF driver or a host substituting the probe actually needs it, while un-publishing an
+/// interface is a breaking change.
+/// </para>
+/// <para>
 /// <b>What it must not do.</b> It must not read or write a record, must not apply or inspect the schema —
 /// "the descriptor applied and the policy catalog is primed" is a different question with its own contributor
 /// — and must not take longer than a probe can wait. The caller bounds it with the token; an implementation
 /// that ignores the token is one a readiness endpoint cannot use.
 /// </para>
 /// </remarks>
-public interface IAlvoDataReachability
+internal interface IAlvoDataReachability
 {
     /// <summary>Asks the store whether it can still be reached.</summary>
     /// <remarks>

@@ -131,9 +131,9 @@ public class ChangeTrackerReachTests
     /// <c>RollupRecompute</c> writes the parent's own aggregate columns from a subquery over the child table
     /// and narrows by the row id it read off the child row this caller was already authorised to write, so it
     /// composes no caller-influenced predicate and every identifier in it comes from the dialect;
-    /// <c>RelationalReachability</c> executes <c>IAlvoSqlDialect.ReachabilityProbeStatement</c> verbatim — a
-    /// per-dialect constant that names no table, carries no <c>WHERE</c> and binds no parameter, so there is
-    /// nothing in it a caller could influence and nothing for a policy predicate to be missing from; and
+    /// <c>RelationalReachability</c> executes one <c>const</c> of its own (<c>SELECT 1</c>) that names no
+    /// table, carries no <c>WHERE</c> and binds no parameter, so there is nothing in it a caller could
+    /// influence and nothing for a policy predicate to be missing from; and
     /// <c>EfAlvoData</c> is the one file that composes a row statement, and it is the file every other fact
     /// here pins.
     /// </para>

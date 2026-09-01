@@ -11,10 +11,11 @@
 /// </para>
 /// <para>
 /// <b>Two states, and there is no third.</b> See <see cref="IAlvoDataReachability"/> for why "cannot answer"
-/// is expressed by not registering the port rather than by a value here.
+/// is expressed by not registering the port rather than by a value here — and for why both types are
+/// <see langword="internal"/>.
 /// </para>
 /// </remarks>
-public sealed class AlvoReachability
+internal sealed class AlvoReachability
 {
     private AlvoReachability(bool isReachable, Exception? failure)
     {
@@ -23,16 +24,16 @@ public sealed class AlvoReachability
     }
 
     /// <summary>The store answered.</summary>
-    public static AlvoReachability Reachable { get; } = new(isReachable: true, failure: null);
+    internal static AlvoReachability Reachable { get; } = new(isReachable: true, failure: null);
 
     /// <summary>Whether the store answered.</summary>
-    public bool IsReachable { get; }
+    internal bool IsReachable { get; }
 
     /// <summary>
     /// Why the store could not be reached, or <see langword="null"/> when it could. For logging only — see
     /// this type's remarks.
     /// </summary>
-    public Exception? Failure { get; }
+    internal Exception? Failure { get; }
 
     /// <summary>The store could not be reached, for the reason an operator has to read.</summary>
     /// <remarks>
@@ -43,7 +44,7 @@ public sealed class AlvoReachability
     /// <param name="failure">Why the store could not be reached.</param>
     /// <returns>An unreachable answer carrying <paramref name="failure"/>.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="failure"/> is <see langword="null"/>.</exception>
-    public static AlvoReachability Unreachable(Exception failure)
+    internal static AlvoReachability Unreachable(Exception failure)
     {
         ArgumentNullException.ThrowIfNull(failure);
 

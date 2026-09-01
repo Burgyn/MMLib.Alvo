@@ -104,9 +104,8 @@ public static class AlvoEfCoreProvider
     /// <see cref="Internal.RelationalReachability"/>'s own remarks give.
     /// </remarks>
     /// <param name="services">The application's services.</param>
-    private static RelationalReachability CreateReachability(IServiceProvider services) => new(
-        services.GetRequiredService<RelationalConnectionFactory>(),
-        services.GetRequiredService<IAlvoSqlDialect>());
+    private static RelationalReachability CreateReachability(IServiceProvider services) =>
+        new(services.GetRequiredService<RelationalConnectionFactory>());
 
     /// <summary>Creates the relational outbox store the dispatcher claims through.</summary>
     /// <remarks>

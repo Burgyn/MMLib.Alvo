@@ -382,8 +382,8 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task A_cancelled_probe_throws_rather_than_answering_unreachable() { }
         public System.Threading.Tasks.Task A_store_that_answers_is_reachable_and_carries_no_failure() { }
         public System.Threading.Tasks.Task A_store_that_cannot_be_reached_is_answered_rather_than_thrown() { }
-        protected abstract MMLib.Alvo.Data.IAlvoDataReachability CreateReachable();
-        protected abstract MMLib.Alvo.Data.IAlvoDataReachability CreateUnreachable();
+        protected abstract System.IServiceProvider CreateReachable();
+        protected abstract System.IServiceProvider CreateUnreachable();
         protected virtual void EnsureEngineAvailable() { }
         public System.Threading.Tasks.Task Probing_twice_answers_twice() { }
     }
