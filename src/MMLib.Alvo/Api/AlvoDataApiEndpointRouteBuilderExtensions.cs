@@ -58,14 +58,39 @@ public static class AlvoDataApiEndpointRouteBuilderExtensions
     /// probe is how a pod gets killed and restart-looped for a schema no restart can fix.
     /// </para>
     /// <para>
-    /// Every mapped endpoint carries the API-key context filter, so this surface has no path to
-    /// <c>IAlvoData</c> that skips the authorization seam.
+    /// Every mapped endpoint carries the API-key context filter — attached in the same call as the operation
+    /// marker and as the host's own conventions — so nothing <em>this framework</em> maps has a path to
+    /// <c>IAlvoData</c> that skips the authorization seam. A convention the host attaches receives the
+    /// endpoint builder and could take it away again; that is host code deciding to dismantle its own
+    /// pipeline, which it could already do by substituting <c>IPolicyEngine</c>, and it is not what this
+    /// sentence claims.
+    /// </para>
+    /// <para>
+    /// <b>It returns a convention builder rather than the route builder it was given, which is what every
+    /// ASP.NET Core <c>Map*</c> does</b> — <c>MapHealthChecks</c> and <c>MapControllers</c> included. The
+    /// capability was reachable before: <c>app.MapGroup("").MapAlvoDataApi()</c> plus conventions on the
+    /// group worked, because <see cref="AlvoEndpointDataSource.GetGroupedEndpoints"/> forwards the group's
+    /// context to the nested minimal-API sources. What it was not, was discoverable. Conventions have to be
+    /// attached before the first request materialises the route table; one attached after is <em>refused</em>,
+    /// because a frozen table cannot honour it and a silently dropped <c>RequireRateLimiting</c> is a rate
+    /// limiter a host believes it has.
+    /// </para>
+    /// <para>
+    /// <c>MapAlvo()</c> deliberately still returns the route builder, and <c>MapAlvoHealth()</c> is not
+    /// chainable at all: one convention builder over the probes <em>and</em> the Data API would let a host
+    /// attach an authorization policy to <c>/health/live</c>, and a container probe presents no credential —
+    /// that is a container killed and restart-looped by its own liveness gate. A host that wants conventions
+    /// calls the parts, which is already the documented composition.
     /// </para>
     /// </remarks>
     /// <param name="endpoints">The endpoint route builder to map onto.</param>
-    /// <returns>The same builder, for chaining.</returns>
+    /// <returns>
+    /// A convention builder over the routes this call will materialise, so a host can attach
+    /// <c>RequireRateLimiting</c>, an authorization policy, output caching or a telemetry tag to Alvo's
+    /// generated endpoints and to nothing else.
+    /// </returns>
     /// <exception cref="InvalidOperationException">Alvo is not registered in the application's services.</exception>
-    public static IEndpointRouteBuilder MapAlvoDataApi(this IEndpointRouteBuilder endpoints)
+    public static IEndpointConventionBuilder MapAlvoDataApi(this IEndpointRouteBuilder endpoints)
     {
         ArgumentNullException.ThrowIfNull(endpoints);
 
@@ -75,14 +100,16 @@ public static class AlvoDataApiEndpointRouteBuilderExtensions
                 "The Alvo Data API is not registered. Call services.AddAlvo(...) — optionally with "
                 + "AddDataApi(...) to configure it — before MapAlvoDataApi().");
 
-        endpoints.DataSources.Add(new AlvoEndpointDataSource(
+        var source = new AlvoEndpointDataSource(
             catalog,
             services.GetRequiredService<IOptions<AlvoApiOptions>>().Value,
             services.GetRequiredService<AlvoContextFilterFactory>(),
             services,
             services.GetRequiredService<AlvoBootState>(),
-            services.GetRequiredService<ILogger<AlvoEndpointDataSource>>()));
+            services.GetRequiredService<ILogger<AlvoEndpointDataSource>>());
 
-        return endpoints;
+        endpoints.DataSources.Add(source);
+
+        return source.Conventions;
     }
 }

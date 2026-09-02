@@ -531,16 +531,32 @@ than by prefix, and `AlvoHostPathBaseTests` follows the forwarded-prefix case th
 that produced it. A **route group** is the harder failure and needs none of that care: it only lengthens the
 route, so the unprefixed URL is mapped by nothing and a wrong header 404s in-process.
 
-The **OpenAPI document's path keys still have the original shape** — a document served under a path base
-declares no `servers` entry, so a client resolving its paths against `/` is wrong by the same prefix. That is
-deliberately not fixed here: `OpenApiDocumentTransformerContext` carries no `HttpContext` and the document is
-cached per document name, so a request-derived `servers` entry is a decision about whether Alvo's document is
-per-request at all. Filed as **#130**.
+The **OpenAPI document's path keys keep their mapped shape, and the document names the origin they are
+resolved against.** `Microsoft.AspNetCore.OpenApi` builds `servers[0].url` from the request's `Scheme`, `Host`
+and **`PathBase`**, per request — measured, including the part that made #130 look unfixable: asking for the
+document with a path base and then without it, in either order, returns the right origin each time, so nothing
+is frozen by a first request. Alvo's transformer never touches `Servers`. Under `app.UsePathBase("/alvo")` the
+origin is `http://localhost/alvo` and the keys stay `/api/owners`; under
+`app.MapGroup("/backend").MapAlvoDataApi()` the origin stays bare and the prefix is in the key, because a group
+prefix belongs to the *route*. `OpenApiServersTests` pins both, and `AlvoHostPathBaseTests` pins the
+forwarded-prefix leg through a model of the proxy — which is where the 404 an unprefixed origin produces
+actually happens.
+
+**#130 closed with no production change.** What it was missing was any fact at all: the origin's scheme and
+host halves were pinned by `AlvoHostForwardedOriginTests`, its path-base half by nothing, so removing `PathBase`
+from the framework's own server-URL construction would have left the suite green while every path in the
+document became wrong by the prefix. Those facts now also gate a bump of `Microsoft.AspNetCore.OpenApi`, which
+is a virtue worth stating rather than a surprise worth discovering.
+
+The docs UI's own document fetch under a path base is a separate question and stays **#134**.
 
 ## The status and `type`-slug catalogue
 
 Problem documents are RFC 9457, media type `application/problem+json`, with an Alvo `violations` array.
-Every `type` is `https://alvo.dev/errors/<slug>`; the nine slugs are `AlvoProblemTypes.All`.
+Every `type` is `https://alvo.dev/errors/<slug>`; the slugs are exactly `AlvoProblemTypes.All`, and the
+table below is that list. Two of them — `unreadable-request` and `internal` — are emitted only by
+`AlvoExceptionHandler`, so only a host that called `AddAlvoProblemDetails()` can produce one, which is
+why neither is documented on any operation.
 
 | Status | Slug | Means |
 |---|---|---|
@@ -724,6 +740,45 @@ linear backoff (~450 ms total) before the exception surfaces as the family-5 500
 an *unkeyed* create with the same violation also answers 500, just immediately. Worth knowing because it is
 a caller-triggerable amplification of a caller's own mistake, and because the fix (asking the dialect
 whether a constraint name is Alvo's own) belongs with the retry logic rather than here. Tracked in **#127**.
+
+## What a host may attach to the generated routes (#182)
+
+`MapAlvoDataApi()` returns an **`IEndpointConventionBuilder`**, so a host attaches
+`RequireRateLimiting`, an authorization policy, output caching or a telemetry tag to Alvo's generated
+endpoints and to nothing else — the return type every other ASP.NET Core `Map*` over a *set* of endpoints
+has. The conventions are applied in `DataApiEndpoints.Protect`, the same call that attaches the
+authorization filter and the operation marker, so no generated route can be mapped without them, and they
+are applied **last**, so a host's convention observes Alvo's own metadata.
+
+Three properties of that seam are contract rather than implementation:
+
+- **Conventions must be attached before the first request**, which is when the route table materialises.
+  One attached after **throws**, naming the call to move. That is a deliberate deviation from the
+  framework — which silently ignores late conventions — because Alvo's table is frozen once built and a
+  dropped `RequireRateLimiting` is a rate limiter a host believes it has.
+- **A convention that throws is its own diagnosis.** Conventions run while the endpoints are built, inside
+  the data source's materialisation, where an `InvalidOperationException` already means "this applied
+  schema cannot be routed". The consequence is identical and has to be — an exception escaping an
+  `EndpointDataSource` enumeration takes down the composite every probe is matched through, liveness
+  included — so a host's broken convention also ends in an empty table and readiness `Failed`, but its log
+  record names `MapAlvoDataApi()` instead of blaming the descriptor.
+- **`MapAlvo()` still returns the route builder, and `MapAlvoHealth()` is not chainable.** One convention
+  builder over the probes *and* the Data API would let a host attach an authorization policy to
+  `/health/live`, and a container probe presents no credential — that is a container killed and
+  restart-looped by its own liveness gate. A host that wants conventions calls the parts.
+
+What this does **not** claim is an authorization guarantee against host code. A convention receives the
+`EndpointBuilder` and could clear its filter factories; so could `app.MapGroup("").MapAlvoDataApi()` plus
+conventions on the group, which worked before this seam existed and is how the capability was measured, and
+so could substituting `IPolicyEngine` in the host's own container. "A marked endpoint is a gated endpoint"
+is a statement about *this framework's* construction. An embedded host owns its pipeline; treating its code
+as an attacker is not this project's threat model.
+
+It could nevertheless be made a *construction* guarantee again — an Alvo `Finally` convention that runs after
+the host's and verifies its own filter factory survived — which would catch an *accidental* dismantling (a
+convention that rebuilds `FilterFactories` rather than appending to it) without changing the threat model.
+Whether that is worth the cost is **#184**, filed so the prose-only invariant is a recorded decision rather
+than a caveat nobody weighed.
 
 ## Route generation happens at *enumeration* time — half of #103 is delivered
 

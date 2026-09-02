@@ -331,7 +331,7 @@ the resolution happens in JavaScript this suite does not run. The compose stack 
 path-base-free, and the gap is filed as **#134** rather than guessed at with a test that could not fail for
 its stated reason. The issue records the resolution rule and says plainly that its outcome is *unmeasured* —
 not working, and not known-broken. It is the third of the path-base family: #121 (`Location`, fixed here),
-#130 (the document's `servers`, open), #134 (this).
+#130 (the document's `servers`, closed — it carries the request's path base), #134 (this).
 
 ## Health — two probes, and they are configured oppositely
 
@@ -401,15 +401,61 @@ ready" (design deviation 63). Neither response is cacheable, and that costs no c
 `AllowCachingResponses` already defaults to `false`, which is what sends
 `Cache-Control: no-store, no-cache` on both.
 
-**`/health/ready` existing is not §2.12 being met.** §2.12 asks for readiness over database, cache
-and message-bus reachability; what exists here is the endpoint, the state machine, the tag-based
-registration seam and exactly *one* contributor to it — "the descriptor applied and the policy
-catalog is primed". The **reachability port is still owed** and stays **#133**: the core may not
-touch a provider directly (§0 principle 2), so "can you reach the database" is a port to design, not
-a health check to write. Deviation 38 is **superseded in its liveness-only part** and preserved in
-its guarantee: a boot that refuses never binds the socket, so nothing ever answers healthy with no
-schema. What is still missing is the *continuing* answer — a database that goes away after boot is
-invisible to both routes.
+**`/health/ready` now answers the database half of §2.12 (#133).** Two checks contribute, under two
+names. `alvo-schema` reports what the boot decided — "the descriptor applied and the policy catalog
+is primed" — and `alvo-database` reports whether the store can *still* be reached, which is the
+**continuing** answer neither route had: the boot ran once, before the server bound, so a database
+that went away afterwards was invisible to both.
+
+The core opens no connection. `IAlvoDataReachability` is a port in `MMLib.Alvo.Abstractions`,
+answering `AlvoReachability` — reachable, or not plus the reason — and it is implemented **once**, at
+the shared EF seam, over the same `RelationalConnectionFactory` every other store here uses plus one
+`const` — `SELECT 1`, which names no table, so a schema problem can never be reported as
+unreachability. So every EF-backed driver inherits a correct probe and §0 principle 2 holds. A fresh
+connection per probe, deliberately: a pool hands back a connection it believes is live, and only a
+round trip distinguishes "the pool has an entry" from "the database is answering".
+
+**Both the port and the statement are deliberately *not* public.** `IAlvoDataReachability` and
+`AlvoReachability` are `internal` to `MMLib.Alvo.Abstractions` with `InternalsVisibleTo` for the four
+in-family assemblies that need them, for the reason `AlvoFrameworkTables` is internal: no driver and
+no host has been shown to need the type, because the shared EF path implements it once and an
+opt-out is "do not register it". The first draft put the statement on `IAlvoSqlDialect` as a default
+interface member so an Oracle dialect could override it — and then no dialect overrode it, so the
+member bought nothing but one more obligation on an interface every out-of-repo dialect author reads.
+A default interface member can be added later *without breaking anyone*, which is the asymmetry that
+says not to add it now; the same asymmetry says `public` stays one word away for the port.
+
+Four decisions inside that are worth stating:
+
+- **Unreachable is an answer, not an exception**, and the reason travels to the log at `Error` while
+  the probe still reads the boot phase and nothing else. A driver's message for an unreachable store
+  carries a connection string, and this route is unauthenticated by construction (design
+  deviation 59, unchanged).
+- **The bound is `HealthCheckRegistration.Timeout`, two seconds** — carried by the registration
+  rather than by the check, so the framework's own linked cancellation source enforces it. It is a
+  *cooperative* bound: a probe that honours its token becomes a 503, one that ignores it holds the
+  request. Honouring it is the port's documented obligation and the reachability contract suite
+  asserts it; the backstop for a probe that breaks it is the orchestrator's own probe timeout.
+- **A driver with nothing cheap to ask opts out by not registering the port**, and readiness is then
+  exactly what it was before. Fail-open on purpose: readiness is an availability gate, not an
+  authorization one, and a third-party driver shipping without a probe must not make every pod
+  permanently unready. Both in-repo drivers register one.
+- **`/health/live` is untouched** and still evaluates no check at all. A database outage must drain
+  the pod's traffic, never restart-loop the container.
+
+One cost is created here and is recorded rather than fixed: `/health/ready` used to do **no I/O**,
+and it now opens a connection per request from the pool the Data API shares — while being anonymous
+by construction, because a container probe presents nothing to authenticate with. An unauthenticated
+caller who can reach the port can therefore spend pool slots at their chosen rate, and the outcome is
+self-limiting in an unhelpful direction: a saturated pool times the probe out and the orchestrator
+drains the pod. Bounded by the two-second registration timeout, ordinary for a reachability probe
+(every `AspNetCore.HealthChecks.*` deployment has the property), and tracked as **#183** — where
+caching the probe result for a short window is the likely answer.
+
+Deviation 38 is **superseded in its liveness-only part** and preserved in its guarantee: a boot that
+refuses never binds the socket, so nothing ever answers healthy with no schema. **Cache and
+message-bus reachability remain owed** — neither subsystem exists, and the readiness tag is what
+makes each additive when it lands.
 
 ## A 500 is Alvo's own refusal here (#119)
 
@@ -589,10 +635,9 @@ PR4 starts `[20] Standalone run (Docker) + embedded run`; F4 finishes it. Still 
 - the **dashboard** and the **Management API**, and with them the dashboard-first source of truth;
 - the **`alvo` CLI** (`alvo apply vehicles.alvo.json`) — one of the descriptor's doors that PR4 does not open
   (`PLAN.md` §2: Docker mount = CLI apply = Management API = `FromDescriptor()` = admin UI export);
-- the **reachability half of readiness** — database / cache / message bus (§2.12, **#133**). `/health/ready`,
-  its state machine and its tag-based registration seam now exist, with one contributor; the *port* does not,
-  and §2.12 is not met until it does. Plus the rest of §2.12 — OpenTelemetry, rate limiting (**#112**), usage
-  metering;
+- the rest of **§2.12** — OpenTelemetry, rate limiting (**#112**), usage metering. The **database half of
+  readiness** landed with `IAlvoDataReachability` and the `alvo-database` check (#133); **cache and
+  message-bus reachability** are still owed, and each brings its own probe when its subsystem lands;
 - the **full compose stack** (MinIO, MailHog) once storage and email exist;
 - an operator-facing **`ALVO_*` environment vocabulary**, if the CLI work shows it earns its keep — and it
   has to be settled **before the image is published**, because after that the env names are a breaking
@@ -602,5 +647,7 @@ PR4 starts `[20] Standalone run (Docker) + embedded run`; F4 finishes it. Still 
   to an older image against a newer system schema is undefined. Recorded as design deviation 55, deferred here
   deliberately — it has no task in the startup-lifecycle plan.
 
-Not #24's, but on the same deployment path: **#130** (the document's `servers`) and **#134** (Scalar behind a
-path base) both have to be answered before "run it behind your ingress" is a claim this project can make.
+Not #24's, but on the same deployment path: **#134** (Scalar behind a path base) still has to be answered
+before "run it behind your ingress" is a claim this project can make. **#130** is closed — the document names
+the origin its path keys are resolved against, path base and trusted forwarded prefix included, and two facts
+pin it.

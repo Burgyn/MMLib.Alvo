@@ -1,8 +1,10 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Api.Internal;
+using MMLib.Alvo.Data;
 using MMLib.Alvo.Migrations;
 
 namespace MMLib.Alvo.Api;
@@ -42,6 +44,8 @@ internal static class HealthSetup
         services.AddHealthChecks();
         services.TryAddEnumerable(ServiceDescriptor
             .Singleton<IConfigureOptions<HealthCheckServiceOptions>, AlvoSchemaHealthCheckRegistration>());
+        services.TryAddEnumerable(ServiceDescriptor
+            .Singleton<IConfigureOptions<HealthCheckServiceOptions>, AlvoReachabilityHealthCheckRegistration>());
 
         return services;
     }
@@ -70,4 +74,41 @@ internal sealed class AlvoSchemaHealthCheckRegistration : IConfigureOptions<Heal
             failureStatus: HealthStatus.Unhealthy,
             tags: [AlvoHealth.ReadyTag]));
     }
+}
+
+/// <summary>
+/// Puts <see cref="AlvoReachabilityHealthCheck"/> into the health-check registry under
+/// <see cref="AlvoHealth.ReadyTag"/>, bounded by <see cref="AlvoHealth.DatabaseProbeTimeout"/>.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <c>GetService</c> rather than <c>GetRequiredService</c> for the probe, because not registering one is the
+/// supported opt-out — see <see cref="IAlvoDataReachability"/>. Resolved inside the factory rather than here,
+/// so a driver whose probe cannot be constructed cannot fail the health-check service's own construction,
+/// which would answer <b>500</b> on <em>both</em> probes: the one failure a readiness endpoint must not have.
+/// </para>
+/// <para>
+/// <see cref="HealthCheckRegistration.FailureStatus"/> is stated rather than defaulted for the reason
+/// <see cref="AlvoSchemaHealthCheckRegistration"/> gives, and it is also what a probe that <em>timed out</em>
+/// is reported as.
+/// </para>
+/// </remarks>
+internal sealed class AlvoReachabilityHealthCheckRegistration : IConfigureOptions<HealthCheckServiceOptions>
+{
+    /// <inheritdoc/>
+    public void Configure(HealthCheckServiceOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        options.Registrations.Add(new HealthCheckRegistration(
+            AlvoHealth.DatabaseCheckName,
+            CreateCheck,
+            failureStatus: HealthStatus.Unhealthy,
+            tags: [AlvoHealth.ReadyTag],
+            timeout: AlvoHealth.DatabaseProbeTimeout));
+    }
+
+    private static AlvoReachabilityHealthCheck CreateCheck(IServiceProvider services) => new(
+        services.GetService<IAlvoDataReachability>(),
+        services.GetRequiredService<ILogger<AlvoReachabilityHealthCheck>>());
 }

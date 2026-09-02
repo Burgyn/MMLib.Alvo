@@ -29,9 +29,10 @@ public static class AlvoHealthEndpointRouteBuilderExtensions
     /// <b>The two are configured oppositely, on purpose.</b> Liveness evaluates <em>zero</em> checks, so no
     /// health check anyone adds later can start killing containers under load. Readiness evaluates every check
     /// tagged <see cref="AlvoHealth.ReadyTag"/>, so a check registered without much thought lands where being
-    /// wrong costs traffic rather than the process. Alvo's own contributor is the schema-applied check, which
-    /// reports <c>Unhealthy</c> and never <c>Degraded</c> — the framework maps <c>Degraded</c> to <b>200</b> and
-    /// Kubernetes counts any 2xx as success, so a degraded gate is no gate at all.
+    /// wrong costs traffic rather than the process. Alvo contributes two: the schema-applied check and the
+    /// store-reachability one. Both report <c>Unhealthy</c> and never <c>Degraded</c> — the framework maps
+    /// <c>Degraded</c> to <b>200</b> and Kubernetes counts any 2xx as success, so a degraded gate is no gate at
+    /// all.
     /// </para>
     /// <para>
     /// <b>Neither route carries a credential, and readiness therefore publishes the phase and nothing else.</b>
