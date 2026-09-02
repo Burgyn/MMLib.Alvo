@@ -117,6 +117,14 @@ internal sealed class AlvoDocumentTransformer(
     /// constant — a sixth of the work and the same complexity — which is not what this is for.
     /// </para>
     /// <para>
+    /// <b>One behavioural edge the index does change.</b> Two entities of the same name in one
+    /// <see cref="SchemaModel"/> used to resolve to whichever came first; indexing them throws instead. That
+    /// state is unreachable through a descriptor — <c>entities</c> is a JSON object keyed by name, so the
+    /// parser cannot produce it — and throwing is the better answer for a schema that cannot say which
+    /// entity it means, but it is a difference rather than a pure hoist and is recorded rather than left to
+    /// be discovered.
+    /// </para>
+    /// <para>
     /// <b>An absent entity or policy still throws, and that is the point of resolving here.</b> Both are
     /// primed by the same descriptor apply that produced the route literals, so either one missing means the
     /// endpoint table and the applied state disagree — a broken framework invariant rather than a
@@ -128,11 +136,15 @@ internal sealed class AlvoDocumentTransformer(
     /// <param name="generated">The mapped Data API endpoints.</param>
     private EntityViews Views(IEnumerable<Endpoint> generated)
     {
-        // The schema is read BEFORE the catalog, and that order is the fail-closed one. Both are reads of the
-        // same monotonically republished holder, so the catalog is always the same-or-newer version of the
-        // pair: an older field list judged by a newer, possibly stricter mask. Swapping these two lines flips
-        // it to the disclosing direction — a newer field list judged by an older mask, which can publish the
-        // name of a field the current policy hides.
+        // The schema is read BEFORE the catalog, and that order is the fail-closed one. By default both are
+        // reads of the SAME holder — Rules/Setup.cs registers ISchemaRegistry as a factory resolving
+        // IPolicyCatalogProvider — which is republished monotonically, so the catalog is always the
+        // same-or-newer half of the pair: an older field list judged by a newer, possibly stricter mask.
+        // Swapping these two lines flips it to the disclosing direction, where a newer field list is judged
+        // by an older mask and can publish the name of a field the current policy hides. A host that
+        // registers its own ISchemaRegistry (which that registration's remarks allow) makes these two
+        // independent holders, and the monotonic argument no longer applies — the ordering is then merely
+        // the better guess rather than a guarantee.
         var declared = schema.GetSchema().Entities.ToDictionary(entity => entity.Name, StringComparer.Ordinal);
         var catalog = policies.Current;
         var views = new EntityViews();

@@ -25,10 +25,16 @@ proves the premise correction before any code moves.
 1. `test/_shared/api/CountingPolicyEngine.cs` — decorator over `IPolicyEngine`, forwards
    `Resolve` verbatim, records `(entity, operation)` per call under a lock. Modelled on
    `RecordingContextAccessor` (`AlvoApiWorld.cs:621`), the in-repo precedent.
-2. Registered through the existing `AlvoApiWorldSetup.ConfigureServices` hook.
-   `IPolicyEngine` is `TryAddSingleton` and `ConfigureServices` runs first, so the test
-   wins with no production DI change. **`IPolicyEngine` has no forwarding registrations**
-   — unlike `IPolicyCatalogProvider`, see slice 3 — so a single decorator is safe here.
+2. ~~Registered through the existing `AlvoApiWorldSetup.ConfigureServices` hook.~~
+   **[corrected during implementation]** That cannot work, for the reason this plan already gives
+   in slice 3: `ConfigureServices` runs *before* `AddAlvo`, and every Alvo registration is a
+   `TryAdd` — so a decorator registered there wins the slot, `PolicyEngine` is never registered at
+   all, and the decorator has nothing to wrap. Decoration has to run *after* the registration it
+   decorates. The implementation therefore adds a `ConfigureServicesAfterAlvo` hook plus a
+   `ServiceDecoration.Decorate` helper, which removes the existing `ServiceDescriptor` and
+   re-registers a factory wrapping whatever that descriptor described. Still no production DI
+   change. **`IPolicyEngine` has no forwarding registrations** — unlike `IPolicyCatalogProvider`,
+   see slice 3 — so a single decorator is safe here.
 3. New `test/MMLib.Alvo.Api.Tests/PolicyResolutionCountTests.cs`:
    - `A_list_resolves_the_policy_exactly_twice` — the HTTP gate plus the port's authority.
    - `A_read_by_id_resolves_the_policy_exactly_once`.
