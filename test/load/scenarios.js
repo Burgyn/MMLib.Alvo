@@ -83,9 +83,20 @@ function trend(name) {
     return known;
 }
 
-// A bounded timeout, not k6's 60-second default: a request that stalls for a minute would be
-// recorded as latency and drag a percentile, where what it actually is is a failure.
-const TIMEOUT = '10s';
+// TIMEOUT AND GRACEFUL_STOP ARE ONE DECISION, not two. k6's default timeout is 60 s, so a
+// stalled request would be recorded as latency when what it is is a failure. But the guard voids
+// a run on ANY failed request, and an iteration still in flight when a scenario's graceful window
+// closes is aborted — i.e. counted as failed. So the timeout has to be SHORTER than the graceful
+// window, or a stuck request becomes a void run at the scenario boundary instead of a timeout
+// inside it.
+//
+// The margin is measured, not guessed: the slowest single request across every run to date was
+// 132 ms (`sort_nullable` max, calibration tier, 200 000 rows), against a 4 000 ms timeout inside
+// a 5 000 ms window. Seven runs, zero failed requests. Zero tolerance is kept deliberately — it
+// is what makes "0 dropped, 0 failed" mean the numbers describe the service — and this is the
+// margin that makes it achievable rather than flaky.
+const TIMEOUT = '4s';
+const GRACEFUL_STOP_SECONDS = 5;
 
 const dispatcher = { timeout: TIMEOUT, headers: { 'X-Alvo-Api-Key': KEY_DISPATCHER } };
 const technician = { timeout: TIMEOUT, headers: { 'X-Alvo-Api-Key': KEY_TECH } };
@@ -97,8 +108,14 @@ const counted = {
 const REFERENCE_LIST = 'status=eq.scheduled&order=priority.asc&limit=50';
 const TWO_TERM_SORT = 'status=eq.scheduled&order=priority.asc,reference.asc&limit=50';
 
-// A row id the seed is guaranteed to have written. Derived from the ordinal rather than fixed, so
-// the read scenario spreads over the table instead of measuring one hot buffer page.
+// A row id the seed is guaranteed to have written, for every value of ROWS.
+//
+// It walks the ordinals in order rather than sampling randomly, which is a deliberate trade and
+// worth stating rather than overselling: the window it touches is `rate x DURATION` ids out of
+// ROWS — 1 200 of 10 000 at the gate tier — so this measures a warm, sequentially-walked slice,
+// not a cold random read. What it buys is that the slice is byte-identical across A/B arms, so a
+// difference between them cannot be which rows were asked for. A cold-cache read is a different
+// measurement and would need its own scenario.
 function seededId() {
     const n = 1 + (exec.scenario.iterationInTest % ROWS);
     return `33333333-0001-4000-8000-${n.toString(16).padStart(12, '0')}`;
@@ -203,11 +220,11 @@ function build() {
             maxVUs: 40,
             exec: 'warmup',
             startTime: '0s',
-            gracefulStop: '0s',
+            gracefulStop: `${GRACEFUL_STOP_SECONDS}s`,
         },
     };
 
-    let start = WARMUP_SECONDS;
+    let start = WARMUP_SECONDS + GRACEFUL_STOP_SECONDS + 1;
     for (const scenario of selected()) {
         scenarios[scenario.name] = {
             executor: 'constant-arrival-rate',
@@ -221,9 +238,12 @@ function build() {
             maxVUs: Math.max(100, scenario.rate * 4),
             exec: scenario.exec,
             startTime: `${start}s`,
-            gracefulStop: '2s',
+            gracefulStop: `${GRACEFUL_STOP_SECONDS}s`,
         };
-        start += DURATION + 2;
+        // The next scenario starts one second after this one's graceful window closes, so the two
+        // never overlap: overlapping scenarios contend and neither one's latency is attributable
+        // to its own shape.
+        start += DURATION + GRACEFUL_STOP_SECONDS + 1;
     }
 
     return scenarios;

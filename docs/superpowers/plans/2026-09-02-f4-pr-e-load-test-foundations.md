@@ -1,8 +1,12 @@
 # PR-E — load-test foundations (implementation plan)
 
-> **For agentic workers:** REQUIRED SUB-SKILL: use `superpowers:executing-plans` (or
-> `superpowers:subagent-driven-development`) to work this plan slice by slice. Steps use
-> checkbox (`- [ ]`) syntax for tracking.
+> **Status: executed.** Every step below is checked because this plan was written alongside the
+> work rather than ahead of it — the harness had to be *run* before its numbers could be chosen, and
+> three of the design's decisions were overturned by what the first runs said (slice 3 step 7,
+> slice 5 step 2, slice 6 step 7). What the checkboxes record is therefore the order a reader should
+> reconstruct it in, and the failures worth causing on purpose along the way, not work still to do.
+>
+> For a future agent replaying it: use `superpowers:executing-plans` slice by slice.
 
 **Goal:** Give Alvo standing HTTP load instrumentation — a per-PR regression gate and a
 per-release calibration run — so F4's "p95 latencies measured and published" is satisfied and the
@@ -53,7 +57,7 @@ black-box harness and wrong for bulk regardless. The seed is therefore SQL again
 tables — which means it knows a layout `DescriptorToSchemaMapper` owns, and that coupling has to
 fail loudly rather than silently.
 
-- [ ] **Step 1: Read the real physical schema, do not infer it.** Start the field-service stack
+- [x] **Step 1: Read the real physical schema, do not infer it.** Start the field-service stack
   and look:
 
 ```bash
@@ -74,7 +78,7 @@ docker exec alvo-field-service-postgres-1 \
   *"has a Secret of N characters; at least 32 are required"*. `openssl rand -hex 16` produces
   exactly that.
 
-- [ ] **Step 2: Create `test/load/seed.sql`.** Parameterised by `psql -v` on `rows`, `customers`,
+- [x] **Step 2: Create `test/load/seed.sql`.** Parameterised by `psql -v` on `rows`, `customers`,
   `tenant_north`, `tenant_south`, `tech_north`. One `TRUNCATE … CASCADE`, then three set-based
   inserts over `generate_series`, then `ANALYZE` on all three tables.
 
@@ -91,7 +95,7 @@ docker exec alvo-field-service-postgres-1 \
   Write the audit quartet exactly as `AlvoAuditStamp.Applied` would on a create — all four
   columns, `updated_at` equal to `created_at`.
 
-- [ ] **Step 3: Run it, and expect the reference collision the first time.**
+- [x] **Step 3: Run it, and expect the reference collision the first time.**
 
 ```bash
 docker exec -i alvo-field-service-postgres-1 psql -U alvo -d alvo_field_service \
@@ -110,7 +114,7 @@ docker exec -i alvo-field-service-postgres-1 psql -U alvo -d alvo_field_service 
 
   Expected after the fix: `INSERT 0 8`, `INSERT 0 1000`, `INSERT 0 20000`, in under a second.
 
-- [ ] **Step 4: Verify every scenario's URL against the running API before writing any of them.**
+- [x] **Step 4: Verify every scenario's URL against the running API before writing any of them.**
   Nine `curl` calls, and each one is a fact the design rests on:
 
 ```bash
@@ -131,7 +135,7 @@ curl -s -H "X-Alvo-Api-Key: $KTECH" -H 'Prefer: count=exact' "$B/api/work_orders
   Also POST one work order to pin the create body: `tenant_id`, `reference`, `title`, `status`,
   `priority`, `access_code`, `customer_id`, `region_id`. Expected `201`.
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ```bash
 git add test/load/seed.sql
@@ -142,7 +146,7 @@ git commit -m "test(load): the bulk seed, and why it reads itself back through t
 
 ## Slice 2 — the k6 scenarios
 
-- [ ] **Step 1: Create `test/load/scenarios.js`.** One `exec` function and one `Trend` per shape.
+- [x] **Step 1: Create `test/load/scenarios.js`.** One `exec` function and one `Trend` per shape.
   Three properties the file exists to hold, each easy to lose by accident:
 
   1. `constant-arrival-rate`, never a looping VU pool. A closed model sends less when the server
@@ -155,7 +159,7 @@ git commit -m "test(load): the bulk seed, and why it reads itself back through t
   Plus a 10-second **unrecorded** warm-up scenario, so JIT, the EF model cache, the connection
   pool and PostgreSQL's plan cache are warm before the first observation.
 
-- [ ] **Step 2: Declare every `Trend` at module scope, driven off `CATALOGUE`.**
+- [x] **Step 2: Declare every `Trend` at module scope, driven off `CATALOGUE`.**
 
 ```javascript
 const trends = {};
@@ -170,19 +174,19 @@ for (const scenario of CATALOGUE) {
   list of what exists: it drives the trends, the scenario map and the `--scenarios` filter alike,
   so there is nowhere else to register a scenario and no second list to fall out of step.
 
-- [ ] **Step 3: Give every request a bounded `timeout: '10s'`.** k6's default is 60 s, and a
+- [x] **Step 3: Give every request a bounded `timeout: '10s'`.** k6's default is 60 s, and a
   request that stalls for a minute would be recorded as latency when what it is is a failure.
 
-- [ ] **Step 4: Write `handleSummary(data)`** returning `{ '<OUT_DIR>/<name>': JSON.stringify(…) }`
+- [x] **Step 4: Write `handleSummary(data)`** returning `{ '<OUT_DIR>/<name>': JSON.stringify(…) }`
   — the current k6 mechanism; `--summary-export` is not used. Emit the per-scenario trend values
   under `scenarios`, plus the three numbers that decide whether the run is valid at all:
   `http_req_failed`, `dropped_iterations`, `iterations`.
 
-- [ ] **Step 5: Set no k6 `thresholds`.** A ratio between two trends is not a k6 metric and the
+- [x] **Step 5: Set no k6 `thresholds`.** A ratio between two trends is not a k6 metric and the
   A/B spans two runs, so splitting the verdict between k6 and a script would give one decision
   two authorities.
 
-- [ ] **Step 6: Syntax-check and commit.**
+- [x] **Step 6: Syntax-check and commit.**
 
 ```bash
 node --check test/load/scenarios.js
@@ -198,35 +202,35 @@ git commit -m "test(load): k6 scenarios, one Trend per shape, open-model arrival
 
 ## Slice 3 — the driver, and the measurement that changed the design
 
-- [ ] **Step 1: Create `scripts/test-load`.** Arguments `--tier gate|calibration`,
+- [x] **Step 1: Create `scripts/test-load`.** Arguments `--tier gate|calibration`,
   `--baseline-ref REF`, `--rows N`, `--scenarios LIST`, `--reps N`, `--keep`. Its own compose
   project (`alvo-load`) and its own port (8091), so a running e2e stack and playground are
   untouched.
 
-- [ ] **Step 2: Export `ALVO_FS_PORT` *after* sourcing `demo-identities.env`, not before.** That
+- [x] **Step 2: Export `ALVO_FS_PORT` *after* sourcing `demo-identities.env`, not before.** That
   file sets `ALVO_FS_PORT=8081`, and `set -a` sourcing overwrites an exported value rather than
   deferring to it. Getting this backwards puts the load stack on the e2e port; the symptom is
   `curl: (7) Failed to connect to 127.0.0.1 port 8091`, on a stack that started cleanly.
 
-- [ ] **Step 3: Add `assert_seed_is_visible`.** Read the seeded set back through the **public
+- [x] **Step 3: Add `assert_seed_is_visible`.** Read the seeded set back through the **public
   API** with `Prefer: count=exact` and abort unless the count equals what was inserted; then
   assert the reference list returns a full page of 50. This is what stops the seed's coupling to
   the physical layout rotting silently — an empty result set would otherwise report a spectacular
   p95 for a list of nothing, which is this design's single most likely failure mode.
 
-- [ ] **Step 4: Add `deep_cursor`.** #100 is about how **deep the cursor sits**, not how many sort
+- [x] **Step 4: Add `deep_cursor`.** #100 is about how **deep the cursor sits**, not how many sort
   terms there are — its own evidence is rows-removed-by-filter growing one-for-one with depth
   (280 001 at depth 280 000). So the deep cursor is *earned* by walking to the last page in an
   **unmeasured** phase at `limit=200` (the API maximum, four times cheaper than the measured page
   size), on the same two-term sort `page_shallow` uses.
 
-- [ ] **Step 5: Make k6 optional.** Prefer a `k6` on `PATH`; otherwise run the **pinned**
+- [x] **Step 5: Make k6 optional.** Prefer a `k6` on `PATH`; otherwise run the **pinned**
   `grafana/k6:2.2.0` image on the compose network. Pinned rather than `latest` because the
   generator is part of the instrument: a k6 release that changes iteration scheduling would show
   up as a latency change in a table whose whole purpose is attributing latency changes to Alvo.
   Warn when a local k6 is a different version.
 
-- [ ] **Step 6: Run the gate tier and expect it to record nothing the first time.**
+- [x] **Step 6: Run the gate tier and expect it to record nothing the first time.**
 
 ```bash
 scripts/test-load --tier gate --keep
@@ -237,7 +241,7 @@ scripts/test-load --tier gate --keep
   *"recorded no scenarios — the run measured nothing"*. **That is slice 2 step 2's failing test**,
   and the guard catching it is slice 4's, both observed before either fix existed.
 
-- [ ] **Step 7: Run it again and read the numbers, because they change the design.** Expected
+- [x] **Step 7: Run it again and read the numbers, because they change the design.** Expected
   after the fix — and this is the measurement that matters:
 
 | Scenario | min | p95 |
@@ -257,7 +261,7 @@ scripts/test-load --tier gate --keep
   the number F4's DoD asks for — but it does not gate. Record the gap this leaves out loud: a
   tail-only regression is not caught.
 
-- [ ] **Step 8: Commit.**
+- [x] **Step 8: Commit.**
 
 ```bash
 git add scripts/test-load
@@ -268,27 +272,27 @@ git commit -m "test(load): the driver — stack, seed, earned cursor, k6 with no
 
 ## Slice 4 — the verdict, and its own suite
 
-- [ ] **Step 1: Create `scripts/assert-load-baseline`.** A pure function from JSON to an exit
+- [x] **Step 1: Create `scripts/assert-load-baseline`.** A pure function from JSON to an exit
   code: no Docker, no k6. `--baseline`, repeatable `--head` and `--base`, optional `--verdict`.
 
   **Exit 2 means "could not judge"; exit 1 means "judged, and it failed".** Conflating them would
   let a broken harness read as a clean bill of health, which is the failure mode the mutation gate
   exists to stop (#142, #71).
 
-- [ ] **Step 2: Make a void run void.** Refuse with exit 2 on `dropped_iterations > 0` (the
+- [x] **Step 2: Make a void run void.** Refuse with exit 2 on `dropped_iterations > 0` (the
   generator, not the server, was the bottleneck), `http_req_failed > 0` (a 500-storm has a
   flattering latency profile), no scenarios recorded, a malformed or missing summary, or a zero
   denominator.
 
-- [ ] **Step 3: Take the minimum across repetitions.** Interference is one-sided — a noisy
+- [x] **Step 3: Take the minimum across repetitions.** Interference is one-sided — a noisy
   neighbour or a co-resident generator can only make a request slower — so the smallest
   observation is the best estimate, and averaging would fold the interference into the answer.
 
-- [ ] **Step 4: Require BOTH conditions for an absolute breach.** `min(HEAD) > min(base) × factor`
+- [x] **Step 4: Require BOTH conditions for an absolute breach.** `min(HEAD) > min(base) × factor`
   **and** `min(HEAD) − min(base) > floorMs`. A factor alone on a two-millisecond endpoint is
   noise, and a gate that fires on noise is muted within a month.
 
-- [ ] **Step 5: Guard against empty-array expansion under `set -u`.**
+- [x] **Step 5: Guard against empty-array expansion under `set -u`.**
 
 ```bash
 for file in ${BASE_FILES[@]+"${BASE_FILES[@]}"}; do assert_run_is_valid "$file"; done
@@ -297,7 +301,7 @@ for file in ${BASE_FILES[@]+"${BASE_FILES[@]}"}; do assert_run_is_valid "$file";
   Bash treats an empty `"${a[@]}"` as an unbound variable, so a ratio-only run (no `--base`)
   aborts with `BASE_FILES[@]: unbound variable` instead of doing its job. Observed.
 
-- [ ] **Step 6: Write `scripts/test-assert-load-baseline` — 22 cases, synthetic summaries.**
+- [x] **Step 6: Write `scripts/test-assert-load-baseline` — 22 cases, synthetic summaries.**
   Synthetic rather than captured (unlike the mutation suite's real fixtures) because the point is
   to drive the arithmetic through exact values, which real k6 output cannot do; what makes them
   trustworthy is that their *shape* is copied from `artifacts/load/head-1.json`.
@@ -311,7 +315,7 @@ for file in ${BASE_FILES[@]+"${BASE_FILES[@]}"}; do assert_run_is_valid "$file";
   - a noisy rep beside a clean one does not fail;
   - each of the five void conditions exits **2**, not 1.
 
-- [ ] **Step 7: Run the suite.**
+- [x] **Step 7: Run the suite.**
 
 ```bash
 scripts/test-assert-load-baseline
@@ -319,7 +323,7 @@ scripts/test-assert-load-baseline
 
   Expected: `22 passed, 0 failed` at this point (29 after slice 6 step 7a).
 
-- [ ] **Step 8: Commit.**
+- [x] **Step 8: Commit.**
 
 ```bash
 git add scripts/assert-load-baseline scripts/test-assert-load-baseline
@@ -330,7 +334,7 @@ git commit -m "test(load): one authority for the verdict, gated on min, with its
 
 ## Slice 5 — the baseline file, measured twice
 
-- [ ] **Step 1: Run the full A/B against `main` to exercise the path that has no other test.**
+- [x] **Step 1: Run the full A/B against `main` to exercise the path that has no other test.**
 
 ```bash
 scripts/test-load --tier gate --baseline-ref main --reps 2
@@ -340,7 +344,7 @@ scripts/test-load --tier gate --baseline-ref main --reps 2
   interleaving. Because the branch changes no `src/`, both images behave identically, so the
   absolute factors **should** come out near 1.0.
 
-- [ ] **Step 2: Read the A/B result as evidence about the thresholds, not just as a pass.**
+- [x] **Step 2: Read the A/B result as evidence about the thresholds, not just as a pass.**
   Expected: `read_by_id` 0.86, `list_indexed` 0.89, `create` 0.96 — and **`openapi` 1.48 on
   identical code**. Across two interleaved arms of the same image, `min` varied by up to 1.5×
   (`read_by_id` 0.71–1.07 ms, `list_indexed` 1.57–2.27 ms, `openapi` 2.44–3.97 ms).
@@ -352,7 +356,7 @@ scripts/test-load --tier gate --baseline-ref main --reps 2
     makes the absolute half a coarse tripwire and the ratios the sensitive instrument — which is
     the design's own division, now with evidence. State it in the file.
 
-- [ ] **Step 3: Write `test/load/baselines/gate.json` from the worst of the two runs.** Each
+- [x] **Step 3: Write `test/load/baselines/gate.json` from the worst of the two runs.** Each
   ratio row carries `over`, `max`, `observed` (the array of what was actually seen), `measuredOn`,
   `headroom` and `why`. Ceilings: `count_exact` 2.5 (observed 1.64, 1.54), `page_deep` 2.2
   (1.18, 1.04 — wider headroom because #100's growth is documented as sublinear but *unbounded*
@@ -363,7 +367,7 @@ scripts/test-load --tier gate --baseline-ref main --reps 2
   `SELECT` list, so ~1.0 is correct today and proves nothing (#117). It is the instrument that
   will demonstrate the fix when the number drops below 1.0.
 
-- [ ] **Step 4: Re-run the guard against the committed baseline.**
+- [x] **Step 4: Re-run the guard against the committed baseline.**
 
 ```bash
 scripts/assert-load-baseline --baseline test/load/baselines/gate.json \
@@ -373,7 +377,7 @@ scripts/assert-load-baseline --baseline test/load/baselines/gate.json \
   Expected: every row `ok`, and `row_policy` visibly *not* near its ceiling any more (it sat at
   1.57 against a provisional 1.6 before this slice — the reason the ceiling moved to 2.4).
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ```bash
 git add test/load/baselines/gate.json
@@ -384,7 +388,7 @@ git commit -m "test(load): the gate's ceilings, measured across two runs rather 
 
 ## Slice 6 — CI, the judged-baseline gate, and the published numbers
 
-- [ ] **Step 1: Create `.github/workflows/load.yml`** with three jobs: `gate` on
+- [x] **Step 1: Create `.github/workflows/load.yml`** with three jobs: `gate` on
   `pull_request` (paths-filtered to `src/`, `schema/`, `examples/field-service/`, `test/load/`,
   the two scripts, the compose file, `Directory.Packages.props`, the workflow itself), `calibration`
   on `push: tags: v*` plus `workflow_dispatch`, and `notify`.
@@ -397,7 +401,7 @@ git commit -m "test(load): the gate's ceilings, measured across two runs rather 
   the host's loopback, and a local binary removes the `host.docker.internal` hop from the
   measurement entirely.
 
-- [ ] **Step 2: Make `notify` fire on `always() && result != 'success'`, not `failure()`.** A job
+- [x] **Step 2: Make `notify` fire on `always() && result != 'success'`, not `failure()`.** A job
   killed by `timeout-minutes` ends `cancelled`, so `failure()` is false for the one outcome that
   matters most — a run that produced no numbers and told nobody. This is #98's lesson, already
   recorded at length in `mutation.yml`.
@@ -406,11 +410,11 @@ git commit -m "test(load): the gate's ceilings, measured across two runs rather 
   so it is always the harness — a build, `up --wait`, a seed that no longer matches the schema, a
   void run, or a timeout.
 
-- [ ] **Step 3: Do not commit results from CI.** Pushing to `main` from CI is banned outright, so
+- [x] **Step 3: Do not commit results from CI.** Pushing to `main` from CI is banned outright, so
   the calibration job builds `artifacts/load/calibration.md`, writes it to `$GITHUB_STEP_SUMMARY`
   and uploads it; a normal PR lands the row in `docs/performance.md`.
 
-- [ ] **Step 4: Teach the ledger and the Stop gate about load baselines.** Widen
+- [x] **Step 4: Teach the ledger and the Stop gate about load baselines.** Widen
   `.claude/hooks/record-edited-paths`'s scope filter to `test/load/baselines/*.json`, and add a
   `check_load_baselines` function to `.claude/hooks/turn-review-gate`, registered in `checks`.
 
@@ -423,12 +427,12 @@ git commit -m "test(load): the gate's ceilings, measured across two runs rather 
   hazard a `*.verified.*` snapshot carries, and nothing mechanical can tell an intended cost from
   a silenced regression.
 
-- [ ] **Step 5: Extend `alvo-snapshot-judge` to the second baseline kind.** Add two closed-list
+- [x] **Step 5: Extend `alvo-snapshot-judge` to the second baseline kind.** Add two closed-list
   fingerprints — a ceiling raised with no source change to buy it, and a `max` moved without its
   `observed` array moving too — and one explicitly normal case: a ceiling coming **down** (which
   is what #178's fix looks like).
 
-- [ ] **Step 6: Extend `scripts/test-hooks`.** Add a committed `test/load/baselines/gate.json` to
+- [x] **Step 6: Extend `scripts/test-hooks`.** Add a committed `test/load/baselines/gate.json` to
   `setup_repo`, then: the recorder records a load baseline; the recorder **ignores**
   `test/load/scenarios.js` (the scope is the baselines directory, not every JSON under
   `test/load` — the scenarios are code, and code is reviewed, not judged); a changed load
@@ -441,7 +445,7 @@ scripts/test-hooks
 
   Expected: `34 passed, 0 failed`.
 
-- [ ] **Step 7: Run the calibration tier — and expect the gate to fail on it.**
+- [x] **Step 7: Run the calibration tier — and expect the gate to fail on it.**
 
 ```bash
 scripts/test-load --tier calibration
@@ -469,7 +473,7 @@ scripts/test-load --tier calibration
   was measured on, and the calibration tier must **report**, not judge — which is what the design's
   own tier table always said (*"never fails on a number"*) and what the implementation got wrong.
 
-- [ ] **Step 7a: Add `--report-only` to the guard, and pass it for any tier but `gate`.** A ratio
+- [x] **Step 7a: Add `--report-only` to the guard, and pass it for any tier but `gate`.** A ratio
   over its ceiling prints `over` instead of `BREACH` and the run exits 0. **Validity stays
   enforced** — a void run publishes garbage, and garbage in `docs/performance.md` is worse than no
   row.
@@ -486,28 +490,28 @@ assert_rejected_because "the same input still FAILS without --report-only" 1 BRE
 
   Expected after this slice: `29 passed, 0 failed`.
 
-- [ ] **Step 7b: Lower the calibration tier's offered rate to 20/s for list shapes.** §5.1 requires
+- [x] **Step 7b: Lower the calibration tier's offered rate to 20/s for list shapes.** §5.1 requires
   a uniform rate across list shapes, so the rate must suit the heaviest one — and at 200 k rows
   `unindexed_filter` is a sequential scan. A rate that saturates it does not make that scenario
   slow, it makes the whole run **void**.
 
-- [ ] **Step 7c: Write `docs/performance.md` from the result**, naming the rig, the row count, the
+- [x] **Step 7c: Write `docs/performance.md` from the result**, naming the rig, the row count, the
   k6 version and the tier in the section heading itself. The headline: **`list_indexed` p95 =
   15.6 ms at 100 k rows per tenant on an indexed column, against `baas-analyza.md:142`'s 50 ms
   bar** — met by a factor of three. Publish the ratio table too, because the ratios are the part
   that survives a change of machine.
 
-- [ ] **Step 8: Write `test/load/README.md`** — how to run it, the two tiers, the two kinds of
+- [x] **Step 8: Write `test/load/README.md`** — how to run it, the two tiers, the two kinds of
   judgement, why the gating statistic is `min` (with the table), the **two edits** that add a
   scenario, and what the rig cannot claim.
 
-- [ ] **Step 9: Record the licensing ruling where a future author will look for it.** Add to the
+- [x] **Step 9: Record the licensing ruling where a future author will look for it.** Add to the
   `alvo-dotnet-conventions` skill: the bans apply to **dependencies of a shipped package**, not to
   a development or CI tool invoked as a separate process. Name NBomber as refused on both grounds
   (licence *and* in-process), and name the tools already in the CI-only category — Stryker,
   TeaPie, Vacuum, Husky.Net, the `postgres:16-alpine` image.
 
-- [ ] **Step 10: Commit.**
+- [x] **Step 10: Commit.**
 
 ```bash
 git add .github/workflows/load.yml .claude/hooks/ .claude/agents/alvo-snapshot-judge.md \
@@ -530,10 +534,89 @@ git commit -m "ci(load): gate on a PR, calibration on a tag, and a judged load b
   building once the HTTP gate has fired in anger at least once. A second harness with a second
   result format and a second baseline is scope this PR has not earned.
 
-- [ ] **Step 3: Do not close #100, #117, #178 or #179.** This PR *quantifies* them; it fixes none
+- [x] **Step 3: Do not close #100, #117, #178 or #179.** This PR *quantifies* them; it fixes none
   of them. Each gets the measured ratio recorded so the fix arrives with a before-and-after.
 
 ---
+
+---
+
+## Slice 8 — what review changed, and it was not cosmetic
+
+Three reviews ran before the PR opened: `alvo-snapshot-judge` on the new baseline (**ok**),
+`alvo-plan-guard` on the whole diff (**ISSUES**, five), and a stand-in for `/code-review medium`
+over the shell/JS/SQL (**twelve findings**, several reproduced rather than reasoned about). The
+fixes below are the ones that changed behaviour rather than prose, and every one is pinned by a
+test.
+
+- [x] **The `row_policy` ratio was unfalsifiable, and it is the security-core row.** A ratio can
+  only reward a *cheaper* policy path, and the cheapest row predicate is one that matches nothing —
+  so a default-deny bug would make it faster, drop the ratio, keep `http_req_failed` at 0 (an empty
+  200 list is not a failure) and publish an improvement for a broken rule engine. Fix:
+  `assert_seed_is_visible` now asserts the technician's set is a **strict subset** of the
+  dispatcher's — non-empty *and* smaller — before k6 starts. Verified by nulling every
+  `assigned_to` on a live stack and confirming the count went 1000 → 0, i.e. the `die` fires.
+
+- [x] **Three fail-open paths in the guard, all reproduced.** (1) Both judgement loops read from
+  `done < <(jq …)`, which `set -e` and `pipefail` cannot see into — a one-letter typo in `.ratios`
+  judged nothing and printed `ok` past a 30× breach. (2) A row that resolved to `not measured`
+  could not fail, so a scenario that silently stopped producing samples turned the gate green.
+  (3) A `min` of `0` on the numerator printed `0.00 … ok`. Fixes: validate the baseline's shape and
+  row count up front; add `--strict` (passed only for a *complete* gate run) so an unmeasured
+  declared row is exit 2; reject a zero on either side of a ratio. Eleven new cases; the suite goes
+  22 → **40**.
+
+- [x] **A truncated flag exited 1 with no message**, and exit 1 is the documented *"judged, and it
+  failed"* — so a typo read to CI as a real regression. `needs_value` before every `shift 2`, in
+  both scripts.
+
+- [x] **`--rows` on a gate run enforced tier-bound ceilings at the wrong volume.** This was a
+  regression introduced *while fixing* plan-guard's issue 4: honouring `rows` in the gate job made
+  `--tier gate --rows 200000` enforce a 2.5× `count_exact` ceiling against a dataset measured at
+  3.0×, a guaranteed false BREACH. Fix: a row-count override disarms the ceilings (`--report-only`).
+
+- [x] **The baseline arm was built with HEAD's Dockerfile.** `build_image` hardcoded
+  `$ROOT/src/.../Dockerfile` while passing the base worktree as the context, and the workflow
+  triggers on `src/**` — which includes that Dockerfile. A PR touching the build would have
+  compared two different builds while looking valid. The Dockerfile now comes from the context.
+
+- [x] **`use_image` recreated PostgreSQL too**, contradicting the comment that justifies the whole
+  arm-swap design ("both arms measure the identical dataset"). Data survived only by anonymous-volume
+  reuse. Added `--no-deps`.
+
+- [x] **The containerised k6 could not write its summary on Linux.** The image runs as uid 12345
+  against a bind mount owned by the invoking user, so `handleSummary` got EACCES, the run produced
+  nothing, and the guard died twelve minutes later — failing exactly for the maintainer-on-Linux
+  case the fallback exists to serve. Added `--user "$(id -u):$(id -g)"`.
+
+- [x] **The scenario boundary had no slack.** An iteration in flight when a graceful window closes
+  is aborted, an aborted request is a failed request, and any failed request voids the run — with a
+  10 s timeout inside a 2 s window. Fix: timeout 4 s inside a 5 s window, staggered so no two
+  scenarios overlap. The margin is now stated from measurement: the slowest single request across
+  every run to date was 132 ms.
+
+- [x] **`page_deep` could measure a partial page.** The walk stops at the cursor yielding the last
+  page, which holds `matching mod 200` rows — freely chosen `--rows` can leave fewer than the 50 the
+  measured scenario asks for, at which point it serialises less than `page_shallow` and flatters
+  itself. Fix: step back one page when the deep page is not full.
+
+- [x] **`--reps 0` aborted with `unbound variable`** after all the Docker work. Validated at parse
+  time, along with `--rows`.
+
+- [x] **Two comments overstated what the code does** — `seededId()` claims to spread over the table
+  where it walks a `rate x DURATION` window in order, and `use_image` claimed PostgreSQL stayed put.
+  Both now say what is true; the first states the trade (identical across arms, warm rather than
+  cold) instead of implying a property it does not have.
+
+- [x] **Housekeeping from plan-guard:** the licensing subsection was splitting a bullet list and
+  burying the outbox hard rule (moved after the list); `docs/performance.md`'s ratio table did not
+  say it is computed on `min`, so a reader dividing the bolded p95 column got a contradictory
+  number; the plan's checkboxes were all unchecked on finished work; `row_policy`'s baseline row now
+  records that moving *that* ceiling carries `needs-deep-review`.
+
+- [x] **The `observed` arrays now list every run, not the first two.** Four runs of identical code
+  gave `count_exact` 1.17–1.65 and `row_policy` 0.98–1.57, and that spread is the evidence for why
+  each ceiling sits ~1.5× above the *worst* observation rather than snugly above the average.
 
 ## Self-review against the spec
 

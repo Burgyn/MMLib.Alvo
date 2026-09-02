@@ -48,18 +48,33 @@ BASELINE_FILE="$ROOT/test/load/baselines/gate.json"
 die() { printf 'test-load: %s\n' "$1" >&2; exit 2; }
 say() { printf '[load] %s\n' "$1"; }
 
+# `needs_value` before every `shift 2`: a truncated flag would otherwise assign "" and then shift
+# past the end, and `shift` returning non-zero under `set -e` kills the script with no message.
+needs_value() {
+    [ "$2" -ge 2 ] || die "$1 needs a value"
+}
+
 while [ $# -gt 0 ]; do
     case "$1" in
-        --tier) TIER="${2:-}"; shift 2 ;;
-        --baseline-ref) BASELINE_REF="${2:-}"; shift 2 ;;
-        --rows) ROWS_OVERRIDE="${2:-}"; shift 2 ;;
-        --scenarios) SCENARIOS_OVERRIDE="${2:-}"; shift 2 ;;
-        --reps) REPS="${2:-}"; shift 2 ;;
+        --tier) needs_value "$1" $#; TIER="$2"; shift 2 ;;
+        --baseline-ref) needs_value "$1" $#; BASELINE_REF="$2"; shift 2 ;;
+        --rows) needs_value "$1" $#; ROWS_OVERRIDE="$2"; shift 2 ;;
+        --scenarios) needs_value "$1" $#; SCENARIOS_OVERRIDE="$2"; shift 2 ;;
+        --reps) needs_value "$1" $#; REPS="$2"; shift 2 ;;
         --keep) KEEP=1; shift ;;
         -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
         *) die "unknown argument '$1'" ;;
     esac
 done
+
+case "$REPS" in
+    ''|*[!0-9]*) die "--reps must be a positive integer, got '$REPS'" ;;
+esac
+[ "$REPS" -ge 1 ] || die "--reps must be at least 1, got '$REPS'"
+case "$ROWS_OVERRIDE" in
+    '') ;;
+    *[!0-9]*) die "--rows must be a positive integer, got '$ROWS_OVERRIDE'" ;;
+esac
 
 # The offered rates are LOWER at the large tier, and that is a correctness choice rather than a
 # timidity one. Every list-shaped scenario must see the SAME rate or the ratio between two of them
@@ -74,7 +89,15 @@ case "$TIER" in
                  LIST_RATE=20; READ_RATE=40; WRITE_RATE=10; DOC_RATE=5 ;;
     *) die "unknown tier '$TIER' (expected gate or calibration)" ;;
 esac
-[ -n "$ROWS_OVERRIDE" ] && ROWS="$ROWS_OVERRIDE"
+# A ROW-COUNT OVERRIDE DISARMS THE CEILINGS, and the reason is §5.3 of the design: the ratios
+# grow with volume, so a ceiling measured at the tier's own row count is invalid at any other.
+# Without this, `--tier gate --rows 200000` would enforce a 2.5x count_exact ceiling against a
+# dataset measured at 3.0x — a guaranteed false BREACH.
+ROWS_ARE_THE_TIER_DEFAULT=1
+if [ -n "$ROWS_OVERRIDE" ]; then
+    [ "$ROWS_OVERRIDE" = "$ROWS" ] || ROWS_ARE_THE_TIER_DEFAULT=0
+    ROWS="$ROWS_OVERRIDE"
+fi
 
 # The four shapes with no meaningful denominator. Only these need the baseline arm, which is why
 # it costs one short run rather than a whole second suite.
@@ -130,6 +153,11 @@ cleanup() {
     local status=$?
     if [ -n "$WORKTREE" ]; then
         git worktree remove --force "$WORKTREE" >/dev/null 2>&1 || true
+        # prune after remove, in case remove failed; then the mktemp parent, which `remove` never
+        # touches and which would otherwise accumulate one empty directory per A/B run.
+        git worktree prune >/dev/null 2>&1 || true
+        rm -rf "$(dirname "$WORKTREE")" >/dev/null 2>&1 || true
+        docker image rm -f "$IMAGE_BASE" >/dev/null 2>&1 || true
     fi
     if [ "$KEEP" -eq 0 ]; then
         ALVO_LOAD_IMAGE="$IMAGE_HEAD" docker compose "${COMPOSE[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
@@ -142,8 +170,14 @@ trap cleanup EXIT INT TERM
 
 build_image() {
     local tag="$1" context="$2"
+    # The Dockerfile comes from the CONTEXT, not from $ROOT. The workflow triggers on `src/**`,
+    # which includes this Dockerfile — so a PR that changes the build (renames a csproj, moves the
+    # SDK base image, adds a COPY) would otherwise build the BASE sources under HEAD's build
+    # configuration, and the A/B would be comparing two different things while looking valid.
+    local dockerfile="$context/src/MMLib.Alvo.Host/Dockerfile"
+    [ -f "$dockerfile" ] || die "no Dockerfile at $dockerfile — the arm's own build configuration is what makes an A/B a comparison"
     say "building $tag"
-    docker build --quiet -f "$ROOT/src/MMLib.Alvo.Host/Dockerfile" -t "$tag" "$context" >/dev/null
+    docker build --quiet -f "$dockerfile" -t "$tag" "$context" >/dev/null
 }
 
 # The alvo service is recreated with the other arm's image while PostgreSQL and its data stay put.
@@ -151,7 +185,13 @@ build_image() {
 # them cannot be the rows.
 use_image() {
     local image="$1"
-    ALVO_LOAD_IMAGE="$image" docker compose "${COMPOSE[@]}" up --wait --no-build --force-recreate alvo >/dev/null
+    # `--no-deps` is what makes the comment above true. Without it, naming `alvo` selects its
+    # dependencies too and `--force-recreate` applies to the whole selected set, so PostgreSQL is
+    # recreated on every arm swap — the data survives only because compose reuses the previous
+    # container's anonymous volume, which is a thin thread to hang "both arms measure the identical
+    # dataset" on.
+    ALVO_LOAD_IMAGE="$image" docker compose "${COMPOSE[@]}" \
+        up --wait --no-build --no-deps --force-recreate alvo >/dev/null
 }
 
 stack_up() {
@@ -197,7 +237,29 @@ assert_seed_is_visible() {
         "$BASE_URL/api/work_orders?status=eq.scheduled&order=priority.asc&limit=50" \
         | jq -r '.items | length')
     [ "$page" = "50" ] || die "the reference list returned $page rows, not a full page of 50 — every ratio anchored on it would be meaningless"
-    say "seed verified through the API: count=$count, reference page full"
+
+    # THE `row_policy` TRIPWIRE, and it is the one check without which that ratio is worthless.
+    #
+    # `row_policy` measures the same URL answered for a caller whose `list` rule carries
+    # `assigned_to == @user.id`. A ratio alone can only ever reward a CHEAPER policy path — and the
+    # cheapest possible row predicate is one that returns nothing. If a change made that predicate
+    # exclude every row (a default-deny bug, an inverted comparison), `row_policy` would get
+    # FASTER, its ratio would fall, and `http_req_failed` would stay 0 because an empty 200 list is
+    # not a failure. The load layer would publish an improvement for a broken rule engine.
+    #
+    # So the technician's set is asserted to be a genuine, strict SUBSET before k6 starts: not
+    # empty (the predicate still matches), and smaller than the dispatcher's (the predicate still
+    # filters). Either failure aborts the run instead of producing a green number.
+    local tech_count
+    tech_count=$(curl -sS -H "X-Alvo-Api-Key: $KEY_TECH" -H 'Prefer: count=exact' \
+        "$BASE_URL/api/work_orders?limit=1" | jq -r '.count // "null"')
+    case "$tech_count" in
+        ''|null|*[!0-9]*) die "the technician's count came back '$tech_count' — the row-policy caller cannot be measured" ;;
+    esac
+    [ "$tech_count" -gt 0 ] || die "the technician's row predicate matched NO rows: row_policy would measure an empty list and report it as an improvement. The seed's assigned_to distribution or the list rule has changed."
+    [ "$tech_count" -lt "$count" ] || die "the technician sees $tech_count of $count rows — the row predicate is not filtering, so row_policy measures nothing about the rule engine."
+
+    say "seed verified through the API: count=$count, reference page full, row predicate a strict subset ($tech_count of $count)"
 }
 
 # #100 is about how deep the cursor sits, not how many sort terms there are — its own evidence is
@@ -206,7 +268,7 @@ assert_seed_is_visible() {
 # four times cheaper than the measured page size would.
 deep_cursor() {
     local sort='status=eq.scheduled&order=priority.asc,reference.asc&limit=200'
-    local cursor="" next body
+    local cursor="" previous="" next body
     while :; do
         if [ -z "$cursor" ]; then
             body=$(curl -sS -H "X-Alvo-Api-Key: $KEY_DISPATCHER" "$BASE_URL/api/work_orders?$sort")
@@ -216,9 +278,29 @@ deep_cursor() {
         fi
         next=$(jq -r '.next // ""' <<<"$body")
         [ -n "$next" ] || break
+        previous="$cursor"
         cursor="$next"
     done
+
+    # THE DEEP PAGE MUST BE A FULL PAGE, or the ratio flatters itself. The walk stops at the
+    # cursor that yields the LAST page, and the last page holds `matching mod 200` rows — which at
+    # a freely chosen --rows can be fewer than the 50 the measured scenario asks for. page_deep
+    # would then serialise fewer rows than page_shallow and come out cheaper for a reason that has
+    # nothing to do with depth. Step back one page when that happens: one page shallower is still
+    # thousands of rows deep, and it is full by construction.
+    if [ "$(page_size_at "$cursor")" -lt 50 ] && [ -n "$previous" ]; then
+        cursor="$previous"
+    fi
     printf '%s' "$cursor"
+}
+
+# How many rows the measured page shape returns from a given cursor.
+page_size_at() {
+    local cursor="$1"
+    local sort='status=eq.scheduled&order=priority.asc,reference.asc&limit=50'
+    curl -sS -H "X-Alvo-Api-Key: $KEY_DISPATCHER" \
+        "$BASE_URL/api/work_orders?$sort&after=$(jq -rn --arg c "$cursor" '$c|@uri')" \
+        | jq -r '.items | length'
 }
 
 # PINNED, not `latest`, and the reason is the measurement rather than tidiness: the generator is
@@ -260,7 +342,13 @@ run_k6() {
 
     # host.docker.internal reaches the published loopback port from inside the generator's
     # container on Docker Desktop; on Linux the extra host maps it to the gateway.
+    # `--user` is not hardening, it is the difference between working and not: the grafana/k6 image
+    # runs as uid 12345, /out is a bind mount owned by the invoking user, and on Linux
+    # handleSummary then gets EACCES — the run completes, writes no summary, and the guard dies
+    # "does not exist" twelve minutes later. Docker Desktop's uid mapping hides it on macOS, so it
+    # fails exactly for the maintainer-on-Linux case this fallback exists to serve.
     docker run --rm \
+        --user "$(id -u):$(id -g)" \
         --add-host=host.docker.internal:host-gateway \
         -v "$ROOT/test/load:/scripts:ro" \
         -v "$OUT_DIR:/out" \
@@ -328,8 +416,14 @@ fi
 # calibration run would fail a healthy release for a reason that is a property of the row count.
 # Validity is still enforced either way: a void run publishes garbage.
 VERDICT_ARGS=()
-if [ "$TIER" != gate ]; then
+if [ "$TIER" != gate ] || [ "$ROWS_ARE_THE_TIER_DEFAULT" -eq 0 ]; then
     VERDICT_ARGS+=(--report-only)
+elif [ -z "$SCENARIOS_OVERRIDE" ]; then
+    # --strict only for a COMPLETE gate run: every row the baseline declares must have resolved to
+    # a number. A scenario that silently stopped producing samples otherwise prints "not measured"
+    # and turns the gate green, which is the class the guard exists to stop. A deliberately partial
+    # local run (`--scenarios a,b`) is exempt, because "not measured" is what the user asked for.
+    VERDICT_ARGS+=(--strict)
 fi
 
 echo

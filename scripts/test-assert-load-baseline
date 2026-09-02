@@ -216,6 +216,72 @@ case "$OUT" in
 esac
 
 echo
+echo "The baseline's own shape — a guard that judges nothing must not print 'ok'"
+
+# THE FAIL-OPEN THIS PINS, and it was reproduced rather than reasoned about: both judgement loops
+# are fed by `done < <(jq …)`, and neither `set -e` nor `pipefail` can see a failure inside a
+# process substitution. A one-letter typo in `.ratios` therefore made jq error to stderr, the loop
+# body never run, FAILED stay 0 — and a 30x breach print "assert-load-baseline: ok".
+jq -n '{ratio: {count_exact: {over: "list_indexed", max: 2.5}},
+        absolute: {defaults: {factor: 1.8, floorMs: 3.0}}}' > "$TMP/typo-baseline.json"
+write_summary "$TMP/huge-breach.json" 0 0 count_exact:60.0:80.0 list_indexed:2.0:8.0
+assert_rejected_because "a baseline with .ratios misspelled is void, not ok" 2 "no '.ratios' object" \
+    --baseline "$TMP/typo-baseline.json" --head "$TMP/huge-breach.json"
+
+# The same slip in the other direction: --baseline pointed at a k6 summary, which is valid JSON
+# living in the same tree.
+assert_rejected_because "--baseline pointed at a summary is void" 2 "no '.ratios' object" \
+    --baseline "$TMP/ok.json" --head "$TMP/ok.json"
+
+jq -n '{ratios: {}, absolute: {defaults: {factor: 1.8, floorMs: 3.0}}}' > "$TMP/empty-ratios.json"
+assert_rejected_because "a baseline declaring no ratios is void" 2 "judges nothing" \
+    --baseline "$TMP/empty-ratios.json" --head "$TMP/ok.json"
+
+jq -n '{ratios: {count_exact: {over: "list_indexed", max: 2.5}}, absolute: {}}' \
+    > "$TMP/no-defaults.json"
+assert_rejected_because "a baseline with no absolute.defaults is void" 2 "defaults" \
+    --baseline "$TMP/no-defaults.json" --head "$TMP/ok.json"
+
+echo
+echo "A zero measurement is a missing measurement, on either side of a ratio"
+
+# A `min` of exactly 0 ms is physically impossible for an HTTP request; it is what a
+# declared-but-unrun k6 trend looks like. Unchecked, a 0 numerator printed "0.00 ... ok" — the
+# scenario that recorded nothing reading as the fastest thing in the run.
+write_summary "$TMP/zero-numerator.json" 0 0 count_exact:0:8.0 list_indexed:2.0:8.0
+assert_rejected_because "a zero NUMERATOR is void" 2 "cannot take zero time" \
+    --baseline "$BASELINE" --head "$TMP/zero-numerator.json"
+
+write_summary "$TMP/zero-abs-head.json" 0 0 read_by_id:0:4.0
+assert_rejected_because "a zero min in the A/B is void" 2 "recorded no samples" \
+    --baseline "$BASELINE" --head "$TMP/zero-abs-head.json" --base "$TMP/base.json"
+
+echo
+echo "--strict — a row the baseline declares but the run did not measure is void"
+
+# Without --strict a scenario that silently stopped producing samples (an exec function throwing
+# before its first record(), a renamed catalogue entry, a --scenarios typo, needsCursor filtering
+# page_deep out) prints "not measured" and turns the gate GREEN.
+assert_rejected_because "an unmeasured declared row is void under --strict" 2 "not measured" \
+    --baseline "$BASELINE" --head "$TMP/ratio-absent.json" --strict
+
+assert_status "the same input passes WITHOUT --strict (a partial local run is legal)" 0 \
+    --baseline "$BASELINE" --head "$TMP/ratio-absent.json"
+
+assert_status "a complete run passes under --strict" 0 \
+    --baseline "$BASELINE" --head "$TMP/ok.json" --strict
+
+echo
+echo "Truncated flags are a misuse (exit 2), never a regression (exit 1)"
+
+# `--baseline` with no value used to assign "" and then `shift 2` past the end; shift returned
+# non-zero and `set -e` killed the script with EXIT 1 AND NO OUTPUT. Exit 1 is the documented
+# "judged, and it failed", so a typo read to CI as a real performance breach.
+assert_rejected_because "--baseline with no value is a misuse" 2 "needs a value" --baseline
+assert_rejected_because "--head with no value is a misuse" 2 "needs a value" \
+    --baseline "$BASELINE" --head
+
+echo
 echo "--report-only — the calibration tier's shape: ceilings not enforced, validity still is"
 
 # The ratios GROW with volume (count=exact 1.6x at 20k rows, 3.0x at 200k), so gate-tier ceilings

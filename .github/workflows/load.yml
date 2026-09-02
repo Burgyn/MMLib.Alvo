@@ -40,7 +40,7 @@ on:
         options: [calibration, gate]
         default: calibration
       rows:
-        description: 'Work orders per tenant (blank = the tier default)'
+        description: 'Work orders per tenant (blank = the tier default; honoured by both tiers)'
         type: string
         default: ''
 
@@ -64,9 +64,12 @@ jobs:
     name: Load gate (A/B vs the merge base)
     if: github.event_name == 'pull_request' || inputs.tier == 'gate'
     runs-on: ubuntu-latest
-    # Two image builds plus four short k6 runs. Measured locally at ~13 minutes; 30 leaves room
-    # for a cold Docker layer cache without hiding a hang.
-    timeout-minutes: 30
+    # Two image builds plus four short k6 runs. Each scenario costs DURATION + 6 s (a 5 s graceful
+    # window plus a second of separation, so no two scenarios ever overlap), which is ~3.5 min for
+    # the ten-scenario HEAD arm and ~1.5 for the four-scenario base arm; two reps of each plus two
+    # builds measured at ~15 minutes locally. 35 leaves room for a cold Docker layer cache without
+    # hiding a hang.
+    timeout-minutes: 35
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -93,9 +96,28 @@ jobs:
         env:
           # The PR's base commit, which is what "did THIS change make it slower" means. Not
           # `main`: a PR branched a week ago would otherwise be charged for everything merged
-          # since.
+          # since. Empty on a workflow_dispatch, which is why the step branches below.
           BASELINE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: scripts/test-load --tier gate --baseline-ref "$BASELINE_SHA" --reps 2
+          # Honoured here as well as in `calibration`: an input described as "blank = the tier
+          # default" that one job silently ignores is worse than no input.
+          ROWS: ${{ inputs.rows }}
+        run: |
+          set -euo pipefail
+          # Explicit `if` rather than `[ -n "$x" ] && args+=(…)`: bash exempts the left operand of
+          # a `&&` from errexit, so the short form happens to work — but it works by exemption, and
+          # a reader has to know that to believe the script. There is a dispatched gate run with no
+          # baseline arm (BASELINE_SHA is empty off a pull_request), which is the case that would
+          # break silently.
+          args=(--tier gate --reps 2)
+          if [ -n "${BASELINE_SHA:-}" ]; then
+            args+=(--baseline-ref "$BASELINE_SHA")
+          else
+            echo "::notice::No baseline arm (not a pull_request): ratios only, no absolute A/B."
+          fi
+          if [ -n "${ROWS:-}" ]; then
+            args+=(--rows "$ROWS")
+          fi
+          scripts/test-load "${args[@]}"
 
       - name: Publish the measurements
         if: always()

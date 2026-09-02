@@ -128,7 +128,21 @@ A run is **void, not slow**, and the guard exits 2 rather than 1, when:
 - the seed is not visible through the API. `scripts/test-load` reads the seeded set back with
   `Prefer: count=exact` and aborts before k6 starts unless the count matches. `seed.sql` writes the
   physical tables directly, so it knows a layout `DescriptorToSchemaMapper` owns; this is what
-  stops that coupling rotting silently instead of producing an empty list with a spectacular p95.
+  stops that coupling rotting silently instead of producing an empty list with a spectacular p95;
+- **the row predicate stopped filtering, or started refusing everything.** `row_policy` is a
+  ratio, and a ratio can only ever reward a *cheaper* policy path — the cheapest possible row
+  predicate is one that matches nothing. So the technician's set is asserted to be a strict subset
+  of the dispatcher's before k6 starts: not empty, and smaller. Without that, a default-deny bug
+  would make `row_policy` faster, drop its ratio, keep `http_req_failed` at 0 (an empty 200 list is
+  not a failure) and publish an improvement for a broken rule engine;
+- a declared baseline row was **not measured** at all, on a full gate run (`--strict`). A scenario
+  that silently stops producing samples — a renamed catalogue entry, an `exec` throwing before its
+  first `record()` — would otherwise print `not measured` and leave the gate green;
+- the **baseline itself** has no `.ratios`/`.absolute` object. Both judgement loops read from a
+  process substitution, which `set -e` cannot see into, so a one-letter typo used to judge nothing
+  and print `ok`;
+- a `min` of **zero** on either side of a ratio. An HTTP request cannot take zero time; a zero is a
+  trend with no samples.
 
 ## What this rig cannot claim
 

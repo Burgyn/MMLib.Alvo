@@ -79,7 +79,12 @@ rather than a latency one, and it is already proven elsewhere: the paging walk i
 `docs/architecture/data-path.md` pages a null-bearing set one row at a time over 1 000 000 rows
 and compares against the unpaged read. What this file adds is the *cost* of depth, below.
 
-### What each row costs, relative to the reference list
+### What each row costs, relative to the reference list — on `min`, not p95
+
+**These ratios are computed on the `min` column, not the p95 one.** Dividing the p95 column
+instead gives `row_policy` = 1.2×, not the 2.8× below, and the reason is qualification 2 above: at
+these volumes p95 carries scheduling and container jitter that is common to every shape and swamps
+the difference between them, while `min` is service time. Do not mix the two.
 
 The ratios are the durable part of this table: they survive a change of machine, where the
 absolute milliseconds do not. Against `list_indexed` (`page_deep` against `page_shallow`, which

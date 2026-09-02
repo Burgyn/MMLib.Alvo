@@ -56,7 +56,10 @@
 #
 # Usage:
 #   assert-load-baseline --baseline FILE --head FILE [--head FILE …] [--base FILE …]
-#                        [--report-only] [--verdict FILE]
+#                        [--strict] [--report-only] [--verdict FILE]
+#
+# --strict means "every row the baseline declares must have been measured". A full gate run passes
+# it; a deliberately partial local run (`--scenarios a,b`) does not.
 #
 # With no --base the absolute half is skipped and only ratios are judged; that is a local
 # ratio-only run's shape.
@@ -66,6 +69,7 @@ set -euo pipefail
 BASELINE=""
 VERDICT=""
 REPORT_ONLY=0
+STRICT=0
 HEAD_FILES=()
 BASE_FILES=()
 
@@ -78,14 +82,23 @@ die() {
     exit 2
 }
 
+# `needs_value` before every `shift 2`: without it, a truncated flag assigns "" and then shifts
+# past the end, `shift` returns non-zero, and `set -e` kills the script with EXIT 1 AND NO OUTPUT.
+# Exit 1 is the documented "judged, and it failed", so a typo would read to CI as a real
+# performance regression — the exact confusion the die/exit-2 split exists to prevent.
+needs_value() {
+    [ "$2" -ge 2 ] || die "$1 needs a value"
+}
+
 while [ $# -gt 0 ]; do
     case "$1" in
-        --baseline) BASELINE="${2:-}"; shift 2 ;;
-        --head) HEAD_FILES+=("${2:-}"); shift 2 ;;
-        --base) BASE_FILES+=("${2:-}"); shift 2 ;;
-        --verdict) VERDICT="${2:-}"; shift 2 ;;
+        --baseline) needs_value "$1" $#; BASELINE="$2"; shift 2 ;;
+        --head) needs_value "$1" $#; HEAD_FILES+=("$2"); shift 2 ;;
+        --base) needs_value "$1" $#; BASE_FILES+=("$2"); shift 2 ;;
+        --verdict) needs_value "$1" $#; VERDICT="$2"; shift 2 ;;
         --report-only) REPORT_ONLY=1; shift ;;
-        -h|--help) sed -n '2,62p' "$0"; exit 0 ;;
+        --strict) STRICT=1; shift ;;
+        -h|--help) sed -n '2,72p' "$0"; exit 0 ;;
         *) die "unknown argument '$1'" ;;
     esac
 done
@@ -97,10 +110,26 @@ command -v jq >/dev/null || die "jq is required"
 
 jq -e . "$BASELINE" >/dev/null 2>&1 || die "baseline '$BASELINE' is not valid JSON"
 
+# VALIDATING THE BASELINE'S SHAPE, NOT ONLY THAT IT PARSES. Both judgement loops are fed by
+# `done < <(jq …)`, and `set -e`/`pipefail` cannot see a failure inside a process substitution —
+# so a baseline with `.ratios` missing or misspelled made jq write an error to stderr, the loop
+# body never ran, FAILED stayed 0, and the guard printed "ok". Measured: a one-letter typo
+# (`.ratio`) passed a 30x breach. Pointing --baseline at any other valid JSON in the same tree
+# (artifacts/load/head-1.json is a plausible slip) did the same.
+jq -e '.ratios | type == "object"' "$BASELINE" >/dev/null 2>&1 \
+    || die "baseline '$BASELINE' has no '.ratios' object — nothing would be judged, and the run would read as ok"
+jq -e '.absolute | type == "object"' "$BASELINE" >/dev/null 2>&1 \
+    || die "baseline '$BASELINE' has no '.absolute' object"
+jq -e '.absolute.defaults.factor and .absolute.defaults.floorMs' "$BASELINE" >/dev/null 2>&1 \
+    || die "baseline '$BASELINE' has no .absolute.defaults.factor/.floorMs — every per-scenario override falls back to them"
+BASELINE_RATIO_ROWS=$(jq -r '.ratios | length' "$BASELINE")
+[ "$BASELINE_RATIO_ROWS" -gt 0 ] || die "baseline '$BASELINE' declares no ratios — a guard that judges nothing is worse than no guard"
+
 GATING_STAT=min
 REPORTED_STAT='p(95)'
 
 FAILED=0
+NOT_MEASURED=0
 ROWS_JSON="[]"
 
 # One place turns "over the ceiling" into a verdict, so report-only cannot diverge from the gate
@@ -190,11 +219,19 @@ while IFS=$'\t' read -r name over ceiling; do
         printf '  %-20s %-16s %8s %8s %9s %9s   %s\n' \
             "$name" "$over" - "$ceiling" - - "not measured"
         record "$(jq -nc --arg n "$name" '{kind:"ratio",scenario:$n,verdict:"not-measured"}')"
+        NOT_MEASURED=$((NOT_MEASURED + 1))
         continue
     fi
 
+    # NEITHER side may be zero, not only the denominator. A `min` of exactly 0 ms is physically
+    # impossible for an HTTP request; it is what a declared-but-unrun k6 trend looks like if the
+    # summary carries one. Left unchecked, a 0 numerator printed `0.00 ... ok` — a scenario that
+    # stopped producing samples reading as the fastest thing in the run.
     if [ "$(jq -rn --argjson d "$denominator" '$d <= 0')" = "true" ]; then
         die "scenario '$over' has a $GATING_STAT of $denominator — a ratio over zero is not a measurement"
+    fi
+    if [ "$(jq -rn --argjson n "$numerator" '$n <= 0')" = "true" ]; then
+        die "scenario '$name' has a $GATING_STAT of $numerator — an HTTP request cannot take zero time, so this trend recorded no samples"
     fi
 
     ratio=$(jq -rn --argjson a "$numerator" --argjson b "$denominator" '$a / $b')
@@ -240,7 +277,12 @@ else
             printf '  %-20s %9s %9s %8s %8s %9s %9s   %s\n' \
                 "$name" - - - "$factor" "$floor" - "not measured"
             record "$(jq -nc --arg n "$name" '{kind:"absolute",scenario:$n,verdict:"not-measured"}')"
+            NOT_MEASURED=$((NOT_MEASURED + 1))
             continue
+        fi
+
+        if [ "$(jq -rn --argjson h "$head_min" --argjson b "$base_min" '$h <= 0 or $b <= 0')" = "true" ]; then
+            die "scenario '$name' has a $GATING_STAT of $base_min (base) / $head_min (head) — a zero means the trend recorded no samples"
         fi
 
         observed=$(jq -rn --argjson h "$head_min" --argjson b "$base_min" \
@@ -266,12 +308,24 @@ else
     ' "$BASELINE")
 fi
 
+# STRICT: every declared row must have resolved to a number. Without this, a scenario that
+# silently stopped producing samples — an exec function throwing before its first record(), a
+# renamed catalogue entry, a `--scenarios` typo, `needsCursor` filtering page_deep out — prints
+# "not measured" and turns the gate GREEN. That is the class the guard exists to stop, so a full
+# gate run asserts it. A deliberately partial local run (`--scenarios a,b`) and the report-only
+# tier do not pass --strict, which is why "not measured" stays a legal outcome there.
+if [ "$STRICT" -eq 1 ] && [ "$NOT_MEASURED" -gt 0 ]; then
+    die "$NOT_MEASURED declared row(s) resolved to 'not measured' under --strict: the run did not measure what the baseline judges"
+fi
+
 if [ -n "$VERDICT" ]; then
     mkdir -p "$(dirname "$VERDICT")"
     jq -n --argjson rows "$ROWS_JSON" --argjson failed "$FAILED" \
         --arg gating "$GATING_STAT" --arg reported "$REPORTED_STAT" \
-        --argjson reportOnly "$REPORT_ONLY" \
-        '{failed: ($failed == 1), reportOnly: ($reportOnly == 1),
+        --argjson reportOnly "$REPORT_ONLY" --argjson strict "$STRICT" \
+        --argjson notMeasured "$NOT_MEASURED" \
+        '{failed: ($failed == 1), reportOnly: ($reportOnly == 1), strict: ($strict == 1),
+          notMeasured: $notMeasured,
           gatingStat: $gating, reportedStat: $reported, checks: $rows}' \
         > "$VERDICT"
 fi

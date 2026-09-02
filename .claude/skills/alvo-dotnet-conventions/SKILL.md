@@ -38,6 +38,18 @@ picking a library, or writing C#.
   (vertical slice, no MediatR) calls for. Prefer plain DI handlers first —
   `vertical-slice.md` only reaches for Wolverine if a genuine multi-handler
   pipeline ever appears.
+- **Not for the outbox, and this is settled, not open.** The sources hint at
+  Wolverine for the transactional outbox (`baas-analyza.md:687`,
+  `alvo-specifikacia.md:329`); the F3 design's **deviation 1** rejected it and
+  PR5a implemented that rejection. **Alvo owns its outbox** — the core takes no
+  foreign dependency for it, so no embedded host inherits one, and the queue
+  behaves identically on every engine. The cost is stated and paid: Alvo owns
+  claim, retry and the poison-message ceiling. `IOutboxStore` (the earned port in
+  `Abstractions`) is what leaves Wolverine or an external bus available later as
+  an **adapter package** — an out-of-repo adapter implements the queue. Do not
+  reintroduce it here: two answers in the repo for one decision is the drift this
+  bullet exists to close. See `docs/architecture/events.md`.
+
 ### The ban's scope: a shipped dependency, not every tool
 
 The bans above are about what an **embedding host acquires transitively**. They do
@@ -65,18 +77,6 @@ its repository carries no `LICENSE` file at all. It would also be a
 *use*, not on distribution, so the CI-tool carve-out above does not reach it. v4
 remains Apache-2.0, and pinning a frozen v4 is the move the FluentAssertions bullet
 already rejects in as many words.
-
-- **Not for the outbox, and this is settled, not open.** The sources hint at
-  Wolverine for the transactional outbox (`baas-analyza.md:687`,
-  `alvo-specifikacia.md:329`); the F3 design's **deviation 1** rejected it and
-  PR5a implemented that rejection. **Alvo owns its outbox** — the core takes no
-  foreign dependency for it, so no embedded host inherits one, and the queue
-  behaves identically on every engine. The cost is stated and paid: Alvo owns
-  claim, retry and the poison-message ceiling. `IOutboxStore` (the earned port in
-  `Abstractions`) is what leaves Wolverine or an external bus available later as
-  an **adapter package** — an out-of-repo adapter implements the queue. Do not
-  reintroduce it here: two answers in the repo for one decision is the drift this
-  bullet exists to close. See `docs/architecture/events.md`.
 
 ## Test stack
 

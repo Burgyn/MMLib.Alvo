@@ -19,21 +19,27 @@
     "THIS FILE IS A MOVED-GOALPOST SURFACE. A red gate can be made green by editing it, which is the",
     "same hazard a *.verified.* snapshot carries -- so .claude/hooks/turn-review-gate treats it as a",
     "judged baseline and dispatches alvo-snapshot-judge when it moves. Move a ceiling only in the",
-    "same PR as the change that caused it, and say in the PR why the feature is worth the number."
+    "same PR as the change that caused it, and say in the PR why the feature is worth the number.",
+    "",
+    "THE SPREAD IS PART OF THE EVIDENCE. `observed` lists every run, not the best one, because the",
+    "run-to-run spread at the gate tier is wide -- count_exact came out 1.17 to 1.65 across four",
+    "runs of identical code, row_policy 0.98 to 1.57. That is why every ceiling sits ~1.5x above the",
+    "WORST observation rather than snugly above the average: a tighter one would fire on a quiet",
+    "afternoon and be muted by the following Monday."
   ],
   "ratios": {
     "count_exact": {
       "over": "list_indexed",
       "max": 2.5,
-      "observed": [1.64, 1.54],
-      "measuredOn": "gate tier, 20k rows, Apple M-series + Docker Desktop, generator co-resident, 2026-09-02",
-      "headroom": "1.5x over the worst observation",
+      "observed": [1.64, 1.65, 1.54, 1.17],
+      "measuredOn": "gate tier, 20k rows, Apple M-series + Docker Desktop, generator co-resident, four runs on 2026-09-02",
+      "headroom": "1.5x over the worst observation. The SPREAD is the thing to notice: four runs of identical code gave 1.17-1.65, so a ceiling near the worst observation would fire on noise.",
       "why": "Prefer: count=exact is documented as one extra statement over the matching set (#110, #179). A breach means it stopped being one -- an N+1, or a count that no longer reuses the filter."
     },
     "page_deep": {
       "over": "page_shallow",
       "max": 2.2,
-      "observed": [1.18, 1.04],
+      "observed": [1.18, 1.04, 0.84],
       "measuredOn": "gate tier, 20k rows, cursor walked to the tenant's last page (depth ~10k), 2026-09-02",
       "headroom": "roughly 2x over the worst observation, deliberately wider than the others because #100's growth is documented as sublinear but UNBOUNDED and the depth reached scales with the tier",
       "why": "#100: on a multi-term sort the keyset predicate is a nested disjunction and per-page cost grows with cursor depth. This pins how much. The denominator is the same sort shape at depth zero, which is what isolates depth from sort width."
@@ -41,24 +47,25 @@
     "sort_nullable": {
       "over": "list_indexed",
       "max": 2.8,
-      "observed": [1.85, 1.76],
-      "measuredOn": "gate tier, 20k rows, 2026-09-02",
+      "observed": [1.85, 1.76, 1.62],
+      "measuredOn": "gate tier, 20k rows, three runs on 2026-09-02",
       "headroom": "1.5x over the worst observation",
       "why": "#178: a nullable sort key renders a portable CASE rank that no index on the key can serve, where a required key renders no rank at all. When the per-dialect native NULLS FIRST/LAST fix lands this number should collapse toward 1.0, and the ceiling should follow it down in that same PR."
     },
     "row_policy": {
       "over": "list_indexed",
       "max": 2.4,
-      "observed": [1.36, 1.57],
-      "measuredOn": "gate tier, 20k rows, 2026-09-02",
+      "observed": [1.36, 1.57, 1.56, 0.98],
+      "measuredOn": "gate tier, 20k rows, four runs on 2026-09-02",
       "headroom": "1.5x over the worst observation",
-      "why": "The same URL answered for a caller whose list rule carries `assigned_to == @user.id` (indexed), against one with no row predicate at all. One variable changes, so this is the rule engine's cost in the hot path -- and it is security-core surface, so it is the ratio to watch hardest."
+      "why": "The same URL answered for a caller whose list rule carries `assigned_to == @user.id` (indexed), against one with no row predicate at all. One variable changes, so this is the rule engine's cost in the hot path -- and it is security-core surface, so it is the ratio to watch hardest.",
+      "movingThisCeilingNeedsDeepReview": "This row is the declared measure of the rule engine's hot path, so a PR that moves it carries the needs-deep-review label and a full alvo-security-core-review pass. Note also which direction is suspicious: a ratio that FALLS here is not automatically good news, because the cheapest possible row predicate is one that matches nothing. scripts/test-load guards that before k6 starts -- it asserts the technician's set is non-empty AND a strict subset of the dispatcher's -- and that assertion is what makes this number mean anything."
     },
     "select_projection": {
       "over": "list_indexed",
       "max": 1.3,
-      "observed": [0.98, 0.85],
-      "measuredOn": "gate tier, 20k rows, 2026-09-02",
+      "observed": [0.98, 0.85, 0.66],
+      "measuredOn": "gate tier, 20k rows, three runs on 2026-09-02",
       "headroom": "a tripwire against the value going UP, not a claim that it is low",
       "why": "RECORDED, NOT DEFENDED. `select` is applied to the response, not to the SELECT list, so ~1.0 is the correct value today and it proves nothing (#117). It is kept because it is the instrument that will DEMONSTRATE the fix: when the port gains a projection member the number drops below 1.0 and the improvement is measured rather than asserted."
     }

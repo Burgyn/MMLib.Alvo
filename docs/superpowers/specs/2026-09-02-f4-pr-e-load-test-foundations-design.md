@@ -398,8 +398,18 @@ longer matches the schema" instead of silently producing an empty set — which 
 report a *spectacular* p95 for a list of nothing.
 
 An empty-set run is the single most likely failure mode of this whole design, so it is guarded
-twice: the count check above, and a per-scenario assertion that the reference list returns a
-full page.
+three times: the count check above, an assertion that the reference list returns a full page, and
+— added after review — an assertion that the **row predicate still filters**.
+
+**That third one is what makes `row_policy` mean anything, and it was missing.** `row_policy` is a
+ratio, and a ratio can only ever reward a *cheaper* policy path. The cheapest possible row
+predicate is one that matches nothing. So if a change made `assigned_to == @user.id` exclude every
+row — a default-deny bug, an inverted comparison — `row_policy` would get **faster**, its ratio
+would fall, `http_req_failed` would stay 0 because an empty 200 list is not a failure, and the load
+layer would publish an improvement for a broken rule engine. The guard therefore asserts the
+technician's set is a **strict subset** of the dispatcher's: non-empty (the predicate still
+matches) and smaller (it still filters). `select_projection` set the precedent for a tripwire
+against a number moving the wrong way; this is its mirror on the security-core row.
 
 ## 7. Where things live, and who owns the verdict
 

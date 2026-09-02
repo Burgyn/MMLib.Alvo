@@ -259,6 +259,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The gate ships **advisory**, not as a required check; promoting it wants a couple of weeks of
   real PRs with no false positive.
 
+  Three reviews ran before the PR and found real defects rather than nits — most usefully that the
+  `row_policy` ratio (the rule engine's hot-path number) was **unfalsifiable**: a ratio can only
+  reward a cheaper policy path, and the cheapest row predicate is one that matches nothing, so a
+  default-deny bug would have published an improvement. The harness now asserts the row predicate
+  still returns a strict subset before k6 starts. Three fail-open paths in the guard were also
+  closed — a misspelled baseline key judged nothing and printed `ok`, an unmeasured row could not
+  fail, and a zero `min` read as the fastest thing in the run — and its suite grew 22 → 40 cases.
+
 - **`/health/ready` now reports whether the database can *still* be reached** (#133), so a store that
   goes away after boot drains the pod's traffic instead of being invisible. **This changes what an
   orchestrator does with a running host:** readiness answered 200 for the life of the process once
