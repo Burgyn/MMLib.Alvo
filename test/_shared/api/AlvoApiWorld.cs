@@ -278,6 +278,11 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
             builder.Services.AddAlvo();
         }
 
+        // After AddAlvo, deliberately: this is where a service Alvo registered can be decorated, which
+        // ConfigureServices above cannot do — it runs first, and TryAdd means a decorator registered there
+        // would leave nothing registered to wrap. See ServiceDecoration.
+        setup.ConfigureServicesAfterAlvo?.Invoke(builder.Services);
+
         return builder.Build();
     }
 
@@ -715,6 +720,12 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
 /// Anything registered on the builder <em>before</em> <c>AddAlvo</c> — a rate limiter, an authorization
 /// policy. General-purpose rather than one fact's knob: it is the seam a host's own registrations occupy.
 /// </param>
+/// <param name="ConfigureServicesAfterAlvo">
+/// Anything that has to run <em>after</em> <c>AddAlvo</c> — in practice, decorating a service Alvo itself
+/// registered. <see cref="ConfigureServices"/> cannot do that: it runs first, and every Alvo registration is
+/// a <c>TryAdd</c>, so a decorator registered there wins the slot and the implementation it meant to wrap is
+/// never registered at all. Use <c>ServiceDecoration.Decorate</c> through this hook instead.
+/// </param>
 /// <param name="ConfigureApp">
 /// Middleware added before the Data API is mapped — <c>UseRateLimiter</c>, <c>UseOutputCache</c>. It runs
 /// after the path-base block, so it sits where a host would write it.
@@ -737,6 +748,7 @@ internal sealed record AlvoApiWorldSetup(
     bool MapBeforePriming = false,
     bool RegisterAlvoTwice = false,
     Action<IServiceCollection>? ConfigureServices = null,
+    Action<IServiceCollection>? ConfigureServicesAfterAlvo = null,
     Action<WebApplication>? ConfigureApp = null,
     Action<IEndpointConventionBuilder>? ConfigureDataApiRoutes = null);
 

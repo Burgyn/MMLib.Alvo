@@ -97,6 +97,73 @@ public sealed class SqliteIdempotentCreateFailureTests : IAsyncDisposable
         all.Items.Count.ShouldBe(2);
     }
 
+    /// <summary>
+    /// The same refusal, measured as a <b>cost</b>: it must take <b>one</b> write attempt, not ten.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why the count and not the outcome (#127).</b> The three facts above assert what the caller is
+    /// told, and every one of them passes on a build that retries ten times and <em>then</em> throws exactly
+    /// the same <see cref="AlvoConstraintViolationException"/> with exactly the same <c>Kind</c> and
+    /// <c>Fields</c>. That is the shape #127 warned about in as many words — "it eventually 500s" passes
+    /// today and would pass after a fix that changed nothing — and until this fact existed, the claim in
+    /// this class's own summary that a duplicate "must not turn into ten transactions" was asserted nowhere.
+    /// Ten attempts is roughly 450 ms of write transactions re-answering a question whose answer cannot
+    /// change, and a client retrying on the failure compounds it.
+    /// </para>
+    /// <para>
+    /// <b>The matcher is proven before it is trusted.</b> A count assertion whose matcher matches nothing
+    /// passes at zero and measures nothing, so a successful create is measured first and must record
+    /// exactly one insert. Only then does the same matcher bound the failing one.
+    /// </para>
+    /// <para>
+    /// <b>This number is engine-specific, and this fact covers SQLite only.</b> The early exit depends on
+    /// <c>IAlvoSqlDialect.DecodeConstraintViolation</c> recognising the engine's code: SQLite decodes
+    /// extended result codes 2067/1555, PostgreSQL decodes SQLSTATE 23505, and a dialect that honestly
+    /// recognises nothing — as <c>TSqlSqlDialect</c> does, shipping no <c>Microsoft.Data.SqlClient</c> —
+    /// still burns all ten. The amplification is therefore a property of each dialect rather than something
+    /// fixed once for all engines, and the PostgreSQL leg belongs to <b>#139</b>, which exists to demand
+    /// constraint behaviour be verified per engine rather than on one.
+    /// </para>
+    /// <para>
+    /// Only the entity's own insert is counted. The idempotency table's <c>SELECT</c> and <c>INSERT</c> are
+    /// hand-built <see cref="System.Data.Common.DbCommand"/>s on the raw connection, so they never reach
+    /// EF's <c>CommandExecuting</c> and cannot be seen here at all — but the matcher names the entity's
+    /// table rather than relying on that.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_unique_violation_in_the_callers_own_data_costs_one_write_attempt()
+    {
+        var host = await _fixture.StartAsync(Schema, Descriptor);
+        var caller = Caller;
+
+        host.ClearStatements();
+        await host.Data.CreateAsync(Entity, Payload("VIN-1"), caller, NewToken(), Ct);
+        InsertsInto(host).ShouldBe(
+            1, "a create that violates nothing must insert once — otherwise the matcher below counts nothing");
+
+        host.ClearStatements();
+        await Should.ThrowAsync<AlvoConstraintViolationException>(() => host.Data.CreateAsync(
+            Entity, Payload("VIN-1"), caller, NewToken(), Ct));
+
+        InsertsInto(host).ShouldBe(
+            1,
+            $"a duplicate must leave on the first attempt, not be retried {ContendedCreateAttempts} times; "
+            + $"statements were: {string.Join(" | ", host.Statements)}");
+    }
+
+    /// <summary>What <c>EfAlvoData.ContendedCreateAttempts</c> is, for the failure message above.</summary>
+    /// <remarks>Not read from the port — it is private there, and a fact that imported the number it is
+    /// asserting against could not fail if that number changed.</remarks>
+    private const int ContendedCreateAttempts = 10;
+
+    /// <summary>How many statements inserted a row into the caller's own table.</summary>
+    private static int InsertsInto(AlvoDataHost host) =>
+        host.Statements.Count(statement =>
+            statement.Contains("INSERT INTO", StringComparison.OrdinalIgnoreCase)
+            && statement.Contains($"\"{Entity}\"", StringComparison.Ordinal));
+
     private const string Entity = "vehicles";
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

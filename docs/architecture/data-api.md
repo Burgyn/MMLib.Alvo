@@ -644,7 +644,8 @@ invariant it is.
 write failure, so a duplicate in an idempotent create used to be re-attempted ten times before surfacing.
 `AlvoConstraintViolationException` is not a `DbException`, so it leaves on the first attempt; the idempotency
 record's own primary key is deliberately **not** translated, because losing that race is what the retry
-exists to converge on. That is the part of **#127** this happens to close; the rest of #127 is still open.
+exists to converge on. That closed **#127**'s stated defect; the attempt count is now asserted rather than
+described, and the paths that legitimately still retry are set out under *the five failure families* below.
 
 ### A `unique` field on a tenant-scoped entity was a cross-tenant existence oracle (#137, fixed)
 
@@ -732,14 +733,29 @@ produces, and no delegate produces this one. The slug is in the published `probl
 enum, because that enum is the catalogue a client branches on and `internal` is a value an Alvo pipeline can
 really send.
 
-**One 500 *is* caller-reachable, and it costs ten write transactions to get there.** A **keyed** create
-whose row violates one of the *caller's own* unique constraints is retried by
-`EfAlvoData.ReplayableCreateAsync` — it cannot distinguish that violation from the idempotency table's own
-insert race, which is exactly what the retry exists to absorb — so ten full write transactions run with a
-linear backoff (~450 ms total) before the exception surfaces as the family-5 500 above. Not a regression:
-an *unkeyed* create with the same violation also answers 500, just immediately. Worth knowing because it is
-a caller-triggerable amplification of a caller's own mistake, and because the fix (asking the dialect
-whether a constraint name is Alvo's own) belongs with the retry logic rather than here. Tracked in **#127**.
+**What an idempotent create still retries, now that the caller's own duplicate does not (#127).** A
+**keyed** create whose row violates one of the *caller's own* unique constraints used to be
+indistinguishable from the idempotency table's own insert race — which is what the retry exists to absorb —
+so it burned ten full write transactions with a linear backoff (~450 ms) before surfacing. It no longer
+does: the entity's insert goes through `ConstraintViolationTranslator`, the refusal is
+`AlvoConstraintViolationException`, that is not a `DbException`, and `IsStorageWriteFailure` therefore does
+not match it, so it leaves on the **first** attempt as a `409` naming the field. `SqliteIdempotentCreateFailureTests`
+asserts the attempt *count*, not only the outcome — a build that retried ten times and then threw the same
+exception passes every outcome assertion.
+
+Two paths legitimately still cost up to ten attempts, and neither is a defect to be "fixed":
+
+- The **idempotency record's own** primary-key failure is deliberately left untranslated. Losing that race
+  is the entire reason the loop exists, and translating it would turn a converging race into a `409`.
+- An **unrecognised** `DbException`/`DbUpdateException`. The dialect answers `null` when it does not
+  recognise the code, when the constraint name matches no model index, or when the surviving columns are all
+  framework-managed. That is the fail-safe direction: narrowing the catch far enough to stop this would let
+  a genuine insert race escape as a 500.
+
+So the amplification is a **per-dialect** property rather than something fixed once for every engine — a
+dialect that honestly recognises nothing, as `TSqlSqlDialect` does, still burns all ten. The count is pinned
+on SQLite; the PostgreSQL leg belongs to **#139**, which exists to demand constraint behaviour be verified
+per engine.
 
 ## What a host may attach to the generated routes (#182)
 
