@@ -215,6 +215,27 @@ across shapes that plainly do different amounts of work — a gate that would ha
 everything, forever. `min` separates them cleanly: `count=exact` costs 1.64× the reference list,
 a nullable sort 1.85×, the row predicate 1.36×.
 
+**The first CI run sharpened this, and the sharper version is the honest one.** On GitHub's
+`ubuntu-latest`, p95 does **not** degenerate — its p95 ratios track the `min` ratios within about
+10 %:
+
+| | `min` ratio | p95 ratio |
+|---|---|---|
+| `count_exact` | 1.90 | 1.87 |
+| `sort_nullable` | 2.03 | 1.98 |
+| `row_policy` | 1.51 | 1.56 |
+| `select_projection` | 0.90 | 0.97 |
+
+So the collapse is a property of **that rig** — macOS with Docker Desktop, where every request
+pays the same VM and gVisor-network overhead and it swamps the difference between shapes — not of
+the gate tier. The claim above is therefore scoped to where it was observed, not generalised.
+
+**And that makes the case for `min` stronger rather than weaker.** `min` means the same thing on
+both rigs; p95 collapses on one of them. A gate whose statistic degenerates on the maintainer's
+own machine is a gate that behaves differently locally and in CI, which is a gate nobody can
+debug locally. Rig-portability is the durable argument; the macOS observation is evidence of the
+failure mode it avoids.
+
 The reason is that the two statistics answer different questions:
 
 - **`min` is service time** with queueing and interference removed, which is exactly *"how much
@@ -253,8 +274,14 @@ analysis's own headline shape: a filtered, sorted, paged list over an indexed co
 | `select_projection` | the same list + `select=id,reference` | measured | **recorded, not defended** — see below | **#117** |
 | `unindexed_filter` | `is_emergency=is.true` (no index) | *calibration only* | context for what an index is worth | — |
 
-**Every ceiling is measured, not chosen**, and the baseline file ships with the numbers the
-first real run produced, rounded up with headroom stated per row. This follows the precedent
+**Every ceiling is measured, not chosen** — and, after the first CI run, measured **on the rig
+that judges**. That distinction was not free: the runner's ratios come out 15–30 % *higher* than
+the laptop's (`count_exact` 1.90–2.12 against 1.17–1.65), so ceilings set from laptop numbers alone
+left `count_exact` with 18 % margin over the runner's own worst observation — thin enough to flake
+on a busy runner. `count_exact` and `sort_nullable` were raised to 3.0 from the runner's numbers,
+and the baseline file keeps `observed` and `observedOnTheRunner` as separate arrays for exactly
+this reason. The baseline file ships with the numbers real runs produced, rounded up with the
+headroom stated per row. This follows the precedent
 `data-api.md` already sets for the filter budgets — *"The two term/candidate numbers are
 measured rather than chosen: 900 filter terms answered in 14 ms and 1000 threw…"* A ceiling
 invented at design time is either so loose it gates nothing or so tight it fires on the first

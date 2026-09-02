@@ -23,8 +23,9 @@ Three qualifications, and none of them is boilerplate:
    as **#187**; it needs a rig where the generator is off-box.
 
 2. **These are not the numbers the CI gate judges.** The gate compares *ratios* and gates on
-   `min`, because at these volumes p95 is dominated by scheduling and container jitter rather than
-   by the query. p95 is published because it is what the sources ask about and what a caller
+   `min`, because `min` is service time and it means the same thing on every rig — where p95 does
+   not: on the macOS/Docker Desktop rig below it collapses to a single value across every shape,
+   while on GitHub's `ubuntu-latest` it tracks `min` closely. p95 is published because it is what the sources ask about and what a caller
    experiences; it is not what decides a PR. See `test/load/README.md`. Which *layer* a change
    moved is a question neither half answers — that is **#188**.
 

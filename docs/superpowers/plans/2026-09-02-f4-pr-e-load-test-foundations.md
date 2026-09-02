@@ -618,6 +618,38 @@ test.
   gave `count_exact` 1.17–1.65 and `row_policy` 0.98–1.57, and that spread is the evidence for why
   each ceiling sits ~1.5× above the *worst* observation rather than snugly above the average.
 
+---
+
+## Slice 9 — the first CI run, and what it corrected
+
+The design listed *"the gate does not produce false positives on real PRs"* as **unverified**,
+because the workflow had never run on a runner. PR #189's own Load run is that first run. It
+**passed** — and it corrected two things, one of which would have flaked.
+
+- [x] **p95 does not degenerate on `ubuntu-latest`, and the design said it did.** The claim was
+  measured on macOS with Docker Desktop, where every request pays the same VM and
+  container-network overhead and it swamps the difference between shapes. On the runner the p95
+  ratios track the `min` ratios within ~10 % (`count_exact` 1.87 against 1.90, `sort_nullable`
+  1.98 against 2.03). The claim is now scoped to the rig where it was observed, in all three docs.
+
+  **The decision stands and the argument is better for it:** `min` means the same thing on both
+  rigs, p95 collapses on one of them, and a gate whose statistic behaves differently on the
+  maintainer's machine than in CI is a gate nobody can debug locally. Rig-portability is the
+  durable reason; the macOS collapse is evidence of the failure mode it avoids.
+
+- [x] **The runner's ratios run 15–30 % higher than the laptop's, and two ceilings were too thin.**
+  `count_exact` came out 1.90–2.12 on the runner against 1.17–1.65 on the laptop, leaving 18 %
+  margin under a ceiling of 2.5 — thin enough to flake on a busy runner. `count_exact` and
+  `sort_nullable` are raised to 3.0 from the runner's own numbers, and the baseline keeps
+  `observed` and `observedOnTheRunner` as separate arrays so the distinction cannot be lost again.
+  **The ceiling is measured on the rig that judges.**
+
+- [x] **Everything else held.** `if:` conditions behaved (`calibration` and `notify` correctly
+  skipped on a `pull_request`); the seed guard printed `row predicate a strict subset (1000 of
+  10000)`; the cursor walk earned a deep cursor; both absolute arms of identical code came out
+  0.92–1.13× (much tighter than the laptop's 0.77–1.48, which is why 1.8 is generous there);
+  0 dropped iterations, 0 failed requests. Gate wall clock: ~12 minutes inside a 35-minute budget.
+
 ## Self-review against the spec
 
 | Spec section | Where it lands |

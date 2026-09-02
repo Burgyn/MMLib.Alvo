@@ -267,6 +267,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   closed — a misspelled baseline key judged nothing and printed `ok`, an unmeasured row could not
   fail, and a zero `min` read as the fastest thing in the run — and its suite grew 22 → 40 cases.
 
+  The gate's own first CI run then corrected the design twice. **p95 does not degenerate on
+  `ubuntu-latest`** — its ratios track `min` within ~10 % there, so the collapse the design
+  described is a property of macOS + Docker Desktop, not of the gate tier; the claim is now scoped
+  to its rig, and the case for `min` is the better one (it means the same thing on both rigs, where
+  p95 collapses on one). And **the runner's ratios run 15–30 % higher than a laptop's**, which left
+  `count_exact` with 18 % margin under a ceiling set from laptop numbers alone — raised to 3.0 from
+  the runner's own numbers, with `observed` and `observedOnTheRunner` kept separate so the
+  distinction cannot be lost. A ceiling is measured on the rig that judges.
+
 - **`/health/ready` now reports whether the database can *still* be reached** (#133), so a store that
   goes away after boot drains the pod's traffic instead of being invisible. **This changes what an
   orchestrator does with a running host:** readiness answered 200 for the life of the process once

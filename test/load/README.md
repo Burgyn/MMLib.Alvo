@@ -81,12 +81,19 @@ while `min` separated them cleanly:
 | `count_exact` | 3.57 ms | 7.90 ms |
 | `sort_nullable` | 4.04 ms | 7.90 ms |
 
-At this volume p95 is dominated by scheduling and container-network jitter, not by the query, so
-gating on it would gate on the runner. `min` is the right statistic for the question the *gate*
-asks — "how much work does this shape do" — because the minimum is service time with queueing and
-interference removed. p95 answers a different question, "what does a caller experience under this
-load", and that is the number F4's definition of done asks to have published. So it is measured
-and printed on every row, and the calibration tier publishes it. It just does not gate.
+That measurement came from macOS with Docker Desktop, where every request pays the same VM and
+container-network overhead and it swamps the difference between shapes. **On GitHub's
+`ubuntu-latest` p95 does not degenerate** — its p95 ratios track the `min` ratios within ~10 %
+(`count_exact` 1.87 against 1.90, `sort_nullable` 1.98 against 2.03).
+
+**That is the argument for `min`, not against it.** `min` means the same thing on both rigs; p95
+collapses on one of them, and a gate whose statistic behaves differently on the maintainer's
+machine than in CI is a gate nobody can debug locally. `min` is also simply the right statistic
+for the question the *gate* asks — "how much work does this shape do" — because the minimum is
+service time with queueing and interference removed. p95 answers a different question, "what does
+a caller experience under this load", and that is the number F4's definition of done asks to have
+published. So it is measured, printed on every row, and published by the calibration tier. It just
+does not gate.
 
 **The gap this leaves, named rather than hidden:** a regression that leaves the fast path alone
 and makes a small fraction of requests much slower — a new lock, a cache-miss branch — is not
@@ -105,8 +112,11 @@ A ratio against a fixed reference endpoint is the right unit because it survives
 change, states the design intent in the number itself ("embedding one relation may cost at most
 2× a plain list"), and is meaningful on its first run with no historical data.
 
-**Measure the ceiling; never invent it.** Run the tier twice, take the worst ratio you saw, and
-give it headroom — then record both in the row's `observed` and `headroom` fields. A ceiling
+**Measure the ceiling on the rig that judges; never invent it, and never trust one rig.** Run the
+tier twice, take the worst ratio you saw, and give it headroom — then record it in the row's
+`observed` / `observedOnTheRunner` and `headroom` fields. The two arrays are separate because the
+runner's ratios come out 15–30 % higher than a macOS laptop's, and ceilings set from laptop
+numbers alone left `count_exact` 18 % of margin on the rig that actually gates. A ceiling
 chosen at a desk is either so loose it gates nothing or so tight it fires on the first PR, and
 there is no way to tell which without measuring.
 
