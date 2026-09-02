@@ -38,6 +38,34 @@ picking a library, or writing C#.
   (vertical slice, no MediatR) calls for. Prefer plain DI handlers first —
   `vertical-slice.md` only reaches for Wolverine if a genuine multi-handler
   pipeline ever appears.
+### The ban's scope: a shipped dependency, not every tool
+
+The bans above are about what an **embedding host acquires transitively**. They do
+not reach a **development or CI tool invoked as a separate process**, which no
+consumer of `MMLib.Alvo.*` ever receives. That distinction is not new — it is the
+rule the repo already follows without having written it down. Stryker.NET, TeaPie,
+Vacuum, Husky.Net, the `postgres:16-alpine` image and **k6** are all in that
+category; none of them ships, none of them is linked, and none of their licences
+touches the Apache-2.0 core.
+
+**k6 is the worked example, because its licence looks alarming and is not.** k6 is
+AGPL-3.0, whose obligations attach to the k6 *program* and to works derived from it.
+Alvo does not modify k6, does not distribute it in any package or image, does not
+offer it over a network (AGPL §13's trigger), and invokes it as a separate
+executable with a script as input. A k6 script is input to the k6 runtime in the
+same sense a Python script is input to CPython: running a program over input does
+not make the input a derivative of the program.
+
+**And NBomber is still refused, on two independent grounds** — which is what makes
+the distinction a real one rather than a loophole. NBomber v5+ is closed source
+under the **NBomber License Agreement** (v2.0 effective 2024-05-01, v3.0 current):
+free for personal use, **a paid licence for any use inside an organisation**, and
+its repository carries no `LICENSE` file at all. It would also be a
+`PackageReference` in a test project, loaded **in-process**. Its restriction is on
+*use*, not on distribution, so the CI-tool carve-out above does not reach it. v4
+remains Apache-2.0, and pinning a frozen v4 is the move the FluentAssertions bullet
+already rejects in as many words.
+
 - **Not for the outbox, and this is settled, not open.** The sources hint at
   Wolverine for the transactional outbox (`baas-analyza.md:687`,
   `alvo-specifikacia.md:329`); the F3 design's **deviation 1** rejected it and

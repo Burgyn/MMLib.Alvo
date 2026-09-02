@@ -1,0 +1,340 @@
+#!/usr/bin/env bash
+# test-load — the load harness: stack, seed, k6, verdict.
+#
+# In NO ring, for the reason scripts/test-e2e states about itself: the rings are dotnet-test tiers
+# and this builds an image and stands up a multi-service stack. It exists so a human runs exactly
+# what CI runs, on purpose.
+#
+# TWO TIERS, and they answer two different questions (docs/superpowers/specs/
+# 2026-09-02-f4-pr-e-load-test-foundations-design.md):
+#
+#   gate         20 000 rows, 15 s a scenario. Catches SHAPE regressions — a lost index, an N+1,
+#                a policy resolved once more than before. Shape is visible long before volume,
+#                which is why the gate tier is deliberately small.
+#
+#   calibration  200 000 rows, 60 s a scenario. Produces the number F4's definition of done asks
+#                to have measured and published, and the analysis's own bar to calibrate against
+#                (baas-analyza.md:142). Never fails on a number; it publishes one.
+#
+# WHAT THIS RIG CANNOT CLAIM. The generator runs beside the server and its database. At a modest
+# offered rate that is fine — the server is idle between requests. At saturation it is not: the
+# number produced would be a property of the machine. So there is no throughput scenario here,
+# and baas-analyza.md:871's SQLite writes/s number is deliberately not attempted.
+#
+# Usage:
+#   scripts/test-load                                  # gate tier, ratios only, single arm
+#   scripts/test-load --baseline-ref origin/main       # gate tier with the absolute A/B half
+#   scripts/test-load --tier calibration               # the publishable numbers
+#   scripts/test-load --tier calibration --rows 1000000 --scenarios page_shallow,page_deep
+
+set -euo pipefail
+DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$DIR/.." && pwd)"
+cd "$ROOT"
+
+TIER=gate
+BASELINE_REF=""
+ROWS_OVERRIDE=""
+SCENARIOS_OVERRIDE=""
+REPS=2
+KEEP=0
+
+OUT_DIR="$ROOT/artifacts/load"
+PROJECT=alvo-load
+IMAGE_HEAD=alvo-load:head
+IMAGE_BASE=alvo-load:base
+BASELINE_FILE="$ROOT/test/load/baselines/gate.json"
+
+die() { printf 'test-load: %s\n' "$1" >&2; exit 2; }
+say() { printf '[load] %s\n' "$1"; }
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --tier) TIER="${2:-}"; shift 2 ;;
+        --baseline-ref) BASELINE_REF="${2:-}"; shift 2 ;;
+        --rows) ROWS_OVERRIDE="${2:-}"; shift 2 ;;
+        --scenarios) SCENARIOS_OVERRIDE="${2:-}"; shift 2 ;;
+        --reps) REPS="${2:-}"; shift 2 ;;
+        --keep) KEEP=1; shift ;;
+        -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
+        *) die "unknown argument '$1'" ;;
+    esac
+done
+
+# The offered rates are LOWER at the large tier, and that is a correctness choice rather than a
+# timidity one. Every list-shaped scenario must see the SAME rate or the ratio between two of them
+# becomes a statement about the generator — so the rate has to suit the HEAVIEST shape in the set,
+# and at 200 000 rows `unindexed_filter` is a sequential scan. A rate that saturates it does not
+# make that scenario slow, it makes the whole run VOID (dropped iterations), and a voided
+# thirteen-minute run tells you nothing.
+case "$TIER" in
+    gate)        ROWS=10000;  CUSTOMERS=500;  DURATION=15
+                 LIST_RATE=40; READ_RATE=80; WRITE_RATE=20; DOC_RATE=5 ;;
+    calibration) ROWS=100000; CUSTOMERS=2000; DURATION=60
+                 LIST_RATE=20; READ_RATE=40; WRITE_RATE=10; DOC_RATE=5 ;;
+    *) die "unknown tier '$TIER' (expected gate or calibration)" ;;
+esac
+[ -n "$ROWS_OVERRIDE" ] && ROWS="$ROWS_OVERRIDE"
+
+# The four shapes with no meaningful denominator. Only these need the baseline arm, which is why
+# it costs one short run rather than a whole second suite.
+ABSOLUTE_SCENARIOS=read_by_id,list_indexed,create,openapi
+GATE_SCENARIOS=read_by_id,list_indexed,create,openapi,count_exact,page_shallow,page_deep,sort_nullable,row_policy,select_projection
+CALIBRATION_SCENARIOS="$GATE_SCENARIOS,unindexed_filter"
+
+if [ -n "$SCENARIOS_OVERRIDE" ]; then
+    HEAD_SCENARIOS="$SCENARIOS_OVERRIDE"
+elif [ "$TIER" = calibration ]; then
+    HEAD_SCENARIOS="$CALIBRATION_SCENARIOS"
+else
+    HEAD_SCENARIOS="$GATE_SCENARIOS"
+fi
+
+for tool in docker curl jq openssl; do
+    command -v "$tool" >/dev/null || die "$tool is required"
+done
+
+# The image ships no credential (§2.14) and the entropy floor is 32 characters (#125), so every
+# run is handed fresh ones. `openssl rand -hex 16` produces exactly that length.
+export ALVO_FS_DISPATCHER_NORTH_SECRET="${ALVO_FS_DISPATCHER_NORTH_SECRET:-$(openssl rand -hex 16)}"
+export ALVO_FS_TECH_NORTH_SECRET="${ALVO_FS_TECH_NORTH_SECRET:-$(openssl rand -hex 16)}"
+export ALVO_FS_SPARE_NORTH_SECRET="${ALVO_FS_SPARE_NORTH_SECRET:-$(openssl rand -hex 16)}"
+export ALVO_FS_DISPATCHER_SOUTH_SECRET="${ALVO_FS_DISPATCHER_SOUTH_SECRET:-$(openssl rand -hex 16)}"
+export ALVO_FS_ADMIN_SECRET="${ALVO_FS_ADMIN_SECRET:-$(openssl rand -hex 16)}"
+
+# Sourced rather than restated, exactly as scripts/test-e2e does it: compose interpolates the same
+# file, so the ids the seed writes and the ids the container was configured with cannot drift.
+set -a
+# shellcheck source=../examples/field-service/demo-identities.env
+. "$ROOT/examples/field-service/demo-identities.env"
+set +a
+
+# AFTER the source, not before. That file sets ALVO_FS_PORT=8081 for the e2e stack, and `set -a`
+# sourcing overwrites an exported value rather than deferring to it — so a port exported earlier
+# would be silently replaced and this stack would collide with a running e2e one.
+export ALVO_FS_PORT="${ALVO_LOAD_PORT:-8091}"
+BASE_URL="http://127.0.0.1:$ALVO_FS_PORT"
+
+KEY_DISPATCHER="dispatcher-north.$ALVO_FS_DISPATCHER_NORTH_SECRET"
+KEY_TECH="tech-north.$ALVO_FS_TECH_NORTH_SECRET"
+
+COMPOSE=(
+    -p "$PROJECT"
+    --env-file "$ROOT/examples/field-service/demo-identities.env"
+    -f "$ROOT/docker-compose.field-service.yml"
+    -f "$ROOT/test/load/docker-compose.load.yml"
+)
+
+WORKTREE=""
+cleanup() {
+    local status=$?
+    if [ -n "$WORKTREE" ]; then
+        git worktree remove --force "$WORKTREE" >/dev/null 2>&1 || true
+    fi
+    if [ "$KEEP" -eq 0 ]; then
+        ALVO_LOAD_IMAGE="$IMAGE_HEAD" docker compose "${COMPOSE[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
+    else
+        say "stack left running at $BASE_URL (--keep)"
+    fi
+    exit "$status"
+}
+trap cleanup EXIT INT TERM
+
+build_image() {
+    local tag="$1" context="$2"
+    say "building $tag"
+    docker build --quiet -f "$ROOT/src/MMLib.Alvo.Host/Dockerfile" -t "$tag" "$context" >/dev/null
+}
+
+# The alvo service is recreated with the other arm's image while PostgreSQL and its data stay put.
+# That is not only faster: both arms then measure the IDENTICAL dataset, so a difference between
+# them cannot be the rows.
+use_image() {
+    local image="$1"
+    ALVO_LOAD_IMAGE="$image" docker compose "${COMPOSE[@]}" up --wait --no-build --force-recreate alvo >/dev/null
+}
+
+stack_up() {
+    say "starting the stack on $BASE_URL"
+    ALVO_LOAD_IMAGE="$IMAGE_HEAD" docker compose "${COMPOSE[@]}" up --wait --no-build >/dev/null
+}
+
+psql_in_container() {
+    docker compose "${COMPOSE[@]}" exec -T -e PGPASSWORD=alvo postgres \
+        psql -U alvo -d alvo_field_service -v ON_ERROR_STOP=1 "$@"
+}
+
+seed() {
+    say "seeding $ROWS work orders per tenant ($((ROWS * 2)) total), $CUSTOMERS customers per tenant"
+    ALVO_LOAD_IMAGE="$IMAGE_HEAD" psql_in_container \
+        -v rows="$ROWS" -v customers="$CUSTOMERS" \
+        -v tenant_north="$ALVO_FS_TENANT_NORTH" \
+        -v tenant_south="$ALVO_FS_TENANT_SOUTH" \
+        -v tech_north="$ALVO_FS_USER_TECH_NORTH" \
+        -f - < "$ROOT/test/load/seed.sql" >/dev/null
+}
+
+# Rows the `create` scenario added, removed between arms so arm two does not measure a slightly
+# larger table than arm one. The seed's own references never start with 9.
+reset_created_rows() {
+    ALVO_LOAD_IMAGE="$IMAGE_HEAD" psql_in_container \
+        -c "DELETE FROM work_orders WHERE reference LIKE 'WO-9%';" >/dev/null
+}
+
+# The seed writes the physical tables directly, so it knows a layout DescriptorToSchemaMapper
+# owns. This is what stops that coupling rotting silently: the same set is read back THROUGH THE
+# PUBLIC API and the count has to match. A renamed column then stops the run with a diagnosis
+# instead of producing an empty list, which would report a spectacular p95 for nothing at all.
+assert_seed_is_visible() {
+    local body count
+    body=$(curl -sS -H "X-Alvo-Api-Key: $KEY_DISPATCHER" -H 'Prefer: count=exact' \
+        "$BASE_URL/api/work_orders?limit=1")
+    count=$(jq -r '.count // "null"' <<<"$body")
+    [ "$count" = "$ROWS" ] || die "the seed is not visible through the API: expected count=$ROWS, got $count. The seed's physical layout no longer matches the descriptor's mapping."
+
+    local page
+    page=$(curl -sS -H "X-Alvo-Api-Key: $KEY_DISPATCHER" \
+        "$BASE_URL/api/work_orders?status=eq.scheduled&order=priority.asc&limit=50" \
+        | jq -r '.items | length')
+    [ "$page" = "50" ] || die "the reference list returned $page rows, not a full page of 50 — every ratio anchored on it would be meaningless"
+    say "seed verified through the API: count=$count, reference page full"
+}
+
+# #100 is about how deep the cursor sits, not how many sort terms there are — its own evidence is
+# rows-removed-by-filter growing one-for-one with depth. So the deep cursor has to be earned by
+# walking, and the walk is UNMEASURED. limit=200 is the API's maximum page, which makes the walk
+# four times cheaper than the measured page size would.
+deep_cursor() {
+    local sort='status=eq.scheduled&order=priority.asc,reference.asc&limit=200'
+    local cursor="" next body
+    while :; do
+        if [ -z "$cursor" ]; then
+            body=$(curl -sS -H "X-Alvo-Api-Key: $KEY_DISPATCHER" "$BASE_URL/api/work_orders?$sort")
+        else
+            body=$(curl -sS -H "X-Alvo-Api-Key: $KEY_DISPATCHER" \
+                "$BASE_URL/api/work_orders?$sort&after=$(jq -rn --arg c "$cursor" '$c|@uri')")
+        fi
+        next=$(jq -r '.next // ""' <<<"$body")
+        [ -n "$next" ] || break
+        cursor="$next"
+    done
+    printf '%s' "$cursor"
+}
+
+# PINNED, not `latest`, and the reason is the measurement rather than tidiness: the generator is
+# part of the instrument. A k6 minor release that changes how it schedules iterations or reports
+# percentiles would show up as a latency change in a table whose whole purpose is to attribute
+# latency changes to Alvo. Overridable so a maintainer can try a newer one deliberately.
+K6_VERSION="${ALVO_K6_VERSION:-2.2.0}"
+K6_IMAGE="${ALVO_K6_IMAGE:-grafana/k6:$K6_VERSION}"
+
+K6_LOCAL=0
+if command -v k6 >/dev/null; then
+    K6_LOCAL=1
+    local_version="$(k6 version 2>/dev/null | head -1 || true)"
+    case "$local_version" in
+        *"v$K6_VERSION"*) ;;
+        *) say "WARNING: local k6 is '$local_version', not v$K6_VERSION — numbers may not be comparable with the baseline's" ;;
+    esac
+fi
+
+# A maintainer on a fresh machine runs the same thing CI runs with nothing to install — the
+# property scripts/test-e2e already has, and the reason it exists. k6 is invoked as a separate
+# process either way, never linked: see the design's §2.2 on why its AGPL-3.0 licence places no
+# obligation on Alvo, and §2.1 on why NBomber is refused outright.
+run_k6() {
+    local summary_name="$1" scenarios="$2" cursor="$3"
+    say "k6: $summary_name (${DURATION}s per scenario)"
+    mkdir -p "$OUT_DIR"
+
+    if [ "$K6_LOCAL" -eq 1 ]; then
+        BASE_URL="$BASE_URL" OUT_DIR="$OUT_DIR" SUMMARY_NAME="$summary_name" \
+        KEY_DISPATCHER="$KEY_DISPATCHER" KEY_TECH="$KEY_TECH" \
+        TENANT_NORTH="$ALVO_FS_TENANT_NORTH" ROWS="$ROWS" DEEP_CURSOR="$cursor" \
+        DURATION="$DURATION" SCENARIOS="$scenarios" \
+        LIST_RATE="$LIST_RATE" READ_RATE="$READ_RATE" \
+        WRITE_RATE="$WRITE_RATE" DOC_RATE="$DOC_RATE" \
+            k6 run --quiet "$ROOT/test/load/scenarios.js"
+        return
+    fi
+
+    # host.docker.internal reaches the published loopback port from inside the generator's
+    # container on Docker Desktop; on Linux the extra host maps it to the gateway.
+    docker run --rm \
+        --add-host=host.docker.internal:host-gateway \
+        -v "$ROOT/test/load:/scripts:ro" \
+        -v "$OUT_DIR:/out" \
+        -e "BASE_URL=http://host.docker.internal:$ALVO_FS_PORT" \
+        -e OUT_DIR=/out \
+        -e "SUMMARY_NAME=$summary_name" \
+        -e "KEY_DISPATCHER=$KEY_DISPATCHER" \
+        -e "KEY_TECH=$KEY_TECH" \
+        -e "TENANT_NORTH=$ALVO_FS_TENANT_NORTH" \
+        -e "ROWS=$ROWS" \
+        -e "DEEP_CURSOR=$cursor" \
+        -e "DURATION=$DURATION" \
+        -e "SCENARIOS=$scenarios" \
+        -e "LIST_RATE=$LIST_RATE" \
+        -e "READ_RATE=$READ_RATE" \
+        -e "WRITE_RATE=$WRITE_RATE" \
+        -e "DOC_RATE=$DOC_RATE" \
+        "$K6_IMAGE" run --quiet /scripts/scenarios.js
+}
+
+rm -f "$OUT_DIR"/*.json 2>/dev/null || true
+build_image "$IMAGE_HEAD" "$ROOT"
+
+if [ -n "$BASELINE_REF" ]; then
+    WORKTREE="$(mktemp -d "${TMPDIR:-/tmp}/alvo-load-base.XXXXXX")/tree"
+    say "checking out $BASELINE_REF for the baseline arm"
+    git worktree add --detach --quiet "$WORKTREE" "$BASELINE_REF"
+    build_image "$IMAGE_BASE" "$WORKTREE"
+fi
+
+stack_up
+seed
+assert_seed_is_visible
+
+CURSOR=$(deep_cursor)
+[ -n "$CURSOR" ] || die "could not walk to a deep cursor — page_deep would measure nothing"
+say "deep cursor earned by walking to the last page"
+
+HEAD_ARGS=()
+BASE_ARGS=()
+
+if [ -z "$BASELINE_REF" ]; then
+    run_k6 head-1.json "$HEAD_SCENARIOS" "$CURSOR"
+    HEAD_ARGS=(--head "$OUT_DIR/head-1.json")
+else
+    # Interleaved, not one arm after the other: a runner that slows over the job's lifetime would
+    # otherwise bias whichever arm ran second.
+    for rep in $(seq 1 "$REPS"); do
+        use_image "$IMAGE_HEAD"
+        reset_created_rows
+        run_k6 "head-$rep.json" "$HEAD_SCENARIOS" "$CURSOR"
+        HEAD_ARGS+=(--head "$OUT_DIR/head-$rep.json")
+
+        use_image "$IMAGE_BASE"
+        reset_created_rows
+        run_k6 "base-$rep.json" "$ABSOLUTE_SCENARIOS" "$CURSOR"
+        BASE_ARGS+=(--base "$OUT_DIR/base-$rep.json")
+    done
+fi
+
+# The calibration tier REPORTS; only the gate tier judges. The ceilings in the baseline file were
+# measured on the gate tier and say so in every row, and the ratios GROW with volume — count=exact
+# costs 1.6x the reference list at 20 000 rows and 3.0x at 200 000, because the fixed per-request
+# overhead stops dominating as the database's share grows. Enforcing gate ceilings against a
+# calibration run would fail a healthy release for a reason that is a property of the row count.
+# Validity is still enforced either way: a void run publishes garbage.
+VERDICT_ARGS=()
+if [ "$TIER" != gate ]; then
+    VERDICT_ARGS+=(--report-only)
+fi
+
+echo
+"$DIR/assert-load-baseline" \
+    --baseline "$BASELINE_FILE" \
+    --verdict "$OUT_DIR/verdict.json" \
+    ${VERDICT_ARGS[@]+"${VERDICT_ARGS[@]}"} \
+    "${HEAD_ARGS[@]}" ${BASE_ARGS[@]+"${BASE_ARGS[@]}"}

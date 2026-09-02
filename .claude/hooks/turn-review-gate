@@ -93,8 +93,47 @@ EOF
   printf 'do NOT re-check mechanical rules (the arch tests and the public-API approval test own those).'
 }
 
+# --- Load baselines: a ratio ceiling or an A/B factor moved this run ----------
+# The same hazard as a Verify baseline, and the reason it is judged the same way:
+# scripts/assert-load-baseline reads test/load/baselines/*.json, so RAISING a
+# ceiling is the one edit that turns a red load gate green without touching a
+# line of product code. Nothing mechanical can tell an intended cost from a
+# silenced regression — only a reader with the accompanying diff in front of
+# them — which is exactly what alvo-snapshot-judge is for.
+check_load_baselines() {
+  local entries="$1" root="$2"
+  local candidates f surviving=''
+
+  candidates="$(printf '%s\n' "$entries" \
+    | grep -E '^test/load/baselines/.*\.json$' | sort -u || true)"
+  [ -n "$candidates" ] || return 0
+
+  # Same no-op filter as the Verify check: a tracked file matching HEAD was
+  # rewritten byte-identically or reverted inside this run, so there is nothing
+  # to judge; an untracked one is new and appears in no diff, so keep it.
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    if git -C "$root" ls-files --error-unmatch -- "$f" >/dev/null 2>&1; then
+      git -C "$root" diff --quiet HEAD -- "$f" 2>/dev/null && continue
+    else
+      [ -e "$root/$f" ] || continue
+    fi
+    surviving="$surviving$f, "
+  done <<EOF
+$candidates
+EOF
+
+  [ -n "$surviving" ] || return 0
+
+  printf 'Load baselines changed this run: %s. ' "${surviving%, }"
+  printf 'Before finishing, invoke the alvo-snapshot-judge agent on these files and address its findings. '
+  printf 'It judges one thing: whether the new ceiling or factor is justified by the accompanying source '
+  printf 'change, or whether it silences a regression. A raised ceiling with no source change to explain it '
+  printf 'is the failure this check exists to catch.'
+}
+
 # Registry of active checks — they run in THIS process, sequentially.
-checks="check_verified_baselines"
+checks="check_verified_baselines check_load_baselines"
 
 # =============================================================================
 

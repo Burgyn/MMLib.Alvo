@@ -1,0 +1,16 @@
+# The load stack is the field-service stack with one thing changed: the alvo service runs a
+# PRE-BUILT image instead of building from the context.
+#
+# WHY AN OVERRIDE AND NOT A FLAG. The A/B gate needs two images of the same stack — the PR's
+# merge-base and its HEAD — and it swaps between them by recreating one service while PostgreSQL
+# and its rows stay put, so both arms measure the identical dataset. A `build:` service cannot be
+# pointed at an already-built tag; an `image:` one can. `scripts/test-load` therefore builds both
+# tags itself and runs compose with `--no-build`.
+#
+# `pull_policy: never` is the guard that matters here: without it a typo in the tag would send
+# compose to Docker Hub for "alvo-load", and the run would either hang or measure something that
+# is not Alvo at all.
+services:
+  alvo:
+    image: ${ALVO_LOAD_IMAGE:?set ALVO_LOAD_IMAGE — scripts/test-load builds and selects it}
+    pull_policy: never

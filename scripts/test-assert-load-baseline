@@ -1,0 +1,274 @@
+#!/usr/bin/env bash
+# Tests for scripts/assert-load-baseline — the load gate's one authority on pass/fail.
+#
+# Run: scripts/test-assert-load-baseline
+#
+# WHY THIS EXISTS. The same reason scripts/test-assert-mutation-run does, and that file says it
+# best: the guard's whole job is "do not trust a green signal", so a guard nobody tests is the
+# same shape as the defects it was written for. assert-mutation-run's own first review found it
+# failing OPEN in five places. This suite pins the fail-CLOSED behaviour of every branch that
+# could quietly turn a broken measurement into a clean bill of health:
+#
+#   - a run that dropped iterations (the generator, not the server, was the bottleneck)
+#   - a run with failing requests (a 500-storm has a lovely latency profile)
+#   - a run that recorded no scenarios at all (a lazily declared k6 metric does exactly this)
+#   - a malformed or missing summary
+#   - a denominator of zero
+#
+# and the two judgements themselves, including the one that is easiest to get wrong: the absolute
+# half must NOT fire when the factor is exceeded but the absolute floor is not, because that is
+# the ordinary noise of a two-millisecond endpoint and a gate that fires on it gets muted.
+#
+# Summaries here are SYNTHETIC, unlike the mutation suite's captured fixtures, and deliberately
+# so: the point is to drive the guard's arithmetic through exact values, which real k6 output
+# cannot do. What makes them trustworthy is that their SHAPE is the shape scenarios.js emits —
+# the same keys, written by hand from artifacts/load/head-1.json.
+
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+GUARD="$ROOT/scripts/assert-load-baseline"
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+PASS=0
+FAIL=0
+
+pass() { PASS=$((PASS + 1)); printf '  ok   %s\n' "$1"; }
+fail() {
+    FAIL=$((FAIL + 1))
+    printf '  FAIL %s\n' "$1"
+    printf '       expected: %s\n' "$2"
+    printf '       actual:   %s\n' "$3"
+}
+
+# A summary in the shape scenarios.js writes. Scenarios are given as name:min:p95 triples.
+write_summary() { # <path> <dropped> <failedRate> <name:min:p95>...
+    local path="$1" dropped="$2" failed="$3"; shift 3
+    local scenarios="{}" entry
+    for entry in "$@"; do
+        local name min p95
+        name="${entry%%:*}"
+        min="${entry#*:}"; min="${min%%:*}"
+        p95="${entry##*:}"
+        scenarios=$(jq -c --arg n "$name" --argjson m "$min" --argjson p "$p95" \
+            '. + {($n): {avg: $m, min: $m, med: $m, "p(95)": $p, "p(99)": $p, max: $p}}' \
+            <<<"$scenarios")
+    done
+    jq -n --argjson s "$scenarios" --argjson d "$dropped" --argjson f "$failed" '{
+        rows: 20000, duration: 15,
+        scenarios: $s,
+        http_req_failed: {rate: $f},
+        dropped_iterations: {count: $d},
+        iterations: {count: 1000}
+    }' > "$path"
+}
+
+write_baseline() { # <path> <ratioCeiling> <factor> <floorMs>
+    jq -n --argjson c "$2" --argjson f "$3" --argjson fl "$4" '{
+        ratios: {
+            count_exact: {over: "list_indexed", max: $c, why: "fixture"}
+        },
+        absolute: {
+            defaults: {factor: $f, floorMs: $fl},
+            read_by_id: {why: "fixture"}
+        }
+    }' > "$1"
+}
+
+OUT=""
+STATUS=0
+run_guard() {
+    OUT="$("$GUARD" "$@" 2>&1)"
+    STATUS=$?
+    return 0
+}
+
+assert_status() { # <label> <expected-status> <args...>
+    local label="$1" expected="$2"; shift 2
+    run_guard "$@"
+    if [ "$STATUS" -eq "$expected" ]; then
+        pass "$label"
+    else
+        fail "$label" "exit $expected" "exit $STATUS: $OUT"
+    fi
+}
+
+assert_rejected_because() { # <label> <expected-status> <needle> <args...>
+    local label="$1" expected="$2" needle="$3"; shift 3
+    run_guard "$@"
+    if [ "$STATUS" -ne "$expected" ]; then
+        fail "$label" "exit $expected" "exit $STATUS: $OUT"
+        return
+    fi
+    case "$OUT" in
+        *"$needle"*) pass "$label" ;;
+        *) fail "$label" "a rejection mentioning '$needle'" "$OUT" ;;
+    esac
+}
+
+BASELINE="$TMP/baseline.json"
+write_baseline "$BASELINE" 2.5 1.8 3.0
+
+echo "Validity — a run that measured the wrong thing is VOID (exit 2), not slow (exit 1)"
+
+write_summary "$TMP/ok.json" 0 0 count_exact:3.0:8.0 list_indexed:2.0:8.0 read_by_id:1.0:4.0
+assert_status "a clean ratio-only run passes" 0 --baseline "$BASELINE" --head "$TMP/ok.json"
+
+write_summary "$TMP/dropped.json" 12 0 count_exact:3.0:8.0 list_indexed:2.0:8.0
+assert_rejected_because "dropped iterations void the run" 2 "dropped 12 iterations" \
+    --baseline "$BASELINE" --head "$TMP/dropped.json"
+
+write_summary "$TMP/failing.json" 0 0.02 count_exact:3.0:8.0 list_indexed:2.0:8.0
+assert_rejected_because "failing requests void the run" 2 "http_req_failed" \
+    --baseline "$BASELINE" --head "$TMP/failing.json"
+
+write_summary "$TMP/empty.json" 0 0
+assert_rejected_because "a run with no scenarios void" 2 "recorded no scenarios" \
+    --baseline "$BASELINE" --head "$TMP/empty.json"
+
+printf 'not json at all' > "$TMP/malformed.json"
+assert_rejected_because "a malformed summary is void" 2 "not valid JSON" \
+    --baseline "$BASELINE" --head "$TMP/malformed.json"
+
+assert_rejected_because "a missing summary is void" 2 "does not exist" \
+    --baseline "$BASELINE" --head "$TMP/nope.json"
+
+assert_rejected_because "a missing baseline is void" 2 "does not exist" \
+    --baseline "$TMP/nope.json" --head "$TMP/ok.json"
+
+assert_rejected_because "no --head at all is void" 2 "at least one --head" \
+    --baseline "$BASELINE"
+
+write_summary "$TMP/zero.json" 0 0 count_exact:3.0:8.0 list_indexed:0:8.0
+assert_rejected_because "a zero denominator is void, not a ratio" 2 "not a measurement" \
+    --baseline "$BASELINE" --head "$TMP/zero.json"
+
+echo
+echo "Ratios — gated on min, and p95 must not influence the verdict"
+
+write_summary "$TMP/ratio-breach.json" 0 0 count_exact:6.0:8.0 list_indexed:2.0:8.0
+assert_rejected_because "a breached ratio fails (3.0x over a 2.5x ceiling)" 1 BREACH \
+    --baseline "$BASELINE" --head "$TMP/ratio-breach.json"
+
+write_summary "$TMP/ratio-edge.json" 0 0 count_exact:5.0:8.0 list_indexed:2.0:8.0
+assert_status "a ratio exactly at the ceiling passes (2.5x)" 0 \
+    --baseline "$BASELINE" --head "$TMP/ratio-edge.json"
+
+# The regression this pins: an earlier version gated on p95 and every shape came out ~1.0,
+# because at gate-tier volume p95 is jitter. Here p95 says 1.0x and min says 3.0x, and the guard
+# must follow min.
+write_summary "$TMP/p95-flat.json" 0 0 count_exact:6.0:8.0 list_indexed:2.0:8.0
+assert_rejected_because "min decides even when p95 is flat" 1 BREACH \
+    --baseline "$BASELINE" --head "$TMP/p95-flat.json"
+
+# And the converse: a p95 blow-out with an unchanged min does NOT fail. That is the gap the
+# guard's header names out loud, and it is pinned so nobody "fixes" it by accident.
+write_summary "$TMP/p95-spike.json" 0 0 count_exact:3.0:400.0 list_indexed:2.0:8.0
+assert_status "a p95 blow-out with a flat min does not fail (the named gap)" 0 \
+    --baseline "$BASELINE" --head "$TMP/p95-spike.json"
+
+write_summary "$TMP/ratio-absent.json" 0 0 read_by_id:1.0:4.0
+assert_status "a ratio whose scenarios were not run is reported, not failed" 0 \
+    --baseline "$BASELINE" --head "$TMP/ratio-absent.json"
+case "$OUT" in
+    *"not measured"*) pass "…and it says 'not measured'" ;;
+    *) fail "…and it says 'not measured'" "'not measured' in the output" "$OUT" ;;
+esac
+
+echo
+echo "Repetitions — the minimum across reps, because interference is one-sided"
+
+write_summary "$TMP/rep-noisy.json" 0 0 count_exact:9.0:8.0 list_indexed:6.0:8.0
+write_summary "$TMP/rep-clean.json" 0 0 count_exact:3.0:8.0 list_indexed:2.0:8.0
+assert_status "a noisy rep beside a clean one does not fail" 0 \
+    --baseline "$BASELINE" --head "$TMP/rep-noisy.json" --head "$TMP/rep-clean.json"
+
+echo
+echo "Absolute A/B — a breach needs BOTH the factor and the floor"
+
+write_summary "$TMP/base.json" 0 0 read_by_id:2.0:5.0
+write_summary "$TMP/head-slow.json" 0 0 read_by_id:8.0:20.0
+assert_rejected_because "4.0x and +6.0ms fails" 1 BREACH \
+    --baseline "$BASELINE" --head "$TMP/head-slow.json" --base "$TMP/base.json"
+
+# The case that keeps the gate trusted: 2.0 -> 4.5 ms is 2.25x, over the 1.8 factor, but only
+# +2.5 ms, under the 3.0 ms floor. Ordinary noise on a fast endpoint. Must NOT fail.
+write_summary "$TMP/head-noise.json" 0 0 read_by_id:4.5:12.0
+assert_status "factor exceeded but under the floor passes" 0 \
+    --baseline "$BASELINE" --head "$TMP/head-noise.json" --base "$TMP/base.json"
+
+# And the mirror: a big absolute delta that is a small factor. 100 -> 140 ms is +40 ms, way over
+# the floor, but 1.4x, under the factor. Also must not fail.
+write_summary "$TMP/base-slow.json" 0 0 read_by_id:100.0:200.0
+write_summary "$TMP/head-drift.json" 0 0 read_by_id:140.0:260.0
+assert_status "floor exceeded but under the factor passes" 0 \
+    --baseline "$BASELINE" --head "$TMP/head-drift.json" --base "$TMP/base-slow.json"
+
+write_summary "$TMP/head-faster.json" 0 0 read_by_id:1.0:3.0
+assert_status "getting faster passes" 0 \
+    --baseline "$BASELINE" --head "$TMP/head-faster.json" --base "$TMP/base.json"
+
+run_guard --baseline "$BASELINE" --head "$TMP/ok.json"
+case "$OUT" in
+    *"Absolute A/B: skipped"*) pass "no --base arm skips the absolute half explicitly" ;;
+    *) fail "no --base arm skips the absolute half explicitly" "'Absolute A/B: skipped'" "$OUT" ;;
+esac
+
+echo
+echo "--report-only — the calibration tier's shape: ceilings not enforced, validity still is"
+
+# The ratios GROW with volume (count=exact 1.6x at 20k rows, 3.0x at 200k), so gate-tier ceilings
+# do not apply to a calibration run and enforcing them would fail a healthy release for a reason
+# that is a property of the row count.
+assert_status "a breached ratio does NOT fail under --report-only" 0 \
+    --baseline "$BASELINE" --head "$TMP/ratio-breach.json" --report-only
+case "$OUT" in
+    *over*) pass "…and the row is labelled 'over', not BREACH" ;;
+    *) fail "…and the row is labelled 'over', not BREACH" "'over' in the output" "$OUT" ;;
+esac
+case "$OUT" in
+    *"not enforced"*) pass "…and the header says the ceilings are not enforced" ;;
+    *) fail "…and the header says the ceilings are not enforced" "'not enforced'" "$OUT" ;;
+esac
+
+assert_status "a breached A/B does NOT fail under --report-only" 0 \
+    --baseline "$BASELINE" --head "$TMP/head-slow.json" --base "$TMP/base.json" --report-only
+
+# The fail-open this pins: an earlier version set FAILED inside `v="$(f)"`, which runs f in a
+# SUBSHELL, so the assignment was discarded and a real breach exited 0. Report-only must be the
+# ONLY thing that changes the consequence.
+assert_rejected_because "the same input still FAILS without --report-only" 1 BREACH \
+    --baseline "$BASELINE" --head "$TMP/ratio-breach.json"
+
+# Validity is not a ceiling, and a void calibration publishes garbage.
+assert_rejected_because "a void run is still void under --report-only" 2 "dropped 12 iterations" \
+    --baseline "$BASELINE" --head "$TMP/dropped.json" --report-only
+
+run_guard --baseline "$BASELINE" --head "$TMP/ratio-breach.json" --report-only \
+    --verdict "$TMP/report-verdict.json"
+if [ "$(jq -r '.reportOnly' "$TMP/report-verdict.json")" = "true" ] \
+    && [ "$(jq -r '.failed' "$TMP/report-verdict.json")" = "false" ]; then
+    pass "the verdict file records reportOnly and failed=false"
+else
+    fail "the verdict file records reportOnly and failed=false" \
+        "reportOnly=true, failed=false" "$(cat "$TMP/report-verdict.json" 2>&1)"
+fi
+
+echo
+echo "The verdict file"
+
+run_guard --baseline "$BASELINE" --head "$TMP/ratio-breach.json" --verdict "$TMP/verdict.json"
+if [ -f "$TMP/verdict.json" ] \
+    && [ "$(jq -r '.failed' "$TMP/verdict.json")" = "true" ] \
+    && [ "$(jq -r '.gatingStat' "$TMP/verdict.json")" = "min" ] \
+    && [ "$(jq -r '[.checks[] | select(.verdict == "BREACH")] | length' "$TMP/verdict.json")" -ge 1 ]; then
+    pass "a failing run writes a verdict naming the breach and the gating statistic"
+else
+    fail "a failing run writes a verdict naming the breach and the gating statistic" \
+        "failed=true, gatingStat=min, >=1 BREACH check" "$(cat "$TMP/verdict.json" 2>&1)"
+fi
+
+echo
+printf '%d passed, %d failed\n' "$PASS" "$FAIL"
+[ "$FAIL" -eq 0 ] || exit 1
