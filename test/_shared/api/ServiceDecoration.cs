@@ -38,9 +38,12 @@ internal static class ServiceDecoration
     /// <param name="services">The collection Alvo has already registered into.</param>
     /// <param name="decorate">Builds the wrapper around the instance the existing registration produces.</param>
     /// <exception cref="InvalidOperationException">
-    /// Nothing registered <typeparamref name="TService"/>, or it was registered more than once. Both mean
-    /// the assumption this helper rests on has moved, and a fact that silently measured an undecorated
-    /// service would pass while measuring nothing.
+    /// Nothing registered <typeparamref name="TService"/>, it was registered more than once, or it was not
+    /// registered as a singleton. The first two mean the assumption this helper rests on has moved, and a
+    /// fact that silently measured an undecorated service would pass while measuring nothing. The third is
+    /// refused rather than accommodated: the replacement is registered as a singleton, so decorating a
+    /// scoped or transient service would quietly widen its lifetime and the fact would then be measuring a
+    /// host this framework never builds.
     /// </exception>
     internal static void Decorate<TService>(
         this IServiceCollection services, Func<TService, TService> decorate)
@@ -50,6 +53,14 @@ internal static class ServiceDecoration
         ArgumentNullException.ThrowIfNull(decorate);
 
         var existing = Sole<TService>(services);
+        if (existing.Lifetime != ServiceLifetime.Singleton)
+        {
+            throw new InvalidOperationException(
+                $"{typeof(TService).Name} is registered as {existing.Lifetime}, and this helper re-registers "
+                + "the decorated service as a singleton. Widening a lifetime silently would make the fact "
+                + "measure a host Alvo never builds.");
+        }
+
         services.Remove(existing);
         services.AddSingleton(provider => decorate((TService)Instantiate(existing, provider)));
     }
@@ -64,12 +75,34 @@ internal static class ServiceDecoration
                 + $"{matches.Count}. Either AddAlvo has not run yet, or the registration moved.");
     }
 
-    private static object Instantiate(ServiceDescriptor descriptor, IServiceProvider provider) =>
-        descriptor.ImplementationInstance
-        ?? descriptor.ImplementationFactory?.Invoke(provider)
-        ?? ActivatorUtilities.CreateInstance(
+    /// <summary>Builds the instance <paramref name="descriptor"/> describes, whichever form it took.</summary>
+    /// <remarks>
+    /// The three forms are tested in the order the descriptor fills them, and a factory that answers
+    /// <see langword="null"/> is a failure rather than a reason to fall through to
+    /// <see cref="ActivatorUtilities"/> — falling through would construct a different object than the
+    /// registration describes, which is exactly the guarantee this helper exists to keep.
+    /// </remarks>
+    /// <param name="descriptor">The registration being decorated.</param>
+    /// <param name="provider">The container the inner instance is built from.</param>
+    private static object Instantiate(ServiceDescriptor descriptor, IServiceProvider provider)
+    {
+        if (descriptor.ImplementationInstance is { } instance)
+        {
+            return instance;
+        }
+
+        if (descriptor.ImplementationFactory is { } factory)
+        {
+            return factory(provider)
+                ?? throw new InvalidOperationException(
+                    $"{descriptor.ServiceType.Name}'s registered factory answered null, so there is nothing "
+                    + "to decorate.");
+        }
+
+        return ActivatorUtilities.CreateInstance(
             provider,
             descriptor.ImplementationType
             ?? throw new InvalidOperationException(
                 $"{descriptor.ServiceType.Name} is registered in a form this helper cannot instantiate."));
+    }
 }

@@ -70,14 +70,14 @@ internal sealed class AlvoDocumentTransformer(
         }
 
         var views = Views(generated);
-        var entities = (IReadOnlyList<EntitySchema>)[.. views.Values.Select(view => view.Schema)];
+        var entities = (IReadOnlyList<EntitySchema>)[.. views.Select(view => view.Schema)];
         var operations = Operations(generated, entities);
 
         Overview(document);
         ProblemComponents.AddTo(document);
         document.AddComponent(CredentialScheme, Credential());
         Reusable(document, operations);
-        foreach (var view in views.Values)
+        foreach (var view in views)
         {
             Describe(document, view);
         }
@@ -112,6 +112,11 @@ internal sealed class AlvoDocumentTransformer(
     /// endpoint that needs no credential, so all of it was per-request work.
     /// </para>
     /// <para>
+    /// <b>The schema is indexed by name once, rather than scanned per entity.</b> Reading it once and still
+    /// calling <c>FirstOrDefault</c> per entity would leave <c>O(N²)</c> comparisons behind a smaller
+    /// constant — a sixth of the work and the same complexity — which is not what this is for.
+    /// </para>
+    /// <para>
     /// <b>An absent entity or policy still throws, and that is the point of resolving here.</b> Both are
     /// primed by the same descriptor apply that produced the route literals, so either one missing means the
     /// endpoint table and the applied state disagree — a broken framework invariant rather than a
@@ -121,34 +126,73 @@ internal sealed class AlvoDocumentTransformer(
     /// </para>
     /// </remarks>
     /// <param name="generated">The mapped Data API endpoints.</param>
-    private Dictionary<string, EntityView> Views(IEnumerable<Endpoint> generated)
+    private EntityViews Views(IEnumerable<Endpoint> generated)
     {
-        var applied = schema.GetSchema();
+        var declared = schema.GetSchema().Entities.ToDictionary(entity => entity.Name, StringComparer.Ordinal);
         var catalog = policies.Current;
-        var views = new Dictionary<string, EntityView>(StringComparer.Ordinal);
+        var views = new EntityViews();
 
         foreach (var name in generated.Select(endpoint => endpoint.Marker.Entity))
         {
-            if (!views.ContainsKey(name))
-            {
-                views.Add(name, ViewOf(name, applied, catalog));
-            }
+            views.Resolve(name, declared, catalog);
         }
 
         return views;
     }
 
+    /// <summary>
+    /// The entities of one document: resolved once each, addressable by name, and enumerable in the order the
+    /// endpoints first named them.
+    /// </summary>
+    /// <remarks>
+    /// <b>The order is held explicitly rather than taken from the dictionary.</b> The walk this replaced used
+    /// <c>Distinct</c>, whose first-seen order is contractual, and the order reaches the published document —
+    /// it is the order components are registered in, and the document has a Verify baseline. <c>Dictionary</c>
+    /// enumeration order is not part of its contract, so relying on it would make a byte-stable document an
+    /// accident of the runtime's current bucket layout rather than a property of this code.
+    /// </remarks>
+    private sealed class EntityViews : IEnumerable<EntityView>
+    {
+        private readonly Dictionary<string, EntityView> _byName = new(StringComparer.Ordinal);
+        private readonly List<EntityView> _inOrder = [];
+
+        internal EntityView this[string entity] => _byName[entity];
+
+        /// <summary>Resolves <paramref name="entity"/> unless it has already been resolved.</summary>
+        /// <param name="entity">The entity name an endpoint was mapped for.</param>
+        /// <param name="declared">Every entity the applied schema declares, by name.</param>
+        /// <param name="catalog">The compiled catalog, read once for the whole document.</param>
+        internal void Resolve(
+            string entity, IReadOnlyDictionary<string, EntitySchema> declared, PolicyCatalog? catalog)
+        {
+            if (_byName.ContainsKey(entity))
+            {
+                return;
+            }
+
+            var view = ViewOf(entity, declared, catalog);
+            _byName.Add(entity, view);
+            _inOrder.Add(view);
+        }
+
+        public IEnumerator<EntityView> GetEnumerator() => _inOrder.GetEnumerator();
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
     /// <summary>Resolves one entity against the applied schema and the compiled catalog.</summary>
     /// <param name="entity">The entity name an endpoint was mapped for.</param>
-    /// <param name="schema">The applied schema, read once for the whole document.</param>
+    /// <param name="declared">Every entity the applied schema declares, by name — indexed once per document.</param>
     /// <param name="catalog">The compiled catalog, read once for the whole document.</param>
-    private static EntityView ViewOf(string entity, SchemaModel schema, PolicyCatalog? catalog)
+    private static EntityView ViewOf(
+        string entity, IReadOnlyDictionary<string, EntitySchema> declared, PolicyCatalog? catalog)
     {
-        var declared = schema.Entities.FirstOrDefault(
-                candidate => string.Equals(candidate.Name, entity, StringComparison.Ordinal))
-            ?? throw new InvalidOperationException(
+        if (!declared.TryGetValue(entity, out var found))
+        {
+            throw new InvalidOperationException(
                 $"Entity '{entity}' has generated endpoints but is absent from the applied schema. The routes were "
                 + "mapped from that schema, so this is a framework invariant rather than a configuration error.");
+        }
 
         if (catalog is null || !catalog.TryGetEntity(entity, out var policy))
         {
@@ -158,7 +202,7 @@ internal sealed class AlvoDocumentTransformer(
         }
 
         return new EntityView(
-            declared,
+            found,
             policy.Hidden.Keys.ToHashSet(StringComparer.Ordinal),
             policy.ReadOnly.Keys.ToHashSet(StringComparer.Ordinal));
     }
