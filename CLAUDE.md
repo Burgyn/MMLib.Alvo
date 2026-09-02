@@ -69,6 +69,8 @@ compresses out. Violating one of these is a bug, not a style nit.
 - `test/` — tests, mirroring `src/`.
 - `docs/product/` — full spec (`alvo-specifikacia.md`) + domain analysis (`baas-analyza.md`), SK, read rarely.
 - `docs/architecture/` — architecture notes, e.g. `package-boundary.md`.
+- `docs/performance.md` — the published latency numbers, one section per
+  measurement, produced by `scripts/test-load --tier calibration`.
 - `docs/superpowers/specs/` — per-issue specs (the what/why for one issue).
 - `docs/superpowers/plans/` — per-issue Superpowers implementation plans (the how, for one PR).
 - `.claude/skills/` — the `alvo-*` skills (see below).
