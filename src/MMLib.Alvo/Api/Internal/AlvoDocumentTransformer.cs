@@ -128,6 +128,11 @@ internal sealed class AlvoDocumentTransformer(
     /// <param name="generated">The mapped Data API endpoints.</param>
     private EntityViews Views(IEnumerable<Endpoint> generated)
     {
+        // The schema is read BEFORE the catalog, and that order is the fail-closed one. Both are reads of the
+        // same monotonically republished holder, so the catalog is always the same-or-newer version of the
+        // pair: an older field list judged by a newer, possibly stricter mask. Swapping these two lines flips
+        // it to the disclosing direction — a newer field list judged by an older mask, which can publish the
+        // name of a field the current policy hides.
         var declared = schema.GetSchema().Entities.ToDictionary(entity => entity.Name, StringComparer.Ordinal);
         var catalog = policies.Current;
         var views = new EntityViews();
