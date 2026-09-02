@@ -182,6 +182,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Serving the OpenAPI document no longer costs `O(N²)` per request** (#126). The document is rebuilt on
+  every request to `/openapi/v1.json`, which needs no credential, and the transformer resolved each
+  entity's schema and field flags once per entity *and again per endpoint* — five endpoints per entity, so
+  `6N` resolutions. The schema lookup was a linear scan by name, making it `O(N²)` comparisons, and each
+  flag resolution allocated two fresh sets, so `12N` of them. The transformer now reads each source once
+  for the whole document and indexes it. Measured on a three-entity descriptor: schema reads `19 → 2`,
+  catalog reads `18 → 1`, and `OpenApiDocumentCostTests` pins both. The schema lands at two rather than
+  one because serving the document also reads it once through `EntityRouteCatalog` when ApiExplorer
+  enumerates the route table — a different concern, and one read regardless of entity count. The document
+  itself is byte-identical — no baseline moved — so this is a change in cost, not in contract.
+
 - **A create whose caller cannot satisfy it now answers `read-only-required-field`, not `required`**
   (#124). When a field is `required` and this caller's own expression-valued `readOnly` mask froze it,
   telling them to supply it sends them to fix something no value of theirs can be stored in. The new
@@ -508,4 +519,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lost key race caught any storage write failure, so a duplicate was re-attempted ten times — about
   450 ms — before surfacing. It is no longer a `DbException`, so it leaves on the first attempt. The
   idempotency record's own primary key is deliberately still untranslated, because losing that race is
-  what the retry exists for. (Part of #127; the rest of #127 is still open.)
+  what the retry exists for. (#127. The attempt count is now asserted rather than described, since every
+  outcome assertion passes on a build that retries ten times and then throws the same exception. Two paths
+  still retry by design — that untranslated primary key, and a failure no dialect recognises, which must
+  keep retrying or a genuine insert race would escape as a 500. The count is pinned on SQLite; the
+  PostgreSQL leg is #139's.)
