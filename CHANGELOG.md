@@ -186,10 +186,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every request to `/openapi/v1.json`, which needs no credential, and the transformer resolved each
   entity's schema and field flags once per entity *and again per endpoint* — five endpoints per entity, so
   `6N` resolutions. The schema lookup was a linear scan by name, making it `O(N²)` comparisons, and each
-  flag resolution allocated two fresh sets, so `12N` of them. Both are now resolved once for the whole
-  document and indexed. Measured on a three-entity descriptor: schema reads `19 → 2`, catalog reads
-  `18 → 1`, and `OpenApiDocumentCostTests` pins both. The document itself is byte-identical — no baseline
-  moved — so this is a change in cost, not in contract.
+  flag resolution allocated two fresh sets, so `12N` of them. The transformer now reads each source once
+  for the whole document and indexes it. Measured on a three-entity descriptor: schema reads `19 → 2`,
+  catalog reads `18 → 1`, and `OpenApiDocumentCostTests` pins both. The schema lands at two rather than
+  one because serving the document also reads it once through `EntityRouteCatalog` when ApiExplorer
+  enumerates the route table — a different concern, and one read regardless of entity count. The document
+  itself is byte-identical — no baseline moved — so this is a change in cost, not in contract.
 
 - **A create whose caller cannot satisfy it now answers `read-only-required-field`, not `required`**
   (#124). When a field is `required` and this caller's own expression-valued `readOnly` mask froze it,

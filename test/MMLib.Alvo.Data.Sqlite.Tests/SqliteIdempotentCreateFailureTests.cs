@@ -158,7 +158,14 @@ public sealed class SqliteIdempotentCreateFailureTests : IAsyncDisposable
     /// asserting against could not fail if that number changed.</remarks>
     private const int ContendedCreateAttempts = 10;
 
-    /// <summary>How many statements inserted a row into the caller's own table.</summary>
+    /// <summary>
+    /// Counts only the entity's own inserts, so the number means write attempts rather than statements.
+    /// </summary>
+    /// <remarks>
+    /// The idempotency table's own <c>INSERT</c> is a hand-built command on the raw connection and never
+    /// reaches EF's <c>CommandExecuting</c>, so it is invisible to <see cref="SqlCapture"/> — but naming the
+    /// entity's table keeps the count right if that ever changes, rather than resting on the omission.
+    /// </remarks>
     private static int InsertsInto(AlvoDataHost host) =>
         host.Statements.Count(statement =>
             statement.Contains("INSERT INTO", StringComparison.OrdinalIgnoreCase)
