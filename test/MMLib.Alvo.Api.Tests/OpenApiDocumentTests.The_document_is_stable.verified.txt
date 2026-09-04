@@ -1723,7 +1723,7 @@
       "select": {
         "name": "select",
         "in": "query",
-        "description": "Comma-separated field names to return, in the order named, each optionally renamed as `alias:field`. It narrows the **read** as well as the response: a field the projection does not name is not read from the row. Two groups of columns are read regardless — the framework-managed ones, and any field named in `order`, because no engine can sort by a column it did not read — but neither appears in the response unless the projection named it. A field the caller may not read is refused exactly as an undeclared one is. An alias is lower snake_case; two fields cannot answer under one key; and a projection cannot name more distinct keys than the entity has fields.",
+        "description": "Comma-separated field names to return, in the order named, each optionally renamed as `alias:field`. It narrows the **read** as well as the response: a field the projection does not name is not read from the row. Two groups of columns are read regardless — the framework-managed ones, and any field named in `order`, because no engine can sort by a column it did not read — but neither appears in the response unless the projection named it. A field the caller may not read is refused exactly as an undeclared one is. An alias is lower snake_case, is not the name of a framework-managed column, and cannot be claimed twice; and a projection cannot name more distinct keys than there are fields this caller can read.",
         "schema": {
           "type": "string"
         },

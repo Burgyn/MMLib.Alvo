@@ -120,6 +120,28 @@ internal static class QueryStringParser
         private string? _after;
         private IReadOnlyList<ProjectedField>? _select;
 
+        /// <summary>Each response key the projection has claimed, and the field it answers from.</summary>
+        private Dictionary<string, string>? _claimedKeys;
+
+        /// <summary>
+        /// How many fields this caller can read — the projection's width bound, and the number its refusal
+        /// names.
+        /// </summary>
+        /// <remarks>
+        /// <b>The caller's count, not the entity's, and that is a confidentiality fix rather than a
+        /// tightening.</b> Charging against every declared field would have told a caller who hit the bound
+        /// how many fields the entity has, while an unprojected list tells them how many they can read — the
+        /// difference being exactly the number of fields hidden from them. That is the bit the byte-identical
+        /// <c>unavailable-field</c> refusal and the response schema's exclusion of masked fields both exist
+        /// to withhold, and an alias makes it cheap to ask for: one readable field mints unlimited distinct
+        /// keys. Every value this class puts in a message is server-owned; a count over masked fields would
+        /// have been the one exception.
+        /// </remarks>
+        private int ReadableFieldCount =>
+            _readableFieldCount ??= entity.Fields.Count(declared => !hiddenFields.Contains(declared.Name));
+
+        private int? _readableFieldCount;
+
         internal IReadOnlyList<AlvoViolation> Violations => _violations;
 
         internal bool TryRun(IQueryCollection query, out ParsedListQuery? parsed)
@@ -296,6 +318,15 @@ internal static class QueryStringParser
                 return;
             }
 
+            // A dictionary rather than a scan of the list: the claimed-key lookup runs once per comma-
+            // separated entry, and the entry count is bounded only by the transport's URL length. The
+            // width bound below caps the number of *distinct* keys, not the number of entries, so a
+            // repeated entry that dedupes is free to arrive thousands of times — with a list scan each one
+            // would have paid O(keys claimed so far), and the total would have been quadratic in a length
+            // the caller chooses. Safe as per-parse state because 'select' twice is already refused as a
+            // repeated parameter.
+            _claimedKeys = new Dictionary<string, string>(StringComparer.Ordinal);
+
             var projected = new List<ProjectedField>();
             foreach (var entry in value.Split(','))
             {
@@ -392,17 +423,16 @@ internal static class QueryStringParser
         /// <c>?select=id,id,id,id,id,id</c> on a five-field entity is still one key and still answered.
         /// </para>
         /// <para>
-        /// A framework-managed column's name is claimed even when no entry named it, because those columns
-        /// survive every projection — <c>select=id:make</c> would otherwise put two different values under
-        /// <c>id</c>.
+        /// An alias onto a framework-owned name is refused, and against <em>every</em> such name rather
+        /// than the ones this entity carries — see <see cref="QueryViolations.CollidingProjectionKey"/> for
+        /// why, and for what this deliberately does not refuse.
         /// </para>
         /// </remarks>
         private bool TryClaimKey(string key, string source, List<ProjectedField> projected)
         {
-            var claimed = projected.FirstOrDefault(field => string.Equals(field.Key, key, StringComparison.Ordinal));
-            if (claimed is not null)
+            if (_claimedKeys!.TryGetValue(key, out var claimed))
             {
-                if (string.Equals(claimed.Source, source, StringComparison.Ordinal))
+                if (string.Equals(claimed, source, StringComparison.Ordinal))
                 {
                     return true;
                 }
@@ -411,19 +441,19 @@ internal static class QueryStringParser
                 return false;
             }
 
-            if (!string.Equals(key, source, StringComparison.Ordinal)
-                && AlvoManagedColumns.For(entity).Contains(key))
+            if (!string.Equals(key, source, StringComparison.Ordinal) && AlvoManagedColumns.All.Contains(key))
             {
                 Add(QueryViolations.CollidingProjectionKey());
                 return false;
             }
 
-            if (projected.Count == entity.Fields.Count)
+            if (projected.Count == ReadableFieldCount)
             {
-                Add(QueryViolations.ProjectionTooWide(entity.Fields.Count));
+                Add(QueryViolations.ProjectionTooWide(ReadableFieldCount));
                 return false;
             }
 
+            _claimedKeys[key] = source;
             projected.Add(new ProjectedField(key, source));
             return true;
         }

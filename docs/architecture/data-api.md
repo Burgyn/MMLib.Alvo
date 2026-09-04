@@ -210,16 +210,29 @@ The source is resolved through the same resolver every other field name goes thr
 reach a field the caller may not read. Four refusals, all pointing at `select`: a malformed pair or an
 alias outside the field-name grammar (`malformed-select-alias` — a deliberate narrowing of PostgREST,
 which admits an arbitrary alias, because an alias is a field name *in the response*); a reserved name as
-an alias (consistency with what a descriptor may declare, not necessity); two sources under one response
-key, a managed column's name included (`colliding-projection-key`); and more distinct keys than the
-entity has fields (`projection-too-wide`).
+an alias (consistency with what a descriptor may declare, not necessity); a key claimed twice, whether by
+two different sources or by an alias onto **any** framework-owned name — `AlvoManagedColumns.All`, not this
+entity's own subset, because the caller is minting a name rather than resolving one
+(`colliding-projection-key`); and more distinct keys than the caller has readable fields
+(`projection-too-wide`).
+
+**What the alias deliberately does not refuse:** a rename onto another declared field's name.
+`?select=year:make` answers `{"year": "skoda"}` where the published schema declares `year` an integer.
+PostgREST behaves the same way, the caller chose both halves, and the value is one they may read; refusing
+it would make the alias useless for the renaming it exists for.
 
 That last bound exists **because** of aliases. Before them the projection was self-bounding — every entry
-resolved to a declared field and duplicates collapsed — so a response could never carry more keys than the
-entity has fields. An alias can name one column under arbitrarily many keys, leaving only the transport's
-URL limit in the way. It is charged per newly claimed *distinct* key rather than on the entry count, which
-is what keeps `?select=id,id,id` deduping as it always has, and follows the precedent
-`FilterParseScope.TryChargeNode` set: a budget spent after the parse does not bound the parse.
+resolved through `QueryFieldResolver` to a declared field and duplicates collapsed — so a response could
+never carry more keys than the entity has fields. An alias can name one column under arbitrarily many keys,
+leaving only the transport's URL limit in the way. It is charged per newly claimed *distinct* key rather
+than on the entry count, which is what keeps `?select=id,id,id` deduping as it always has, and follows the
+precedent `FilterParseScope.TryChargeNode` set: a budget spent after the parse does not bound the parse.
+
+**The number is the caller's readable field count, not the entity's declared one**, and that is a
+confidentiality decision rather than a tightening: the count is published in the refusal's fix suggestion,
+and an unprojected list already tells the caller how many fields they can read — so publishing the declared
+count would hand them the size of their own mask, the one bit the byte-identical `unavailable-field`
+refusal exists to withhold.
 
 ### Allow-list 1: the ten operators, derived and not written out
 

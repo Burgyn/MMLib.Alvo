@@ -176,9 +176,11 @@ internal sealed class ReadStatementComposer
     /// <param name="context">The caller the predicates' context values are resolved against.</param>
     /// <param name="options">
     /// The same options the page was composed from. <see cref="ReadStatementOptions.Anchor"/>,
-    /// <see cref="ReadStatementOptions.Sort"/>, <see cref="ReadStatementOptions.Limit"/> and
-    /// <see cref="ReadStatementOptions.Offset"/> are deliberately ignored; the caller passes the whole record
-    /// rather than a narrowed copy so that a term added to the read cannot be silently missed here.
+    /// <see cref="ReadStatementOptions.Sort"/>, <see cref="ReadStatementOptions.Limit"/>,
+    /// <see cref="ReadStatementOptions.Offset"/> and <see cref="ReadStatementOptions.Unselected"/> are
+    /// deliberately ignored; the caller passes the whole record rather than a narrowed copy so that a term
+    /// added to the read cannot be silently missed here. <c>Unselected</c> is ignored for a stronger reason
+    /// than the rest: this method composes no projection at all, so there is nothing for it to apply.
     /// </param>
     internal ReadStatement ComposeCount(
         EntitySchema entity, PolicyDecision decision, AlvoContext context, ReadStatementOptions options)

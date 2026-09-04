@@ -88,6 +88,18 @@ internal sealed record DataApiPage
     /// nothing a caller may read, so an absent key means the port chose not to return it and this layer must
     /// not manufacture the field back into existence.
     /// </para>
+    /// <para>
+    /// <b>That silence is in tension with a sibling decision in this same change, and the tension is
+    /// deliberate.</b> <c>ReadProjection</c> answers its own unreachable case — a declared field the read
+    /// model does not map — with a loud <see cref="InvalidOperationException"/>, on the ground that an Alvo
+    /// defect must not be dressed as a decision about the caller. A missing <em>source</em> here is equally
+    /// unreachable: the name was resolved against the entity and refused if masked or undeclared, so a
+    /// correct driver always returns it. The difference is what failing loudly would cost. There, nothing
+    /// had been sent yet. Here, the request was valid, the rows are in hand, and the only remaining act is
+    /// to write them — so a throw turns a driver's defect into a 500 for a caller who did nothing wrong,
+    /// and hides the rows they were entitled to. A dropped key is the smaller harm, and the port suite is
+    /// where a driver that omits a selected field is caught.
+    /// </para>
     /// </remarks>
     private static IReadOnlyDictionary<string, object?> Render(
         IReadOnlyDictionary<string, object?> values, IReadOnlyList<ProjectedField>? projection)

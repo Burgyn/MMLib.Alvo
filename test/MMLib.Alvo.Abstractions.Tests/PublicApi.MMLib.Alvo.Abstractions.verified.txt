@@ -260,6 +260,7 @@ namespace MMLib.Alvo.Data
         public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoSort> Sort { get; init; }
         public static void EnsurePagingWindowIsSane(MMLib.Alvo.Data.AlvoQuery query) { }
         public static void EnsureProjectionIsSane(MMLib.Alvo.Data.AlvoQuery query) { }
+        public static System.Collections.Generic.IReadOnlySet<string> UnselectedFields(MMLib.Alvo.Data.AlvoQuery query, MMLib.Alvo.Schema.EntitySchema entity) { }
     }
     public sealed class AlvoRecord : System.IEquatable<MMLib.Alvo.Data.AlvoRecord>
     {
@@ -1195,6 +1196,7 @@ namespace MMLib.Alvo.Schema
     }
     public static class AlvoManagedColumns
     {
+        public static System.Collections.Generic.IReadOnlySet<string> All { get; }
         public static System.Collections.Generic.IReadOnlyList<string> Audit { get; }
         public static string CreatedAt { get; }
         public static string CreatedBy { get; }

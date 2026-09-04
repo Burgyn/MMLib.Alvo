@@ -318,8 +318,8 @@ internal static class DataApiParameters
             + "framework-managed ones, and any field named in `order`, because no engine can sort by a "
             + "column it did not read — but neither appears in the response unless the projection named it. "
             + "A field the caller may not read is refused exactly as an undeclared one is. An alias is lower "
-            + "snake_case; two fields cannot answer under one key; and a projection cannot name more distinct "
-            + "keys than the entity has fields.",
+            + "snake_case, is not the name of a framework-managed column, and cannot be claimed twice; and a "
+            + "projection cannot name more distinct keys than there are fields this caller can read.",
         Schema = new OpenApiSchema { Type = JsonSchemaType.String },
         Example = JsonValue.Create("label:make,model"),
     };

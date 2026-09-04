@@ -1287,53 +1287,18 @@ internal sealed class EfAlvoData : IAlvoData
         };
 
     /// <summary>
-    /// The declared fields this read will not fetch: everything the entity declares that the caller did not
-    /// select and that nothing else in the statement needs. Empty when the caller sent no projection, which
-    /// is what keeps every pre-projection read byte-identical.
+    /// The declared fields this read will not fetch, from the port's own rule rather than a copy of it.
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// <b>Framework-managed columns survive, through <see cref="AlvoManagedColumns.For(EntitySchema)"/>
-    /// rather than a list written here.</b> That type is the one authority for which columns the framework
-    /// owns, and it exists because two hand-kept copies of this answer drifted. Beyond
-    /// <see cref="IAlvoData"/>'s returned-key-set contract, <see cref="Paginated"/> mints the keyset cursor
-    /// from the fetched row's <c>id</c>, so a NULLed row key would not mis-sort a page — it would break
-    /// paging outright.
-    /// </para>
-    /// <para>
-    /// <b>Every sort key survives, and this is measured rather than cautious.</b> The projection aliases its
-    /// <c>NULL</c> to the column's own name, and a bare identifier in <c>ORDER BY</c> resolves against the
-    /// output column names first — on SQLite <em>and</em> PostgreSQL. NULLing a sort key would therefore
-    /// order the page by the <c>NULL</c> while the keyset boundary in <c>WHERE</c> still described the real
-    /// sequence: a page that skips or repeats a row, which is the failure <c>SortSqlRenderer</c> is written
-    /// to make unrepresentable. A filter term, the keyset anchor and the policy predicates need no such
-    /// exemption — they are all in <c>WHERE</c>, where both engines resolve the table column and ignore the
-    /// alias. That measurement is also the only reason this feature has a safe shape at all: a compiled
-    /// predicate's field references are not enumerable, so had <c>WHERE</c> behaved like <c>ORDER BY</c>
-    /// there would have been no conservative survivor set to compute.
-    /// </para>
-    /// <para>
-    /// An entity the applied schema does not know narrows nothing. It is refused either way — by
-    /// <see cref="QueryFieldGuard"/> a line later, or by <see cref="PageAsync"/> — and answering with an
-    /// empty set here keeps that refusal the one that speaks.
-    /// </para>
+    /// <b>Delegated to <see cref="AlvoQuery.UnselectedFields"/> deliberately.</b> Which fields survive a
+    /// projection is a promise <see cref="IAlvoData"/>'s returned-key-set contract makes, not a decision
+    /// this driver gets to take — and the in-memory reference has to reach the same answer, or the
+    /// differential suite is comparing two features rather than two implementations of one. A local copy
+    /// here was the first draft, and it was a second hand-kept list of which columns the framework must
+    /// return: the defect <see cref="AlvoManagedColumns"/> exists to have stopped.
     /// </remarks>
-    private static FrozenSet<string> Unselected(AlvoQuery query, EntitySchema? entity)
-    {
-        if (query.Select is null || entity is null)
-        {
-            return FrozenSet<string>.Empty;
-        }
-
-        var survivors = new HashSet<string>(query.Select, StringComparer.Ordinal);
-        survivors.UnionWith(AlvoManagedColumns.For(entity));
-        survivors.UnionWith(query.Sort.Select(sort => sort.Field));
-
-        return entity.Fields
-            .Select(field => field.Name)
-            .Where(name => !survivors.Contains(name))
-            .ToFrozenSet(StringComparer.Ordinal);
-    }
+    private static IReadOnlySet<string> Unselected(AlvoQuery query, EntitySchema? entity) =>
+        entity is null ? FrozenSet<string>.Empty : AlvoQuery.UnselectedFields(query, entity);
 
     /// <summary>
     /// One past <paramref name="limit"/>, so <see cref="Paginated"/> can tell a page that ends exactly at the

@@ -1,4 +1,7 @@
-﻿namespace MMLib.Alvo.Data;
+﻿using MMLib.Alvo.Schema;
+using System.Collections.Frozen;
+
+namespace MMLib.Alvo.Data;
 
 /// <summary>
 /// A request to list an entity's rows through <see cref="IAlvoData.QueryAsync"/>: which entity,
@@ -201,6 +204,57 @@ public sealed record AlvoQuery
                 + "field, or leave the projection unset for every field this caller may read.",
                 nameof(query));
         }
+    }
+
+    /// <summary>
+    /// The fields of <paramref name="entity"/> that <paramref name="query"/>'s projection excludes — every
+    /// declared field the caller did not select and that this port does not have to return anyway. Empty
+    /// when the query carries no projection.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Here rather than in each implementation, on the same ground as
+    /// <see cref="EnsurePagingWindowIsSane"/>: it is a rule of the port.</b> Which fields survive a
+    /// projection is what <see cref="IAlvoData"/>'s returned-key-set contract promises, so an implementation
+    /// that computed its own answer would be free to promise something else — and a second hand-kept copy of
+    /// "which columns must survive" is the exact defect <see cref="AlvoManagedColumns"/> exists to have
+    /// stopped. The first draft of this feature wrote the set twice, once per implementation, and they were
+    /// byte-identical by review discipline alone.
+    /// </para>
+    /// <para>
+    /// <b>Two groups survive, for two unrelated reasons.</b> The framework-managed columns, because the
+    /// contract says so and because a keyset cursor is minted from the row key. And every field named in
+    /// <see cref="Sort"/>, because no implementation can order by a column it did not read — the shipped
+    /// drivers render an excluded column as a <c>NULL</c> aliased to its own name, and a bare identifier in
+    /// <c>ORDER BY</c> resolves against the output names on both engines, so excluding a sort key would order
+    /// a page by the placeholder while its keyset boundary still described the real sequence.
+    /// </para>
+    /// <para>
+    /// <b>What an implementation does with this is its own business.</b> A relational driver stops reading
+    /// those columns; the in-memory reference simply drops their keys. The one observable rule this fixes is
+    /// which keys the returned record carries.
+    /// </para>
+    /// </remarks>
+    /// <param name="query">The query being served.</param>
+    /// <param name="entity">The entity being read, as the applied schema declares it.</param>
+    public static IReadOnlySet<string> UnselectedFields(AlvoQuery query, EntitySchema entity)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        ArgumentNullException.ThrowIfNull(entity);
+
+        if (query.Select is null)
+        {
+            return FrozenSet<string>.Empty;
+        }
+
+        var survivors = new HashSet<string>(query.Select, StringComparer.Ordinal);
+        survivors.UnionWith(AlvoManagedColumns.For(entity));
+        survivors.UnionWith(query.Sort.Select(sort => sort.Field));
+
+        return entity.Fields
+            .Select(field => field.Name)
+            .Where(name => !survivors.Contains(name))
+            .ToFrozenSet(StringComparer.Ordinal);
     }
 }
 

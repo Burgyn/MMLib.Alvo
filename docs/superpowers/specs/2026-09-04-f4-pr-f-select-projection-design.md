@@ -182,8 +182,12 @@ visible:
 
 ### 1.4 What is derived, and where
 
-The unselected set is computed at the one place that knows both the request and the
-schema, and it is derived — never caller-named:
+The unselected set is derived — never caller-named — and it is computed **once, on the
+port's own type** (`AlvoQuery.UnselectedFields`) rather than per implementation. The first
+draft wrote it twice, byte-identical, once in each driver; a reviewer pointed out that this
+is the very defect `AlvoManagedColumns` exists to have stopped, one level up. Which fields
+survive a projection is what `IAlvoData`'s returned-key-set contract promises, so it is a
+rule of the port and a future implementation inherits it:
 
 ```
 survivors  = Select ∪ AlvoManagedColumns.For(entity) ∪ { every sort key }
@@ -413,10 +417,26 @@ Four refusals, each with a violation code and a fix suggestion, all pointing at 
    and is recorded as such: a response key that no descriptor is allowed to declare should
    not be reachable by renaming.
 4. **A colliding key.** Two selected fields resolving to the same response key over
-   **different** sources (`select=name,name:other`, `select=a:x,a:y`), or an alias
-   colliding with a managed column that survives the projection (`select=id:name`, which
-   would otherwise put two different values under `id`). Refused rather than resolved: two
-   sources for one response key is a request with no correct answer.
+   **different** sources (`select=name,name:other`, `select=a:x,a:y`), or an alias onto a
+   name the framework owns (`select=id:name`, `select=tenant_id:name`). Refused rather than
+   resolved: two sources for one response key is a request with no correct answer.
+
+   **Two corrections to this item, both made after review and both worth stating.** First,
+   the alias-onto-a-managed-name half is *not* refused because two values would arrive
+   under one key — `Render` emits only the projection's own keys, so the port's real `id` is
+   dropped and nothing collides. It is refused because the response would carry a key that
+   reads as a framework column and is not one: the same reason the reserved-name check
+   exists. Second, it is tested against **every** managed name (`AlvoManagedColumns.All`,
+   added for this) rather than the ones the entity happens to carry — a global, non-audited
+   entity has no `tenant_id` and no `created_at`, and a response key called either would
+   still read as one.
+
+   **What this deliberately does not refuse:** an alias onto another *declared* field's
+   name. `select=year:make` answers `{"year": "skoda"}` where the published schema declares
+   `year` an integer. That is inherent to PostgREST-style aliasing, which Alvo adopts rather
+   than narrows here — the caller chose both halves and the value is one they may read — and
+   refusing it would make the alias useless for the renaming it exists for. Recorded so the
+   asymmetry with the managed names reads as a decision.
 
    `select=name,name` is **not** this condition: the key and the source are both the same,
    there is nothing to resolve, and it dedupes exactly as it does today (§1.1). The rule is
@@ -446,18 +466,31 @@ only remaining limit is whatever URL length the transport happens to allow — t
 the caller controls" shape §2.1 of the analysis warns about, and the one
 `AlvoFilter.MaxTerms` exists to close on the filter side.
 
-The bound is **derived, not chosen**: a projection may name at most as many keys as the
-entity declares fields.
+The bound is **derived, not chosen**: a projection may name at most as many keys as this
+caller has readable fields.
 
 ```
-distinct projection keys ≤ entity.Fields.Count
+distinct projection keys ≤ count of entity.Fields not in decision.HiddenFields
 ```
 
-A response with more keys than the entity has fields is a duplication request, not a read —
-no caller has a use for it, and the number needs no judgement call, no configuration knob
-and no per-engine measurement. It is generous by construction, and more so than it first
-looks, because `entity.Fields` includes the framework-managed columns: an audited,
-tenant-scoped entity with four descriptor fields admits nine keys.
+A response with more keys than the caller has fields to read is a duplication request, not
+a read — no caller has a use for it, and the number needs no judgement call, no
+configuration knob and no per-engine measurement. It is generous by construction, and more
+so than it first looks, because `entity.Fields` includes the framework-managed columns: an
+audited, tenant-scoped entity with four descriptor fields and no mask admits nine keys.
+
+**The caller's readable count rather than the entity's declared one, and this is a
+confidentiality fix rather than a tightening.** The first shape of this section said
+`entity.Fields.Count`. That number is published in the refusal's own fix suggestion, so a
+caller who hit the bound would learn how many fields the entity declares — while an
+unprojected list already tells them how many they can read. The difference between the two
+is exactly the number of fields hidden from them: the bit the byte-identical
+`unavailable-field` refusal, and the response schema's exclusion of masked fields, both
+exist to withhold. An alias is what makes it cheap to ask for, because one readable field
+mints unlimited distinct keys. `QueryViolations`' own remarks state that every value
+reaching a message is server-owned; a count over masked fields would have been the one
+exception. Recorded here rather than only in the code because it changed after this design
+was reviewed.
 
 **Charged on arrival, per distinct key — not on the entry count, and not after the loop.**
 This is the whole of whether the bound works, and this repo has already paid to learn it.
@@ -562,13 +595,18 @@ entity whose `USING` predicate names an unselected field admits exactly the rows
 unprojected — including the `!has(field)` shape, which is the one that would have inverted
 into a bypass.
 
-**Baselines that move — two, and no SQL snapshot among them.**
+**Baselines that move — three, and no SQL snapshot among them.** (Two were predicted; the third was
+found during implementation and is recorded here rather than left as a surprise in the diff.)
 
 1. `test/MMLib.Alvo.Abstractions.Tests/PublicApi.MMLib.Alvo.Abstractions.verified.txt`
    enumerates every `AlvoQuery` member and `EnsurePagingWindowIsSane`, so `Select` and
    `EnsureProjectionIsSane` move it. This is the load-bearing one: a public-API baseline is
    the record of what the package promises.
-2. `OpenApiDocumentTests.The_document_is_stable.verified.txt`, whose current `select`
+2. `test/MMLib.Alvo.Tests/PublicApi.MMLib.Alvo.Testing.verified.txt` — **the one this design did not
+   predict.** The shared contract suite is a `public abstract class` in a shipped package, so adding
+   `AlvoDataProjectionTests` and four facts to `AlvoDataStatementTests` is itself a public-API
+   change. Worth recording because the instinct is to file a test as "not API".
+3. `OpenApiDocumentTests.The_document_is_stable.verified.txt`, whose current `select`
    description asserts the thing this PR falsifies — *"It narrows the response only — the
    read still fetches the whole row … saves bandwidth to the caller and nothing at the
    database."*
@@ -664,9 +702,11 @@ parsed projection, not a change to the port member.
 | The `SELECT` list keeps every column; unselected ones render `NULL AS col` | #117 as filed ("push the projection into the port", narrow the `SELECT` list) | EF `FromSql` requires every mapped property in the result set. §0, finding 1. The database still stops reading the column. |
 | An alias must match the field-name grammar | PostgREST admits an arbitrary alias | §2.3, item 2 — an alias is a response key an agent reads as a field name. |
 | A reserved name is refused as an alias | Nothing requires it; an alias is never a query key | §2.3, item 3 — consistency with what a descriptor may declare. Recorded as consistency, not necessity. |
-| A projection may name at most `entity.Fields.Count` keys | PostgREST imposes no such cap | §2.4 — the alias is what makes the projection able to amplify, so the bound arrives with it. Derived from the schema, not chosen. |
+| A projection may name at most as many keys as the caller can read fields | PostgREST imposes no such cap | §2.4 — the alias is what makes the projection able to amplify, so the bound arrives with it. Derived from the caller's own readable set, not chosen; the declared count would have leaked the size of their mask. |
 | A repeated `select` name dedupes, while a repeated `order` key is refused | Internal consistency | §2.3, item 4 — the dedupe is published behaviour; refusing it now would 422 requests that work today, and the bound in §2.4 answers the reason `order` refuses. |
 | `?select=name` still hides `id` from the response although the port now returns it | — | §2.2. Preserves the pre-PR wire shape exactly; the port's guarantee and the response's key list are two different lists. |
 | A projected read returns fewer keys than *"every non-hidden field the schema declares"* | `IAlvoData`'s returned-key-set contract | The feature is the narrowing. The contract paragraph is amended in this PR to name `Select` as the one narrowing channel, exempting both framework-managed columns and every field named in `Sort` — §1.4. |
 | A sort key survives the projection even when unselected | Nothing in #117 or PR-D anticipates it | §1.4 — measured: `ORDER BY` resolves a bare identifier against the output alias on both engines, which would break keyset paging. The alternative (qualifying every emitted identifier) was declined for blast radius, and is recorded as the route if this ever needs to change. |
+| An alias onto any framework-owned name is refused, not only one this entity carries | Nothing requires it; `AlvoManagedColumns.For(entity)` is the usual reading | §2.3 item 4 — the caller is *minting* a key here rather than resolving a field, so the question is "which names are the framework's to give", and `AlvoManagedColumns.All` was added to answer it. |
+| An alias onto another declared field's name is allowed, wrong type and all | PostgREST behaviour, adopted | §2.3 item 4 — the caller chose both halves, the value is theirs to read, and refusing it would defeat renaming. |
 | #118 gets two recorded facts and no code | #118 as filed (a request-scoped decision cache) | PR-D §3.2 declined it on a measurement. §0.1, §5. |

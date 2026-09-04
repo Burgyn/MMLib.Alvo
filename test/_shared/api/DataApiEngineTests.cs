@@ -249,10 +249,16 @@ public abstract class DataApiEngineTests
             HttpMethod.Get, "/api/vehicles?select=model&order=make.desc", _admin);
         using var unprojected = await world.SendAsync(HttpMethod.Get, "/api/vehicles?order=make.desc", _admin);
 
-        (await projected.ReadItemsAsync()).Count.ShouldBe((await unprojected.ReadItemsAsync()).Count);
-        (await projected.ReadItemsAsync())[0].ContainsKey("make").ShouldBeFalse();
-        (await unprojected.ReadItemsAsync()).Select(row => row["make"]!.GetValue<string>())
-            .ShouldBe(["vw", "skoda", "audi"], "the descending make order the projected read must match");
+        var projectedRows = await projected.ReadItemsAsync();
+        var unprojectedRows = await unprojected.ReadItemsAsync();
+
+        // The order is asserted on the PROJECTED read's own rows, against the unprojected read's. Asserting
+        // it on the unprojected one would have passed unchanged under the very defect this fact documents.
+        unprojectedRows.Select(row => row["make"]!.GetValue<string>())
+            .ShouldBe(["vw", "skoda", "audi"], "the seeded makes, descending");
+        projectedRows[0].ContainsKey("make").ShouldBeFalse("the response does not carry the sort key");
+        projectedRows.Select(row => row["model"]!.GetValue<string>())
+            .ShouldBe([.. unprojectedRows.Select(row => row["model"]!.GetValue<string>())]);
     }
 
     /// <summary>

@@ -94,6 +94,30 @@ public static class AlvoManagedColumns
     }
 
     /// <summary>
+    /// Every name the framework owns, on any entity — the union of what <see cref="For(EntitySchema)"/>
+    /// can return.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Not the same question as <see cref="For(EntitySchema)"/>, and the difference matters.</b> That
+    /// one answers "which columns does <em>this</em> entity have", which is what a payload guard or a
+    /// projection needs. This answers "which names are the framework's to give", which is what a layer
+    /// needs when it is about to <em>mint</em> a name rather than resolve one — a projection alias being
+    /// the case that made this necessary. A global, non-audited entity has no <c>tenant_id</c> and no
+    /// <c>created_at</c>, but a response key called either of those still reads as a framework column to
+    /// whoever receives it, and no descriptor is allowed to declare one.
+    /// </para>
+    /// <para>
+    /// Derived from <see cref="For(TenancyMode?, bool, bool)"/> rather than written out, so it cannot drift
+    /// from it — which is the whole reason this class exists. The cost is a static-initialisation order
+    /// dependency: <c>For</c> reads <see cref="Audit"/>, so this initializer must stay <b>below</b> it.
+    /// Moving it above would leave <see cref="Audit"/> null and fail at type initialisation.
+    /// </para>
+    /// </remarks>
+    public static IReadOnlySet<string> All { get; } =
+        For(TenancyMode.Scoped, audit: true, softDelete: true);
+
+    /// <summary>
     /// The column whose value versions a row for optimistic concurrency, or <see langword="null"/>
     /// when the entity has none. Only an audited entity has one: <c>updated_at</c> exists because
     /// <c>audit: true</c> asked for it, so a non-audited entity cannot answer "has this row changed"

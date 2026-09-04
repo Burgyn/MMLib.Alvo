@@ -586,40 +586,17 @@ public sealed class InMemoryAlvoData : IAlvoData
     }
 
     /// <summary>
-    /// The declared fields a read will not return: everything the entity declares that the caller did not
-    /// select. Empty when the caller sent no projection.
+    /// The declared fields this read will not return, from the port's own rule rather than a copy of it.
     /// </summary>
     /// <remarks>
-    /// <para>
     /// This reference has no <c>SELECT</c> list, so for it a projection <em>is</em> a second field mask —
-    /// but the survivor set is computed by the same rule the shipped drivers use, or the differential suite
-    /// is comparing two different features. Framework-managed columns survive through
-    /// <see cref="AlvoManagedColumns.For(EntitySchema)"/>, the one authority for which columns the framework
-    /// owns.
-    /// </para>
-    /// <para>
-    /// <b>Sort keys survive here too, and here it is not for a SQL reason.</b> There is no <c>ORDER BY</c>
-    /// to be shadowed by an aliased <c>NULL</c>; the exemption is kept because this reference's job is to
-    /// answer exactly what the drivers answer, and one that returned <em>fewer</em> keys than a driver would
-    /// make the differential suite red for the right reason and the wrong implementation.
-    /// </para>
+    /// but the set it works from is <see cref="AlvoQuery.UnselectedFields"/>, the same one both shipped
+    /// drivers use. That is the whole point of the rule living on the port: a reference that computed its
+    /// own survivor set could answer a different key set from a driver, and the differential suite would be
+    /// comparing two features rather than two implementations of one.
     /// </remarks>
-    private static FrozenSet<string> Unselected(AlvoQuery query, EntitySchema? entity)
-    {
-        if (query.Select is null || entity is null)
-        {
-            return FrozenSet<string>.Empty;
-        }
-
-        var survivors = new HashSet<string>(query.Select, StringComparer.Ordinal);
-        survivors.UnionWith(AlvoManagedColumns.For(entity));
-        survivors.UnionWith(query.Sort.Select(sort => sort.Field));
-
-        return entity.Fields
-            .Select(field => field.Name)
-            .Where(name => !survivors.Contains(name))
-            .ToFrozenSet(StringComparer.Ordinal);
-    }
+    private static IReadOnlySet<string> Unselected(AlvoQuery query, EntitySchema? entity) =>
+        entity is null ? FrozenSet<string>.Empty : AlvoQuery.UnselectedFields(query, entity);
 
     /// <summary>
     /// Drops every key neither the policy's field mask nor the caller's projection admits.
@@ -630,7 +607,7 @@ public sealed class InMemoryAlvoData : IAlvoData
     /// no-op on every entity that declares no <c>hidden</c> rule, which is most of them.
     /// </remarks>
     private static AlvoRecord Mask(
-        AlvoRecord record, IReadOnlySet<string> hiddenFields, FrozenSet<string> unselectedFields)
+        AlvoRecord record, IReadOnlySet<string> hiddenFields, IReadOnlySet<string> unselectedFields)
     {
         if (hiddenFields.Count == 0 && unselectedFields.Count == 0)
         {

@@ -297,6 +297,9 @@ public sealed class QueryStringParserTests
     [InlineData("order=zqmarkerqz")]
     [InlineData("order=year.zqmarkerqz")]
     [InlineData("select=zqmarkerqz")]
+    [InlineData("select=zqmarkerqz:nosuchfield")]
+    [InlineData("select=make:zqmarkerqz")]
+    [InlineData("select=Zqmarkerqz:make")]
     [InlineData("limit=zqmarkerqz")]
     [InlineData("offset=zqmarkerqz")]
     [InlineData("or=(zqmarkerqz")]
@@ -338,7 +341,9 @@ public sealed class QueryStringParserTests
         "nosuchfield=eq.1", "secret=eq.1", "year=nosuchop.1", "year=eq", "year=gte.notanumber",
         "make=eq.a%00b", "notes=is.hello", "make=in.skoda", "or=(", "or=()", "year=like.2",
         "limit=0", "offset=-1", "after=", "after=abc&offset=1", "order=", "order=year.sideways",
-        "order=year,year", "select=", "select=nosuchfield", "limit=1&limit=2",
+        "order=year,year", "select=", "select=nosuchfield", "select=Label:make", "select=id:make",
+        "select=a:make,b:make,c:make,d:make,e:make,f:make,g:make,h:make,i:make,j:make,k:make,l:make",
+        "limit=1&limit=2",
     ];
 
     /// <summary>
@@ -548,16 +553,17 @@ public sealed class QueryStringParserTests
     /// the divergence rather than fail on it. This is what fails instead.
     /// </summary>
     [Theory]
-    [InlineData("select=make")]
-    [InlineData("select=label:make,year")]
-    [InlineData("select=a:make,b:make")]
-    [InlineData("select=id,make,year")]
-    public void Every_rendered_source_is_asked_of_the_port_and_nothing_else_is(string queryString)
+    [InlineData("select=make", "make")]
+    [InlineData("select=label:make,year", "make,year")]
+    [InlineData("select=a:make,b:make", "make")]
+    [InlineData("select=id,make,year", "id,make,year")]
+    [InlineData("select=year,make,year", "year,make")]
+    public void The_port_is_asked_for_exactly_the_fields_the_response_reads_from(
+        string queryString, string expected)
     {
         TryParse(queryString, out var parsed, out var violations).ShouldBeTrue(Because(violations));
 
-        parsed!.Query.Select!.ToHashSet(StringComparer.Ordinal)
-            .ShouldBe(Sources(parsed).ToHashSet(StringComparer.Ordinal), ignoreOrder: true);
+        parsed!.Query.Select.ShouldBe(expected.Split(','));
     }
 
     /// <summary>
@@ -589,8 +595,10 @@ public sealed class QueryStringParserTests
     }
 
     /// <summary>
-    /// A projection naming every declared field is exactly at the bound, and must be accepted — the
-    /// off-by-one that would refuse it is the whole reason this fact sits beside the one above.
+    /// A projection naming every field this caller can read sits <b>exactly</b> at the bound and must be
+    /// accepted — the off-by-one that would refuse it is the whole reason this fact sits beside the one
+    /// above, and it is only boundary-exact because the bound counts readable fields rather than declared
+    /// ones.
     /// </summary>
     [Fact]
     public void A_projection_naming_every_declared_field_is_exactly_at_the_bound()
@@ -605,6 +613,60 @@ public sealed class QueryStringParserTests
 
         Keys(parsed!).ShouldBe(readable);
     }
+
+    /// <summary>
+    /// An alias does not open a second channel for the field-existence question. The aliased refusals must
+    /// be byte-identical to each other for the same reason the unaliased pair is: a caller must not be able
+    /// to tell "this entity has a field called X, hidden from you" from "no such field".
+    /// </summary>
+    [Fact]
+    public void An_aliased_projection_refuses_a_hidden_source_and_an_undeclared_one_identically()
+    {
+        var hidden = OnlyViolation("select=label:secret");
+        var undeclared = OnlyViolation("select=label:nosuchfield");
+
+        hidden.Code.ShouldBe(undeclared.Code);
+        hidden.Pointer.ShouldBe(undeclared.Pointer);
+        hidden.Message.ShouldBe(undeclared.Message);
+        hidden.FixSuggestion.ShouldBe(undeclared.FixSuggestion);
+    }
+
+    /// <summary>
+    /// The width bound names how many fields this <em>caller</em> can read, never how many the entity
+    /// declares. The difference between the two numbers is exactly the count of fields hidden from them —
+    /// the one bit the byte-identical refusal above exists to withhold, and an alias makes it cheap to ask
+    /// for, because one readable field mints unlimited distinct keys.
+    /// </summary>
+    [Fact]
+    public void The_width_bound_does_not_disclose_how_many_fields_are_hidden_from_the_caller()
+    {
+        var readable = _vehicles.Fields.Count(declared => !_masked.Contains(declared.Name));
+        var tooMany = string.Join(',', Enumerable.Range(0, readable + 1).Select(index => $"k{index}:make"));
+
+        var violation = OnlyViolation($"select={tooMany}");
+
+        var fix = violation.FixSuggestion.ShouldNotBeNull();
+
+        violation.Code.ShouldBe("projection-too-wide");
+        fix.ShouldContain(readable.ToString(CultureInfo.InvariantCulture), Case.Sensitive);
+        fix.ShouldNotContain(
+            _vehicles.Fields.Count.ToString(CultureInfo.InvariantCulture),
+            Case.Sensitive,
+            "the declared count is the caller's mask size away from the readable one");
+    }
+
+    /// <summary>
+    /// A framework-owned name is refused as an alias whether or not <em>this</em> entity carries the column.
+    /// The fixture is a global, non-audited entity, so it has no <c>tenant_id</c> and no <c>created_at</c> —
+    /// and a response key called either would still read as a framework column to whoever receives it.
+    /// </summary>
+    [Theory]
+    [InlineData("select=tenant_id:make")]
+    [InlineData("select=created_at:make")]
+    [InlineData("select=updated_by:make")]
+    [InlineData("select=deleted_at:make")]
+    public void An_alias_cannot_mint_a_framework_owned_name_this_entity_does_not_carry(string queryString)
+        => OnlyViolation(queryString).Code.ShouldBe("colliding-projection-key");
 
     private static IReadOnlyList<string> Keys(ParsedListQuery parsed) =>
         [.. parsed.Select!.Select(field => field.Key)];

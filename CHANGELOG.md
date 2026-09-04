@@ -257,12 +257,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     port is given source names, and the response's key list is rendered above it. New refusals, all
     on `select`: `malformed-select-alias` (an alias must match the field-name grammar
     `^[a-z][a-z0-9_]{0,62}$` and must not be a reserved name — a deliberate narrowing of PostgREST,
-    which admits any alias), `colliding-projection-key` (two sources under one key, a managed
-    column's name included), and `projection-too-wide`.
-  - **`projection-too-wide` is a new bound aliases made necessary.** A projection may name at most
-    `entity.Fields.Count` distinct keys, because an alias can otherwise name one column under
-    arbitrarily many keys with only the URL length in the way. It is charged per newly claimed
-    *distinct* key, so a repeated entry still dedupes exactly as it did.
+    which admits any alias), `colliding-projection-key` (a key claimed twice, whether by two sources
+    or by an alias onto any framework-owned name — `AlvoManagedColumns.All` is new and answers that
+    question, because a global entity has no `tenant_id` and a response key called `tenant_id` would
+    still read as one), and `projection-too-wide`. An alias onto another *declared* field's name is
+    deliberately allowed, wrong type and all: PostgREST behaves the same way, the caller chose both
+    halves, and refusing it would defeat renaming.
+  - **`projection-too-wide` is a new bound aliases made necessary.** A projection may name at most as
+    many distinct keys as there are fields this caller can read, because an alias can otherwise name
+    one column under arbitrarily many keys with only the URL length in the way. It is charged per
+    newly claimed *distinct* key, so a repeated entry still dedupes exactly as it did. The bound
+    counts the caller's **readable** fields rather than the entity's declared ones on purpose: the
+    number appears in the refusal's fix suggestion, and the declared count would have told the caller
+    how many fields are hidden from them.
 
   Internal: `DataApiPage.Project` is gone, replaced by `Render`, which renames and orders rather than
   filtering — the filtering moved into the port.

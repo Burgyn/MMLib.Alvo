@@ -75,11 +75,19 @@ public sealed class QueryStringParserPropertyTests
         "2020", "red", "null", "true", "false", "2020.5", "1500.50", "(skoda,vw)", "(", ")", "()",
         string.Empty, "1", "10", "-1", "0", "100000", "year.desc", "year.sideways", "make,year",
         "abc", "'", "\"", "%", "\\", "' OR 1=1 --", "'; DROP TABLE vehicles; --", "\0", "\u202E", "e\u0301",
+
+        // The alias half of a projection entry — the one position where a caller's bytes reach a response
+        // key rather than an identifier, so the grammar that admits it is worth fuzzing on both sides of
+        // the colon.
+        "label:make", "label:", ":make", "a:b:make", "Label:make", "limit:make", "id:make", "make,make:year",
     ];
 
     /// <summary>Productions the structured generator must really spell, or the corpus is smaller than it claims.</summary>
     private static readonly string[] _productions =
-        ["eq.", "in.(", "is.", "like.", "or=", "and=", "not.", "order=", "limit=", "select=", "' OR 1=1 --", "\0"];
+    [
+        "eq.", "in.(", "is.", "like.", "or=", "and=", "not.", "order=", "limit=", "select=", "label:make",
+        "' OR 1=1 --", "\0",
+    ];
 
     [Fact]
     public void No_query_string_makes_the_parser_throw()
