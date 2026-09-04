@@ -234,7 +234,16 @@ namespace MMLib.Alvo.Data;
 /// A returned <see cref="AlvoRecord"/> carries every non-hidden field the schema declares for that
 /// entity, including framework-managed columns (<c>id</c>, and — on a tenant-scoped entity —
 /// <c>tenant_id</c>); masking removes only descriptor-declared <c>hidden</c> fields, never a
-/// framework column. Field values use the same CLR types <see cref="AlvoRecord"/>'s own remarks
+/// framework column.
+/// <b><see cref="AlvoQuery.Select"/> is the one other thing that narrows this key set, and it never
+/// narrows it below two groups.</b> A projected read returns the fields the projection named, plus
+/// every column <see cref="Schema.AlvoManagedColumns.For(Schema.EntitySchema)"/> reports for the
+/// entity — the row key alone is what a keyset cursor is minted from — plus every field named in
+/// <see cref="AlvoQuery.Sort"/>, because no implementation can order by a column it did not read. Both
+/// exemptions are contract, not courtesy: a caller reading "the fields I selected" and receiving
+/// those plus a sort key has not been surprised, and one that received *fewer* would have lost its
+/// paging. Masking remains the only thing that removes a field the caller did ask for.
+/// Field values use the same CLR types <see cref="AlvoRecord"/>'s own remarks
 /// describe the interpreter reading (<see cref="Guid"/> for a <c>uuid</c> field, never a
 /// <see cref="string"/> or a byte array; <see cref="DateTimeOffset"/> for a timestamp; <c>decimal</c>
 /// for a <c>decimal</c> field), so a caller of this port — and the adversarial suite itself — can
