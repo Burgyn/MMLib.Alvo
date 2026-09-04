@@ -26,5 +26,15 @@ namespace MMLib.Alvo.Api.Internal;
 /// </para>
 /// </remarks>
 /// <param name="Entity">The entity the endpoint serves, as the applied schema names it.</param>
-/// <param name="Operation">The operation the endpoint performs, and the one its filter gates.</param>
-internal sealed record DataApiOperationMetadata(string Entity, DataOperation Operation);
+/// <param name="Kind">
+/// Which endpoint this route is — finer than the operation it gates, because two kinds are one operation.
+/// </param>
+internal sealed record DataApiOperationMetadata(string Entity, DataApiEndpointKind Kind)
+{
+    /// <summary>The operation the endpoint performs, and the one its filter gates.</summary>
+    /// <remarks>
+    /// Derived rather than stored beside <see cref="Kind"/>, so a marker cannot claim a kind and an
+    /// operation that disagree — which would be a route gated as something other than what it is.
+    /// </remarks>
+    internal DataOperation Operation => Kind.ToDataOperation();
+}

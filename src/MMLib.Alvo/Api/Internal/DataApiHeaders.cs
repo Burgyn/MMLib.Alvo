@@ -94,9 +94,9 @@ internal static class DataApiHeaders
     /// cannot collide with a schema or a parameter component.
     /// </remarks>
     /// <param name="document">The document being built.</param>
-    /// <param name="operations">Every generated endpoint's operation and the entity it serves.</param>
+    /// <param name="operations">Every generated endpoint's kind and the entity it serves.</param>
     internal static void AddTo(
-        OpenApiDocument document, IEnumerable<(DataOperation Operation, EntitySchema Entity)> operations)
+        OpenApiDocument document, IEnumerable<(DataApiEndpointKind Kind, EntitySchema Entity)> operations)
     {
         ArgumentNullException.ThrowIfNull(document);
         ArgumentNullException.ThrowIfNull(operations);
@@ -129,13 +129,14 @@ internal static class DataApiHeaders
     /// not among them — <see cref="AddTo"/> registers it unconditionally, since every generated response
     /// carries it, refusals included.
     /// </summary>
-    /// <param name="operations">Every generated endpoint's operation and the entity it serves.</param>
-    private static HashSet<string> UsedIds(IEnumerable<(DataOperation Operation, EntitySchema Entity)> operations)
+    /// <param name="operations">Every generated endpoint's kind and the entity it serves.</param>
+    private static HashSet<string> UsedIds(
+        IEnumerable<(DataApiEndpointKind Kind, EntitySchema Entity)> operations)
     {
         var used = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var (operation, entity) in operations)
+        foreach (var (kind, entity) in operations)
         {
-            foreach (var response in DataApiDocumentation.ResponsesFor(operation, entity))
+            foreach (var response in DataApiDocumentation.ResponsesFor(kind, entity))
             {
                 if (CarriesEntityTag(response.Status) && AlvoManagedColumns.VersionColumn(entity) is not null)
                 {

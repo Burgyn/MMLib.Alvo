@@ -241,14 +241,19 @@ internal sealed class AlvoDocumentTransformer(
         description.ActionDescriptor.EndpointMetadata.OfType<DataApiOperationMetadata>().FirstOrDefault();
 
     /// <summary>
-    /// Every generated endpoint's operation, paired with the entity it serves — the exact scope
+    /// Every generated endpoint's kind, paired with the entity it serves — the exact scope
     /// <see cref="Reusable"/> reads to decide which shared components are really referenced by something.
     /// </summary>
-    private static IReadOnlyList<(DataOperation Operation, EntitySchema Entity)> Operations(
+    /// <remarks>
+    /// The <em>kind</em> and not the operation, because two kinds resolve to one operation: collapsing them
+    /// here would make a component referenced only by the query endpoint look like an orphan, and would make
+    /// one referenced only by the list endpoint look as though both used it.
+    /// </remarks>
+    private static IReadOnlyList<(DataApiEndpointKind Kind, EntitySchema Entity)> Operations(
         IEnumerable<Endpoint> generated, IReadOnlyList<EntitySchema> entities)
     {
         var byName = entities.ToDictionary(entity => entity.Name, StringComparer.Ordinal);
-        return [.. generated.Select(endpoint => (endpoint.Marker.Operation, byName[endpoint.Marker.Entity]))];
+        return [.. generated.Select(endpoint => (endpoint.Marker.Kind, byName[endpoint.Marker.Entity]))];
     }
 
     /// <summary>
@@ -292,9 +297,9 @@ internal sealed class AlvoDocumentTransformer(
     /// </para>
     /// </remarks>
     /// <param name="document">The document being built.</param>
-    /// <param name="operations">Every generated endpoint's operation and the entity it serves.</param>
+    /// <param name="operations">Every generated endpoint's kind and the entity it serves.</param>
     private void Reusable(
-        OpenApiDocument document, IReadOnlyList<(DataOperation Operation, EntitySchema Entity)> operations)
+        OpenApiDocument document, IReadOnlyList<(DataApiEndpointKind Kind, EntitySchema Entity)> operations)
     {
         DataApiHeaders.AddTo(document, operations);
         foreach (var refusal in DataApiDocumentation.SharedRefusals)
@@ -356,12 +361,12 @@ internal sealed class AlvoDocumentTransformer(
         var operation = Find(document, endpoint);
         var flags = (view.Hidden, view.ReadOnly);
 
-        operation.Summary = DataApiDocumentation.SummaryOf(endpoint.Marker.Operation, entity.Name);
-        operation.Description = DataApiDocumentation.DescriptionOf(endpoint.Marker.Operation, entity);
+        operation.Summary = DataApiDocumentation.SummaryOf(endpoint.Marker.Kind, entity.Name);
+        operation.Description = DataApiDocumentation.DescriptionOf(endpoint.Marker.Kind, entity);
         operation.OperationId = OperationId(endpoint.Marker);
         operation.Tags = new HashSet<OpenApiTagReference> { new(entity.Name, document) };
         operation.Parameters = DataApiParameters.For(
-            endpoint.Marker.Operation, entity, flags.Hidden, document);
+            endpoint.Marker.Kind, entity, flags.Hidden, document);
         operation.RequestBody = RequestBody(endpoint.Marker, entity, document);
         operation.Responses = Responses(endpoint.Marker, entity, document);
         operation.Security = Security(document);
@@ -501,26 +506,32 @@ internal sealed class AlvoDocumentTransformer(
     /// named endpoint at startup.
     /// </remarks>
     private static string OperationId(DataApiOperationMetadata marker) =>
-        $"{marker.Entity}.{marker.Operation.ToWireName()}";
+        $"{marker.Entity}.{marker.Kind.ToWireName()}";
 
     /// <summary>The body a write accepts, or <see langword="null"/> for the three operations that take none.</summary>
     private static OpenApiRequestBody? RequestBody(
         DataApiOperationMetadata marker, EntitySchema entity, OpenApiDocument document) =>
-        BodyComponent(marker.Operation, entity.Name) is not { } component
+        BodyComponent(marker.Kind, entity.Name) is not { } component
             ? null
             : new OpenApiRequestBody
             {
                 Required = true,
-                Description = "The row to write, as the entity's declared fields.",
+                Description = BodyDescription(marker.Kind),
                 Content = Json(new OpenApiSchemaReference(component, document)),
             };
 
-    private static string? BodyComponent(DataOperation operation, string entity) => operation switch
+    private static string? BodyComponent(DataApiEndpointKind kind, string entity) => kind switch
     {
-        DataOperation.Create => SchemaComponentBuilder.CreateId(entity),
-        DataOperation.Update => SchemaComponentBuilder.PatchId(entity),
+        DataApiEndpointKind.Create => SchemaComponentBuilder.CreateId(entity),
+        DataApiEndpointKind.Update => SchemaComponentBuilder.PatchId(entity),
+        DataApiEndpointKind.Query => SchemaComponentBuilder.QueryId(entity),
         _ => null,
     };
+
+    /// <summary>What the body carries, which is a row on a write and the query parameters on a read.</summary>
+    private static string BodyDescription(DataApiEndpointKind kind) => kind == DataApiEndpointKind.Query
+        ? "The query parameters, as an object. An empty object reads the first page with no filter."
+        : "The row to write, as the entity's declared fields.";
 
     /// <summary>
     /// Every response the operation can answer with, built from <see cref="DataApiDocumentation"/>'s catalogue
@@ -536,7 +547,7 @@ internal sealed class AlvoDocumentTransformer(
         DataApiOperationMetadata marker, EntitySchema entity, OpenApiDocument document)
     {
         var responses = new OpenApiResponses();
-        foreach (var response in DataApiDocumentation.ResponsesFor(marker.Operation, entity))
+        foreach (var response in DataApiDocumentation.ResponsesFor(marker.Kind, entity))
         {
             responses[Text(response.Status)] = response.SharedId is { } shared
                 ? Referenced(response, shared, document)

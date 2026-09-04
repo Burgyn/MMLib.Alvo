@@ -89,7 +89,8 @@ internal static class DataApiEndpoints
                 ProblemResultFactory.GuardAsync(async () =>
                 {
                     var context = Caller(caller);
-                    var decision = EnsureOperationIsAllowed(policies, entity.Name, DataOperation.List, context);
+                    var decision = EnsureOperationIsAllowed(
+                        policies, entity.Name, DataApiEndpointKind.List.ToDataOperation(), context);
 
                     // The parser needs this caller's mask so a filter over a hidden field is refused exactly
                     // as one over an undeclared field is; the decision resolved above is that mask, which is
@@ -107,7 +108,7 @@ internal static class DataApiEndpoints
                     ApplyCountPreference(http.Response, counted);
                     return Json(DataApiPage.From(page, request.Select));
                 }))
-            .Protect(entity, DataOperation.List, filters, conventions);
+            .Protect(entity, DataApiEndpointKind.List, filters, conventions);
 
     /// <summary>
     /// Reports what was done with the caller's <c>count</c> preference, per RFC 7240 §3 — and always
@@ -171,7 +172,7 @@ internal static class DataApiEndpoints
                         ? ProblemResultFactory.NotFound()
                         : Representation(http.Request, record, entity);
                 }))
-            .Protect(entity, DataOperation.Get, filters, conventions);
+            .Protect(entity, DataApiEndpointKind.Get, filters, conventions);
 
     private static void MapCreate(
         IEndpointRouteBuilder endpoints,
@@ -190,7 +191,8 @@ internal static class DataApiEndpoints
                 ProblemResultFactory.GuardAsync(async () =>
                 {
                     var context = Caller(caller);
-                    var decision = EnsureOperationIsAllowed(policies, entity.Name, DataOperation.Create, context);
+                    var decision = EnsureOperationIsAllowed(
+                        policies, entity.Name, DataApiEndpointKind.Create.ToDataOperation(), context);
                     EnsureUnconditional(http.Request);
                     var key = IdempotencyKey(http.Request, context, options);
 
@@ -207,7 +209,7 @@ internal static class DataApiEndpoints
                         .ConfigureAwait(false);
                     return Created(pattern, record, entity);
                 }))
-            .Protect(entity, DataOperation.Create, filters, conventions);
+            .Protect(entity, DataApiEndpointKind.Create, filters, conventions);
 
     private static void MapUpdate(
         IEndpointRouteBuilder endpoints,
@@ -227,7 +229,8 @@ internal static class DataApiEndpoints
                 ProblemResultFactory.GuardAsync(async () =>
                 {
                     var context = Caller(caller);
-                    var decision = EnsureOperationIsAllowed(policies, entity.Name, DataOperation.Update, context);
+                    var decision = EnsureOperationIsAllowed(
+                        policies, entity.Name, DataApiEndpointKind.Update.ToDataOperation(), context);
                     var precondition = Precondition(http.Request);
 
                     var (body, violations) = await ReadAndValidateAsync(
@@ -242,7 +245,7 @@ internal static class DataApiEndpoints
                         .UpdateAsync(entity.Name, id, body.Values, context, precondition, ct).ConfigureAwait(false);
                     return Row(record, entity);
                 }))
-            .Protect(entity, DataOperation.Update, filters, conventions);
+            .Protect(entity, DataApiEndpointKind.Update, filters, conventions);
 
     private static void MapDelete(
         IEndpointRouteBuilder endpoints,
@@ -260,13 +263,14 @@ internal static class DataApiEndpoints
                 ProblemResultFactory.GuardAsync(async () =>
                 {
                     var context = Caller(caller);
-                    _ = EnsureOperationIsAllowed(policies, entity.Name, DataOperation.Delete, context);
+                    _ = EnsureOperationIsAllowed(
+                        policies, entity.Name, DataApiEndpointKind.Delete.ToDataOperation(), context);
 
                     var precondition = Precondition(http.Request);
                     await data.DeleteAsync(entity.Name, id, context, precondition, ct).ConfigureAwait(false);
                     return Results.NoContent();
                 }))
-            .Protect(entity, DataOperation.Delete, filters, conventions);
+            .Protect(entity, DataApiEndpointKind.Delete, filters, conventions);
 
     /// <summary>
     /// Attaches the authorization filter <b>and</b> the operation marker in one call, so an endpoint
@@ -281,7 +285,11 @@ internal static class DataApiEndpoints
     /// </remarks>
     /// <param name="builder">The route just mapped.</param>
     /// <param name="entity">The entity the endpoint serves.</param>
-    /// <param name="operation">The operation the endpoint performs, and the one to gate it as.</param>
+    /// <param name="kind">
+    /// Which endpoint this is. The operation it is gated as comes from
+    /// <see cref="DataApiEndpointKinds.ToDataOperation"/> rather than from a second parameter, so a route
+    /// cannot be marked one kind and gated as another operation's.
+    /// </param>
     /// <param name="filters">Builds the filter for that entity and operation.</param>
     /// <param name="conventions">
     /// The host's own conventions, applied <b>last</b> and in this same call. A route that is gated therefore
@@ -293,7 +301,7 @@ internal static class DataApiEndpoints
     private static RouteHandlerBuilder Protect(
         this RouteHandlerBuilder builder,
         EntitySchema entity,
-        DataOperation operation,
+        DataApiEndpointKind kind,
         AlvoContextFilterFactory filters,
         AlvoDataApiConventions conventions)
     {
@@ -302,9 +310,9 @@ internal static class DataApiEndpoints
             // with too — see NoStoreResponseFilter for why an uncacheable response is what pays for a
             // strong entity tag minted over a row version rather than over the response bytes.
             .AddEndpointFilter(NoStoreResponseFilter.Instance)
-            .AddEndpointFilter(filters.For(entity.Name, operation))
-            .WithMetadata(new DataApiOperationMetadata(entity.Name, operation))
-            .Documenting(entity, operation);
+            .AddEndpointFilter(filters.For(entity.Name, kind.ToDataOperation()))
+            .WithMetadata(new DataApiOperationMetadata(entity.Name, kind))
+            .Documenting(entity, kind);
 
         conventions.ApplyTo(route);
 
@@ -337,12 +345,12 @@ internal static class DataApiEndpoints
     /// </remarks>
     /// <param name="builder">The route just mapped.</param>
     /// <param name="entity">The entity the endpoint serves, which decides whether a 304 is reachable.</param>
-    /// <param name="operation">The operation the endpoint performs.</param>
+    /// <param name="kind">Which endpoint this is.</param>
     private static RouteHandlerBuilder Documenting(
-        this RouteHandlerBuilder builder, EntitySchema entity, DataOperation operation)
+        this RouteHandlerBuilder builder, EntitySchema entity, DataApiEndpointKind kind)
     {
         builder.WithTags(entity.Name);
-        foreach (var response in DataApiDocumentation.ResponsesFor(operation, entity))
+        foreach (var response in DataApiDocumentation.ResponsesFor(kind, entity))
         {
             builder.Produces(response.Status, contentType: MediaTypeOf(response.Body));
         }

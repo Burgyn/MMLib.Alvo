@@ -300,6 +300,40 @@ public sealed class DataApiRoutingTests
     }
 
     /// <summary>
+    /// The kind is the API layer's own vocabulary and the operation is policy's. Two kinds map to
+    /// <c>list</c> on purpose — a second, body-shaped way to reach the same read — and every other kind is
+    /// one-to-one, so a kind added later cannot silently gate as the wrong operation.
+    /// </summary>
+    [Fact]
+    public void Every_endpoint_kind_maps_to_the_operation_its_filter_must_gate()
+    {
+        DataApiEndpointKind.List.ToDataOperation().ShouldBe(DataOperation.List);
+        DataApiEndpointKind.Query.ToDataOperation().ShouldBe(DataOperation.List);
+        DataApiEndpointKind.Get.ToDataOperation().ShouldBe(DataOperation.Get);
+        DataApiEndpointKind.Create.ToDataOperation().ShouldBe(DataOperation.Create);
+        DataApiEndpointKind.Update.ToDataOperation().ShouldBe(DataOperation.Update);
+        DataApiEndpointKind.Delete.ToDataOperation().ShouldBe(DataOperation.Delete);
+    }
+
+    /// <summary>
+    /// A kind's wire name is what the document's <c>operationId</c> is built from, so the five that existed
+    /// before this split must keep the spelling they published — and the sixth must not collide with them.
+    /// </summary>
+    [Fact]
+    public void Every_endpoint_kind_has_its_own_wire_name_and_the_five_original_ones_are_unchanged()
+    {
+        DataApiEndpointKind.List.ToWireName().ShouldBe("list");
+        DataApiEndpointKind.Get.ToWireName().ShouldBe("get");
+        DataApiEndpointKind.Create.ToWireName().ShouldBe("create");
+        DataApiEndpointKind.Update.ToWireName().ShouldBe("update");
+        DataApiEndpointKind.Delete.ToWireName().ShouldBe("delete");
+        DataApiEndpointKind.Query.ToWireName().ShouldBe("query");
+
+        var kinds = Enum.GetValues<DataApiEndpointKind>();
+        kinds.Select(kind => kind.ToWireName()).Distinct(StringComparer.Ordinal).Count().ShouldBe(kinds.Length);
+    }
+
+    /// <summary>
     /// The operation a route's own shape implies, derived from the verb plus whether the pattern addresses one
     /// row — so a marker that says <c>List</c> on a <c>DELETE</c> fails rather than being taken at its word.
     /// </summary>

@@ -33,13 +33,13 @@ namespace MMLib.Alvo.Api.Internal;
 /// </remarks>
 internal static class DataApiParameters
 {
-    /// <summary>The parameters <paramref name="operation"/> reads on <paramref name="entity"/>.</summary>
-    /// <param name="operation">The operation the endpoint performs.</param>
+    /// <summary>The parameters <paramref name="kind"/> reads on <paramref name="entity"/>.</summary>
+    /// <param name="kind">The endpoint kind.</param>
     /// <param name="entity">The entity it serves.</param>
     /// <param name="hidden">Every field carrying a <c>hidden</c> flag, which contributes no filter parameter.</param>
     /// <param name="document">The document the shared parameter components are referenced from.</param>
     internal static List<IOpenApiParameter> For(
-        DataOperation operation, EntitySchema entity, IReadOnlySet<string> hidden, OpenApiDocument document)
+        DataApiEndpointKind kind, EntitySchema entity, IReadOnlySet<string> hidden, OpenApiDocument document)
     {
         ArgumentNullException.ThrowIfNull(entity);
         ArgumentNullException.ThrowIfNull(hidden);
@@ -47,8 +47,8 @@ internal static class DataApiParameters
 
         return
         [
-            .. Shared(Names(operation, entity), document),
-            .. operation == DataOperation.List
+            .. Shared(Names(kind, entity), document),
+            .. kind == DataApiEndpointKind.List
                 ? entity.Fields.Where(field => !hidden.Contains(field.Name)).Select(Filter)
                 : [],
         ];
@@ -60,28 +60,34 @@ internal static class DataApiParameters
     /// (the tenant header on a descriptor with no tenant-scoped entity, <c>ifNoneMatch</c> on one with no
     /// audited entity) is never an orphan component.
     /// </summary>
-    /// <param name="operations">Every generated endpoint's operation and the entity it serves.</param>
+    /// <param name="operations">Every generated endpoint's kind and the entity it serves.</param>
     internal static IReadOnlySet<string> UsedSharedIds(
-        IEnumerable<(DataOperation Operation, EntitySchema Entity)> operations)
+        IEnumerable<(DataApiEndpointKind Kind, EntitySchema Entity)> operations)
     {
         ArgumentNullException.ThrowIfNull(operations);
 
         var used = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var (operation, entity) in operations)
+        foreach (var (kind, entity) in operations)
         {
-            used.UnionWith(Names(operation, entity));
+            used.UnionWith(Names(kind, entity));
         }
 
         return used;
     }
 
     /// <summary>Which of the shared parameters this operation reads, in the order they are published.</summary>
-    private static IEnumerable<string> Names(DataOperation operation, EntitySchema entity) =>
+    /// <remarks>
+    /// The seven query parameters belong to <see cref="DataApiEndpointKind.List"/> alone. On
+    /// <see cref="DataApiEndpointKind.Query"/> they are the request body's members instead, which is the
+    /// whole of that endpoint — publishing them as query parameters there would advertise a second way to
+    /// send them that the delegate does not read.
+    /// </remarks>
+    private static IEnumerable<string> Names(DataApiEndpointKind kind, EntitySchema entity) =>
     [
-        .. AddressesOneRow(operation) ? new[] { RowIdId } : [],
+        .. AddressesOneRow(kind) ? new[] { RowIdId } : [],
         .. entity.Tenancy == TenancyMode.Scoped ? new[] { TenantId } : [],
-        .. HeaderNames(operation, entity),
-        .. operation == DataOperation.List
+        .. HeaderNames(kind, entity),
+        .. kind == DataApiEndpointKind.List
             ? new[] { SelectId, OrderId, LimitId, OffsetId, AfterId, OrId, AndId }
             : [],
     ];
@@ -155,8 +161,8 @@ internal static class DataApiParameters
 
     private const string AndId = "andGroup";
 
-    private static bool AddressesOneRow(DataOperation operation) =>
-        operation is DataOperation.Get or DataOperation.Update or DataOperation.Delete;
+    private static bool AddressesOneRow(DataApiEndpointKind kind) =>
+        kind is DataApiEndpointKind.Get or DataApiEndpointKind.Update or DataApiEndpointKind.Delete;
 
     /// <summary>
     /// The row key in the path. Re-declared rather than left to ApiExplorer's inference from the delegate's
@@ -215,13 +221,13 @@ internal static class DataApiParameters
     /// asymmetry survived — the read arm was entity-conditional from the start.
     /// </para>
     /// </remarks>
-    private static IEnumerable<string> HeaderNames(DataOperation operation, EntitySchema entity) =>
-        operation switch
+    private static IEnumerable<string> HeaderNames(DataApiEndpointKind kind, EntitySchema entity) =>
+        kind switch
         {
-            DataOperation.List => [PreferId],
-            DataOperation.Get when AlvoManagedColumns.VersionColumn(entity) is not null => [IfNoneMatchId],
-            DataOperation.Create => [IdempotencyKeyId],
-            DataOperation.Update or DataOperation.Delete
+            DataApiEndpointKind.List or DataApiEndpointKind.Query => [PreferId],
+            DataApiEndpointKind.Get when AlvoManagedColumns.VersionColumn(entity) is not null => [IfNoneMatchId],
+            DataApiEndpointKind.Create => [IdempotencyKeyId],
+            DataApiEndpointKind.Update or DataApiEndpointKind.Delete
                 when AlvoManagedColumns.VersionColumn(entity) is not null => [IfMatchId],
             _ => [],
         };

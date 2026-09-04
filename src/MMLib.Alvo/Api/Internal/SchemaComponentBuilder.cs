@@ -92,6 +92,10 @@ internal sealed class SchemaComponentBuilder(
     /// <param name="entity">The entity name.</param>
     internal static string PatchId(string entity) => entity + "Patch";
 
+    /// <summary>The component id of the body the collection query accepts.</summary>
+    /// <param name="entity">The entity name.</param>
+    internal static string QueryId(string entity) => entity + "Query";
+
     /// <summary>The component id of the page envelope a list returns.</summary>
     /// <param name="entity">The entity name.</param>
     internal static string PageId(string entity) => entity + "Page";
