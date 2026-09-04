@@ -320,6 +320,12 @@ internal sealed class AlvoDocumentTransformer(
     /// <summary>Registers one entity's schema components and the tag its operations are grouped under.</summary>
     /// <remarks>
     /// <para>
+    /// <b>An instance method because of one component.</b> The query body's <c>limit</c> property carries
+    /// <see cref="AlvoApiOptions.MaxPageSize"/>, and <see cref="SchemaComponentBuilder"/> is constructed
+    /// with a schema view and no options — so the component is built here, where the options already are,
+    /// rather than threading them through a builder to serve one member.
+    /// </para>
+    /// <para>
     /// The tag <em>name</em> comes from <c>DataApiEndpoints</c>' own <c>WithTags</c>, because ApiExplorer's
     /// default for a minimal API is the <em>host assembly's</em> name — which would group Alvo's endpoints
     /// under whatever executable happens to be running and make the document's content depend on it.
@@ -332,9 +338,12 @@ internal sealed class AlvoDocumentTransformer(
     /// way had no tag descriptions at all while the descriptor described every entity.
     /// </para>
     /// </remarks>
-    private static void Describe(OpenApiDocument document, EntityView view)
+    private void Describe(OpenApiDocument document, EntityView view)
     {
         new SchemaComponentBuilder(view.Schema, view.Hidden, view.ReadOnly).AddTo(document);
+        document.AddComponent(
+            SchemaComponentBuilder.QueryId(view.Schema.Name),
+            DataApiParameters.QueryBody(view.Schema, view.Hidden, options.Value));
         Tag(document, view.Schema.Name).Description = view.Schema.Description;
     }
 

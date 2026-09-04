@@ -326,7 +326,7 @@ internal static class DataApiParameters
             + "A field the caller may not read is refused exactly as an undeclared one is. An alias is lower "
             + "snake_case, is not the name of a framework-managed column, and cannot be claimed twice; and a "
             + "projection cannot name more distinct keys than there are fields this caller can read.",
-        Schema = new OpenApiSchema { Type = JsonSchemaType.String },
+        Schema = SelectSchema,
         Example = JsonValue.Create("label:make,model"),
     };
 
@@ -340,7 +340,7 @@ internal static class DataApiParameters
             + "spelling; an unrecognised modifier is refused rather than ignored. A **nullable** field is a "
             + "sort key like any other and defaults to `nullslast`; paging honours the same placement — see "
             + "the operation description for what it costs.",
-        Schema = new OpenApiSchema { Type = JsonSchemaType.String },
+        Schema = OrderSchema,
         Example = JsonValue.Create("id.desc"),
     };
 
@@ -352,14 +352,7 @@ internal static class DataApiParameters
             "How many rows this page carries. A value past the maximum is **refused, not clamped**: a client "
             + "that asked for more and silently received fewer computes its paging from a number no response "
             + "ever told it. Zero is refused too — it is a read that can never return a row.",
-        Schema = new OpenApiSchema
-        {
-            Type = JsonSchemaType.Integer,
-            Format = "int32",
-            Minimum = "1",
-            Maximum = Text(options.MaxPageSize),
-            Default = JsonValue.Create(options.DefaultPageSize),
-        },
+        Schema = LimitSchema(options),
     };
 
     private static OpenApiParameter Offset => new()
@@ -369,7 +362,7 @@ internal static class DataApiParameters
         Description =
             "How many rows to skip. Prefer `after`: an offset re-scans the skipped rows and shifts under "
             + "concurrent writes, where a keyset cursor does neither.",
-        Schema = new OpenApiSchema { Type = JsonSchemaType.Integer, Format = "int32", Minimum = "0" },
+        Schema = OffsetSchema,
     };
 
     private static OpenApiParameter After => new()
@@ -380,12 +373,7 @@ internal static class DataApiParameters
             "The keyset cursor a previous page returned as `next`, sent back verbatim. It is opaque and only "
             + "the provider that issued it may interpret it, so it must not be decoded or constructed. A "
             + "forged one yields an empty page rather than an error.",
-        Schema = new OpenApiSchema
-        {
-            Type = JsonSchemaType.String,
-            MinLength = 1,
-            MaxLength = QueryStringParser.MaxCursorLength,
-        },
+        Schema = AfterSchema,
     };
 
     /// <summary>One of the two explicit grouping keywords.</summary>
@@ -399,7 +387,126 @@ internal static class DataApiParameters
             $"A bracketed, comma-separated list of terms combined as a {meaning}: "
             + $"`{keyword}=(color.eq.red,make.in.(skoda,vw))`. Groups may nest, and either the keyword or any "
             + "member may carry the `not.` prefix. Repeating the parameter conjoins the groups.",
-        Schema = new OpenApiSchema { Type = JsonSchemaType.String },
+        Schema = TextSchema,
+    };
+
+    /// <summary>The value shape a parameter carrying plain text takes, on either surface.</summary>
+    /// <remarks>
+    /// The five settings and the filter parameters read their schema from these factories rather than
+    /// declaring one inline, because <see cref="QueryBody"/> publishes the <em>same</em> shapes as the
+    /// members of the query endpoint's request body. One source is what keeps the two surfaces from coming
+    /// to describe different parameters; the <em>prose</em> deliberately stays with the parameter, since a
+    /// body schema that repeated every filter's sentence would put the same paragraph in one document twice
+    /// per entity.
+    /// </remarks>
+    private static OpenApiSchema TextSchema => new() { Type = JsonSchemaType.String };
+
+    /// <summary>The projection's value shape.</summary>
+    private static OpenApiSchema SelectSchema => TextSchema;
+
+    /// <summary>The sort parameter's value shape.</summary>
+    private static OpenApiSchema OrderSchema => TextSchema;
+
+    /// <summary>The page size's value shape, carrying the host's configured bounds.</summary>
+    /// <param name="options">The API options the bounds are published from.</param>
+    private static OpenApiSchema LimitSchema(AlvoApiOptions options) => new()
+    {
+        Type = JsonSchemaType.Integer,
+        Format = "int32",
+        Minimum = "1",
+        Maximum = Text(options.MaxPageSize),
+        Default = JsonValue.Create(options.DefaultPageSize),
+    };
+
+    /// <summary>The row-skip parameter's value shape.</summary>
+    private static OpenApiSchema OffsetSchema =>
+        new() { Type = JsonSchemaType.Integer, Format = "int32", Minimum = "0" };
+
+    /// <summary>The cursor's value shape, carrying the bound the parser enforces.</summary>
+    private static OpenApiSchema AfterSchema => new()
+    {
+        Type = JsonSchemaType.String,
+        MinLength = 1,
+        MaxLength = QueryStringParser.MaxCursorLength,
+    };
+
+    /// <summary>The body the collection query accepts: the list's own query parameters, as an object.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Derived from the same parameters the collection <c>GET</c> publishes</b> — filtered to the ones
+    /// that live in the query string, since the tenant and <c>Prefer</c> are headers on both operations and
+    /// stay headers. One source, so the two surfaces cannot come to describe different parameters.
+    /// </para>
+    /// <para>
+    /// <b>A property carries the parameter's schema and not its description.</b> A filter's description is a
+    /// per-field sentence, and copying every one of them here would put the same prose in the document twice
+    /// per entity — the cost <see cref="DataApiHeaders"/> states its own "described once" rule against. The
+    /// grammar is on the operation, exactly as the <c>not.</c> prefix already is.
+    /// </para>
+    /// <para>
+    /// <b>Every property is one value or an array of them except the five settings</b>, because a repeated
+    /// <em>filter</em> conjoins while a repeated setting is refused — the same asymmetry the query string
+    /// has, published rather than restated. <c>not</c> is not a property: it is only ever a prefix on
+    /// another parameter's name, so there is no member for it to be.
+    /// </para>
+    /// <para>
+    /// <b><c>additionalProperties</c> is deliberately not <c>false</c></b>, even though the statement would
+    /// be true. No other Alvo body component closes itself — <c>{entity}Create</c> and <c>{entity}Patch</c>
+    /// refuse an unknown key and stay silent about it too — and the rule is stated once, in prose, on the
+    /// operation.
+    /// </para>
+    /// </remarks>
+    /// <param name="entity">The entity being queried.</param>
+    /// <param name="hidden">Every field carrying a <c>hidden</c> flag, which contributes no property.</param>
+    /// <param name="options">The API options the paging bounds are published from.</param>
+    internal static OpenApiSchema QueryBody(
+        EntitySchema entity, IReadOnlySet<string> hidden, AlvoApiOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        ArgumentNullException.ThrowIfNull(hidden);
+        ArgumentNullException.ThrowIfNull(options);
+
+        var properties = new Dictionary<string, IOpenApiSchema>(StringComparer.Ordinal);
+        foreach (var (name, schema, repeatable) in QueryProperties(options))
+        {
+            properties[name] = repeatable ? Repeatable(schema) : schema;
+        }
+
+        foreach (var field in entity.Fields.Where(field => !hidden.Contains(field.Name)))
+        {
+            properties[field.Name] = Repeatable(TextSchema);
+        }
+
+        return new OpenApiSchema
+        {
+            Type = JsonSchemaType.Object,
+            Description =
+                "The query parameters, as an object. A member's name is a parameter and its value is the "
+                + "text a query string would carry; an array repeats the parameter. See the operation "
+                + "description for the grammar and for what a field property accepts.",
+            Properties = properties,
+        };
+    }
+
+    /// <summary>The five settings and the two grouping keywords, as body properties.</summary>
+    /// <param name="options">The API options the paging bounds are published from.</param>
+    private static IEnumerable<(string Name, OpenApiSchema Schema, bool Repeatable)> QueryProperties(
+        AlvoApiOptions options) =>
+    [
+        (ReservedQueryKeys.Select, SelectSchema, false),
+        (ReservedQueryKeys.Order, OrderSchema, false),
+        (ReservedQueryKeys.Limit, LimitSchema(options), false),
+        (ReservedQueryKeys.Offset, OffsetSchema, false),
+        (ReservedQueryKeys.After, AfterSchema, false),
+        (ReservedQueryKeys.Or, TextSchema, true),
+        (ReservedQueryKeys.And, TextSchema, true),
+    ];
+
+    /// <summary>A property that accepts one value or several, which is how a repeated parameter is written.</summary>
+    /// <param name="single">The shape one value takes.</param>
+    private static OpenApiSchema Repeatable(OpenApiSchema single) => new()
+    {
+        OneOf = [single, new OpenApiSchema { Type = JsonSchemaType.Array, Items = single }],
     };
 
     /// <summary>The filter parameter one declared field contributes.</summary>

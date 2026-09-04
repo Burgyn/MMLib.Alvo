@@ -103,7 +103,7 @@ public sealed class OpenApiDocumentCostTests
         }
 
         Operations(document).ShouldBe(
-            entities.Count * 5, $"five operations per entity for {entities.Count} entities");
+            entities.Count * 6, $"six operations per entity for {entities.Count} entities");
     }
 
     /// <summary>Every entity the document describes, read off its tags.</summary>

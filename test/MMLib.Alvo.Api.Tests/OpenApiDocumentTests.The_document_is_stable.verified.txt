@@ -171,6 +171,67 @@
         ]
       }
     },
+    "/api/categories/query": {
+      "post": {
+        "tags": [
+          "categories"
+        ],
+        "summary": "Query 'categories' rows through a request body",
+        "description": "Reads a page of rows the caller's policy admits, taking the same parameters in a JSON request body.\n\n**It exists for one reason: a filter a request line cannot carry.** Alvo's own budgets are generous — 256 filter terms and 1000 `in` candidates — and a proxy's URL limit is reached first, so `?id=in.(…400 ids…)` is refused by an intermediary with a 414 carrying no `violations` array at all. Sent as a body it is answered normally.\n\n**The body is a JSON object whose members are the query parameters**, and the grammar inside each value is exactly the one the query string carries: `{\"year\": \"gte.2020\", \"or\": [\"(color.eq.red,color.eq.blue)\"], \"select\": \"id,label:make\", \"limit\": 50}`. A repeated parameter is an array of strings; the same name twice in one object is refused, because JSON leaves the order of two such members undefined. `{}` is the empty query — every readable field, the default page.\n\n**Values are not percent-encoded here, and that is the point.** A query string carries the escaping of a value; a JSON string carries the value. So `{\"make\": \"like.100%\"}` is what `?make=like.100%25` means, and `+` is a plus rather than a space. Everything else is identical: the same parser, the same refusals, the same page envelope, the same `Prefer: count` preference.\n\n**This is a read and is gated as `list`.** A caller whose `list` is unconfigured is refused here exactly as on the collection `GET`, before the body is read at all — so a refusal never arrives dressed as a complaint about the body.\n\n**`Idempotency-Key` is accepted and ignored.** There is nothing to make idempotent: no row is written, so a retry costs a second read and nothing else. It is accepted rather than refused because several SDKs attach it to every `POST`.\n\nA refusal's `pointer` tells you where to look: an empty string or one beginning with `/` is a JSON Pointer into this body, and any other value is the *role* of a query parameter — `filter`, `order`, `limit`, `offset`, `after` or `select`.\n\n**Filtering** follows PostgREST's spelling: every query parameter that is not one of the reserved names (order, limit, offset, after, select, or, and, not) names a field, and its value is `<operator>.<operand>` — `?year=gte.2020`. The operators are eq, neq, gt, gte, lt, lte, like, ilike, in, is. `in` takes a bracketed candidate list (`in.(skoda,vw)`) and `is` takes exactly `null`, `true` or `false`; `like`/`ilike` take a pattern. An unrecognised operator is refused with 422, never quietly read as equality, and an ordering operator applied to a type this API defines no total order over is refused too — so one filter means the same thing on every engine.\n\nSeveral parameters are one **conjunction** (AND), which is the only reading that keeps a filter narrowing as terms are added. `or=(…)` and `and=(…)` group terms explicitly and may nest, and prefixing any parameter name or group keyword with `not.` negates it (`not.color=eq.red`, `not.or=(…)`).\n\n**A field that is unavailable to the caller is refused exactly like one that does not exist**, in `filter`, `order` and `select` alike — the refusal names the parameter's role and never the field, so filtering, ordering or selecting cannot be used to discover a hidden field's name. The one exception is a field the descriptor also marks `required`: its name is published in the write schemas below, because a mandatory field a caller cannot see could not be supplied — see the overview.",
+        "operationId": "categories.query",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/prefer"
+          }
+        ],
+        "requestBody": {
+          "description": "The query parameters, as an object. An empty object reads the first page with no filter.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/categoriesQuery"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "A page of rows the caller's policy admits.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Cache-Control"
+              },
+              "Preference-Applied": {
+                "$ref": "#/components/headers/Preference-Applied"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/categoriesPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/unprocessable"
+          }
+        },
+        "security": [
+          { },
+          {
+            "alvoApiKey": [ ]
+          }
+        ]
+      }
+    },
     "/api/categories/{id}": {
       "get": {
         "tags": [
@@ -615,6 +676,70 @@
         ]
       }
     },
+    "/api/products/query": {
+      "post": {
+        "tags": [
+          "products"
+        ],
+        "summary": "Query 'products' rows through a request body",
+        "description": "Reads a page of rows the caller's policy admits, taking the same parameters in a JSON request body.\n\n**It exists for one reason: a filter a request line cannot carry.** Alvo's own budgets are generous — 256 filter terms and 1000 `in` candidates — and a proxy's URL limit is reached first, so `?id=in.(…400 ids…)` is refused by an intermediary with a 414 carrying no `violations` array at all. Sent as a body it is answered normally.\n\n**The body is a JSON object whose members are the query parameters**, and the grammar inside each value is exactly the one the query string carries: `{\"year\": \"gte.2020\", \"or\": [\"(color.eq.red,color.eq.blue)\"], \"select\": \"id,label:make\", \"limit\": 50}`. A repeated parameter is an array of strings; the same name twice in one object is refused, because JSON leaves the order of two such members undefined. `{}` is the empty query — every readable field, the default page.\n\n**Values are not percent-encoded here, and that is the point.** A query string carries the escaping of a value; a JSON string carries the value. So `{\"make\": \"like.100%\"}` is what `?make=like.100%25` means, and `+` is a plus rather than a space. Everything else is identical: the same parser, the same refusals, the same page envelope, the same `Prefer: count` preference.\n\n**This is a read and is gated as `list`.** A caller whose `list` is unconfigured is refused here exactly as on the collection `GET`, before the body is read at all — so a refusal never arrives dressed as a complaint about the body.\n\n**`Idempotency-Key` is accepted and ignored.** There is nothing to make idempotent: no row is written, so a retry costs a second read and nothing else. It is accepted rather than refused because several SDKs attach it to every `POST`.\n\nA refusal's `pointer` tells you where to look: an empty string or one beginning with `/` is a JSON Pointer into this body, and any other value is the *role* of a query parameter — `filter`, `order`, `limit`, `offset`, `after` or `select`.\n\n**Filtering** follows PostgREST's spelling: every query parameter that is not one of the reserved names (order, limit, offset, after, select, or, and, not) names a field, and its value is `<operator>.<operand>` — `?year=gte.2020`. The operators are eq, neq, gt, gte, lt, lte, like, ilike, in, is. `in` takes a bracketed candidate list (`in.(skoda,vw)`) and `is` takes exactly `null`, `true` or `false`; `like`/`ilike` take a pattern. An unrecognised operator is refused with 422, never quietly read as equality, and an ordering operator applied to a type this API defines no total order over is refused too — so one filter means the same thing on every engine.\n\nSeveral parameters are one **conjunction** (AND), which is the only reading that keeps a filter narrowing as terms are added. `or=(…)` and `and=(…)` group terms explicitly and may nest, and prefixing any parameter name or group keyword with `not.` negates it (`not.color=eq.red`, `not.or=(…)`).\n\n**A field that is unavailable to the caller is refused exactly like one that does not exist**, in `filter`, `order` and `select` alike — the refusal names the parameter's role and never the field, so filtering, ordering or selecting cannot be used to discover a hidden field's name. The one exception is a field the descriptor also marks `required`: its name is published in the write schemas below, because a mandatory field a caller cannot see could not be supplied — see the overview.",
+        "operationId": "products.query",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/prefer"
+          }
+        ],
+        "requestBody": {
+          "description": "The query parameters, as an object. An empty object reads the first page with no filter.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/productsQuery"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "A page of rows the caller's policy admits.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Cache-Control"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              },
+              "Preference-Applied": {
+                "$ref": "#/components/headers/Preference-Applied"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/productsPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/unprocessable"
+          }
+        },
+        "security": [
+          { },
+          {
+            "alvoApiKey": [ ]
+          }
+        ]
+      }
+    },
     "/api/products/{id}": {
       "get": {
         "tags": [
@@ -935,6 +1060,100 @@
           }
         },
         "description": "The fields to change. A field this object does not mention keeps its stored value, so nothing here is mandatory — that is what makes the verb PATCH rather than PUT."
+      },
+      "categoriesQuery": {
+        "type": "object",
+        "properties": {
+          "select": {
+            "type": "string"
+          },
+          "order": {
+            "type": "string"
+          },
+          "limit": {
+            "maximum": 200,
+            "minimum": 1,
+            "type": "integer",
+            "format": "int32",
+            "default": 50
+          },
+          "offset": {
+            "minimum": 0,
+            "type": "integer",
+            "format": "int32"
+          },
+          "after": {
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          },
+          "or": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "and": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "name": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "code": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          }
+        },
+        "description": "The query parameters, as an object. A member's name is a parameter and its value is the text a query string would carry; an array repeats the parameter. See the operation description for the grammar and for what a field property accepts."
       },
       "problemDetails": {
         "title": "problemDetails",
@@ -1577,6 +1796,295 @@
           }
         },
         "description": "The fields to change. A field this object does not mention keeps its stored value, so nothing here is mandatory — that is what makes the verb PATCH rather than PUT."
+      },
+      "productsQuery": {
+        "type": "object",
+        "properties": {
+          "select": {
+            "type": "string"
+          },
+          "order": {
+            "type": "string"
+          },
+          "limit": {
+            "maximum": 200,
+            "minimum": 1,
+            "type": "integer",
+            "format": "int32",
+            "default": 50
+          },
+          "offset": {
+            "minimum": 0,
+            "type": "integer",
+            "format": "int32"
+          },
+          "after": {
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          },
+          "or": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "and": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "name": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "sku": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "contact": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "status": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "price": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "released_on": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "discontinued_at": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "in_stock": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "specs": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "notes": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "slug": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "category_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "parent_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "created_at": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "created_by": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "updated_at": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "updated_by": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          }
+        },
+        "description": "The query parameters, as an object. A member's name is a parameter and its value is the text a query string would carry; an array repeats the parameter. See the operation description for the grammar and for what a field property accepts."
       }
     },
     "responses": {
