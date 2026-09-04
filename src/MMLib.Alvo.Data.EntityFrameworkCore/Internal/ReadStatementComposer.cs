@@ -2,6 +2,7 @@
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
+using System.Collections.Frozen;
 using System.Text;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore;
@@ -78,6 +79,26 @@ internal sealed class ReadStatementComposer
         internal bool Unmasked { get; init; }
 
         /// <summary>
+        /// The declared fields the caller's projection excluded, rendered as projected <c>NULL</c>s instead
+        /// of being read. Empty for every read but a projected page.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>Separate from the decision's field mask, deliberately</b> — see <see cref="ReadProjection"/>
+        /// for why a caller preference and a security control must not share one parameter.
+        /// </para>
+        /// <para>
+        /// <b>Empty on every path but the page.</b> A pre-image, a policy root and a single-row read each
+        /// build their own options and take this default. <see cref="ComposeCount"/> is the exception worth
+        /// knowing about: it is handed the page's own record and simply <em>ignores</em> this, exactly as it
+        /// ignores <see cref="Anchor"/>, <see cref="Sort"/>, <see cref="Limit"/> and <see cref="Offset"/> —
+        /// it composes no projection at all, so there is nothing here for it to apply. Narrowing the record
+        /// it is handed to "protect" it would undo the drift guard that convention exists for.
+        /// </para>
+        /// </remarks>
+        internal IReadOnlySet<string> Unselected { get; init; } = FrozenSet<string>.Empty;
+
+        /// <summary>
         /// The mutation this read's row is a pre-image for, or <see langword="null"/> for a read that takes
         /// no lock. It selects the lock <em>mode</em>, not merely whether to lock — an update's pre-image
         /// takes the weaker no-key lock and a delete's takes the full one.
@@ -115,7 +136,7 @@ internal sealed class ReadStatementComposer
         var (terms, parameters) = Terms(entity, decision, context, options);
 
         var sql = new StringBuilder("SELECT ")
-            .Append(ReadProjection.Compose(entity, Mask(decision, options), _dialect, rows))
+            .Append(ReadProjection.Compose(entity, Mask(decision, options), options.Unselected, _dialect, rows))
             .Append(" FROM ")
             .Append(_dialect.RenderTable(entity, options.LockFor))
             .Append(" WHERE ")
