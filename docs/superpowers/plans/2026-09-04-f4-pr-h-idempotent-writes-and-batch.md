@@ -415,7 +415,7 @@ Design §2 and §9. Signature-only in the port; the two shipped implementations 
 - Modify: `src/MMLib.Alvo.Testing/Data/InMemoryAlvoData.cs` (signatures only)
 - Modify: `test/_shared/api/FaultingAlvoData.cs`
 - Modify: `src/MMLib.Alvo/Api/Internal/DataApiEndpoints.cs` (the two positional call sites)
-- Test: the three `PublicApi.*.verified.txt` baselines move
+- Test: **two** `PublicApi.*.verified.txt` baselines move — Abstractions and Testing. `PublicApi.MMLib.Alvo.verified.txt` does not move until Task 10.
 
 **Interfaces:**
 - Produces:
@@ -449,7 +449,18 @@ Add `AlvoIdempotency.EnsureUsableToken(idempotency, context);` to the head of bo
 
 - [ ] **Step 3: Fix the positional callers**
 
-`DataApiEndpoints` passes `(…, context, precondition, ct)` positionally at both sites. Inserting a parameter makes `ct` bind to `idempotency` — a **compile error**, not a silent bind, because the types differ. Change both to named arguments:
+**There are twelve, not two, and ten of them are in the shipped `MMLib.Alvo.Testing` package** — in the
+very file Task 4 edits. Inserting a parameter makes `ct` bind to `idempotency`, a **compile error** rather
+than a silent bind because the types differ, so the compiler finds them all; this list is so the executor
+knows the scale before starting:
+
+- `src/MMLib.Alvo.Testing/Data/AlvoDataConcurrencyTests.cs` — `UpdateAsync` at 92, 114, 159, 191, 193, 220, 223; `DeleteAsync` at 137, 141, 225
+- `src/MMLib.Alvo/Api/Internal/DataApiEndpoints.cs` — 352 and 377
+
+Everything else in the repo already passes `cancellationToken:` named, or fewer positionals than the
+insertion point. Fix each by naming the token: `…, world.Caller, new AlvoPrecondition(VersionOf(created)), cancellationToken: Ct`.
+
+Change the two endpoint sites to:
 
 ```csharp
                     var record = await data
@@ -462,7 +473,7 @@ Add `AlvoIdempotency.EnsureUsableToken(idempotency, context);` to the head of bo
                         .ConfigureAwait(false);
 ```
 
-Then grep the whole repo for other call sites: `rg 'UpdateAsync\(|DeleteAsync\(' --type cs` and fix any that pass the token positionally. Named-argument sites (`AlvoDataWorlds.cs`, `AlvoDataStatementTests.cs`) survive untouched.
+Then build — the compiler names every remaining site. Named-argument sites (`AlvoDataWorlds.cs`, `AlvoDataStatementTests.cs`, `AlvoDataComputedRollupTests.cs`, `AlvoDataOutboxTests.cs`, `AlvoDataBeforeHookTests.cs`, `AlvoDataConstraintTests.cs`, `AlvoDataAdversarialTests.cs`) survive untouched.
 
 - [ ] **Step 4: Build and accept the baselines**
 
@@ -511,97 +522,52 @@ Design §2. An update replays by re-reading; a delete replays by answering that 
 
 - [ ] **Step 1: Write the failing contract facts**
 
-Add to `src/MMLib.Alvo.Testing/Data/AlvoDataConcurrencyTests.cs` — the shared suite, so each fact runs on SQLite, PostgreSQL and in-memory. Follow the file's existing world-construction idiom.
+Add to `src/MMLib.Alvo.Testing/Data/AlvoDataConcurrencyTests.cs` — the shared suite, so each fact runs on
+SQLite, PostgreSQL and in-memory.
+
+**Use the file's own idiom, which is not the obvious one.** `World` is **not** `IAsyncDisposable`, so
+`await using` is a compile error; there is no seed helper, so a fact writes through the port; the entity
+constants are `Orders`/`Receipts`/`Tickets`/`Drafts`/`Invoices`/`Vaults`/`Dropbox` (`Orders` is audited and
+has a version column, `Drafts` has none); a key comes from `TokenFor(entity)`, which mints a fresh one
+because a fixed key collides across facts on a shared store; and the version reader is `VersionOf(record)`.
 
 ```csharp
     /// <summary>
     /// A retried update is answered with the row rather than refused, which is the whole of #102: without
-    /// a key the retry is a 412 the caller cannot tell from someone else having changed the row.
+    /// a key the retry is a precondition failure the caller cannot tell from someone else having changed
+    /// the row.
     /// </summary>
     /// <remarks>
     /// The version is what makes this non-vacuous. A second write would advance it again, so asserting
-    /// that it did **not** move is what proves the replay wrote nothing — a status alone could not.
+    /// that it did <b>not</b> move is what proves the replay wrote nothing — a status alone could not.
     /// </remarks>
     [Fact]
     public async Task A_retried_update_answers_the_row_and_writes_nothing()
     {
-        await using var world = await WorldAsync();
-        var id = await world.SeedAsync("notes", new() { ["title"] = "first" });
-        var token = new AlvoIdempotency("k-update", "fingerprint-update");
+        var world = await AuditedWorldAsync();
+        var created = await world.Data.CreateAsync(Orders, Payload("first"), world.Caller, cancellationToken: Ct);
+        var token = TokenFor(Orders);
 
         var first = await world.Data.UpdateAsync(
-            "notes", id, new Dictionary<string, object?> { ["title"] = "second" }, world.Caller,
-            idempotency: token);
+            Orders, IdOf(created), Payload("second"), world.Caller, idempotency: token, cancellationToken: Ct);
         var replay = await world.Data.UpdateAsync(
-            "notes", id, new Dictionary<string, object?> { ["title"] = "second" }, world.Caller,
-            idempotency: token);
+            Orders, IdOf(created), Payload("second"), world.Caller, idempotency: token, cancellationToken: Ct);
 
-        replay["title"].ShouldBe("second");
-        replay[AlvoManagedColumns.UpdatedAt].ShouldBe(
-            first[AlvoManagedColumns.UpdatedAt],
-            "a replay must not write again — a second write would advance the version");
-    }
-
-    /// <summary>
-    /// A retried delete is answered as done rather than as absent. Without a key the retry is a 404 that
-    /// cannot be told from somebody else's delete, which is precisely the question the key answers.
-    /// </summary>
-    [Fact]
-    public async Task A_retried_delete_answers_as_done_rather_than_as_absent()
-    {
-        await using var world = await WorldAsync();
-        var id = await world.SeedAsync("notes", new() { ["title"] = "doomed" });
-        var token = new AlvoIdempotency("k-delete", "fingerprint-delete");
-
-        await world.Data.DeleteAsync("notes", id, world.Caller, idempotency: token);
-        await Should.NotThrowAsync(
-            () => world.Data.DeleteAsync("notes", id, world.Caller, idempotency: token));
-
-        (await world.Data.GetAsync("notes", id, world.Caller)).ShouldBeNull();
-    }
-
-    /// <summary>The same key for a different request is a conflict on these verbs too, not a replay.</summary>
-    [Fact]
-    public async Task One_key_reused_for_a_different_update_is_a_conflict()
-    {
-        await using var world = await WorldAsync();
-        var id = await world.SeedAsync("notes", new() { ["title"] = "first" });
-
-        await world.Data.UpdateAsync(
-            "notes", id, new Dictionary<string, object?> { ["title"] = "second" }, world.Caller,
-            idempotency: new AlvoIdempotency("k-shared", "fingerprint-a"));
-
-        await Should.ThrowAsync<AlvoIdempotencyConflictException>(
-            () => world.Data.UpdateAsync(
-                "notes", id, new Dictionary<string, object?> { ["title"] = "third" }, world.Caller,
-                idempotency: new AlvoIdempotency("k-shared", "fingerprint-b")));
-    }
-
-    /// <summary>
-    /// A retried update whose precondition held the first time is not re-evaluated against the row it
-    /// already advanced — which is the 412 #102 exists to remove.
-    /// </summary>
-    [Fact]
-    public async Task A_retried_conditional_update_is_not_refused_by_its_own_first_write()
-    {
-        await using var world = await WorldAsync();
-        var id = await world.SeedAsync("notes", new() { ["title"] = "first" });
-        var stored = await world.Data.GetAsync("notes", id, world.Caller);
-        var version = new AlvoPrecondition((DateTimeOffset)stored![AlvoManagedColumns.UpdatedAt]!);
-        var token = new AlvoIdempotency("k-conditional", "fingerprint-conditional");
-
-        await world.Data.UpdateAsync(
-            "notes", id, new Dictionary<string, object?> { ["title"] = "second" }, world.Caller,
-            version, token);
-
-        await Should.NotThrowAsync(
-            () => world.Data.UpdateAsync(
-                "notes", id, new Dictionary<string, object?> { ["title"] = "second" }, world.Caller,
-                version, token));
+        VersionOf(replay).ShouldBe(
+            VersionOf(first), "a replay must not write again — a second write would advance the version");
     }
 ```
 
-> **Executor note:** `AlvoDataConcurrencyTests` builds its world through the abstract members the file already declares. Read the top of that file and use whatever `SeedAsync`/`WorldAsync`/`Caller` equivalents it actually exposes rather than the shapes sketched above — the *claims* are what this plan fixes, not the helper names. If the file has no seed helper, add one there so all three implementations share it.
+Write the other three against the same idiom:
+
+- **`A_retried_delete_answers_as_done_rather_than_as_absent`** — delete with a token, delete again with the
+  same token, `Should.NotThrowAsync`, and `GetAsync` answers `null`. Without a key the retry is a
+  not-found the caller cannot tell from somebody else's delete.
+- **`One_key_reused_for_a_different_update_is_a_conflict`** — two `AlvoIdempotency` values sharing a key
+  and differing in fingerprint; the second throws `AlvoIdempotencyConflictException`.
+- **`A_retried_conditional_update_is_not_refused_by_its_own_first_write`** — `VersionOf` the created row
+  into an `AlvoPrecondition`, write with it and a token, retry identically, `Should.NotThrowAsync`. This is
+  the 412 #102 exists to remove.
 
 - [ ] **Step 2: Run to verify they fail**
 
@@ -651,12 +617,23 @@ Record the row after the write, exactly as the create does: `await records.Inser
 
 - [ ] **Step 4: Implement in `InMemoryAlvoData`**
 
-The same shape under `_gate`: look the record up, branch, and record after the write. The existing `Replay`, `RecordIdempotencyLocked` and `IdempotencyKey` helpers already do most of it; `Replay` gains an overload that answers "this key is spent" without producing a row, which is what a delete's replay needs.
+The same shape under `_gate`: look the record up, branch, and record after the write. The existing `Replay`,
+`RecordIdempotencyLocked` and `IdempotencyKey` helpers already do most of it; `Replay` gains an overload
+that answers "this key is spent" without producing a row, which is what a delete's replay needs.
+
+**`InMemoryAlvoData` has its own private `IdempotencyRecord(string Fingerprint, Guid RowId)`**, separate
+from `IdempotencyTable`'s — Task 2 widened only the EF one. It stays single-row here and widens in Task 8,
+where the batch replay needs it to hold N ids.
 
 - [ ] **Step 5: Run the tests**
 
 Run: `scripts/test-ring0`
-Expected: `[ring0] OK`. Then `dotnet test --project test/MMLib.Alvo.Data.PostgreSql.Tests.Integration` to run the PostgreSQL leg, which ring0 skips.
+Expected: **FAIL on `PublicApiApprovalTests` for `MMLib.Alvo.Testing`** — that baseline lists **test method
+names**, so the four new facts move it. Read the `.received.txt`, confirm it contains only the four names,
+accept it, and dispatch `alvo-snapshot-judge`.
+
+Then `dotnet test --project test/MMLib.Alvo.Data.PostgreSql.Tests.Integration -c Debug` for the PostgreSQL
+leg, which ring0 skips.
 
 - [ ] **Step 6: Commit**
 
@@ -696,7 +673,53 @@ Design §1, §1.1 and §2. This is where `data-api.md`'s *"`Idempotency-Key` is 
 
 - [ ] **Step 1: Write the failing facts**
 
-Add to `test/MMLib.Alvo.Api.Tests/IdempotencyTests.cs`, over `AlvoApiWorld`:
+Add to `test/MMLib.Alvo.Api.Tests/IdempotencyTests.cs`, over `AlvoApiWorld`.
+
+**Use the file's own helpers**, which are `AlvoApiWorld.VehicleRegistryAsync([_admin])`,
+`PostAsync(world, entity, body, key)`, `Pair(key)`, `Key(key)` and `IdOfAsync(response)`. There is no
+`SeededAsync`, `CreateOwnerAsync` or `Owner(...)`. And **`ReadFieldAsync` reads a page envelope, not a
+row** — it throws on a bare object body, so a `PATCH` 200 is read with `ReadJsonObjectAsync()`.
+
+```csharp
+    /// <summary>
+    /// The scenario #102 was filed for: the 200 is lost, the caller retries the identical request, and
+    /// the answer is the row rather than the precondition failure they cannot attribute.
+    /// </summary>
+    [Fact]
+    public async Task A_retried_conditional_patch_is_answered_with_the_row_not_a_precondition_failure()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin]);
+        using var created = await PostAsync(world, "owners", new JsonObject { ["name"] = "Acme Ltd" }, "seed-1");
+        created.StatusCode.ShouldBe(HttpStatusCode.Created, await created.ReadTextAsync());
+        var id = await IdOfAsync(created);
+        var body = new JsonObject { ["name"] = "Renamed" };
+        var headers = new[]
+        {
+            Pair("retry-1"),
+            new KeyValuePair<string, string>("If-Match", created.Headers.ETag!.ToString()),
+        };
+
+        using var first = await world.SendAsync(
+            HttpMethod.Patch, $"/api/owners/{id}", _admin, body: body, headers: headers);
+        using var retry = await world.SendAsync(
+            HttpMethod.Patch, $"/api/owners/{id}", _admin, body: body, headers: headers);
+
+        first.StatusCode.ShouldBe(HttpStatusCode.OK, await first.ReadTextAsync());
+        retry.StatusCode.ShouldBe(
+            HttpStatusCode.OK, $"the retry is the caller's own write: {await retry.ReadTextAsync()}");
+        (await retry.ReadJsonObjectAsync())["name"]!.GetValue<string>().ShouldBe("Renamed");
+    }
+```
+
+Write the other three against the same helpers:
+
+- **`A_retried_delete_is_answered_as_done`** — delete twice with one key; both 204.
+- **`One_key_against_two_rows_is_a_conflict_over_http`** — two owners, one key, second is 409, and the
+  second owner's name is unchanged. This is the defect the fingerprint's row id exists to prevent,
+  asserted where a caller would actually hit it.
+- **`An_anonymous_callers_key_is_refused_on_an_update_too`** — `key: null` with a key header; accept either
+  422 or 403, because policy may refuse the anonymous caller before the key is read, which is correct
+  precedence. The fact's point is only that the key never buys them anything.
 
 ```csharp
     /// <summary>
@@ -726,73 +749,7 @@ Add to `test/MMLib.Alvo.Api.Tests/IdempotencyTests.cs`, over `AlvoApiWorld`:
         (await retry.ReadFieldAsync("name")).ShouldBe(await first.ReadFieldAsync("name"));
     }
 
-    /// <summary>A retried delete is 204, not the 404 that reads as somebody else's delete.</summary>
-    [Fact]
-    public async Task A_retried_delete_is_answered_as_done()
-    {
-        var world = await SeededAsync();
-        await using var _ = world;
-        var (id, _) = await CreateOwnerAsync(world, "Doomed Ltd");
-        var headers = new[]
-        {
-            new KeyValuePair<string, string>(DataApiEndpoints.IdempotencyKeyHeader, "retry-delete"),
-        };
-
-        using var first = await world.SendAsync(HttpMethod.Delete, $"/api/owners/{id}", _admin, headers: headers);
-        using var retry = await world.SendAsync(HttpMethod.Delete, $"/api/owners/{id}", _admin, headers: headers);
-
-        first.StatusCode.ShouldBe(HttpStatusCode.NoContent);
-        retry.StatusCode.ShouldBe(HttpStatusCode.NoContent);
-    }
-
-    /// <summary>
-    /// One key against two different rows is a conflict, not a replay — the defect the fingerprint's row
-    /// id exists to prevent, asserted over HTTP where a caller would actually hit it.
-    /// </summary>
-    [Fact]
-    public async Task One_key_against_two_rows_is_a_conflict_over_http()
-    {
-        var world = await SeededAsync();
-        await using var _ = world;
-        var (first, _) = await CreateOwnerAsync(world, "First Ltd");
-        var (second, _) = await CreateOwnerAsync(world, "Second Ltd");
-        var headers = new[]
-        {
-            new KeyValuePair<string, string>(DataApiEndpoints.IdempotencyKeyHeader, "one-key"),
-        };
-
-        using var wrote = await world.SendAsync(
-            HttpMethod.Patch, $"/api/owners/{first}", _admin, body: Owner("Renamed"), headers: headers);
-        using var other = await world.SendAsync(
-            HttpMethod.Patch, $"/api/owners/{second}", _admin, body: Owner("Renamed"), headers: headers);
-
-        wrote.StatusCode.ShouldBe(HttpStatusCode.OK);
-        other.StatusCode.ShouldBe(
-            HttpStatusCode.Conflict, "the same key against another row is another request");
-        (await world.ReadOwnerNameAsync(second)).ShouldBe(
-            "Second Ltd", "the refused write must not have landed");
-    }
-
-    /// <summary>An anonymous caller still cannot hold a key, on these verbs as on the create.</summary>
-    [Fact]
-    public async Task An_anonymous_callers_key_is_refused_on_an_update_too()
-    {
-        var world = await SeededAsync();
-        await using var _ = world;
-        var (id, _) = await CreateOwnerAsync(world, "Acme Ltd");
-
-        using var response = await world.SendAsync(
-            HttpMethod.Patch,
-            $"/api/owners/{id}",
-            key: null,
-            body: Owner("Renamed"),
-            headers: [new KeyValuePair<string, string>(DataApiEndpoints.IdempotencyKeyHeader, "anon")]);
-
-        response.StatusCode.ShouldBeOneOf(HttpStatusCode.UnprocessableEntity, HttpStatusCode.Forbidden);
-    }
 ```
-
-> **Executor note:** `IdempotencyTests` already has its own world, key and body helpers. Use them; the helper names above are illustrative and the *claims* are what this plan fixes. `An_anonymous_callers_key_is_refused_on_an_update_too` accepts either status because policy may refuse the anonymous caller before the key is read — which is correct precedence, and the fact's point is only that the key never buys them anything.
 
 - [ ] **Step 2: Run to verify they fail**
 
@@ -909,6 +866,14 @@ The parameter's description says "Makes this create retry-safe" — reword it to
 
 - [ ] **Step 6: Rewrite the prose that says the header is ignored**
 
+**Four sites, not two.** `DataApiDocumentation`'s own type remarks say the key is "honoured on a create and
+ignored on an update and a delete", and `DataApiParameters.HeaderNames`' remark calls
+"`Idempotency-Key` on an update or a delete" one of "the two gaps that matter". Both become false here.
+(`DataApiDocumentation`'s "accepted and ignored" on the **query** route is correct and stays.)
+
+Also: `MapDelete` currently discards its decision (`_ = EnsureOperationIsAllowed(...)`). It still does not
+need it — a delete has no payload to mask — so leave the discard and read the key beside it.
+
 `DataApiDocumentation.Update` and `Delete` each carry a paragraph beginning *"**`Idempotency-Key` is accepted and ignored here — a known limitation…**"*, and `UpdateRetry(entity)` exists only to describe what that costs. Replace them:
 
 - The update's paragraph says the key makes the retry answer the row, that the fingerprint covers the row and the precondition, and that a key reused for another row or another precondition is 409.
@@ -960,11 +925,31 @@ Design §5. This is the enabling refactor for the batch, and it is behaviour-neu
 **Interfaces:**
 - Produces:
   - `private string? EfAlvoData.WriteRefusal(PolicyDecision decision, AlvoRecord postImage, AlvoRecord? previous, AlvoContext context)` — the deny reason, or `null` when the write is allowed.
-  - `internal static string? WritePayloadGuard.PayloadRefusal(IReadOnlyDictionary<string, object?> values, EntitySchema schema, PolicyDecision decision, bool isUpdate)`
+  - `internal static string? WritePayloadGuard.PayloadRefusal(IReadOnlyDictionary<string, object?> values, EntitySchema? entity, PolicyDecision decision, bool isUpdate)` — note the **nullable** entity, which is what `QueryFieldGuard.EnsureDeclared` refuses.
 
 - [ ] **Step 1: Invert the two guards**
 
-`EnsureWriteAllowed` currently evaluates and throws. Split it: `WriteRefusal` returns the reason or `null`, and `EnsureWriteAllowed` becomes
+**`EnsureWriteAllowed` inverts cleanly; `WritePayloadGuard` does not, and the difference matters.**
+
+`EnsureWriteAllowed` (both the EF one and `InMemoryAlvoData`'s own) is single-throw, single-type,
+single-site — it inverts exactly as below.
+
+`WritePayloadGuard.EnsureWritable` throws from **four** places, one of them outside the type:
+`QueryFieldGuard.EnsureDeclared`, which the **read** path shares. Its signature is also
+`(values, EntitySchema? entity, decision, isUpdate)` — the entity is **nullable and the null case is
+load-bearing**, being what `EnsureDeclared` refuses. So:
+
+- `PayloadRefusal` keeps the nullable entity parameter;
+- it wraps `QueryFieldGuard.EnsureDeclared` in a `try`/`catch (AlvoAuthorizationException)` rather than
+  inverting it, because that method is the read path's too and inverting it would change a second surface
+  for a batch's convenience;
+- the two `ArgumentNullException.ThrowIfNull` guards at its head **stay throwing** — they are family 5,
+  not a caller refusal, and `WritePayloadGuardTests` pins that.
+
+`InMemoryAlvoData` has its own `EnsureNoReadOnlyWrite` and managed-column checks beside its
+`EnsureWriteAllowed`; Task 8's in-memory batch needs those collectable too, so invert them here.
+
+`EnsureWriteAllowed` becomes:
 
 ```csharp
     /// <summary>
@@ -1018,26 +1003,59 @@ Claude-Session: https://claude.ai/code/session_01Uh7NkobnQZy5fDftEZbVLp"
 Design §4, §6 and §9. Types only — no implementation, no route.
 
 **Files:**
-- Move: `src/MMLib.Alvo/Api/AlvoViolation.cs` → `src/MMLib.Alvo.Abstractions/Data/AlvoViolation.cs`
+- Create: `src/MMLib.Alvo.Abstractions/Data/AlvoRowRefusal.cs`
 - Create: `src/MMLib.Alvo.Abstractions/Data/AlvoRowPatch.cs`
 - Create: `src/MMLib.Alvo.Abstractions/Data/AlvoBatchResult.cs`
 - Modify: `src/MMLib.Alvo.Abstractions/Data/IAlvoData.cs`
-- Modify: every file with `using MMLib.Alvo.Api;` that resolved `AlvoViolation`
-- Test: three `PublicApi.*.verified.txt` baselines move
+- Test: two `PublicApi.*.verified.txt` baselines move (Abstractions, Testing)
 
 **Interfaces:**
 - Produces:
   - `public sealed record AlvoRowPatch(Guid Id, IReadOnlyDictionary<string, object?> Values)`
-  - `public sealed record AlvoBatchResult(IReadOnlyList<AlvoRecord> Rows, IReadOnlyList<AlvoViolation> Violations)`
+  - `public sealed record AlvoRowRefusal(int Index, string Code, string Message, string? FixSuggestion)`
+  - `public sealed record AlvoBatchResult(int Affected, IReadOnlyList<AlvoRecord> Rows, IReadOnlyList<AlvoRowRefusal> Refusals)`
   - `Task<AlvoBatchResult> CreateManyAsync(string entity, IReadOnlyList<IReadOnlyDictionary<string, object?>> rows, AlvoContext context, AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default)`
   - `Task<AlvoBatchResult> UpdateManyAsync(string entity, IReadOnlyList<AlvoRowPatch> rows, AlvoContext context, AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default)`
   - `Task<AlvoBatchResult> DeleteManyAsync(string entity, IReadOnlyList<Guid> ids, AlvoContext context, AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default)`
 
-- [ ] **Step 1: Move `AlvoViolation` to the ports**
+- [ ] **Step 1: Add `AlvoRowRefusal`**
 
-Namespace becomes `MMLib.Alvo.Data`. Its documentation gains one paragraph explaining why it lives here now: **the port reports a batch's per-row refusals**, and a refusal that named no row would make a 500-row import unfixable. The `pointer` documentation — including PR-G's rule that tells an RFC 6901 body pointer from a query-parameter role — travels with it unchanged.
+**Not** a move of `AlvoViolation`, which the design's first draft proposed and its review killed:
+`AlvoViolation` pins every member with `[JsonPropertyName]` and half its `Pointer` contract is a PostgREST
+query-parameter vocabulary no `IAlvoData` implementor can produce. Putting that in a package whose own
+description is "the ports and pure model" would carry the API's wire format and its query grammar with it.
 
-Then fix every consumer. `MMLib.Alvo` already references `Abstractions`, so most files need only their `using` adjusted; `grep -rn "AlvoViolation" src/ test/` finds them.
+```csharp
+namespace MMLib.Alvo.Data;
+
+/// <summary>One row of a batch, and why the port refused it.</summary>
+/// <remarks>
+/// <para>
+/// <b>This exists because a batch's refusal has to name a row.</b>
+/// <see cref="AlvoAuthorizationException"/> carries a message and nothing else, so a five-hundred-row
+/// import refused with "forbidden" is one nobody can fix — and a batch is one transaction, so the caller
+/// cannot bisect it by retrying halves without writing the halves that pass.
+/// </para>
+/// <para>
+/// <b>An index rather than a pointer, and that is the truer type.</b> The port knows a row's position in
+/// the list it was handed; a JSON Pointer is a fact about a request body, which the port never sees. A
+/// request layer composes <c>/rows/3/quoted_price</c> where it already composes pointers.
+/// </para>
+/// <para>
+/// <b>The message rule is a port obligation, and it is the one an implementor is most likely to break.</b>
+/// <see cref="Message"/> and <see cref="FixSuggestion"/> must be built from constants and server-owned
+/// values — never from the caller's own keys or values. A refusal is answered before much else, so it is
+/// the cheapest oracle a framework has: a message naming a field answers "does this entity have one" a
+/// request at a time, and a message quoting a value puts attacker-controlled bytes into every log that
+/// records the response. The shipped implementations are held to it by the contract suite.
+/// </para>
+/// </remarks>
+/// <param name="Index">The row's position in the list the caller supplied, counting from zero.</param>
+/// <param name="Code">A stable kebab-case code, e.g. <c>forbidden</c>, <c>required</c>, <c>row-not-found</c>.</param>
+/// <param name="Message">A human sentence, free of caller-supplied text.</param>
+/// <param name="FixSuggestion">What to change, or <see langword="null"/> when the source has nothing to offer.</param>
+public sealed record AlvoRowRefusal(int Index, string Code, string Message, string? FixSuggestion);
+```
 
 - [ ] **Step 2: Add the two records**
 
@@ -1062,26 +1080,51 @@ namespace MMLib.Alvo.Data;
 /// <summary>What one batch produced: the rows it wrote, or every reason it wrote none.</summary>
 /// <remarks>
 /// <para>
-/// <b>Exactly one of the two is non-empty.</b> A batch is one transaction, so it either wrote every row
-/// or wrote none — there is no partial outcome for this type to express, and a result carrying both would
-/// be describing one that cannot happen.
+/// <b>A batch is one transaction, so it wrote every row or none</b> — there is no partial outcome for this
+/// type to express, and a result carrying both rows and refusals would describe one that cannot happen.
+/// <see cref="Succeeded"/> is the discriminator.
 /// </para>
 /// <para>
-/// <b><see cref="Violations"/> is how a refusal names a row.</b> A batch of five hundred that reports
-/// only "refused" is a batch nobody can fix, so each violation's pointer carries the offending row's
-/// index — <c>/rows/3/quoted_price</c>. That is the reason this port can report a policy refusal at all
-/// rather than raising <see cref="AlvoAuthorizationException"/>, which carries a message and nothing else.
+/// <b><see cref="Affected"/> exists because a delete produces no rows, and this type failed open without
+/// it.</b> With only <see cref="Rows"/>, a successful <c>DeleteManyAsync</c> and a refused one are
+/// <em>both</em> an empty list — so a caller who checked the rows could not tell a five-row delete from a
+/// refusal, in a port where every other refusal throws. A count cannot be confused with an absence.
 /// </para>
 /// <para>
-/// <b><see cref="Rows"/> is empty for a delete</b>, which removes rows rather than producing them. The
-/// count of what it removed is <see cref="IReadOnlyList{T}.Count"/> on what the caller passed in, so this
-/// type does not repeat it.
+/// <b><see cref="Refusals"/> is how a refusal names a row.</b> A batch of five hundred that reports only
+/// "refused" is one nobody can fix, and a caller cannot bisect it by retrying halves without writing the
+/// halves that pass.
 /// </para>
 /// </remarks>
+/// <param name="Affected">How many rows the batch wrote or removed; zero when it was refused.</param>
 /// <param name="Rows">The rows the batch wrote, in request order; empty for a delete and for a refusal.</param>
-/// <param name="Violations">Every reason the batch wrote nothing; empty when it wrote.</param>
+/// <param name="Refusals">Every reason the batch wrote nothing; empty when it wrote.</param>
 public sealed record AlvoBatchResult(
-    IReadOnlyList<AlvoRecord> Rows, IReadOnlyList<AlvoViolation> Violations);
+    int Affected, IReadOnlyList<AlvoRecord> Rows, IReadOnlyList<AlvoRowRefusal> Refusals)
+{
+    /// <summary>Whether the batch wrote. A refused batch wrote nothing at all.</summary>
+    public bool Succeeded => Refusals.Count == 0;
+
+    /// <summary>The result of a batch that wrote.</summary>
+    /// <param name="rows">The rows it wrote, in request order; empty for a delete.</param>
+    /// <param name="affected">How many rows it wrote or removed.</param>
+    public static AlvoBatchResult Wrote(IReadOnlyList<AlvoRecord> rows, int affected) =>
+        new(affected, rows, []);
+
+    /// <summary>The result of a batch that wrote nothing, and every reason.</summary>
+    /// <param name="refusals">Every refused row; never empty, or this would read as a successful write of nothing.</param>
+    /// <exception cref="ArgumentException"><paramref name="refusals"/> is empty.</exception>
+    public static AlvoBatchResult Refused(IReadOnlyList<AlvoRowRefusal> refusals)
+    {
+        ArgumentNullException.ThrowIfNull(refusals);
+        return refusals.Count > 0
+            ? new AlvoBatchResult(0, [], refusals)
+            : throw new ArgumentException(
+                "A refused batch must name at least one refused row: a result carrying neither rows nor "
+                + "refusals reads as a successful write of nothing.",
+                nameof(refusals));
+    }
+}
 ```
 
 - [ ] **Step 3: Declare the three port members**
@@ -1095,21 +1138,33 @@ Each gets full documentation covering: the transaction ("either every row or non
 - [ ] **Step 5: Move the baselines**
 
 Run: `scripts/test-ring0`
-Expected: FAIL on all three `PublicApiApprovalTests`.
+Expected: FAIL on the Abstractions and Testing `PublicApiApprovalTests`.
 
-Read each `.received.txt`. Abstractions gains `AlvoRowPatch`, `AlvoBatchResult`, `AlvoViolation` and three interface members; `MMLib.Alvo` **loses** `AlvoViolation`; Testing gains three `InMemoryAlvoData` members. Anything else in those diffs is a mistake. Accept, then run `alvo-snapshot-judge` and the `alvo-architecture-rules` pass — design §9 justifies each symbol.
+Read each `.received.txt`. Abstractions gains `AlvoRowPatch`, `AlvoRowRefusal`, `AlvoBatchResult` and three
+interface members; Testing gains three `InMemoryAlvoData` members. `PublicApi.MMLib.Alvo.verified.txt` does
+**not** move here — `MaxBatchRows` lands in Task 10. Anything else in those diffs is a mistake. Accept, then
+run `alvo-snapshot-judge` and the `alvo-architecture-rules` pass — design §9 justifies each symbol.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add src/ test/
-git commit -m "feat(data): the port's batch vocabulary, and AlvoViolation moves to it
+git commit -m "feat(data): the port's batch vocabulary
 
 A batch's refusals travel on its result, because a refusal that named no row
 makes a five-hundred-row import unfixable — and AlvoAuthorizationException
-carries a message and nothing else. That is what puts AlvoViolation in the
-ports: the port has to be able to name a row's refusal without the HTTP
-layer inventing one.
+carries a message and nothing else.
+
+The port gets AlvoRowRefusal rather than AlvoViolation: the latter pins every
+member with JsonPropertyName and half its Pointer contract is a PostgREST
+query-parameter vocabulary no implementor can produce. An index is also the
+truer type — the port knows a row's position, not a JSON Pointer into a body
+it never sees.
+
+AlvoBatchResult carries Affected as well as Rows, because a delete produces
+no rows: without a count a successful delete and a refusal are both an empty
+list, and a returned-refusal channel that fails open is the wrong default in
+a port where every other refusal throws.
 
 Types only; the three members throw until the next two tasks.
 
@@ -1126,17 +1181,38 @@ Design §5 and §10. The facts come before the shipped implementation deliberate
 
 **Files:**
 - Create: `src/MMLib.Alvo.Testing/Data/AlvoDataBatchTests.cs`
+- Create: `src/MMLib.Alvo.Testing/Data/AlvoDataFixture.cs` (the hoisted scaffolding — see Step 1)
 - Create: `test/MMLib.Alvo.Data.Sqlite.Tests/SqliteAlvoDataBatchTests.cs`
 - Create: `test/MMLib.Alvo.Data.PostgreSql.Tests.Integration/PostgreSqlAlvoDataBatchTests.cs`
 - Create: `test/MMLib.Alvo.Tests/Data/InMemoryAlvoDataBatchTests.cs`
+- Modify: `src/MMLib.Alvo.Testing/Data/AlvoDataConcurrencyTests.cs` (derive from the hoisted base)
 - Modify: `src/MMLib.Alvo.Testing/Data/InMemoryAlvoData.cs`
+- Modify: the three existing `*AlvoDataConcurrencyTests.cs` legs (implement `CountAsync`)
 
 **Interfaces:**
 - Consumes: Task 7's port members, Task 6's collectable verdict.
 
 - [ ] **Step 1: Write the shared facts**
 
-`AlvoDataBatchTests` is an abstract class in the pattern `AlvoDataConcurrencyTests` already uses — read that file's world-construction members and mirror them exactly. The facts, each with the control that makes it non-vacuous:
+`AlvoDataBatchTests` is an abstract class in the pattern `AlvoDataConcurrencyTests` already uses.
+
+**Read that file first; almost none of the helpers a batch suite wants exist.** Its abstract seam is
+`CreateAsync(SchemaModel, AlvoDescriptor, IReadOnlyDictionary<string, IReadOnlyList<AlvoRecord>> seed)`,
+its `World` exposes only `Data`, `Caller`, `Acme`, `Globex`, `Alice`, `Bob`, `AcmeCaller`, `GlobexCaller`,
+and there is **no row-count helper on any of the three legs**. Counting through `QueryAsync` is
+policy-filtered, so *"a count over the whole entity"* — which the design calls the headline proof of
+atomicity — has to be built before it can be asserted. Two options, and the first is better:
+
+1. **Hoist the fixture scaffolding** (`EntityFixture`, `DescriptorOf`, `SchemaOf`) out of
+   `AlvoDataConcurrencyTests` into a shared base both suites derive from, and add an unfiltered
+   `CountAsync(entity)` to the seam — implemented per leg, since only the leg knows its store.
+2. Reproduce ~250 lines of scaffolding in the new file, which is how the two come to drift.
+
+Take option 1. The facts below name `world.CountAsync(...)`, `Orders`, `Payload(...)`, `IdOf(...)` and
+`TokenFor(...)` because those are the names the hoist should produce; everything else in the sketches is
+illustrative and the **claims** are what this plan fixes.
+
+The facts, each with the control that makes it non-vacuous:
 
 ```csharp
     /// <summary>
@@ -1156,7 +1232,7 @@ Design §5 and §10. The facts come before the shipped implementation deliberate
             world.Caller);
 
         result.Rows.ShouldBeEmpty();
-        result.Violations.ShouldNotBeEmpty();
+        result.Refusals.ShouldNotBeEmpty();
         (await CountAsync(world, "notes")).ShouldBe(before, "a batch commits every row or none");
     }
 
@@ -1174,10 +1250,8 @@ Design §5 and §10. The facts come before the shipped implementation deliberate
             [Row("ok"), RowThatFailsTheCheck(), Row("ok"), Row("ok"), RowThatFailsTheCheck()],
             world.Caller);
 
-        result.Violations.Select(violation => violation.Pointer).ShouldBe(
-            ["/rows/1", "/rows/4"],
-            ignoreOrder: false,
-            customMessage: "every bad row, in the order the batch carried them");
+        result.Refusals.Select(refusal => refusal.Index).ShouldBe(
+            [1, 4], ignoreOrder: false, customMessage: "every bad row, in the order the batch carried them");
     }
 
     /// <summary>
@@ -1193,8 +1267,8 @@ Design §5 and §10. The facts come before the shipped implementation deliberate
         var beside = await world.Data.CreateManyAsync(
             "notes", [Row("ok"), RowThatFailsTheCheck()], world.Caller);
 
-        alone.Violations.ShouldNotBeEmpty();
-        beside.Violations.ShouldNotBeEmpty("a passing neighbour must not admit a failing row");
+        alone.Refusals.ShouldNotBeEmpty();
+        beside.Refusals.ShouldNotBeEmpty("a passing neighbour must not admit a failing row");
     }
 
     /// <summary>
@@ -1214,7 +1288,7 @@ Design §5 and §10. The facts come before the shipped implementation deliberate
             "notes", [Patch(mine, "renamed")], world.Caller);
 
         refused.Rows.ShouldBeEmpty();
-        refused.Violations.ShouldNotBeEmpty();
+        refused.Refusals.ShouldNotBeEmpty();
         allowed.Rows.Count.ShouldBe(1, "the same batch without the other tenant's row must succeed");
     }
 
@@ -1247,13 +1321,110 @@ Design §5 and §10. The facts come before the shipped implementation deliberate
         var refused = await world.Data.DeleteManyAsync(
             "notes", [first, second, Guid.NewGuid()], world.Caller);
 
-        refused.Violations.ShouldNotBeEmpty("an absent row refuses the batch");
+        refused.Refusals.ShouldNotBeEmpty("an absent row refuses the batch");
         (await CountAsync(world, "notes")).ShouldBe(2, "and leaves the two real rows in place");
 
         var removed = await world.Data.DeleteManyAsync("notes", [first, second], world.Caller);
 
-        removed.Violations.ShouldBeEmpty();
+        removed.Refusals.ShouldBeEmpty();
         (await CountAsync(world, "notes")).ShouldBe(0);
+    }
+
+    /// <summary>
+    /// A before-hook cannot patch a row past the check. This is <c>EfAlvoData.RunBeforeCreate</c>'s own
+    /// documented bypass — "a hook writing <c>owner_id</c> from a field the caller controls would place a
+    /// row the create rule refuses" — at batch scale, and splitting judge from write is exactly what would
+    /// reopen it.
+    /// </summary>
+    [Fact]
+    public async Task A_hook_cannot_patch_a_row_past_the_check_in_a_batch()
+    {
+        await using var world = await HookedWorldAsync();
+
+        var result = await world.Data.CreateManyAsync(
+            HookedOrders, [Payload("ok"), PayloadTheHookWillMakeIllegal()], world.Caller, cancellationToken: Ct);
+
+        result.Refusals.Select(refusal => refusal.Index).ShouldBe([1]);
+        (await world.CountAsync(HookedOrders)).ShouldBe(0, "the batch must have written nothing");
+    }
+
+    /// <summary>
+    /// The row that lands is the row that was judged: the hook runs exactly once per row, and what is
+    /// stored is what the verdict consumed rather than something the write pass re-derived.
+    /// </summary>
+    [Fact]
+    public async Task The_row_that_lands_is_the_row_that_was_judged()
+    {
+        await using var world = await HookedWorldAsync();
+
+        var result = await world.Data.CreateManyAsync(
+            HookedOrders, [Payload("a"), Payload("b")], world.Caller, cancellationToken: Ct);
+
+        world.HookRuns.ShouldBe(2, "once per row, in the judging pass — not again in the write pass");
+        foreach (var row in result.Rows)
+        {
+            row["stamped_by_hook"].ShouldNotBeNull("the stored row is the hook's output, not the caller's");
+        }
+    }
+
+    /// <summary>
+    /// A row another tenant owns and a row that never existed are <b>one</b> refusal. Distinguishing them
+    /// would make a batch answer as many existence questions per request as it carries rows — the oracle
+    /// the single-row not-found exists to close, multiplied by the batch size.
+    /// </summary>
+    [Fact]
+    public async Task An_invisible_row_and_an_absent_row_are_one_refusal()
+    {
+        await using var world = await TenantWorldAsync();
+        var theirs = await world.SeedForAsync(world.Globex, Orders, Payload("theirs"));
+
+        var invisible = await world.Data.UpdateManyAsync(
+            Orders, [new AlvoRowPatch(theirs, Payload("renamed"))], world.AcmeCaller, cancellationToken: Ct);
+        var absent = await world.Data.UpdateManyAsync(
+            Orders, [new AlvoRowPatch(Guid.NewGuid(), Payload("renamed"))], world.AcmeCaller, cancellationToken: Ct);
+
+        var hidden = invisible.Refusals.ShouldHaveSingleItem();
+        var missing = absent.Refusals.ShouldHaveSingleItem();
+        hidden.Code.ShouldBe(missing.Code);
+        hidden.Message.ShouldBe(missing.Message);
+    }
+
+    /// <summary>
+    /// A refusal carries no caller-supplied text. The port obligation `AlvoRowRefusal` states is the one
+    /// a third-party provider is most likely to break, and it is the cheapest oracle a framework has.
+    /// </summary>
+    [Fact]
+    public async Task A_refusal_never_echoes_what_the_caller_sent()
+    {
+        await using var world = await WorldAsync();
+        const string Marker = "zqmarkerqz";
+
+        var result = await world.Data.CreateManyAsync(
+            Orders, [PayloadCarrying(Marker)], world.Caller, cancellationToken: Ct);
+
+        foreach (var refusal in result.Refusals)
+        {
+            refusal.Message.ShouldNotContain(Marker, Case.Insensitive);
+            refusal.FixSuggestion?.ShouldNotContain(Marker, Case.Insensitive);
+        }
+    }
+
+    /// <summary>
+    /// A successful delete is distinguishable from a refusal, which it was not while the result carried
+    /// only rows: a delete produces none, so both were an empty list.
+    /// </summary>
+    [Fact]
+    public async Task A_successful_delete_is_not_an_empty_refusal()
+    {
+        await using var world = await WorldAsync();
+        var first = IdOf(await world.Data.CreateAsync(Orders, Payload("a"), world.Caller, cancellationToken: Ct));
+        var second = IdOf(await world.Data.CreateAsync(Orders, Payload("b"), world.Caller, cancellationToken: Ct));
+
+        var removed = await world.Data.DeleteManyAsync(Orders, [first, second], world.Caller, cancellationToken: Ct);
+
+        removed.Succeeded.ShouldBeTrue();
+        removed.Affected.ShouldBe(2, "a count is what tells a delete apart from a refusal");
+        removed.Rows.ShouldBeEmpty("a delete produces no rows");
     }
 
     /// <summary>An empty batch is refused rather than treated as a write of nothing.</summary>
@@ -1269,7 +1440,7 @@ Design §5 and §10. The facts come before the shipped implementation deliberate
 
         var result = await world.Data.CreateManyAsync("notes", [], world.Caller);
 
-        result.Violations.ShouldNotBeEmpty();
+        result.Refusals.ShouldNotBeEmpty();
     }
 ```
 
@@ -1476,6 +1647,14 @@ Design §7. #106 asks for a bound *measured* the way `AlvoFilter.MaxTerms` was, 
 
 A throwaway harness — **labelled throwaway and not committed** — driving `CreateManyAsync`, `UpdateManyAsync` and `DeleteManyAsync` at N = 10, 50, 100, 250, 500, 1000, 2500, 5000 against **both** SQLite and a real PostgreSQL container, recording per N: wall time, peak managed allocation (`GC.GetTotalAllocatedBytes`), and the transaction's open duration.
 
+**Measure the entity this bound actually protects, not the cheapest one.** The row is judged before it is
+written, so the per-row cost the bound has to hold is a `WITH CHECK` predicate evaluated N times plus the
+tenant scope, not a bare insert. A harness over an unpoliced entity measures the store and reports a
+ceiling several times too high, which is the same as not measuring: use a policed, tenant-scoped entity
+with at least one create rule carrying a check, and a caller whose token resolves a tenant. Note in the
+evidence file that this is what was measured, so a later reader can tell the number apart from a raw
+insert benchmark.
+
 What the measurement is looking for is the same shape `MaxTerms`' own remark records — the N at which something *breaks* or degrades sharply, named. Candidates: the round-trip cost of N single-row inserts plus N outbox inserts; SQLite's write-lock duration; PostgreSQL's lock table.
 
 - [ ] **Step 2: Write the evidence file**
@@ -1560,7 +1739,39 @@ Design §4.1. One path per entity, three verbs, three endpoint kinds.
             routes.ShouldContain($"DELETE /api/{entity}/batch");
 ```
 
-and `routes.Count.ShouldBe(_entities.Length * 9, …)`, and the same for `endpoints.Count`. `ExpectedOperation` gains the `/batch` suffix as a discriminator so `POST …/batch` resolves to `Create`, `PATCH …/batch` to `Update` and `DELETE …/batch` to `Delete`.
+and `routes.Count.ShouldBe(_entities.Length * 9, …)`, and the same for
+`endpoints.Count.ShouldBe(_entities.Length * 9, …)` inside
+`Every_generated_endpoint_carries_an_operation_marker_matching_its_verb`.
+
+**`ExpectedOperation` needs no change, and that is the point.** Its `POST` arm already discriminates on
+`isQueryByBody`, so `POST …/batch` falls to `Create`, `PATCH` to `Update` and `DELETE` to `Delete` — each
+batch route resolving to the operation its single-row sibling resolves to, through a helper written before
+batches existed. If a `/batch` discriminator ever *is* needed there, that is the signal a batch is gating
+as something its sibling does not, which is the mistake the whole design exists to avoid.
+
+Two more facts in the same file move, and both would otherwise pass vacuously or fail confusingly:
+
+```csharp
+        DataApiEndpointKind.BatchCreate.ToDataOperation().ShouldBe(DataOperation.Create);
+        DataApiEndpointKind.BatchUpdate.ToDataOperation().ShouldBe(DataOperation.Update);
+        DataApiEndpointKind.BatchDelete.ToDataOperation().ShouldBe(DataOperation.Delete);
+```
+
+in `Every_endpoint_kind_maps_to_the_operation_its_filter_must_gate`, and in
+`Every_endpoint_kind_has_its_own_wire_name_and_the_five_original_ones_are_unchanged`:
+
+```csharp
+        DataApiEndpointKind.BatchCreate.ToWireName().ShouldBe("batchCreate");
+        DataApiEndpointKind.BatchUpdate.ToWireName().ShouldBe("batchUpdate");
+        DataApiEndpointKind.BatchDelete.ToWireName().ShouldBe("batchDelete");
+```
+
+That second fact ends with a **distinctness counter** —
+`kinds.Select(k => k.ToWireName()).Distinct(Ordinal).Count().ShouldBe(kinds.Length)` — and it is the one
+that catches the mistake here. `ToWireName`'s default arm is
+`_ => kind.ToDataOperation().ToWireName()`, so a `BatchCreate` added with no explicit arm answers
+`"create"`, collides with `Create`, and the counter goes red. That red is correct: two kinds sharing a wire
+name means two routes sharing an `operationId` in the generated document. Step 2 adds the arms.
 
 `LazyRouteMaterialisationTests.PathsPerEntity` goes 3 → **4**, with the fourth path asserted by name.
 
@@ -1577,7 +1788,9 @@ and `routes.Count.ShouldBe(_entities.Length * 9, …)`, and the same for `endpoi
     BatchDelete,
 ```
 
-`ToDataOperation` maps them to `Create`, `Update` and `Delete` — so each is gated by the filter that already gates its single-row sibling, with no new policy vocabulary. `ToWireName` gives them `batchCreate`, `batchUpdate`, `batchDelete`; the existing five keep the spellings they publish.
+`ToDataOperation` maps them to `Create`, `Update` and `Delete` — so each is gated by the filter that already gates its single-row sibling, with no new policy vocabulary. `ToWireName` needs an **explicit arm each** — `batchCreate`, `batchUpdate`, `batchDelete` — placed before
+the `_ => kind.ToDataOperation().ToWireName()` default, which would otherwise spell all three as their
+single-row sibling and collide. The existing six keep the spellings they publish.
 
 Extend the enum's `<remarks>`: the batches are the second reason this type exists — three routes gated as three operations that a caller may hold independently, which is why one route per verb rather than one route with a mode in its body.
 

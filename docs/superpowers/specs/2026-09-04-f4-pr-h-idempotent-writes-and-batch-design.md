@@ -171,98 +171,148 @@ rows to delete", which turns the hazard into a 422 instead of a silent success. 
 
 ## 5. #106 — per-row policy is the whole of the security content
 
-**The batch is two passes, not one loop, and that is forced rather than chosen.** The single-row helpers
-`WritePayloadGuard.EnsureWritable` and `EnsureWriteAllowed` **throw on the first failure**, and on
-PostgreSQL any statement error aborts the transaction (`25P02`) until it is rolled back — so "catch per
-row and keep going" is not available at all. A batch therefore:
+**The batch is two passes inside one transaction, and that is forced rather than chosen.** The single-row
+helpers `WritePayloadGuard.EnsureWritable` and `EnsureWriteAllowed` **throw on the first failure**, and on
+PostgreSQL any statement error aborts the transaction (`25P02`) until it is rolled back — so "catch per row
+and keep going" is not available at all. A batch therefore:
 
-1. **judges every row**, collecting refusals rather than throwing — which for an update means taking all
-   N row-locked pre-images first, because the `WITH CHECK` verdict is reached over *that row's* locked
-   pre-image merged with *that row's* patch;
+1. **judges every row**, collecting refusals rather than throwing;
 2. **refuses the whole batch** if the collection is non-empty, having written nothing;
 3. **writes every row** only when it is empty.
 
-The first draft said "the same helpers, in a loop" and that was wrong twice over: it could not report more
-than one bad row, and on PostgreSQL it could not report even one and then continue.
+### 5.1 The judging pass judges what will be written, hooks included
+
+**This is the subtlest thing in the PR and the first draft of this section got it wrong by omission.**
+The single-row paths do not judge the caller's payload — they judge the payload *after* the entity's
+before-hooks have patched it. `EfAlvoData.RunBeforeCreate`'s own remark says why, in the sharpest terms
+available:
+
+> "A patch reaching storage unjudged would be a caller-reachable authorization bypass — a hook writing
+> `owner_id` from a field the caller controls would place a row the `create` rule refuses — so the
+> post-image verdict runs again over exactly what will be written."
+
+Splitting judge from write puts a seam exactly where that invariant lives. So the rule is stated as an
+invariant rather than left to the implementation:
+
+> **Hooks run once, in the judging pass. The write pass writes byte-identically the post-image the verdict
+> consumed, and constructs no image of its own.**
+
+The judging pass therefore produces, per row, the *final* stored image — stamped, hook-patched, judged —
+and the write pass is a loop over images. A write pass that re-derived an image would be able to write one
+nothing judged, which is the bypass at batch scale. §10 asks for a fact, not a remark.
+
+### 5.2 An invisible row and an absent row are one refusal
+
+A row the caller's `USING` predicate excludes raises `AlvoRecordNotFoundException` on the single-row path,
+and that refusal is a **third** expression of the write verdict which §6's inversion does not reach.
+
+In a batch it becomes a collected refusal, and **it must be byte-identical for a row that does not exist
+and a row that exists but is invisible**. Otherwise `UpdateManyAsync` and `DeleteManyAsync` become a
+cross-tenant existence oracle that answers `MaxBatchRows` questions per request — the same oracle the
+single-row 404 exists to close, multiplied by the batch size. One code, one message, no distinction.
+
+### 5.3 Ordering, and the one engine the first draft reasoned past
 
 **The rows are sorted by id before either pass.** Two concurrent batches whose id sets overlap take their
-row locks in whatever order the caller wrote them, which is a deadlock on PostgreSQL; a fixed order is the
-standard fix and it costs one sort. The same applies to the rollup parents.
+row locks in whatever order the callers wrote them, which is a deadlock on PostgreSQL. A fixed order is
+the standard fix and costs one sort; the *request* order is kept separately, because a caller's row 3 must
+be reported as row 3.
 
-**Every row is judged individually**, and the judgement is the one a single-row write already makes:
+**The contended-write retry stays wide for a batch, and the first draft was wrong to narrow it.** The
+narrowing looked obviously right — the retry exists for a rival committing the same idempotency key, which
+fails one statement, so retrying N inserts ten times is waste. But `RollupRecompute` carries an in-repo
+*measurement* that kills it:
 
-- `WritePayloadGuard.EnsureWritable` per row — a framework-managed column, a `readOnly` field.
-- `EnsureWriteAllowed` per row — the `WITH CHECK` predicate and the tenant scope, over that row's own
-  post-image. For an update that post-image is *that row's* stored image merged with *that row's* patch,
-  so a batch cannot smuggle a value past a check by pairing it with a row that passes.
-- The `USING` predicate per row, through the same policy-rooted query the single-row path uses — so a
-  row the caller cannot see is `AlvoRecordNotFoundException` for that row, not silently skipped.
+> "SQLite must **not** read the parent before writing inside a deferred transaction — 12 of 24 writers died
+> on `SQLITE_BUSY_SNAPSHOT` when they did"
 
-**"Checks the first row and admits the rest" is the failure this design is arranged to make
-unrepresentable**, and the arrangement is structural rather than careful: the judging pass calls the
-*same* per-row predicates the single-row write calls, once per row, and the writing pass does not run at
-all until the judging pass has consumed every row. There is no batch-shaped variant of the check to get
-wrong, and an optimisation that hoisted one out of the loop would have to delete a call site to do it —
-a diff a reviewer sees.
+A judging pass is N reads before the first write, in a deferred transaction, which is that shape at N times
+the width. `IsStorageWriteFailure` matches `DbException`, so `SQLITE_BUSY_SNAPSHOT` is absorbed by the wide
+retry today and would not be by a narrow one. So the retry stays wide, and the cost is stated: an
+unrecognised storage failure on row 400 costs ten full batch attempts before it surfaces. A recognised
+constraint violation escapes early through `ConstraintViolationTranslator`, which is the common case.
 
-**The collecting shape is new and is where the risk actually lives.** The single-row path proves its
-refusals by throwing; a collecting variant is a second expression of the same rule, and two expressions
-of one rule is exactly how they come to differ. So the collecting predicate is the **only** implementation
-and the single-row path is refactored to throw on *its* result — one rule, one evaluation, the throw
-becoming a caller's choice rather than the check's.
+The alternative — opening the batch's transaction as `IMMEDIATE` on SQLite — is a per-engine transaction
+mode, therefore an `IAlvoSqlDialect` member, therefore a port change this PR does not need. Recorded as the
+better fix if the wide retry ever costs too much.
 
-**Three things the loop must not do per row**, each of which the single-row path does once and a naive
-batch would do N times:
+### 5.4 What each row is judged against
 
-- **`RecomputeRollupsAsync` takes a list already** and `RollupRecompute` groups by parent precisely
-  because one write can name a parent twice. Called per row, N children of one parent become N lock-plus-
-  `SUM` statements instead of one. The batch collects its images and calls it **once**, after the writes.
-- **The contended-write retry wraps the whole attempt.** Around a batch it retries N inserts, N hooks and
-  N outbox rows, ten times — so an unrecognised storage failure on row 400 costs ten full batches before
-  it surfaces. The batch keeps the retry (it is what turns a lost race on the idempotency key into a
-  replay) and **narrows what it retries to a failure on the record insert itself**, which is the only one
-  a rival can cause.
-- **One instant covers the batch.** Every write site reads `WriteInstantNow()` once and threads it into
-  the audit stamp, the event `time` and the record's `created_at`; a batch does the same, so all N rows
-  share one `updated_at` and therefore one `ETag`. That is right — they were written together — and it is
-  stated because `data-path.md`'s "one write is one instant" now has to say what "one write" means.
+The judgement is the one a single-row write already makes, in the same order:
 
-§10 states what a fact must prove rather than assert here, and it is not "a bad row is refused" — it is
-**a batch whose *last* row fails leaves no row written**, plus a batch whose rows individually pass and
-whose *combination* would not.
+- `WritePayloadGuard`'s refusal per row — a framework-managed column, a `readOnly` field, an undeclared key.
+- The entity's before-hooks per row (§5.1), which are stateless per call and carry no cross-row budget.
+- `WITH CHECK` and the tenant scope per row, over *that row's* post-image. For an update that post-image is
+  *that row's* stored image merged with *that row's* patch, so a batch cannot smuggle a value past a check
+  by pairing it with a row that passes.
+- The `USING` predicate per row (§5.2).
+
+**"Checks the first row and admits the rest" is what this arrangement makes unrepresentable**, and the
+arrangement is structural: the judging pass calls the same per-row predicates the single-row write calls,
+once per row, and the write pass does not run until the judging pass has consumed every row.
+
+**Three things the loop must not do per row**, each of which the single-row path does once:
+
+- **`RecomputeRollupsAsync` is called once**, after the writes, with every stored image.
+  `RollupRecompute.TenantOf` throws unless the images carry exactly one distinct `tenant_id` — which a
+  batch satisfies only because the tenant scope forces it, so that contract's wording is corrected to say
+  "one write's rows" rather than "one stored row".
+- **One instant covers the batch**, threaded into every audit stamp, every event's `time` and the record's
+  `created_at` — so all N rows share one `updated_at` and one `ETag`. They were written together.
+- **`EnsureNotSoftDeleted` is called once**, before the transaction: an entity that cannot be deleted at
+  all is not a per-row refusal.
 
 ## 6. #106 — the failure report
 
-One refusal for the batch, `422` with slug `validation` for a payload the entity's shape refuses and
-`403` for a policy refusal, exactly as a single write. What changes is the pointer:
+**The port gets its own refusal type, and it is not `AlvoViolation`.**
 
-> `/rows/3/quoted_price` — RFC 6901 into the request body, where `3` is the batch index.
+```csharp
+public sealed record AlvoRowRefusal(int Index, string Code, string Message, string? FixSuggestion);
+```
 
-**The index needs a carrier, and today there is none.** `AlvoAuthorizationException` carries a message and
-nothing else, and a 403 that says only "refused" cannot name a row. So a batch's refusals travel on
-`AlvoBatchResult` as an `IReadOnlyList<AlvoViolation>` — which makes `AlvoViolation` reachable from the
-port, and therefore moves it out of `MMLib.Alvo.Api` into `MMLib.Alvo.Abstractions`. §9 lists that as the
-public-surface item it is; it is also the change that lets the *port* report a per-row policy refusal at
-all, rather than the HTTP layer inventing one.
+**Rejected: moving `AlvoViolation` into the ports**, which the first draft proposed. It is an HTTP shape:
+every member is pinned with `[JsonPropertyName]`, and half its `Pointer` contract is a PostgREST
+query-parameter role vocabulary — `filter`, `order`, `limit`, `offset`, `after`, `select` — that no
+`IAlvoData` implementor can ever produce. Moving it would put the API's wire format and its query grammar
+in a package whose own description is "the ports and pure model". `AlvoRowRefusal` carries an `int` index
+instead of a pointer string, which is also the truer type: the port knows a row's position, not a JSON
+Pointer.
 
-That is the existing `PayloadViolations.PointerTo` shape with a prefix, and it needs no new convention:
-the pointer is already documented as "a JSON Pointer into the request body, or the role of a query
-parameter" (PR-G published the rule that tells the two apart), and a batch body genuinely has that
-structure.
+The HTTP layer maps it. `/rows/3/quoted_price` is the pointer a caller sees, composed where pointers are
+already composed, and the `/rows/{index}` prefix is the API's convention rather than the port's.
 
-**Every offending row is reported, not the first**, for the reason the single-row validator collects:
-one violation per request is one round trip per mistake, and a 500-row import that reports row 3 and
-stops will be run five hundred times.
+**The message rule travels as a port obligation.** `AlvoViolation`'s remark — *"nothing here may echo
+caller-supplied text… the cheapest oracle in the framework"* — holds today only because every producer is
+internal to `MMLib.Alvo`. `AlvoRowRefusal` is produced by a *provider*, so the rule becomes something a
+third party must honour: it is stated on the type, and §10 asks the contract suite to hold it.
 
-**A policy refusal reports its index too**, which is a deliberate narrowing of what a single write
-discloses: a single `403` says only "refused". Naming *which row* was refused tells the caller something
-about the rows — but only about rows **they themselves sent**, and it is the only thing that makes a
-batch fixable. Recorded as a decision, not a slip.
+**Every offending row is reported, not the first** — a 500-row import that reports row 3 and stops will be
+run five hundred times.
 
-**A constraint conflict reports its index as well.** A batch import is exactly where a duplicate key
-arrives, and `AlvoConstraintViolationException` names *fields* and no row — so a 500-row import that
-collides on one `unique` value would say "some row collides on `reference`". The batch's 409 carries the
-index on the same `violations` array, for the same reason the 422 does. The single-row 409 is unchanged.
+**A policy refusal reports its index**, which is a deliberate narrowing of what a single write discloses.
+Naming *which row* was refused tells the caller something about rows **they themselves sent**, and it is
+the only thing that makes a batch fixable.
+
+**A constraint conflict does not.** This is the asymmetry worth reading twice. A `unique` collision
+surfaces from the engine during the *write* pass — so on PostgreSQL exactly one is knowable before the
+transaction aborts, and "every offending row" is not available for it anyway. But the deciding reason is
+the oracle: unique fields are **caller-guessable** where a framework-assigned row id is not, so a batch of
+500 candidate emails answered with the colliding indices is 500 registration probes in one request.
+`AlvoConstraintViolationException` keeps its message value-free for exactly this reason; an index would
+re-attach the value by position. **The batch's 409 names the field, as the single-row 409 does, and no
+index.** An intra-batch collision — two rows of one batch carrying the same unique value — is invisible to
+the judging pass and surfaces the same way; recorded rather than fixed, because catching it would mean
+re-implementing every `unique` constraint in the judging pass.
+
+**The status a refusal maps to**, stated once because the first draft left it to two sections that
+disagreed:
+
+| Refusal | Status |
+|---|---|
+| any policy refusal — `WITH CHECK`, the tenant scope, a `readOnly` field, a managed column, an invisible or absent row | **403** |
+| anything the entity's declared shape refuses — a type, a `maxLength`, a missing `required` | **422** |
+| a mix | **403** — default-deny dominates, and a caller told to fix a field would fix it and be refused again |
+| a constraint the database enforces | **409**, naming the field and no index |
 
 ## 7. #106 — the bound, and it will be measured
 
@@ -281,7 +331,12 @@ always meant on a single write. A batch refused for its size then says *"more th
 was measured**, not picked:
 
 - On SQLite and PostgreSQL, batch create / update / delete at increasing N, recording wall time,
-  allocation, and the transaction's lock duration.
+  allocation, and the transaction's lock duration — **over an entity that carries a `WITH CHECK`
+  predicate and a tenant scope**. The entire cost this PR adds is the per-row rule evaluation, so a
+  harness over a rule-free entity would calibrate the bound from a cost the real path never pays.
+- **The byte bound is measured beside it**, because for a wide row `MaxRequestBodyBytes` (1 MiB) binds
+  before `MaxBatchRows` and produces exactly the "advice about the wrong thing" this section exists to
+  prevent. The evidence file states the row width at which the two cross.
 - The measurement is written to `docs/superpowers/specs/evidence/`, and the number in the code is the
   one the measurement supports, with the failure mode named — as `MaxTerms`' own remark names
   "900 filter terms answered in 14 ms and 1000 threw a raw `SqliteException`".
@@ -325,10 +380,10 @@ first release, which is the same cost paid later.
 |---|---|
 | `IAlvoData.CreateManyAsync` / `UpdateManyAsync` / `DeleteManyAsync` | The port is the seam a provider implements. A batch that lived only in the core could not be served by a different driver, which is §0 principle 2. |
 | `AlvoRowPatch` (`Guid Id`, `IReadOnlyDictionary<string, object?> Values`) | `UpdateManyAsync`'s element type. A tuple would be untitled in every implementor's signature and could not carry documentation. |
-| `AlvoBatchResult` | What a batch returns: the rows, in request order. A bare `IReadOnlyList<AlvoRecord>` cannot say what a delete returns (nothing) or carry a count. |
+| `AlvoBatchResult` | What a batch returns. It carries `Affected` as well as `Rows`, because a delete produces no rows — so without a count a successful delete and a refusal are **both** an empty list, and a caller reading only `Rows` could not tell them apart. A returned-refusal channel that fails open is the wrong default in a port where every other refusal throws. |
 | `AlvoApiOptions.MaxBatchRows` | A host must be able to lower it; every other payload bound is configurable for the same reason. |
 | `AlvoIdempotency` on `UpdateAsync` / `DeleteAsync` | A **breaking change for implementors**, and — because it is inserted before `precondition` — a compile break for every **positional** caller too, including `DataApiEndpoints`' own two. Optional-with-a-default does not save them; it only makes the break loud rather than silent. Nothing is released. |
-| `AlvoViolation` moves from `MMLib.Alvo.Api` to `MMLib.Alvo.Abstractions` | §6: a batch's refusals travel on `AlvoBatchResult`, so the port must be able to name a row's refusal. It is already public; this changes its assembly, which is why the baseline moves in two places at once. |
+| `AlvoRowRefusal` | §6: a batch's refusals travel on its result, so the port must be able to name a row's refusal — and `AlvoAuthorizationException` carries a message and nothing else. **Not** `AlvoViolation`, which is an HTTP shape carrying a query-parameter vocabulary no implementor can produce. |
 
 Everything else — the batch reader, the batch endpoint, the per-row violation shape — stays `internal`.
 
@@ -336,12 +391,13 @@ Everything else — the batch reader, the batch endpoint, the per-row violation 
 `EfAlvoData`, `InMemoryAlvoData`, and `test/_shared/api/FaultingAlvoData.cs` — the last a test double whose
 whole contract is that every member throws the fifth failure family, so its three additions must too.
 
-**Three approval baselines move, not one**, and the turn hook blocks a turn that grows any of them until
-the `alvo-architecture-rules` pass has justified each symbol:
-`PublicApi.MMLib.Alvo.Abstractions.verified.txt` (the port members, the two signatures, `AlvoRowPatch`,
-`AlvoBatchResult`, `AlvoViolation` arriving), `PublicApi.MMLib.Alvo.verified.txt`
-(`MaxBatchRows`, `AlvoViolation` leaving) and `PublicApi.MMLib.Alvo.Testing.verified.txt` — that last one
-lists **test method names**, so every fact §10 adds to the shared suite moves it too.
+**Three approval baselines move**, and the turn hook blocks a turn that grows any of them until the
+`alvo-architecture-rules` pass has justified each symbol:
+`PublicApi.MMLib.Alvo.Abstractions.verified.txt` (the three port members, the two changed signatures,
+`AlvoRowPatch`, `AlvoBatchResult`, `AlvoRowRefusal`), `PublicApi.MMLib.Alvo.verified.txt`
+(`MaxBatchRows`), and `PublicApi.MMLib.Alvo.Testing.verified.txt` — that last one lists **test method
+names**, so it moves twice: once for `InMemoryAlvoData`'s three members and again for every fact §10 adds
+to the shared suite.
 
 ## 10. How each claim is proved
 
@@ -371,10 +427,15 @@ than being taken from the two that get it from the database.
 | A replay honours the *current* `get` | A caller whose `get` is denied outright gets the id-only answer; a caller a configured `get` rule now excludes gets 404. Both inherited from the create's contract and asserted on the new verbs. |
 | A batch is one transaction | A batch of N whose **last** row fails leaves **no** row written — asserted as a count over the whole entity, on both engines. |
 | Policy is per row | A batch whose rows each pass in isolation but whose combination the `WITH CHECK` refuses is refused; and a batch of N rows for a caller whose tenant covers N−1 of them writes nothing. |
+| **A hook cannot patch a row past the check** | An entity whose `beforeCreate` writes a field the `WITH CHECK` predicate reads: the batch refuses and names that row. This is `EfAlvoData`'s own documented bypass at batch scale, and today nothing would catch it. |
+| **The row that lands is the row that was judged** | A counting hook asserts it ran exactly once per row, and the committed row is compared with the post-image the verdict consumed. |
+| **Invisible and absent are one refusal** | A row of another tenant and a row that never existed produce the **identical** code and message — otherwise a batch answers `MaxBatchRows` existence questions per request. |
+| **A refusal carries no caller text** | The port obligation §6 states: every `AlvoRowRefusal` a batch produces is screened for the values and keys the caller sent. |
 | Cross-tenant, as a test | A batch naming one row of another tenant writes nothing and reports that index — over a tenant-scoped fixture, with the control that the same batch from the owning tenant succeeds. |
 | Every bad row is reported | A batch with three bad rows answers three violations, with indices 1, 4 and 9 — not one. |
 | The bound bounds, and the right one speaks | `MaxBatchRows + 1` rows is refused **naming the row bound**, not the field bound — the fact asserts the code, because §7's whole point is that the flat key count would otherwise fire first with the wrong message. A single row past `MaxPayloadKeys` is still refused per row. |
 | The batch is idempotent as a unit | One key, replayed: the same N rows, and **N rows exist, not 2N**. |
+| A successful delete is not an empty refusal | `DeleteManyAsync` answering `Affected = N` is distinguishable from a refusal answering `Affected = 0` — the fact a caller reading only `Rows` would have got wrong. |
 | Events are per row | A batch of 5 emits 5 outbox rows, in the same transaction — asserted so the follow-up issue has a number to change. |
 
 ## 11. Scope
@@ -414,9 +475,18 @@ sections that currently say the header is ignored.
    correct rather than merely present.
 6. **From RFC 9110 §9.3.5** — a `DELETE` carrying a body. §4.1: chosen for verb symmetry, with the
    stripped-body hazard turned into a refusal rather than a silent success.
-7. **From this design's own first draft**, recorded because the corrections are the substance: the
+7. **From "every offending row is reported"**, for the 409 alone: a constraint conflict names the field
+   and no index, because a `unique` value is caller-guessable where a row id is not, and an index would
+   turn one collision probe into `MaxBatchRows` of them per request. §6.
+8. **From this design's own first draft**, recorded because the corrections are the substance: the
    `row_id` rename was a DDL change dressed as none (§3); the batch's row ceiling was stated as 20 000
    when `MaxPayloadKeys` already caps it near 100 (§7); "the same helpers in a loop" could report at most
    one bad row and, on PostgreSQL, could not continue after any (§5); the fingerprint's stability for a
    create was asserted as a property rather than required as one (§1); and the batch was described as one
-   new endpoint kind where the gate forces three (§0).
+   new endpoint kind where the gate forces three (§0). A second review pass killed five more: the judging
+   pass omitted before-hooks, which is `EfAlvoData`'s own documented authorization bypass (§5.1); the
+   `USING` refusal was a third expression of the verdict the inversion does not reach, and an invisible
+   row was left distinguishable from an absent one (§5.2); narrowing the contended retry would have
+   removed the only absorber of a *measured* SQLite failure mode (§5.3); `AlvoBatchResult` failed open,
+   since a successful delete and a refusal were both an empty list (§9); and moving `AlvoViolation` into
+   the ports would have carried an HTTP wire shape and a PostgREST query vocabulary with it (§6).
