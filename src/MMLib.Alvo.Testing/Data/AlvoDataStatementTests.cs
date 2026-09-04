@@ -244,6 +244,118 @@ public abstract class AlvoDataStatementTests
         return statement[where..];
     }
 
+    /// <summary>
+    /// Everything between the statement's <c>SELECT</c> and its first <c>FROM</c> — the projection alone.
+    /// </summary>
+    /// <remarks>
+    /// Narrower than <see cref="WhereClauseOf"/> is crude, and for the opposite reason: a projection fact
+    /// asserts that a column is <em>not</em> fetched, and the whole statement text names every column
+    /// somewhere (the <c>NULL</c> projection's own alias, the <c>ORDER BY</c>, the <c>WHERE</c>). Asserting
+    /// over the whole text would therefore prove nothing at all.
+    /// </remarks>
+    private static string SelectListOf(string statement)
+    {
+        var select = statement.IndexOf("SELECT", StringComparison.OrdinalIgnoreCase);
+        select.ShouldBeGreaterThanOrEqualTo(0, $"The statement has no SELECT at all:{Environment.NewLine}{statement}");
+
+        var from = statement.IndexOf(" FROM ", select, StringComparison.OrdinalIgnoreCase);
+        from.ShouldBeGreaterThan(select, $"The statement has no FROM clause:{Environment.NewLine}{statement}");
+
+        return statement[(select + "SELECT".Length)..from];
+    }
+
+    /// <summary>
+    /// The <c>SELECT</c> list as its individual items, trimmed. A projection fact needs this rather than the
+    /// list as text: an excluded column's name still <em>appears</em> in the list, as the alias of the
+    /// <c>NULL</c> that replaced it, so a substring assertion could never tell "fetched" from "projected".
+    /// One item per column, and the item's own shape is the answer.
+    /// </summary>
+    private static IReadOnlyList<string> SelectItemsOf(string statement) =>
+        [.. SelectListOf(statement).Split(',').Select(item => item.Trim())];
+
+    /// <summary>
+    /// The push-down, asserted as the only thing a statement can carry: the unselected column is not read.
+    /// </summary>
+    /// <remarks>
+    /// <b>What is deliberately not claimed.</b> <c>NULL AS col</c> stops the engine reading the column; it
+    /// does not make the query proportionally cheaper — the win is real for a wide or TOASTed column and
+    /// near zero for a narrow int. A throughput claim is not something a statement can prove, so none is
+    /// made here.
+    /// </remarks>
+    [Fact]
+    public async Task An_unselected_column_is_not_read_by_the_statement()
+    {
+        var world = await OwnedNotesAsync();
+        world.Probe.ClearStatements();
+
+        await world.Probe.Data.QueryAsync(
+            new AlvoQuery { Entity = Entity, Select = ["label"] }, world.Alice, Token);
+
+        var items = SelectItemsOf(world.Probe.Statements.ShouldHaveSingleItem());
+
+        items.ShouldNotContain("\"title\"", "an unselected column must not be fetched");
+        items.ShouldContain(
+            item => item.EndsWith("AS \"title\"", StringComparison.Ordinal),
+            "it is projected as a typed NULL under its own name instead");
+    }
+
+    /// <summary>
+    /// The row key survives every projection, and this is not merely the returned-key-set contract:
+    /// <c>Paginated</c> mints the keyset cursor from the fetched row's <c>id</c>, so a NULLed key would not
+    /// mis-sort a page — it would break paging outright.
+    /// </summary>
+    [Fact]
+    public async Task The_row_key_is_read_whatever_the_projection_named()
+    {
+        var world = await OwnedNotesAsync();
+        world.Probe.ClearStatements();
+
+        await world.Probe.Data.QueryAsync(
+            new AlvoQuery { Entity = Entity, Select = ["title"] }, world.Alice, Token);
+
+        var items = SelectItemsOf(world.Probe.Statements.ShouldHaveSingleItem());
+
+        items.ShouldContain("\"id\"", "the keyset cursor is minted from the fetched row's id");
+    }
+
+    /// <summary>
+    /// A sort key is read even when the projection excluded it, and this fact is the statement-level twin of
+    /// the behavioural one in <c>AlvoDataProjectionTests</c>. A bare identifier in <c>ORDER BY</c> resolves
+    /// against the output column names on both shipped engines, so a NULLed sort key would order the page by
+    /// the <c>NULL</c> while the keyset boundary in <c>WHERE</c> still described the real sequence.
+    /// </summary>
+    [Fact]
+    public async Task An_unselected_sort_key_is_read_rather_than_projected_as_a_null()
+    {
+        var world = await OwnedNotesAsync();
+        world.Probe.ClearStatements();
+
+        await world.Probe.Data.QueryAsync(
+            new AlvoQuery { Entity = Entity, Select = ["id"], Sort = [new AlvoSort("label")] },
+            world.Alice,
+            Token);
+
+        var items = SelectItemsOf(world.Probe.Statements.ShouldHaveSingleItem());
+
+        items.ShouldContain(
+            "\"label\"", "the ORDER BY would otherwise resolve to the projected NULL of the same name");
+    }
+
+    /// <summary>
+    /// This change alters cost, not conduct: a caller who sends no projection gets the statement they got
+    /// before it, with no null projection anywhere in the <c>SELECT</c> list.
+    /// </summary>
+    [Fact]
+    public async Task A_read_with_no_projection_projects_no_null_at_all()
+    {
+        var world = await PublicNotesAsync();
+        world.Probe.ClearStatements();
+
+        await world.Probe.Data.QueryAsync(new AlvoQuery { Entity = Entity }, world.Alice, Token);
+
+        world.Probe.Statements.ShouldHaveSingleItem().ShouldNotContain(" AS ", Case.Sensitive);
+    }
+
     private Task<StatementWorld> OwnedNotesAsync() => NotesAsync("owner_id == @user.id");
 
     private Task<StatementWorld> PublicNotesAsync() => NotesAsync("true");
@@ -276,6 +388,7 @@ public abstract class AlvoDataStatementTests
             ["owner_id"] = owner,
             ["tenant_id"] = tenant,
             ["title"] = "seeded",
+            ["label"] = "seeded-label",
         });
 
     private static AlvoContext Caller(TenantId tenant) => new()
@@ -305,6 +418,10 @@ public abstract class AlvoDataStatementTests
                     {
                         ["owner_id"] = new() { Type = DescField.Uuid, Required = true },
                         ["title"] = new() { Type = DescField.String },
+
+                        // A second, nullable field exists only so a projection fact can sort by a column it
+                        // did not select — the shape that would have ordered a page by a projected NULL.
+                        ["label"] = new() { Type = DescField.String },
                     },
                     Rules = new AccessRules { List = rule, Get = rule, Update = rule, Delete = rule },
                 },
@@ -322,6 +439,7 @@ public abstract class AlvoDataStatementTests
                     new FieldSchema { Name = "owner_id", Type = SchemaField.Uuid, Required = true },
                     new FieldSchema { Name = "tenant_id", Type = SchemaField.Uuid, Required = true, Indexed = true },
                     new FieldSchema { Name = "title", Type = SchemaField.String },
+                    new FieldSchema { Name = "label", Type = SchemaField.String, Nullable = true },
                 ],
             },
         ]);
