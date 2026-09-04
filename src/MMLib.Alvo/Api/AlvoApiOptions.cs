@@ -77,9 +77,10 @@ public sealed class AlvoApiOptions
     /// <b>Not <see cref="MaxPayloadKeys"/>, and that is the whole reason this exists.</b> The key bound counts
     /// property names at every depth, so a batch of N rows with K fields spends <c>1 + N·K</c> of it — about a
     /// hundred rows for a five-field entity. A batch refused by that bound is told it sent too many
-    /// <em>fields</em>, which is advice about the wrong thing. The batch reader counts rows against this and
-    /// applies <see cref="MaxPayloadKeys"/> per row, which is what that number has always meant on a single
-    /// write.
+    /// <em>fields</em>, which is advice about the wrong thing — and it makes this bound unreachable over HTTP
+    /// for any entity with more than one field. So the batch body's shape scan resets the key counter as each
+    /// row opens: <see cref="MaxPayloadKeys"/> is spent per row, which is what that number has always meant on
+    /// a single write, and this one is spent on rows.
     /// </para>
     /// <para>
     /// <b>Chosen rather than measured to a ceiling, and the difference is stated because

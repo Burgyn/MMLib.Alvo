@@ -26,7 +26,15 @@ internal enum BodyRefusal
     TooDeep,
 
     /// <summary>The body carries more property names, at any depth, than the bound allows.</summary>
+    /// <remarks>
+    /// On a batch body the count is scoped to one row rather than to the whole body — see
+    /// <see cref="BoundedJsonBody.ReadAsync(HttpRequest, MemoryStream, AlvoApiOptions, string?, CancellationToken)"/>
+    /// for why sharing one budget across the rows makes the row bound unreachable.
+    /// </remarks>
     TooManyKeys,
+
+    /// <summary>A batch body carries more rows than <see cref="AlvoApiOptions.MaxBatchRows"/> allows.</summary>
+    TooManyRows,
 
     /// <summary>One object in the body uses the same property name twice.</summary>
     DuplicateName,
@@ -78,10 +86,41 @@ internal static class BoundedJsonBody
     /// which is itself an <see cref="int"/> — stated here because the guard is a property of the line above
     /// rather than of the cast, and a reader arriving at the cast alone cannot see it.
     /// </remarks>
+    internal static Task<BodyRefusal?> ReadAsync(
+        HttpRequest request,
+        MemoryStream destination,
+        AlvoApiOptions options,
+        CancellationToken cancellationToken) =>
+        ReadAsync(request, destination, options, rowsMember: null, cancellationToken);
+
+    /// <inheritdoc cref="ReadAsync(HttpRequest, MemoryStream, AlvoApiOptions, CancellationToken)"/>
+    /// <remarks>
+    /// <para>
+    /// <b>With <paramref name="rowsMember"/>, the key bound is spent per row rather than across the body,
+    /// and the row bound is spent while reading.</b> Both matter, and the first one is not a refinement: the
+    /// key bound counts property names at every depth, so a batch of N rows with K fields spends
+    /// <c>1 + N·K</c> of one shared budget — about a hundred rows for a five-field entity, refused with
+    /// "too many fields", which is advice about the wrong thing and makes
+    /// <see cref="AlvoApiOptions.MaxBatchRows"/> unreachable. Scoping the counter to the object currently
+    /// open inside the reserved array is what makes each bound mean what its own documentation says.
+    /// </para>
+    /// <para>
+    /// The row bound is checked as each element opens, so a body carrying a million rows is refused at the
+    /// bound rather than after the whole array has been walked.
+    /// </para>
+    /// </remarks>
+    /// <param name="request">The request whose body to read.</param>
+    /// <param name="destination">The buffer to read into.</param>
+    /// <param name="options">The bounds to enforce.</param>
+    /// <param name="rowsMember">
+    /// The reserved member whose array elements are rows, or <see langword="null"/> for an ordinary body.
+    /// </param>
+    /// <param name="cancellationToken">A token to cancel the read.</param>
     internal static async Task<BodyRefusal?> ReadAsync(
         HttpRequest request,
         MemoryStream destination,
         AlvoApiOptions options,
+        string? rowsMember,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -92,7 +131,8 @@ internal static class BoundedJsonBody
             request, destination, options.MaxRequestBodyBytes, cancellationToken).ConfigureAwait(false);
 
         return readFailure
-            ?? EnsureWithinShapeBounds(destination.GetBuffer().AsSpan(0, (int)destination.Length), options);
+            ?? EnsureWithinShapeBounds(
+                destination.GetBuffer().AsSpan(0, (int)destination.Length), options, rowsMember);
     }
 
     /// <summary>The stable code a refusal is published under, whichever surface words it.</summary>
@@ -106,6 +146,7 @@ internal static class BoundedJsonBody
         BodyRefusal.TooDeep => "body-too-deep",
         BodyRefusal.TooManyKeys => "body-too-many-fields",
         BodyRefusal.DuplicateName => "duplicate-field",
+        BodyRefusal.TooManyRows => "batch-too-many-rows",
         _ => throw new ArgumentOutOfRangeException(
             nameof(refusal), refusal, "Unmapped body refusal; give it a stable code here."),
     };
@@ -161,7 +202,8 @@ internal static class BoundedJsonBody
     /// simply never the first to speak.
     /// </para>
     /// </remarks>
-    private static BodyRefusal? EnsureWithinShapeBounds(ReadOnlySpan<byte> utf8Body, AlvoApiOptions options)
+    private static BodyRefusal? EnsureWithinShapeBounds(
+        ReadOnlySpan<byte> utf8Body, AlvoApiOptions options, string? rowsMember)
     {
         var reader = new Utf8JsonReader(
             utf8Body,
@@ -174,7 +216,7 @@ internal static class BoundedJsonBody
                 return BodyRefusal.NotAnObject;
             }
 
-            return ScanShape(ref reader, options);
+            return ScanShape(ref reader, options, rowsMember);
         }
         catch (JsonException)
         {
@@ -208,9 +250,13 @@ internal static class BoundedJsonBody
     /// <see cref="StringComparer.Ordinal"/>, so <c>a</c> and <c>A</c> are two names.
     /// </para>
     /// </remarks>
-    private static BodyRefusal? ScanShape(ref Utf8JsonReader reader, AlvoApiOptions options)
+    private static BodyRefusal? ScanShape(
+        ref Utf8JsonReader reader, AlvoApiOptions options, string? rowsMember)
     {
         var names = 0;
+        var rows = 0;
+        var rowsDepth = -1;
+        var atRowsMember = false;
         var seen = new NamesByDepth();
 
         seen.Enter(reader.CurrentDepth + 1);
@@ -222,20 +268,46 @@ internal static class BoundedJsonBody
                 return BodyRefusal.TooDeep;
             }
 
-            if (reader.TokenType == JsonTokenType.StartObject)
+            if (reader.TokenType == JsonTokenType.StartArray && rowsDepth < 0 && atRowsMember)
+            {
+                rowsDepth = reader.CurrentDepth;
+            }
+            else if (reader.TokenType == JsonTokenType.StartObject)
             {
                 seen.Enter(reader.CurrentDepth + 1);
+                if (rowsDepth >= 0 && reader.CurrentDepth == rowsDepth + 1)
+                {
+                    if (++rows > options.MaxBatchRows)
+                    {
+                        return BodyRefusal.TooManyRows;
+                    }
+
+                    names = 0;
+                }
             }
             else if (reader.TokenType == JsonTokenType.PropertyName)
             {
+                var name = reader.GetString()!;
+                atRowsMember = rowsMember is not null
+                    && reader.CurrentDepth == 1
+                    && string.Equals(name, rowsMember, StringComparison.Ordinal);
+
                 if (++names > options.MaxPayloadKeys)
                 {
                     return BodyRefusal.TooManyKeys;
                 }
 
-                if (!seen.Add(reader.CurrentDepth, reader.GetString()!))
+                if (!seen.Add(reader.CurrentDepth, name))
                 {
                     return BodyRefusal.DuplicateName;
+                }
+            }
+            else if (rowsDepth >= 0 && reader.CurrentDepth == rowsDepth + 1
+                && reader.TokenType is JsonTokenType.String or JsonTokenType.Number)
+            {
+                if (++rows > options.MaxBatchRows)
+                {
+                    return BodyRefusal.TooManyRows;
                 }
             }
         }

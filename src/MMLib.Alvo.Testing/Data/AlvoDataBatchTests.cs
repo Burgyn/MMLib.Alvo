@@ -172,6 +172,66 @@ public abstract class AlvoDataBatchTests : AlvoDataFixture
         hidden.FixSuggestion.ShouldBe(missing.FixSuggestion);
     }
 
+    /// <summary>
+    /// A batch naming one row twice is refused, and every repeat is named.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This is a <c>WITH CHECK</c> bypass, not a tidiness rule.</b> Every row is judged against its own
+    /// locked pre-image <em>before</em> any row is written, so two patches for one row are both judged
+    /// against the <em>original</em> — and then both applied. The stored row is the composition of the two,
+    /// which no verdict ever saw. With a rule of the shape <c>a != b</c> over <c>{a:1, b:2}</c>: <c>{a:5}</c>
+    /// passes against <c>{a:5, b:2}</c>, <c>{b:5}</c> passes against <c>{a:1, b:5}</c>, and <c>{a:5, b:5}</c>
+    /// lands.
+    /// </para>
+    /// <para>
+    /// Refused rather than folded, because a partial order over one row is not expressible in one
+    /// transaction: "which patch wins" has no answer this API ever promised, and picking one silently would
+    /// make the outcome depend on an ordering the caller cannot see.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_batch_naming_one_row_twice_is_refused()
+    {
+        var world = await AuditedWorldAsync();
+        var row = IdOf(await world.Data.CreateAsync(Orders, Payload("first"), world.Caller, cancellationToken: Ct));
+
+        var result = await world.Data.UpdateManyAsync(
+            Orders,
+            [
+                new AlvoRowPatch(row, Payload("second")),
+                new AlvoRowPatch(row, Payload("third")),
+            ],
+            world.Caller,
+            cancellationToken: Ct);
+
+        result.Succeeded.ShouldBeFalse("one row named twice is a batch nobody can judge");
+        result.Refusals.Select(refusal => refusal.Index).ShouldBe(
+            [1], customMessage: "the first occurrence stands; every repeat is named");
+
+        var stored = await world.Data.GetAsync(Orders, row, world.Caller, Ct);
+        stored.ShouldNotBeNull()["title"].ShouldBe("first", "a refused batch writes nothing");
+    }
+
+    /// <summary>A batch delete naming one row twice is refused, so its count can never exceed the rows it removed.</summary>
+    /// <remarks>
+    /// Without this the second delete of a row affects zero rows, and the batch still reports it as affected
+    /// and emits a second <c>deleted</c> event for one physical row — a consumer that is not idempotent then
+    /// processes the deletion twice.
+    /// </remarks>
+    [Fact]
+    public async Task A_batch_delete_naming_one_row_twice_is_refused()
+    {
+        var world = await AuditedWorldAsync();
+        var row = IdOf(await world.Data.CreateAsync(Orders, Payload("first"), world.Caller, cancellationToken: Ct));
+
+        var result = await world.Data.DeleteManyAsync(Orders, [row, row], world.Caller, cancellationToken: Ct);
+
+        result.Succeeded.ShouldBeFalse();
+        result.Refusals.Select(refusal => refusal.Index).ShouldBe([1]);
+        (await CountAsync(world, Orders, world.Caller)).ShouldBe(1, "a refused batch removes nothing");
+    }
+
     /// <summary>A batch is one request under one key, so replaying it writes no second set of rows.</summary>
     [Fact]
     public async Task A_replayed_batch_writes_no_second_set_of_rows()

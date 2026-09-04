@@ -88,6 +88,25 @@ public sealed class AlvoAuthorizationException : Exception
     /// </remarks>
     public const string RowUnavailable = "The row is not available to this caller.";
 
+    /// <summary>The refusal for a batch that names one row more than once.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Refused rather than folded, because it is a <c>WITH CHECK</c> bypass and not untidiness.</b> Every
+    /// row of a batch is judged against its own locked pre-image <em>before</em> any row is written, so two
+    /// patches for one row are both judged against the <em>original</em> — and then both applied. What lands
+    /// is the composition of the two, which no verdict ever saw. With a rule of the shape <c>a != b</c> over
+    /// a row <c>{a:1, b:2}</c>: <c>{a:5}</c> passes when judged as <c>{a:5, b:2}</c>, <c>{b:5}</c> passes
+    /// when judged as <c>{a:1, b:5}</c>, and <c>{a:5, b:5}</c> is stored.
+    /// </para>
+    /// <para>
+    /// Folding the patches instead would need an answer to "which one wins", and a partial order over one
+    /// row inside one transaction is not something this port ever promised. On a delete the same input is
+    /// milder and still wrong: the second removal affects no rows, while the count and the emitted event
+    /// both report it as one.
+    /// </para>
+    /// </remarks>
+    public const string RowNamedTwice = "The batch names this row more than once.";
+
     /// <summary>Initializes a new instance of the <see cref="AlvoAuthorizationException"/> class.</summary>
     public AlvoAuthorizationException()
         : base(DefaultMessage)

@@ -164,13 +164,15 @@ public abstract class AlvoDataFixture
     /// <param name="Rules">The access rules to compile.</param>
     /// <param name="Extra">An additional required field, for the owner-scoped fixture.</param>
     /// <param name="Hidden">A field and the <c>hidden</c> expression that masks it, for the masking fixture.</param>
+    /// <param name="Hooks">The before-hooks to compile, for the rejecting fixture.</param>
     private protected sealed record EntityFixture(
         string Name,
         bool Audit,
         EntityTenancy Tenancy,
         AccessRules Rules,
         (string Name, DescField Type)? Extra = null,
-        (string Field, string Expression)? Hidden = null)
+        (string Field, string Expression)? Hidden = null,
+        EntityHooks? Hooks = null)
     {
         internal static EntityFixture Permissive(string name, bool audit) => new(
             name,
@@ -208,6 +210,7 @@ public abstract class AlvoDataFixture
         Audit = entity.Audit,
         Fields = DescriptorFieldsOf(entity),
         Rules = entity.Rules,
+        Hooks = entity.Hooks,
     };
 
     private protected static Dictionary<string, FieldDescriptor> DescriptorFieldsOf(EntityFixture entity)

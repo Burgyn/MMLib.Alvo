@@ -419,15 +419,28 @@ public sealed class InMemoryAlvoData : IAlvoData
     /// </remarks>
     /// <param name="context">The replaying caller, whose tenant and user scope the record.</param>
     /// <param name="idempotency">The token this request carries, or <see langword="null"/>.</param>
-    private bool IsSpent(AlvoContext context, AlvoIdempotency? idempotency)
+    private bool IsSpent(AlvoContext context, AlvoIdempotency? idempotency) =>
+        SpentRowCount(context, idempotency) is not null;
+
+    /// <inheritdoc cref="IsSpent"/>
+    /// <returns>
+    /// How many rows the recorded write touched, or <see langword="null"/> when this key has not been used in
+    /// this scope yet. The <b>record's</b> count rather than the current request's — they are equal whenever
+    /// the fingerprint matched, but answering from the request would report the caller's own number back to
+    /// them rather than what was stored.
+    /// </returns>
+    /// <param name="context">The replaying caller, whose tenant and user scope the record.</param>
+    /// <param name="idempotency">The token this request carries, or <see langword="null"/>.</param>
+    private int? SpentRowCount(AlvoContext context, AlvoIdempotency? idempotency)
     {
         if (idempotency is not { } token || !_idempotency.TryGetValue(IdempotencyKey(token, context), out var record))
         {
-            return false;
+            return null;
         }
 
         EnsureSameRequest(record, token);
-        return true;
+
+        return record.RowIds.Count;
     }
 
     /// <summary>
@@ -882,6 +895,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         string entity, IReadOnlyList<IReadOnlyDictionary<string, object?>> rows, AlvoContext context,
         AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(rows);
         var decision = BatchDecision(entity, DataOperation.Create, rows.Count, context, idempotency, cancellationToken);
 
         lock (_gate)
@@ -906,6 +920,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         string entity, IReadOnlyList<AlvoRowPatch> rows, AlvoContext context,
         AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(rows);
         var decision = BatchDecision(entity, DataOperation.Update, rows.Count, context, idempotency, cancellationToken);
 
         lock (_gate)
@@ -913,6 +928,11 @@ public sealed class InMemoryAlvoData : IAlvoData
             if (ReplayedBatch(entity, context, idempotency) is { } replayed)
             {
                 return Task.FromResult(replayed);
+            }
+
+            if (RepeatedRows(rows, row => row.Id) is { Count: > 0 } repeats)
+            {
+                return Task.FromResult(AlvoBatchResult.Refused(repeats));
             }
 
             var (judged, refusals) = JudgedUpdates(entity, rows, decision, context);
@@ -930,14 +950,20 @@ public sealed class InMemoryAlvoData : IAlvoData
         string entity, IReadOnlyList<Guid> ids, AlvoContext context, AlvoIdempotency? idempotency = null,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(ids);
         var decision = BatchDecision(entity, DataOperation.Delete, ids.Count, context, idempotency, cancellationToken);
         EnsureNotSoftDeleted(entity);
 
         lock (_gate)
         {
-            if (IsSpent(context, idempotency))
+            if (SpentRowCount(context, idempotency) is { } removed)
             {
-                return Task.FromResult(AlvoBatchResult.Wrote([], ids.Count));
+                return Task.FromResult(AlvoBatchResult.Wrote([], removed));
+            }
+
+            if (RepeatedRows(ids, row => row) is { Count: > 0 } repeats)
+            {
+                return Task.FromResult(AlvoBatchResult.Refused(repeats));
             }
 
             var (removable, refusals) = JudgedDeletes(entity, ids, decision, context);
@@ -1226,6 +1252,41 @@ public sealed class InMemoryAlvoData : IAlvoData
     }
 
     private static Guid RowIdOf(AlvoRecord row) => (Guid)row[IdField]!;
+
+    /// <summary>
+    /// Every row after the first that names an id an earlier row already named, as a refusal each — mirroring
+    /// <c>BatchWrite.RepeatedRows</c>, and for the reason
+    /// <see cref="AlvoAuthorizationException.RowNamedTwice"/> gives.
+    /// </summary>
+    /// <typeparam name="T">The row shape — a patch, or a bare id.</typeparam>
+    /// <param name="rows">The rows the caller supplied, in request order.</param>
+    /// <param name="id">The row id each element addresses.</param>
+    private static List<AlvoRowRefusal> RepeatedRows<T>(IReadOnlyList<T> rows, Func<T, Guid> id)
+    {
+        var seen = new HashSet<Guid>();
+        var repeats = new List<AlvoRowRefusal>();
+        for (var index = 0; index < rows.Count; index++)
+        {
+            if (!seen.Add(id(rows[index])))
+            {
+                repeats.Add(NamedTwice(index));
+            }
+        }
+
+        return repeats;
+    }
+
+    /// <summary>A row the caller named more than once, refused by its own index.</summary>
+    /// <param name="index">The repeated row's position in the list the caller supplied.</param>
+    private static AlvoRowRefusal NamedTwice(int index) =>
+        new(
+            index,
+            DuplicateRowCode,
+            AlvoAuthorizationException.RowNamedTwice,
+            "Send each row once. Merge the changes you meant for it into a single entry.");
+
+    /// <inheritdoc cref="ForbiddenCode"/>
+    private const string DuplicateRowCode = "duplicate-row";
 
     /// <summary>
     /// The result a replay of <paramref name="idempotency"/> answers with, or <see langword="null"/> when

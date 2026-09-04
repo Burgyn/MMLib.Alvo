@@ -130,8 +130,10 @@ namespace MMLib.Alvo.Testing.Data
     public abstract class AlvoDataBatchTests : MMLib.Alvo.Testing.Data.AlvoDataFixture
     {
         protected AlvoDataBatchTests() { }
+        public System.Threading.Tasks.Task A_batch_delete_naming_one_row_twice_is_refused() { }
         public System.Threading.Tasks.Task A_batch_delete_removes_every_named_row_or_none() { }
         public System.Threading.Tasks.Task A_batch_naming_another_tenants_row_writes_nothing() { }
+        public System.Threading.Tasks.Task A_batch_naming_one_row_twice_is_refused() { }
         public System.Threading.Tasks.Task A_batch_whose_last_row_fails_writes_nothing() { }
         public System.Threading.Tasks.Task A_caller_the_policy_denies_outright_is_refused_before_any_row_is_judged() { }
         public System.Threading.Tasks.Task A_refusal_never_echoes_what_the_caller_sent() { }
@@ -154,6 +156,7 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task A_mutate_that_moves_a_row_out_of_the_create_rule_is_refused() { }
         public System.Threading.Tasks.Task A_mutate_the_create_rule_accepts_still_lands() { }
         public System.Threading.Tasks.Task A_mutate_writes_through_a_bound_parameter_like_every_other_value() { }
+        public System.Threading.Tasks.Task A_reject_inside_a_batch_names_the_row_it_refused() { }
         public System.Threading.Tasks.Task A_reject_on_a_delete_leaves_the_row_in_place() { }
         public System.Threading.Tasks.Task A_reject_on_an_update_leaves_the_stored_row_untouched() { }
         public System.Threading.Tasks.Task A_reject_refuses_the_create_and_stores_no_row() { }

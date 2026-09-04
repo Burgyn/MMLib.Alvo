@@ -134,6 +134,43 @@ public abstract class AlvoDataBeforeHookTests
     }
 
     /// <summary>
+    /// A <c>reject</c> inside a <b>batch</b> refuses that row by its own index, rather than aborting the
+    /// whole batch anonymously.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="AlvoBatchResult.Refusals"/> promises that every refused row is named. A hook's
+    /// <c>reject</c> raises <see cref="AlvoAuthorizationException"/>, which is how a single write reports it
+    /// — and left to propagate out of a batch's judging pass it would give the caller a bare refusal with
+    /// nothing to repair, on a request where the whole point of the refusal list is that they can repair it.
+    /// </para>
+    /// <para>
+    /// The control is the neighbouring row: it is a create the hook admits, so "refused" cannot pass because
+    /// the batch path refuses everything.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_reject_inside_a_batch_names_the_row_it_refused()
+    {
+        var world = await DealsWorldAsync();
+
+        var result = await world.Data.CreateManyAsync(
+            Deals,
+            [
+                Payload(("tenant_id", Caller.Tenant!.Value.Value), ("title", "ordinary deal"), ("stage", "lead")),
+                Payload(("tenant_id", Caller.Tenant!.Value.Value), ("title", "blocked deal"), ("stage", Blocked)),
+            ],
+            Caller,
+            cancellationToken: Ct);
+
+        result.Succeeded.ShouldBeFalse();
+        var refusal = result.Refusals.ShouldHaveSingleItem();
+        refusal.Index.ShouldBe(1, "the row the hook refused, not the whole batch");
+        refusal.Message.ShouldContain(BlockedCreateRefusal, customMessage: "the author's own text reaches the caller");
+        (await VisibleAsync(world)).ShouldBeEmpty("a refused batch leaves nothing behind");
+    }
+
+    /// <summary>
     /// The counterweight to the refusal: a create whose <c>reject</c> condition is false is not refused. An
     /// implementation that refused every write would satisfy the fact above on its own.
     /// </summary>

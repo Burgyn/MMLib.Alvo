@@ -84,6 +84,79 @@ public class DataApiBatchTests
     }
 
     /// <summary>
+    /// The field bound is spent PER ROW, so a batch of many small rows reaches the row bound rather than the
+    /// field bound.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This was silently false until a reviewer caught it.</b> The shape scan counted property names once
+    /// across the whole body, so a batch of N rows with K fields spent <c>1 + N·K</c> of one shared budget:
+    /// at the defaults a five-field entity was refused at about a hundred rows with "too many fields" —
+    /// advice about the wrong thing by <see cref="AlvoApiOptions.MaxPayloadKeys"/>'s own definition — and
+    /// <see cref="AlvoApiOptions.MaxBatchRows"/> was unreachable over HTTP for any entity with more than one
+    /// field.
+    /// </para>
+    /// <para>
+    /// The bounds are set deliberately far apart here: three fields per row and a key bound of four, so
+    /// twenty rows spend 61 keys against a shared budget and 3 against a per-row one. A batch that is
+    /// refused proves the counter is shared; a batch that is answered proves it is not.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task The_field_bound_is_spent_per_row_not_across_the_batch()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync(
+            [_admin],
+            new AlvoApiWorldSetup(ConfigureApi: options =>
+            {
+                options.MaxPayloadKeys = 4;
+                options.MaxBatchRows = 100;
+            }));
+
+        var rows = Enumerable.Range(0, 20)
+            .Select(ordinal => new JsonObject
+            {
+                ["name"] = $"Owner {ordinal}",
+                ["email"] = $"owner{ordinal}@example.test",
+                ["phone"] = "+421000000000",
+            })
+            .ToArray();
+
+        using var response = await world.SendAsync(
+            HttpMethod.Post, "/api/owners/batch", _admin, body: Rows(rows));
+
+        response.StatusCode.ShouldBe(
+            HttpStatusCode.OK,
+            $"three fields a row is inside a per-row bound of four: {await response.ReadTextAsync()}");
+        (await world.CountRowsAsync("owners")).ShouldBe(20);
+    }
+
+    /// <summary>A row past the per-row field bound is still refused, so the bound is real rather than absent.</summary>
+    /// <remarks>
+    /// The counterweight to the fact above: an implementation that stopped counting names altogether would
+    /// satisfy it, and this is what tells "scoped per row" from "not enforced".
+    /// </remarks>
+    [Fact]
+    public async Task A_row_past_the_field_bound_is_still_refused()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync(
+            [_admin], new AlvoApiWorldSetup(ConfigureApi: options => options.MaxPayloadKeys = 2));
+
+        using var response = await world.SendAsync(
+            HttpMethod.Post, "/api/owners/batch", _admin,
+            body: Rows(new JsonObject
+            {
+                ["name"] = "Too wide",
+                ["email"] = "wide@example.test",
+                ["phone"] = "+421000000000",
+            }));
+
+        response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity, await response.ReadTextAsync());
+        (await response.ReadViolationsAsync()).Select(violation => violation.Code)
+            .ShouldContain("body-too-many-fields");
+    }
+
+    /// <summary>
     /// An empty batch is refused on every verb — and on the <c>DELETE</c> that is what turns a body an
     /// intermediary stripped into a 422 rather than a silent success.
     /// </summary>

@@ -360,7 +360,8 @@ in the grammar distinguishes them.
 | Page size | `limit` ≤ `MaxPageSize` (200); absent ⇒ `DefaultPageSize` (50) | API options |
 | Request body | 1 MiB, depth 32, 512 keys — a **write payload or a query body** | API options |
 | `Idempotency-Key` | ≤ 255 UTF-8 **bytes**, and a host may only narrow that | port + options |
-| Batch rows, per request | 1000 (`AlvoApiOptions.MaxBatchRows`) — and `MaxPayloadKeys` applies **per row** | API options |
+| Batch rows, per request | 1000 (`AlvoApiOptions.MaxBatchRows`), counted as each row opens | API options |
+| Property names, on a batch | `MaxPayloadKeys` **per row**, not across the body | API options |
 
 **The value row exists because a JSON array's elements are not property names.** `BoundedJsonBody`'s key
 bound counts property names at every depth, so `{"or": […500 000 strings…]}` is **one key**: it satisfies
@@ -634,6 +635,32 @@ refusal.
 
 **No precondition on the batch delete.** One version cannot condition many rows, and accepting one would
 either check a single row or check none while looking as though it checked all of them.
+
+**One row named twice is refused**, and that is a `WITH CHECK` bypass rather than untidiness. Every row is
+judged against its own *locked* pre-image before any row is written, so two patches for one row are both
+judged against the original — and then both applied, leaving a composition no verdict ever saw. With a rule
+`a != b` over `{a:1, b:2}`: `{a:5}` passes as `{a:5, b:2}`, `{b:5}` passes as `{a:1, b:5}`, and `{a:5, b:5}`
+lands. Folding the patches instead would need an answer to "which one wins", and a partial order over one row
+inside one transaction is not something this API promised. Found by review, not by the suite — the facts that
+pin it were written afterwards.
+
+**The key bound is spent per row and the row bound while reading.** `BoundedJsonBody`'s shape scan resets the
+property-name counter as each element of `rows` opens, and counts the elements as it goes. Sharing one key
+budget across the batch — which is what the first implementation did — capped a five-field entity near a
+hundred rows and refused it as "too many fields", making `MaxBatchRows` unreachable over HTTP.
+
+**A known, bounded channel: a batch's refusal list tells "this row is refused" from "this row is not yours".**
+A row that exists and fails `WITH CHECK` answers `WriteRejectedByPolicy`; a row that is absent *or* invisible
+answers `RowUnavailable`. Because a refused batch writes nothing, a caller can send up to `MaxBatchRows`
+candidate ids and read the partition off the refusal list without changing anything. For a caller who may
+also read, this discloses nothing new. For the **write-but-no-read** configuration the framework supports, it
+is a real enumeration channel — and an amplification by `MaxBatchRows` of the single-row 403-vs-404
+distinction that already exists.
+
+Collapsing the two was considered and **rejected**: *absent* and *invisible* were collapsed because both mean
+"check the id", so the caller loses nothing. *Check-refused* and *unavailable* mean different repairs, and
+collapsing them would leave every batch refusal unactionable — which is the entire reason the refusal list
+exists. Tracked as **#194** so the trade is revisited rather than forgotten.
 
 **The cost, stated: one event per row.** A 500-row import fans out to 500 outbox rows and 500 deliveries.
 `baas-analyza` §3 asks for the opposite — *"import 10k riadkov nesmie znamenať 10k webhookov"*, with the

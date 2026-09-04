@@ -34,6 +34,35 @@ internal static class BatchWrite
             .OrderBy(pair => id(pair.Row))
     ];
 
+    /// <summary>
+    /// Every row after the first that names an id an earlier row already named, as a refusal each.
+    /// </summary>
+    /// <remarks>
+    /// <b>Checked before anything is judged, because it is a question about the request rather than about a
+    /// row.</b> The first occurrence stands and every repeat is named, so a caller removes exactly the rows
+    /// the response points at. See <see cref="AlvoAuthorizationException.RowNamedTwice"/> for why this is a
+    /// refusal rather than a fold.
+    /// </remarks>
+    /// <typeparam name="T">The row shape — a patch, or a bare id.</typeparam>
+    /// <param name="rows">The rows the caller supplied, in request order.</param>
+    /// <param name="id">The row id each element addresses.</param>
+    /// <param name="refusal">Builds the refusal for one repeated row.</param>
+    internal static List<AlvoRowRefusal> RepeatedRows<T>(
+        IReadOnlyList<T> rows, Func<T, Guid> id, Func<int, AlvoRowRefusal> refusal)
+    {
+        var seen = new HashSet<Guid>();
+        var repeats = new List<AlvoRowRefusal>();
+        for (var index = 0; index < rows.Count; index++)
+        {
+            if (!seen.Add(id(rows[index])))
+            {
+                repeats.Add(refusal(index));
+            }
+        }
+
+        return repeats;
+    }
+
     /// <summary>The refusals a batch collected, in the order the caller sent the rows they name.</summary>
     /// <remarks>
     /// Sorted on the way out rather than collected in order, because the judging pass runs in lock order.

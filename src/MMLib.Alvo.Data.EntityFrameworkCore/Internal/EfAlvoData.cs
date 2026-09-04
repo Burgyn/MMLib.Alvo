@@ -2050,7 +2050,16 @@ internal sealed class EfAlvoData : IAlvoData
         AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context,
         Dictionary<string, object> candidate, DateTimeOffset now, int index)
     {
-        var patch = _hooks.Run(schema.Name, DataOperation.Create, Unmasked(candidate), previous: null, context, now);
+        IReadOnlyDictionary<string, object?> patch;
+        try
+        {
+            patch = _hooks.Run(schema.Name, DataOperation.Create, Unmasked(candidate), previous: null, context, now);
+        }
+        catch (AlvoAuthorizationException refusedByHook)
+        {
+            return (null, Forbidden(index, refusedByHook.Message));
+        }
+
         if (patch.Count == 0)
         {
             return (candidate, null);
@@ -2095,6 +2104,11 @@ internal sealed class EfAlvoData : IAlvoData
         AlvoContext context, IReadOnlyList<AlvoRowPatch> rows, DateTimeOffset now,
         CancellationToken cancellationToken)
     {
+        if (BatchWrite.RepeatedRows(rows, row => row.Id, NamedTwice) is { Count: > 0 } repeats)
+        {
+            return BatchOutcome.Refused(repeats);
+        }
+
         var judged = new List<(int Index, Guid Id, AlvoRecord PreImage, IReadOnlyDictionary<string, object?> Values)>(rows.Count);
         var refusals = new List<AlvoRowRefusal>();
 
@@ -2115,7 +2129,17 @@ internal sealed class EfAlvoData : IAlvoData
             }
 
             var preImage = Unmasked(locked);
-            var vetted = RunBeforeUpdate(schema, context, preImage, patch.Values, now);
+            IReadOnlyDictionary<string, object?> vetted;
+            try
+            {
+                vetted = RunBeforeUpdate(schema, context, preImage, patch.Values, now);
+            }
+            catch (AlvoAuthorizationException refusedByHook)
+            {
+                refusals.Add(Forbidden(index, refusedByHook.Message));
+                continue;
+            }
+
             if (WriteRefusal(decision, Merge(preImage, vetted), preImage, context) is { } rejected)
             {
                 refusals.Add(Forbidden(index, rejected));
@@ -2209,6 +2233,11 @@ internal sealed class EfAlvoData : IAlvoData
     {
         EnsureNotSoftDeleted(schema);
 
+        if (BatchWrite.RepeatedRows(ids, row => row, NamedTwice) is { Count: > 0 } repeats)
+        {
+            return BatchOutcome.Refused(repeats);
+        }
+
         var judged = new List<(int Index, Guid Id, AlvoRecord PreImage)>(ids.Count);
         var refusals = new List<AlvoRowRefusal>();
 
@@ -2222,7 +2251,16 @@ internal sealed class EfAlvoData : IAlvoData
                 continue;
             }
 
-            RunBeforeDelete(schema, context, Unmasked(locked), now);
+            try
+            {
+                RunBeforeDelete(schema, context, Unmasked(locked), now);
+            }
+            catch (AlvoAuthorizationException refusedByHook)
+            {
+                refusals.Add(Forbidden(index, refusedByHook.Message));
+                continue;
+            }
+
             judged.Add((index, id, Unmasked(locked)));
         }
 
@@ -2233,11 +2271,15 @@ internal sealed class EfAlvoData : IAlvoData
 
         foreach (var (_, id, _) in judged)
         {
-            await ConstraintViolationTranslator.TranslatedAsync(
+            var affected = await ConstraintViolationTranslator.TranslatedAsync(
                 () => RowOf(PolicyRoot(db, schema, decision, context), id).ExecuteDeleteAsync(cancellationToken),
                 _dialect,
                 db.Rows(schema.Name).EntityType,
                 schema);
+            if (affected == 0)
+            {
+                throw new AlvoRecordNotFoundException();
+            }
         }
 
         await RecomputeRollupsAsync(db, schema, [.. judged.Select(row => row.PreImage.Values)], cancellationToken);
@@ -2259,6 +2301,15 @@ internal sealed class EfAlvoData : IAlvoData
     /// <param name="message">The refusal, built from constants and never from the caller's own text.</param>
     private static AlvoRowRefusal Forbidden(int index, string message) =>
         new(index, ForbiddenCode, message, "Change the row so the entity's rules admit it, or drop it from the batch.");
+
+    /// <summary>A row the caller named more than once, refused by its own index.</summary>
+    /// <param name="index">The repeated row's position in the list the caller supplied.</param>
+    private static AlvoRowRefusal NamedTwice(int index) =>
+        new(
+            index,
+            "duplicate-row",
+            AlvoAuthorizationException.RowNamedTwice,
+            "Send each row once. Merge the changes you meant for it into a single entry.");
 
     /// <summary>
     /// The refusal for a row this caller cannot act on, whether because it does not exist or because their own
