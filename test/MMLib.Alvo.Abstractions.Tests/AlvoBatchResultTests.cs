@@ -54,6 +54,33 @@ public sealed class AlvoBatchResultTests
         }
     }
 
+    /// <summary>Nor can the caller reach the refused state by mutating the list it handed in.</summary>
+    /// <remarks>
+    /// <b>The other way past a constructor check</b>: <see cref="IReadOnlyList{T}"/> is a view, so the
+    /// <c>List&lt;T&gt;</c> behind it stays writable by whoever built it. A provider that cleared its
+    /// refusals afterwards would leave a result answering <see cref="AlvoBatchResult.Succeeded"/>
+    /// <see langword="true"/> beside <c>Affected == 0</c> — the state the constructor refuses, reached after
+    /// it ran — and one that added rows to a refused result would reach the first state too.
+    /// </remarks>
+    [Fact]
+    public void Mutating_the_caller_s_lists_afterwards_does_not_change_the_result()
+    {
+        var refusals = new List<AlvoRowRefusal>(_refusals);
+        var refused = AlvoBatchResult.Refused(refusals);
+
+        refusals.Clear();
+
+        refused.Refusals.Count.ShouldBe(1, "the result kept the caller's list instead of a copy of it");
+        refused.Succeeded.ShouldBeFalse("a refused batch became a successful write of nothing");
+
+        var rows = new List<AlvoRecord>();
+        var wrote = AlvoBatchResult.Wrote(rows, 3);
+
+        rows.AddRange(_rows);
+
+        wrote.Rows.ShouldBeEmpty("a delete's result grew rows it never wrote");
+    }
+
     /// <summary>The two valid shapes are built, so the refusals above are not simply refusing everything.</summary>
     [Fact]
     public void The_two_valid_shapes_are_accepted()

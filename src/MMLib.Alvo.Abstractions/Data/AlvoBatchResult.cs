@@ -23,12 +23,22 @@ public sealed record AlvoBatchResult
 {
     /// <summary>Initializes a new instance of the <see cref="AlvoBatchResult"/> class.</summary>
     /// <remarks>
+    /// <para>
     /// <b>The invariant is enforced here rather than only described, because this type crosses the port.</b>
     /// A third-party <see cref="IAlvoData"/> builds one of these, and the remarks above say a result carrying
     /// both rows and refusals "would describe one that cannot happen" — a sentence that binds nobody. A
     /// provider that returned <c>(1, rows, refusals)</c> would make <see cref="Succeeded"/> answer
     /// <see langword="false"/> while the result reported written rows, and every caller branching on it would
     /// be wrong in the same direction.
+    /// </para>
+    /// <para>
+    /// <b>Both lists are copied, and the check runs over the copies</b> — <see cref="IReadOnlyList{T}"/> is a
+    /// view, not a guarantee, so the <c>List&lt;T&gt;</c> behind it stays writable by whoever built it. A
+    /// provider that cleared its refusal list after <see cref="Refused"/> returned would leave a result whose
+    /// <see cref="Succeeded"/> answers <see langword="true"/> beside <c>Affected == 0</c>: the state this
+    /// constructor exists to refuse, reached after it ran. Validating the caller's list and then keeping it is
+    /// the same hole the get-only members close on the <c>with</c> path.
+    /// </para>
     /// </remarks>
     /// <param name="Affected">How many rows the batch wrote or removed; zero when it was refused.</param>
     /// <param name="Rows">The rows the batch wrote, in request order; empty for a delete and for a refusal.</param>
@@ -44,7 +54,10 @@ public sealed record AlvoBatchResult
         ArgumentNullException.ThrowIfNull(Refusals);
         ArgumentOutOfRangeException.ThrowIfNegative(Affected);
 
-        if (Refusals.Count > 0 && (Rows.Count > 0 || Affected > 0))
+        AlvoRecord[] rows = [.. Rows];
+        AlvoRowRefusal[] refusals = [.. Refusals];
+
+        if (refusals.Length > 0 && (rows.Length > 0 || Affected > 0))
         {
             throw new ArgumentException(
                 "A batch is one transaction, so a refused one wrote nothing: a result carrying refusals may "
@@ -52,7 +65,7 @@ public sealed record AlvoBatchResult
                 nameof(Refusals));
         }
 
-        if (Refusals.Count == 0 && Affected == 0)
+        if (refusals.Length == 0 && Affected == 0)
         {
             throw new ArgumentException(
                 "A result that wrote nothing must name at least one reason, or it reads as a successful "
@@ -61,8 +74,8 @@ public sealed record AlvoBatchResult
         }
 
         this.Affected = Affected;
-        this.Rows = Rows;
-        this.Refusals = Refusals;
+        this.Rows = rows;
+        this.Refusals = refusals;
     }
 
     /// <summary>How many rows the batch wrote or removed; zero when it was refused.</summary>
