@@ -69,11 +69,14 @@ compresses out. Violating one of these is a bug, not a style nit.
 - `test/` — tests, mirroring `src/`.
 - `docs/product/` — full spec (`alvo-specifikacia.md`) + domain analysis (`baas-analyza.md`), SK, read rarely.
 - `docs/architecture/` — architecture notes, e.g. `package-boundary.md`.
+- `docs/performance.md` — the published latency numbers, one section per
+  measurement, produced by `scripts/test-load --tier calibration`.
 - `docs/superpowers/specs/` — per-issue specs (the what/why for one issue).
 - `docs/superpowers/plans/` — per-issue Superpowers implementation plans (the how, for one PR).
 - `.claude/skills/` — the `alvo-*` skills (see below).
 - `.claude/agents/` — subagents, e.g. `alvo-plan-guard`.
-- `scripts/` — `test-ring0`/`test-ring1`/`test-ring2` plus `check-brief-freshness`.
+- `scripts/` — `test-ring0`/`test-ring1`/`test-ring2` plus `check-brief-freshness`,
+  and `test-load` (the load harness — in no ring, see below).
 - `.husky/` — Husky.Net git hooks (`pre-commit`, `commit-msg`) + `task-runner.json`; auto-installed on build.
 - `.github/` — CI workflows; the PR run (everything but mutation) plus
   `mutation.yml`, which runs post-merge on `main`.
@@ -92,12 +95,24 @@ compresses out. Violating one of these is a bug, not a style nit.
 | ring2 | `scripts/test-ring2` | before opening a PR |
 | full (+ e2e) | CI on the PR | never run locally |
 | mutation | CI post-merge on `main` | never run locally |
+| load | `scripts/test-load` | in no ring — see below |
 
 Each ring wraps the previous one and adds a layer: ring1 adds architecture
 tests (already inside `dotnet test`) and, once it lands, public-API
 approval; ring2 adds affected-scoped integration tests, the API invariant
 check, and Vacuum. See each script's own comments for what is a placeholder
 today.
+
+**Load is in no ring, like `test-e2e`**, and for the same reason: the rings are
+`dotnet test` tiers, and this builds an image and stands up a multi-service
+stack. `scripts/test-load` runs the k6 scenarios against the field-service
+stack; `scripts/assert-load-baseline` is the one authority on pass/fail (its
+own suite is `scripts/test-assert-load-baseline`). Two tiers: `gate` (small,
+per PR, A/B against the merge base — **advisory**, not a required check) and
+`calibration` (large, per release tag, publishes into `docs/performance.md`).
+The gate is judged on `min`, never p95, and the reason is measured — see
+`test/load/README.md`. Design:
+`docs/superpowers/specs/2026-09-02-f4-pr-e-load-test-foundations-design.md`.
 
 ## Hard rules
 
@@ -170,11 +185,15 @@ brief-freshness on a staged spec/analysis/brief (regenerate via
 
 Distinct from the Husky git hooks above: these run inside an agent's turn, not
 around a commit. `.claude/hooks/record-edited-paths` (PostToolUse) records every
-touched `*.verified.*` baseline into a per-turn ledger in the git dir;
+touched baseline into a per-turn ledger in the git dir — **two shapes qualify**,
+a `*.verified.*` snapshot and a load baseline (`test/load/baselines/*.json`),
+because both are files whose edit can turn a red check green with no product
+change;
 `.claude/hooks/turn-review-gate` (Stop) drains that ledger — always, before any
 decision — and, if a baseline really moved, blocks the turn with an instruction
-to dispatch the read-only `alvo-snapshot-judge`, because a Verify baseline is the
-one place a test can be made green with no product-code change.
+to dispatch the read-only `alvo-snapshot-judge`, because a baseline is the one
+place a check can be made green with no product-code change: accept a snapshot,
+or raise a load ceiling.
 `reset-edited-paths` clears a ledger orphaned by an ungraceful exit. The gate is
 a **registry**: add a future judgment check as a function inside
 `turn-review-gate`, never as a second Stop hook (an event's hooks run in

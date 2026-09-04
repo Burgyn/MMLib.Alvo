@@ -232,6 +232,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A load-test harness, with a per-PR regression gate and a per-release calibration run.** No
+  public API changes and no product code: `test/load/` (k6 scenarios, the bulk seed, the gate's
+  baseline), `scripts/test-load`, `scripts/assert-load-baseline` plus its own suite, and
+  `.github/workflows/load.yml`. This is what fills F4's *"p95 latencies measured and published"*
+  and it puts numbers on six filed-but-unquantified costs (#100, #117, #118, #126, #178, #179);
+  the published figures live in `docs/performance.md`. Three decisions worth knowing rather than
+  discovering:
+  - **k6, and NBomber is refused.** NBomber v5+ is closed source and needs a paid licence for any
+    organisational use. k6's AGPL-3.0 places no obligation on Alvo because it is invoked as a
+    separate process and never shipped — the general rule (a ban reaches a shipped dependency, not
+    a CI tool) is now recorded in the `alvo-dotnet-conventions` skill.
+  - **The gate is judged on `min`, not p95, and this was measured.** At gate volume every p95
+    landed within 8-9 ms of every other while `min` separated the shapes cleanly, so gating on p95
+    would gate on the runner. p95 is still measured, printed and published; the tail-only
+    regression that `min` cannot see is named in the guard's own header and pinned by its suite.
+  - **`test/load/baselines/*.json` is a judged baseline**, like a `*.verified.*` snapshot: raising
+    a ceiling is the one edit that turns the gate green with no product change, so the Stop hook
+    dispatches `alvo-snapshot-judge` when it moves.
+  - **A ceiling is only valid for the tier it was measured on, and this was measured too.** The
+    ratios grow with row count — `Prefer: count=exact` costs 1.6x the reference list at 20 000 rows
+    and 3.0x at 200 000 — because the fixed per-request overhead stops dominating as the database's
+    share grows. So the calibration tier reports rather than judges (`--report-only`); its validity
+    checks still bite, because a void run publishes garbage.
+
+  The gate ships **advisory**, not as a required check; promoting it wants a couple of weeks of
+  real PRs with no false positive.
+
+  Three reviews ran before the PR and found real defects rather than nits — most usefully that the
+  `row_policy` ratio (the rule engine's hot-path number) was **unfalsifiable**: a ratio can only
+  reward a cheaper policy path, and the cheapest row predicate is one that matches nothing, so a
+  default-deny bug would have published an improvement. The harness now asserts the row predicate
+  still returns a strict subset before k6 starts. Three fail-open paths in the guard were also
+  closed — a misspelled baseline key judged nothing and printed `ok`, an unmeasured row could not
+  fail, and a zero `min` read as the fastest thing in the run — and its suite grew 22 → 40 cases.
+
+  The gate's own first CI run then corrected the design twice. **p95 does not degenerate on
+  `ubuntu-latest`** — its ratios track `min` within ~10 % there, so the collapse the design
+  described is a property of macOS + Docker Desktop, not of the gate tier; the claim is now scoped
+  to its rig, and the case for `min` is the better one (it means the same thing on both rigs, where
+  p95 collapses on one). And **the runner's ratios run 15–30 % higher than a laptop's**, which left
+  `count_exact` with 18 % margin under a ceiling set from laptop numbers alone — raised to 3.0 from
+  the runner's own numbers, with `observed` and `observedOnTheRunner` kept separate so the
+  distinction cannot be lost. A ceiling is measured on the rig that judges.
+
 - **`/health/ready` now reports whether the database can *still* be reached** (#133), so a store that
   goes away after boot drains the pod's traffic instead of being invisible. **This changes what an
   orchestrator does with a running host:** readiness answered 200 for the life of the process once

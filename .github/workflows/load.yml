@@ -1,0 +1,262 @@
+name: Load
+
+# TWO JOBS, TWO QUESTIONS, and they are deliberately not the same job with a flag.
+#
+#   gate         on a PR that touches the data path. Asks "did this change make Alvo slower?"
+#                and answers pass/fail. Small tier, short runs, two arms.
+#
+#   calibration  on a release tag (or by hand). Asks "what are the numbers?" and publishes them.
+#                Large tier, long runs, one arm, NEVER fails on a measurement.
+#
+# WHY THE GATE IS NOT A REQUIRED CHECK YET. It ships advisory: a red gate shows on the PR, and
+# nothing blocks a merge on it. Promoting it to required is the maintainer's call and wants
+# evidence — a couple of weeks of real PRs with no false positive. The design says so out loud
+# rather than leaving it to drift into "we always ignore that one".
+#
+# Design: docs/superpowers/specs/2026-09-02-f4-pr-e-load-test-foundations-design.md
+
+on:
+  pull_request:
+    paths:
+      # The data path and everything the generated API is built from. A docs-only or
+      # workflow-only PR does not pay for two image builds.
+      - 'src/**'
+      - 'schema/**'
+      - 'examples/field-service/**'
+      - 'test/load/**'
+      - 'scripts/test-load'
+      - 'scripts/assert-load-baseline'
+      - 'docker-compose.field-service.yml'
+      - 'Directory.Packages.props'
+      - '.github/workflows/load.yml'
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tier:
+        description: 'Which tier to run'
+        type: choice
+        options: [calibration, gate]
+        default: calibration
+      rows:
+        description: 'Work orders per tenant (blank = the tier default; honoured by both tiers)'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  # A load measurement is worthless when two of them share a runner, and on a PR the newest
+  # commit is the only one worth measuring.
+  group: load-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Pinned deliberately: the generator is part of the instrument, so a k6 release that changes
+  # how it schedules iterations would show up as a latency change in Alvo's table. Keep this in
+  # step with ALVO_K6_VERSION's default in scripts/test-load.
+  K6_VERSION: '2.2.0'
+
+jobs:
+  gate:
+    name: Load gate (A/B vs the merge base)
+    if: github.event_name == 'pull_request' || inputs.tier == 'gate'
+    runs-on: ubuntu-latest
+    # Two image builds plus four short k6 runs. Each scenario costs DURATION + 6 s (a 5 s graceful
+    # window plus a second of separation, so no two scenarios ever overlap), which is ~3.5 min for
+    # the ten-scenario HEAD arm and ~1.5 for the four-scenario base arm; two reps of each plus two
+    # builds measured at ~15 minutes locally. 35 leaves room for a cold Docker layer cache without
+    # hiding a hang.
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          # The A/B needs the merge base as a real commit to build an image from, so the shallow
+          # default will not do.
+          fetch-depth: 0
+
+      # Installed rather than run from the container image: on a runner the published port is on
+      # the host's loopback, and a local binary removes the host.docker.internal hop from the
+      # measurement entirely. scripts/test-load falls back to the pinned image when k6 is absent,
+      # which is what makes a fresh laptop work with nothing installed.
+      - name: Install k6 ${{ env.K6_VERSION }}
+        run: |
+          set -euo pipefail
+          url="https://github.com/grafana/k6/releases/download/v${K6_VERSION}/k6-v${K6_VERSION}-linux-amd64.tar.gz"
+          curl -fsSL "$url" -o /tmp/k6.tar.gz
+          tar -xzf /tmp/k6.tar.gz -C /tmp
+          sudo install -m 0755 "/tmp/k6-v${K6_VERSION}-linux-amd64/k6" /usr/local/bin/k6
+          k6 version
+
+      - name: Load gate
+        env:
+          # The PR's base commit, which is what "did THIS change make it slower" means. Not
+          # `main`: a PR branched a week ago would otherwise be charged for everything merged
+          # since. Empty on a workflow_dispatch, which is why the step branches below.
+          BASELINE_SHA: ${{ github.event.pull_request.base.sha }}
+          # Honoured here as well as in `calibration`: an input described as "blank = the tier
+          # default" that one job silently ignores is worse than no input.
+          ROWS: ${{ inputs.rows }}
+        run: |
+          set -euo pipefail
+          # Explicit `if` rather than `[ -n "$x" ] && args+=(…)`: bash exempts the left operand of
+          # a `&&` from errexit, so the short form happens to work — but it works by exemption, and
+          # a reader has to know that to believe the script. There is a dispatched gate run with no
+          # baseline arm (BASELINE_SHA is empty off a pull_request), which is the case that would
+          # break silently.
+          args=(--tier gate --reps 2)
+          if [ -n "${BASELINE_SHA:-}" ]; then
+            args+=(--baseline-ref "$BASELINE_SHA")
+          else
+            echo "::notice::No baseline arm (not a pull_request): ratios only, no absolute A/B."
+          fi
+          if [ -n "${ROWS:-}" ]; then
+            args+=(--rows "$ROWS")
+          fi
+          scripts/test-load "${args[@]}"
+
+      - name: Publish the measurements
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: load-gate
+          path: artifacts/load/*.json
+          # `ignore`, not `error`: the step above fails BEFORE k6 runs whenever an image build or
+          # `up --wait` is what broke, and a second misleading "no files were found" on top of the
+          # real failure is exactly what the e2e job's own comment warns against.
+          if-no-files-found: ignore
+
+  calibration:
+    name: Load calibration (publishable numbers)
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.tier == 'calibration')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install k6 ${{ env.K6_VERSION }}
+        run: |
+          set -euo pipefail
+          url="https://github.com/grafana/k6/releases/download/v${K6_VERSION}/k6-v${K6_VERSION}-linux-amd64.tar.gz"
+          curl -fsSL "$url" -o /tmp/k6.tar.gz
+          tar -xzf /tmp/k6.tar.gz -C /tmp
+          sudo install -m 0755 "/tmp/k6-v${K6_VERSION}-linux-amd64/k6" /usr/local/bin/k6
+          k6 version
+
+      - name: Calibration run
+        env:
+          ROWS: ${{ inputs.rows }}
+        run: |
+          set -euo pipefail
+          if [ -n "${ROWS:-}" ]; then
+            scripts/test-load --tier calibration --rows "$ROWS"
+          else
+            scripts/test-load --tier calibration
+          fi
+
+      # The table a human folds into docs/performance.md. Written here rather than committed:
+      # pushing to `main` from CI is banned outright (CLAUDE.md), so the workflow produces the
+      # row and a normal PR lands it.
+      - name: Build the published table
+        if: always()
+        run: |
+          set -euo pipefail
+          [ -f artifacts/load/head-1.json ] || { echo "no summary to publish"; exit 0; }
+          {
+            printf '### `%s` — %s\n\n' "${GITHUB_REF_NAME}" "$(date -u +%Y-%m-%d)"
+            printf 'Rig: GitHub-hosted `ubuntu-latest`, generator co-resident with the server and PostgreSQL.\n'
+            printf 'k6 v%s. Rows: %s work orders per tenant.\n\n' \
+              "$K6_VERSION" "$(jq -r '.rows' artifacts/load/head-1.json)"
+            printf '| Scenario | min | med | p95 | p99 | max |\n|---|---|---|---|---|---|\n'
+            jq -r '
+              .scenarios | to_entries | sort_by(.key)[]
+              | "| `\(.key)` | \(.value.min | .*100|round/100) | \(.value.med | .*100|round/100)"
+                + " | \(.value["p(95)"] | .*100|round/100) | \(.value["p(99)"] | .*100|round/100)"
+                + " | \(.value.max | .*100|round/100) |"
+            ' artifacts/load/head-1.json
+          } > artifacts/load/calibration.md
+          cat artifacts/load/calibration.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish the measurements
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: load-calibration
+          path: |
+            artifacts/load/*.json
+            artifacts/load/calibration.md
+          if-no-files-found: ignore
+
+  notify:
+    name: Report a calibration run that produced nothing
+    needs: calibration
+    # NOT `failure()`, for the reason mutation.yml records at length: a job killed by
+    # `timeout-minutes` ends `cancelled`, so `failure()` is false for precisely the outcome that
+    # matters most — a run that produced no numbers at all and told nobody.
+    #
+    # And note WHAT this reports: the calibration tier never fails on a measurement, so a red
+    # calibration always means the harness broke (an image build, `up --wait`, a seed that no
+    # longer matches the schema), never "Alvo got slower".
+    if: always() && github.event_name == 'push' && needs.calibration.result != 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Open or update the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          RESULT: ${{ needs.calibration.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          {
+            cat <<MD
+          The load **calibration** run for \`$TAG\` ended \`$RESULT\`, so this release has no
+          published latency numbers.
+
+          Run: $RUN_URL
+
+          The calibration tier never fails on a measurement — it publishes one. So this is the
+          harness, not a regression, and it is one of:
+
+          - the image build or \`docker compose up --wait\` failed;
+          - the seed no longer matches the physical schema, which \`scripts/test-load\` refuses
+            *before* k6 starts (see "the seed is not visible through the API");
+          - k6 could not sustain the offered rate, which \`scripts/assert-load-baseline\` treats
+            as a void run rather than a slow one;
+          - the job hit \`timeout-minutes\` and produced no artifact at all.
+
+          Reproduce it locally with the same script CI runs:
+
+          \`\`\`
+          scripts/test-load --tier calibration
+          \`\`\`
+          MD
+          } > load-report.md
+
+          gh label create load-gate \
+            --repo "$REPO" \
+            --description "The load harness needs attention" \
+            --color B60205 2>/dev/null || true
+
+          existing="$(gh issue list --repo "$REPO" --state open \
+            --label load-gate --limit 1 --json number --jq '.[0].number // empty')"
+
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$REPO" --body-file load-report.md
+          else
+            gh issue create --repo "$REPO" \
+              --title "Load calibration produced no numbers" \
+              --label load-gate \
+              --body-file load-report.md
+          fi

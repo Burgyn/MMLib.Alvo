@@ -208,13 +208,23 @@ jobs:
 
       # Needs nothing but git (test-hooks builds throwaway repos) and jq
       # (test-assert-mutation-run reads the expected test-project count out of the
-      # Stryker config, so the assertion cannot drift from what it guards). Both are
-      # preinstalled on ubuntu-latest; no dotnet setup, so this job stays seconds long.
+      # Stryker config, so the assertion cannot drift from what it guards;
+      # test-assert-load-baseline builds its summaries with it). Both are preinstalled
+      # on ubuntu-latest; no dotnet setup, so this job stays seconds long.
       - name: Claude Code hook suite
         run: bash scripts/test-hooks
 
       - name: Mutation-run guard suite
         run: bash scripts/test-assert-mutation-run
+
+      # The load gate's verdict lives in scripts/assert-load-baseline, and it decides
+      # whether a red measurement is a regression or a void run. It belongs HERE rather
+      # than in load.yml: load.yml is paths-filtered and advisory, so a PR that changed
+      # the guard and nothing else would not run it — which is the "a guard nothing
+      # tests" trap the guard itself exists to avoid. This job folds into the required
+      # "Build & test" check.
+      - name: Load-baseline guard suite
+        run: bash scripts/test-assert-load-baseline
 
   # Stable required status check: the branch ruleset requires "Build & test",
   # which must not change when matrix legs are added/removed. This gate passes

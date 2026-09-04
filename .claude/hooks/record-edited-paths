@@ -45,10 +45,19 @@ rootnorm="${root%/}"
 case "$file" in "$rootnorm"/*) rel="${file#"$rootnorm"/}" ;; esac
 
 # Coarse SCOPE filter. The settings.json PostToolUse `matcher` filters by TOOL
-# NAME only, never by path, so path scoping lives here. Only Verify baselines
-# matter while the snapshot check is the ledger's one consumer — loosen this when
-# a future Stop check needs other paths.
-case "$rel" in *.verified.*) ;; *) exit 0 ;; esac
+# NAME only, never by path, so path scoping lives here. Widen it when a Stop check
+# needs a path shape that is not listed.
+#
+# Two shapes qualify today, and they are the same KIND of artifact: a file whose
+# edit can turn a red check green with no product-code change. A Verify baseline
+# is the original case; a load baseline (test/load/baselines/*.json) holds the
+# ratio ceilings and A/B factors the load gate judges against, so raising one
+# silences a real regression exactly the way accepting a snapshot does.
+case "$rel" in
+  *.verified.*) ;;
+  test/load/baselines/*.json) ;;
+  *) exit 0 ;;
+esac
 
 printf '%s\n' "$rel" >>"$ledger" 2>/dev/null || true
 exit 0
