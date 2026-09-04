@@ -796,15 +796,35 @@ internal sealed class EfAlvoData : IAlvoData
     private void EnsureWriteAllowed(
         PolicyDecision decision, AlvoRecord postImage, AlvoRecord? previous, AlvoContext context)
     {
+        if (WriteRefusal(decision, postImage, previous, context) is { } reason)
+        {
+            throw new AlvoAuthorizationException(reason);
+        }
+    }
+
+    /// <summary>
+    /// Why this row may not be written, or <see langword="null"/> when it may.
+    /// </summary>
+    /// <remarks>
+    /// <b>The one evaluation of this rule, and <see cref="EnsureWriteAllowed"/> is a caller of it.</b> A batch
+    /// has to report every bad row rather than the first, so it needs this verdict without a throw. A second,
+    /// collecting variant beside the throwing one would be two expressions of one authorization rule — which
+    /// is how the two come to differ, and this rule is the <c>WITH CHECK</c> predicate. So the collecting form
+    /// is the implementation, and throwing is the single-row caller's choice.
+    /// </remarks>
+    /// <param name="decision">The verdict the policy engine returned for this caller.</param>
+    /// <param name="postImage">The complete row as it would be stored.</param>
+    /// <param name="previous">The stored row an update replaces, or <see langword="null"/> for a create.</param>
+    /// <param name="context">The caller performing the write.</param>
+    private string? WriteRefusal(
+        PolicyDecision decision, AlvoRecord postImage, AlvoRecord? previous, AlvoContext context)
+    {
         var passesCheck = decision.WithCheck is null
             || _evaluator.Evaluate(decision.WithCheck, postImage, previous, context);
         var passesTenantScope = decision.TenantScope is null
             || _evaluator.Evaluate(decision.TenantScope, postImage, previous, context);
 
-        if (!passesCheck || !passesTenantScope)
-        {
-            throw new AlvoAuthorizationException(AlvoAuthorizationException.WriteRejectedByPolicy);
-        }
+        return passesCheck && passesTenantScope ? null : AlvoAuthorizationException.WriteRejectedByPolicy;
     }
 
     /// <summary>

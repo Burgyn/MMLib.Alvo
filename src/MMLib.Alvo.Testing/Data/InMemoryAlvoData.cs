@@ -534,26 +534,54 @@ public sealed class InMemoryAlvoData : IAlvoData
     /// </summary>
     private void EnsureWriteAllowed(PolicyDecision decision, AlvoRecord postImage, AlvoRecord? previous, AlvoContext context)
     {
+        if (WriteRefusal(decision, postImage, previous, context) is { } reason)
+        {
+            throw new AlvoAuthorizationException(reason);
+        }
+    }
+
+    /// <summary>
+    /// Why this row may not be written, or <see langword="null"/> when it may — mirroring
+    /// <c>EfAlvoData.WriteRefusal</c>, and for the same reason.
+    /// </summary>
+    /// <remarks>
+    /// A batch reports every bad row rather than the first, so the verdict has to be collectable; a second
+    /// collecting copy of an authorization rule beside the throwing one is how the two come to differ. The
+    /// collecting form is the implementation and the throw is a single-row caller's choice, on this
+    /// implementation exactly as on the shipped ones.
+    /// </remarks>
+    /// <param name="decision">The verdict the policy engine returned for this caller.</param>
+    /// <param name="postImage">The complete row as it would be stored.</param>
+    /// <param name="previous">The stored row an update replaces, or <see langword="null"/> for a create.</param>
+    /// <param name="context">The caller performing the write.</param>
+    private string? WriteRefusal(
+        PolicyDecision decision, AlvoRecord postImage, AlvoRecord? previous, AlvoContext context)
+    {
         var passesCheck = decision.WithCheck is null
             || _evaluator.Evaluate(decision.WithCheck, postImage, previous, context);
         var passesTenantScope = decision.TenantScope is null
             || _evaluator.Evaluate(decision.TenantScope, postImage, previous, context);
 
-        if (!passesCheck || !passesTenantScope)
-        {
-            throw new AlvoAuthorizationException(AlvoAuthorizationException.WriteRejectedByPolicy);
-        }
+        return passesCheck && passesTenantScope ? null : AlvoAuthorizationException.WriteRejectedByPolicy;
     }
 
     private static void EnsureNoReadOnlyWrite(IReadOnlyDictionary<string, object?> values, IReadOnlySet<string> readOnlyFields)
     {
-        foreach (var field in values.Keys)
+        if (ReadOnlyRefusal(values, readOnlyFields) is { } reason)
         {
-            if (readOnlyFields.Contains(field))
-            {
-                throw new AlvoAuthorizationException($"Field '{field}' is read-only and cannot be written.");
-            }
+            throw new AlvoAuthorizationException(reason);
         }
+    }
+
+    /// <inheritdoc cref="WriteRefusal"/>
+    /// <param name="values">The caller-supplied payload.</param>
+    /// <param name="readOnlyFields">The fields this caller's policy marks read-only.</param>
+    private static string? ReadOnlyRefusal(
+        IReadOnlyDictionary<string, object?> values, IReadOnlySet<string> readOnlyFields)
+    {
+        var refused = values.Keys.FirstOrDefault(readOnlyFields.Contains);
+
+        return refused is null ? null : $"Field '{refused}' is read-only and cannot be written.";
     }
 
     /// <summary>
@@ -573,15 +601,24 @@ public sealed class InMemoryAlvoData : IAlvoData
     private static void EnsureNoManagedColumnWrite(
         IReadOnlyDictionary<string, object?> values, EntitySchema entity, bool isUpdate)
     {
+        if (ManagedColumnRefusal(values, entity, isUpdate) is { } reason)
+        {
+            throw new AlvoAuthorizationException(reason);
+        }
+    }
+
+    /// <inheritdoc cref="WriteRefusal"/>
+    /// <param name="values">The caller-supplied payload.</param>
+    /// <param name="entity">The entity being written.</param>
+    /// <param name="isUpdate">Whether this is an update rather than a create.</param>
+    private static string? ManagedColumnRefusal(
+        IReadOnlyDictionary<string, object?> values, EntitySchema entity, bool isUpdate)
+    {
         var refused = AlvoManagedColumns.For(entity)
             .Where(column => !AlvoManagedColumns.IsCallerWritable(column, isUpdate))
-            .Where(values.ContainsKey);
+            .FirstOrDefault(values.ContainsKey);
 
-        foreach (var column in refused)
-        {
-            throw new AlvoAuthorizationException(
-                $"Field '{column}' {AlvoManagedColumns.RefusalReason(column, isUpdate)}.");
-        }
+        return refused is null ? null : $"Field '{refused}' {AlvoManagedColumns.RefusalReason(refused, isUpdate)}.";
     }
 
     /// <summary>
@@ -602,19 +639,34 @@ public sealed class InMemoryAlvoData : IAlvoData
     /// </remarks>
     private EntitySchema EnsureFieldsDeclared(string entity, IReadOnlyDictionary<string, object?> values)
     {
-        var entitySchema = FindEntity(entity)
-            ?? throw new AlvoAuthorizationException(UndeclaredPayloadFieldMessage);
+        var (schema, refusal) = DeclaredFieldsRefusal(entity, values);
 
-        var declared = DeclaredFieldsOf(entitySchema);
-        foreach (var field in values.Keys)
+        return refusal is null
+            ? schema!
+            : throw new AlvoAuthorizationException(refusal);
+    }
+
+    /// <inheritdoc cref="WriteRefusal"/>
+    /// <param name="entity">The entity being written.</param>
+    /// <param name="values">The caller-supplied payload.</param>
+    /// <returns>
+    /// The entity's schema and <see langword="null"/> when every key is declared; otherwise
+    /// <see langword="null"/> and the one refusal every undeclared name shares — an unknown entity and an
+    /// unknown field answer identically, so neither can be used to probe for the other.
+    /// </returns>
+    private (EntitySchema? Schema, string? Refusal) DeclaredFieldsRefusal(
+        string entity, IReadOnlyDictionary<string, object?> values)
+    {
+        if (FindEntity(entity) is not { } entitySchema)
         {
-            if (!declared.Contains(field))
-            {
-                throw new AlvoAuthorizationException(UndeclaredPayloadFieldMessage);
-            }
+            return (null, UndeclaredPayloadFieldMessage);
         }
 
-        return entitySchema;
+        var declared = DeclaredFieldsOf(entitySchema);
+
+        return values.Keys.All(declared.Contains)
+            ? (entitySchema, null)
+            : (null, UndeclaredPayloadFieldMessage);
     }
 
     private const string UndeclaredPayloadFieldMessage = "The payload names a field that is not writable on this entity.";
