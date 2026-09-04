@@ -349,6 +349,13 @@ public abstract class AlvoDataBatchTests : AlvoDataFixture
     /// caller wrote those rows. The ids are exactly what their own first response gave them.
     /// </para>
     /// <para>
+    /// <b>The replay is narrower than the answer it replays, and that asymmetry is the fact.</b> A create
+    /// returns the row it wrote, under the <c>create</c> decision — so the first answer here carries every
+    /// field. The replay cannot do that: it is a <em>read</em>, and this caller has none, so it answers the
+    /// ids alone. Both halves are asserted, or "the replay is id-only" would also pass on a path that
+    /// answered id-only throughout.
+    /// </para>
+    /// <para>
     /// <b>Pinned because the branch had no driver.</b> The HTTP replay fact used to reach it by accident, on
     /// a key that happened to lack the read role; widening that key for an unrelated fact moved it off, and
     /// nothing else covered an id-only replay. It fails closed, so this is a proof gap rather than a hole —
@@ -365,6 +372,13 @@ public abstract class AlvoDataBatchTests : AlvoDataFixture
             Dropbox, [Payload("a"), Payload("b")], world.Caller, token, Ct);
         var replay = await world.Data.CreateManyAsync(
             Dropbox, [Payload("a"), Payload("b")], world.Caller, token, Ct);
+
+        first.Rows.ShouldAllBe(
+            row => row.Values.Count > 1,
+            "the FIRST answer carries the rows as written — a create returns what you wrote, under the "
+            + "create decision. That is the contrast the replay below is measured against: the replay is "
+            + "NARROWER than the answer it replays, and without this it could be narrow because the whole "
+            + "path is.");
 
         replay.Rows.Select(IdOf).ShouldBe(
             first.Rows.Select(IdOf), ignoreOrder: false,

@@ -242,7 +242,10 @@ internal static class DataApiDocumentation
             + "is not yours or does not exist (one refusal for both, so a batch cannot be used to ask which), "
             + "or a row the batch named twice. A batch is one transaction, so nothing was written — repair "
             + "the rows the response names and resend the whole batch. A refusal the entity's declared SHAPE "
-            + "produced is a 422 instead, and carries the same pointers.",
+            + "produced is a 422 instead, and carries the same pointers. The two operation-level kinds are "
+            + "unchanged and are still told apart by the problem 'type': 'out-of-scope' means the presented "
+            + "key's scopes do not cover this entity and operation (grant the key the scope), 'forbidden' "
+            + "means policy refused (change a rule, or a row).",
     };
 
     private static Response Absent => new(
