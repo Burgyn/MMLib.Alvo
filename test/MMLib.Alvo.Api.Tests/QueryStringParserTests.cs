@@ -701,6 +701,82 @@ public sealed class QueryStringParserTests
     }
 
     /// <summary>
+    /// A projection's <em>entry</em> count is bounded, and it has to be separately from the width bound: a
+    /// repeated entry claims no new key, so <c>projection-too-wide</c> can never fire on one. Until the
+    /// query body existed the only thing bounding it was the URL length, which is a property of the
+    /// transport rather than a decision this layer made.
+    /// </summary>
+    [Fact]
+    public void A_projection_naming_more_entries_than_the_parser_reads_is_refused()
+    {
+        var entries = string.Join(',', Enumerable.Repeat("id", QueryStringParser.MaxSelectEntries + 1));
+
+        TryParse($"select={entries}", out _, out var violations).ShouldBeFalse();
+
+        violations.Single().Code.ShouldBe("too-many-select-entries");
+    }
+
+    /// <summary>
+    /// The entry bound does not retire the deduplication the width bound was written around: a projection
+    /// naming one field right up to the entry bound is still one key and still a 200.
+    /// </summary>
+    [Fact]
+    public void A_repeated_projection_entry_still_deduplicates_under_the_entry_bound()
+    {
+        var entries = string.Join(',', Enumerable.Repeat("id", QueryStringParser.MaxSelectEntries));
+
+        TryParse($"select={entries}", out var parsed, out var violations).ShouldBeTrue(Because(violations));
+
+        Keys(parsed!).ShouldBe(["id"]);
+    }
+
+    /// <summary>
+    /// A group carrying more members than the node budget is refused as too wide — the code it already
+    /// earned. What changed is that it is reached before the member list is materialised, which no
+    /// assertion on the answer can see; <see cref="An_in_list_is_capped_at_the_ports_candidate_limit"/>
+    /// already pins the <c>in</c> side of the same boundary.
+    /// </summary>
+    [Fact]
+    public void A_group_past_the_node_budget_is_refused_as_too_wide()
+    {
+        var members = string.Join(',', Enumerable.Repeat("year.eq.1", AlvoFilter.MaxTerms + 1));
+
+        TryParse($"or=({members})", out _, out var violations).ShouldBeFalse();
+
+        violations.ShouldContain(violation => violation.Code == "filter-too-wide");
+    }
+
+    /// <summary>
+    /// A <c>like</c> pattern is bounded and every other operand is not, because the two cost different
+    /// things: an <c>eq</c> operand is a bound value whose comparison is linear in its size and
+    /// short-circuits on the first differing byte, while a pattern is matched against every row and its
+    /// cost is not linear in its length. Under a URL both were capped by the request line; a body caps
+    /// neither.
+    /// </summary>
+    [Fact]
+    public void A_like_pattern_longer_than_the_parser_matches_is_refused()
+    {
+        var pattern = new string('%', QueryStringParser.MaxPatternLength + 1);
+
+        TryParse($"make=like.{pattern}", out _, out var violations).ShouldBeFalse();
+
+        violations.Single().Code.ShouldBe("pattern-too-long");
+    }
+
+    /// <summary>
+    /// And the bound reaches only the two pattern operators: an equality against a long value is a
+    /// comparison a caller may legitimately want, and refusing it would be a bound on data rather than on
+    /// cost.
+    /// </summary>
+    [Fact]
+    public void A_long_equality_operand_is_not_a_pattern_and_is_not_refused()
+    {
+        var value = new string('a', QueryStringParser.MaxPatternLength + 1);
+
+        TryParse($"make=eq.{value}", out _, out var violations).ShouldBeTrue(Because(violations));
+    }
+
+    /// <summary>
     /// A request that is wrong in three different ways reports <b>all three</b>, and reports each of them once.
     /// </summary>
     /// <remarks>

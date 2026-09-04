@@ -48,9 +48,9 @@ internal static class SortParser
         }
 
         var keys = new List<AlvoSort>();
-        foreach (var token in raw.Split(','))
+        foreach (var token in raw.AsSpan().Split(','))
         {
-            if (!TryAddKey(token, fields, keys, out violation))
+            if (!TryAddKey(raw[token], fields, keys, out violation))
             {
                 return false;
             }
@@ -64,7 +64,7 @@ internal static class SortParser
     private static bool TryAddKey(
         string token, QueryFieldResolver fields, List<AlvoSort> keys, out AlvoViolation? violation)
     {
-        var parts = token.Split('.');
+        var parts = token.Split('.', SortKeyParts + 1);
         if (fields.Resolve(parts[0]) is not { } declared)
         {
             violation = QueryViolations.UnavailableField(ReservedQueryKeys.Order);
@@ -92,6 +92,18 @@ internal static class SortParser
     /// Reads the modifiers a key carries, in PostgREST's own order and each at most once. The order is
     /// enforced rather than tolerated so that one sort key has exactly one spelling.
     /// </summary>
+    /// <summary>
+    /// How many dot-separated parts one sort key can carry: the field, a direction and a null placement.
+    /// </summary>
+    /// <remarks>
+    /// Passed as a split limit rather than checked afterwards, so a single key of a million dots costs four
+    /// substrings and a refusal instead of a million substrings and the same refusal — the transport used to
+    /// be what bounded that, and a request body is not. A fourth part is still refused by
+    /// <see cref="TryReadModifiers"/> exactly as it was, because the limit leaves the tail in the last part
+    /// rather than discarding it.
+    /// </remarks>
+    private const int SortKeyParts = 3;
+
     private static bool TryReadModifiers(string[] parts, out bool descending, out AlvoNullPlacement nulls)
     {
         descending = false;

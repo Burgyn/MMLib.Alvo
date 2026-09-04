@@ -78,6 +78,50 @@ internal static class QueryStringParser
     /// </remarks>
     internal const int MaxCursorLength = 512;
 
+    /// <summary>How many comma-separated entries one <c>select</c> may carry.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Separate from the width bound, because a repeated entry claims no key.</b>
+    /// <see cref="QueryViolations.ProjectionTooWide"/> counts <em>distinct</em> response keys, which is what
+    /// keeps <c>?select=id,id,id</c> deduplicating — and is therefore something a repeat can never trip.
+    /// Until the query body existed, the only thing bounding the entry count was the URL length: a property
+    /// of the transport rather than a decision this layer made, and one a request body does not have.
+    /// </para>
+    /// <para>
+    /// The number is <see cref="AlvoFilter.MaxTerms"/> rather than a new one, because that is the
+    /// framework's single measured "how many of a thing may one request carry", and 256 entries of at least
+    /// two characters is under 800 bytes — unreachable from any query string a proxy would have carried.
+    /// <b>The coupling is deliberate and is the only thing tying the two budgets together</b>: they count
+    /// different things, and a change to the filter's breadth would move this with it. Give this its own
+    /// literal the day the two need to differ.
+    /// </para>
+    /// </remarks>
+    internal static int MaxSelectEntries { get; } = AlvoFilter.MaxTerms;
+
+    /// <summary>The longest <c>like</c>/<c>ilike</c> pattern this API passes to an engine.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Only the two pattern operators are bounded, and the asymmetry is about cost rather than about
+    /// size.</b> Every other operand is a bound value: the engine compares it per row, the comparison is
+    /// linear in its length and short-circuits on the first differing byte, and the sum of all operands is
+    /// already capped by the request body. A <em>pattern</em> is matched rather than compared, and its cost
+    /// is not linear in its length — so a caller who could send a megabyte of <c>%_%_%_…</c> would be buying
+    /// an engine-side match per row for the price of one request.
+    /// </para>
+    /// <para>
+    /// <b>Until the query body existed, the request line was what bounded this</b> — the same transport
+    /// budget <see cref="MaxSelectEntries"/> exists to replace, applied to the one channel that never splits
+    /// on a comma and so was not covered by making the three splitters lazy.
+    /// </para>
+    /// <para>
+    /// <b>512 is chosen rather than measured, and it is recorded as chosen.</b> It is
+    /// <see cref="MaxCursorLength"/>'s number for the same kind of reason: far past anything a real caller
+    /// sends, and the length past which the string has stopped being plausibly the thing it claims to be. A
+    /// search pattern longer than a keyset cursor is not a search.
+    /// </para>
+    /// </remarks>
+    internal static int MaxPatternLength { get; } = MaxCursorLength;
+
     /// <summary>Parses <paramref name="query"/> for a list request over <paramref name="entity"/>.</summary>
     /// <param name="query">The request's query string.</param>
     /// <param name="entity">The entity being listed, as the applied schema declares it.</param>
@@ -332,9 +376,16 @@ internal static class QueryStringParser
             _claimedKeys = new Dictionary<string, string>(StringComparer.Ordinal);
 
             var projected = new List<ProjectedField>();
-            foreach (var entry in value.Split(','))
+            var entries = 0;
+            foreach (var entry in value.AsSpan().Split(','))
             {
-                if (!TryAddProjectedField(entry, projected))
+                if (++entries > MaxSelectEntries)
+                {
+                    Add(QueryViolations.TooManySelectEntries(MaxSelectEntries));
+                    return;
+                }
+
+                if (!TryAddProjectedField(value[entry], projected))
                 {
                     return;
                 }

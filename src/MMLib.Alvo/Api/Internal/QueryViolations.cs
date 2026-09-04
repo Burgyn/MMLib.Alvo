@@ -330,6 +330,36 @@ internal static class QueryViolations
         $"Name at most {maxKeys} distinct keys; aliasing one field under many keys returns the same value "
         + "repeatedly.");
 
+    /// <summary>The refusal for a projection carrying more comma-separated entries than the parser reads.</summary>
+    /// <remarks>
+    /// A separate code from <see cref="ProjectionTooWide"/> because it has a different cause and a different
+    /// fix: that one means "you asked for more keys than there are fields to read", this one means "you sent
+    /// more entries than this API will read", and a caller who repeated one field ten thousand times has hit
+    /// only the second. Charged while splitting rather than after, for the reason
+    /// <c>FilterParseScope</c>'s node budget is: a budget spent after the list is built does not bound it.
+    /// </remarks>
+    /// <param name="maxEntries">The most entries the parser reads.</param>
+    internal static AlvoViolation TooManySelectEntries(int maxEntries) => new(
+        ReservedQueryKeys.Select,
+        "too-many-select-entries",
+        "The projection carries more comma-separated entries than this API reads.",
+        $"List at most {maxEntries} entries. A repeated entry answers under one key, so naming one field "
+        + "many times returns the same value once and costs a parse each time.");
+
+    /// <summary>The refusal for a <c>like</c>/<c>ilike</c> pattern longer than this API passes to an engine.</summary>
+    /// <remarks>
+    /// Its own code rather than <see cref="UnrepresentableValue"/>'s, because nothing is wrong with the
+    /// <em>value</em>: it is a perfectly representable string, and what is refused is the cost of matching it
+    /// against every row. A caller told their value was unrepresentable would go looking for a type mistake.
+    /// </remarks>
+    /// <param name="maxLength">The longest pattern this API passes through.</param>
+    internal static AlvoViolation PatternTooLong(int maxLength) => new(
+        FilterPointer,
+        "pattern-too-long",
+        "A 'like' or 'ilike' pattern is longer than this API matches.",
+        $"Send a pattern of at most {maxLength} characters. Only the two pattern operators are bounded this "
+        + "way: every other operand is compared rather than matched, so its cost is its size.");
+
     /// <summary>The refusal for a parameter sent more than once, which anchors one setting two ways.</summary>
     /// <param name="pointer">The parameter that was repeated.</param>
     internal static AlvoViolation RepeatedParameter(string pointer) => new(

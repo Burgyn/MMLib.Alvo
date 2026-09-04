@@ -144,6 +144,13 @@ internal static class FilterTermParser
 
     private static bool TryReadPattern(string operand, out object? value, out AlvoViolation? violation)
     {
+        if (operand.Length > QueryStringParser.MaxPatternLength)
+        {
+            value = null;
+            violation = QueryViolations.PatternTooLong(QueryStringParser.MaxPatternLength);
+            return false;
+        }
+
         var read = FilterValueReader.TryReadPattern(operand, out var pattern, out violation);
         value = pattern;
         return read;
@@ -187,13 +194,16 @@ internal static class FilterTermParser
         out AlvoViolation? violation)
     {
         value = null;
-        if (!ParenthesisedList.TrySplit(operand, out var candidates))
+        var split = ParenthesisedList.Split(operand, AlvoFilter.MaxInCandidates, out var candidates);
+        if (split != ListSplit.Ok)
         {
-            violation = QueryViolations.MalformedInList();
+            violation = split == ListSplit.TooMany
+                ? QueryViolations.TooManyInCandidates()
+                : QueryViolations.MalformedInList();
             return false;
         }
 
-        if (candidates.Count > AlvoFilter.MaxInCandidates || !scope.TryChargeCandidates(candidates.Count))
+        if (!scope.TryChargeCandidates(candidates.Count))
         {
             violation = QueryViolations.TooManyInCandidates();
             return false;
