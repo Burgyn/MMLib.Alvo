@@ -68,68 +68,138 @@ internal static class QueryBodyReader
         using var document = JsonDocument.Parse(
             body, new JsonDocumentOptions { MaxDepth = options.MaxPayloadDepth });
 
-        return Transpose(document.RootElement);
+        return new TranspositionPass(options).Run(document.RootElement);
     }
 
-    /// <summary>Turns the body's members into parameters, or into every reason one of them is not a value.</summary>
-    private static Result Transpose(JsonElement root)
+    /// <summary>
+    /// One body's transposition, as an object so the running value count, the parameters and the
+    /// de-duplicated violations are one piece of state rather than four <c>ref</c> parameters — the shape
+    /// <c>QueryStringParser.ParsePass</c> already uses for the same reason.
+    /// </summary>
+    /// <param name="options">The bounds this pass enforces.</param>
+    private sealed class TranspositionPass(AlvoApiOptions options)
     {
-        var parameters = new Dictionary<string, StringValues>(StringComparer.OrdinalIgnoreCase);
-        var violations = new List<AlvoViolation>();
-        foreach (var member in root.EnumerateObject())
+        private readonly Dictionary<string, List<string?>> _parameters = new(StringComparer.OrdinalIgnoreCase);
+        private readonly List<AlvoViolation> _violations = [];
+        private readonly HashSet<(string Code, string Pointer)> _reported = [];
+        private int _values;
+
+        /// <summary>Turns the body's members into parameters, or into every reason one of them is not a value.</summary>
+        internal Result Run(JsonElement root)
         {
-            Read(member, parameters, violations);
+            foreach (var member in root.EnumerateObject())
+            {
+                if (!Read(member))
+                {
+                    break;
+                }
+            }
+
+            return _violations.Count > 0
+                ? new Result(null, _violations)
+                : new Result(new QueryCollection(Collected()), []);
         }
 
-        return violations.Count > 0
-            ? new Result(null, violations)
-            : new Result(new QueryCollection(parameters), []);
-    }
-
-    /// <summary>Reads one member — a single value, or an array standing for a repeated parameter.</summary>
-    /// <remarks>
-    /// An <em>empty</em> array is refused rather than read as an absent parameter. A caller who wrote one
-    /// sent a parameter that does nothing, and this grammar refuses a parameter it cannot act on rather than
-    /// ignoring it — the same rule that makes a mistyped <c>oder=name</c> a refusal instead of an unsorted
-    /// page.
-    /// </remarks>
-    private static void Read(
-        JsonProperty member, Dictionary<string, StringValues> parameters, List<AlvoViolation> violations)
-    {
-        if (member.Value.ValueKind != JsonValueKind.Array)
+        /// <summary>Each parameter's values, built once rather than grown one value at a time.</summary>
+        /// <remarks>
+        /// <b><c>StringValues.Concat</c> copies</b>, so appending N values one
+        /// by one is quadratic in N — and N is the length of an array the caller chose. Accumulating in a
+        /// list and converting once is linear, and the bound below is what keeps N itself finite.
+        /// </remarks>
+        private Dictionary<string, StringValues> Collected()
         {
-            Append(member.Name, member.Value, parameters, violations);
-            return;
+            var collected = new Dictionary<string, StringValues>(_parameters.Count, StringComparer.OrdinalIgnoreCase);
+            foreach (var (name, values) in _parameters)
+            {
+                collected[name] = new StringValues([.. values]);
+            }
+
+            return collected;
         }
 
-        if (member.Value.GetArrayLength() == 0)
+        /// <summary>
+        /// Reads one member — a single value, or an array standing for a repeated parameter — answering
+        /// whether the pass should continue.
+        /// </summary>
+        /// <remarks>
+        /// An <em>empty</em> array is refused rather than read as an absent parameter. A caller who wrote one
+        /// sent a parameter that does nothing, and this grammar refuses a parameter it cannot act on rather
+        /// than ignoring it — the same rule that makes a mistyped <c>oder=name</c> a refusal instead of an
+        /// unsorted page.
+        /// </remarks>
+        private bool Read(JsonProperty member)
         {
-            violations.Add(QueryViolations.UnrepresentableQueryValue(RoleOf(member.Name)));
-            return;
+            if (member.Value.ValueKind != JsonValueKind.Array)
+            {
+                return Append(member.Name, member.Value);
+            }
+
+            if (member.Value.GetArrayLength() == 0)
+            {
+                Add(QueryViolations.UnrepresentableQueryValue(RoleOf(member.Name)));
+                return true;
+            }
+
+            foreach (var element in member.Value.EnumerateArray())
+            {
+                if (!Append(member.Name, element))
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
-        foreach (var element in member.Value.EnumerateArray())
+        /// <summary>
+        /// Adds one value to a parameter, answering <see langword="false"/> once the body has carried more
+        /// values than this API reads.
+        /// </summary>
+        /// <remarks>
+        /// <b>The bound counts <em>values</em>, and it has to, because nothing above it does.</b>
+        /// <see cref="BoundedJsonBody"/>'s key bound counts property names at every depth — an array's
+        /// <em>elements</em> are not property names, so <c>{"or":[…500 000 strings…]}</c> is one key, passes
+        /// every shape bound, and fits inside <see cref="AlvoApiOptions.MaxRequestBodyBytes"/>. The parser
+        /// below would refuse the 257th of them, but only after this method had built all 500 000. This is
+        /// the same "a budget spent after the work does not bound the work" rule the filter's node budget and
+        /// the projection's entry bound both follow.
+        /// </remarks>
+        private bool Append(string name, JsonElement value)
         {
-            Append(member.Name, element, parameters, violations);
-        }
-    }
+            if (++_values > options.MaxPayloadKeys)
+            {
+                Add(QueryViolations.TooManyQueryValues(options.MaxPayloadKeys));
+                return false;
+            }
 
-    /// <summary>Adds one value to a parameter, accumulating a repeat the way a query string accumulates one.</summary>
-    private static void Append(
-        string name,
-        JsonElement value,
-        Dictionary<string, StringValues> parameters,
-        List<AlvoViolation> violations)
-    {
-        if (Scalar(value) is not { } text)
+            if (Scalar(value) is not { } text)
+            {
+                Add(QueryViolations.UnrepresentableQueryValue(RoleOf(name)));
+                return true;
+            }
+
+            if (!_parameters.TryGetValue(name, out var values))
+            {
+                _parameters[name] = values = [];
+            }
+
+            values.Add(text);
+            return true;
+        }
+
+        /// <summary>
+        /// Records one refusal — <b>once per distinct <c>(code, pointer)</c></b>, exactly as
+        /// <c>QueryStringParser</c> does and for the same reason: an array of ten thousand nulls is one
+        /// mistake, and reporting it ten thousand times fills the response with one kind while telling the
+        /// caller nothing they did not know from the first.
+        /// </summary>
+        private void Add(AlvoViolation violation)
         {
-            violations.Add(QueryViolations.UnrepresentableQueryValue(RoleOf(name)));
-            return;
+            if (_reported.Add((violation.Code, violation.Pointer)))
+            {
+                _violations.Add(violation);
+            }
         }
-
-        parameters[name] = parameters.TryGetValue(name, out var existing)
-            ? StringValues.Concat(existing, text)
-            : new StringValues(text);
     }
 
     /// <summary>

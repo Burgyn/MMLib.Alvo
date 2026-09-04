@@ -381,8 +381,9 @@ internal static class QueryViolations
         BodyRefusal.MalformedJson =>
             "Check for an unterminated string, a trailing comma, or a truncated body.",
         BodyRefusal.TooLarge =>
-            $"Narrow the query. {AlvoFilter.MaxInCandidates} 'in' candidates and {AlvoFilter.MaxTerms} "
-            + "filter terms fit well inside the bound; split a larger read across requests.",
+            "Narrow the query, or split the read across requests. A body carries the parameters a query "
+            + "string would; if it is over the bound, it is carrying a candidate list or a filter this host "
+            + "has configured itself not to read in one request.",
         BodyRefusal.TooDeep =>
             "A query body is one level deep, or two where a repeated parameter is an array of strings.",
         BodyRefusal.TooManyKeys =>
@@ -394,6 +395,22 @@ internal static class QueryViolations
         _ => throw new ArgumentOutOfRangeException(
             nameof(refusal), refusal, "Unmapped body refusal; give it the read path's fix suggestion here."),
     };
+
+    /// <summary>The refusal for a query body carrying more parameter values than this API reads.</summary>
+    /// <remarks>
+    /// <b>Its own code because it counts something no other bound counts.</b>
+    /// <see cref="BoundedJsonBody"/>'s key bound counts property names at every depth, and an array's
+    /// elements are not property names — so a single parameter repeated half a million times satisfies every
+    /// shape bound the body is read under. The parser's own budgets would refuse the query, but only after
+    /// the transposition had built every value, which is the cost this refuses instead.
+    /// </remarks>
+    /// <param name="maxValues">The most values the body may carry.</param>
+    internal static AlvoViolation TooManyQueryValues(int maxValues) => new(
+        PayloadViolations.BodyPointer,
+        "too-many-query-values",
+        $"The query body carries more than {maxValues} parameter values, the configured maximum.",
+        "Repeat a parameter only as often as the query needs it. An array stands for the same parameter "
+        + "sent again, so a long one is a filter with that many terms.");
 
     /// <summary>The refusal for a query parameter whose JSON value is not a value a query string could carry.</summary>
     /// <remarks>

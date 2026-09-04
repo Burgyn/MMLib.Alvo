@@ -355,12 +355,22 @@ in the grammar distinguishes them.
 | `in` candidates, per list **and** per request in total | 1000 (`AlvoFilter.MaxInCandidates`) | port |
 | Cursor length | 512 chars (`QueryStringParser.MaxCursorLength`) | API |
 | `select` entries, per parameter | 256 (`QueryStringParser.MaxSelectEntries`) | API |
+| Query-body parameter **values** | `MaxPayloadKeys` (512) | API options |
 | `like`/`ilike` pattern length | 512 chars (`QueryStringParser.MaxPatternLength`) | API |
 | Page size | `limit` ≤ `MaxPageSize` (200); absent ⇒ `DefaultPageSize` (50) | API options |
 | Request body | 1 MiB, depth 32, 512 keys — a **write payload or a query body** | API options |
 | `Idempotency-Key` | ≤ 255 UTF-8 **bytes**, and a host may only narrow that | port + options |
 
-**The last two rows exist because `POST …/query` removed the transport bound they had been relying on.**
+**The value row exists because a JSON array's elements are not property names.** `BoundedJsonBody`'s key
+bound counts property names at every depth, so `{"or": […500 000 strings…]}` is **one key**: it satisfies
+every shape bound and fits inside `MaxRequestBodyBytes`. The parser would have refused the 257th filter
+term — after the transposition had built all half a million values, one `StringValues.Concat` at a time,
+which copies. Counting values while reading them is what bounds it, and building each parameter's values
+once is what makes the bounded work linear. Found by CodeRabbit on #107's own PR. **The write path has the
+same shape and is untouched here:** a `json` field's array value is bounded only by the body's bytes, which
+is a smaller amplification (the array is stored, not interpreted) and not this route's to close.
+
+**The other bound rows exist because `POST …/query` removed the transport bound they had been relying on.**
 Three comma-splitting readers — a group's members, an `in` list's candidates, a projection's entries — used
 to materialise the whole list and refuse it afterwards, and one channel never splits at all: a `like`
 pattern had no length bound whatsoever. Under an ~8 KB request line that was a few hundred entries; under a
@@ -390,8 +400,9 @@ bound was measured against.
 `not-an-object`, `malformed-json`, `body-too-large`, `body-too-deep`, `body-too-many-fields` and
 `duplicate-field`. The *code* is shared with the write path and the *fix suggestion* is not — a read
 endpoint answering "send only the fields you are changing" hands an agent advice about another operation.
-Three codes are new: `unrepresentable-query-value` (a member whose JSON value is not a string, a number, a
-boolean or a non-empty array of those), `too-many-select-entries` and `pattern-too-long`.
+Four codes are new: `unrepresentable-query-value` (a member whose JSON value is not a string, a number, a
+boolean or a non-empty array of those), `too-many-query-values`, `too-many-select-entries` and
+`pattern-too-long`.
 
 **A `pointer` carries one of two conventions and the rule that tells them apart is published on
 `AlvoViolation`:** empty or beginning with `/` is an RFC 6901 pointer into the request body; anything else

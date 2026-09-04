@@ -97,9 +97,11 @@ public sealed class PayloadBindingTests
         using var pastBound = await world.SendRawAsync(
             HttpMethod.Post, "/api/owners", _admin, content: AlvoApiWorld.RawJson(Nested(depth: 4)));
 
-        (await atBound.ReadProblemDetailAsync()).Contains("nests deeper", StringComparison.Ordinal).ShouldBeFalse(
-            "a body at the bound must reach the binder, which is only possible if the parse accepted what "
-            + "the scan admitted");
+        atBound.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
+        (await atBound.ReadViolationsAsync()).ShouldContain(
+            violation => violation.Pointer == "/name" && violation.Code == "invalid-value",
+            "a body at the bound must reach the binder and be answered about its VALUE — which is only "
+            + "possible if the parse accepted what the scan admitted");
         (await pastBound.ReadProblemDetailAsync()).ShouldContain("nests deeper than 4");
     }
 

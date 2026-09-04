@@ -143,6 +143,76 @@ public sealed class QueryBodyReaderTests
         fix.ShouldNotContain("field you", Case.Insensitive);
     }
 
+    /// <summary>
+    /// A body carrying more parameter <em>values</em> than this API reads is refused — and the bound is
+    /// reached while the values are being read, not after.
+    /// </summary>
+    /// <remarks>
+    /// <b>Nothing above this counts them.</b> <c>BoundedJsonBody</c>'s key bound counts property names at
+    /// every depth, and an array's elements are not property names — so one parameter repeated half a
+    /// million times is one key, satisfies every shape bound, and fits inside <c>MaxRequestBodyBytes</c>.
+    /// The parser would refuse the 257th filter term, but only after the transposition had built all half
+    /// million of them.
+    /// </remarks>
+    [Fact]
+    public async Task A_body_carrying_more_values_than_the_reader_reads_is_refused()
+    {
+        var repeated = string.Join(',', Enumerable.Repeat("\"(a.eq.1)\"", _options.MaxPayloadKeys + 1));
+
+        var read = await ReadAsync($$"""{"or":[{{repeated}}]}""");
+
+        read.Parameters.ShouldBeNull();
+        read.Violations.ShouldHaveSingleItem().Code.ShouldBe("too-many-query-values");
+    }
+
+    /// <summary>
+    /// And it is genuinely bounded rather than merely refused: a body far past the bound is answered
+    /// promptly, which is the property a quadratic accumulation would have destroyed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Appending one value at a time to a <c>StringValues</c> copies the whole of it each time, so the cost
+    /// of N values was quadratic in N — a length the caller chooses. The bound caps N, and building the
+    /// values once rather than N times is what makes the capped work linear.
+    /// </para>
+    /// <para>
+    /// <b>Sized to fit inside <c>MaxRequestBodyBytes</c> on purpose.</b> A body big enough to be refused by
+    /// the byte bound proves nothing about this one — the point is that a body the byte bound <em>admits</em>
+    /// can still carry a hundred thousand values, which is where the quadratic cost lived.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_body_far_past_the_value_bound_is_refused_promptly()
+    {
+        var repeated = string.Join(',', Enumerable.Repeat("\"1\"", 100_000));
+        var body = $$"""{"or":[{{repeated}}]}""";
+        System.Text.Encoding.UTF8.GetByteCount(body).ShouldBeLessThan(
+            _options.MaxRequestBodyBytes, "or the byte bound refuses this before the value bound can");
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+
+        var read = await ReadAsync(body);
+
+        clock.Stop();
+        read.Violations.ShouldHaveSingleItem().Code.ShouldBe("too-many-query-values");
+        clock.Elapsed.ShouldBeLessThan(
+            TimeSpan.FromSeconds(5),
+            "the transposition must stop at the bound rather than building every value first");
+    }
+
+    /// <summary>
+    /// One kind of bad value is one violation, however many elements carry it — the de-duplication
+    /// <c>QueryStringParser</c> already applies, for the same reason: a response that repeats one refusal
+    /// ten thousand times tells a caller nothing the first told them.
+    /// </summary>
+    [Fact]
+    public async Task An_array_of_bad_values_is_one_violation_not_one_per_element()
+    {
+        var read = await ReadAsync("""{"year":[null,null,null,null,null]}""");
+
+        read.Parameters.ShouldBeNull();
+        read.Violations.ShouldHaveSingleItem().Code.ShouldBe("unrepresentable-query-value");
+    }
+
     /// <summary>An empty object is the empty query, not a refusal: every readable field, the default page.</summary>
     [Fact]
     public async Task An_empty_object_is_the_empty_query()
