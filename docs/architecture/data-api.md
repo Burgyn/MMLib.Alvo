@@ -649,6 +649,12 @@ property-name counter as each element of `rows` opens, and counts the elements a
 budget across the batch — which is what the first implementation did — capped a five-field entity near a
 hundred rows and refused it as "too many fields", making `MaxBatchRows` unreachable over HTTP.
 
+**An idempotency record now holds a batch's whole id list.** `IdempotencyTable.Encode` writes a JSON array
+into the `row_id` column, so a record for a 1000-row batch is ~38 KB rather than the 36 bytes a single write
+stores. Nothing expires records (**#115**), and the growth is still bounded by the writes the caller may
+already perform — but the per-record size is no longer a constant, which is what that issue's argument
+assumed.
+
 **A known, bounded channel: a batch's refusal list tells "this row is refused" from "this row is not yours".**
 A row that exists and fails `WITH CHECK` answers `WriteRejectedByPolicy`; a row that is absent *or* invisible
 answers `RowUnavailable`. Because a refused batch writes nothing, a caller can send up to `MaxBatchRows`

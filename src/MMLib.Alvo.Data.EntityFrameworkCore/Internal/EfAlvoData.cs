@@ -2298,7 +2298,10 @@ internal sealed class EfAlvoData : IAlvoData
 
     /// <summary>The narrowest refusal a policy can produce: an index and a server-owned sentence.</summary>
     /// <param name="index">The row's position in the list the caller supplied.</param>
-    /// <param name="message">The refusal, built from constants and never from the caller's own text.</param>
+    /// <param name="message">
+    /// The refusal. Built from constants, or — on the hook path — from a <c>reject</c>'s own text, which is
+    /// <b>descriptor-authored</b> and so the one kind of text this framework echoes. Never the caller's.
+    /// </param>
     private static AlvoRowRefusal Forbidden(int index, string message) =>
         new(index, ForbiddenCode, message, "Change the row so the entity's rules admit it, or drop it from the batch.");
 

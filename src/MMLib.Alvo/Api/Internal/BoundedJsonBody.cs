@@ -272,16 +272,21 @@ internal static class BoundedJsonBody
             {
                 rowsDepth = reader.CurrentDepth;
             }
-            else if (reader.TokenType == JsonTokenType.StartObject)
+            else if (reader.TokenType == JsonTokenType.EndArray && reader.CurrentDepth == rowsDepth)
+            {
+                rowsDepth = -1;
+            }
+
+            if (StartsARow(ref reader, rowsDepth) && ++rows > options.MaxBatchRows)
+            {
+                return BodyRefusal.TooManyRows;
+            }
+
+            if (reader.TokenType == JsonTokenType.StartObject)
             {
                 seen.Enter(reader.CurrentDepth + 1);
                 if (rowsDepth >= 0 && reader.CurrentDepth == rowsDepth + 1)
                 {
-                    if (++rows > options.MaxBatchRows)
-                    {
-                        return BodyRefusal.TooManyRows;
-                    }
-
                     names = 0;
                 }
             }
@@ -302,18 +307,38 @@ internal static class BoundedJsonBody
                     return BodyRefusal.DuplicateName;
                 }
             }
-            else if (rowsDepth >= 0 && reader.CurrentDepth == rowsDepth + 1
-                && reader.TokenType is JsonTokenType.String or JsonTokenType.Number)
-            {
-                if (++rows > options.MaxBatchRows)
-                {
-                    return BodyRefusal.TooManyRows;
-                }
-            }
         }
 
         return null;
     }
+
+    /// <summary>
+    /// Whether the token the reader is on begins one element of the reserved rows array.
+    /// </summary>
+    /// <remarks>
+    /// <b>Every value token counts, and the list is written as "what a JSON value can begin with" rather than
+    /// as the shapes a row may legitimately take.</b> The first version counted an object, a string and a
+    /// number — the three a valid row or row id can be — and so never counted <c>null</c>, <c>true</c> or
+    /// <c>false</c>. A body of two hundred thousand <c>null</c>s then fitted inside
+    /// <see cref="AlvoApiOptions.MaxRequestBodyBytes"/>, scanned as zero rows, and was materialised in full
+    /// before the reader refused each element one at a time — which is precisely the cost
+    /// <see cref="AlvoApiOptions.MaxBatchRows"/> exists to refuse. A bound that counts only well-formed input
+    /// is not a bound; the refusal for a row of the wrong shape is the reader's job, and it happens after
+    /// this one has already been paid.
+    /// </remarks>
+    /// <param name="reader">The scanner, on the token to judge.</param>
+    /// <param name="rowsDepth">The depth of the reserved array, or -1 when it is not open.</param>
+    private static bool StartsARow(ref Utf8JsonReader reader, int rowsDepth) =>
+        rowsDepth >= 0
+        && reader.CurrentDepth == rowsDepth + 1
+        && reader.TokenType
+            is JsonTokenType.StartObject
+            or JsonTokenType.StartArray
+            or JsonTokenType.String
+            or JsonTokenType.Number
+            or JsonTokenType.True
+            or JsonTokenType.False
+            or JsonTokenType.Null;
 
     /// <summary>
     /// The property names seen so far in the object currently open at each depth — enough to decide "this

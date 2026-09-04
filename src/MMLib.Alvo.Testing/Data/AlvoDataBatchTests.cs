@@ -146,6 +146,93 @@ public abstract class AlvoDataBatchTests : AlvoDataFixture
     }
 
     /// <summary>
+    /// A batch update naming a row another <b>user of the same tenant</b> owns writes nothing, and that
+    /// user's row is untouched.
+    /// </summary>
+    /// <remarks>
+    /// The tenant facts prove the scope; this proves the row predicate, which is a different mechanism. Two
+    /// callers in one tenant differ only in which rows <c>owner_id == @user.id</c> admits, so a batch that
+    /// crossed that line would be a per-row <c>USING</c> failure the tenant facts cannot see.
+    /// </remarks>
+    [Fact]
+    public async Task A_batch_update_naming_another_users_row_writes_nothing()
+    {
+        var world = await OwnedWorldAsync();
+        var hers = IdOf(await world.Data.CreateAsync(
+            Tickets, OwnedPayload("hers", world.Alice), world.Alice, cancellationToken: Ct));
+        var his = IdOf(await world.Data.CreateAsync(
+            Tickets, OwnedPayload("his", world.Bob), world.Bob, cancellationToken: Ct));
+
+        var refused = await world.Data.UpdateManyAsync(
+            Tickets,
+            [new AlvoRowPatch(hers, Payload("renamed")), new AlvoRowPatch(his, Payload("renamed"))],
+            world.Alice,
+            cancellationToken: Ct);
+
+        refused.Succeeded.ShouldBeFalse();
+        refused.Rows.ShouldBeEmpty();
+
+        var untouched = await world.Data.GetAsync(Tickets, his, world.Bob, Ct);
+        untouched.ShouldNotBeNull()["title"].ShouldBe("his", "the other user's row must be as they left it");
+
+        var allowed = await world.Data.UpdateManyAsync(
+            Tickets, [new AlvoRowPatch(hers, Payload("renamed"))], world.Alice, cancellationToken: Ct);
+        allowed.Rows.Count.ShouldBe(1, "the same batch without the other user's row must succeed");
+    }
+
+    /// <summary>A batch delete naming another user's row removes nothing, including her own.</summary>
+    /// <remarks>
+    /// The delete verb's own per-row <c>USING</c> fact. It had none — its only isolation-adjacent fact was
+    /// "an absent row refuses the batch", over a permissive global fixture, which cannot tell a predicate
+    /// from an absence.
+    /// </remarks>
+    [Fact]
+    public async Task A_batch_delete_naming_another_users_row_removes_nothing()
+    {
+        var world = await OwnedWorldAsync();
+        var hers = IdOf(await world.Data.CreateAsync(
+            Tickets, OwnedPayload("hers", world.Alice), world.Alice, cancellationToken: Ct));
+        var his = IdOf(await world.Data.CreateAsync(
+            Tickets, OwnedPayload("his", world.Bob), world.Bob, cancellationToken: Ct));
+
+        var refused = await world.Data.DeleteManyAsync(Tickets, [hers, his], world.Alice, cancellationToken: Ct);
+
+        refused.Succeeded.ShouldBeFalse();
+        (await world.Data.GetAsync(Tickets, his, world.Bob, Ct)).ShouldNotBeNull("his row survives");
+        (await world.Data.GetAsync(Tickets, hers, world.Alice, Ct)).ShouldNotBeNull(
+            "and so does hers — a refused batch removes nothing at all");
+
+        var removed = await world.Data.DeleteManyAsync(Tickets, [hers], world.Alice, cancellationToken: Ct);
+        removed.Succeeded.ShouldBeTrue("the same batch without the other user's row must succeed");
+    }
+
+    /// <summary>A batch delete naming another <b>tenant's</b> row removes nothing.</summary>
+    /// <remarks>
+    /// The two-tenant half the delete verb was missing. The other tenant's row is read back as that tenant
+    /// rather than counted, which compares the row rather than a number.
+    /// </remarks>
+    [Fact]
+    public async Task A_batch_delete_naming_another_tenants_row_removes_nothing()
+    {
+        var world = await TenantedWorldAsync();
+        var theirs = IdOf(await world.Data.CreateAsync(
+            Invoices, TenantPayload("theirs", world.Globex), world.GlobexCaller, cancellationToken: Ct));
+        var mine = IdOf(await world.Data.CreateAsync(
+            Invoices, TenantPayload("mine", world.Acme), world.AcmeCaller, cancellationToken: Ct));
+
+        var refused = await world.Data.DeleteManyAsync(
+            Invoices, [mine, theirs], world.AcmeCaller, cancellationToken: Ct);
+
+        refused.Succeeded.ShouldBeFalse();
+        (await world.Data.GetAsync(Invoices, theirs, world.GlobexCaller, Ct))
+            .ShouldNotBeNull()["title"].ShouldBe("theirs");
+
+        var removed = await world.Data.DeleteManyAsync(
+            Invoices, [mine], world.AcmeCaller, cancellationToken: Ct);
+        removed.Succeeded.ShouldBeTrue("the same batch without the other tenant's row must succeed");
+    }
+
+    /// <summary>
     /// A row another tenant owns and a row that never existed are <b>one</b> refusal, byte for byte.
     /// Distinguishing them would make a batch answer as many existence questions per request as it carries
     /// rows — the oracle the single-row not-found closes, multiplied by the batch size.

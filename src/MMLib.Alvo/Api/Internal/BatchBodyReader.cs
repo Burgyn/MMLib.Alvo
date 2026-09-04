@@ -80,7 +80,7 @@ internal static class BatchBodyReader
             documentOptions: new JsonDocumentOptions { MaxDepth = options.MaxPayloadDepth });
 
         return node is JsonObject document && document[BatchViolations.RowsMember] is JsonArray rows
-            ? await BoundAsync(rows, entity, kind, decision, formats, data, context, cancellationToken)
+            ? await BoundAsync(rows, entity, options, kind, decision, formats, data, context, cancellationToken)
                 .ConfigureAwait(false)
             : Refused(BatchViolations.NotABatch());
     }
@@ -92,6 +92,7 @@ internal static class BatchBodyReader
     /// <inheritdoc cref="ReadAsync"/>
     /// <param name="rows">The <c>rows</c> array.</param>
     /// <param name="entity">The entity being written.</param>
+    /// <param name="options">The payload bounds to enforce.</param>
     /// <param name="kind">Which batch verb this is.</param>
     /// <param name="decision">The verdict the policy engine returned for this caller.</param>
     /// <param name="formats">The applied descriptor's compiled field formats.</param>
@@ -101,6 +102,7 @@ internal static class BatchBodyReader
     private static async Task<Batch> BoundAsync(
         JsonArray rows,
         EntitySchema entity,
+        AlvoApiOptions options,
         DataApiEndpointKind kind,
         PolicyDecision decision,
         FormatCatalog formats,
@@ -111,6 +113,11 @@ internal static class BatchBodyReader
         if (rows.Count == 0)
         {
             return Refused(BatchViolations.EmptyBatch());
+        }
+
+        if (rows.Count > options.MaxBatchRows)
+        {
+            return Refused(BatchViolations.TooManyRows(options.MaxBatchRows));
         }
 
         var bound = new List<Dictionary<string, object?>>(rows.Count);

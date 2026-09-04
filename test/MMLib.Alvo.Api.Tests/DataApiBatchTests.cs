@@ -131,6 +131,43 @@ public class DataApiBatchTests
         (await world.CountRowsAsync("owners")).ShouldBe(20);
     }
 
+    /// <summary>
+    /// The row bound counts every element, whatever its type — a body of nulls is refused as too many rows,
+    /// not walked into a tree and refused one element at a time.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The first version of the scan counted only the shapes a valid row can take</b> — an object, a
+    /// string, a number — so <c>null</c>, <c>true</c>, <c>false</c> and a nested array were never counted at
+    /// all. A body of two hundred thousand nulls fitted inside <c>MaxRequestBodyBytes</c>, scanned as zero
+    /// rows, and was then parsed in full and refused one element at a time: precisely the work the bound
+    /// exists to refuse, reachable by any caller who may write.
+    /// </para>
+    /// <para>
+    /// A bound that counts only well-formed input is not a bound. The refusal for a row of the wrong shape
+    /// is the reader's job and happens after this one has already been paid.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData("null")]
+    [InlineData("true")]
+    [InlineData("[]")]
+    public async Task The_row_bound_counts_an_element_of_any_type(string element)
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync(
+            [_admin], new AlvoApiWorldSetup(ConfigureApi: options => options.MaxBatchRows = 3));
+
+        using var response = await world.SendRawAsync(
+            HttpMethod.Post,
+            "/api/owners/batch",
+            _admin,
+            content: AlvoApiWorld.RawJson($"{{\"rows\":[{string.Join(",", Enumerable.Repeat(element, 10))}]}}"));
+
+        response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity, await response.ReadTextAsync());
+        (await response.ReadViolationsAsync()).Select(violation => violation.Code)
+            .ShouldContain("batch-too-many-rows", "ten elements is past a bound of three, whatever they are");
+    }
+
     /// <summary>A row past the per-row field bound is still refused, so the bound is real rather than absent.</summary>
     /// <remarks>
     /// The counterweight to the fact above: an implementation that stopped counting names altogether would

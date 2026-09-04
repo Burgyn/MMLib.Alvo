@@ -130,10 +130,13 @@ namespace MMLib.Alvo.Testing.Data
     public abstract class AlvoDataBatchTests : MMLib.Alvo.Testing.Data.AlvoDataFixture
     {
         protected AlvoDataBatchTests() { }
+        public System.Threading.Tasks.Task A_batch_delete_naming_another_tenants_row_removes_nothing() { }
+        public System.Threading.Tasks.Task A_batch_delete_naming_another_users_row_removes_nothing() { }
         public System.Threading.Tasks.Task A_batch_delete_naming_one_row_twice_is_refused() { }
         public System.Threading.Tasks.Task A_batch_delete_removes_every_named_row_or_none() { }
         public System.Threading.Tasks.Task A_batch_naming_another_tenants_row_writes_nothing() { }
         public System.Threading.Tasks.Task A_batch_naming_one_row_twice_is_refused() { }
+        public System.Threading.Tasks.Task A_batch_update_naming_another_users_row_writes_nothing() { }
         public System.Threading.Tasks.Task A_batch_whose_last_row_fails_writes_nothing() { }
         public System.Threading.Tasks.Task A_caller_the_policy_denies_outright_is_refused_before_any_row_is_judged() { }
         public System.Threading.Tasks.Task A_refusal_never_echoes_what_the_caller_sent() { }

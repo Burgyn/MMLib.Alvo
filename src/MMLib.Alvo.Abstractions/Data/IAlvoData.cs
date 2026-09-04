@@ -548,6 +548,13 @@ public interface IAlvoData
     /// a per-row key would promise one. The fingerprint covers every row, so the same key with a different
     /// list is <see cref="AlvoIdempotencyConflictException"/> rather than a replay.
     /// </para>
+    /// <para>
+    /// <b>A batch that names one row more than once is refused, and an implementor must refuse it.</b> Every
+    /// row is judged against its own pre-image before any row is written, so two entries for one row are both
+    /// judged against the <em>original</em> and then both applied — leaving a composition no verdict ever saw,
+    /// which is a <c>WITH CHECK</c> bypass. See <see cref="AlvoAuthorizationException.RowNamedTwice"/> for the
+    /// worked example and for why folding the entries is not the answer.
+    /// </para>
     /// </remarks>
     /// <param name="entity">The entity name.</param>
     /// <param name="rows">The rows to change, in the order the caller supplied them.</param>
@@ -606,6 +613,13 @@ public interface IAlvoData
     /// is one version, and a batch addresses many rows — so the header a single-row delete honours has no
     /// meaning here, and accepting one version for a list would either check one row or check none while
     /// looking as though it checked all. A caller who needs per-row conditions performs per-row deletes.
+    /// </para>
+    /// <para>
+    /// <b>A batch that names one row more than once is refused, and an implementor must refuse it.</b> Every
+    /// row is judged against its own pre-image before any row is written, so two entries for one row are both
+    /// judged against the <em>original</em> and then both applied — leaving a composition no verdict ever saw,
+    /// which is a <c>WITH CHECK</c> bypass. See <see cref="AlvoAuthorizationException.RowNamedTwice"/> for the
+    /// worked example and for why folding the entries is not the answer.
     /// </para>
     /// </remarks>
     /// <param name="entity">The entity name.</param>
