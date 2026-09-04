@@ -179,7 +179,7 @@ namespace MMLib.Alvo.Data;
 /// <para>
 /// <b>A write's two concurrency channels, and where each one is decided.</b> An
 /// <see cref="AlvoPrecondition"/> is the caller's claim about the version they are changing, and an
-/// <see cref="AlvoIdempotency"/> token is their claim that a create may already have happened. Both are
+/// <see cref="AlvoIdempotency"/> token is their claim that this write may already have happened. Both are
 /// optional, and an implementation must honour three rules about them:
 /// </para>
 /// <list type="bullet">
@@ -206,8 +206,10 @@ namespace MMLib.Alvo.Data;
 ///   </item>
 /// </list>
 /// <para>
-/// <b>An idempotency record stores the created row id, and a replay re-reads that row under a freshly
-/// resolved <c>get</c> decision for the replaying caller</b> — reading <em>and</em> masking through it. Not
+/// <b>An idempotency record stores the ids of the rows the write touched, and a replay re-reads them under
+/// a freshly resolved <c>get</c> decision for the replaying caller</b> — reading <em>and</em> masking
+/// through it. A replayed delete is the one that reads nothing: its rows are gone by construction, so the
+/// answer is the same "it is gone" the first call gave, produced without a read. Not
 /// under the <c>create</c> decision the call arrived with, and the reason is the one a future implementer has
 /// to know rather than rediscover: a <c>create</c> decision has no <c>USING</c> predicate by contract
 /// (<see cref="PolicyDecision.Using"/> is <see langword="null"/> — there is no stored row to filter when the
@@ -392,6 +394,13 @@ public interface IAlvoData
     /// Compared against the row-locked pre-image inside the write transaction — see the type remarks for the
     /// ordering rules, which are part of the contract.
     /// </param>
+    /// <param name="idempotency">
+    /// The caller's idempotency token, or <see langword="null"/> for an ordinary write. With a token, the
+    /// first write is recorded against it and a replay carrying the same
+    /// <see cref="AlvoIdempotency.Fingerprint"/> is answered without writing again — by re-reading the recorded row under a
+    /// freshly resolved <c>get</c> decision, exactly as a replayed create is.
+    /// The record is scoped to the caller's tenant and user, and a token from an anonymous caller is refused.
+    /// </param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>The updated row, with every <c>hidden</c> field stripped.</returns>
     /// <exception cref="AlvoRecordNotFoundException">
@@ -413,7 +422,15 @@ public interface IAlvoData
     /// <exception cref="AlvoConstraintViolationException">
     /// <paramref name="values"/> supplies a value another record already holds on a <c>unique</c> field.
     /// </exception>
-    Task<AlvoRecord> UpdateAsync(string entity, Guid id, IReadOnlyDictionary<string, object?> values, AlvoContext context, AlvoPrecondition? precondition = null, CancellationToken cancellationToken = default);
+    /// <exception cref="AlvoIdempotencyConflictException">
+    /// <paramref name="idempotency"/>'s key was already used for a request with a different fingerprint.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="idempotency"/> is supplied for an anonymous <paramref name="context"/> — see
+    /// <see cref="AlvoIdempotency.EnsureUsableKey"/>. Decided from the token and the context alone, before
+    /// any policy is resolved, so it discloses nothing about the entity.
+    /// </exception>
+    Task<AlvoRecord> UpdateAsync(string entity, Guid id, IReadOnlyDictionary<string, object?> values, AlvoContext context, AlvoPrecondition? precondition = null, AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default);
 
     /// <summary>Deletes a row by id.</summary>
     /// <param name="entity">The entity name.</param>
@@ -423,6 +440,13 @@ public interface IAlvoData
     /// The version the caller believes the row holds, or <see langword="null"/> to delete unconditionally.
     /// Compared against the row-locked pre-image inside the delete's own transaction, under the same ordering
     /// rules an update follows.
+    /// </param>
+    /// <param name="idempotency">
+    /// The caller's idempotency token, or <see langword="null"/> for an ordinary write. With a token, the
+    /// first write is recorded against it and a replay carrying the same
+    /// <see cref="AlvoIdempotency.Fingerprint"/> is answered without writing again — by answering that the row is gone
+    /// without reading anything, because there is nothing left to read.
+    /// The record is scoped to the caller's tenant and user, and a token from an anonymous caller is refused.
     /// </param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <exception cref="AlvoRecordNotFoundException">
@@ -437,5 +461,13 @@ public interface IAlvoData
     /// <exception cref="AlvoConstraintViolationException">
     /// Another record still references this one through a <c>ref</c> declaring <c>onDelete: "restrict"</c>.
     /// </exception>
-    Task DeleteAsync(string entity, Guid id, AlvoContext context, AlvoPrecondition? precondition = null, CancellationToken cancellationToken = default);
+    /// <exception cref="AlvoIdempotencyConflictException">
+    /// <paramref name="idempotency"/>'s key was already used for a request with a different fingerprint.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="idempotency"/> is supplied for an anonymous <paramref name="context"/> — see
+    /// <see cref="AlvoIdempotency.EnsureUsableKey"/>. Decided from the token and the context alone, before
+    /// any policy is resolved, so it discloses nothing about the entity.
+    /// </exception>
+    Task DeleteAsync(string entity, Guid id, AlvoContext context, AlvoPrecondition? precondition = null, AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default);
 }

@@ -90,7 +90,7 @@ public abstract class AlvoDataConcurrencyTests
         var created = await world.Data.CreateAsync(Orders, Payload("first"), world.Caller, cancellationToken: Ct);
 
         var updated = await world.Data.UpdateAsync(
-            Orders, IdOf(created), Payload("second"), world.Caller, new AlvoPrecondition(VersionOf(created)), Ct);
+            Orders, IdOf(created), Payload("second"), world.Caller, new AlvoPrecondition(VersionOf(created)), cancellationToken: Ct);
 
         updated["title"].ShouldBe("second");
     }
@@ -112,7 +112,7 @@ public abstract class AlvoDataConcurrencyTests
         VersionOf(advanced).ShouldNotBe(stale, "a write must advance the version, or nothing below discriminates");
 
         await Should.ThrowAsync<AlvoPreconditionFailedException>(() => world.Data.UpdateAsync(
-            Orders, IdOf(created), Payload("third"), world.Caller, new AlvoPrecondition(stale), Ct));
+            Orders, IdOf(created), Payload("third"), world.Caller, new AlvoPrecondition(stale), cancellationToken: Ct));
 
         var stored = await world.Data.GetAsync(Orders, IdOf(created), world.Caller, Ct);
         stored.ShouldNotBeNull();
@@ -135,11 +135,11 @@ public abstract class AlvoDataConcurrencyTests
         VersionOf(advanced).ShouldNotBe(stale, "a write must advance the version, or nothing below discriminates");
 
         await Should.ThrowAsync<AlvoPreconditionFailedException>(() => world.Data.DeleteAsync(
-            Orders, IdOf(created), world.Caller, new AlvoPrecondition(stale), Ct));
+            Orders, IdOf(created), world.Caller, new AlvoPrecondition(stale), cancellationToken: Ct));
         (await world.Data.GetAsync(Orders, IdOf(created), world.Caller, Ct)).ShouldNotBeNull();
 
         await world.Data.DeleteAsync(
-            Orders, IdOf(created), world.Caller, new AlvoPrecondition(VersionOf(advanced)), Ct);
+            Orders, IdOf(created), world.Caller, new AlvoPrecondition(VersionOf(advanced)), cancellationToken: Ct);
         (await world.Data.GetAsync(Orders, IdOf(created), world.Caller, Ct)).ShouldBeNull();
     }
 
@@ -162,7 +162,7 @@ public abstract class AlvoDataConcurrencyTests
             Payload("second"),
             world.Caller,
             new AlvoPrecondition(DateTimeOffset.UnixEpoch),
-            Ct));
+            cancellationToken: Ct));
         refusal.Message.ShouldContain("audit");
 
         var stored = await world.Data.GetAsync(Drafts, IdOf(created), world.Caller, Ct);
@@ -189,9 +189,9 @@ public abstract class AlvoDataConcurrencyTests
         var created = await world.Data.CreateAsync(Orders, Payload("first"), world.Caller, cancellationToken: Ct);
 
         var updated = await world.Data.UpdateAsync(
-            Orders, IdOf(created), Payload("second"), world.Caller, new AlvoPrecondition(VersionOf(created)), Ct);
+            Orders, IdOf(created), Payload("second"), world.Caller, new AlvoPrecondition(VersionOf(created)), cancellationToken: Ct);
         var again = await world.Data.UpdateAsync(
-            Orders, IdOf(created), Payload("third"), world.Caller, new AlvoPrecondition(VersionOf(updated)), Ct);
+            Orders, IdOf(created), Payload("third"), world.Caller, new AlvoPrecondition(VersionOf(updated)), cancellationToken: Ct);
 
         again["title"].ShouldBe("third");
     }
@@ -218,12 +218,12 @@ public abstract class AlvoDataConcurrencyTests
         VersionOf(advanced).ShouldNotBe(stale, "a write must advance the version, or nothing below discriminates");
 
         await Should.ThrowAsync<AlvoPreconditionFailedException>(() => world.Data.UpdateAsync(
-            Tickets, IdOf(hers), Payload("x"), world.Alice, new AlvoPrecondition(stale), Ct));
+            Tickets, IdOf(hers), Payload("x"), world.Alice, new AlvoPrecondition(stale), cancellationToken: Ct));
 
         await Should.ThrowAsync<AlvoRecordNotFoundException>(() => world.Data.UpdateAsync(
-            Tickets, IdOf(his), Payload("x"), world.Alice, new AlvoPrecondition(stale), Ct));
+            Tickets, IdOf(his), Payload("x"), world.Alice, new AlvoPrecondition(stale), cancellationToken: Ct));
         await Should.ThrowAsync<AlvoRecordNotFoundException>(() => world.Data.DeleteAsync(
-            Tickets, IdOf(his), world.Alice, new AlvoPrecondition(stale), Ct));
+            Tickets, IdOf(his), world.Alice, new AlvoPrecondition(stale), cancellationToken: Ct));
     }
 
     /// <summary>

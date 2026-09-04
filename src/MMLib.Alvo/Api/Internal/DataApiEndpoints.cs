@@ -349,7 +349,8 @@ internal static class DataApiEndpoints
                     }
 
                     var record = await data
-                        .UpdateAsync(entity.Name, id, body.Values, context, precondition, ct).ConfigureAwait(false);
+                        .UpdateAsync(entity.Name, id, body.Values, context, precondition, cancellationToken: ct)
+                        .ConfigureAwait(false);
                     return Row(record, entity);
                 }))
             .Protect(entity, DataApiEndpointKind.Update, filters, conventions);
@@ -374,7 +375,8 @@ internal static class DataApiEndpoints
                         policies, entity.Name, DataApiEndpointKind.Delete.ToDataOperation(), context);
 
                     var precondition = Precondition(http.Request);
-                    await data.DeleteAsync(entity.Name, id, context, precondition, ct).ConfigureAwait(false);
+                    await data.DeleteAsync(entity.Name, id, context, precondition, cancellationToken: ct)
+                        .ConfigureAwait(false);
                     return Results.NoContent();
                 }))
             .Protect(entity, DataApiEndpointKind.Delete, filters, conventions);

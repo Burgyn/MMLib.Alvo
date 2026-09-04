@@ -810,11 +810,13 @@ internal sealed class EfAlvoData : IAlvoData
     /// </remarks>
     public async Task<AlvoRecord> UpdateAsync(
         string entity, Guid id, IReadOnlyDictionary<string, object?> values, AlvoContext context,
-        AlvoPrecondition? precondition = null, CancellationToken cancellationToken = default)
+        AlvoPrecondition? precondition = null, AlvoIdempotency? idempotency = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentNullException.ThrowIfNull(values);
         ArgumentNullException.ThrowIfNull(context);
+        AlvoIdempotency.EnsureUsableToken(idempotency, context);
 
         var decision = Resolve(entity, DataOperation.Update, context);
 
@@ -891,10 +893,11 @@ internal sealed class EfAlvoData : IAlvoData
     /// <inheritdoc/>
     public async Task DeleteAsync(
         string entity, Guid id, AlvoContext context, AlvoPrecondition? precondition = null,
-        CancellationToken cancellationToken = default)
+        AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentNullException.ThrowIfNull(context);
+        AlvoIdempotency.EnsureUsableToken(idempotency, context);
 
         var decision = Resolve(entity, DataOperation.Delete, context);
 

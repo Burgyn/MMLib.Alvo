@@ -277,11 +277,13 @@ public sealed class InMemoryAlvoData : IAlvoData
     /// <inheritdoc/>
     public Task<AlvoRecord> UpdateAsync(
         string entity, Guid id, IReadOnlyDictionary<string, object?> values, AlvoContext context,
-        AlvoPrecondition? precondition = null, CancellationToken cancellationToken = default)
+        AlvoPrecondition? precondition = null, AlvoIdempotency? idempotency = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentNullException.ThrowIfNull(values);
         ArgumentNullException.ThrowIfNull(context);
+        AlvoIdempotency.EnsureUsableToken(idempotency, context);
         cancellationToken.ThrowIfCancellationRequested();
 
         var decision = _policy.Resolve(entity, DataOperation.Update, context);
@@ -318,10 +320,11 @@ public sealed class InMemoryAlvoData : IAlvoData
     /// <inheritdoc/>
     public Task DeleteAsync(
         string entity, Guid id, AlvoContext context, AlvoPrecondition? precondition = null,
-        CancellationToken cancellationToken = default)
+        AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentNullException.ThrowIfNull(context);
+        AlvoIdempotency.EnsureUsableToken(idempotency, context);
         cancellationToken.ThrowIfCancellationRequested();
 
         var decision = _policy.Resolve(entity, DataOperation.Delete, context);
