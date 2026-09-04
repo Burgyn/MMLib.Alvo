@@ -633,6 +633,15 @@ silent success for a request that never arrived. The response is `200` with an e
 `affected`, not `204`: it reports on many rows, and `affected` is what tells a five-row delete from a
 refusal.
 
+**A batch's refusals answer the status their channel answers.** The reader refuses what the entity's
+declared shape refuses — a type, a length, a missing `required` — and that is a `422`, exactly as on the
+single-row routes. The **port** refuses what policy refuses — `WITH CHECK`, the tenant scope, a row that is
+not yours, a row named twice — and that is a `403` carrying a `violations` array, one entry per refused row.
+A 403 with violations is new: the single-row 403 carries only a message, and a refusal that names no row is
+what makes a five-hundred-row import unfixable. The one refusal that stays 422 where you might expect 403 is
+a write to a `readOnly` field, because `RecordValidator` catches it in the reader and answers 422 on every
+write route — matching the single-row routes was judged to matter more than matching the batch's own table.
+
 **No precondition on the batch delete.** One version cannot condition many rows, and accepting one would
 either check a single row or check none while looking as though it checked all of them.
 

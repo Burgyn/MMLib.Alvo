@@ -312,6 +312,14 @@ disagreed:
 | any policy refusal — `WITH CHECK`, the tenant scope, a `readOnly` field, a managed column, an invisible or absent row | **403** |
 | anything the entity's declared shape refuses — a type, a `maxLength`, a missing `required` | **422** |
 | a mix | **403** — default-deny dominates, and a caller told to fix a field would fix it and be refused again |
+
+**A refinement the implementation forced, recorded here rather than left as drift.** The table above reads as
+one decision over one list, and the two refusals never actually meet in one list: the *reader* refuses what
+the entity's declared shape refuses and answers **422**, and the *port* refuses what policy refuses and
+answers **403** — the reader short-circuits before the port is called, so there is no mix to resolve. The one
+case the table would have put at 403 and the code puts at 422 is a `readOnly` field, which `RecordValidator`
+refuses in the reader: it answers 422 on the batch exactly as it does on the single-row create and update, and
+matching the single-row route was judged to matter more than matching this table.
 | a constraint the database enforces | **409**, naming the field and no index |
 
 ## 7. #106 — the bound, and it will be measured
@@ -399,6 +407,20 @@ whole contract is that every member throws the fifth failure family, so its thre
 names**, so it moves twice: once for `InMemoryAlvoData`'s three members and again for every fact §10 adds
 to the shared suite.
 
+
+**Added after the design was written, and recorded here rather than left to a commit message:**
+
+- `MMLib.Alvo.Testing.Data.AlvoDataFixture` — the fixture `AlvoDataConcurrencyTests` and `AlvoDataBatchTests`
+  share. Public because it is an abstract base an out-of-tree provider derives from, exactly as the two
+  suites are; its only published member is the `protected abstract CreateAsync` that *moved* off
+  `AlvoDataConcurrencyTests`, so the effective surface is unchanged. Everything else it carries is
+  `private protected` and invisible to a consumer. Hoisted rather than copied because the two suites must
+  agree — the batch suite's whole claim is that a batch judges a row exactly as its single-row sibling does,
+  and 250 lines of duplicated scaffolding is how two fixtures that must agree come to disagree.
+- `AlvoAuthorizationException.RowNamedTwice` — the refusal for a batch naming one row more than once, added
+  when review found that judging two patches for one row against the same pre-image is a `WITH CHECK`
+  bypass. It lives beside `RowUnavailable` and `QueryFieldUnavailable` for the reason those do: a provider
+  that cannot read the constant words it themselves, and the wording is the contract.
 ## 10. How each claim is proved
 
 The contract suite (`src/MMLib.Alvo.Testing`) is where the port-level facts go, because they must hold

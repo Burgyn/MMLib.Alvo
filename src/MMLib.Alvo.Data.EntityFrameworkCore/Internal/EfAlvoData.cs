@@ -2211,8 +2211,10 @@ internal sealed class EfAlvoData : IAlvoData
     /// <summary>A batch delete: every named row's locked pre-image judged, then every one removed.</summary>
     /// <remarks>
     /// <para>
-    /// <see cref="EnsureNotSoftDeleted"/> runs before the transaction, not per row: an entity that cannot be
-    /// deleted at all is a broken caller rather than a refused row, so it throws.
+    /// <see cref="EnsureNotSoftDeleted"/> runs once for the batch rather than per row: an entity that cannot
+    /// be deleted at all is a broken caller rather than a refused row, so it throws. It runs inside the
+    /// transaction, which costs nothing — it consults the schema and no stored row, and the transaction is
+    /// rolled back on the way out.
     /// </para>
     /// <para>
     /// <b>No precondition.</b> One version cannot condition many rows — see
@@ -2333,8 +2335,11 @@ internal sealed class EfAlvoData : IAlvoData
     /// decision, exactly as a single write's replay is and for the same reason.
     /// </summary>
     /// <remarks>
-    /// A replayed batch <b>delete</b> reads nothing and answers its recorded count, because its rows are gone
-    /// by construction — the record itself is the whole answer, and a read would find none of them.
+    /// <b>A replayed batch delete finds nothing, which is the same answer by a longer road.</b> Its rows are
+    /// gone by construction, so the reads below return none and the count comes from the record either way.
+    /// Reading anyway is N wasted round trips on a replayed delete and is the price of one shape for all
+    /// three verbs; a verb-aware short circuit here would be a second place that has to know which verb
+    /// wrote a record, and the record deliberately does not say.
     /// </remarks>
     /// <param name="db">The store this attempt runs against.</param>
     /// <param name="schema">The entity being written.</param>

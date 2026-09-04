@@ -133,8 +133,17 @@ internal static class DataApiEndpoints
 
     /// <summary>One batch request: the decision, the body, then the port.</summary>
     /// <remarks>
+    /// <para>
     /// The decision is resolved <b>before a byte of the body is read</b>, for the reason every other write
     /// does it: a caller this entity does not admit must not be answered with advice about a field.
+    /// </para>
+    /// <para>
+    /// <b>The two refusal channels answer different statuses, and which one fired decides it.</b> The reader
+    /// refuses what the entity's declared shape refuses — a type, a length, a missing required field — and
+    /// that is a <c>422</c>, exactly as it is on the single-row routes. The <em>port</em> refuses what policy
+    /// refuses, and that is a <c>403</c>: a caller refused by <c>WITH CHECK</c> on one row gets a 403, and
+    /// getting a 422 for the same refusal on a batch would tell them to fix a shape that is not wrong.
+    /// </para>
     /// </remarks>
     /// <param name="http">The request.</param>
     /// <param name="entity">The entity being written.</param>
@@ -174,7 +183,7 @@ internal static class DataApiEndpoints
 
         return result.Succeeded
             ? Rows(result)
-            : ProblemResultFactory.Validation([.. result.Refusals.Select(BatchViolations.FromPort)]);
+            : ProblemResultFactory.RowsForbidden([.. result.Refusals.Select(BatchViolations.FromPort)]);
     }
 
     /// <summary>The port call this batch verb makes.</summary>
@@ -219,10 +228,25 @@ internal static class DataApiEndpoints
     /// <param name="batch">The bound rows.</param>
     private static JsonObject BatchDigest(BatchBodyReader.Batch batch) => new()
     {
+        [BatchMarker] = true,
         [BatchViolations.RowsMember] = new JsonArray(
             [.. batch.Ids.Select(id => (JsonNode)JsonValue.Create(id))]),
         ["values"] = System.Text.Json.JsonSerializer.SerializeToNode(batch.Rows),
     };
+
+    /// <summary>
+    /// The member that keeps a batch's digest out of a caller body's namespace.
+    /// </summary>
+    /// <remarks>
+    /// <b><see cref="IdempotencyFingerprint"/> claims no two different requests share a digest input, and
+    /// without this they could.</b> The route is deliberately out of the digest, and a create carries
+    /// neither a row id nor a precondition — so <c>POST {entity}</c> and <c>POST {entity}/batch</c> differ
+    /// only by body. An entity declaring <c>json</c> fields named <c>rows</c> and <c>values</c> could send a
+    /// single-row body whose canonical form equalled a batch's, and the single write's replay would then
+    /// answer from a batch record. A leading <c>$</c> cannot appear in a descriptor field name, so this
+    /// member cannot collide with one.
+    /// </remarks>
+    private const string BatchMarker = "$batch";
 
     /// <summary>The batch's success body: the rows it wrote, under the same envelope key a page uses.</summary>
     /// <remarks>

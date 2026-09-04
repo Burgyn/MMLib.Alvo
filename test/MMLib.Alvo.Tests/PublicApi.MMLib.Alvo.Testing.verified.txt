@@ -151,7 +151,9 @@ namespace MMLib.Alvo.Testing.Data
     {
         protected AlvoDataBeforeHookTests() { }
         protected static System.DateTimeOffset Stamp { get; }
+        public System.Threading.Tasks.Task A_batch_whose_mutates_the_create_rule_accepts_still_lands() { }
         public System.Threading.Tasks.Task A_delete_no_hook_refuses_still_removes_the_row() { }
+        public System.Threading.Tasks.Task A_mutate_cannot_move_a_row_out_of_the_create_rule_inside_a_batch() { }
         public System.Threading.Tasks.Task A_mutate_may_write_a_field_the_caller_is_refused() { }
         public System.Threading.Tasks.Task A_mutate_on_an_update_reaches_the_stored_row_at_that_writes_instant() { }
         public System.Threading.Tasks.Task A_mutate_reaches_the_stored_row() { }
@@ -165,6 +167,7 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task A_reject_refuses_the_create_and_stores_no_row() { }
         public System.Threading.Tasks.Task A_reject_whose_condition_is_false_lets_the_create_through() { }
         public System.Threading.Tasks.Task An_idempotent_replay_runs_no_hook_a_second_time() { }
+        public System.Threading.Tasks.Task Every_row_a_batch_stores_is_the_row_its_hook_produced() { }
         public System.Threading.Tasks.Task Every_write_face_consults_the_hook_pipeline() { }
         protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Testing.Data.IAlvoDataBeforeHookWorld> WorldAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, System.TimeProvider time);
     }
@@ -330,6 +333,7 @@ namespace MMLib.Alvo.Testing.Data
     public abstract class AlvoDataOutboxTests
     {
         protected AlvoDataOutboxTests() { }
+        public System.Threading.Tasks.Task A_batch_emits_one_event_per_row() { }
         public System.Threading.Tasks.Task A_create_emits_exactly_one_event() { }
         public System.Threading.Tasks.Task A_delete_emits_exactly_one_event_carrying_the_pre_image() { }
         public System.Threading.Tasks.Task A_denied_write_emits_nothing() { }

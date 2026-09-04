@@ -16,10 +16,17 @@ namespace MMLib.Alvo.Api.Tests;
 /// </remarks>
 public class DataApiBatchTests
 {
-    private static readonly TestApiKey _admin = new("admin-key", ["admin"], ["*:read", "*:write"]);
+    /// <summary>
+    /// The writing caller. <c>authenticated</c> as well as <c>admin</c>, because the registry's <c>get</c> and
+    /// <c>list</c> rules name the first while its write rules name the second — a key holding only
+    /// <c>admin</c> can create a row and then cannot read it back, which reads as a product bug and is not.
+    /// </summary>
+    private static readonly TestApiKey _admin =
+        new("admin-key", ["admin", "authenticated"], ["*:read", "*:write"]);
 
     /// <summary>A key that may read and not write, so the batch is refused before a byte of it is read.</summary>
-    private static readonly TestApiKey _reader = new("reader-key", ["admin"], ["*:read"]);
+    private static readonly TestApiKey _reader =
+        new("reader-key", ["admin", "authenticated"], ["*:read"]);
 
     /// <summary>A batch of three creates three rows and answers them in the order they were sent.</summary>
     [Fact]
@@ -229,6 +236,43 @@ public class DataApiBatchTests
         (await response.ReadTextAsync()).Contains("/rows/", StringComparison.Ordinal).ShouldBeFalse(
             "a refusal decided before any row was read must not name one");
         (await world.CountRowsAsync("owners")).ShouldBe(0);
+    }
+
+    /// <summary>
+    /// A row the <b>port</b> refuses answers 403 with a violation naming it — not 422.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The two refusal channels answer different statuses and this is the one that is easy to get wrong. The
+    /// reader refuses what the declared shape refuses and answers 422; the port refuses what policy refuses
+    /// and answers 403, because a caller refused by policy on one row of a single-row route gets a 403 and
+    /// telling them 422 would send them to fix a shape that is not wrong.
+    /// </para>
+    /// <para>
+    /// A 403 carrying <c>violations</c> is new to this API — the single-row 403 carries only a message — and
+    /// it is the whole reason a batch's refusal is usable: the pointer is what a caller repairs.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_row_the_port_refuses_is_403_and_names_the_row()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin]);
+        var real = await CreatedIdAsync(world, "Real");
+
+        using var response = await world.SendAsync(
+            HttpMethod.Patch, "/api/owners/batch", _admin,
+            body: Rows(
+                new JsonObject { ["id"] = real, ["name"] = "Renamed" },
+                new JsonObject { ["id"] = Guid.NewGuid(), ["name"] = "Renamed" }));
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Forbidden, await response.ReadTextAsync());
+        (await response.ReadViolationsAsync()).Select(violation => violation.Pointer).ShouldContain("/rows/1");
+        (await response.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.Forbidden);
+
+        using var unchanged = await world.SendAsync(HttpMethod.Get, $"/api/owners/{real}", _admin);
+        unchanged.StatusCode.ShouldBe(HttpStatusCode.OK, await unchanged.ReadTextAsync());
+        (await unchanged.ReadJsonObjectAsync())["name"]!.GetValue<string>().ShouldBe(
+            "Real", "a refused batch writes nothing");
     }
 
     /// <summary>One key replayed writes no second set of rows.</summary>

@@ -83,6 +83,28 @@ throughput question:
 1000 also matches `AlvoFilter.MaxInCandidates`, which is the other caller-chosen count in this framework —
 one number for "how many things may one request name" is easier to hold than two.
 
+## Where the byte bound crosses the row bound
+
+Design §7 asks this file to state the row width at which `MaxRequestBodyBytes` starts binding before
+`MaxBatchRows` does, because past that width a caller is refused with advice about **bytes** when their
+actual problem is rows — the "advice about the wrong thing" the row bound exists to prevent.
+
+At the defaults — `MaxRequestBodyBytes` 1 MiB, `MaxBatchRows` 1000 — the two cross at
+
+```
+1 048 576 bytes / 1000 rows  ≈  1049 bytes per row
+```
+
+So an entity whose rows serialise to **under ~1 KB** reaches the row bound first and is told it sent too
+many rows; an entity whose rows are **wider than ~1 KB** hits the byte bound first and is told the body is
+too large. The fixture measured above serialises at roughly 190 bytes a row, so it is comfortably in the
+first regime.
+
+**This is stated rather than fixed.** Making the row bound always bind first would mean scaling
+`MaxRequestBodyBytes` with `MaxBatchRows`, which trades a bound an operator sets for one they cannot. A host
+that imports wide rows should lower `MaxBatchRows` to `MaxRequestBodyBytes / typical row width`, so the
+refusal a caller actually meets is the one about rows.
+
 ## What was not measured
 
 - **Contention.** All three verbs ran uncontended. The judging pass is N reads before the first write, which
