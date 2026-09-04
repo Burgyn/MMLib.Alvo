@@ -1,5 +1,9 @@
-﻿using System.Globalization;
+﻿using MMLib.Alvo.Api.Internal;
+using MMLib.Alvo.Data;
+using System.Globalization;
 using System.Net;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Api.Tests;
@@ -722,6 +726,99 @@ public sealed class IdempotencyTests
     };
 
     /// <summary>Posts <paramref name="body"/> to one entity, presenting <paramref name="key"/>.</summary>
+    /// <summary>
+    /// A create's digest is byte-identical to the one this API has always produced, so no request in
+    /// flight across the deploy that widened the fingerprint becomes a conflict.
+    /// </summary>
+    /// <remarks>
+    /// The obvious widening — always joining an id segment — digests a create as
+    /// <c>POST\nowners\n\n{…}</c>, which is a different digest. Each optional part is appended only when
+    /// it is present, and this is what holds that rather than a remark claiming it.
+    /// </remarks>
+    [Fact]
+    public void A_creates_fingerprint_is_unchanged_by_the_parameters_a_create_does_not_carry()
+    {
+        var body = new JsonObject { ["name"] = "Acme" };
+
+        var widened = IdempotencyFingerprint.Of("POST", "owners", id: null, precondition: null, body);
+
+        widened.ShouldBe(
+            Digest("POST\nowners\n{\"name\":\"Acme\"}"), "widening the digest must not move a create's");
+    }
+
+    /// <summary>
+    /// The same key and the same body against two different rows is two different requests. Without the
+    /// id in the digest the second is answered as a replay of the first — the row is never written and
+    /// the caller is told it was, which is the silent wrong answer this digest exists to prevent.
+    /// </summary>
+    [Fact]
+    public void Two_updates_of_different_rows_with_one_body_have_different_fingerprints()
+    {
+        var body = new JsonObject { ["name"] = "Renamed" };
+
+        var first = IdempotencyFingerprint.Of("PATCH", "owners", Guid.NewGuid(), precondition: null, body);
+        var second = IdempotencyFingerprint.Of("PATCH", "owners", Guid.NewGuid(), precondition: null, body);
+
+        first.ShouldNotBe(second);
+    }
+
+    /// <summary>A delete carries no body at all, so the digest has to accept its absence.</summary>
+    [Fact]
+    public void A_delete_has_a_fingerprint_and_it_is_not_a_patch_of_an_empty_body()
+    {
+        var id = Guid.NewGuid();
+
+        var deleted = IdempotencyFingerprint.Of("DELETE", "owners", id, precondition: null, body: null);
+        var patched = IdempotencyFingerprint.Of("PATCH", "owners", id, precondition: null, new JsonObject());
+
+        deleted.ShouldNotBeNullOrWhiteSpace();
+        deleted.ShouldNotBe(patched, "the method alone must keep these apart");
+    }
+
+    /// <summary>
+    /// "Write only if the row is at this version" and "write unconditionally" are two requests, so one key
+    /// cannot stand for both — a caller who retried with a corrected precondition would otherwise be
+    /// answered with the result of a write that never checked one.
+    /// </summary>
+    [Fact]
+    public void A_precondition_is_part_of_the_request_the_key_stands_for()
+    {
+        var id = Guid.NewGuid();
+        var body = new JsonObject { ["name"] = "Renamed" };
+        var version = new AlvoPrecondition(DateTimeOffset.UtcNow);
+
+        var conditional = IdempotencyFingerprint.Of("PATCH", "owners", id, version, body);
+        var unconditional = IdempotencyFingerprint.Of("PATCH", "owners", id, precondition: null, body);
+
+        conditional.ShouldNotBe(unconditional);
+    }
+
+    /// <summary>
+    /// The precondition is digested as an instant rather than as a formatted timestamp: the port compares
+    /// instants, so two offsets of one instant are one precondition and must not become two records.
+    /// </summary>
+    [Fact]
+    public void One_instant_at_two_offsets_is_one_precondition_to_the_digest()
+    {
+        var id = Guid.NewGuid();
+        var utc = new DateTimeOffset(2026, 9, 4, 12, 0, 0, TimeSpan.Zero);
+
+        var asUtc = IdempotencyFingerprint.Of("PATCH", "owners", id, new AlvoPrecondition(utc), body: null);
+        var asShifted = IdempotencyFingerprint.Of(
+            "PATCH", "owners", id, new AlvoPrecondition(utc.ToOffset(TimeSpan.FromHours(2))), body: null);
+
+        asShifted.ShouldBe(asUtc);
+    }
+
+    /// <summary>
+    /// The digest this API produced before the row and the precondition joined it — spelled out here
+    /// rather than read from the implementation, so the stability fact above compares against something
+    /// independent of the code it is holding.
+    /// </summary>
+    /// <param name="input">The digest input, exactly as the old implementation composed it.</param>
+    private static string Digest(string input) =>
+        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(input)));
+
     private static Task<HttpResponseMessage> PostAsync(
         AlvoApiWorld world, string entity, JsonObject body, string key) =>
         world.SendAsync(HttpMethod.Post, $"/api/{entity}", _admin, body: body, headers: Key(key));

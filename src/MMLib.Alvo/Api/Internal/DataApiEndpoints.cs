@@ -945,7 +945,8 @@ internal static class DataApiEndpoints
             "A create reached the port with no parsed body. JsonPayloadReader reports a body that is not an "
             + "object as a violation, and a violation is answered before this point.");
 
-        return new AlvoIdempotency(key, IdempotencyFingerprint.Of(method, entity.Name, body));
+        return new AlvoIdempotency(
+            key, IdempotencyFingerprint.Of(method, entity.Name, id: null, precondition: null, body));
     }
 
     /// <summary>The refusal for a request carrying the idempotency header more than once.</summary>
