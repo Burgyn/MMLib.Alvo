@@ -7,20 +7,33 @@ using System.Globalization;
 namespace MMLib.Alvo.Api.Internal;
 
 /// <summary>
-/// A parsed list request: the <see cref="AlvoQuery"/> the port serves, plus the projection the API applies
-/// to the rows it returns.
+/// One entry of a parsed projection: the response key, and the declared field its value comes from.
 /// </summary>
 /// <remarks>
-/// <b>The projection is deliberately not on <see cref="AlvoQuery"/>.</b> That record invites additive
-/// members, and a future <c>Select</c> on it is the right long-term home — but only once a provider
-/// <em>honours</em> it. Adding it now would publish a port member both shipped drivers and the in-memory
-/// reference silently ignore, so a caller reaching the port directly would ask for two fields and receive
-/// every one, with nothing raised. Until the drivers push a projection into their <c>SELECT</c> list, the
-/// projection is an HTTP-response concern and lives here; the follow-up is named in the deferred-work list.
+/// The two are equal unless the caller wrote an alias. <b>Only <see cref="Source"/> reaches the port</b> —
+/// <see cref="AlvoQuery.Select"/> carries declared field names, so the port's contract that these are the
+/// entity's own names stays literally true and an alias never leaves the HTTP layer. That is also what
+/// makes the port's own availability check meaningful: it compares declared names against declared names.
+/// </remarks>
+/// <param name="Key">The key this field answers under in the response.</param>
+/// <param name="Source">The declared field the value is read from.</param>
+internal sealed record ProjectedField(string Key, string Source);
+
+/// <summary>
+/// A parsed list request: the <see cref="AlvoQuery"/> the port serves, plus the response keys the API
+/// renders the returned rows into.
+/// </summary>
+/// <remarks>
+/// <b>The projection is on both, and they are not the same list.</b> <see cref="AlvoQuery.Select"/> carries
+/// the declared fields the port must read; this carries the keys the response answers under, in the order
+/// the request named them. They coincide exactly when no alias was used. The port cannot hold the second
+/// list — an alias is an HTTP concern it is deliberately not told about — and the response cannot hold the
+/// first, because the port returns framework-managed columns and sort keys the response must not show
+/// unless the caller asked.
 /// </remarks>
 /// <param name="Query">The query to serve.</param>
-/// <param name="Select">The fields to project, or <see langword="null"/> for every field the port returns.</param>
-internal sealed record ParsedListQuery(AlvoQuery Query, IReadOnlyList<string>? Select);
+/// <param name="Select">The response keys and their sources, or <see langword="null"/> for the row as the port returned it.</param>
+internal sealed record ParsedListQuery(AlvoQuery Query, IReadOnlyList<ProjectedField>? Select);
 
 /// <summary>
 /// Parses a request's query string into an <see cref="AlvoQuery"/>, or into the violations that stopped it.
@@ -105,7 +118,40 @@ internal static class QueryStringParser
         private int? _limit;
         private int? _offset;
         private string? _after;
-        private IReadOnlyList<string>? _select;
+        private IReadOnlyList<ProjectedField>? _select;
+
+        /// <summary>Each response key the projection has claimed, and the field it answers from.</summary>
+        /// <remarks>
+        /// <b>A dictionary rather than a scan of the assembled list.</b> The lookup runs once per
+        /// comma-separated entry and the entry count is bounded only by the transport's URL length, while
+        /// the width bound caps the number of <em>distinct</em> keys — so a repeated entry that dedupes may
+        /// arrive thousands of times, and a list scan would have made the total quadratic in a length the
+        /// caller chooses.
+        /// </remarks>
+        /// <remarks>
+        /// Per-parse state rather than a parameter, which is safe because a second <c>select</c> is already
+        /// refused as a repeated parameter before either reader runs.
+        /// </remarks>
+        private Dictionary<string, string>? _claimedKeys;
+
+        /// <summary>
+        /// How many fields this caller can read — the projection's width bound, and the number its refusal
+        /// names.
+        /// </summary>
+        /// <remarks>
+        /// <b>The caller's count, not the entity's, and that is a confidentiality fix rather than a
+        /// tightening.</b> Charging against every declared field would have told a caller who hit the bound
+        /// how many fields the entity has, while an unprojected list tells them how many they can read — the
+        /// difference being exactly the number of fields hidden from them. That is the bit the byte-identical
+        /// <c>unavailable-field</c> refusal and the response schema's exclusion of masked fields both exist
+        /// to withhold, and an alias makes it cheap to ask for: one readable field mints unlimited distinct
+        /// keys. Every value this class puts in a message is server-owned; a count over masked fields would
+        /// have been the one exception.
+        /// </remarks>
+        private int ReadableFieldCount =>
+            _readableFieldCount ??= entity.Fields.Count(declared => !hiddenFields.Contains(declared.Name));
+
+        private int? _readableFieldCount;
 
         internal IReadOnlyList<AlvoViolation> Violations => _violations;
 
@@ -283,27 +329,137 @@ internal static class QueryStringParser
                 return;
             }
 
-            var projected = new List<string>();
-            foreach (var name in value.Split(','))
+            _claimedKeys = new Dictionary<string, string>(StringComparer.Ordinal);
+
+            var projected = new List<ProjectedField>();
+            foreach (var entry in value.Split(','))
             {
-                if (_scope.Fields.Resolve(name) is not { } declared)
+                if (!TryAddProjectedField(entry, projected))
                 {
-                    Add(QueryViolations.UnavailableField(ReservedQueryKeys.Select));
                     return;
                 }
-
-                AddOnce(projected, declared.Name);
             }
 
             _select = projected;
         }
 
-        private static void AddOnce(List<string> projected, string field)
+        /// <summary>
+        /// Reads one <c>field</c> or <c>alias:field</c> entry. The <em>source</em> is resolved through the
+        /// same resolver every other field name goes through, which is what makes an alias unable to reach a
+        /// field the caller may not read: the refusal is the one an undeclared name earns, byte for byte.
+        /// </summary>
+        private bool TryAddProjectedField(string entry, List<ProjectedField> projected)
         {
-            if (!projected.Contains(field, StringComparer.Ordinal))
+            if (!TrySplitProjectedField(entry, out var key, out var source))
             {
-                projected.Add(field);
+                Add(QueryViolations.MalformedSelectAlias());
+                return false;
             }
+
+            if (_scope.Fields.Resolve(source) is not { } declared)
+            {
+                Add(QueryViolations.UnavailableField(ReservedQueryKeys.Select));
+                return false;
+            }
+
+            return TryClaimKey(key ?? declared.Name, declared.Name, projected);
+        }
+
+        /// <summary>
+        /// Splits <c>alias:field</c>, or reports the whole entry as a field with no alias. An entry with
+        /// more than one colon, an empty half, or an alias outside the field-name grammar is malformed.
+        /// </summary>
+        /// <param name="entry">The comma-separated entry as the caller wrote it.</param>
+        /// <param name="key">The alias, or <see langword="null"/> when the entry carried none.</param>
+        /// <param name="source">The field name half.</param>
+        private static bool TrySplitProjectedField(string entry, out string? key, out string source)
+        {
+            key = null;
+            source = entry;
+
+            var colon = entry.IndexOf(':', StringComparison.Ordinal);
+            if (colon < 0)
+            {
+                return entry.Length > 0;
+            }
+
+            if (entry.IndexOf(':', colon + 1) >= 0)
+            {
+                return false;
+            }
+
+            key = entry[..colon];
+            source = entry[(colon + 1)..];
+            return source.Length > 0 && IsAliasShaped(key);
+        }
+
+        /// <summary>
+        /// Whether <paramref name="alias"/> is shaped like a declared field name
+        /// (<c>^[a-z][a-z0-9_]{0,62}$</c>) and is not one of the reserved names.
+        /// </summary>
+        /// <remarks>
+        /// The grammar is the schema's own (<c>project.schema.json</c>), checked here rather than borrowed
+        /// as a regex: this is the only place a caller can put an arbitrary string into a response key, and
+        /// the answer is a handful of character tests.
+        /// </remarks>
+        private static bool IsAliasShaped(string alias) =>
+            alias.Length is > 0 and <= 63
+            && char.IsAsciiLetterLower(alias[0])
+            && alias.All(character =>
+                char.IsAsciiLetterLower(character) || char.IsAsciiDigit(character) || character == '_')
+            && !ReservedQueryKeys.IsReserved(alias);
+
+        /// <summary>
+        /// Claims one response key. A repeated identical entry dedupes; a second <em>source</em> for a key
+        /// already taken is refused; and a newly claimed key past the entity's field count is refused as the
+        /// projection's width bound.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>The bound is charged here, on each newly claimed key, and that is the whole of whether it
+        /// works.</b> <see cref="ChargeTheConjunction"/>'s remark records the measured incident from the
+        /// filter side — a budget spent after the tree is assembled does not bound the tree — so a cap
+        /// tested after the parse loop would leave the entire amplification payable before the 422.
+        /// </para>
+        /// <para>
+        /// <b>Charged on the <em>distinct</em> key rather than the raw entry count</b>, which is what keeps
+        /// a repeat deduping: a repeat claims nothing and therefore costs nothing, so
+        /// <c>?select=id,id,id,id,id,id</c> on a five-field entity is still one key and still answered.
+        /// </para>
+        /// <para>
+        /// An alias onto a framework-owned name is refused, and against <em>every</em> such name rather
+        /// than the ones this entity carries — see <see cref="QueryViolations.CollidingProjectionKey"/> for
+        /// why, and for what this deliberately does not refuse.
+        /// </para>
+        /// </remarks>
+        private bool TryClaimKey(string key, string source, List<ProjectedField> projected)
+        {
+            if (_claimedKeys!.TryGetValue(key, out var claimed))
+            {
+                if (string.Equals(claimed, source, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+
+                Add(QueryViolations.CollidingProjectionKey());
+                return false;
+            }
+
+            if (!string.Equals(key, source, StringComparison.Ordinal) && AlvoManagedColumns.All.Contains(key))
+            {
+                Add(QueryViolations.CollidingProjectionKey());
+                return false;
+            }
+
+            if (projected.Count == ReadableFieldCount)
+            {
+                Add(QueryViolations.ProjectionTooWide(ReadableFieldCount));
+                return false;
+            }
+
+            _claimedKeys[key] = source;
+            projected.Add(new ProjectedField(key, source));
+            return true;
         }
 
         /// <summary>
@@ -324,6 +480,7 @@ internal static class QueryStringParser
                 Limit = _limit ?? options.DefaultPageSize,
                 Offset = _offset,
                 After = _after,
+                Select = DeclaredSources(),
             };
 
             EnsureWithinPortRules(query);
@@ -335,6 +492,13 @@ internal static class QueryStringParser
             parsed = new ParsedListQuery(query, _select);
             return true;
         }
+
+        /// <summary>
+        /// The declared fields the port is asked to read: one entry per source, however many response keys
+        /// the caller aliased onto it.
+        /// </summary>
+        private List<string>? DeclaredSources() =>
+            _select?.Select(field => field.Source).Distinct(StringComparer.Ordinal).ToList();
 
         /// <summary>
         /// Several top-level parameters are one conjunction — PostgREST's own semantics, and the only reading

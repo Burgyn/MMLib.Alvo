@@ -2,6 +2,7 @@
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
+using System.Collections.Frozen;
 
 namespace MMLib.Alvo.Testing.Data;
 
@@ -90,6 +91,7 @@ public sealed class InMemoryAlvoData : IAlvoData
 
         AlvoFilter.EnsureWithinLimits(query.Filter);
         AlvoQuery.EnsurePagingWindowIsSane(query);
+        AlvoQuery.EnsureProjectionIsSane(query);
         EnsureQueryFieldsAvailable(query, decision);
 
         List<AlvoRecord> snapshot;
@@ -104,9 +106,11 @@ public sealed class InMemoryAlvoData : IAlvoData
         var ordered = ApplySort(visible, query.Sort).ToList();
         var (page, nextCursor) = Page(ordered, query.Limit, query.Offset, query.After);
 
+        var unselectedForThisQuery = Unselected(query, FindEntity(query.Entity));
+
         return Task.FromResult(new AlvoPage
         {
-            Items = [.. page.Select(row => Mask(row, decision.HiddenFields))],
+            Items = [.. page.Select(row => Mask(row, decision.HiddenFields, unselectedForThisQuery))],
             NextCursor = nextCursor,
 
             // Counted over the ordered, policy-filtered set — before paging, which is the whole distinction
@@ -130,7 +134,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         }
 
         var row = FindVisible(entity, id, decision, context);
-        AlvoRecord? result = row is null ? null : Mask(row, decision.HiddenFields);
+        AlvoRecord? result = row is null ? null : Mask(row, decision.HiddenFields, FrozenSet<string>.Empty);
         return Task.FromResult(result);
     }
 
@@ -171,7 +175,7 @@ public sealed class InMemoryAlvoData : IAlvoData
             RecordIdempotencyLocked(idempotency, context, (Guid)candidate[IdField]!);
         }
 
-        return Task.FromResult(Mask(postImage, decision.HiddenFields));
+        return Task.FromResult(Mask(postImage, decision.HiddenFields, FrozenSet<string>.Empty));
     }
 
     /// <summary>
@@ -228,7 +232,7 @@ public sealed class InMemoryAlvoData : IAlvoData
 
         var stored = RowsForLocked(entity).Find(row => IsRow(row, record.RowId));
         return stored is not null && IsVisible(stored, read, context)
-            ? Mask(stored, read.HiddenFields)
+            ? Mask(stored, read.HiddenFields, FrozenSet<string>.Empty)
             : throw new AlvoRecordNotFoundException();
     }
 
@@ -307,7 +311,7 @@ public sealed class InMemoryAlvoData : IAlvoData
             EnsureWriteAllowed(decision, merged, stored, context);
 
             list[index] = merged;
-            return Task.FromResult(Mask(merged, decision.HiddenFields));
+            return Task.FromResult(Mask(merged, decision.HiddenFields, FrozenSet<string>.Empty));
         }
     }
 
@@ -422,8 +426,15 @@ public sealed class InMemoryAlvoData : IAlvoData
     private static HashSet<string> DeclaredFieldsOf(EntitySchema entity) =>
         entity.Fields.Select(field => field.Name).ToHashSet(StringComparer.Ordinal);
 
+    /// <summary>
+    /// Every caller-supplied field name this read references — filter terms, sort keys and the projection
+    /// alike. Identical to the shipped drivers' own feeder, deliberately: a divergence here is a
+    /// divergence in what is refused.
+    /// </summary>
     private static IEnumerable<string> QueryFields(AlvoQuery query) =>
-        AlvoFilter.ReferencedFields(query.Filter).Concat(query.Sort.Select(sort => sort.Field));
+        AlvoFilter.ReferencedFields(query.Filter)
+            .Concat(query.Sort.Select(sort => sort.Field))
+            .Concat(query.Select ?? []);
 
     /// <summary>
     /// One message for every refused query field, naming neither the field nor why it is unavailable:
@@ -572,15 +583,37 @@ public sealed class InMemoryAlvoData : IAlvoData
         return merged;
     }
 
-    private static AlvoRecord Mask(AlvoRecord record, IReadOnlySet<string> hiddenFields)
+    /// <summary>
+    /// The declared fields this read will not return, from the port's own rule rather than a copy of it.
+    /// </summary>
+    /// <remarks>
+    /// This reference has no <c>SELECT</c> list, so for it a projection <em>is</em> a second field mask —
+    /// but the set it works from is <see cref="AlvoQuery.UnselectedFields"/>, the same one both shipped
+    /// drivers use. That is the whole point of the rule living on the port: a reference that computed its
+    /// own survivor set could answer a different key set from a driver, and the differential suite would be
+    /// comparing two features rather than two implementations of one.
+    /// </remarks>
+    private static IReadOnlySet<string> Unselected(AlvoQuery query, EntitySchema? entity) =>
+        entity is null ? FrozenSet<string>.Empty : AlvoQuery.UnselectedFields(query, entity);
+
+    /// <summary>
+    /// Drops every key neither the policy's field mask nor the caller's projection admits.
+    /// </summary>
+    /// <remarks>
+    /// <b>The early return must consider both sets.</b> It used to test the mask alone, which was correct
+    /// while the mask was the only thing that removed a key — and would have made a projection a silent
+    /// no-op on every entity that declares no <c>hidden</c> rule, which is most of them.
+    /// </remarks>
+    private static AlvoRecord Mask(
+        AlvoRecord record, IReadOnlySet<string> hiddenFields, IReadOnlySet<string> unselectedFields)
     {
-        if (hiddenFields.Count == 0)
+        if (hiddenFields.Count == 0 && unselectedFields.Count == 0)
         {
             return record;
         }
 
         var visible = record.Values
-            .Where(pair => !hiddenFields.Contains(pair.Key))
+            .Where(pair => !hiddenFields.Contains(pair.Key) && !unselectedFields.Contains(pair.Key))
             .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
         return new AlvoRecord(visible);
     }

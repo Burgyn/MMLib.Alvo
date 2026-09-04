@@ -376,6 +376,23 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task The_null_keyed_rows_sit_where_the_placement_puts_them(MMLib.Alvo.Data.AlvoNullPlacement nulls, bool descending) { }
         public System.Threading.Tasks.Task Walking_an_exactly_divisible_set_by_cursor_stops_after_the_full_last_page() { }
     }
+    public abstract class AlvoDataProjectionTests
+    {
+        protected AlvoDataProjectionTests() { }
+        public System.Threading.Tasks.Task A_filter_over_an_unselected_field_matches_the_same_rows_as_without_the_projection() { }
+        public System.Threading.Tasks.Task A_framework_managed_column_survives_a_projection_that_did_not_name_it() { }
+        public System.Threading.Tasks.Task A_projected_paged_read_over_an_unselected_sort_key_returns_each_row_exactly_once() { }
+        public System.Threading.Tasks.Task A_projected_read_admits_one_callers_rows_and_not_the_other_callers() { }
+        public System.Threading.Tasks.Task A_projected_read_never_crosses_the_tenant_boundary() { }
+        public System.Threading.Tasks.Task A_projection_naming_a_hidden_field_is_refused_exactly_as_an_undeclared_one_is() { }
+        public System.Threading.Tasks.Task A_projection_naming_no_field_is_refused() { }
+        public System.Threading.Tasks.Task A_projection_over_an_entity_declaring_every_field_type_casts_every_null_it_projects() { }
+        public System.Threading.Tasks.Task A_projection_returns_the_selected_keys_and_no_other_descriptor_declared_field() { }
+        public System.Threading.Tasks.Task A_projection_selecting_every_declared_field_returns_the_same_keys_as_no_projection() { }
+        public System.Threading.Tasks.Task A_sort_over_an_unselected_field_orders_exactly_as_the_same_sort_without_a_projection() { }
+        public System.Threading.Tasks.Task A_using_predicate_over_an_unselected_field_admits_exactly_the_rows_it_admits_unprojected() { }
+        protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Data.IAlvoData> CreateAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, System.Collections.Generic.IReadOnlyDictionary<string, System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRecord>> seed);
+    }
     public abstract class AlvoDataReachabilityContractTests
     {
         protected AlvoDataReachabilityContractTests() { }
@@ -404,12 +421,16 @@ namespace MMLib.Alvo.Testing.Data
         protected AlvoDataStatementTests() { }
         public System.Threading.Tasks.Task A_counted_read_composes_its_count_with_the_same_policy_predicate() { }
         public System.Threading.Tasks.Task A_read_that_did_not_ask_for_a_count_sends_no_count_statement() { }
+        public System.Threading.Tasks.Task A_read_with_no_projection_projects_no_null_at_all() { }
         public System.Threading.Tasks.Task A_rule_with_no_operands_binds_no_policy_parameter() { }
         public System.Threading.Tasks.Task A_rule_with_no_operands_binds_no_policy_parameter_on_the_write_path() { }
         public System.Threading.Tasks.Task A_single_row_read_carries_the_predicate_rather_than_checking_after_the_fetch() { }
+        public System.Threading.Tasks.Task An_unselected_column_is_not_read_by_the_statement() { }
+        public System.Threading.Tasks.Task An_unselected_sort_key_is_read_rather_than_projected_as_a_null() { }
         protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Testing.Data.IStatementProbe> CreateAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, System.Collections.Generic.IReadOnlyDictionary<string, System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRecord>> seed);
         public System.Threading.Tasks.Task The_delete_statement_itself_carries_the_policy_predicate() { }
         public System.Threading.Tasks.Task The_policy_predicate_is_bound_inside_the_where_clause_of_one_statement() { }
+        public System.Threading.Tasks.Task The_row_key_is_read_whatever_the_projection_named() { }
         public System.Threading.Tasks.Task The_tenant_scope_is_bound_inside_the_same_where_clause() { }
         public System.Threading.Tasks.Task The_update_statement_itself_carries_the_policy_predicate() { }
     }

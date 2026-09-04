@@ -24,7 +24,7 @@ namespace MMLib.Alvo.Api.Internal;
 /// </remarks>
 internal sealed record DataApiPage
 {
-    /// <summary>The rows in this page, each already masked by the port.</summary>
+    /// <summary>The rows in this page, each already masked and projected by the port.</summary>
     [JsonPropertyName("items")]
     public required IReadOnlyList<IReadOnlyDictionary<string, object?>> Items { get; init; }
 
@@ -48,50 +48,76 @@ internal sealed record DataApiPage
     [JsonPropertyName("count")]
     public long? Count { get; init; }
 
-    /// <summary>Wraps one page the port returned, projected to the fields the request selected.</summary>
+    /// <summary>Wraps one page the port returned, rendered to the keys the request asked for.</summary>
     /// <param name="page">The page to render.</param>
-    /// <param name="select">The fields to keep, or <see langword="null"/> to keep every field the port returned.</param>
-    internal static DataApiPage From(AlvoPage page, IReadOnlyList<string>? select)
+    /// <param name="projection">
+    /// The response keys and their sources, or <see langword="null"/> for each row as the port returned it.
+    /// </param>
+    internal static DataApiPage From(AlvoPage page, IReadOnlyList<ProjectedField>? projection)
     {
         ArgumentNullException.ThrowIfNull(page);
         return new DataApiPage
         {
-            Items = [.. page.Items.Select(row => Project(row.Values, select))],
+            Items = [.. page.Items.Select(row => Render(row.Values, projection))],
             Next = page.NextCursor,
             Count = page.TotalCount,
         };
     }
 
     /// <summary>
-    /// Narrows one row to the requested projection, in the order the request named the fields.
+    /// Renders one row as the response's own key list: each requested key, in the order the request named
+    /// it, carrying the value of the field it names.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>The projection is applied to the response, not pushed into the <c>SELECT</c> list</b> — the port has
-    /// no projection member yet, and inventing one no driver honours would be worse than over-fetching. So
-    /// this saves bandwidth to the caller and none to the database; <c>ParsedListQuery</c> records why, and
-    /// the follow-up that fixes it.
+    /// <b>This is not the projection — the port applies that</b>, by not reading the excluded columns at all
+    /// and by omitting their keys from the record. What is left here is renaming and ordering, and this is
+    /// the only layer that can do it: an alias is an HTTP concern the port is deliberately not told about
+    /// (see <see cref="ProjectedField"/>).
     /// </para>
     /// <para>
-    /// A selected field the row does not carry is skipped rather than emitted as <see langword="null"/>: the
-    /// port omits nothing a caller may read, so an absent key means the port chose not to return it and this
-    /// layer must not manufacture the field back into existence.
+    /// <b>It also drops what the port had to keep, and that is not a second projection.</b>
+    /// <c>IAlvoData</c>'s contract makes a returned record carry every framework-managed column whatever the
+    /// caller selected — <c>id</c> because a keyset cursor is minted from it — and every field named in
+    /// <c>order</c>, because no engine can sort by a column it did not read. The response must show none of
+    /// them unless the caller asked. So the port's key set and the response's are two different lists by
+    /// construction, and this renders the second from the first.
+    /// </para>
+    /// <para>
+    /// A source the row does not carry emits nothing rather than a <see langword="null"/>: the port omits
+    /// nothing a caller may read, so an absent key means the port chose not to return it and this layer must
+    /// not manufacture the field back into existence.
+    /// </para>
+    /// <para>
+    /// <b>That silence is in tension with a sibling decision in this same change, and the tension is
+    /// deliberate.</b> <c>ReadProjection</c> answers its own unreachable case — a declared field the read
+    /// model does not map — with a loud <see cref="InvalidOperationException"/>, on the ground that an Alvo
+    /// defect must not be dressed as a decision about the caller. A missing <em>source</em> here is equally
+    /// unreachable: the name was resolved against the entity and refused if masked or undeclared, so a
+    /// correct driver always returns it. The difference is what failing loudly would cost. There, nothing
+    /// had been sent yet. Here, the request was valid, the rows are in hand, and the only remaining act is
+    /// to write them — so a throw turns a driver's defect into a 500 for a caller who did nothing wrong,
+    /// and hides the rows they were entitled to. A dropped key is the smaller harm, and the port suite is
+    /// where a driver that omits a selected field is caught.
     /// </para>
     /// </remarks>
-    private static IReadOnlyDictionary<string, object?> Project(
-        IReadOnlyDictionary<string, object?> values, IReadOnlyList<string>? select)
+    private static IReadOnlyDictionary<string, object?> Render(
+        IReadOnlyDictionary<string, object?> values, IReadOnlyList<ProjectedField>? projection)
     {
-        if (select is null)
+        if (projection is null)
         {
             return values;
         }
 
-        var projected = new Dictionary<string, object?>(select.Count, StringComparer.Ordinal);
-        foreach (var field in select.Where(values.ContainsKey))
+        var rendered = new Dictionary<string, object?>(projection.Count, StringComparer.Ordinal);
+        foreach (var field in projection)
         {
-            projected[field] = values[field];
+            if (values.TryGetValue(field.Source, out var value))
+            {
+                rendered[field.Key] = value;
+            }
         }
 
-        return projected;
+        return rendered;
     }
 }

@@ -132,8 +132,75 @@ EOF
   printf 'is the failure this check exists to catch.'
 }
 
+# --- Public surface: a PublicApi.* approval baseline GREW this run ------------
+# A third kind of "a red check went green with no product change", and the one
+# the two above cannot see. The approval test fails whenever the public surface
+# moves; accepting its baseline is how you make it pass, and it is the correct
+# move — for a member that genuinely belongs in the contract. Nothing mechanical
+# distinguishes that from a member that was made public because it was the
+# shortest path to a caller in another assembly, when `internal` plus the
+# InternalsVisibleTo grant Abstractions already hands its own packages would
+# have done. `public` is a promise a consumer may depend on and a later removal
+# is a breaking change, so the cost of getting it wrong is paid by whoever
+# reverses it, not by whoever added it.
+#
+# WHY only a WIDENING: a removed line narrows the surface, which is the
+# direction the rule wants. Blocking on it would be noise on exactly the change
+# this check exists to encourage.
+#
+# WHY this fires ALONGSIDE check_verified_baselines rather than instead of it:
+# they ask different questions of the same file. The snapshot judge asks whether
+# the new baseline is justified by the accompanying source change — a member
+# that was really added justifies it, and the judge is right to pass. This asks
+# whether the member should be public at all. The registry aggregates both into
+# one block.
+check_widened_public_surface() {
+  local entries="$1" root="$2"
+  local candidates listed f added='' surviving=''
+
+  candidates="$(printf '%s\n' "$entries" | grep -E 'PublicApi\..*\.verified\.' || true)"
+
+  if printf '%s\n' "$entries" | grep -qx 'ACCEPT'; then
+    listed="$(git -C "$root" status --porcelain --untracked-files=all 2>/dev/null \
+      | sed -e 's/^...//' -e 's/.* -> //' | grep -E 'PublicApi\..*\.verified\.' || true)"
+    candidates="$(printf '%s\n%s\n' "$candidates" "$listed")"
+  fi
+
+  candidates="$(printf '%s\n' "$candidates" | grep -v '^[[:space:]]*$' | sort -u || true)"
+  [ -n "$candidates" ] || return 0
+
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    if git -C "$root" ls-files --error-unmatch -- "$f" >/dev/null 2>&1; then
+      added="$(git -C "$root" diff HEAD -- "$f" 2>/dev/null \
+        | grep -E '^\+' | grep -vE '^\+\+\+' | sed -e 's/^+//' || true)"
+    else
+      [ -e "$root/$f" ] || continue
+      added="$(cat "$root/$f" 2>/dev/null || true)"
+    fi
+
+    added="$(printf '%s\n' "$added" | grep -vE '^[[:space:]]*$' || true)"
+    [ -n "$added" ] || continue
+
+    surviving="$surviving$f, "
+  done <<EOF
+$candidates
+EOF
+
+  [ -n "$surviving" ] || return 0
+
+  printf 'The public surface GREW this run: %s. ' "${surviving%, }"
+  printf 'Before finishing, invoke the alvo-architecture-rules skill and justify EACH added symbol '
+  printf 'against its "public is the contract" rule — narrow by default, widen only when a real '
+  printf 'EXTERNAL caller needs it. For every one, name that caller. If the only callers are in '
+  printf 'MMLib.Alvo, MMLib.Alvo.Data.* or MMLib.Alvo.Testing, Abstractions already grants them '
+  printf 'InternalsVisibleTo and `internal` is the answer — narrow it and re-accept the baseline. '
+  printf 'A symbol an out-of-tree provider or an embedded host must call is a real contract member; '
+  printf 'say which it is and keep it.'
+}
+
 # Registry of active checks — they run in THIS process, sequentially.
-checks="check_verified_baselines check_load_baselines"
+checks="check_verified_baselines check_load_baselines check_widened_public_surface"
 
 # =============================================================================
 

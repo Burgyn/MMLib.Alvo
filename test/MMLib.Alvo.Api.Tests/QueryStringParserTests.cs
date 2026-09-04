@@ -44,7 +44,7 @@ public sealed class QueryStringParserTests
         ],
     };
 
-    private static readonly IReadOnlySet<string> _masked = new HashSet<string>(StringComparer.Ordinal) { "secret" };
+    private static readonly HashSet<string> _masked = new(StringComparer.Ordinal) { "secret" };
 
     private static readonly AlvoApiOptions _options = new();
 
@@ -209,6 +209,18 @@ public sealed class QueryStringParserTests
     [InlineData("order=year,year", "repeated-sort-key")]
     [InlineData("select=", "malformed-select")]
     [InlineData("select=nosuchfield", "unavailable-field")]
+    [InlineData("select=label:nosuchfield", "unavailable-field")]
+    [InlineData("select=label:secret", "unavailable-field")]
+    [InlineData("select=:make", "malformed-select-alias")]
+    [InlineData("select=make:", "malformed-select-alias")]
+    [InlineData("select=a:b:make", "malformed-select-alias")]
+    [InlineData("select=Label:make", "malformed-select-alias")]
+    [InlineData("select=1label:make", "malformed-select-alias")]
+    [InlineData("select=la-bel:make", "malformed-select-alias")]
+    [InlineData("select=limit:make", "malformed-select-alias")]
+    [InlineData("select=make,make:year", "colliding-projection-key")]
+    [InlineData("select=a:make,a:year", "colliding-projection-key")]
+    [InlineData("select=id:make", "colliding-projection-key")]
     [InlineData("limit=1&limit=2", "repeated-parameter")]
     [InlineData("year=like.2", "unsupported-operator-for-field")]
     [InlineData("owner_id=gt.00000000-0000-0000-0000-000000000001", "unsupported-operator-for-field")]
@@ -285,6 +297,9 @@ public sealed class QueryStringParserTests
     [InlineData("order=zqmarkerqz")]
     [InlineData("order=year.zqmarkerqz")]
     [InlineData("select=zqmarkerqz")]
+    [InlineData("select=zqmarkerqz:nosuchfield")]
+    [InlineData("select=make:zqmarkerqz")]
+    [InlineData("select=Zqmarkerqz:make")]
     [InlineData("limit=zqmarkerqz")]
     [InlineData("offset=zqmarkerqz")]
     [InlineData("or=(zqmarkerqz")]
@@ -326,7 +341,9 @@ public sealed class QueryStringParserTests
         "nosuchfield=eq.1", "secret=eq.1", "year=nosuchop.1", "year=eq", "year=gte.notanumber",
         "make=eq.a%00b", "notes=is.hello", "make=in.skoda", "or=(", "or=()", "year=like.2",
         "limit=0", "offset=-1", "after=", "after=abc&offset=1", "order=", "order=year.sideways",
-        "order=year,year", "select=", "select=nosuchfield", "limit=1&limit=2",
+        "order=year,year", "select=", "select=nosuchfield", "select=Label:make", "select=id:make",
+        "select=a:make,b:make,c:make,d:make,e:make,f:make,g:make,h:make,i:make,j:make,k:make,l:make",
+        "limit=1&limit=2",
     ];
 
     /// <summary>
@@ -499,8 +516,163 @@ public sealed class QueryStringParserTests
     {
         TryParse("select=year,make,year", out var parsed, out var violations).ShouldBeTrue(Because(violations));
 
-        parsed!.Select.ShouldBe(["year", "make"]);
+        Keys(parsed!).ShouldBe(["year", "make"]);
+        Sources(parsed!).ShouldBe(["year", "make"], "with no alias, a key is its own source");
     }
+
+    /// <summary>
+    /// PostgREST's own spelling, <c>alias:field</c>, adopted rather than invented — and the alias stays on
+    /// this side of the port: <see cref="AlvoQuery.Select"/> carries the source name.
+    /// </summary>
+    [Fact]
+    public void An_alias_renames_the_response_key_and_leaves_the_port_the_source()
+    {
+        TryParse("select=label:make", out var parsed, out var violations).ShouldBeTrue(Because(violations));
+
+        Keys(parsed!).ShouldBe(["label"]);
+        Sources(parsed!).ShouldBe(["make"]);
+        parsed!.Query.Select.ShouldBe(["make"]);
+    }
+
+    /// <summary>
+    /// Two keys over one column ask the port for that column once. The alias is a response concern, so the
+    /// read must not be told about it twice.
+    /// </summary>
+    [Fact]
+    public void Two_aliases_over_one_field_ask_the_port_for_that_field_once()
+    {
+        TryParse("select=short:make,full:make", out var parsed, out var violations).ShouldBeTrue(Because(violations));
+
+        Keys(parsed!).ShouldBe(["short", "full"]);
+        parsed!.Query.Select.ShouldBe(["make"]);
+    }
+
+    /// <summary>
+    /// The two key lists must not drift. <c>DataApiPage.Render</c> emits nothing for a source the row does
+    /// not carry, so a projection that asked the port for one set and rendered another would <em>hide</em>
+    /// the divergence rather than fail on it. This is what fails instead.
+    /// </summary>
+    [Theory]
+    [InlineData("select=make", "make")]
+    [InlineData("select=label:make,year", "make,year")]
+    [InlineData("select=a:make,b:make", "make")]
+    [InlineData("select=id,make,year", "id,make,year")]
+    [InlineData("select=year,make,year", "year,make")]
+    public void The_port_is_asked_for_exactly_the_fields_the_response_reads_from(
+        string queryString, string expected)
+    {
+        TryParse(queryString, out var parsed, out var violations).ShouldBeTrue(Because(violations));
+
+        parsed!.Query.Select.ShouldBe(expected.Split(','));
+    }
+
+    /// <summary>
+    /// The bound aliases make necessary — a projection cannot name more distinct keys than the entity has
+    /// fields, because a response with more keys than that is a duplication request rather than a read.
+    /// </summary>
+    [Fact]
+    public void A_projection_naming_more_keys_than_the_entity_has_fields_is_refused()
+    {
+        var tooMany = string.Join(',', Enumerable.Range(0, _vehicles.Fields.Count + 1)
+            .Select(index => $"k{index}:make"));
+
+        OnlyViolation($"select={tooMany}").Code.ShouldBe("projection-too-wide");
+    }
+
+    /// <summary>
+    /// The bound is charged on each newly claimed <em>distinct</em> key, not on the raw entry count — so a
+    /// repeat costs nothing and a request that dedupes to one key is answered however often it repeats.
+    /// Charging the entry count would have refused this, which is behaviour that works today.
+    /// </summary>
+    [Fact]
+    public void A_projection_repeating_one_field_past_the_field_count_still_dedupes()
+    {
+        var repeated = string.Join(',', Enumerable.Repeat("make", _vehicles.Fields.Count + 5));
+
+        TryParse($"select={repeated}", out var parsed, out var violations).ShouldBeTrue(Because(violations));
+
+        Keys(parsed!).ShouldBe(["make"]);
+    }
+
+    /// <summary>
+    /// A projection naming every field this caller can read sits <b>exactly</b> at the bound and must be
+    /// accepted — the off-by-one that would refuse it is the whole reason this fact sits beside the one
+    /// above, and it is only boundary-exact because the bound counts readable fields rather than declared
+    /// ones.
+    /// </summary>
+    [Fact]
+    public void A_projection_naming_every_declared_field_is_exactly_at_the_bound()
+    {
+        var readable = _vehicles.Fields
+            .Where(field => !_masked.Contains(field.Name))
+            .Select(field => field.Name)
+            .ToArray();
+
+        TryParse($"select={string.Join(',', readable)}", out var parsed, out var violations)
+            .ShouldBeTrue(Because(violations));
+
+        Keys(parsed!).ShouldBe(readable);
+    }
+
+    /// <summary>
+    /// An alias does not open a second channel for the field-existence question. The aliased refusals must
+    /// be byte-identical to each other for the same reason the unaliased pair is: a caller must not be able
+    /// to tell "this entity has a field called X, hidden from you" from "no such field".
+    /// </summary>
+    [Fact]
+    public void An_aliased_projection_refuses_a_hidden_source_and_an_undeclared_one_identically()
+    {
+        var hidden = OnlyViolation("select=label:secret");
+        var undeclared = OnlyViolation("select=label:nosuchfield");
+
+        hidden.Code.ShouldBe(undeclared.Code);
+        hidden.Pointer.ShouldBe(undeclared.Pointer);
+        hidden.Message.ShouldBe(undeclared.Message);
+        hidden.FixSuggestion.ShouldBe(undeclared.FixSuggestion);
+    }
+
+    /// <summary>
+    /// The width bound names how many fields this <em>caller</em> can read, never how many the entity
+    /// declares. The difference between the two numbers is exactly the count of fields hidden from them —
+    /// the one bit the byte-identical refusal above exists to withhold, and an alias makes it cheap to ask
+    /// for, because one readable field mints unlimited distinct keys.
+    /// </summary>
+    [Fact]
+    public void The_width_bound_does_not_disclose_how_many_fields_are_hidden_from_the_caller()
+    {
+        var readable = _vehicles.Fields.Count(declared => !_masked.Contains(declared.Name));
+        var tooMany = string.Join(',', Enumerable.Range(0, readable + 1).Select(index => $"k{index}:make"));
+
+        var violation = OnlyViolation($"select={tooMany}");
+
+        var fix = violation.FixSuggestion.ShouldNotBeNull();
+
+        violation.Code.ShouldBe("projection-too-wide");
+        fix.ShouldContain(readable.ToString(CultureInfo.InvariantCulture), Case.Sensitive);
+        fix.ShouldNotContain(
+            _vehicles.Fields.Count.ToString(CultureInfo.InvariantCulture),
+            Case.Sensitive,
+            "the declared count is the caller's mask size away from the readable one");
+    }
+
+    /// <summary>
+    /// A framework-owned name is refused as an alias whether or not <em>this</em> entity carries the column.
+    /// The fixture is a global, non-audited entity, so it has no <c>tenant_id</c> and no <c>created_at</c> —
+    /// and a response key called either would still read as a framework column to whoever receives it.
+    /// </summary>
+    [Theory]
+    [InlineData("select=tenant_id:make")]
+    [InlineData("select=created_at:make")]
+    [InlineData("select=updated_by:make")]
+    [InlineData("select=deleted_at:make")]
+    public void An_alias_cannot_mint_a_framework_owned_name_this_entity_does_not_carry(string queryString)
+        => OnlyViolation(queryString).Code.ShouldBe("colliding-projection-key");
+
+    private static IReadOnlyList<string> Keys(ParsedListQuery parsed) =>
+        [.. parsed.Select!.Select(field => field.Key)];
+
+    private static IReadOnlyList<string> Sources(ParsedListQuery parsed) =>
+        [.. parsed.Select!.Select(field => field.Source)];
 
     /// <summary>
     /// A projection is not a filter: naming a field in <c>select</c> must not change which rows come back.

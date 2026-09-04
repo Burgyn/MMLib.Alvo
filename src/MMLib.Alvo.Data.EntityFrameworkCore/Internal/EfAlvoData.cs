@@ -5,6 +5,7 @@ using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
+using System.Collections.Frozen;
 using System.Data.Common;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore;
@@ -112,13 +113,14 @@ internal sealed class EfAlvoData : IAlvoData
         var decision = Resolve(query.Entity, DataOperation.List, context);
         AlvoFilter.EnsureWithinLimits(query.Filter);
         AlvoQuery.EnsurePagingWindowIsSane(query);
+        AlvoQuery.EnsureProjectionIsSane(query);
 
         using var db = _contexts.Create();
         var entity = Entity(db, query.Entity);
         QueryFieldGuard.EnsureAvailable(QueryFields(query), entity, decision.HiddenFields);
 
         var anchor = await AnchorAsync(db, entity, decision, context, query, cancellationToken);
-        var options = ReadOptions(query, anchor);
+        var options = ReadOptions(query, anchor, entity);
         var total = await TotalCountAsync(db, entity, decision, context, query, options, cancellationToken);
 
         // A cursor this provider never issued — stale, forged, or from another tenant — finds no anchor and
@@ -134,7 +136,7 @@ internal sealed class EfAlvoData : IAlvoData
         var (kept, nextCursor) = Paginated(fetched, query.Limit);
         return new AlvoPage
         {
-            Items = [.. kept.Select(row => RecordMaterializer.ToRecord(row, decision.HiddenFields))],
+            Items = [.. kept.Select(row => RecordMaterializer.ToRecord(row, decision.HiddenFields, options.Unselected))],
             NextCursor = nextCursor,
             TotalCount = total,
         };
@@ -216,7 +218,7 @@ internal sealed class EfAlvoData : IAlvoData
 
         using var db = _contexts.Create();
         var row = await SingleAsync(db, Entity(db, entity), decision, context, id, lockFor: null, cancellationToken);
-        return row is null ? null : RecordMaterializer.ToRecord(row, decision.HiddenFields);
+        return row is null ? null : RecordMaterializer.ToRecord(row, decision.HiddenFields, FrozenSet<string>.Empty);
     }
 
     /// <inheritdoc/>
@@ -257,7 +259,7 @@ internal sealed class EfAlvoData : IAlvoData
             cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
-        return RecordMaterializer.ToRecord(stored, decision.HiddenFields);
+        return RecordMaterializer.ToRecord(stored, decision.HiddenFields, FrozenSet<string>.Empty);
     }
 
     /// <summary>
@@ -533,7 +535,7 @@ internal sealed class EfAlvoData : IAlvoData
             cancellationToken);
         await records.InsertAsync((Guid)candidate[AlvoDataContext.IdColumn], now, cancellationToken);
 
-        return RecordMaterializer.ToRecord(stored, decision.HiddenFields);
+        return RecordMaterializer.ToRecord(stored, decision.HiddenFields, FrozenSet<string>.Empty);
     }
 
     /// <summary>
@@ -602,7 +604,7 @@ internal sealed class EfAlvoData : IAlvoData
         var row = await SingleAsync(db, schema, read, context, record.RowId, lockFor: null, cancellationToken)
             ?? throw new AlvoRecordNotFoundException();
 
-        return RecordMaterializer.ToRecord(row, read.HiddenFields);
+        return RecordMaterializer.ToRecord(row, read.HiddenFields, FrozenSet<string>.Empty);
     }
 
     /// <summary>
@@ -818,7 +820,7 @@ internal sealed class EfAlvoData : IAlvoData
             cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
-        return RecordMaterializer.ToRecord(postImage, decision.HiddenFields);
+        return RecordMaterializer.ToRecord(postImage, decision.HiddenFields, FrozenSet<string>.Empty);
     }
 
     /// <summary>
@@ -1172,8 +1174,21 @@ internal sealed class EfAlvoData : IAlvoData
             string.Equals(candidate.Name, entity, StringComparison.Ordinal)
             && candidate.Storage == EntityStorage.Physical);
 
+    /// <summary>
+    /// Every caller-supplied field name this read is about to reference — filter terms, sort keys and the
+    /// projection alike.
+    /// </summary>
+    /// <remarks>
+    /// <b>The projection is fed through the same guard rather than checked separately</b>, because it is
+    /// the same kind of string and earns the same refusal: naming a masked field in a projection is the
+    /// identical oracle as naming one in a filter, and one feeder is what keeps the two answers
+    /// byte-identical. This is also what makes <see cref="AlvoQuery.Select"/> non-advisory at the port —
+    /// a direct caller now either gets the projection or gets a refusal.
+    /// </remarks>
     private static IEnumerable<string> QueryFields(AlvoQuery query) =>
-        AlvoFilter.ReferencedFields(query.Filter).Concat(query.Sort.Select(sort => sort.Field));
+        AlvoFilter.ReferencedFields(query.Filter)
+            .Concat(query.Sort.Select(sort => sort.Field))
+            .Concat(query.Select ?? []);
 
     /// <summary>
     /// Reads the one row <paramref name="id"/> names, still under the policy predicate, so a row the caller
@@ -1259,7 +1274,8 @@ internal sealed class EfAlvoData : IAlvoData
     /// ordering and the anchor.
     /// </para>
     /// </remarks>
-    private static ReadStatementComposer.ReadStatementOptions ReadOptions(AlvoQuery query, KeysetAnchor? anchor) =>
+    private static ReadStatementComposer.ReadStatementOptions ReadOptions(
+        AlvoQuery query, KeysetAnchor? anchor, EntitySchema? entity) =>
         new()
         {
             Filter = query.Filter,
@@ -1267,7 +1283,22 @@ internal sealed class EfAlvoData : IAlvoData
             Sort = query.Sort,
             Limit = OverFetched(query.Limit),
             Offset = query.Offset,
+            Unselected = Unselected(query, entity),
         };
+
+    /// <summary>
+    /// The declared fields this read will not fetch, from the port's own rule rather than a copy of it.
+    /// </summary>
+    /// <remarks>
+    /// <b>Delegated to <see cref="AlvoQuery.UnselectedFields"/> deliberately.</b> Which fields survive a
+    /// projection is a promise <see cref="IAlvoData"/>'s returned-key-set contract makes, not a decision
+    /// this driver gets to take — and the in-memory reference has to reach the same answer, or the
+    /// differential suite is comparing two features rather than two implementations of one. A local copy
+    /// here was the first draft, and it was a second hand-kept list of which columns the framework must
+    /// return: the defect <see cref="AlvoManagedColumns"/> exists to have stopped.
+    /// </remarks>
+    private static IReadOnlySet<string> Unselected(AlvoQuery query, EntitySchema? entity) =>
+        entity is null ? FrozenSet<string>.Empty : AlvoQuery.UnselectedFields(query, entity);
 
     /// <summary>
     /// One past <paramref name="limit"/>, so <see cref="Paginated"/> can tell a page that ends exactly at the
@@ -1374,7 +1405,7 @@ internal sealed class EfAlvoData : IAlvoData
     /// </remarks>
     /// <param name="row">The stored row, as the re-read returned it.</param>
     private static AlvoRecord Unmasked(Dictionary<string, object> row) =>
-        RecordMaterializer.ToRecord(row, _noMask);
+        RecordMaterializer.ToRecord(row, _noMask, FrozenSet<string>.Empty);
 
     /// <summary>
     /// The empty mask: a row a policy decision is <em>reached over</em> is never masked, only a row this data

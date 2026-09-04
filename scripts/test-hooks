@@ -44,6 +44,7 @@ setup_repo() { # -> prints the repo path
   git -C "$repo" config user.name test
   mkdir -p "$repo/test/Some.Tests" "$repo/test/load/baselines" "$repo/src"
   printf 'committed\n' >"$repo/test/Some.Tests/Thing.verified.txt"
+  printf 'namespace X\n{\n}\n' >"$repo/test/Some.Tests/PublicApi.X.verified.txt"
   printf '{"ratios":{}}\n' >"$repo/test/load/baselines/gate.json"
   printf 'x\n' >"$repo/src/Thing.cs"
   git -C "$repo" add -A
@@ -192,6 +193,47 @@ assert_contains 'test/load/baselines/gate.json' "$out" \
 repo="$(setup_repo)"
 printf 'test/load/baselines/gate.json\n' >"$(ledger_path "$repo")"
 assert_empty "$(run_gate "$repo")" "drops an unchanged load baseline"
+
+# A PublicApi baseline that GREW must send the agent to alvo-architecture-rules.
+# Fires alongside the snapshot judge on purpose: one asks whether the baseline is
+# justified, this asks whether the symbol should be public at all.
+repo="$(setup_repo)"
+printf 'namespace X\n{\n  public static string Added { get; }\n}\n' \
+  >"$repo/test/Some.Tests/PublicApi.X.verified.txt"
+printf 'test/Some.Tests/PublicApi.X.verified.txt\n' >"$(ledger_path "$repo")"
+out="$(run_gate "$repo")"
+assert_contains 'public surface GREW' "$out" \
+  "blocks when a PublicApi baseline gained a line"
+assert_contains 'alvo-architecture-rules' "$out" \
+  "names the skill that owns the public-is-the-contract rule"
+assert_contains 'InternalsVisibleTo' "$out" \
+  "names the alternative the rule points at"
+assert_eq "1" "$(printf '%s' "$out" | jq -s 'length')" \
+  "a grown PublicApi baseline still produces exactly one block"
+
+# A NARROWED surface is the direction the rule wants, so it must not block on
+# this check — that is the whole reason the check reads added lines, not any diff.
+repo="$(setup_repo)"
+printf 'namespace X\n' >"$repo/test/Some.Tests/PublicApi.X.verified.txt"
+printf 'test/Some.Tests/PublicApi.X.verified.txt\n' >"$(ledger_path "$repo")"
+out="$(run_gate "$repo")"
+assert_contains 'alvo-snapshot-judge' "$out" \
+  "a narrowed PublicApi baseline still reaches the snapshot judge"
+assert_empty "$(printf '%s' "$out" | grep -o 'public surface GREW' || true)" \
+  "a narrowed PublicApi baseline does not block on the widening check"
+
+# An unchanged PublicApi baseline is a no-op for both checks.
+repo="$(setup_repo)"
+printf 'test/Some.Tests/PublicApi.X.verified.txt\n' >"$(ledger_path "$repo")"
+assert_empty "$(run_gate "$repo")" "drops an unchanged PublicApi baseline"
+
+# A brand-new PublicApi baseline appears in no diff, so every line is an addition.
+repo="$(setup_repo)"
+printf 'namespace Y\n{\n  public static string New { get; }\n}\n' \
+  >"$repo/test/Some.Tests/PublicApi.Y.verified.txt"
+printf 'test/Some.Tests/PublicApi.Y.verified.txt\n' >"$(ledger_path "$repo")"
+assert_contains 'public surface GREW' "$(run_gate "$repo")" \
+  "blocks on an untracked PublicApi baseline"
 
 # Both kinds of baseline in one run still produce exactly ONE block — the checks
 # aggregate into one Stop decision rather than racing each other.

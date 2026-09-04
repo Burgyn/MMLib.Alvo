@@ -152,7 +152,8 @@ own semantics and the only reading in which adding a term narrows the set.
   (`or=(a.eq.1,and=(b.eq.2))`), where PostgREST writes `and(b.eq.2)`. One grammar in one place beat a
   parser that quietly accepts two dialects; widening to PostgREST's exact nested form later is additive.
 - Negation: a single leading `not.` on a key or a group member. `not.not.` is not in the grammar.
-- `order=<field>[.asc|.desc][.nullsfirst|.nullslast][,…]`, `select=a,b`, `limit`, `offset`, `after`.
+- `order=<field>[.asc|.desc][.nullsfirst|.nullslast][,…]`, `select=a,b` or `select=alias:a`,
+  `limit`, `offset`, `after`.
 
 ### Sorting over nulls
 
@@ -174,8 +175,64 @@ emits no rank at all. The index-friendly fix is per-dialect native `NULLS FIRST`
 `IAlvoSqlDialect` — both shipped engines support it — and it is **#178**, deliberately not bundled with
 the change that made the read legal.
 
-`select` is applied to the **response**, not to the `SELECT` list — the port has no projection member yet,
-so `?select=id` costs the database exactly what a full read costs (**#117**).
+### `select` — the projection, and what it costs
+
+`select` reaches the `SELECT` list, so `?select=id` stops the engine reading the columns it did not name
+(**#117**, closed). It does **not** shorten the column list: reads run through `FromSqlRaw` over a
+property-bag entity mapping every schema field, and EF fails if a mapped column is missing from the result
+set — so an unselected column is rendered `NULL AS <col>` and its key is dropped when the record is
+assembled. That is the mechanism `hidden` already used, proven on both engines, and it keeps
+`IAlvoSqlDialect` out of the change entirely.
+
+**The honest scope of the win:** the engine stops *reading* the column, which is real for a wide or
+TOASTed value and near zero for a narrow int. It is not a proportional speed-up, and
+`AlvoDataStatementTests` therefore asserts only what a statement can carry — that the column is not
+fetched.
+
+**Two groups of columns are read whatever the projection names**, and neither appears in the response
+unless it was named:
+
+- The framework-managed columns, through `AlvoManagedColumns.For(entity)`. `IAlvoData`'s returned-key-set
+  contract requires it, and the keyset cursor is minted from the fetched row's `id` — a NULLed row key
+  would not mis-sort a page, it would break paging.
+- Every field named in `order`. **Measured on SQLite 3 and PostgreSQL 16 alike:** a bare identifier in
+  `ORDER BY` resolves against the *output* column names first, so a NULLed sort key would order the page
+  by the `NULL` while the keyset boundary in `WHERE` still described the real sequence — a page that skips
+  or repeats a row. A filter term, the cursor anchor and the policy predicates need no such exemption,
+  because both engines resolve the table column in `WHERE` and ignore the alias. That measurement is what
+  makes the feature safe at all: a compiled `USING` predicate's field references are not enumerable, so
+  had `WHERE` behaved like `ORDER BY`, `!has(owner_id)` over a NULLed column would have rendered
+  `NOT("owner_id" IS NOT NULL)` → true and admitted every row.
+
+**Aliases** (`select=label:make`, PostgREST's own spelling, **#111**) are a response concern and never
+reach the port: `AlvoQuery.Select` carries source names, and the API renders the response's key list.
+The source is resolved through the same resolver every other field name goes through, so an alias cannot
+reach a field the caller may not read. Four refusals, all pointing at `select`: a malformed pair or an
+alias outside the field-name grammar (`malformed-select-alias` — a deliberate narrowing of PostgREST,
+which admits an arbitrary alias, because an alias is a field name *in the response*); a reserved name as
+an alias (consistency with what a descriptor may declare, not necessity); a key claimed twice, whether by
+two different sources or by an alias onto **any** framework-owned name — `AlvoManagedColumns.All`, not this
+entity's own subset, because the caller is minting a name rather than resolving one
+(`colliding-projection-key`); and more distinct keys than the caller has readable fields
+(`projection-too-wide`).
+
+**What the alias deliberately does not refuse:** a rename onto another declared field's name.
+`?select=year:make` answers `{"year": "skoda"}` where the published schema declares `year` an integer.
+PostgREST behaves the same way, the caller chose both halves, and the value is one they may read; refusing
+it would make the alias useless for the renaming it exists for.
+
+That last bound exists **because** of aliases. Before them the projection was self-bounding — every entry
+resolved through `QueryFieldResolver` to a declared field and duplicates collapsed — so a response could
+never carry more keys than the entity has fields. An alias can name one column under arbitrarily many keys,
+leaving only the transport's URL limit in the way. It is charged per newly claimed *distinct* key rather
+than on the entry count, which is what keeps `?select=id,id,id` deduping as it always has, and follows the
+precedent `FilterParseScope.TryChargeNode` set: a budget spent after the parse does not bound the parse.
+
+**The number is the caller's readable field count, not the entity's declared one**, and that is a
+confidentiality decision rather than a tightening: the count is published in the refusal's fix suggestion,
+and an unprojected list already tells the caller how many fields they can read — so publishing the declared
+count would hand them the size of their own mask, the one bit the byte-identical `unavailable-field`
+refusal exists to withhold.
 
 ### Allow-list 1: the ten operators, derived and not written out
 

@@ -241,6 +241,95 @@ internal static class QueryViolations
         "The projection names no fields.",
         "Write select=make,model — or omit 'select' entirely for every readable field.");
 
+    /// <summary>
+    /// The refusal for a projection entry that is neither <c>field</c> nor <c>alias:field</c>, or whose
+    /// alias is not shaped like a field name.
+    /// </summary>
+    /// <remarks>
+    /// <b>An alias must match the field-name grammar</b> (<c>^[a-z][a-z0-9_]{0,62}$</c>) and must not be one
+    /// of the reserved names. A deliberate narrowing of PostgREST, which admits an arbitrary alias: an alias
+    /// is a field name <em>in the response</em>, so an agent reading the body should not have to tell a real
+    /// field from caller-supplied text, and an unbounded alias is caller-controlled bytes in a response key
+    /// for no gain. The reserved-name half is consistency rather than necessity — an alias is never a query
+    /// key and creates no ambiguity — but a response key no descriptor is allowed to declare should not be
+    /// reachable by renaming.
+    /// </remarks>
+    internal static AlvoViolation MalformedSelectAlias() => new(
+        ReservedQueryKeys.Select,
+        "malformed-select-alias",
+        "A projection entry is not a field name or an 'alias:field' pair.",
+        "Write select=make or select=label:make; an alias is lower snake_case, starts with a letter, is at "
+        + $"most 63 characters, and is none of {ReservedQueryKeys.AsList}.");
+
+    /// <summary>
+    /// The refusal for one response key claimed twice — by two different fields, or by an alias onto a name
+    /// the framework owns.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Two sources for one key</b> is a request with no correct answer, and answering with either would
+    /// silently drop a field the caller asked for. A repeated <em>identical</em> entry is not this
+    /// condition: it dedupes, as it always has, because a repeat claims nothing new.
+    /// </para>
+    /// <para>
+    /// <b>An alias onto a framework-owned name</b> — <c>select=id:make</c>, <c>select=tenant_id:make</c> —
+    /// is refused for a different reason, and the reason is worth stating correctly because an earlier
+    /// draft of this remark got it wrong. It is <em>not</em> that two values would arrive under one key:
+    /// <c>DataApiPage.Render</c> emits only the projection's own keys, so the port's real <c>id</c> is
+    /// dropped and nothing collides. It is that the response would carry a key that reads as a framework
+    /// column and is not one — the same outcome <see cref="MalformedSelectAlias"/>'s reserved-name check
+    /// exists to prevent, and for the same reason: a key no descriptor is allowed to declare should not be
+    /// reachable by renaming. Tested against <em>every</em> managed name rather than the ones this entity
+    /// happens to carry, because a global entity has no <c>tenant_id</c> and a response key called
+    /// <c>tenant_id</c> would still read as one.
+    /// </para>
+    /// <para>
+    /// <b>What this deliberately does not refuse:</b> an alias onto another <em>declared</em> field's name
+    /// — <c>select=year:make</c> answers <c>{"year": "skoda"}</c> where the published schema declares
+    /// <c>year</c> an integer. That is inherent to PostgREST-style aliasing, which Alvo adopts rather than
+    /// narrows here: the caller chose both halves, the value is one they may read, and refusing it would
+    /// make the alias useless for the renaming it exists for. Recorded so the asymmetry with the managed
+    /// names reads as a decision.
+    /// </para>
+    /// </remarks>
+    internal static AlvoViolation CollidingProjectionKey() => new(
+        ReservedQueryKeys.Select,
+        "colliding-projection-key",
+        "Two projected fields would answer under the same response key.",
+        "Give each projected field its own key, and do not alias onto a framework-managed column's name.");
+
+    /// <summary>The refusal for a projection naming more distinct keys than the caller can read fields.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The bound aliases make necessary.</b> Before them the projection was self-bounding: every entry
+    /// resolved to a declared field and duplicates collapsed, so a response could never carry more keys than
+    /// the entity has fields. An alias can name one column under arbitrarily many keys, leaving only the
+    /// transport's URL limit in the way — the "a bound the caller controls" shape
+    /// <see cref="AlvoFilter.MaxTerms"/> exists to close on the filter side.
+    /// </para>
+    /// <para>
+    /// <b>Derived rather than chosen</b>, so it needs no judgement call, no configuration knob and no
+    /// per-engine measurement: a response with more keys than the caller has readable fields is a
+    /// duplication request, not a read. Charged per newly claimed <em>distinct</em> key, which is what keeps
+    /// a repeated entry deduping instead of counting.
+    /// </para>
+    /// <para>
+    /// <b>The caller's readable count, not the entity's declared one</b> — a deliberate change from the
+    /// design's first shape, which said <c>entity.Fields.Count</c>. That number, published here in the fix
+    /// suggestion, would have told a caller who hit the bound how many fields the entity declares, while an
+    /// unprojected list already tells them how many they can read: the difference is exactly the number of
+    /// fields hidden from them. An alias makes that cheap to ask for, because one readable field mints
+    /// unlimited distinct keys. The readable count is both tighter and silent.
+    /// </para>
+    /// </remarks>
+    /// <param name="maxKeys">How many fields this caller can read.</param>
+    internal static AlvoViolation ProjectionTooWide(int maxKeys) => new(
+        ReservedQueryKeys.Select,
+        "projection-too-wide",
+        "The projection names more keys than there are fields to read.",
+        $"Name at most {maxKeys} distinct keys; aliasing one field under many keys returns the same value "
+        + "repeatedly.");
+
     /// <summary>The refusal for a parameter sent more than once, which anchors one setting two ways.</summary>
     /// <param name="pointer">The parameter that was repeated.</param>
     internal static AlvoViolation RepeatedParameter(string pointer) => new(

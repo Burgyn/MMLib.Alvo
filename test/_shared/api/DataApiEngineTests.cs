@@ -175,6 +175,93 @@ public abstract class DataApiEngineTests
     }
 
     /// <summary>
+    /// A projection narrows the response to the keys it named, in the order it named them — and to nothing
+    /// else, even though the port had to return more than that.
+    /// </summary>
+    /// <remarks>
+    /// The port's returned-key-set contract keeps <c>id</c> and the audit columns in every record whatever
+    /// the caller selected (a keyset cursor is minted from the row key), so this is the fact that pins the
+    /// two key lists apart: what the port must carry, and what the response may show.
+    /// </remarks>
+    [Fact]
+    public async Task A_projection_answers_with_the_named_keys_in_the_named_order_and_nothing_else()
+    {
+        await using var world = await StartAsync();
+        await SeedVehiclesAsync(world);
+
+        using var response = await world.SendAsync(HttpMethod.Get, "/api/vehicles?select=model,make", _admin);
+
+        var row = (await response.ReadItemsAsync())[0];
+        row.Select(pair => pair.Key).ShouldBe(["model", "make"]);
+    }
+
+    /// <summary>
+    /// PostgREST's own <c>alias:field</c> spelling: the value of the named field, under the requested key.
+    /// </summary>
+    [Fact]
+    public async Task An_alias_returns_the_value_under_the_requested_key()
+    {
+        await using var world = await StartAsync();
+        await SeedVehiclesAsync(world);
+
+        using var aliased = await world.SendAsync(HttpMethod.Get, "/api/vehicles?select=label:make&order=make", _admin);
+        using var plain = await world.SendAsync(HttpMethod.Get, "/api/vehicles?select=make&order=make", _admin);
+
+        var row = (await aliased.ReadItemsAsync())[0];
+        row.ContainsKey("make").ShouldBeFalse("the source name is not a key the caller asked for");
+        row["label"]!.GetValue<string>()
+            .ShouldBe((await plain.ReadItemsAsync())[0]["make"]!.GetValue<string>());
+    }
+
+    /// <summary>
+    /// A framework-managed column is shown when it is asked for, and not otherwise. Both halves matter: the
+    /// port returns it either way, so only the response's own key list decides.
+    /// </summary>
+    [Fact]
+    public async Task A_projection_shows_a_managed_column_only_when_it_named_one()
+    {
+        await using var world = await StartAsync();
+        await SeedVehiclesAsync(world);
+
+        using var withId = await world.SendAsync(HttpMethod.Get, "/api/vehicles?select=id,make", _admin);
+        using var withoutId = await world.SendAsync(HttpMethod.Get, "/api/vehicles?select=make", _admin);
+
+        (await withId.ReadItemsAsync())[0].ContainsKey("id").ShouldBeTrue();
+        (await withoutId.ReadItemsAsync())[0].ContainsKey("id").ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// A projection is a response concern and an order is a read concern, so sorting by a field the response
+    /// does not carry has to work — and the page must arrive in that order rather than in the store's.
+    /// </summary>
+    /// <remarks>
+    /// The wire-level twin of the port suite's sort fact. Both shipped engines resolve a bare <c>ORDER BY</c>
+    /// identifier against the output column names, so an implementation that projected the sort key away
+    /// would answer this in an arbitrary order.
+    /// </remarks>
+    [Fact]
+    public async Task A_projection_can_omit_the_field_the_page_is_ordered_by()
+    {
+        await using var world = await StartAsync();
+        await SeedVehiclesAsync(world);
+
+        using var projected = await world.SendAsync(
+            HttpMethod.Get, "/api/vehicles?select=model&order=make.desc", _admin);
+        using var unprojected = await world.SendAsync(HttpMethod.Get, "/api/vehicles?order=make.desc", _admin);
+
+        var projectedRows = await projected.ReadItemsAsync();
+        var unprojectedRows = await unprojected.ReadItemsAsync();
+
+        // The order is asserted on the PROJECTED read's own rows, against the unprojected read's. Asserting
+        // it on the unprojected one would have passed unchanged under the very defect this fact documents.
+        unprojectedRows.Select(row => row["make"]!.GetValue<string>())
+            .ShouldBe(["vw", "skoda", "audi"], "the seeded makes, descending");
+        projectedRows[0].ContainsKey("make").ShouldBeFalse("the response does not carry the sort key");
+        projectedRows.Select(row => row["model"]!.GetValue<string>())
+            .ShouldBe([.. unprojectedRows.Select(row => row["model"]!.GetValue<string>())]);
+    }
+
+    /// <summary>
     /// The order a request asks for is the order the page arrives in, both ways round.
     /// </summary>
     /// <remarks>

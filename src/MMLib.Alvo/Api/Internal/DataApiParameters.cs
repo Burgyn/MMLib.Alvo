@@ -312,10 +312,16 @@ internal static class DataApiParameters
         Name = ReservedQueryKeys.Select,
         In = ParameterLocation.Query,
         Description =
-            "Comma-separated field names to return, in the order named. It narrows the *response* only — the "
-            + "read still fetches the whole row — so it saves bandwidth to the caller and nothing at the "
-            + "database. A field the caller may not read is refused exactly as an undeclared one is.",
+            "Comma-separated field names to return, in the order named, each optionally renamed as "
+            + "`alias:field`. It narrows the **read** as well as the response: a field the projection does "
+            + "not name is not read from the row. Two groups of columns are read regardless — the "
+            + "framework-managed ones, and any field named in `order`, because no engine can sort by a "
+            + "column it did not read — but neither appears in the response unless the projection named it. "
+            + "A field the caller may not read is refused exactly as an undeclared one is. An alias is lower "
+            + "snake_case, is not the name of a framework-managed column, and cannot be claimed twice; and a "
+            + "projection cannot name more distinct keys than there are fields this caller can read.",
         Schema = new OpenApiSchema { Type = JsonSchemaType.String },
+        Example = JsonValue.Create("label:make,model"),
     };
 
     private static OpenApiParameter Order => new()
