@@ -190,10 +190,16 @@ a `*.verified.*` snapshot and a load baseline (`test/load/baselines/*.json`),
 because both are files whose edit can turn a red check green with no product
 change;
 `.claude/hooks/turn-review-gate` (Stop) drains that ledger — always, before any
-decision — and, if a baseline really moved, blocks the turn with an instruction
+decision — and runs three checks over what moved. Two block with an instruction
 to dispatch the read-only `alvo-snapshot-judge`, because a baseline is the one
 place a check can be made green with no product-code change: accept a snapshot,
-or raise a load ceiling.
+or raise a load ceiling. The third fires when a `PublicApi.*.verified.txt`
+**grew**, and sends you to the `alvo-architecture-rules` skill to justify each
+added symbol against its *"public is the contract"* rule — the judge passes a
+grown baseline, correctly, because the member really was added; whether it
+should be `public` at all is a different question, and one `internal` plus
+Abstractions' own `InternalsVisibleTo` grants usually answers. A narrowing never
+blocks on that check: it is the direction the rule wants.
 `reset-edited-paths` clears a ledger orphaned by an ungraceful exit. The gate is
 a **registry**: add a future judgment check as a function inside
 `turn-review-gate`, never as a second Stop hook (an event's hooks run in
