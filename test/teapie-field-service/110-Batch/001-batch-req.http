@@ -18,9 +18,9 @@ Content-Type: application/json
 
 {
   "rows": [
-    { "tenant_id": "{{tenantNorth}}", "reference": "WO-2001", "title": "Batch one", "status": "scheduled", "priority": 2, "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}" },
-    { "tenant_id": "{{tenantNorth}}", "reference": "WO-2002", "title": "Batch two", "status": "scheduled", "priority": 2, "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}" },
-    { "tenant_id": "{{tenantNorth}}", "reference": "WO-2003", "title": "Batch three", "status": "scheduled", "priority": 2, "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}" }
+    { "tenant_id": "{{tenantNorth}}", "reference": "WO-2001", "title": "Batch one", "status": "scheduled", "priority": 2, "access_code": "ACME-2001", "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}" },
+    { "tenant_id": "{{tenantNorth}}", "reference": "WO-2002", "title": "Batch two", "status": "scheduled", "priority": 2, "access_code": "ACME-2002", "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}" },
+    { "tenant_id": "{{tenantNorth}}", "reference": "WO-2003", "title": "Batch three", "status": "scheduled", "priority": 2, "access_code": "ACME-2003", "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}" }
   ]
 }
 
@@ -40,9 +40,9 @@ Content-Type: application/json
 
 {
   "rows": [
-    { "tenant_id": "{{tenantNorth}}", "reference": "WO-2101", "title": "Would have landed", "status": "scheduled", "priority": 2, "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}" },
-    { "tenant_id": "{{tenantNorth}}", "reference": "WO-2102", "title": "Would have landed too", "status": "scheduled", "priority": 2, "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}" },
-    { "tenant_id": "{{tenantNorth}}", "reference": "WO-2103", "title": "Bad", "status": "not_a_declared_status", "priority": 2, "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}" }
+    { "tenant_id": "{{tenantNorth}}", "reference": "WO-2101", "title": "Would have landed", "status": "scheduled", "priority": 2, "access_code": "ACME-2101", "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}" },
+    { "tenant_id": "{{tenantNorth}}", "reference": "WO-2102", "title": "Would have landed too", "status": "scheduled", "priority": 2, "access_code": "ACME-2102", "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}" },
+    { "tenant_id": "{{tenantNorth}}", "reference": "WO-2103", "title": "Bad", "status": "not_a_declared_status", "priority": 2, "access_code": "ACME-2103", "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}" }
   ]
 }
 
@@ -54,8 +54,11 @@ X-Alvo-Api-Key: {{keyDispatcherNorth}}
 
 ### A batch naming another tenant's row. SOUTH holds exactly NORTH's rights and differs only in tenant,
 ### so this refusal is the tenant predicate and can be nothing else.
+###
+### 403, not 422: the PORT refused this row, and a policy refusal answers 403 carrying one violation per
+### refused row. A 422 is what the READER answers, for something the entity's declared shape refuses.
 # @name SouthBatchUpdatesNorthsRow
-## TEST-EXPECT-STATUS: [422]
+## TEST-EXPECT-STATUS: [403]
 PATCH {{fsBaseUrl}}/api/work_orders/batch
 X-Alvo-Api-Key: {{keyDispatcherSouth}}
 Content-Type: application/json
