@@ -52,6 +52,9 @@ internal static class DataApiDocumentation
         /// <summary>The <c>{ items, next }</c> page envelope.</summary>
         Page,
 
+        /// <summary>The <c>{ items, affected }</c> batch envelope.</summary>
+        Batch,
+
         /// <summary>An RFC 9457 problem document.</summary>
         Problem,
     }
@@ -143,6 +146,11 @@ internal static class DataApiDocumentation
                  .. Refusals(Malformed, Absent, PreconditionOn(entity), Conflict)],
             DataApiEndpointKind.Delete =>
                 [NoContent(), .. Refusals(Absent, PreconditionOn(entity), Conflict)],
+            DataApiEndpointKind.BatchCreate or DataApiEndpointKind.BatchUpdate
+                or DataApiEndpointKind.BatchDelete =>
+                [Ok(ResponseBody.Batch, "Every row the batch wrote, in request order, and how many it "
+                    + "affected. A batch delete answers an empty 'items' with a non-zero 'affected'."),
+                 .. Refusals(Malformed, Precondition, Conflict)],
             _ => throw new InvalidOperationException($"No response catalogue for endpoint kind '{kind}'."),
         };
     }
@@ -300,6 +308,9 @@ internal static class DataApiDocumentation
         DataApiEndpointKind.Create => $"Create one '{entity}' row",
         DataApiEndpointKind.Update => $"Update one '{entity}' row",
         DataApiEndpointKind.Delete => $"Delete one '{entity}' row",
+        DataApiEndpointKind.BatchCreate => $"Create many '{entity}' rows in one transaction",
+        DataApiEndpointKind.BatchUpdate => $"Update many '{entity}' rows in one transaction",
+        DataApiEndpointKind.BatchDelete => $"Delete many '{entity}' rows in one transaction",
         _ => throw new InvalidOperationException($"No summary for endpoint kind '{kind}'."),
     };
 
@@ -319,9 +330,59 @@ internal static class DataApiDocumentation
             DataApiEndpointKind.Create => Create,
             DataApiEndpointKind.Update => Update(entity),
             DataApiEndpointKind.Delete => Delete(entity),
+            DataApiEndpointKind.BatchCreate => Batch(BatchCreateVerb),
+            DataApiEndpointKind.BatchUpdate => Batch(BatchUpdateVerb),
+            DataApiEndpointKind.BatchDelete => Batch(BatchDeleteVerb),
             _ => throw new InvalidOperationException($"No description for endpoint kind '{kind}'."),
         };
     }
+
+    /// <summary>
+    /// The three batch operations' shared prose: what a batch is, plus the verb's own opening sentence.
+    /// </summary>
+    /// <remarks>
+    /// One paragraph set for all three, because everything that makes a batch a batch — the transaction, the
+    /// per-row policy, the refusal list, the single key — is identical across them, and three copies is three
+    /// places for one of them to drift. Only the first sentence differs.
+    /// </remarks>
+    /// <param name="verb">The verb's own opening sentence.</param>
+    private static string Batch(string verb) =>
+        verb
+        + "\n\n**The batch is one transaction: every row is written, or none is.** A refusal on the last row "
+        + "leaves the first unwritten, so a caller repairs the rows the response names and resends the whole "
+        + "batch. There is no partial outcome to reconcile.\n\n"
+        + "**Every row is judged individually** against your own policy — the `WITH CHECK` predicate and, on a "
+        + "tenant-scoped entity, the tenant scope — exactly as the single-row route judges one. A batch is not "
+        + "a way to write rows a single call could not.\n\n"
+        + "**Every offending row is reported, not the first.** Each entry of `violations` carries a "
+        + "`/rows/{index}` pointer, so a five-hundred-row import is repaired in one round trip rather than "
+        + "five hundred. A row you cannot see and a row that does not exist are the *same* refusal, "
+        + "deliberately: telling them apart would let one request ask as many existence questions as it "
+        + "carries rows.\n\n"
+        + "**A `409` names the field and no row index.** A unique value is something you can guess, so an "
+        + "index would turn one collision probe into as many per request as the batch carries rows.\n\n"
+        + "**`Idempotency-Key` covers the whole batch**, because a batch is one request and a partial retry is "
+        + "not expressible. The same key with a different list of rows is a `409`, not a replay.";
+
+    /// <inheritdoc cref="Batch"/>
+    private const string BatchCreateVerb =
+        "Creates many rows in one transaction. Send `{\"rows\": [ … ]}`, each element the object the "
+        + "single-row create takes.";
+
+    /// <inheritdoc cref="Batch"/>
+    private const string BatchUpdateVerb =
+        "Updates many rows in one transaction. Send `{\"rows\": [ … ]}`, each element an object carrying the "
+        + "row's `id` plus the fields to change on it — partial, exactly as the single-row update is. There is "
+        + "no `If-Match` here: one version cannot condition many rows, and accepting one would check a single "
+        + "row while appearing to check all of them.";
+
+    /// <inheritdoc cref="Batch"/>
+    private const string BatchDeleteVerb =
+        "Deletes many rows in one transaction. Send `{\"rows\": [ … ]}`, each element a row `id`. The "
+        + "response is `200` with an empty `items` and a non-zero `affected`, not `204`, because it reports on "
+        + "many rows. **This `DELETE` carries a body**, which RFC 9110 §9.3.5 leaves undefined — an "
+        + "intermediary is permitted to strip it, so an empty batch is refused with `422` rather than read as "
+        + "\"no rows to delete\", which would be a silent success for a request that never arrived.";
 
     /// <summary>
     /// The list operation's prose, carrying two of the four gaps this type exists for — preconditions on a

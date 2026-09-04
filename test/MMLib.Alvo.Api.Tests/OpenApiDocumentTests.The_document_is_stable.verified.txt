@@ -396,6 +396,179 @@
         ]
       }
     },
+    "/api/categories/batch": {
+      "post": {
+        "tags": [
+          "categories"
+        ],
+        "summary": "Create many 'categories' rows in one transaction",
+        "description": "Creates many rows in one transaction. Send `{\"rows\": [ … ]}`, each element the object the single-row create takes.\n\n**The batch is one transaction: every row is written, or none is.** A refusal on the last row leaves the first unwritten, so a caller repairs the rows the response names and resends the whole batch. There is no partial outcome to reconcile.\n\n**Every row is judged individually** against your own policy — the `WITH CHECK` predicate and, on a tenant-scoped entity, the tenant scope — exactly as the single-row route judges one. A batch is not a way to write rows a single call could not.\n\n**Every offending row is reported, not the first.** Each entry of `violations` carries a `/rows/{index}` pointer, so a five-hundred-row import is repaired in one round trip rather than five hundred. A row you cannot see and a row that does not exist are the *same* refusal, deliberately: telling them apart would let one request ask as many existence questions as it carries rows.\n\n**A `409` names the field and no row index.** A unique value is something you can guess, so an index would turn one collision probe into as many per request as the batch carries rows.\n\n**`Idempotency-Key` covers the whole batch**, because a batch is one request and a partial retry is not expressible. The same key with a different list of rows is a `409`, not a replay.",
+        "operationId": "categories.batchCreate",
+        "requestBody": {
+          "description": "The rows to write, under a 'rows' array. A batch is one transaction: every row is written, or none is.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/categoriesBatchCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Every row the batch wrote, in request order, and how many it affected. A batch delete answers an empty 'items' with a non-zero 'affected'.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Cache-Control"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/categoriesBatchResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/unprocessable"
+          },
+          "412": {
+            "$ref": "#/components/responses/preconditionFailed"
+          },
+          "409": {
+            "$ref": "#/components/responses/conflict"
+          }
+        },
+        "security": [
+          { },
+          {
+            "alvoApiKey": [ ]
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "categories"
+        ],
+        "summary": "Update many 'categories' rows in one transaction",
+        "description": "Updates many rows in one transaction. Send `{\"rows\": [ … ]}`, each element an object carrying the row's `id` plus the fields to change on it — partial, exactly as the single-row update is. There is no `If-Match` here: one version cannot condition many rows, and accepting one would check a single row while appearing to check all of them.\n\n**The batch is one transaction: every row is written, or none is.** A refusal on the last row leaves the first unwritten, so a caller repairs the rows the response names and resends the whole batch. There is no partial outcome to reconcile.\n\n**Every row is judged individually** against your own policy — the `WITH CHECK` predicate and, on a tenant-scoped entity, the tenant scope — exactly as the single-row route judges one. A batch is not a way to write rows a single call could not.\n\n**Every offending row is reported, not the first.** Each entry of `violations` carries a `/rows/{index}` pointer, so a five-hundred-row import is repaired in one round trip rather than five hundred. A row you cannot see and a row that does not exist are the *same* refusal, deliberately: telling them apart would let one request ask as many existence questions as it carries rows.\n\n**A `409` names the field and no row index.** A unique value is something you can guess, so an index would turn one collision probe into as many per request as the batch carries rows.\n\n**`Idempotency-Key` covers the whole batch**, because a batch is one request and a partial retry is not expressible. The same key with a different list of rows is a `409`, not a replay.",
+        "operationId": "categories.batchUpdate",
+        "requestBody": {
+          "description": "The rows to write, under a 'rows' array. A batch is one transaction: every row is written, or none is.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/categoriesBatchUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Every row the batch wrote, in request order, and how many it affected. A batch delete answers an empty 'items' with a non-zero 'affected'.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Cache-Control"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/categoriesBatchResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/unprocessable"
+          },
+          "412": {
+            "$ref": "#/components/responses/preconditionFailed"
+          },
+          "409": {
+            "$ref": "#/components/responses/conflict"
+          }
+        },
+        "security": [
+          { },
+          {
+            "alvoApiKey": [ ]
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "categories"
+        ],
+        "summary": "Delete many 'categories' rows in one transaction",
+        "description": "Deletes many rows in one transaction. Send `{\"rows\": [ … ]}`, each element a row `id`. The response is `200` with an empty `items` and a non-zero `affected`, not `204`, because it reports on many rows. **This `DELETE` carries a body**, which RFC 9110 §9.3.5 leaves undefined — an intermediary is permitted to strip it, so an empty batch is refused with `422` rather than read as \"no rows to delete\", which would be a silent success for a request that never arrived.\n\n**The batch is one transaction: every row is written, or none is.** A refusal on the last row leaves the first unwritten, so a caller repairs the rows the response names and resends the whole batch. There is no partial outcome to reconcile.\n\n**Every row is judged individually** against your own policy — the `WITH CHECK` predicate and, on a tenant-scoped entity, the tenant scope — exactly as the single-row route judges one. A batch is not a way to write rows a single call could not.\n\n**Every offending row is reported, not the first.** Each entry of `violations` carries a `/rows/{index}` pointer, so a five-hundred-row import is repaired in one round trip rather than five hundred. A row you cannot see and a row that does not exist are the *same* refusal, deliberately: telling them apart would let one request ask as many existence questions as it carries rows.\n\n**A `409` names the field and no row index.** A unique value is something you can guess, so an index would turn one collision probe into as many per request as the batch carries rows.\n\n**`Idempotency-Key` covers the whole batch**, because a batch is one request and a partial retry is not expressible. The same key with a different list of rows is a `409`, not a replay.",
+        "operationId": "categories.batchDelete",
+        "requestBody": {
+          "description": "The rows to write, under a 'rows' array. A batch is one transaction: every row is written, or none is.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/categoriesBatchDelete"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Every row the batch wrote, in request order, and how many it affected. A batch delete answers an empty 'items' with a non-zero 'affected'.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Cache-Control"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/categoriesBatchResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/unprocessable"
+          },
+          "412": {
+            "$ref": "#/components/responses/preconditionFailed"
+          },
+          "409": {
+            "$ref": "#/components/responses/conflict"
+          }
+        },
+        "security": [
+          { },
+          {
+            "alvoApiKey": [ ]
+          }
+        ]
+      }
+    },
     "/api/products": {
       "get": {
         "tags": [
@@ -933,6 +1106,188 @@
           }
         ]
       }
+    },
+    "/api/products/batch": {
+      "post": {
+        "tags": [
+          "products"
+        ],
+        "summary": "Create many 'products' rows in one transaction",
+        "description": "Creates many rows in one transaction. Send `{\"rows\": [ … ]}`, each element the object the single-row create takes.\n\n**The batch is one transaction: every row is written, or none is.** A refusal on the last row leaves the first unwritten, so a caller repairs the rows the response names and resends the whole batch. There is no partial outcome to reconcile.\n\n**Every row is judged individually** against your own policy — the `WITH CHECK` predicate and, on a tenant-scoped entity, the tenant scope — exactly as the single-row route judges one. A batch is not a way to write rows a single call could not.\n\n**Every offending row is reported, not the first.** Each entry of `violations` carries a `/rows/{index}` pointer, so a five-hundred-row import is repaired in one round trip rather than five hundred. A row you cannot see and a row that does not exist are the *same* refusal, deliberately: telling them apart would let one request ask as many existence questions as it carries rows.\n\n**A `409` names the field and no row index.** A unique value is something you can guess, so an index would turn one collision probe into as many per request as the batch carries rows.\n\n**`Idempotency-Key` covers the whole batch**, because a batch is one request and a partial retry is not expressible. The same key with a different list of rows is a `409`, not a replay.",
+        "operationId": "products.batchCreate",
+        "requestBody": {
+          "description": "The rows to write, under a 'rows' array. A batch is one transaction: every row is written, or none is.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/productsBatchCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Every row the batch wrote, in request order, and how many it affected. A batch delete answers an empty 'items' with a non-zero 'affected'.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Cache-Control"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/productsBatchResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/unprocessable"
+          },
+          "412": {
+            "$ref": "#/components/responses/preconditionFailed"
+          },
+          "409": {
+            "$ref": "#/components/responses/conflict"
+          }
+        },
+        "security": [
+          { },
+          {
+            "alvoApiKey": [ ]
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "products"
+        ],
+        "summary": "Update many 'products' rows in one transaction",
+        "description": "Updates many rows in one transaction. Send `{\"rows\": [ … ]}`, each element an object carrying the row's `id` plus the fields to change on it — partial, exactly as the single-row update is. There is no `If-Match` here: one version cannot condition many rows, and accepting one would check a single row while appearing to check all of them.\n\n**The batch is one transaction: every row is written, or none is.** A refusal on the last row leaves the first unwritten, so a caller repairs the rows the response names and resends the whole batch. There is no partial outcome to reconcile.\n\n**Every row is judged individually** against your own policy — the `WITH CHECK` predicate and, on a tenant-scoped entity, the tenant scope — exactly as the single-row route judges one. A batch is not a way to write rows a single call could not.\n\n**Every offending row is reported, not the first.** Each entry of `violations` carries a `/rows/{index}` pointer, so a five-hundred-row import is repaired in one round trip rather than five hundred. A row you cannot see and a row that does not exist are the *same* refusal, deliberately: telling them apart would let one request ask as many existence questions as it carries rows.\n\n**A `409` names the field and no row index.** A unique value is something you can guess, so an index would turn one collision probe into as many per request as the batch carries rows.\n\n**`Idempotency-Key` covers the whole batch**, because a batch is one request and a partial retry is not expressible. The same key with a different list of rows is a `409`, not a replay.",
+        "operationId": "products.batchUpdate",
+        "requestBody": {
+          "description": "The rows to write, under a 'rows' array. A batch is one transaction: every row is written, or none is.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/productsBatchUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Every row the batch wrote, in request order, and how many it affected. A batch delete answers an empty 'items' with a non-zero 'affected'.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Cache-Control"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/productsBatchResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/unprocessable"
+          },
+          "412": {
+            "$ref": "#/components/responses/preconditionFailed"
+          },
+          "409": {
+            "$ref": "#/components/responses/conflict"
+          }
+        },
+        "security": [
+          { },
+          {
+            "alvoApiKey": [ ]
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "products"
+        ],
+        "summary": "Delete many 'products' rows in one transaction",
+        "description": "Deletes many rows in one transaction. Send `{\"rows\": [ … ]}`, each element a row `id`. The response is `200` with an empty `items` and a non-zero `affected`, not `204`, because it reports on many rows. **This `DELETE` carries a body**, which RFC 9110 §9.3.5 leaves undefined — an intermediary is permitted to strip it, so an empty batch is refused with `422` rather than read as \"no rows to delete\", which would be a silent success for a request that never arrived.\n\n**The batch is one transaction: every row is written, or none is.** A refusal on the last row leaves the first unwritten, so a caller repairs the rows the response names and resends the whole batch. There is no partial outcome to reconcile.\n\n**Every row is judged individually** against your own policy — the `WITH CHECK` predicate and, on a tenant-scoped entity, the tenant scope — exactly as the single-row route judges one. A batch is not a way to write rows a single call could not.\n\n**Every offending row is reported, not the first.** Each entry of `violations` carries a `/rows/{index}` pointer, so a five-hundred-row import is repaired in one round trip rather than five hundred. A row you cannot see and a row that does not exist are the *same* refusal, deliberately: telling them apart would let one request ask as many existence questions as it carries rows.\n\n**A `409` names the field and no row index.** A unique value is something you can guess, so an index would turn one collision probe into as many per request as the batch carries rows.\n\n**`Idempotency-Key` covers the whole batch**, because a batch is one request and a partial retry is not expressible. The same key with a different list of rows is a `409`, not a replay.",
+        "operationId": "products.batchDelete",
+        "requestBody": {
+          "description": "The rows to write, under a 'rows' array. A batch is one transaction: every row is written, or none is.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/productsBatchDelete"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Every row the batch wrote, in request order, and how many it affected. A batch delete answers an empty 'items' with a non-zero 'affected'.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Cache-Control"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/productsBatchResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/unprocessable"
+          },
+          "412": {
+            "$ref": "#/components/responses/preconditionFailed"
+          },
+          "409": {
+            "$ref": "#/components/responses/conflict"
+          }
+        },
+        "security": [
+          { },
+          {
+            "alvoApiKey": [ ]
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -967,6 +1322,105 @@
           }
         },
         "description": "A product category. Not audited, so its rows carry no version — no ETag is minted for them and no conditional read or write of one is possible.\n\nOne row as a single read, a create or an update returns it. Every field is present, even one with no value — that field is present and null. Fields marked read-only are written by the framework and refused in a request body."
+      },
+      "categoriesBatchCreate": {
+        "required": [
+          "rows"
+        ],
+        "type": "object",
+        "properties": {
+          "rows": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/categoriesCreate"
+            },
+            "description": "One element per row, in the order you want them reported."
+          }
+        },
+        "description": "The rows to write, in one transaction."
+      },
+      "categoriesBatchDelete": {
+        "required": [
+          "rows"
+        ],
+        "type": "object",
+        "properties": {
+          "rows": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "One row id per element."
+          }
+        },
+        "description": "The rows to remove, in one transaction."
+      },
+      "categoriesBatchPatch": {
+        "title": "categoriesBatchPatch",
+        "type": "object",
+        "allOf": [
+          {
+            "required": [
+              "id"
+            ],
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "The row to change, exactly as a previous response returned it.",
+                "format": "uuid"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/categoriesPatch"
+          }
+        ],
+        "description": "One row of a batch update: which row, and the fields to change on it."
+      },
+      "categoriesBatchResult": {
+        "title": "categoriesBatchResult",
+        "required": [
+          "items",
+          "affected"
+        ],
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/categoriesPageItem"
+            },
+            "description": "The rows the batch wrote, in the order you sent them. Empty for a batch delete, which produces no rows — read `affected` there."
+          },
+          "affected": {
+            "minimum": 0,
+            "type": "integer",
+            "description": "How many rows the batch wrote or removed.",
+            "format": "int32"
+          }
+        },
+        "description": "What the batch wrote. A batch is one transaction, so this is never a partial outcome."
+      },
+      "categoriesBatchUpdate": {
+        "required": [
+          "rows"
+        ],
+        "type": "object",
+        "properties": {
+          "rows": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/categoriesBatchPatch"
+            },
+            "description": "One element per row, in the order you want them reported."
+          }
+        },
+        "description": "The rows to write, in one transaction."
       },
       "categoriesCreate": {
         "title": "categoriesCreate",
@@ -1419,6 +1873,105 @@
           }
         },
         "description": "A product in the catalogue. Audited, so every row carries a version and every read and write of one can be made conditional.\n\nOne row as a single read, a create or an update returns it. Every field is present, even one with no value — that field is present and null. Fields marked read-only are written by the framework and refused in a request body."
+      },
+      "productsBatchCreate": {
+        "required": [
+          "rows"
+        ],
+        "type": "object",
+        "properties": {
+          "rows": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/productsCreate"
+            },
+            "description": "One element per row, in the order you want them reported."
+          }
+        },
+        "description": "The rows to write, in one transaction."
+      },
+      "productsBatchDelete": {
+        "required": [
+          "rows"
+        ],
+        "type": "object",
+        "properties": {
+          "rows": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "One row id per element."
+          }
+        },
+        "description": "The rows to remove, in one transaction."
+      },
+      "productsBatchPatch": {
+        "title": "productsBatchPatch",
+        "type": "object",
+        "allOf": [
+          {
+            "required": [
+              "id"
+            ],
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "The row to change, exactly as a previous response returned it.",
+                "format": "uuid"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/productsPatch"
+          }
+        ],
+        "description": "One row of a batch update: which row, and the fields to change on it."
+      },
+      "productsBatchResult": {
+        "title": "productsBatchResult",
+        "required": [
+          "items",
+          "affected"
+        ],
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/productsPageItem"
+            },
+            "description": "The rows the batch wrote, in the order you sent them. Empty for a batch delete, which produces no rows — read `affected` there."
+          },
+          "affected": {
+            "minimum": 0,
+            "type": "integer",
+            "description": "How many rows the batch wrote or removed.",
+            "format": "int32"
+          }
+        },
+        "description": "What the batch wrote. A batch is one transaction, so this is never a partial outcome."
+      },
+      "productsBatchUpdate": {
+        "required": [
+          "rows"
+        ],
+        "type": "object",
+        "properties": {
+          "rows": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/productsBatchPatch"
+            },
+            "description": "One element per row, in the order you want them reported."
+          }
+        },
+        "description": "The rows to write, in one transaction."
       },
       "productsCreate": {
         "title": "productsCreate",

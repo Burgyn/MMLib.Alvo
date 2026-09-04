@@ -55,10 +55,11 @@ public sealed class OpenApiDocumentTests
     /// <summary>A credential that was presented and cannot be resolved, so every operation is 401.</summary>
     private static readonly TestApiKey _ghost = new("ghost-key", ["admin"], ["*:read", "*:write"]);
 
-    /// <summary>The two entities the fixture descriptor declares, and the six routes each of them gets.</summary>
+    /// <summary>The two entities the fixture descriptor declares, and the nine routes each of them gets.</summary>
     private static readonly string[] _entities = ["categories", "products"];
 
-    private const int RoutesPerEntity = 6;
+    /// <summary>Six single-row routes plus the three the batch path answers.</summary>
+    private const int RoutesPerEntity = 9;
 
     /// <summary>
     /// .NET 10 emits OpenAPI 3.1 over JSON Schema draft 2020-12 by default, and #75 requires keeping it —
@@ -147,7 +148,7 @@ public sealed class OpenApiDocumentTests
         }
 
         documented.Count.ShouldBe(
-            63,
+            99,
             "31 on the version-less entity and 32 on the audited one, whose read adds a 304 — pinned from "
             + "outside so the equality below cannot be satisfied by two empty sets. It went 51 -> 55 with "
             + "#138 (an update and a delete can each answer 409 when a database constraint refuses the "
@@ -351,7 +352,7 @@ public sealed class OpenApiDocumentTests
         var refusals = Refusals(document).ToList();
 
         refusals.Count.ShouldBe(
-            50,
+            80,
             "twenty-five per entity — three on each of the two collection reads and on the row read, five on "
             + "a create, six on an update and five on a delete, the last two having each gained the 409 "
             + "#138 made reachable and the first three being what #107's body-shaped read added");
@@ -1008,6 +1009,7 @@ public sealed class OpenApiDocumentTests
         var body = Body(entity, categoryId);
         var taken = await TakeAUniqueValueAsync(world, entity, categoryId);
         var referenced = await ReferencedRowAsync(world, entity, categoryId);
+        var condemned = await CreateAsync(world, entity, Body(entity, categoryId));
 
         return
         [
@@ -1042,7 +1044,80 @@ public sealed class OpenApiDocumentTests
             new("delete", 404, HttpMethod.Delete, absent, _admin, null),
             new("delete", 409, HttpMethod.Delete, referenced, _admin, null),
             new("delete", 204, HttpMethod.Delete, doomed, _admin, null),
+
+            .. BatchProbes(collection, entity, categoryId, stale, spent, condemned),
         ];
+    }
+
+    /// <summary>Every status each of the three batch routes can answer, on one path.</summary>
+    /// <remarks>
+    /// <para>
+    /// The three share a path and differ only in verb, so they are built together — and the shapes they take
+    /// differ enough that writing them inline beside the single-row probes buried what each one is for.
+    /// </para>
+    /// <para>
+    /// The <c>409</c> is a <b>reused key</b> rather than a unique collision, deliberately. A batch's
+    /// constraint conflict carries no row index by design, so the two 409s a batch can answer are the same
+    /// status from different causes — and the key one is the cause this PR added, so it is the one probed.
+    /// </para>
+    /// </remarks>
+    /// <param name="collection">The entity's collection path.</param>
+    /// <param name="entity">The entity being written.</param>
+    /// <param name="categoryId">The category a product must belong to.</param>
+    /// <param name="stale">An <c>If-Match</c> header no batch route accepts.</param>
+    /// <param name="spent">An <c>Idempotency-Key</c> already used for a different request.</param>
+    /// <param name="condemned">A row the batch delete may remove.</param>
+    private static IEnumerable<Probe> BatchProbes(
+        string collection,
+        string entity,
+        Guid categoryId,
+        IReadOnlyDictionary<string, string> stale,
+        IReadOnlyDictionary<string, string> spent,
+        Guid condemned)
+    {
+        var batch = $"{collection}/batch";
+        var rows = Rows(Body(entity, categoryId));
+        var refused = Rows(RefusedBody(entity, categoryId));
+        var empty = new JsonObject { ["rows"] = new JsonArray() };
+
+        return
+        [
+            .. Gated(batch, "batchCreate", HttpMethod.Post, rows),
+            new("batchCreate", 200, HttpMethod.Post, batch, _admin, rows),
+            new("batchCreate", 422, HttpMethod.Post, batch, _admin, refused),
+            new("batchCreate", 412, HttpMethod.Post, batch, _admin, rows, stale),
+            new("batchCreate", 409, HttpMethod.Post, batch, _admin, Rows(RenamedBody(entity, categoryId)), spent),
+
+            .. Gated(batch, "batchUpdate", HttpMethod.Patch, empty),
+            new("batchUpdate", 200, HttpMethod.Patch, batch, _admin, Rows(WithId(Rename(), condemned))),
+            new("batchUpdate", 422, HttpMethod.Patch, batch, _admin, empty),
+            new("batchUpdate", 412, HttpMethod.Patch, batch, _admin, empty, stale),
+            new("batchUpdate", 409, HttpMethod.Patch, batch, _admin, Rows(WithId(Rename(), condemned)), spent),
+
+            .. Gated(batch, "batchDelete", HttpMethod.Delete, empty),
+            new("batchDelete", 422, HttpMethod.Delete, batch, _admin, empty),
+            new("batchDelete", 412, HttpMethod.Delete, batch, _admin, empty, stale),
+            new("batchDelete", 409, HttpMethod.Delete, batch, _admin, RowIds(condemned), spent),
+            new("batchDelete", 200, HttpMethod.Delete, batch, _admin, RowIds(condemned)),
+        ];
+    }
+
+    /// <summary>One batch body carrying <paramref name="row"/> as its only row.</summary>
+    /// <param name="row">The row to send.</param>
+    private static JsonObject Rows(JsonObject row) => new() { ["rows"] = new JsonArray(row) };
+
+    /// <summary>One batch delete body naming <paramref name="id"/> as its only row.</summary>
+    /// <param name="id">The row to remove.</param>
+    private static JsonObject RowIds(Guid id) => new() { ["rows"] = new JsonArray(JsonValue.Create(id)) };
+
+    /// <summary>A batch update row: the patch, plus the row key it addresses.</summary>
+    /// <param name="patch">The fields to change.</param>
+    /// <param name="id">The row to change.</param>
+    private static JsonObject WithId(JsonObject patch, Guid id)
+    {
+        patch["id"] = JsonValue.Create(id);
+
+        return patch;
     }
 
     /// <summary>
