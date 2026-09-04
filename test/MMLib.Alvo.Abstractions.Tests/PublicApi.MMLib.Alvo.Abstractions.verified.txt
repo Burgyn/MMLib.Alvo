@@ -256,8 +256,10 @@ namespace MMLib.Alvo.Data
         public bool IncludeTotalCount { get; init; }
         public int? Limit { get; init; }
         public int? Offset { get; init; }
+        public System.Collections.Generic.IReadOnlyList<string>? Select { get; init; }
         public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoSort> Sort { get; init; }
         public static void EnsurePagingWindowIsSane(MMLib.Alvo.Data.AlvoQuery query) { }
+        public static void EnsureProjectionIsSane(MMLib.Alvo.Data.AlvoQuery query) { }
     }
     public sealed class AlvoRecord : System.IEquatable<MMLib.Alvo.Data.AlvoRecord>
     {

@@ -2,18 +2,18 @@
 
 /// <summary>
 /// A request to list an entity's rows through <see cref="IAlvoData.QueryAsync"/>: which entity,
-/// an optional caller filter, sort order, and a page size/cursor. This models the whole PostgREST-
-/// style query surface F3 through F-final will expose, but only implements the F3 subset —
-/// filtering, sorting, and keyset paging. Projection (selecting a field subset), relation
-/// embedding, aggregates, and bulk operations are deliberately <b>not</b> modelled here yet; they
-/// land in PR3.
+/// an optional caller filter, sort order, a page size/cursor, and which fields to return. This
+/// models the whole PostgREST-style query surface F3 through F-final will expose, and implements
+/// filtering, sorting, keyset paging and projection. Relation embedding, aggregates and bulk
+/// operations are deliberately <b>not</b> modelled here yet.
 /// </summary>
 /// <remarks>
 /// Every member of <b>this record</b> beyond <see cref="Entity"/> is additive by construction — a
-/// new optional member (e.g. a future <c>Select</c> projection list) can be added here without
-/// breaking an existing caller or provider, because §2.1 of the domain analysis warns that a badly
-/// designed query language cannot be fixed later without a breaking change. Do not narrow or
-/// repurpose an existing member to smuggle in a PR3 feature; add a new one instead. This promise is
+/// new optional member can be added here without breaking an existing caller or provider, because
+/// §2.1 of the domain analysis warns that a badly designed query language cannot be fixed later
+/// without a breaking change. <see cref="Select"/> is that promise being kept: this remark named it
+/// by name as the example before it existed. Do not narrow or
+/// repurpose an existing member to smuggle in a later feature; add a new one instead. This promise is
 /// scoped to <see cref="AlvoQuery"/> itself — <see cref="AlvoSort"/> and <see cref="AlvoComparison"/>
 /// are positional records and do not carry the same guarantee; see their own remarks.
 /// </remarks>
@@ -113,6 +113,37 @@ public sealed record AlvoQuery
     public bool IncludeTotalCount { get; init; }
 
     /// <summary>
+    /// Gets the declared field names to return, or <see langword="null"/> for every field this caller may
+    /// read. Never an empty list — see <see cref="EnsureProjectionIsSane"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>An implementation must narrow what it reads, not only what it returns.</b> A member both shipped
+    /// drivers ignored would be advisory, and an advisory port member is worse than none: a caller would ask
+    /// for two fields, receive every one, and nothing would be raised. <em>How</em> a driver narrows is its
+    /// own business — the shipped EF drivers render an unselected column as a typed SQL <c>NULL</c> rather
+    /// than dropping it from the <c>SELECT</c> list, because EF requires a <c>FromSql</c> result set to carry
+    /// every mapped property — but the observable rule is the same everywhere: the key is <em>absent</em>
+    /// from the returned record, never present and null.
+    /// </para>
+    /// <para>
+    /// <b>A name here is subject to the same confidentiality rule as <see cref="Filter"/> and
+    /// <see cref="Sort"/>.</b> A projection naming a field in <see cref="Rules.PolicyDecision.HiddenFields"/>
+    /// is rejected with the identical refusal an undeclared name earns, so the answer is not an oracle for
+    /// "this field exists but is hidden from you".
+    /// </para>
+    /// <para>
+    /// <b>Two groups of fields survive this, whatever it names.</b> Framework-managed columns do, because
+    /// <see cref="IAlvoData"/>'s returned-key-set contract says so and because a keyset cursor is minted from
+    /// the row key. And every field named in <see cref="Sort"/> does, because ordering is not expressible over
+    /// a column the statement did not read — a projected placeholder aliased to the column's own name is what
+    /// a bare <c>ORDER BY</c> identifier resolves to, on both shipped engines. Neither group appears in a
+    /// response that did not ask for it; the port's key set and a response's are two different lists.
+    /// </para>
+    /// </remarks>
+    public IReadOnlyList<string>? Select { get; init; }
+
+    /// <summary>
     /// Throws when <paramref name="query"/>'s paging window is self-contradictory or out of range —
     /// a negative <see cref="Limit"/> or <see cref="Offset"/>, or both <see cref="After"/> and
     /// <see cref="Offset"/> set at once.
@@ -142,6 +173,32 @@ public sealed record AlvoQuery
                 "A query cannot combine a keyset cursor ('after') with an offset: they anchor the same "
                 + "paging window two different ways, and answering with only one would silently resolve an "
                 + "ambiguous request rather than refuse it. Send only one.",
+                nameof(query));
+        }
+    }
+
+    /// <summary>
+    /// Throws when <paramref name="query"/>'s <see cref="Select"/> names no field — a read that could
+    /// return none.
+    /// </summary>
+    /// <remarks>
+    /// The sibling of <see cref="EnsurePagingWindowIsSane"/>, and here for the same reason: a rule of the
+    /// port belongs on the port's own type, so a future implementation inherits it instead of writing
+    /// another copy. An empty projection is refused rather than read as "every field", on the same ground
+    /// the <see cref="After"/>/<see cref="Offset"/> pair is refused — silently resolving an ambiguous
+    /// request is the one thing this port does not do.
+    /// </remarks>
+    /// <param name="query">The query about to be served.</param>
+    /// <exception cref="ArgumentException"><paramref name="query"/>'s projection names no field.</exception>
+    public static void EnsureProjectionIsSane(AlvoQuery query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        if (query.Select is { Count: 0 })
+        {
+            throw new ArgumentException(
+                "A query's projection names no fields, so it could return none. Name at least one declared "
+                + "field, or leave the projection unset for every field this caller may read.",
                 nameof(query));
         }
     }
