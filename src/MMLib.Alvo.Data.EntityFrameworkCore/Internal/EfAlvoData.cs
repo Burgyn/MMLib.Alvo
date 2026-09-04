@@ -533,7 +533,7 @@ internal sealed class EfAlvoData : IAlvoData
         await EmitAsync(
             db, transaction, schema, OutboxOperation.Created, context, now, Unmasked(stored), preImage: null,
             cancellationToken);
-        await records.InsertAsync((Guid)candidate[AlvoDataContext.IdColumn], now, cancellationToken);
+        await records.InsertAsync([(Guid)candidate[AlvoDataContext.IdColumn]], now, cancellationToken);
 
         return RecordMaterializer.ToRecord(stored, decision.HiddenFields, FrozenSet<string>.Empty);
     }
@@ -567,7 +567,7 @@ internal sealed class EfAlvoData : IAlvoData
     /// denied outright — no policy allows it at all, so <see cref="PolicyDecision.IsDenied"/> is
     /// <see langword="true"/> before any row is touched — the retry must not be worse than the create it
     /// replays: it answers with an <see cref="AlvoRecord"/> carrying only <see cref="AlvoManagedColumns.Id"/>,
-    /// taken from <paramref name="record"/>'s own <c>RowId</c>. The safety argument rests on
+    /// taken from <paramref name="record"/>'s own row list. The safety argument rests on
     /// <see cref="AlvoIdempotency.IdentityOf"/>: the record is keyed on the key, the tenant and the acting
     /// user, so a match <em>proves this caller created that row</em> — the id disclosed is exactly the id
     /// their own original 201 already gave them, in the body and in <c>Location</c>, and nothing more is
@@ -598,14 +598,28 @@ internal sealed class EfAlvoData : IAlvoData
         var read = _policy.Resolve(schema.Name, DataOperation.Get, context);
         if (read.IsDenied)
         {
-            return IdOnly(record.RowId);
+            return IdOnly(RecordedRow(record));
         }
 
-        var row = await SingleAsync(db, schema, read, context, record.RowId, lockFor: null, cancellationToken)
+        var row = await SingleAsync(db, schema, read, context, RecordedRow(record), lockFor: null, cancellationToken)
             ?? throw new AlvoRecordNotFoundException();
 
         return RecordMaterializer.ToRecord(row, read.HiddenFields, FrozenSet<string>.Empty);
     }
+
+    /// <summary>The one row a single-row write's record names.</summary>
+    /// <remarks>
+    /// An empty list is a broken invariant of this file rather than a caller error — every write records at
+    /// least one row — so it is raised loudly (family 5, rendered 500) rather than answered as a miss, which
+    /// would silently re-execute a write the caller has already been told succeeded.
+    /// </remarks>
+    /// <param name="record">The record this replay matched.</param>
+    private static Guid RecordedRow(IdempotencyTable.IdempotencyRecord record) =>
+        record.RowIds.Count > 0
+            ? record.RowIds[0]
+            : throw new InvalidOperationException(
+                "An idempotency record names no row. Every write records at least one, so an empty list means "
+                + "the record was written by something other than this port's write paths.");
 
     /// <summary>
     /// The narrowest possible answer to a replay: <paramref name="rowId"/> and nothing else, from the
@@ -680,9 +694,10 @@ internal sealed class EfAlvoData : IAlvoData
         internal Task<IdempotencyTable.IdempotencyRecord?> FindAsync(CancellationToken cancellationToken) =>
             IdempotencyTable.FindAsync(connection, transaction, tableName, token.Key, Scope, cancellationToken);
 
-        internal Task InsertAsync(Guid rowId, DateTimeOffset createdAt, CancellationToken cancellationToken) =>
+        internal Task InsertAsync(
+            IReadOnlyList<Guid> rowIds, DateTimeOffset createdAt, CancellationToken cancellationToken) =>
             IdempotencyTable.InsertAsync(
-                connection, transaction, tableName, token, Scope, rowId, createdAt, cancellationToken);
+                connection, transaction, tableName, token, Scope, rowIds, createdAt, cancellationToken);
     }
 
     /// <summary>
