@@ -74,6 +74,35 @@ public sealed class PayloadBindingTests
         (await response.ReadProblemDetailAsync()).ShouldContain("nests deeper than 4");
     }
 
+    /// <summary>
+    /// The shape scan is exactly one level stricter than the parse it hands the buffer to — so a body
+    /// <em>at</em> the bound reaches the binder and is answered about its value, and one level deeper is
+    /// the named depth refusal.
+    /// </summary>
+    /// <remarks>
+    /// The two conventions count differently — <c>JsonDocumentOptions.MaxDepth</c> counts the outermost
+    /// container as level 1 where <c>Utf8JsonReader.CurrentDepth</c> reports it as 0 — which looks like an
+    /// off-by-one waiting to turn a body the scan admitted into an uncaught <c>JsonException</c>, rendered
+    /// as a 500 for a caller who did nothing wrong. It is not, and nothing held that before: the fact above
+    /// drives depth 16 against a bound of 4 and never approaches the boundary.
+    /// </remarks>
+    [Fact]
+    public async Task A_body_at_the_depth_bound_reaches_the_binder_and_one_past_it_does_not()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync(
+            [_admin], new AlvoApiWorldSetup(api => api.MaxPayloadDepth = 4));
+
+        using var atBound = await world.SendRawAsync(
+            HttpMethod.Post, "/api/owners", _admin, content: AlvoApiWorld.RawJson(Nested(depth: 3)));
+        using var pastBound = await world.SendRawAsync(
+            HttpMethod.Post, "/api/owners", _admin, content: AlvoApiWorld.RawJson(Nested(depth: 4)));
+
+        (await atBound.ReadProblemDetailAsync()).Contains("nests deeper", StringComparison.Ordinal).ShouldBeFalse(
+            "a body at the bound must reach the binder, which is only possible if the parse accepted what "
+            + "the scan admitted");
+        (await pastBound.ReadProblemDetailAsync()).ShouldContain("nests deeper than 4");
+    }
+
     [Fact]
     public async Task A_body_with_more_keys_than_the_configured_maximum_is_refused_and_names_the_bound()
     {

@@ -330,6 +330,86 @@ internal static class QueryViolations
         $"Name at most {maxKeys} distinct keys; aliasing one field under many keys returns the same value "
         + "repeatedly.");
 
+    /// <summary>The read path's wording for a body one of the shared bounds refused.</summary>
+    /// <remarks>
+    /// <b>The same stable code as the write path's, and deliberately not the same fix suggestion.</b>
+    /// <see cref="PayloadViolations"/>' four bound refusals tell a caller to send fewer fields, to flatten a
+    /// <c>json</c> field's value, or that a write payload is a flat map of declared fields — every one of
+    /// which is advice about an operation this endpoint does not perform. A code keys on the kind of
+    /// refusal; the sentence belongs to the surface.
+    /// </remarks>
+    /// <param name="refusal">The bound that stopped the body.</param>
+    /// <param name="options">The options the bounds are published from.</param>
+    internal static AlvoViolation Body(BodyRefusal refusal, AlvoApiOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return new AlvoViolation(
+            PayloadViolations.BodyPointer,
+            BoundedJsonBody.CodeOf(refusal),
+            BodyMessage(refusal, options),
+            BodyFix(refusal, options));
+    }
+
+    /// <summary>What went wrong, said as a read rather than as a write.</summary>
+    /// <param name="refusal">The bound that stopped the body.</param>
+    /// <param name="options">The options the bounds are published from.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="refusal"/> is not one of the named cases.</exception>
+    private static string BodyMessage(BodyRefusal refusal, AlvoApiOptions options) => refusal switch
+    {
+        BodyRefusal.NotAnObject => "The query body must be a JSON object of query parameters.",
+        BodyRefusal.MalformedJson => "The query body is not well-formed JSON.",
+        BodyRefusal.TooLarge =>
+            $"The query body is larger than {options.MaxRequestBodyBytes} bytes, the configured maximum.",
+        BodyRefusal.TooDeep =>
+            $"The query body nests deeper than {options.MaxPayloadDepth} levels, the configured maximum.",
+        BodyRefusal.TooManyKeys =>
+            $"The query body carries more than {options.MaxPayloadKeys} parameters, the configured maximum.",
+        BodyRefusal.DuplicateName => "The query body names one parameter twice.",
+        _ => throw new ArgumentOutOfRangeException(
+            nameof(refusal), refusal, "Unmapped body refusal; give it the read path's wording here."),
+    };
+
+    /// <summary>What to change, in terms of the parameters a query carries rather than the fields a write sends.</summary>
+    /// <param name="refusal">The bound that stopped the body.</param>
+    /// <param name="options">The options the bounds are published from.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="refusal"/> is not one of the named cases.</exception>
+    private static string BodyFix(BodyRefusal refusal, AlvoApiOptions options) => refusal switch
+    {
+        BodyRefusal.NotAnObject =>
+            "Send {\"<parameter>\":\"<operator>.<operand>\",…} — the same parameters a query string "
+            + "carries. An empty object {} reads the first page with no filter.",
+        BodyRefusal.MalformedJson =>
+            "Check for an unterminated string, a trailing comma, or a truncated body.",
+        BodyRefusal.TooLarge =>
+            $"Narrow the query. {AlvoFilter.MaxInCandidates} 'in' candidates and {AlvoFilter.MaxTerms} "
+            + "filter terms fit well inside the bound; split a larger read across requests.",
+        BodyRefusal.TooDeep =>
+            "A query body is one level deep, or two where a repeated parameter is an array of strings.",
+        BodyRefusal.TooManyKeys =>
+            $"Send at most {options.MaxPayloadKeys} parameters. Repeat one parameter as an array of strings "
+            + "rather than spreading a filter across many.",
+        BodyRefusal.DuplicateName =>
+            "Send a repeated parameter once, as an array of strings: {\"or\":[\"(a.eq.1)\",\"(b.eq.2)\"]}. "
+            + "Two members with one name have no defined order, so answering with either would be a guess.",
+        _ => throw new ArgumentOutOfRangeException(
+            nameof(refusal), refusal, "Unmapped body refusal; give it the read path's fix suggestion here."),
+    };
+
+    /// <summary>The refusal for a query parameter whose JSON value is not a value a query string could carry.</summary>
+    /// <remarks>
+    /// One code for null, an object, a nested array and an empty array alike: what they have in common is
+    /// that none of them names a value, and distinguishing them would describe the caller's own body back to
+    /// them for no fix they could not already make. The pointer is the parameter's <em>role</em>, so a
+    /// filter on a masked field cannot be told from one on an undeclared field by where the refusal points.
+    /// </remarks>
+    /// <param name="pointer">The role of the parameter the value belongs to.</param>
+    internal static AlvoViolation UnrepresentableQueryValue(string pointer) => new(
+        pointer,
+        "unrepresentable-query-value",
+        "A query parameter's value is not a string, a number, a boolean, or a non-empty array of those.",
+        "Write {\"year\":\"gte.2020\"} — a parameter's value is the text a query string would carry. "
+        + "Repeat a parameter as an array of strings; null, an object and an empty array name no value.");
+
     /// <summary>The refusal for a projection carrying more comma-separated entries than the parser reads.</summary>
     /// <remarks>
     /// A separate code from <see cref="ProjectionTooWide"/> because it has a different cause and a different
