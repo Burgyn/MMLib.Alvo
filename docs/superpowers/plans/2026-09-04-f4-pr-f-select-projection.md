@@ -450,7 +450,7 @@ git commit -m "feat(data): a projection naming a hidden field is refused like an
 - Produces:
   - `ReadProjection.Compose(EntitySchema entity, IReadOnlySet<string> hiddenFields, IReadOnlySet<string> unselectedFields, IAlvoSqlDialect dialect, IEntityType rows)` — the third parameter is **required**.
   - `ReadStatementComposer.ReadStatementOptions.Unselected` of type `IReadOnlySet<string>`, defaulting to `FrozenSet<string>.Empty`.
-  - `RecordMaterializer.ToRecord(IDictionary<string, object> row, IReadOnlySet<string> hiddenFields, IReadOnlySet<string>? unselectedFields = null)` — the third parameter is **optional**, `null` meaning nothing was unselected.
+  - `RecordMaterializer.ToRecord(IDictionary<string, object> row, IReadOnlySet<string> hiddenFields, IReadOnlySet<string> unselectedFields)` — the third parameter is **required**, and all seven call sites are edited. Six pass `FrozenSet<string>.Empty`; only the page path passes a real set. Required rather than defaulted so the author who later adds `select` to `GET /{entity}/{id}` is made to look at `GetAsync`'s call site — see the design's section 1.6.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -553,6 +553,11 @@ Replace the body of `ReadProjection.cs` below the type summary. Add to that summ
         IAlvoSqlDialect dialect,
         IEntityType rows)
     {
+        // The mask is tested FIRST, and that order is load-bearing rather than stylistic. The two sets
+        // overlap on every projected read of a masked entity — a hidden field is never selected, never a
+        // sort key and never framework-managed, so it is always unselected too — and testing `unselected`
+        // first would answer a masked field's unresolvable store type with InvalidOperationException,
+        // undoing the split below in the one direction that matters.
         if (hiddenFields.Contains(field.Name))
         {
             return NullProjection(field.Name, dialect, rows, masked: true);
@@ -608,7 +613,9 @@ In `ReadStatementComposer.ReadStatementOptions`, after `Unmasked`:
         internal IReadOnlySet<string> Unselected { get; init; } = FrozenSet<string>.Empty;
 ```
 
-Add `using System.Collections.Frozen;` to the file. In `Compose`, pass it through:
+Add `using System.Collections.Frozen;` to the file — it is **not** currently imported there, nor in
+`EfAlvoData.cs`, which needs it too for `FrozenSet<string>.Empty` and `ToFrozenSet`. In `Compose`,
+pass it through:
 
 ```csharp
             .Append(ReadProjection.Compose(entity, Mask(decision, options), options.Unselected, _dialect, rows))
@@ -679,25 +686,25 @@ In `RecordMaterializer.cs`:
     /// <param name="row">The property-bag row the engine returned.</param>
     /// <param name="hiddenFields">The resolved field mask.</param>
     /// <param name="unselectedFields">
-    /// The fields the caller's projection excluded, or <see langword="null"/> when it excluded none.
-    /// <b>Optional where <see cref="ReadProjection.Compose"/>'s equivalent is required</b>, and the asymmetry
-    /// is deliberate: this method has seven callers, six of them writes where "unselected" has no meaning, and
-    /// <see langword="null"/> there says exactly that. The default can only ever return a value the caller was
-    /// already entitled to see, so it fails in the safe direction — which is not true of the mask, and is why
-    /// that one stays required.
+    /// The fields the caller's projection excluded; empty when it excluded none. <b>Required rather than
+    /// defaulted</b>, though six of the seven call sites pass an empty set: a default would mean the author
+    /// who adds <c>select</c> to a single-row read is never made to look at <c>GetAsync</c>'s call site, and
+    /// a projection that narrowed that statement while its materialization kept every key is the advisory
+    /// member this whole change exists to avoid, one layer down.
     /// </param>
     internal static AlvoRecord ToRecord(
         IDictionary<string, object> row,
         IReadOnlySet<string> hiddenFields,
-        IReadOnlySet<string>? unselectedFields = null)
+        IReadOnlySet<string> unselectedFields)
     {
         ArgumentNullException.ThrowIfNull(row);
         ArgumentNullException.ThrowIfNull(hiddenFields);
+        ArgumentNullException.ThrowIfNull(unselectedFields);
 
         var values = new Dictionary<string, object?>(StringComparer.Ordinal);
         foreach (var (field, value) in row)
         {
-            if (!hiddenFields.Contains(field) && unselectedFields?.Contains(field) is not true)
+            if (!hiddenFields.Contains(field) && !unselectedFields.Contains(field))
             {
                 values[field] = value;
             }
@@ -706,6 +713,10 @@ In `RecordMaterializer.cs`:
         return new AlvoRecord(values);
     }
 ```
+
+The other six sites (`EfAlvoData.cs:219, 260, 536, 605, 821, 1377`) each take
+`FrozenSet<string>.Empty`. `:219` is `GetAsync` — a read, not a write — and is the one that will
+change when `select` reaches a single-row read.
 
 In `EfAlvoData.QueryAsync`, pass it at the page's materialization only:
 
@@ -762,20 +773,60 @@ Expected: PASS — Task 3 already did this half.
 
 - [ ] **Step 3: Honour the projection in the reference**
 
-In `InMemoryAlvoData.QueryAsync`, the page is masked at `Items = [.. page.Select(row => Mask(row, decision.HiddenFields))]`. The reference has no `SELECT` list, so for it the projection *is* the mask, applied over the union — but computed by the same survivor rule as the driver, or the differential suite diverges:
+In `InMemoryAlvoData.QueryAsync`, the page is masked at `Items = [.. page.Select(row => Mask(row, decision.HiddenFields))]`. The reference has no `SELECT` list, so for it the projection *is* the mask, applied over the union — but computed by the same survivor rule as the driver, or the differential suite diverges.
+
+**Three things here are not obvious, and each one is a way to get this silently wrong:**
+
+**(a) There is no `EntitySchema` in scope.** `QueryAsync` never resolves one —
+`EnsureQueryFieldsAvailable` looks the fields up internally. Add a local through the file's own
+lookup (`private EntitySchema? FindEntity(string entity)`), which is **nullable**:
 
 ```csharp
-            Items = [.. page.Select(row => Mask(row, decision.HiddenFields, Unselected(query, schema)))],
+        var schema = FindEntity(query.Entity);
+        var unselected = Unselected(query, schema);
 ```
 
-Hoist `Unselected(query, schema)` to a local before the `AlvoPage` is built rather than recomputing it per row. Add the same `Unselected` helper the EF driver has — same survivor set, same authority call, same sort-key exemption — and widen `Mask`:
+A null schema returns `FrozenSet<string>.Empty` from `Unselected` — the fail-safe reading, and safe
+because the field guard has already refused every named field by the time this runs. Unlike the EF
+driver there is no `UnknownEntityMessage` precedent to follow here: `DeclaredFields` fails closed
+with an empty set rather than throwing, and this follows that.
+
+**(b) `Mask` has an early return that makes the projection a no-op.** As written it is:
+
+```csharp
+    private static AlvoRecord Mask(AlvoRecord record, IReadOnlySet<string> hiddenFields)
+    {
+        if (hiddenFields.Count == 0)
+        {
+            return record;
+        }
+```
+
+Widening the signature is not enough — on an entity with no `hidden` rule, which is most of them
+and is exactly the projection fixture's shape, the record would come back whole and the differential
+suite would go red against a driver that got it right. The guard must consider both sets:
 
 ```csharp
     private static AlvoRecord Mask(
-        AlvoRecord record, IReadOnlySet<string> hiddenFields, IReadOnlySet<string>? unselectedFields = null)
+        AlvoRecord record, IReadOnlySet<string> hiddenFields, IReadOnlySet<string> unselectedFields)
+    {
+        if (hiddenFields.Count == 0 && unselectedFields.Count == 0)
+        {
+            return record;
+        }
 ```
 
-with the same `hiddenFields.Contains(pair.Key) || unselectedFields?.Contains(pair.Key) is true` exclusion.
+and the per-key exclusion becomes `hiddenFields.Contains(pair.Key) || unselectedFields.Contains(pair.Key)`.
+`Mask`'s other call sites pass `FrozenSet<string>.Empty`, for the same reason the EF driver's do.
+
+**(c) Hoist `unselected` out of the row loop.** `Unselected(query, schema)` allocates a set; computing
+it per row would do that once per returned row.
+
+Add the same `Unselected` helper the EF driver has — same survivor set, same
+`AlvoManagedColumns.For` call, same sort-key exemption. The sort-key exemption has no SQL reason
+here (there is no `ORDER BY` to shadow) and is kept anyway: the reference's job is to answer what
+the drivers answer, and one that returned *fewer* keys would make the differential suite red for the
+right reason and the wrong implementation.
 
 **Note for the implementer:** the sort-key exemption has no SQL reason here — there is no `ORDER BY` to shadow. It is kept anyway, because the reference's job is to answer what the drivers answer; a reference that returned *fewer* keys than a driver would make the differential suite red for the right reason and the wrong implementation.
 
@@ -868,7 +919,7 @@ Add to `AlvoDataProjectionTests`. Each is a paired read — once projected, once
     public async Task A_filter_over_an_unselected_field_matches_the_same_rows_as_without_the_projection()
     {
         var world = await SeededWorldAsync(rowCount: 5);
-        var filter = new AlvoComparison("label", AlvoFilterOperator.Equal, "label-0003");
+        var filter = new AlvoComparison("label", AlvoFilterOperator.Eq, "label-0003");
 
         var unprojected = await world.Data.QueryAsync(
             new AlvoQuery { Entity = "notes", Filter = filter }, world.Alice);
@@ -942,7 +993,24 @@ Add to `AlvoDataProjectionTests`. Each is a paired read — once projected, once
 Two more world builders are needed, both on the `SeededWorldAsync` pattern above:
 
 - **`ScopedWorldAsync()`** — the same `notes` entity, but `Rules = new AccessRules { List = "!has(label)", Get = "true" }`, and seeded so some rows have a null `label` and some do not. The point of the rule is that its truth depends on a field the projection excludes.
-- **`EveryFieldTypeWorldAsync()`** — built over `AlvoDataFixtures.Vehicle`, the framework's canonical entity with one column of every mapped field type, seeded with one row. Use `AlvoDataFixtures.Caller`, which is the tenanted identity that entity's scoping expects. The descriptor half needs `Rules = new AccessRules { List = "true", Get = "true" }` and a `FieldDescriptor` per schema field; `AlvoDataAdversarialTests` builds a descriptor over this same entity — copy that shape rather than inventing one.
+- **`EveryFieldTypeWorldAsync()`** — built over `AlvoDataFixtures.Vehicle`, the framework's canonical
+  entity with one column of every mapped field type, seeded with one row, queried as
+  `AlvoDataFixtures.Caller` (the tenanted, `Admin`-holding identity its scoping expects).
+
+  **No descriptor over this entity exists to copy — this one is hand-written.** Every other consumer
+  of `AlvoDataFixtures.Vehicle` uses it as a bare `EntitySchema` (composer, renderer and guard unit
+  tests), and `AlvoDataAdversarialTests.BuildFixture` is both private and lossy: its `ToFieldSchema`
+  drops `MaxLength`, `Precision` and `Scale`, so it could not reproduce `plate` (MaxLength 32) or
+  `price` (Precision 18, Scale 2) — which are exactly the facets this test exists to push a typed
+  `NULL` cast through. So: write the `AlvoDescriptor` half by hand and pair it with
+  `new SchemaModel([AlvoDataFixtures.Vehicle])` directly.
+
+  Facts that decide the assertions: the entity is named `vehicle` (singular), is
+  `TenancyMode.Scoped`, and declares neither `Audit` nor `SoftDelete` — so
+  `AlvoManagedColumns.For(Vehicle)` is `{ id, tenant_id }` and `created_at` is an **ordinary**
+  nullable field here, not a managed one. Its fields are `id, tenant_id, owner_id, plate, status,
+  secret_note, mileage, price, is_public, due_on, created_at`. The descriptor's own field dictionary
+  must **exclude** `id` and `tenant_id`, which the framework injects.
 
 - [ ] **Step 2: Run them on SQLite and the reference**
 
@@ -978,9 +1046,29 @@ git commit -m "test(data): the projection agrees across both engines and the ref
 - Consumes: Tasks 1–4.
 - Produces: nothing new. Both existing subclasses (`SqliteAlvoDataStatementTests`, ring0; `PostgreSqlAlvoDataStatementTests`, ring2) inherit the new facts automatically.
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Extend the statement fixture, then write the failing tests**
 
-Add to `AlvoDataStatementTests`, following the `ShouldContain` style already in that file — it asserts over captured statements, not through Verify, so **no snapshot moves here**:
+**The fixture cannot carry these facts as it stands.** `AlvoDataStatementTests`' `notes` entity
+declares only `id`, `owner_id`, `tenant_id` and `title` — so `title` is the field to leave
+unselected, and there is **no second field to sort by**. Add one nullable `label` field to that
+suite's `Fixture(...)`, in the descriptor and the schema both. It is a shared fixture read by every
+statement fact in the file, so this is a deliberate change: adding a nullable field changes no
+existing statement's `WHERE` or `ORDER BY`, but check the file's other facts still pass before
+moving on.
+
+Then add the facts, following the `ShouldContain` style already in that file — it asserts over
+captured statements through `IStatementProbe` (`Data`, `Statements`, `ClearStatements()`) plus the
+file's own `WhereClauseOf(statement)` and `Token` helpers, **not** through Verify, so **no snapshot
+moves here**. The shape to copy, verbatim from the file:
+
+```csharp
+        var world = await OwnedNotesAsync();
+        world.Probe.ClearStatements();
+
+        await world.Probe.Data.QueryAsync(new AlvoQuery { Entity = Entity }, world.Alice, Token);
+
+        var statement = world.Probe.Statements.ShouldHaveSingleItem();
+```
 
 ```csharp
     /// <summary>
@@ -991,21 +1079,22 @@ Add to `AlvoDataStatementTests`, following the `ShouldContain` style already in 
     [Fact]
     public async Task An_unselected_column_does_not_appear_in_the_emitted_statement()
     {
-        // Read with Select = ["name"]. Assert the captured statement contains 'AS "notes"' and does not
-        // reference "notes" as a fetched column.
+        // Read with Select = ["label"]. Assert the captured statement contains 'AS "title"' and does not
+        // fetch "title" as a plain column. ("notes" is the entity name here, not a field.)
     }
 
     [Fact]
     public async Task The_row_key_appears_in_the_statement_whatever_the_projection_named()
     {
-        // Select = ["name"]. Assert the statement fetches "id" — the cursor is minted from it.
+        // Select = ["title"]. Assert the statement fetches "id" — the cursor is minted from it.
     }
 
     [Fact]
     public async Task An_unselected_sort_key_appears_in_the_statement_rather_than_as_a_projected_null()
     {
-        // Select = ["id"], Sort over "label". Assert the statement fetches "label" and does NOT contain
-        // 'NULL AS "label"'. The ORDER BY would otherwise resolve to the projected NULL on both engines.
+        // Select = ["id"], Sort over the new nullable "label". Assert the statement fetches "label" and
+        // does NOT contain 'NULL AS "label"'. The ORDER BY would otherwise resolve to the projected NULL
+        // on both engines.
     }
 
     [Fact]
@@ -1185,15 +1274,8 @@ Change `ParsedListQuery`'s second parameter to `IReadOnlyList<ProjectedField>? S
                 return;
             }
 
-            var entries = value.Split(',');
-            if (entries.Length > entity.Fields.Count)
-            {
-                Add(QueryViolations.ProjectionTooWide(entity.Fields.Count));
-                return;
-            }
-
             var projected = new List<ProjectedField>();
-            foreach (var entry in entries)
+            foreach (var entry in value.Split(','))
             {
                 if (!TryAddProjectedField(entry, projected))
                 {
@@ -1260,44 +1342,58 @@ Change `ParsedListQuery`'s second parameter to `IReadOnlyList<ProjectedField>? S
             && char.IsAsciiLetterLower(alias[0])
             && alias.All(character =>
                 char.IsAsciiLetterLower(character) || char.IsAsciiDigit(character) || character == '_')
-            && !ReservedQueryKeys.Contains(alias);
+            && !ReservedQueryKeys.IsReserved(alias);
 
         /// <summary>
         /// Claims one response key. A repeated identical entry dedupes; a second <em>source</em> for a key
-        /// already taken is refused, because there is no correct answer to give.
+        /// already taken is refused, because there is no correct answer to give; and a key beyond the
+        /// entity's field count is refused as the projection's width bound.
         /// </summary>
+        /// <remarks>
+        /// <b>The bound is charged here, on each newly claimed key, and that is the whole of whether it
+        /// works.</b> <c>ChargeTheConjunction</c>'s remark records the measured incident from the filter
+        /// side — "a budget spent after the tree is assembled does not bound the tree" — so a cap tested
+        /// after the parse loop would leave the entire amplification payable before the 422. Charging on the
+        /// <em>distinct</em> key rather than the raw entry count is what keeps a repeat deduping: a repeat
+        /// claims nothing and so costs nothing, and <c>?select=id,id,id,id,id,id</c> on a five-field entity
+        /// is still one key.
+        /// </remarks>
         private bool TryClaimKey(string key, string source, List<ProjectedField> projected)
         {
             var claimed = projected.FirstOrDefault(field => string.Equals(field.Key, key, StringComparison.Ordinal));
-            if (claimed is null)
+            if (claimed is not null)
             {
-                projected.Add(new ProjectedField(key, source));
-                return true;
+                if (string.Equals(claimed.Source, source, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+
+                Add(QueryViolations.CollidingProjectionKey());
+                return false;
             }
 
-            if (string.Equals(claimed.Source, source, StringComparison.Ordinal))
+            if (projected.Count == entity.Fields.Count)
             {
-                return true;
+                Add(QueryViolations.ProjectionTooWide(entity.Fields.Count));
+                return false;
             }
 
-            Add(QueryViolations.CollidingProjectionKey());
-            return false;
+            projected.Add(new ProjectedField(key, source));
+            return true;
         }
 ```
 
 **A managed-column collision needs one more thing:** `select=id:name` must be refused even though `id` was never claimed by an entry, because `id` survives every projection (Task 3). Seed the claim list with the framework-managed columns that will survive, or check `AlvoManagedColumns.For(entity).Contains(key)` in `TryClaimKey` before the lookup. Prefer the explicit check — a seeded claim would also refuse the legitimate `select=id`.
 
-- [ ] **Step 5: Add `ReservedQueryKeys.Contains`**
+- [ ] **Step 5: Use the membership test that already exists**
 
-`ReservedQueryKeys` already holds the eight names and an `AsList`. If it has no membership test, add one beside them:
+No new member is needed. `ReservedQueryKeys` already has
+`internal static bool IsReserved(string key) => _reserved.Contains(key);` over a frozen set of all
+eight names, and `EnsureNoneIsShadowed` reads the same set. `IsAliasShaped` calls it:
 
 ```csharp
-    /// <summary>Whether <paramref name="name"/> is one of the reserved keys.</summary>
-    /// <param name="name">The name to test.</param>
-    internal static bool Contains(string name) => _all.Contains(name);
+            && !ReservedQueryKeys.IsReserved(alias);
 ```
-
-reusing whichever frozen set `AsList` and `EnsureNoneIsShadowed` already read from rather than declaring a ninth copy of the list.
 
 - [ ] **Step 6: Carry the sources into `AlvoQuery`**
 
@@ -1322,7 +1418,35 @@ In `TryBuild`:
 
 `QueryStringParserPropertyTests.cs` already generates query strings with CsCheck. Add the alias form to whatever generator produces `select` values, and assert the standing invariant that class already asserts — a parse either succeeds or reports at least one violation, and never throws.
 
-- [ ] **Step 8: Run and commit**
+- [ ] **Step 8: Update the existing projection test that the type change breaks**
+
+`QueryStringParserTests` already has one, and it is not in the file list above because it does not
+need new behaviour — only the new type:
+
+```csharp
+    [Fact]
+    public void A_projection_keeps_the_order_the_request_named_and_drops_a_duplicate()
+    {
+        TryParse("select=year,make,year", out var parsed, out var violations).ShouldBeTrue(Because(violations));
+
+        parsed!.Select.ShouldBe(["year", "make"]);   // now a list of ProjectedField
+    }
+```
+
+Assert over `parsed!.Select.Select(field => field.Key)` and add a second assertion over `.Source`, so
+the test now says the two lists are what they should be rather than only one of them.
+
+**Fixture facts for every test in this task**, so the cases are written against what exists: the
+parser suite's `_vehicles` entity declares **eleven** fields — `id, make, year, color, notes, price,
+passed, inspected_on, serviced_at, owner_id, secret` — and `_masked` is `{ "secret" }`. So:
+`select=label:make` is the alias case; `select=nosuchfield` and `select=label:secret` are the two
+refusals that must read identically; `select=id:make` trips the managed-column collision, because
+`id` is declared *and* in `AlvoManagedColumns.For(_vehicles)`; and `projection-too-wide` needs
+**twelve** distinct keys, e.g. twelve aliases over `make`. The parser is reached through the file's
+own `TryParse(queryString, out parsed, out violations)` wrapper and `OnlyViolation(queryString)`;
+new codes go in as `[InlineData]` rows on `A_refused_query_string_carries_the_code_that_names_the_mistake`.
+
+- [ ] **Step 9: Run and commit**
 
 Run: `dotnet test test/MMLib.Alvo.Api.Tests`
 Expected: PASS. `DataApiPage.From` will not compile against the new `ParsedListQuery` — that is Task 8; if the build blocks here, do Task 8's Step 3 first and commit the two together.
@@ -1348,7 +1472,12 @@ git commit -m "feat(api): projection aliases, select=label:name, with the bound 
 
 - [ ] **Step 1: Write the failing tests**
 
-In `test/_shared/api/DataApiEngineTests.cs`, at the wire level:
+In `test/_shared/api/DataApiEngineTests.cs`, at the wire level. The idiom is
+`world.SendAsync(HttpMethod.Get, "/api/vehicles?…", _admin)` then `await response.ReadItemsAsync()`
+(an `IReadOnlyList<JsonObject>`) — so a key-set assertion is `items[0].Count` and
+`items[0].ContainsKey("label")`. `SeedVehiclesAsync(world)` seeds `vin, plate, make, model, year,
+owner_id` from `examples/vehicle-registry/vehicles.alvo.json`, which is where these field names come
+from:
 
 ```csharp
     [Fact]
