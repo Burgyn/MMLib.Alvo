@@ -54,15 +54,25 @@ await tp.Test("The tenant boundary holds on this route: a row named by another t
     Equal(new[] { "WO-1001" }, ownTenant);
 });
 
-await tp.Test("A masked field and an undeclared one are one refusal on this surface, byte for byte.", async () =>
+await tp.Test("A masked field and an undeclared one are one refusal on this surface, member for member.", async () =>
 {
-    var masked = await tp.Responses["BodyMaskedField"].Content.ReadAsStringAsync();
-    var undeclared = await tp.Responses["BodyUndeclaredField"].Content.ReadAsStringAsync();
+    // Everything EXCEPT `traceId`, which the standalone host's own problem-details enrichment stamps
+    // per request — so two responses can never be byte-identical over this surface, and a comparison
+    // that demanded it would be red for a reason that has nothing to do with the claim. The claim is
+    // that nothing a caller could branch on distinguishes the two.
+    string Refusal(string request) => string.Concat(
+        JsonDocument.Parse(tp.Responses[request].Content.ReadAsStringAsync().Result).RootElement
+            .EnumerateObject()
+            .Where(member => member.Name != "traceId")
+            .OrderBy(member => member.Name, StringComparer.Ordinal)
+            .Select(member => member.Name + "=" + member.Value.GetRawText()));
 
-    Equal(undeclared, masked);
+    Equal(Refusal("BodyUndeclaredField"), Refusal("BodyMaskedField"));
 
     // And neither names what was asked about — the whole response, not just the pointer, because a
     // name reaching `detail` or a fix suggestion would be the same leak by another route.
+    var masked = await tp.Responses["BodyMaskedField"].Content.ReadAsStringAsync();
+    var undeclared = await tp.Responses["BodyUndeclaredField"].Content.ReadAsStringAsync();
     DoesNotContain("internal_notes", masked);
     DoesNotContain("no_such_field_at_all", undeclared);
 });
