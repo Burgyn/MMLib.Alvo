@@ -16,8 +16,9 @@ namespace MMLib.Alvo.Api.Internal;
 /// client-observable and unguessable, and every one of them was deferred to this task with a note saying so:
 /// <c>If-Match</c> is ignored on a read and neither precondition header is honoured on a list
 /// (<see cref="DataApiEndpoints"/>' <c>Representation</c>); a create carrying either one is refused with 412
-/// (<c>EnsureUnconditional</c>); <c>Idempotency-Key</c> is honoured on a create and ignored on an update and
-/// a delete (<c>IdempotencyKeyHeader</c>); and where a <see langword="null"/> sorts on a nullable sort key,
+/// (<c>EnsureUnconditional</c>); <c>Idempotency-Key</c> is honoured on every write and accepted-and-ignored
+/// on the body-shaped read (<c>IdempotencyKeyHeader</c>); and where a <see langword="null"/> sorts on a
+/// nullable sort key,
 /// which is a choice the caller makes and the server never guesses (<c>SortSqlRenderer</c>,
 /// <c>KeysetSqlRenderer</c>). An integrator reads none of those files. §0 principle 4 makes the published document the contract an agent reads, so this is where
 /// they belong.
@@ -265,9 +266,10 @@ internal static class DataApiDocumentation
         StatusCodes.Status409Conflict,
         ResponseBody.Problem,
         "The request conflicts with what is already stored. Two kinds, told apart by the problem 'type': "
-        + "'idempotency-conflict' means the 'Idempotency-Key' was already used by this caller for a request "
-        + "with a different body (retry with the same key and the same body to replay the first result, or "
-        + "send a fresh key); 'conflict' means a constraint the database enforces refused the write — a value "
+        + "'idempotency-conflict' means the 'Idempotency-Key' was already used by this caller for a different "
+        + "request — a different body, but also a different row or a different 'If-Match', because the key "
+        + "covers the whole request (retry the identical request to replay its result, or send a fresh key); "
+        + "'conflict' means a constraint the database enforces refused the write — a value "
         + "another record already holds on a field declared unique, or a delete another record still "
         + "references through a 'ref' declaring onDelete: restrict. The 'violations' array names the field "
         + "for the first of those and carries a fix suggestion for both.",
@@ -493,14 +495,14 @@ internal static class DataApiDocumentation
         + "entity does not declare. `id` and the framework-managed columns can never be rewritten, `tenant_id` "
         + "included: a row does not move between tenants.\n\n"
         + UpdateConditioning(entity)
-        + "**`Idempotency-Key` is accepted and ignored here — a known limitation, and this is what it costs.** "
-        + "The row's end state is unaffected: an update assigns *absolute* values to named fields, so applying "
-        + "it twice leaves exactly the state applying it once leaves, and there is no duplicate row to prevent. "
-        + "The *outcome you observe* is another matter. "
+        + "**`Idempotency-Key` makes the retry answer the row.** The row's end state never needed it — an "
+        + "update assigns *absolute* values to named fields, so applying it twice leaves what applying it once "
+        + "leaves — but the *outcome you observe* did. "
         + UpdateRetry(entity)
-        + " Refusing the header instead would break the widespread client habit of attaching it to every "
-        + "mutating request and would reject requests that are otherwise fine, so it is accepted — and declared "
-        + "here rather than left to be discovered.";
+        + " The key covers the whole request: the method, the entity, **the row it addresses** and the "
+        + "`If-Match` it carries, as well as the body. So the same key against another row, or against this "
+        + "row with a different `If-Match`, is 409 rather than a replay of the first — a key is a claim about "
+        + "one request, not a licence for the next one.";
 
     /// <summary>
     /// The delete's prose, conditional on the same trait <see cref="Update"/> is and for the same reason.
@@ -510,14 +512,14 @@ internal static class DataApiDocumentation
         "Deletes one row and returns no body. A row the caller's policy excludes is 404, exactly as an absent "
         + "one is.\n\n"
         + DeleteConditioning(entity)
-        + "**`Idempotency-Key` is accepted and ignored here — the same known limitation as on the update.** "
-        + "Removing one row twice leaves the same state as removing it once, so nothing is duplicated; but a "
-        + "retry after a lost `204` is a "
+        + "**`Idempotency-Key` makes the retry answer `204`.** Removing one row twice always left the same "
+        + "state, so nothing was ever duplicated; what a retry after a lost `204` could not tell you is "
+        + "whether the row was yours to have removed. Without a key that retry is a "
         + (AlvoManagedColumns.VersionColumn(entity) is null
-            ? "**404 you cannot tell apart from somebody else's delete**, "
-            : "**404 (or a 412) you cannot tell apart from somebody else's delete**, ")
-        + "which is precisely the question a key would have answered. Read the row back rather than treating the "
-        + "second answer as evidence the first attempt did not land.";
+            ? "**404 you cannot tell apart from somebody else's delete**"
+            : "**404 (or a 412) you cannot tell apart from somebody else's delete**")
+        + "; with one it is `204`, because the key records that this caller already performed exactly this "
+        + "delete. The key covers the row and the `If-Match` too, so reusing it against another row is 409.";
 
     /// <summary>
     /// How an update of this entity can be conditioned — or that it cannot be.
@@ -601,20 +603,17 @@ internal static class DataApiDocumentation
     /// <param name="entity">The entity, consulted for whether a row of it can be versioned.</param>
     private static string UpdateRetry(EntitySchema entity) =>
         AlvoManagedColumns.VersionColumn(entity) is null
-            ? "If the 200 is lost to a dropped connection and you retry the identical request, the retry "
-            + "assigns the same absolute values again and is answered 200 — so unlike an audited entity, there "
-            + "is no 412 to misread. What you cannot learn is whether anybody changed the row between your two "
-            + "attempts: this entity keeps no version, so the retry overwrites a concurrent change exactly as "
-            + "the first attempt would have, and silently. **Read the row back and compare it with what you "
-            + "sent** before treating the write as settled. That is the whole of retry safety on this verb "
-            + "here; `audit: true` on the entity is what buys the rest."
-            : "If you send `PATCH … If-Match: \"v1\"`, the 200 is lost to a dropped connection, and you retry "
-            + "the identical request, the write has landed and the row is at `v2` — so the retry is **412, and "
-            + "you cannot tell it apart from someone else having changed the row**. Resolving that 412 the "
-            + "usual way (re-read, re-merge, re-apply) would clobber a genuinely concurrent change if it *was* "
-            + "someone else. A key would have told you it was your own write. So retry safety on this verb is "
-            + "`If-Match` plus a re-read, not a key: after a lost response, **read the row back and compare it "
-            + "with what you sent** before deciding the write did not land.";
+            ? "Send a key and a retry of the identical request is answered with the row this caller already "
+            + "wrote, rather than performed a second time. Without one the retry still assigns the same "
+            + "absolute values and is answered 200, but this entity keeps no version, so it overwrites a "
+            + "concurrent change exactly as the first attempt would have — and silently. **Read the row back "
+            + "and compare it with what you sent** before treating an unkeyed write as settled."
+            : "Send `PATCH … If-Match: \"v1\"` with a key, lose the 200 to a dropped connection, and retry "
+            + "the identical request: the row is at `v2`, but the key records that `v2` is *your* write, so "
+            + "the retry is answered 200 with the row. Without a key the same retry is **412, and you cannot "
+            + "tell it apart from someone else having changed the row** — and resolving that 412 the usual way "
+            + "(re-read, re-merge, re-apply) would clobber a genuinely concurrent change if it *was* someone "
+            + "else.";
 
     /// <summary>The document-level prose: what this API is, and the invariants that hold on every route.</summary>
     /// <remarks>

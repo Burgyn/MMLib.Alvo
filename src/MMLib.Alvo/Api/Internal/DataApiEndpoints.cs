@@ -79,7 +79,7 @@ internal static class DataApiEndpoints
         MapGet(endpoints, entity, item, filters, conventions);
         MapCreate(endpoints, entity, collection, options, filters, formats, conventions);
         MapUpdate(endpoints, entity, item, options, filters, formats, conventions);
-        MapDelete(endpoints, entity, item, filters, conventions);
+        MapDelete(endpoints, entity, item, options, filters, conventions);
     }
 
     private static void MapList(
@@ -311,7 +311,8 @@ internal static class DataApiEndpoints
                         return ProblemResultFactory.Validation(violations);
                     }
 
-                    var token = Idempotency(key, http.Request.Method, entity, body.Document);
+                    var token = Idempotency(
+                        key, http.Request.Method, entity, id: null, precondition: null, body.Document);
                     var record = await data.CreateAsync(entity.Name, body.Values, context, token, ct)
                         .ConfigureAwait(false);
                     return Created(pattern, record, entity);
@@ -339,6 +340,7 @@ internal static class DataApiEndpoints
                     var decision = EnsureOperationIsAllowed(
                         policies, entity.Name, DataApiEndpointKind.Update.ToDataOperation(), context);
                     var precondition = Precondition(http.Request);
+                    var key = IdempotencyKey(http.Request, context, options);
 
                     var (body, violations) = await ReadAndValidateAsync(
                         http, entity, options, decision, isCreate: false, formats, data, context, ct)
@@ -348,8 +350,10 @@ internal static class DataApiEndpoints
                         return ProblemResultFactory.Validation(violations);
                     }
 
+                    var token = Idempotency(
+                        key, http.Request.Method, entity, id, precondition, body.Document);
                     var record = await data
-                        .UpdateAsync(entity.Name, id, body.Values, context, precondition, cancellationToken: ct)
+                        .UpdateAsync(entity.Name, id, body.Values, context, precondition, token, ct)
                         .ConfigureAwait(false);
                     return Row(record, entity);
                 }))
@@ -359,6 +363,7 @@ internal static class DataApiEndpoints
         IEndpointRouteBuilder endpoints,
         EntitySchema entity,
         string pattern,
+        AlvoApiOptions options,
         AlvoContextFilterFactory filters,
         AlvoDataApiConventions conventions) =>
         endpoints.MapDelete(pattern, (
@@ -375,7 +380,11 @@ internal static class DataApiEndpoints
                         policies, entity.Name, DataApiEndpointKind.Delete.ToDataOperation(), context);
 
                     var precondition = Precondition(http.Request);
-                    await data.DeleteAsync(entity.Name, id, context, precondition, cancellationToken: ct)
+                    var key = IdempotencyKey(http.Request, context, options);
+
+                    var token = Idempotency(
+                        key, http.Request.Method, entity, id, precondition, document: null);
+                    await data.DeleteAsync(entity.Name, id, context, precondition, token, ct)
                         .ConfigureAwait(false);
                     return Results.NoContent();
                 }))
@@ -921,34 +930,64 @@ internal static class DataApiEndpoints
     }
 
     /// <summary>
-    /// The token the create is performed under: the caller's key plus the fingerprint of the request it
+    /// The token this write is performed under: the caller's key plus the fingerprint of the request it
     /// belongs to.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Built <b>after</b> validation, because the fingerprint covers the body and a body that was refused
     /// never reaches the port at all — so a fingerprint over it would digest a request that was never
     /// performed and reserve the key against it.
+    /// </para>
+    /// <para>
+    /// <b>A create's <paramref name="document"/> is non-null by construction and a delete's is null by
+    /// contract</b>, so the invariant this used to assert — "a write reached the port with no parsed body" —
+    /// now holds only for a create, and is asserted only there.
+    /// </para>
     /// </remarks>
     /// <param name="key">The caller's key, or <see langword="null"/> when they sent none.</param>
     /// <param name="method">The request method, for the digest.</param>
     /// <param name="entity">The entity being written.</param>
-    /// <param name="document">The body as it was parsed.</param>
+    /// <param name="id">The row the write addresses, or <see langword="null"/> for a create.</param>
+    /// <param name="precondition">The version the write is conditional on, or <see langword="null"/>.</param>
+    /// <param name="document">The body as it was parsed, or <see langword="null"/> for a delete.</param>
     private static AlvoIdempotency? Idempotency(
-        string? key, string method, EntitySchema entity, JsonObject? document)
+        string? key,
+        string method,
+        EntitySchema entity,
+        Guid? id,
+        AlvoPrecondition? precondition,
+        JsonObject? document)
     {
         if (key is null)
         {
             return null;
         }
 
-        // A create with no violations bound as an object by construction, so this is an invariant of this
-        // file rather than a caller error (family 5, rendered 500) — the same reasoning as AssignedId.
-        var body = document ?? throw new InvalidOperationException(
-            "A create reached the port with no parsed body. JsonPayloadReader reports a body that is not an "
-            + "object as a violation, and a violation is answered before this point.");
+        EnsureACreateParsedItsBody(id, document);
 
         return new AlvoIdempotency(
-            key, IdempotencyFingerprint.Of(method, entity.Name, id: null, precondition: null, body));
+            key, IdempotencyFingerprint.Of(method, entity.Name, id, precondition, document));
+    }
+
+    /// <summary>
+    /// Asserts the invariant that a create with no violations bound as an object — family 5, rendered 500,
+    /// the same reasoning as <see cref="AssignedId"/>.
+    /// </summary>
+    /// <remarks>
+    /// Scoped to a create, because it is only a create's invariant: a delete legitimately carries no body,
+    /// and an update's is reported through the same violation path a create's is.
+    /// </remarks>
+    /// <param name="id">The row the write addresses, or <see langword="null"/> for a create.</param>
+    /// <param name="document">The body as it was parsed.</param>
+    private static void EnsureACreateParsedItsBody(Guid? id, JsonObject? document)
+    {
+        if (id is null && document is null)
+        {
+            throw new InvalidOperationException(
+                "A create reached the port with no parsed body. JsonPayloadReader reports a body that is not "
+                + "an object as a violation, and a violation is answered before this point.");
+        }
     }
 
     /// <summary>The refusal for a request carrying the idempotency header more than once.</summary>
