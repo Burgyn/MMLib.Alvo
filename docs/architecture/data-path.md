@@ -436,6 +436,21 @@ seeding seam, and in `PredicateParameterBinder` for a caller's comparison operan
 sites; a second copy of this rule is how the two copies come to disagree, and a disagreement here is invisible
 until it costs a row.
 
+**A batch is one instant, and that is a decision rather than a consequence.** `WriteInstantNow()` is read
+once per batch and threaded into every row's audit stamp, every event's `time` and the idempotency record's
+`created_at` — so all N rows of a batch share one `updated_at` and therefore one `ETag`. Reading the clock
+per row would be defensible too, and it is the wrong answer here: the rows were written together, in one
+transaction that either committed or did not, so a caller who sorts a batch's rows by `updated_at` should see
+them tie rather than see an ordering the transaction never had.
+
+**A batch locks its rows in id order.** Each row's `WITH CHECK` verdict is reached over that row's *locked*
+pre-image, so all N pre-images are taken before any row is written. Two concurrent batches whose id sets
+overlap would take the same locks in whatever order their callers happened to write them — the textbook
+deadlock, and on PostgreSQL a real one rather than a slowdown. A fixed total order removes it for the cost of
+one sort, and any total order works as long as both batches use the same one. `BatchWrite.InLockOrder` is
+where that happens, and it carries the caller's request index alongside each row, because a caller's row 3
+must be reported as row 3.
+
 **What it fixes.** Unnormalised, the two engines did not merely order these differently — they disagreed on
 whether the value was legal at all:
 

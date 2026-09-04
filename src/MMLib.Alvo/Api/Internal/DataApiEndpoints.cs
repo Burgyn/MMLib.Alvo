@@ -73,14 +73,189 @@ internal static class DataApiEndpoints
         var collection = $"{prefix}/{entity.Name}";
         var item = $"{collection}/{{id:guid}}";
         var query = $"{collection}/query";
+        var batch = $"{collection}/batch";
 
         MapList(endpoints, entity, collection, options, filters, conventions);
         MapQuery(endpoints, entity, query, options, filters, conventions);
         MapGet(endpoints, entity, item, filters, conventions);
         MapCreate(endpoints, entity, collection, options, filters, formats, conventions);
         MapUpdate(endpoints, entity, item, options, filters, formats, conventions);
-        MapDelete(endpoints, entity, item, filters, conventions);
+        MapDelete(endpoints, entity, item, options, filters, conventions);
+        MapBatch(endpoints, entity, batch, options, filters, formats, conventions);
     }
+
+    /// <summary>The three batch routes: one path, three verbs, three endpoint kinds.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Three routes rather than one route with a mode in its body.</b> A mode would be gated once, as
+    /// whichever operation the route was declared to be, so a caller permitted to create could reach the
+    /// delete through it. Three verbs are gated as three operations by the filters that already gate their
+    /// single-row siblings — no new policy vocabulary, and nothing a descriptor opts into.
+    /// </para>
+    /// <para>
+    /// <b>The <c>DELETE</c> carries a body, which RFC 9110 §9.3.5 leaves undefined.</b> An intermediary may
+    /// strip it, so the empty-batch refusal is load-bearing rather than pedantry: it turns a stripped body
+    /// into a 422 instead of a silent success for a request that never arrived.
+    /// </para>
+    /// </remarks>
+    /// <param name="endpoints">The builder to map onto.</param>
+    /// <param name="entity">The entity these routes serve.</param>
+    /// <param name="pattern">The batch path.</param>
+    /// <param name="options">The API options the delegates read their bounds from.</param>
+    /// <param name="filters">Builds the authorization filter each endpoint carries.</param>
+    /// <param name="formats">The applied descriptor's compiled field formats.</param>
+    /// <param name="conventions">The conventions the host attached to <c>MapAlvoDataApi()</c>.</param>
+    private static void MapBatch(
+        IEndpointRouteBuilder endpoints,
+        EntitySchema entity,
+        string pattern,
+        AlvoApiOptions options,
+        AlvoContextFilterFactory filters,
+        FormatCatalog formats,
+        AlvoDataApiConventions conventions)
+    {
+        Map(endpoints.MapPost, DataApiEndpointKind.BatchCreate);
+        Map(endpoints.MapPatch, DataApiEndpointKind.BatchUpdate);
+        Map(endpoints.MapDelete, DataApiEndpointKind.BatchDelete);
+
+        void Map(
+            Func<string, Delegate, RouteHandlerBuilder> map, DataApiEndpointKind kind) =>
+            map(pattern, (
+                        HttpContext http,
+                        IAlvoData data,
+                        IPolicyEngine policies,
+                        IAlvoContextAccessor caller,
+                        CancellationToken ct) =>
+                    ProblemResultFactory.GuardAsync(() =>
+                        BatchAsync(http, entity, kind, options, formats, data, policies, caller, ct)))
+                .Protect(entity, kind, filters, conventions);
+    }
+
+    /// <summary>One batch request: the decision, the body, then the port.</summary>
+    /// <remarks>
+    /// <para>
+    /// The decision is resolved <b>before a byte of the body is read</b>, for the reason every other write
+    /// does it: a caller this entity does not admit must not be answered with advice about a field.
+    /// </para>
+    /// <para>
+    /// <b>The two refusal channels answer different statuses, and which one fired decides it.</b> The reader
+    /// refuses what the entity's declared shape refuses — a type, a length, a missing required field — and
+    /// that is a <c>422</c>, exactly as it is on the single-row routes. The <em>port</em> refuses what policy
+    /// refuses, and that is a <c>403</c>: a caller refused by <c>WITH CHECK</c> on one row gets a 403, and
+    /// getting a 422 for the same refusal on a batch would tell them to fix a shape that is not wrong.
+    /// </para>
+    /// </remarks>
+    /// <param name="http">The request.</param>
+    /// <param name="entity">The entity being written.</param>
+    /// <param name="kind">Which batch verb this is.</param>
+    /// <param name="options">The API options the bounds come from.</param>
+    /// <param name="formats">The applied descriptor's compiled field formats.</param>
+    /// <param name="data">The store.</param>
+    /// <param name="policies">The policy engine.</param>
+    /// <param name="caller">The caller accessor.</param>
+    /// <param name="ct">A token to cancel the operation.</param>
+    private static async Task<IResult> BatchAsync(
+        HttpContext http,
+        EntitySchema entity,
+        DataApiEndpointKind kind,
+        AlvoApiOptions options,
+        FormatCatalog formats,
+        IAlvoData data,
+        IPolicyEngine policies,
+        IAlvoContextAccessor caller,
+        CancellationToken ct)
+    {
+        var context = Caller(caller);
+        var decision = EnsureOperationIsAllowed(policies, entity.Name, kind.ToDataOperation(), context);
+        EnsureUnconditional(http.Request);
+        var key = IdempotencyKey(http.Request, context, options);
+
+        var batch = await BatchBodyReader
+            .ReadAsync(http.Request, entity, options, kind, decision, formats, data, context, ct)
+            .ConfigureAwait(false);
+        if (batch.Violations.Count > 0)
+        {
+            return ProblemResultFactory.Validation(batch.Violations);
+        }
+
+        var token = Idempotency(key, http.Request.Method, entity, id: null, precondition: null, BatchDigest(batch));
+        var result = await PerformAsync(data, entity, kind, batch, context, token, ct).ConfigureAwait(false);
+
+        return result.Succeeded
+            ? Rows(result)
+            : ProblemResultFactory.RowsForbidden([.. result.Refusals.Select(BatchViolations.FromPort)]);
+    }
+
+    /// <summary>The port call this batch verb makes.</summary>
+    /// <param name="data">The store.</param>
+    /// <param name="entity">The entity being written.</param>
+    /// <param name="kind">Which batch verb this is.</param>
+    /// <param name="batch">The bound rows.</param>
+    /// <param name="context">The caller performing the batch.</param>
+    /// <param name="token">The caller's idempotency token, or <see langword="null"/>.</param>
+    /// <param name="ct">A token to cancel the operation.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="kind"/> is not a batch kind.</exception>
+    private static Task<AlvoBatchResult> PerformAsync(
+        IAlvoData data,
+        EntitySchema entity,
+        DataApiEndpointKind kind,
+        BatchBodyReader.Batch batch,
+        AlvoContext context,
+        AlvoIdempotency? token,
+        CancellationToken ct) => kind switch
+        {
+            DataApiEndpointKind.BatchCreate =>
+                data.CreateManyAsync(entity.Name, [.. batch.Rows], context, token, ct),
+            DataApiEndpointKind.BatchUpdate => data.UpdateManyAsync(
+                entity.Name,
+                [.. batch.Ids.Select((id, index) => new AlvoRowPatch(id, batch.Rows[index]))],
+                context,
+                token,
+                ct),
+            DataApiEndpointKind.BatchDelete => data.DeleteManyAsync(entity.Name, batch.Ids, context, token, ct),
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(kind), kind, "Not a batch kind; name the port call it makes here."),
+        };
+
+    /// <summary>
+    /// The body the batch's fingerprint digests: the rows as they were sent, under the reserved member.
+    /// </summary>
+    /// <remarks>
+    /// <b>One key for the whole batch</b>, so the fingerprint has to cover every row — the same key with a
+    /// different list is a different request and must be a 409 rather than a replay. The ids of an update or
+    /// a delete are part of it for the same reason a single write's row id is.
+    /// </remarks>
+    /// <param name="batch">The bound rows.</param>
+    private static JsonObject BatchDigest(BatchBodyReader.Batch batch) => new()
+    {
+        [BatchMarker] = true,
+        [BatchViolations.RowsMember] = new JsonArray(
+            [.. batch.Ids.Select(id => (JsonNode)JsonValue.Create(id))]),
+        ["values"] = System.Text.Json.JsonSerializer.SerializeToNode(batch.Rows),
+    };
+
+    /// <summary>
+    /// The member that keeps a batch's digest out of a caller body's namespace.
+    /// </summary>
+    /// <remarks>
+    /// <b><see cref="IdempotencyFingerprint"/> claims no two different requests share a digest input, and
+    /// without this they could.</b> The route is deliberately out of the digest, and a create carries
+    /// neither a row id nor a precondition — so <c>POST {entity}</c> and <c>POST {entity}/batch</c> differ
+    /// only by body. An entity declaring <c>json</c> fields named <c>rows</c> and <c>values</c> could send a
+    /// single-row body whose canonical form equalled a batch's, and the single write's replay would then
+    /// answer from a batch record. A leading <c>$</c> cannot appear in a descriptor field name, so this
+    /// member cannot collide with one.
+    /// </remarks>
+    private const string BatchMarker = "$batch";
+
+    /// <summary>The batch's success body: the rows it wrote, under the same envelope key a page uses.</summary>
+    /// <remarks>
+    /// <c>200</c> with an <c>items</c> array on every verb, including the delete — which answers an empty
+    /// array rather than <c>204</c>, because it is reporting on many rows and a caller correlating them with
+    /// what they sent needs a body to read.
+    /// </remarks>
+    /// <param name="result">What the port produced.</param>
+    private static IResult Rows(AlvoBatchResult result) => Json(DataApiBatch.From(result));
 
     private static void MapList(
         IEndpointRouteBuilder endpoints,
@@ -311,7 +486,8 @@ internal static class DataApiEndpoints
                         return ProblemResultFactory.Validation(violations);
                     }
 
-                    var token = Idempotency(key, http.Request.Method, entity, body.Document);
+                    var token = Idempotency(
+                        key, http.Request.Method, entity, id: null, precondition: null, body.Document);
                     var record = await data.CreateAsync(entity.Name, body.Values, context, token, ct)
                         .ConfigureAwait(false);
                     return Created(pattern, record, entity);
@@ -339,6 +515,7 @@ internal static class DataApiEndpoints
                     var decision = EnsureOperationIsAllowed(
                         policies, entity.Name, DataApiEndpointKind.Update.ToDataOperation(), context);
                     var precondition = Precondition(http.Request);
+                    var key = IdempotencyKey(http.Request, context, options);
 
                     var (body, violations) = await ReadAndValidateAsync(
                         http, entity, options, decision, isCreate: false, formats, data, context, ct)
@@ -348,8 +525,11 @@ internal static class DataApiEndpoints
                         return ProblemResultFactory.Validation(violations);
                     }
 
+                    var token = Idempotency(
+                        key, http.Request.Method, entity, id, precondition, body.Document);
                     var record = await data
-                        .UpdateAsync(entity.Name, id, body.Values, context, precondition, ct).ConfigureAwait(false);
+                        .UpdateAsync(entity.Name, id, body.Values, context, precondition, token, ct)
+                        .ConfigureAwait(false);
                     return Row(record, entity);
                 }))
             .Protect(entity, DataApiEndpointKind.Update, filters, conventions);
@@ -358,6 +538,7 @@ internal static class DataApiEndpoints
         IEndpointRouteBuilder endpoints,
         EntitySchema entity,
         string pattern,
+        AlvoApiOptions options,
         AlvoContextFilterFactory filters,
         AlvoDataApiConventions conventions) =>
         endpoints.MapDelete(pattern, (
@@ -374,7 +555,12 @@ internal static class DataApiEndpoints
                         policies, entity.Name, DataApiEndpointKind.Delete.ToDataOperation(), context);
 
                     var precondition = Precondition(http.Request);
-                    await data.DeleteAsync(entity.Name, id, context, precondition, ct).ConfigureAwait(false);
+                    var key = IdempotencyKey(http.Request, context, options);
+
+                    var token = Idempotency(
+                        key, http.Request.Method, entity, id, precondition, document: null);
+                    await data.DeleteAsync(entity.Name, id, context, precondition, token, ct)
+                        .ConfigureAwait(false);
                     return Results.NoContent();
                 }))
             .Protect(entity, DataApiEndpointKind.Delete, filters, conventions);
@@ -919,33 +1105,64 @@ internal static class DataApiEndpoints
     }
 
     /// <summary>
-    /// The token the create is performed under: the caller's key plus the fingerprint of the request it
+    /// The token this write is performed under: the caller's key plus the fingerprint of the request it
     /// belongs to.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Built <b>after</b> validation, because the fingerprint covers the body and a body that was refused
     /// never reaches the port at all — so a fingerprint over it would digest a request that was never
     /// performed and reserve the key against it.
+    /// </para>
+    /// <para>
+    /// <b>A create's <paramref name="document"/> is non-null by construction and a delete's is null by
+    /// contract</b>, so the invariant this used to assert — "a write reached the port with no parsed body" —
+    /// now holds only for a create, and is asserted only there.
+    /// </para>
     /// </remarks>
     /// <param name="key">The caller's key, or <see langword="null"/> when they sent none.</param>
     /// <param name="method">The request method, for the digest.</param>
     /// <param name="entity">The entity being written.</param>
-    /// <param name="document">The body as it was parsed.</param>
+    /// <param name="id">The row the write addresses, or <see langword="null"/> for a create.</param>
+    /// <param name="precondition">The version the write is conditional on, or <see langword="null"/>.</param>
+    /// <param name="document">The body as it was parsed, or <see langword="null"/> for a delete.</param>
     private static AlvoIdempotency? Idempotency(
-        string? key, string method, EntitySchema entity, JsonObject? document)
+        string? key,
+        string method,
+        EntitySchema entity,
+        Guid? id,
+        AlvoPrecondition? precondition,
+        JsonObject? document)
     {
         if (key is null)
         {
             return null;
         }
 
-        // A create with no violations bound as an object by construction, so this is an invariant of this
-        // file rather than a caller error (family 5, rendered 500) — the same reasoning as AssignedId.
-        var body = document ?? throw new InvalidOperationException(
-            "A create reached the port with no parsed body. JsonPayloadReader reports a body that is not an "
-            + "object as a violation, and a violation is answered before this point.");
+        EnsureACreateParsedItsBody(id, document);
 
-        return new AlvoIdempotency(key, IdempotencyFingerprint.Of(method, entity.Name, body));
+        return new AlvoIdempotency(
+            key, IdempotencyFingerprint.Of(method, entity.Name, id, precondition, document));
+    }
+
+    /// <summary>
+    /// Asserts the invariant that a create with no violations bound as an object — family 5, rendered 500,
+    /// the same reasoning as <see cref="AssignedId"/>.
+    /// </summary>
+    /// <remarks>
+    /// Scoped to a create, because it is only a create's invariant: a delete legitimately carries no body,
+    /// and an update's is reported through the same violation path a create's is.
+    /// </remarks>
+    /// <param name="id">The row the write addresses, or <see langword="null"/> for a create.</param>
+    /// <param name="document">The body as it was parsed.</param>
+    private static void EnsureACreateParsedItsBody(Guid? id, JsonObject? document)
+    {
+        if (id is null && document is null)
+        {
+            throw new InvalidOperationException(
+                "A create reached the port with no parsed body. JsonPayloadReader reports a body that is not "
+                + "an object as a violation, and a violation is answered before this point.");
+        }
     }
 
     /// <summary>The refusal for a request carrying the idempotency header more than once.</summary>

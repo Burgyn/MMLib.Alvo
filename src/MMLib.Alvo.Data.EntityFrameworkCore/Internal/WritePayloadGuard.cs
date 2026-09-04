@@ -52,13 +52,51 @@ internal static class WritePayloadGuard
     internal static void EnsureWritable(
         IReadOnlyDictionary<string, object?> values, EntitySchema? entity, PolicyDecision decision, bool isUpdate)
     {
+        if (PayloadRefusal(values, entity, decision, isUpdate) is { } reason)
+        {
+            throw new AlvoAuthorizationException(reason);
+        }
+    }
+
+    /// <summary>
+    /// Why <paramref name="values"/> may not be written, or <see langword="null"/> when every key is writable.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The one evaluation of these four rules; <see cref="EnsureWritable"/> is a caller of it.</b> A batch
+    /// reports every bad row rather than the first, so it needs the verdict without a throw — and a second,
+    /// collecting copy of a rule is how two copies of one rule come to differ.
+    /// </para>
+    /// <para>
+    /// <b><see cref="QueryFieldGuard.EnsureDeclared"/> is caught rather than inverted</b>, because it is the
+    /// <em>read</em> path's guard as well: inverting it would change a second surface for a batch's
+    /// convenience, and an undeclared name has to read identically on both. The two
+    /// <see cref="ArgumentNullException"/> guards stay throwing, because they are the port's fifth failure
+    /// family — a broken caller, not a refused one — and <c>WritePayloadGuardTests</c> pins that.
+    /// </para>
+    /// </remarks>
+    /// <param name="values">The caller-supplied payload.</param>
+    /// <param name="entity">The entity being written, or <see langword="null"/> when the applied schema does not declare it.</param>
+    /// <param name="decision">The verdict <see cref="IPolicyEngine"/> returned for this caller.</param>
+    /// <param name="isUpdate">Whether this is an update rather than a create.</param>
+    internal static string? PayloadRefusal(
+        IReadOnlyDictionary<string, object?> values, EntitySchema? entity, PolicyDecision decision, bool isUpdate)
+    {
         ArgumentNullException.ThrowIfNull(values);
         ArgumentNullException.ThrowIfNull(decision);
 
-        QueryFieldGuard.EnsureDeclared(values, entity);
-        EnsureNoManagedColumnWrite(values, entity, isUpdate);
-        EnsureNoComputedWrite(values, entity);
-        EnsureNoReadOnlyWrite(values, decision.ReadOnlyFields);
+        try
+        {
+            QueryFieldGuard.EnsureDeclared(values, entity);
+        }
+        catch (AlvoAuthorizationException undeclared)
+        {
+            return undeclared.Message;
+        }
+
+        return ManagedColumnRefusal(values, entity, isUpdate)
+            ?? ComputedRefusal(values, entity)
+            ?? ReadOnlyRefusal(values, decision.ReadOnlyFields);
     }
 
     /// <summary>
@@ -85,19 +123,17 @@ internal static class WritePayloadGuard
     /// the payload and the schema alone, so no row is consulted and no answer here depends on stored data.
     /// </para>
     /// </remarks>
-    private static void EnsureNoComputedWrite(IReadOnlyDictionary<string, object?> values, EntitySchema? entity)
+    private static string? ComputedRefusal(IReadOnlyDictionary<string, object?> values, EntitySchema? entity)
     {
         var computed = entity?.Fields
             .Where(field => field.ComputedExpression is not null)
-            .Where(field => values.ContainsKey(field.Name));
+            .FirstOrDefault(field => values.ContainsKey(field.Name));
 
-        foreach (var field in computed ?? [])
-        {
-            throw new AlvoAuthorizationException(
-                $"Field '{field.Name}' is computed by the database and cannot be written: it is a stored "
-                + "generated column, so the engine itself refuses every write to it. Remove it from the "
-                + "payload — its value follows from the fields the expression reads.");
-        }
+        return computed is null
+            ? null
+            : $"Field '{computed.Name}' is computed by the database and cannot be written: it is a stored "
+            + "generated column, so the engine itself refuses every write to it. Remove it from the "
+            + "payload — its value follows from the fields the expression reads.";
     }
 
     /// <summary>
@@ -105,31 +141,23 @@ internal static class WritePayloadGuard
     /// path. An entity the applied schema does not declare has already been refused by
     /// <see cref="QueryFieldGuard.EnsureDeclared"/>, so the row key is still covered.
     /// </summary>
-    private static void EnsureNoManagedColumnWrite(
+    private static string? ManagedColumnRefusal(
         IReadOnlyDictionary<string, object?> values, EntitySchema? entity, bool isUpdate)
     {
-        if (entity is null)
-        {
-            return;
-        }
+        var refused = entity is null
+            ? null
+            : AlvoManagedColumns.For(entity)
+                .Where(column => !AlvoManagedColumns.IsCallerWritable(column, isUpdate))
+                .FirstOrDefault(values.ContainsKey);
 
-        var refused = AlvoManagedColumns.For(entity)
-            .Where(column => !AlvoManagedColumns.IsCallerWritable(column, isUpdate))
-            .Where(values.ContainsKey);
-
-        foreach (var column in refused)
-        {
-            throw new AlvoAuthorizationException(
-                $"Field '{column}' {AlvoManagedColumns.RefusalReason(column, isUpdate)}.");
-        }
+        return refused is null ? null : $"Field '{refused}' {AlvoManagedColumns.RefusalReason(refused, isUpdate)}.";
     }
 
-    private static void EnsureNoReadOnlyWrite(
+    private static string? ReadOnlyRefusal(
         IReadOnlyDictionary<string, object?> values, IReadOnlySet<string> readOnlyFields)
     {
-        foreach (var field in values.Keys.Where(readOnlyFields.Contains))
-        {
-            throw new AlvoAuthorizationException($"Field '{field}' is read-only and cannot be written.");
-        }
+        var refused = values.Keys.FirstOrDefault(readOnlyFields.Contains);
+
+        return refused is null ? null : $"Field '{refused}' is read-only and cannot be written.";
     }
 }

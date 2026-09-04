@@ -205,9 +205,16 @@ internal static class DataApiParameters
     /// <remarks>
     /// <para>
     /// A header the operation <em>ignores</em> is deliberately not listed as a parameter, because a parameter is
-    /// an invitation to send it. The two gaps that matter — <c>If-Match</c> on a read, and
-    /// <c>Idempotency-Key</c> on an update or a delete — are stated in the operation's own description instead,
-    /// where the text can say that sending them has no effect.
+    /// an invitation to send it. The gaps that remain — <c>If-Match</c> on a read, and <c>Idempotency-Key</c>
+    /// on the body-shaped read — are stated in the operation's own description instead, where the text can say
+    /// that sending them has no effect. <c>Idempotency-Key</c> on an update or a delete used to be the other
+    /// one; it is honoured on every write now, so all six write kinds publish it.
+    /// </para>
+    /// <para>
+    /// <b>The batch kinds publish the key and not <c>If-Match</c>, which is the asymmetry to notice.</b> A
+    /// batch honours the key — one for the whole request — and refuses a precondition outright, because one
+    /// version cannot condition many rows. Falling through to the empty arm, which is what the first version
+    /// did, published neither and left a supported retry-control header undiscoverable.
     /// </para>
     /// <para>
     /// <b>A header the operation <em>refuses</em> is not listed either, which is why the write arm carries the
@@ -228,7 +235,10 @@ internal static class DataApiParameters
             DataApiEndpointKind.Get when AlvoManagedColumns.VersionColumn(entity) is not null => [IfNoneMatchId],
             DataApiEndpointKind.Create => [IdempotencyKeyId],
             DataApiEndpointKind.Update or DataApiEndpointKind.Delete
-                when AlvoManagedColumns.VersionColumn(entity) is not null => [IfMatchId],
+                when AlvoManagedColumns.VersionColumn(entity) is not null => [IfMatchId, IdempotencyKeyId],
+            DataApiEndpointKind.Update or DataApiEndpointKind.Delete => [IdempotencyKeyId],
+            DataApiEndpointKind.BatchCreate or DataApiEndpointKind.BatchUpdate
+                or DataApiEndpointKind.BatchDelete => [IdempotencyKeyId],
             _ => [],
         };
 
@@ -263,10 +273,14 @@ internal static class DataApiParameters
         In = ParameterLocation.Header,
         Required = false,
         Description =
-            "Makes this create retry-safe. The result is recorded against the key and the caller's own scope: "
-            + "the same key with the same body replays the first result and writes no second row, and the same "
-            + "key with a different body is 409. An anonymous caller's key is refused, because every anonymous "
-            + "caller shares one identity and their keys would share one space. The bound below is a **byte** "
+            "Makes this write retry-safe. The result is recorded against the key and the caller's own scope, so "
+            + "the same key repeated replays the first result and writes nothing further: a retried create is "
+            + "the first row, a retried update is the row, and a retried delete is 204 rather than a 404 the "
+            + "caller cannot tell from somebody else's delete. The key covers **the whole request** — the "
+            + "method, the entity, the row it addresses, the `If-Match` it carries and the body — so the same "
+            + "key against another row, or with another `If-Match`, is 409 rather than a replay. An anonymous "
+            + "caller's key is refused, because every anonymous caller shares one identity and their keys would "
+            + "share one space. The bound below is a **byte** "
             + "bound — at most "
             + $"{options.MaxIdempotencyKeyBytes.ToString(CultureInfo.InvariantCulture)} bytes once UTF-8 "
             + "encoded — so a key of non-ASCII characters reaches it sooner than `maxLength` suggests; an "

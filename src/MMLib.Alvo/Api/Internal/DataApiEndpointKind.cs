@@ -40,6 +40,15 @@ internal enum DataApiEndpointKind
 
     /// <summary>The delete.</summary>
     Delete,
+
+    /// <summary>The batch create, taking many rows in one transaction.</summary>
+    BatchCreate,
+
+    /// <summary>The batch update.</summary>
+    BatchUpdate,
+
+    /// <summary>The batch delete.</summary>
+    BatchDelete,
 }
 
 /// <summary>What a <see cref="DataApiEndpointKind"/> means to the layers below and above it.</summary>
@@ -58,24 +67,36 @@ internal static class DataApiEndpointKinds
     {
         DataApiEndpointKind.List or DataApiEndpointKind.Query => DataOperation.List,
         DataApiEndpointKind.Get => DataOperation.Get,
-        DataApiEndpointKind.Create => DataOperation.Create,
-        DataApiEndpointKind.Update => DataOperation.Update,
-        DataApiEndpointKind.Delete => DataOperation.Delete,
+        DataApiEndpointKind.Create or DataApiEndpointKind.BatchCreate => DataOperation.Create,
+        DataApiEndpointKind.Update or DataApiEndpointKind.BatchUpdate => DataOperation.Update,
+        DataApiEndpointKind.Delete or DataApiEndpointKind.BatchDelete => DataOperation.Delete,
         _ => throw new ArgumentOutOfRangeException(
             nameof(kind), kind, "Unmapped endpoint kind; state which operation gates it here."),
     };
 
     /// <summary>The spelling this endpoint's <c>operationId</c> is built from.</summary>
     /// <remarks>
+    /// <para>
     /// The five that existed before <see cref="DataApiEndpointKind.Query"/> read their spelling from
     /// <see cref="DataOperation"/>'s own table rather than repeating it, so no published <c>operationId</c>
     /// can move; only a kind whose name is <em>not</em> an operation's needs a spelling of its own, and it is
     /// spelled here rather than in <c>Abstractions</c>, where a transport's name has no business being.
+    /// </para>
+    /// <para>
+    /// <b>Each batch kind needs an arm of its own, and the default arm is why.</b> Falling through to
+    /// <see cref="ToDataOperation"/> would spell <see cref="DataApiEndpointKind.BatchCreate"/> as
+    /// <c>create</c> — colliding with its single-row sibling, so two routes would mint one
+    /// <c>operationId</c> and one route's prose would be published for the other. The routing suite's
+    /// distinctness counter is what catches an arm left off.
+    /// </para>
     /// </remarks>
     /// <param name="kind">The endpoint kind.</param>
     internal static string ToWireName(this DataApiEndpointKind kind) => kind switch
     {
         DataApiEndpointKind.Query => "query",
+        DataApiEndpointKind.BatchCreate => "batchCreate",
+        DataApiEndpointKind.BatchUpdate => "batchUpdate",
+        DataApiEndpointKind.BatchDelete => "batchDelete",
         _ => kind.ToDataOperation().ToWireName(),
     };
 }

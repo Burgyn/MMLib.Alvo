@@ -283,11 +283,14 @@
           "categories"
         ],
         "summary": "Update one 'categories' row",
-        "description": "Partially updates one row and returns it. A field the body does not mention keeps its stored value — which is why this is a `PATCH` and there is no `PUT`: the underlying update is partial by contract, so a `PUT` would advertise whole-resource replacement that never happens.\n\nA write to a read-only field is refused with 422 rather than silently dropped, and so is a key the entity does not declare. `id` and the framework-managed columns can never be rewritten, `tenant_id` included: a row does not move between tenants.\n\n**This entity's rows carry no version, so this write cannot be conditioned.** A row version comes from `audit: true` in the descriptor; without it there is no column the framework writes on every change, and a version a caller can rewrite is not a version. No `ETag` is ever returned for a row of this entity, so there is no tag a caller could ever send back — and an `If-Match` naming a version is therefore **refused with 412**, never ignored, because a success would tell a caller their condition held when nothing was compared. `If-None-Match` is refused with 412 here as it is on every write. The one precondition that is accepted is `If-Match: *`, and it changes nothing: it asks only that the row still exist, which an absent row already answers with 404. Neither header is offered as a parameter on this operation for that reason — a parameter is an invitation to send a value, and there is no value to send. Note what this means for a client that blanket-attaches `If-Match` to every mutating request, as several SDKs do: unless it sends `*`, it is refused here. Add `audit: true` to the entity to make a conditional write possible.\n\n**`Idempotency-Key` is accepted and ignored here — a known limitation, and this is what it costs.** The row's end state is unaffected: an update assigns *absolute* values to named fields, so applying it twice leaves exactly the state applying it once leaves, and there is no duplicate row to prevent. The *outcome you observe* is another matter. If the 200 is lost to a dropped connection and you retry the identical request, the retry assigns the same absolute values again and is answered 200 — so unlike an audited entity, there is no 412 to misread. What you cannot learn is whether anybody changed the row between your two attempts: this entity keeps no version, so the retry overwrites a concurrent change exactly as the first attempt would have, and silently. **Read the row back and compare it with what you sent** before treating the write as settled. That is the whole of retry safety on this verb here; `audit: true` on the entity is what buys the rest. Refusing the header instead would break the widespread client habit of attaching it to every mutating request and would reject requests that are otherwise fine, so it is accepted — and declared here rather than left to be discovered.",
+        "description": "Partially updates one row and returns it. A field the body does not mention keeps its stored value — which is why this is a `PATCH` and there is no `PUT`: the underlying update is partial by contract, so a `PUT` would advertise whole-resource replacement that never happens.\n\nA write to a read-only field is refused with 422 rather than silently dropped, and so is a key the entity does not declare. `id` and the framework-managed columns can never be rewritten, `tenant_id` included: a row does not move between tenants.\n\n**This entity's rows carry no version, so this write cannot be conditioned.** A row version comes from `audit: true` in the descriptor; without it there is no column the framework writes on every change, and a version a caller can rewrite is not a version. No `ETag` is ever returned for a row of this entity, so there is no tag a caller could ever send back — and an `If-Match` naming a version is therefore **refused with 412**, never ignored, because a success would tell a caller their condition held when nothing was compared. `If-None-Match` is refused with 412 here as it is on every write. The one precondition that is accepted is `If-Match: *`, and it changes nothing: it asks only that the row still exist, which an absent row already answers with 404. Neither header is offered as a parameter on this operation for that reason — a parameter is an invitation to send a value, and there is no value to send. Note what this means for a client that blanket-attaches `If-Match` to every mutating request, as several SDKs do: unless it sends `*`, it is refused here. Add `audit: true` to the entity to make a conditional write possible.\n\n**`Idempotency-Key` makes the retry answer the row.** The row's end state never needed it — an update assigns *absolute* values to named fields, so applying it twice leaves what applying it once leaves — but the *outcome you observe* did. Send a key and a retry of the identical request is answered with the row this caller already wrote, rather than performed a second time. Without one the retry still assigns the same absolute values and is answered 200, but this entity keeps no version, so it overwrites a concurrent change exactly as the first attempt would have — and silently. **Read the row back and compare it with what you sent** before treating an unkeyed write as settled. The key covers the whole request: the method, the entity, **the row it addresses** and the `If-Match` it carries, as well as the body. So the same key against another row, or against this row with a different `If-Match`, is 409 rather than a replay of the first — a key is a claim about one request, not a licence for the next one.",
         "operationId": "categories.update",
         "parameters": [
           {
             "$ref": "#/components/parameters/rowId"
+          },
+          {
+            "$ref": "#/components/parameters/idempotencyKey"
           }
         ],
         "requestBody": {
@@ -349,11 +352,14 @@
           "categories"
         ],
         "summary": "Delete one 'categories' row",
-        "description": "Deletes one row and returns no body. A row the caller's policy excludes is 404, exactly as an absent one is.\n\n**This entity's rows carry no version, so this write cannot be conditioned.** A row version comes from `audit: true` in the descriptor; without it there is no column the framework writes on every change, and a version a caller can rewrite is not a version. No `ETag` is ever returned for a row of this entity, so there is no tag a caller could ever send back — and an `If-Match` naming a version is therefore **refused with 412**, never ignored, because a success would tell a caller their condition held when nothing was compared. `If-None-Match` is refused with 412 here as it is on every write. The one precondition that is accepted is `If-Match: *`, and it changes nothing: it asks only that the row still exist, which an absent row already answers with 404. Neither header is offered as a parameter on this operation for that reason — a parameter is an invitation to send a value, and there is no value to send. Note what this means for a client that blanket-attaches `If-Match` to every mutating request, as several SDKs do: unless it sends `*`, it is refused here. Add `audit: true` to the entity to make a conditional write possible.\n\n**`Idempotency-Key` is accepted and ignored here — the same known limitation as on the update.** Removing one row twice leaves the same state as removing it once, so nothing is duplicated; but a retry after a lost `204` is a **404 you cannot tell apart from somebody else's delete**, which is precisely the question a key would have answered. Read the row back rather than treating the second answer as evidence the first attempt did not land.",
+        "description": "Deletes one row and returns no body. A row the caller's policy excludes is 404, exactly as an absent one is.\n\n**This entity's rows carry no version, so this write cannot be conditioned.** A row version comes from `audit: true` in the descriptor; without it there is no column the framework writes on every change, and a version a caller can rewrite is not a version. No `ETag` is ever returned for a row of this entity, so there is no tag a caller could ever send back — and an `If-Match` naming a version is therefore **refused with 412**, never ignored, because a success would tell a caller their condition held when nothing was compared. `If-None-Match` is refused with 412 here as it is on every write. The one precondition that is accepted is `If-Match: *`, and it changes nothing: it asks only that the row still exist, which an absent row already answers with 404. Neither header is offered as a parameter on this operation for that reason — a parameter is an invitation to send a value, and there is no value to send. Note what this means for a client that blanket-attaches `If-Match` to every mutating request, as several SDKs do: unless it sends `*`, it is refused here. Add `audit: true` to the entity to make a conditional write possible.\n\n**`Idempotency-Key` makes the retry answer `204`.** Removing one row twice always left the same state, so nothing was ever duplicated; what a retry after a lost `204` could not tell you is whether the row was yours to have removed. Without a key that retry is a **404 you cannot tell apart from somebody else's delete**; with one it is `204`, because the key records that this caller already performed exactly this delete. The key covers the row and the `If-Match` too, so reusing it against another row is 409.",
         "operationId": "categories.delete",
         "parameters": [
           {
             "$ref": "#/components/parameters/rowId"
+          },
+          {
+            "$ref": "#/components/parameters/idempotencyKey"
           }
         ],
         "responses": {
@@ -376,6 +382,197 @@
           },
           "412": {
             "description": "A precondition was supplied that this entity cannot answer. Its rows carry no version — 'audit: true' is what mints one — so an 'If-Match' naming a version, and any 'If-None-Match', are refused here rather than ignored: there is nothing stored for either to be compared against. On this entity the status never means 'the version did not match', because no comparison is possible. 'If-Match: *' is accepted and is not this refusal.",
+            "$ref": "#/components/responses/preconditionFailed"
+          },
+          "409": {
+            "$ref": "#/components/responses/conflict"
+          }
+        },
+        "security": [
+          { },
+          {
+            "alvoApiKey": [ ]
+          }
+        ]
+      }
+    },
+    "/api/categories/batch": {
+      "post": {
+        "tags": [
+          "categories"
+        ],
+        "summary": "Create many 'categories' rows in one transaction",
+        "description": "Creates many rows in one transaction. Send `{\"rows\": [ … ]}`, each element the object the single-row create takes.\n\n**The batch is one transaction: every row is written, or none is.** A refusal on the last row leaves the first unwritten, so a caller repairs the rows the response names and resends the whole batch. There is no partial outcome to reconcile.\n\n**Every row is judged individually** against your own policy — the `WITH CHECK` predicate and, on a tenant-scoped entity, the tenant scope — exactly as the single-row route judges one. A batch is not a way to write rows a single call could not.\n\n**Every offending row is reported, not the first.** Each entry of `violations` carries a `/rows/{index}` pointer, so a five-hundred-row import is repaired in one round trip rather than five hundred. A row you cannot see and a row that does not exist are the *same* refusal, deliberately: telling them apart would let one request ask as many existence questions as it carries rows.\n\n**A `409` names the field and no row index.** A unique value is something you can guess, so an index would turn one collision probe into as many per request as the batch carries rows.\n\n**`Idempotency-Key` covers the whole batch**, because a batch is one request and a partial retry is not expressible. The same key with a different list of rows is a `409`, not a replay.",
+        "operationId": "categories.batchCreate",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/idempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "description": "The rows to write, under a 'rows' array. A batch is one transaction: every row is written, or none is.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/categoriesBatchCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Every row the batch wrote, in request order, and how many it affected. A batch delete answers an empty 'items' with a non-zero 'affected'.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Cache-Control"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/categoriesBatchResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "description": "The operation is refused, or one or more rows are — and on this route a policy refusal CAN be per row, unlike every other operation. Each entry of 'violations' carries a '/rows/{index}' pointer naming a row policy refused: its 'WITH CHECK' predicate, the tenant scope, a row that is not yours or does not exist (one refusal for both, so a batch cannot be used to ask which), or a row the batch named twice. A batch is one transaction, so nothing was written — repair the rows the response names and resend the whole batch. A refusal the entity's declared SHAPE produced is a 422 instead, and carries the same pointers. The two operation-level kinds are unchanged and are still told apart by the problem 'type': 'out-of-scope' means the presented key's scopes do not cover this entity and operation (grant the key the scope), 'forbidden' means policy refused (change a rule, or a row).",
+            "$ref": "#/components/responses/forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/unprocessable"
+          },
+          "412": {
+            "$ref": "#/components/responses/preconditionFailed"
+          },
+          "409": {
+            "$ref": "#/components/responses/conflict"
+          }
+        },
+        "security": [
+          { },
+          {
+            "alvoApiKey": [ ]
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "categories"
+        ],
+        "summary": "Update many 'categories' rows in one transaction",
+        "description": "Updates many rows in one transaction. Send `{\"rows\": [ … ]}`, each element an object carrying the row's `id` plus the fields to change on it — partial, exactly as the single-row update is. There is no `If-Match` here: one version cannot condition many rows, and accepting one would check a single row while appearing to check all of them.\n\n**The batch is one transaction: every row is written, or none is.** A refusal on the last row leaves the first unwritten, so a caller repairs the rows the response names and resends the whole batch. There is no partial outcome to reconcile.\n\n**Every row is judged individually** against your own policy — the `WITH CHECK` predicate and, on a tenant-scoped entity, the tenant scope — exactly as the single-row route judges one. A batch is not a way to write rows a single call could not.\n\n**Every offending row is reported, not the first.** Each entry of `violations` carries a `/rows/{index}` pointer, so a five-hundred-row import is repaired in one round trip rather than five hundred. A row you cannot see and a row that does not exist are the *same* refusal, deliberately: telling them apart would let one request ask as many existence questions as it carries rows.\n\n**A `409` names the field and no row index.** A unique value is something you can guess, so an index would turn one collision probe into as many per request as the batch carries rows.\n\n**`Idempotency-Key` covers the whole batch**, because a batch is one request and a partial retry is not expressible. The same key with a different list of rows is a `409`, not a replay.",
+        "operationId": "categories.batchUpdate",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/idempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "description": "The rows to write, under a 'rows' array. A batch is one transaction: every row is written, or none is.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/categoriesBatchUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Every row the batch wrote, in request order, and how many it affected. A batch delete answers an empty 'items' with a non-zero 'affected'.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Cache-Control"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/categoriesBatchResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "description": "The operation is refused, or one or more rows are — and on this route a policy refusal CAN be per row, unlike every other operation. Each entry of 'violations' carries a '/rows/{index}' pointer naming a row policy refused: its 'WITH CHECK' predicate, the tenant scope, a row that is not yours or does not exist (one refusal for both, so a batch cannot be used to ask which), or a row the batch named twice. A batch is one transaction, so nothing was written — repair the rows the response names and resend the whole batch. A refusal the entity's declared SHAPE produced is a 422 instead, and carries the same pointers. The two operation-level kinds are unchanged and are still told apart by the problem 'type': 'out-of-scope' means the presented key's scopes do not cover this entity and operation (grant the key the scope), 'forbidden' means policy refused (change a rule, or a row).",
+            "$ref": "#/components/responses/forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/unprocessable"
+          },
+          "412": {
+            "$ref": "#/components/responses/preconditionFailed"
+          },
+          "409": {
+            "$ref": "#/components/responses/conflict"
+          }
+        },
+        "security": [
+          { },
+          {
+            "alvoApiKey": [ ]
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "categories"
+        ],
+        "summary": "Delete many 'categories' rows in one transaction",
+        "description": "Deletes many rows in one transaction. Send `{\"rows\": [ … ]}`, each element a row `id`. The response is `200` with an empty `items` and a non-zero `affected`, not `204`, because it reports on many rows. **This `DELETE` carries a body**, which RFC 9110 §9.3.5 leaves undefined — an intermediary is permitted to strip it, so an empty batch is refused with `422` rather than read as \"no rows to delete\", which would be a silent success for a request that never arrived.\n\n**The batch is one transaction: every row is written, or none is.** A refusal on the last row leaves the first unwritten, so a caller repairs the rows the response names and resends the whole batch. There is no partial outcome to reconcile.\n\n**Every row is judged individually** against your own policy — the `WITH CHECK` predicate and, on a tenant-scoped entity, the tenant scope — exactly as the single-row route judges one. A batch is not a way to write rows a single call could not.\n\n**Every offending row is reported, not the first.** Each entry of `violations` carries a `/rows/{index}` pointer, so a five-hundred-row import is repaired in one round trip rather than five hundred. A row you cannot see and a row that does not exist are the *same* refusal, deliberately: telling them apart would let one request ask as many existence questions as it carries rows.\n\n**A `409` names the field and no row index.** A unique value is something you can guess, so an index would turn one collision probe into as many per request as the batch carries rows.\n\n**`Idempotency-Key` covers the whole batch**, because a batch is one request and a partial retry is not expressible. The same key with a different list of rows is a `409`, not a replay.",
+        "operationId": "categories.batchDelete",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/idempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "description": "The rows to write, under a 'rows' array. A batch is one transaction: every row is written, or none is.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/categoriesBatchDelete"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Every row the batch wrote, in request order, and how many it affected. A batch delete answers an empty 'items' with a non-zero 'affected'.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Cache-Control"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/categoriesBatchResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "description": "The operation is refused, or one or more rows are — and on this route a policy refusal CAN be per row, unlike every other operation. Each entry of 'violations' carries a '/rows/{index}' pointer naming a row policy refused: its 'WITH CHECK' predicate, the tenant scope, a row that is not yours or does not exist (one refusal for both, so a batch cannot be used to ask which), or a row the batch named twice. A batch is one transaction, so nothing was written — repair the rows the response names and resend the whole batch. A refusal the entity's declared SHAPE produced is a 422 instead, and carries the same pointers. The two operation-level kinds are unchanged and are still told apart by the problem 'type': 'out-of-scope' means the presented key's scopes do not cover this entity and operation (grant the key the scope), 'forbidden' means policy refused (change a rule, or a row).",
+            "$ref": "#/components/responses/forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/unprocessable"
+          },
+          "412": {
             "$ref": "#/components/responses/preconditionFailed"
           },
           "409": {
@@ -808,7 +1005,7 @@
           "products"
         ],
         "summary": "Update one 'products' row",
-        "description": "Partially updates one row and returns it. A field the body does not mention keeps its stored value — which is why this is a `PATCH` and there is no `PUT`: the underlying update is partial by contract, so a `PUT` would advertise whole-resource replacement that never happens.\n\nA write to a read-only field is refused with 422 rather than silently dropped, and so is a key the entity does not declare. `id` and the framework-managed columns can never be rewritten, `tenant_id` included: a row does not move between tenants.\n\n**`If-Match` conditions the write on the row's current version**, compared with RFC 9110 §13.1.1's *strong* comparison. Send back one `ETag` exactly as a previous response returned it, or `*` to require only that the row still exist. Anything this API cannot turn into exactly one version it minted — several tags, a weak `W/` tag, an opaque value it never issued — is 412, never ignored. `If-None-Match` is refused with 412 as well: this API compares a row against the version a caller *holds*, and has no channel for \"act only if the row is not at this version\". That is a labelled deviation from RFC 9110 §13.1.2, which would let a non-matching `If-None-Match` simply succeed — Alvo cannot evaluate the header at all, so a conforming success would be indistinguishable from a precondition that was never checked.\n\n**`Idempotency-Key` is accepted and ignored here — a known limitation, and this is what it costs.** The row's end state is unaffected: an update assigns *absolute* values to named fields, so applying it twice leaves exactly the state applying it once leaves, and there is no duplicate row to prevent. The *outcome you observe* is another matter. If you send `PATCH … If-Match: \"v1\"`, the 200 is lost to a dropped connection, and you retry the identical request, the write has landed and the row is at `v2` — so the retry is **412, and you cannot tell it apart from someone else having changed the row**. Resolving that 412 the usual way (re-read, re-merge, re-apply) would clobber a genuinely concurrent change if it *was* someone else. A key would have told you it was your own write. So retry safety on this verb is `If-Match` plus a re-read, not a key: after a lost response, **read the row back and compare it with what you sent** before deciding the write did not land. Refusing the header instead would break the widespread client habit of attaching it to every mutating request and would reject requests that are otherwise fine, so it is accepted — and declared here rather than left to be discovered.",
+        "description": "Partially updates one row and returns it. A field the body does not mention keeps its stored value — which is why this is a `PATCH` and there is no `PUT`: the underlying update is partial by contract, so a `PUT` would advertise whole-resource replacement that never happens.\n\nA write to a read-only field is refused with 422 rather than silently dropped, and so is a key the entity does not declare. `id` and the framework-managed columns can never be rewritten, `tenant_id` included: a row does not move between tenants.\n\n**`If-Match` conditions the write on the row's current version**, compared with RFC 9110 §13.1.1's *strong* comparison. Send back one `ETag` exactly as a previous response returned it, or `*` to require only that the row still exist. Anything this API cannot turn into exactly one version it minted — several tags, a weak `W/` tag, an opaque value it never issued — is 412, never ignored. `If-None-Match` is refused with 412 as well: this API compares a row against the version a caller *holds*, and has no channel for \"act only if the row is not at this version\". That is a labelled deviation from RFC 9110 §13.1.2, which would let a non-matching `If-None-Match` simply succeed — Alvo cannot evaluate the header at all, so a conforming success would be indistinguishable from a precondition that was never checked.\n\n**`Idempotency-Key` makes the retry answer the row.** The row's end state never needed it — an update assigns *absolute* values to named fields, so applying it twice leaves what applying it once leaves — but the *outcome you observe* did. Send `PATCH … If-Match: \"v1\"` with a key, lose the 200 to a dropped connection, and retry the identical request: the row is at `v2`, but the key records that `v2` is *your* write, so the retry is answered 200 with the row. Without a key the same retry is **412, and you cannot tell it apart from someone else having changed the row** — and resolving that 412 the usual way (re-read, re-merge, re-apply) would clobber a genuinely concurrent change if it *was* someone else. The key covers the whole request: the method, the entity, **the row it addresses** and the `If-Match` it carries, as well as the body. So the same key against another row, or against this row with a different `If-Match`, is 409 rather than a replay of the first — a key is a claim about one request, not a licence for the next one.",
         "operationId": "products.update",
         "parameters": [
           {
@@ -816,6 +1013,9 @@
           },
           {
             "$ref": "#/components/parameters/ifMatch"
+          },
+          {
+            "$ref": "#/components/parameters/idempotencyKey"
           }
         ],
         "requestBody": {
@@ -879,7 +1079,7 @@
           "products"
         ],
         "summary": "Delete one 'products' row",
-        "description": "Deletes one row and returns no body. A row the caller's policy excludes is 404, exactly as an absent one is.\n\n**`If-Match` conditions the delete** on the row's current version, and `If-None-Match` is refused with 412 — both exactly as on the update, including the wording of what cannot be compared.\n\n**`Idempotency-Key` is accepted and ignored here — the same known limitation as on the update.** Removing one row twice leaves the same state as removing it once, so nothing is duplicated; but a retry after a lost `204` is a **404 (or a 412) you cannot tell apart from somebody else's delete**, which is precisely the question a key would have answered. Read the row back rather than treating the second answer as evidence the first attempt did not land.",
+        "description": "Deletes one row and returns no body. A row the caller's policy excludes is 404, exactly as an absent one is.\n\n**`If-Match` conditions the delete** on the row's current version, and `If-None-Match` is refused with 412 — both exactly as on the update, including the wording of what cannot be compared.\n\n**`Idempotency-Key` makes the retry answer `204`.** Removing one row twice always left the same state, so nothing was ever duplicated; what a retry after a lost `204` could not tell you is whether the row was yours to have removed. Without a key that retry is a **404 (or a 412) you cannot tell apart from somebody else's delete**; with one it is `204`, because the key records that this caller already performed exactly this delete. The key covers the row and the `If-Match` too, so reusing it against another row is 409.",
         "operationId": "products.delete",
         "parameters": [
           {
@@ -887,6 +1087,9 @@
           },
           {
             "$ref": "#/components/parameters/ifMatch"
+          },
+          {
+            "$ref": "#/components/parameters/idempotencyKey"
           }
         ],
         "responses": {
@@ -906,6 +1109,206 @@
           },
           "404": {
             "$ref": "#/components/responses/notFound"
+          },
+          "412": {
+            "$ref": "#/components/responses/preconditionFailed"
+          },
+          "409": {
+            "$ref": "#/components/responses/conflict"
+          }
+        },
+        "security": [
+          { },
+          {
+            "alvoApiKey": [ ]
+          }
+        ]
+      }
+    },
+    "/api/products/batch": {
+      "post": {
+        "tags": [
+          "products"
+        ],
+        "summary": "Create many 'products' rows in one transaction",
+        "description": "Creates many rows in one transaction. Send `{\"rows\": [ … ]}`, each element the object the single-row create takes.\n\n**The batch is one transaction: every row is written, or none is.** A refusal on the last row leaves the first unwritten, so a caller repairs the rows the response names and resends the whole batch. There is no partial outcome to reconcile.\n\n**Every row is judged individually** against your own policy — the `WITH CHECK` predicate and, on a tenant-scoped entity, the tenant scope — exactly as the single-row route judges one. A batch is not a way to write rows a single call could not.\n\n**Every offending row is reported, not the first.** Each entry of `violations` carries a `/rows/{index}` pointer, so a five-hundred-row import is repaired in one round trip rather than five hundred. A row you cannot see and a row that does not exist are the *same* refusal, deliberately: telling them apart would let one request ask as many existence questions as it carries rows.\n\n**A `409` names the field and no row index.** A unique value is something you can guess, so an index would turn one collision probe into as many per request as the batch carries rows.\n\n**`Idempotency-Key` covers the whole batch**, because a batch is one request and a partial retry is not expressible. The same key with a different list of rows is a `409`, not a replay.",
+        "operationId": "products.batchCreate",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/idempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "description": "The rows to write, under a 'rows' array. A batch is one transaction: every row is written, or none is.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/productsBatchCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Every row the batch wrote, in request order, and how many it affected. A batch delete answers an empty 'items' with a non-zero 'affected'.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Cache-Control"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/productsBatchResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "description": "The operation is refused, or one or more rows are — and on this route a policy refusal CAN be per row, unlike every other operation. Each entry of 'violations' carries a '/rows/{index}' pointer naming a row policy refused: its 'WITH CHECK' predicate, the tenant scope, a row that is not yours or does not exist (one refusal for both, so a batch cannot be used to ask which), or a row the batch named twice. A batch is one transaction, so nothing was written — repair the rows the response names and resend the whole batch. A refusal the entity's declared SHAPE produced is a 422 instead, and carries the same pointers. The two operation-level kinds are unchanged and are still told apart by the problem 'type': 'out-of-scope' means the presented key's scopes do not cover this entity and operation (grant the key the scope), 'forbidden' means policy refused (change a rule, or a row).",
+            "$ref": "#/components/responses/forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/unprocessable"
+          },
+          "412": {
+            "$ref": "#/components/responses/preconditionFailed"
+          },
+          "409": {
+            "$ref": "#/components/responses/conflict"
+          }
+        },
+        "security": [
+          { },
+          {
+            "alvoApiKey": [ ]
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "products"
+        ],
+        "summary": "Update many 'products' rows in one transaction",
+        "description": "Updates many rows in one transaction. Send `{\"rows\": [ … ]}`, each element an object carrying the row's `id` plus the fields to change on it — partial, exactly as the single-row update is. There is no `If-Match` here: one version cannot condition many rows, and accepting one would check a single row while appearing to check all of them.\n\n**The batch is one transaction: every row is written, or none is.** A refusal on the last row leaves the first unwritten, so a caller repairs the rows the response names and resends the whole batch. There is no partial outcome to reconcile.\n\n**Every row is judged individually** against your own policy — the `WITH CHECK` predicate and, on a tenant-scoped entity, the tenant scope — exactly as the single-row route judges one. A batch is not a way to write rows a single call could not.\n\n**Every offending row is reported, not the first.** Each entry of `violations` carries a `/rows/{index}` pointer, so a five-hundred-row import is repaired in one round trip rather than five hundred. A row you cannot see and a row that does not exist are the *same* refusal, deliberately: telling them apart would let one request ask as many existence questions as it carries rows.\n\n**A `409` names the field and no row index.** A unique value is something you can guess, so an index would turn one collision probe into as many per request as the batch carries rows.\n\n**`Idempotency-Key` covers the whole batch**, because a batch is one request and a partial retry is not expressible. The same key with a different list of rows is a `409`, not a replay.",
+        "operationId": "products.batchUpdate",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/idempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "description": "The rows to write, under a 'rows' array. A batch is one transaction: every row is written, or none is.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/productsBatchUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Every row the batch wrote, in request order, and how many it affected. A batch delete answers an empty 'items' with a non-zero 'affected'.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Cache-Control"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/productsBatchResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "description": "The operation is refused, or one or more rows are — and on this route a policy refusal CAN be per row, unlike every other operation. Each entry of 'violations' carries a '/rows/{index}' pointer naming a row policy refused: its 'WITH CHECK' predicate, the tenant scope, a row that is not yours or does not exist (one refusal for both, so a batch cannot be used to ask which), or a row the batch named twice. A batch is one transaction, so nothing was written — repair the rows the response names and resend the whole batch. A refusal the entity's declared SHAPE produced is a 422 instead, and carries the same pointers. The two operation-level kinds are unchanged and are still told apart by the problem 'type': 'out-of-scope' means the presented key's scopes do not cover this entity and operation (grant the key the scope), 'forbidden' means policy refused (change a rule, or a row).",
+            "$ref": "#/components/responses/forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/unprocessable"
+          },
+          "412": {
+            "$ref": "#/components/responses/preconditionFailed"
+          },
+          "409": {
+            "$ref": "#/components/responses/conflict"
+          }
+        },
+        "security": [
+          { },
+          {
+            "alvoApiKey": [ ]
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "products"
+        ],
+        "summary": "Delete many 'products' rows in one transaction",
+        "description": "Deletes many rows in one transaction. Send `{\"rows\": [ … ]}`, each element a row `id`. The response is `200` with an empty `items` and a non-zero `affected`, not `204`, because it reports on many rows. **This `DELETE` carries a body**, which RFC 9110 §9.3.5 leaves undefined — an intermediary is permitted to strip it, so an empty batch is refused with `422` rather than read as \"no rows to delete\", which would be a silent success for a request that never arrived.\n\n**The batch is one transaction: every row is written, or none is.** A refusal on the last row leaves the first unwritten, so a caller repairs the rows the response names and resends the whole batch. There is no partial outcome to reconcile.\n\n**Every row is judged individually** against your own policy — the `WITH CHECK` predicate and, on a tenant-scoped entity, the tenant scope — exactly as the single-row route judges one. A batch is not a way to write rows a single call could not.\n\n**Every offending row is reported, not the first.** Each entry of `violations` carries a `/rows/{index}` pointer, so a five-hundred-row import is repaired in one round trip rather than five hundred. A row you cannot see and a row that does not exist are the *same* refusal, deliberately: telling them apart would let one request ask as many existence questions as it carries rows.\n\n**A `409` names the field and no row index.** A unique value is something you can guess, so an index would turn one collision probe into as many per request as the batch carries rows.\n\n**`Idempotency-Key` covers the whole batch**, because a batch is one request and a partial retry is not expressible. The same key with a different list of rows is a `409`, not a replay.",
+        "operationId": "products.batchDelete",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/idempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "description": "The rows to write, under a 'rows' array. A batch is one transaction: every row is written, or none is.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/productsBatchDelete"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Every row the batch wrote, in request order, and how many it affected. A batch delete answers an empty 'items' with a non-zero 'affected'.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Cache-Control"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/productsBatchResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "description": "The operation is refused, or one or more rows are — and on this route a policy refusal CAN be per row, unlike every other operation. Each entry of 'violations' carries a '/rows/{index}' pointer naming a row policy refused: its 'WITH CHECK' predicate, the tenant scope, a row that is not yours or does not exist (one refusal for both, so a batch cannot be used to ask which), or a row the batch named twice. A batch is one transaction, so nothing was written — repair the rows the response names and resend the whole batch. A refusal the entity's declared SHAPE produced is a 422 instead, and carries the same pointers. The two operation-level kinds are unchanged and are still told apart by the problem 'type': 'out-of-scope' means the presented key's scopes do not cover this entity and operation (grant the key the scope), 'forbidden' means policy refused (change a rule, or a row).",
+            "$ref": "#/components/responses/forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/unprocessable"
           },
           "412": {
             "$ref": "#/components/responses/preconditionFailed"
@@ -955,6 +1358,108 @@
           }
         },
         "description": "A product category. Not audited, so its rows carry no version — no ETag is minted for them and no conditional read or write of one is possible.\n\nOne row as a single read, a create or an update returns it. Every field is present, even one with no value — that field is present and null. Fields marked read-only are written by the framework and refused in a request body."
+      },
+      "categoriesBatchCreate": {
+        "required": [
+          "rows"
+        ],
+        "type": "object",
+        "properties": {
+          "rows": {
+            "maxItems": 1000,
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/categoriesCreate"
+            },
+            "description": "One element per row, in the order you want them reported."
+          }
+        },
+        "description": "The rows to write, in one transaction."
+      },
+      "categoriesBatchDelete": {
+        "required": [
+          "rows"
+        ],
+        "type": "object",
+        "properties": {
+          "rows": {
+            "maxItems": 1000,
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "One row id per element."
+          }
+        },
+        "description": "The rows to remove, in one transaction."
+      },
+      "categoriesBatchPatch": {
+        "title": "categoriesBatchPatch",
+        "type": "object",
+        "allOf": [
+          {
+            "required": [
+              "id"
+            ],
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "The row to change, exactly as a previous response returned it.",
+                "format": "uuid"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/categoriesPatch"
+          }
+        ],
+        "description": "One row of a batch update: which row, and the fields to change on it."
+      },
+      "categoriesBatchResult": {
+        "title": "categoriesBatchResult",
+        "required": [
+          "items",
+          "affected"
+        ],
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/categoriesPageItem"
+            },
+            "description": "The rows the batch wrote, in the order you sent them. Empty for a batch delete, which produces no rows — read `affected` there."
+          },
+          "affected": {
+            "minimum": 0,
+            "type": "integer",
+            "description": "How many rows the batch wrote or removed.",
+            "format": "int32"
+          }
+        },
+        "description": "What the batch wrote. A batch is one transaction, so this is never a partial outcome."
+      },
+      "categoriesBatchUpdate": {
+        "required": [
+          "rows"
+        ],
+        "type": "object",
+        "properties": {
+          "rows": {
+            "maxItems": 1000,
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/categoriesBatchPatch"
+            },
+            "description": "One element per row, in the order you want them reported."
+          }
+        },
+        "description": "The rows to write, in one transaction."
       },
       "categoriesCreate": {
         "title": "categoriesCreate",
@@ -1407,6 +1912,108 @@
           }
         },
         "description": "A product in the catalogue. Audited, so every row carries a version and every read and write of one can be made conditional.\n\nOne row as a single read, a create or an update returns it. Every field is present, even one with no value — that field is present and null. Fields marked read-only are written by the framework and refused in a request body."
+      },
+      "productsBatchCreate": {
+        "required": [
+          "rows"
+        ],
+        "type": "object",
+        "properties": {
+          "rows": {
+            "maxItems": 1000,
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/productsCreate"
+            },
+            "description": "One element per row, in the order you want them reported."
+          }
+        },
+        "description": "The rows to write, in one transaction."
+      },
+      "productsBatchDelete": {
+        "required": [
+          "rows"
+        ],
+        "type": "object",
+        "properties": {
+          "rows": {
+            "maxItems": 1000,
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "One row id per element."
+          }
+        },
+        "description": "The rows to remove, in one transaction."
+      },
+      "productsBatchPatch": {
+        "title": "productsBatchPatch",
+        "type": "object",
+        "allOf": [
+          {
+            "required": [
+              "id"
+            ],
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "The row to change, exactly as a previous response returned it.",
+                "format": "uuid"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/productsPatch"
+          }
+        ],
+        "description": "One row of a batch update: which row, and the fields to change on it."
+      },
+      "productsBatchResult": {
+        "title": "productsBatchResult",
+        "required": [
+          "items",
+          "affected"
+        ],
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/productsPageItem"
+            },
+            "description": "The rows the batch wrote, in the order you sent them. Empty for a batch delete, which produces no rows — read `affected` there."
+          },
+          "affected": {
+            "minimum": 0,
+            "type": "integer",
+            "description": "How many rows the batch wrote or removed.",
+            "format": "int32"
+          }
+        },
+        "description": "What the batch wrote. A batch is one transaction, so this is never a partial outcome."
+      },
+      "productsBatchUpdate": {
+        "required": [
+          "rows"
+        ],
+        "type": "object",
+        "properties": {
+          "rows": {
+            "maxItems": 1000,
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/productsBatchPatch"
+            },
+            "description": "One element per row, in the order you want them reported."
+          }
+        },
+        "description": "The rows to write, in one transaction."
       },
       "productsCreate": {
         "title": "productsCreate",
@@ -2152,7 +2759,7 @@
         }
       },
       "conflict": {
-        "description": "The request conflicts with what is already stored. Two kinds, told apart by the problem 'type': 'idempotency-conflict' means the 'Idempotency-Key' was already used by this caller for a request with a different body (retry with the same key and the same body to replay the first result, or send a fresh key); 'conflict' means a constraint the database enforces refused the write — a value another record already holds on a field declared unique, or a delete another record still references through a 'ref' declaring onDelete: restrict. The 'violations' array names the field for the first of those and carries a fix suggestion for both.",
+        "description": "The request conflicts with what is already stored. Two kinds, told apart by the problem 'type': 'idempotency-conflict' means the 'Idempotency-Key' was already used by this caller for a different request — a different body, but also a different row or a different 'If-Match', because the key covers the whole request (retry the identical request to replay its result, or send a fresh key); 'conflict' means a constraint the database enforces refused the write — a value another record already holds on a field declared unique, or a delete another record still references through a 'ref' declaring onDelete: restrict. The 'violations' array names the field for the first of those and carries a fix suggestion for both.",
         "headers": {
           "Cache-Control": {
             "$ref": "#/components/headers/Cache-Control"
@@ -2212,7 +2819,7 @@
       "idempotencyKey": {
         "name": "Idempotency-Key",
         "in": "header",
-        "description": "Makes this create retry-safe. The result is recorded against the key and the caller's own scope: the same key with the same body replays the first result and writes no second row, and the same key with a different body is 409. An anonymous caller's key is refused, because every anonymous caller shares one identity and their keys would share one space. The bound below is a **byte** bound — at most 255 bytes once UTF-8 encoded — so a key of non-ASCII characters reaches it sooner than `maxLength` suggests; an over-long key is refused rather than shortened, because two keys differing only past the cut would become one.",
+        "description": "Makes this write retry-safe. The result is recorded against the key and the caller's own scope, so the same key repeated replays the first result and writes nothing further: a retried create is the first row, a retried update is the row, and a retried delete is 204 rather than a 404 the caller cannot tell from somebody else's delete. The key covers **the whole request** — the method, the entity, the row it addresses, the `If-Match` it carries and the body — so the same key against another row, or with another `If-Match`, is 409 rather than a replay. An anonymous caller's key is refused, because every anonymous caller shares one identity and their keys would share one space. The bound below is a **byte** bound — at most 255 bytes once UTF-8 encoded — so a key of non-ASCII characters reaches it sooner than `maxLength` suggests; an over-long key is refused rather than shortened, because two keys differing only past the cut would become one.",
         "schema": {
           "maxLength": 255,
           "minLength": 1,

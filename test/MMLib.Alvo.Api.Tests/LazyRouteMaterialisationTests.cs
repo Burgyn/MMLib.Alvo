@@ -100,14 +100,15 @@ public sealed class LazyRouteMaterialisationTests
     }
 
     /// <summary>
-    /// A collection path, an item path and the query path, which is what six routes collapse to once the
-    /// verbs sharing a path are folded together.
+    /// A collection path, an item path, the query path and the batch path, which is what nine routes
+    /// collapse to once the verbs sharing a path are folded together.
     /// </summary>
     /// <remarks>
-    /// The body-shaped read is a <em>path</em> and not a sixth verb on an existing one, which is why this
-    /// number moves by one where the route count moves by one too — the two are not the same arithmetic.
+    /// The two arithmetics are deliberately different. The body-shaped read added one path and one route; the
+    /// batch added one path and <em>three</em> routes, because its three verbs share one path. A change that
+    /// moved these two numbers by the same amount would be describing something else.
     /// </remarks>
-    private const int PathsPerEntity = 3;
+    private const int PathsPerEntity = 4;
 
     /// <summary>
     /// <c>WebApplicationBuilder</c> wires <c>UseRouting</c>/<c>UseEndpoints</c> only when

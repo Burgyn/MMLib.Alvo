@@ -25,9 +25,18 @@ internal sealed class FaultingAlvoData : IAlvoData
     public Task<AlvoRecord> CreateAsync(string entity, IReadOnlyDictionary<string, object?> values, AlvoContext context, AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default) =>
         throw new InvalidOperationException(FailureMessage);
 
-    public Task<AlvoRecord> UpdateAsync(string entity, Guid id, IReadOnlyDictionary<string, object?> values, AlvoContext context, AlvoPrecondition? precondition = null, CancellationToken cancellationToken = default) =>
+    public Task<AlvoRecord> UpdateAsync(string entity, Guid id, IReadOnlyDictionary<string, object?> values, AlvoContext context, AlvoPrecondition? precondition = null, AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default) =>
         throw new InvalidOperationException(FailureMessage);
 
-    public Task DeleteAsync(string entity, Guid id, AlvoContext context, AlvoPrecondition? precondition = null, CancellationToken cancellationToken = default) =>
+    public Task DeleteAsync(string entity, Guid id, AlvoContext context, AlvoPrecondition? precondition = null, AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default) =>
+        throw new InvalidOperationException(FailureMessage);
+
+    public Task<AlvoBatchResult> CreateManyAsync(string entity, IReadOnlyList<IReadOnlyDictionary<string, object?>> rows, AlvoContext context, AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default) =>
+        throw new InvalidOperationException(FailureMessage);
+
+    public Task<AlvoBatchResult> UpdateManyAsync(string entity, IReadOnlyList<AlvoRowPatch> rows, AlvoContext context, AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default) =>
+        throw new InvalidOperationException(FailureMessage);
+
+    public Task<AlvoBatchResult> DeleteManyAsync(string entity, IReadOnlyList<Guid> ids, AlvoContext context, AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default) =>
         throw new InvalidOperationException(FailureMessage);
 }

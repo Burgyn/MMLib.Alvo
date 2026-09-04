@@ -340,7 +340,8 @@ internal sealed class AlvoDocumentTransformer(
     /// </remarks>
     private void Describe(OpenApiDocument document, EntityView view)
     {
-        new SchemaComponentBuilder(view.Schema, view.Hidden, view.ReadOnly).AddTo(document);
+        new SchemaComponentBuilder(view.Schema, view.Hidden, view.ReadOnly)
+            .AddTo(document, options.Value.MaxBatchRows);
         document.AddComponent(
             SchemaComponentBuilder.QueryId(view.Schema.Name),
             DataApiParameters.QueryBody(view.Schema, view.Hidden, options.Value));
@@ -534,13 +535,23 @@ internal sealed class AlvoDocumentTransformer(
         DataApiEndpointKind.Create => SchemaComponentBuilder.CreateId(entity),
         DataApiEndpointKind.Update => SchemaComponentBuilder.PatchId(entity),
         DataApiEndpointKind.Query => SchemaComponentBuilder.QueryId(entity),
+        DataApiEndpointKind.BatchCreate => SchemaComponentBuilder.BatchCreateId(entity),
+        DataApiEndpointKind.BatchUpdate => SchemaComponentBuilder.BatchUpdateId(entity),
+        DataApiEndpointKind.BatchDelete => SchemaComponentBuilder.BatchDeleteId(entity),
         _ => null,
     };
 
     /// <summary>What the body carries, which is a row on a write and the query parameters on a read.</summary>
-    private static string BodyDescription(DataApiEndpointKind kind) => kind == DataApiEndpointKind.Query
-        ? "The query parameters, as an object. An empty object reads the first page with no filter."
-        : "The row to write, as the entity's declared fields.";
+    private static string BodyDescription(DataApiEndpointKind kind) => kind switch
+    {
+        DataApiEndpointKind.Query =>
+            "The query parameters, as an object. An empty object reads the first page with no filter.",
+        DataApiEndpointKind.BatchCreate or DataApiEndpointKind.BatchUpdate
+            or DataApiEndpointKind.BatchDelete =>
+            "The rows to write, under a 'rows' array. A batch is one transaction: every row is written, or "
+            + "none is.",
+        _ => "The row to write, as the entity's declared fields.",
+    };
 
     /// <summary>
     /// Every response the operation can answer with, built from <see cref="DataApiDocumentation"/>'s catalogue
@@ -618,6 +629,9 @@ internal sealed class AlvoDocumentTransformer(
                 Json(new OpenApiSchemaReference(SchemaComponentBuilder.RowId(Named(entity).Name), document)),
             DataApiDocumentation.ResponseBody.Page =>
                 Json(new OpenApiSchemaReference(SchemaComponentBuilder.PageId(Named(entity).Name), document)),
+            DataApiDocumentation.ResponseBody.Batch =>
+                Json(new OpenApiSchemaReference(
+                    SchemaComponentBuilder.BatchResultId(Named(entity).Name), document)),
             DataApiDocumentation.ResponseBody.Problem =>
                 Media(ProblemMediaType, new OpenApiSchemaReference(ProblemComponents.DocumentId, document)),
             _ => null,

@@ -1,4 +1,5 @@
 ﻿using System.Data.Common;
+using System.Text.Json;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 
@@ -93,8 +94,43 @@ internal static class IdempotencyTable
     /// The record stored for one key in one scope, or <see langword="null"/> when the key is unused there.
     /// </summary>
     /// <param name="Fingerprint">The fingerprint of the request the key was first used for.</param>
-    /// <param name="RowId">The id of the row that first request created.</param>
-    internal readonly record struct IdempotencyRecord(string Fingerprint, Guid RowId);
+    /// <param name="RowIds">
+    /// The rows that request wrote, in the order it wrote them — one for every write this API had before
+    /// the batch, and more only for a batch.
+    /// </param>
+    internal readonly record struct IdempotencyRecord(string Fingerprint, IReadOnlyList<Guid> RowIds);
+
+    /// <summary>The rows a record covers, as the column's text.</summary>
+    /// <remarks>
+    /// <b>A JSON array in a column that has always been <c>TEXT</c>, so this is not a schema change.</b> It
+    /// could not be one: <see cref="EnsureAsync"/> and <c>SystemSchemaInitializer</c> both create the table
+    /// with <c>CREATE TABLE IF NOT EXISTS</c>, so a redefinition against an existing database is silently
+    /// skipped — and every statement naming a column that database does not have would then fail inside the
+    /// write transaction, where the contended-write retry would retry it ten times and surface it as an
+    /// unattributable 500. The column keeps its name for the same reason.
+    /// </remarks>
+    /// <param name="rowIds">The rows the write covered.</param>
+    internal static string Encode(IReadOnlyList<Guid> rowIds)
+    {
+        ArgumentNullException.ThrowIfNull(rowIds);
+        return JsonSerializer.Serialize(rowIds.Select(id => id.ToString()));
+    }
+
+    /// <summary>The rows a stored value names.</summary>
+    /// <remarks>
+    /// A value that does not begin with <c>[</c> is one row, which is the shape every record written before
+    /// this widening holds. Two lines, and they are what keeps a developer's existing local database working
+    /// across the commit rather than failing at its first replay. Nothing is released, so this is a courtesy
+    /// rather than a compatibility obligation.
+    /// </remarks>
+    /// <param name="stored">The column's text.</param>
+    internal static IReadOnlyList<Guid> Decode(string stored)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(stored);
+        return stored.StartsWith('[')
+            ? [.. JsonSerializer.Deserialize<string[]>(stored)!.Select(Guid.Parse)]
+            : [Guid.Parse(stored)];
+    }
 
     /// <summary>
     /// Creates the table if it does not exist yet, on <paramref name="connection"/> and outside any
@@ -158,14 +194,14 @@ internal static class IdempotencyTable
             await using (reader.ConfigureAwait(false))
             {
                 return await reader.ReadAsync(ct).ConfigureAwait(false)
-                    ? new IdempotencyRecord(reader.GetString(0), Guid.Parse(reader.GetString(1)))
+                    ? new IdempotencyRecord(reader.GetString(0), Decode(reader.GetString(1)))
                     : null;
             }
         }
     }
 
     /// <summary>
-    /// Records that <paramref name="token"/>'s key created <paramref name="rowId"/>, in the same transaction
+    /// Records that <paramref name="token"/>'s key wrote <paramref name="rowIds"/>, in the same transaction
     /// as the row itself — so the record and the row commit together or not at all.
     /// </summary>
     /// <param name="connection">The write transaction's own connection.</param>
@@ -173,7 +209,7 @@ internal static class IdempotencyTable
     /// <param name="tableName">The table name.</param>
     /// <param name="token">The caller's idempotency token.</param>
     /// <param name="scope">The key's scope, from <see cref="AlvoIdempotency.IdentityOf"/>.</param>
-    /// <param name="rowId">The id of the row this create inserted.</param>
+    /// <param name="rowIds">The rows this write inserted, in the order it wrote them.</param>
     /// <param name="createdAt">The instant the record is written, from the framework's own clock.</param>
     /// <param name="ct">A token to cancel the operation.</param>
     /// <remarks>
@@ -186,7 +222,7 @@ internal static class IdempotencyTable
         string tableName,
         AlvoIdempotency token,
         string scope,
-        Guid rowId,
+        IReadOnlyList<Guid> rowIds,
         DateTimeOffset createdAt,
         CancellationToken ct)
     {
@@ -202,7 +238,7 @@ internal static class IdempotencyTable
             RelationalSqlBatch.AddParameter(command, "@key", token.Key);
             RelationalSqlBatch.AddParameter(command, "@scope", scope);
             RelationalSqlBatch.AddParameter(command, "@fingerprint", token.Fingerprint);
-            RelationalSqlBatch.AddParameter(command, "@row_id", rowId.ToString());
+            RelationalSqlBatch.AddParameter(command, "@row_id", Encode(rowIds));
             RelationalSqlBatch.AddParameter(command, "@created_at", StoredInstant.Text(createdAt));
 
             await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);

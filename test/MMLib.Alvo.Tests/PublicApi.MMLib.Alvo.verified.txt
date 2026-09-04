@@ -13,6 +13,7 @@ namespace MMLib.Alvo.Api
     {
         public AlvoApiOptions() { }
         public int DefaultPageSize { get; set; }
+        public int MaxBatchRows { get; set; }
         public int MaxIdempotencyKeyBytes { get; set; }
         public int MaxPageSize { get; set; }
         public int MaxPayloadDepth { get; set; }

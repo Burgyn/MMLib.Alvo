@@ -100,6 +100,26 @@ internal sealed class SchemaComponentBuilder(
     /// <param name="entity">The entity name.</param>
     internal static string PageId(string entity) => entity + "Page";
 
+    /// <summary>The component id of the envelope a batch returns.</summary>
+    /// <param name="entity">The entity name.</param>
+    internal static string BatchResultId(string entity) => entity + "BatchResult";
+
+    /// <summary>The component id of the body a batch create accepts.</summary>
+    /// <param name="entity">The entity name.</param>
+    internal static string BatchCreateId(string entity) => entity + "BatchCreate";
+
+    /// <summary>The component id of the body a batch update accepts.</summary>
+    /// <param name="entity">The entity name.</param>
+    internal static string BatchUpdateId(string entity) => entity + "BatchUpdate";
+
+    /// <summary>The component id of the body a batch delete accepts.</summary>
+    /// <param name="entity">The entity name.</param>
+    internal static string BatchDeleteId(string entity) => entity + "BatchDelete";
+
+    /// <summary>The component id of one row of a batch update — the patch, plus the row key.</summary>
+    /// <param name="entity">The entity name.</param>
+    internal static string BatchPatchId(string entity) => entity + "BatchPatch";
+
     /// <summary>The component id of one item inside a list's page — the same fields as <see cref="RowId"/>, with no <c>required</c> list.</summary>
     /// <param name="entity">The entity name.</param>
     internal static string PageItemId(string entity) => entity + "PageItem";
@@ -112,7 +132,12 @@ internal sealed class SchemaComponentBuilder(
     /// be worse than building it where the options already are.
     /// </remarks>
     /// <param name="document">The document being built.</param>
-    internal void AddTo(OpenApiDocument document)
+    /// <param name="maxRows">
+    /// <see cref="AlvoApiOptions.MaxBatchRows"/>, published as the batch arrays' <c>maxItems</c>. Threaded in
+    /// rather than read here for the reason the <c>Query</c> component is built elsewhere: this builder holds
+    /// a schema view and no options.
+    /// </param>
+    internal void AddTo(OpenApiDocument document, int maxRows)
     {
         ArgumentNullException.ThrowIfNull(document);
         document.AddComponent(RowId(entity.Name), Row());
@@ -120,7 +145,124 @@ internal sealed class SchemaComponentBuilder(
         document.AddComponent(CreateId(entity.Name), Body(isUpdate: false));
         document.AddComponent(PatchId(entity.Name), Body(isUpdate: true));
         document.AddComponent(PageId(entity.Name), Page(document));
+        document.AddComponent(BatchPatchId(entity.Name), BatchPatch(document));
+        document.AddComponent(BatchResultId(entity.Name), BatchResult(document));
+        document.AddComponent(BatchCreateId(entity.Name), Rows(CreateId(entity.Name), document, maxRows));
+        document.AddComponent(BatchUpdateId(entity.Name), Rows(BatchPatchId(entity.Name), document, maxRows));
+        document.AddComponent(BatchDeleteId(entity.Name), RowIds(maxRows));
     }
+
+    /// <summary>A batch body: the reserved <c>rows</c> array, whose elements are <paramref name="item"/>.</summary>
+    /// <remarks>
+    /// One shape for the create and the update, because the only thing that differs between them is what one
+    /// element is — and that is exactly what a <c>$ref</c> is for. The array's own bound is
+    /// <see cref="AlvoApiOptions.MaxBatchRows"/>, published as <c>maxItems</c> so a client generator refuses
+    /// an over-long batch before it is sent rather than after.
+    /// </remarks>
+    /// <param name="item">The component id one row references.</param>
+    /// <param name="document">The document the item component is referenced from.</param>
+    /// <param name="maxRows">The configured row bound, published so a generator refuses before sending.</param>
+    private static OpenApiSchema Rows(string item, OpenApiDocument document, int maxRows) => new()
+    {
+        Type = JsonSchemaType.Object,
+        Description = "The rows to write, in one transaction.",
+        Properties = new Dictionary<string, IOpenApiSchema>(StringComparer.Ordinal)
+        {
+            ["rows"] = new OpenApiSchema
+            {
+                Type = JsonSchemaType.Array,
+                MinItems = 1,
+                MaxItems = maxRows,
+                Description = "One element per row, in the order you want them reported.",
+                Items = new OpenApiSchemaReference(item, document),
+            },
+        },
+        Required = new HashSet<string>(StringComparer.Ordinal) { "rows" },
+    };
+
+    /// <summary>A batch delete's body: the reserved <c>rows</c> array of row ids.</summary>
+    /// <param name="maxRows">The configured row bound, published so a generator refuses before sending.</param>
+    private static OpenApiSchema RowIds(int maxRows) => new()
+    {
+        Type = JsonSchemaType.Object,
+        Description = "The rows to remove, in one transaction.",
+        Properties = new Dictionary<string, IOpenApiSchema>(StringComparer.Ordinal)
+        {
+            ["rows"] = new OpenApiSchema
+            {
+                Type = JsonSchemaType.Array,
+                MinItems = 1,
+                MaxItems = maxRows,
+                Description = "One row id per element.",
+                Items = new OpenApiSchema { Type = JsonSchemaType.String, Format = "uuid" },
+            },
+        },
+        Required = new HashSet<string>(StringComparer.Ordinal) { "rows" },
+    };
+
+    /// <summary>One row of a batch update: the row key, plus the fields to change on it.</summary>
+    /// <remarks>
+    /// The key travels <em>in</em> the row rather than in the path, because a batch addresses many rows and a
+    /// path can address one. It is the only place <c>id</c> is a caller-supplied member on a write.
+    /// </remarks>
+    /// <param name="document">The document the patch component is referenced from.</param>
+    private OpenApiSchema BatchPatch(OpenApiDocument document) => new()
+    {
+        Type = JsonSchemaType.Object,
+        Title = BatchPatchId(entity.Name),
+        Description = "One row of a batch update: which row, and the fields to change on it.",
+        AllOf =
+        [
+            new OpenApiSchema
+            {
+                Type = JsonSchemaType.Object,
+                Properties = new Dictionary<string, IOpenApiSchema>(StringComparer.Ordinal)
+                {
+                    ["id"] = new OpenApiSchema
+                    {
+                        Type = JsonSchemaType.String,
+                        Format = "uuid",
+                        Description = "The row to change, exactly as a previous response returned it.",
+                    },
+                },
+                Required = new HashSet<string>(StringComparer.Ordinal) { "id" },
+            },
+            new OpenApiSchemaReference(PatchId(entity.Name), document),
+        ],
+    };
+
+    /// <summary>What a batch returns: the rows it wrote, and how many it affected.</summary>
+    /// <remarks>
+    /// <c>affected</c> is required and is the member a delete is read from — it produces no rows, so
+    /// <c>items</c> is empty and a caller checking only that could not tell a five-row delete from a refusal.
+    /// A refusal is not this shape at all: it is an RFC 9457 problem document with a 4xx status.
+    /// </remarks>
+    /// <param name="document">The document the item component is referenced from.</param>
+    private OpenApiSchema BatchResult(OpenApiDocument document) => new()
+    {
+        Type = JsonSchemaType.Object,
+        Title = BatchResultId(entity.Name),
+        Description = "What the batch wrote. A batch is one transaction, so this is never a partial outcome.",
+        Properties = new Dictionary<string, IOpenApiSchema>(StringComparer.Ordinal)
+        {
+            ["items"] = new OpenApiSchema
+            {
+                Type = JsonSchemaType.Array,
+                Description =
+                    "The rows the batch wrote, in the order you sent them. Empty for a batch delete, which "
+                    + "produces no rows — read `affected` there.",
+                Items = new OpenApiSchemaReference(PageItemId(entity.Name), document),
+            },
+            ["affected"] = new OpenApiSchema
+            {
+                Type = JsonSchemaType.Integer,
+                Format = "int32",
+                Minimum = "0",
+                Description = "How many rows the batch wrote or removed.",
+            },
+        },
+        Required = new HashSet<string>(StringComparer.Ordinal) { "items", "affected" },
+    };
 
     /// <summary>
     /// The row a single read, a create or an update returns: every field the caller may see, with the

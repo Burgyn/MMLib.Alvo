@@ -1042,6 +1042,7 @@ Each line with the issue or the PR that owns it.
 | **`function`**, **`http.call`** | frozen in the schema, out of scope for all of PR5 |
 | **`entity.update`** | PR5b's automation half — still open |
 | ~~**Before-hooks**, the `CelProfile.Mutate` profile~~ | **done** — PR5b (#114); see *Before-hooks* above |
+| **Batch event coalescing** — one event for a batch rather than one per row | **#193** (see below) |
 | **The budget-overrun rollback** | **not built, and not scheduled**: there is no wall-clock budget to overrun — the bound is the grammar (deviation 81, and *What bounds a hook's execution time* above) |
 | **Before-hooks in `InMemoryAlvoData`** | **not built** — the public in-memory reference runs the policy engine but no hook pipeline, so a host testing against the double sees a `reject` not refuse and a `mutate` not apply. Deliberate (the contract suite is inherited by the two relational drivers, which have a transaction to run a hook in), and recorded as an **owed obligation** rather than a mere absence: deviation 85 |
 | **Automation** (`event` + `schedule` triggers), cron, and cron's distributed lock | PR5b's automation half — still open (the lock: deviation 74) |
@@ -1058,6 +1059,29 @@ Each line with the issue or the PR that owns it.
 | **Bulk coalescing** (`entity.orders.created.batch`) | unscheduled; the base design places it with automation, and `baas-analyza.md:682` is its criterion. Every write emits its own event today |
 
 **This PR does not close #22.** It closes PR5a's half; #22 closes when PR5b merges.
+
+## A batch emits one event per row, and the source asks for one per batch
+
+**What #106 ships:** a transactional batch writes N rows and emits **N events**, one per row, all inside the
+same transaction and all carrying the same instant. A 500-row import therefore fans out to 500 outbox rows
+and 500 deliveries.
+
+**What the source asks for**, in as many words — `baas-analyza` §3: *"import 10k riadkov nesmie znamenať 10k
+webhookov"*, with the acceptance criterion *"Bulk insert 10k riadkov s batch pravidlom = 1 batch event"*.
+
+**Why it is not in #106.** Coalescing is a **descriptor** feature, not a write-path one. A rule has to
+*declare* batch delivery — which is a schema change (`$defs/rule` gains a delivery mode), a compiler change
+(the catalogue has to carry it), and a new event shape (an envelope whose `data` is many rows rather than
+one, with its own `type` slug so a subscriber can tell them apart). Building that inside a data-path PR would
+land the descriptor change invisibly, as a side effect of a batch write, in a PR nobody would review for
+schema evolution.
+
+**What it costs until then**, stated so nobody discovers it: an import at the row bound produces 1000 outbox
+rows in one transaction and 1000 dispatcher deliveries after it, against endpoints that may rate-limit. A
+host importing at scale today should either import below the fan-out its subscribers tolerate, or disable the
+rule for the duration.
+
+Tracked as **#193**.
 
 ## What PR5b and F7 inherit
 

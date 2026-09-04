@@ -134,6 +134,43 @@ public abstract class AlvoDataBeforeHookTests
     }
 
     /// <summary>
+    /// A <c>reject</c> inside a <b>batch</b> refuses that row by its own index, rather than aborting the
+    /// whole batch anonymously.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="AlvoBatchResult.Refusals"/> promises that every refused row is named. A hook's
+    /// <c>reject</c> raises <see cref="AlvoAuthorizationException"/>, which is how a single write reports it
+    /// — and left to propagate out of a batch's judging pass it would give the caller a bare refusal with
+    /// nothing to repair, on a request where the whole point of the refusal list is that they can repair it.
+    /// </para>
+    /// <para>
+    /// The control is the neighbouring row: it is a create the hook admits, so "refused" cannot pass because
+    /// the batch path refuses everything.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_reject_inside_a_batch_names_the_row_it_refused()
+    {
+        var world = await DealsWorldAsync();
+
+        var result = await world.Data.CreateManyAsync(
+            Deals,
+            [
+                Payload(("tenant_id", Caller.Tenant!.Value.Value), ("title", "ordinary deal"), ("stage", "lead")),
+                Payload(("tenant_id", Caller.Tenant!.Value.Value), ("title", "blocked deal"), ("stage", Blocked)),
+            ],
+            Caller,
+            cancellationToken: Ct);
+
+        result.Succeeded.ShouldBeFalse();
+        var refusal = result.Refusals.ShouldHaveSingleItem();
+        refusal.Index.ShouldBe(1, "the row the hook refused, not the whole batch");
+        refusal.Message.ShouldContain(BlockedCreateRefusal, customMessage: "the author's own text reaches the caller");
+        (await VisibleAsync(world)).ShouldBeEmpty("a refused batch leaves nothing behind");
+    }
+
+    /// <summary>
     /// The counterweight to the refusal: a create whose <c>reject</c> condition is false is not refused. An
     /// implementation that refused every write would satisfy the fact above on its own.
     /// </summary>
@@ -322,6 +359,101 @@ public abstract class AlvoDataBeforeHookTests
             cancellationToken: Ct);
 
         created["owner_id"].ShouldBe(Caller.User.Value);
+    }
+
+    /// <summary>
+    /// <b>A hook cannot patch a row past the check inside a batch either.</b> The batch's judging pass runs
+    /// the hooks and re-judges what they produced; without that second verdict a row the <c>create</c> rule
+    /// refuses would be stored, written through a hook, once per batch row.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is <see cref="A_mutate_that_moves_a_row_out_of_the_create_rule_is_refused"/> at batch scale, and
+    /// it needs its own fact because the batch's re-verdict is a <em>second copy</em> of that closer —
+    /// <c>EfAlvoData.RunBeforeCreateOrRefuse</c> — living on a different path. Delete it and the single-row
+    /// fact stays green.
+    /// </para>
+    /// <para>
+    /// The good row beside the bad one is the control: it proves the batch was refused for the patched row
+    /// rather than because the batch path refuses everything, and the count proves it wrote nothing at all.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_mutate_cannot_move_a_row_out_of_the_create_rule_inside_a_batch()
+    {
+        var world = await DealsWorldAsync();
+        var stranger = Guid.Parse("bbbbbbbb-0000-0000-0000-000000000003");
+
+        var result = await world.Data.CreateManyAsync(
+            Guarded,
+            [
+                Payload(("owner_id", Caller.User.Value), ("requested_owner", Caller.User.Value)),
+                Payload(("owner_id", Caller.User.Value), ("requested_owner", stranger)),
+            ],
+            Caller,
+            cancellationToken: Ct);
+
+        result.Succeeded.ShouldBeFalse("the hook moved row 1 out of the create rule");
+        result.Refusals.Select(refusal => refusal.Index).ShouldBe([1]);
+        (await world.Data.QueryAsync(new AlvoQuery { Entity = Guarded }, Caller, Ct)).Items.ShouldBeEmpty(
+            "and a refused batch leaves neither row behind");
+    }
+
+    /// <summary>
+    /// The counterweight: a batch whose patches the rule accepts still lands, so the fact above cannot pass
+    /// on a batch path that refuses every patched write.
+    /// </summary>
+    [Fact]
+    public async Task A_batch_whose_mutates_the_create_rule_accepts_still_lands()
+    {
+        var world = await DealsWorldAsync();
+
+        var result = await world.Data.CreateManyAsync(
+            Guarded,
+            [
+                Payload(("owner_id", Caller.User.Value), ("requested_owner", Caller.User.Value)),
+                Payload(("owner_id", Caller.User.Value), ("requested_owner", Caller.User.Value)),
+            ],
+            Caller,
+            cancellationToken: Ct);
+
+        result.Succeeded.ShouldBeTrue();
+        result.Rows.Count.ShouldBe(2);
+    }
+
+    /// <summary>
+    /// <b>The row that lands is the row that was judged.</b> The hook runs in the judging pass, and what is
+    /// stored is what that verdict consumed rather than something a write pass re-derived.
+    /// </summary>
+    /// <remarks>
+    /// The <c>mutate</c> on this fixture lower-cases the title and assigns a code the caller may not write.
+    /// Reading both back off every stored row is what says the judged image is the stored one: a write pass
+    /// that re-derived the row from the caller's payload would store the caller's casing and no code at all.
+    /// </remarks>
+    [Fact]
+    public async Task Every_row_a_batch_stores_is_the_row_its_hook_produced()
+    {
+        var world = await DealsWorldAsync();
+
+        var result = await world.Data.CreateManyAsync(
+            Deals,
+            [
+                Payload(("tenant_id", Caller.Tenant!.Value.Value), ("title", "FIRST"), ("stage", "lead")),
+                Payload(("tenant_id", Caller.Tenant!.Value.Value), ("title", "SECOND"), ("stage", "lead")),
+            ],
+            Caller,
+            cancellationToken: Ct);
+
+        result.Rows.Count.ShouldBe(2);
+        foreach (var row in result.Rows)
+        {
+            row["code"].ShouldBe(AssignedCode, "the hook's own value, on every row");
+        }
+
+        (await VisibleAsync(world)).Select(row => row["title"]).ShouldBe(
+            ["first", "second"],
+            ignoreOrder: true,
+            customMessage: "the stored title is the hook's output, not the caller's casing");
     }
 
     private const string Deals = "deals";

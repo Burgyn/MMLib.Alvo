@@ -144,6 +144,19 @@ internal static class JsonPayloadReader
             return Refused(PayloadViolations.NotAnObject());
         }
 
+        return BindObject(payload, entity);
+    }
+
+    /// <summary>Binds one already-parsed object to <paramref name="entity"/>'s declared fields.</summary>
+    /// <remarks>
+    /// Split out of <see cref="Bind"/> when the batch arrived: a batch parses one body and binds N objects
+    /// out of it, so the binding has to be reachable without a stream. The bounds are still enforced once,
+    /// over the whole body, by <see cref="BoundedJsonBody"/> — this half is pure binding.
+    /// </remarks>
+    /// <param name="payload">The object to bind.</param>
+    /// <param name="entity">The entity being written, as the applied schema declares it.</param>
+    internal static Payload BindObject(JsonObject payload, EntitySchema entity)
+    {
         var declared = DeclaredFields(entity);
         var values = new Dictionary<string, object?>(StringComparer.Ordinal);
         var violations = new List<AlvoViolation>();

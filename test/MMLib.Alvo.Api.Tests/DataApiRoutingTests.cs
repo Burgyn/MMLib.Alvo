@@ -20,10 +20,10 @@ public sealed class DataApiRoutingTests
 
     /// <summary>
     /// The whole route table, spelled out rather than derived from the code that builds it. The count is
-    /// asserted too: a seventh route per entity, or a stray catch-all, has to fail something.
+    /// asserted too: a tenth route per entity, or a stray catch-all, has to fail something.
     /// </summary>
     [Fact]
-    public async Task Every_entity_in_the_applied_schema_gets_six_routes()
+    public async Task Every_entity_in_the_applied_schema_gets_nine_routes()
     {
         await using var world = await AlvoApiWorld.VehicleRegistryAsync();
 
@@ -37,11 +37,14 @@ public sealed class DataApiRoutingTests
             routes.ShouldContain($"POST /api/{entity}/query");
             routes.ShouldContain($"PATCH /api/{entity}/{{id:guid}}");
             routes.ShouldContain($"DELETE /api/{entity}/{{id:guid}}");
+            routes.ShouldContain($"POST /api/{entity}/batch");
+            routes.ShouldContain($"PATCH /api/{entity}/batch");
+            routes.ShouldContain($"DELETE /api/{entity}/batch");
         }
 
         routes.Count.ShouldBe(
-            _entities.Length * 6,
-            $"exactly six routes per declared entity and nothing else: {string.Join(", ", routes)}");
+            _entities.Length * 9,
+            $"exactly nine routes per declared entity and nothing else: {string.Join(", ", routes)}");
     }
 
     /// <summary>
@@ -312,7 +315,7 @@ public sealed class DataApiRoutingTests
 
         var endpoints = world.Endpoints;
 
-        endpoints.Count.ShouldBe(_entities.Length * 6, "or this fact is asserting over the wrong set");
+        endpoints.Count.ShouldBe(_entities.Length * 9, "or this fact is asserting over the wrong set");
         foreach (var endpoint in endpoints)
         {
             var marker = endpoint.Metadata.GetMetadata<DataApiOperationMetadata>();
@@ -336,6 +339,9 @@ public sealed class DataApiRoutingTests
         DataApiEndpointKind.Create.ToDataOperation().ShouldBe(DataOperation.Create);
         DataApiEndpointKind.Update.ToDataOperation().ShouldBe(DataOperation.Update);
         DataApiEndpointKind.Delete.ToDataOperation().ShouldBe(DataOperation.Delete);
+        DataApiEndpointKind.BatchCreate.ToDataOperation().ShouldBe(DataOperation.Create);
+        DataApiEndpointKind.BatchUpdate.ToDataOperation().ShouldBe(DataOperation.Update);
+        DataApiEndpointKind.BatchDelete.ToDataOperation().ShouldBe(DataOperation.Delete);
     }
 
     /// <summary>
@@ -351,6 +357,9 @@ public sealed class DataApiRoutingTests
         DataApiEndpointKind.Update.ToWireName().ShouldBe("update");
         DataApiEndpointKind.Delete.ToWireName().ShouldBe("delete");
         DataApiEndpointKind.Query.ToWireName().ShouldBe("query");
+        DataApiEndpointKind.BatchCreate.ToWireName().ShouldBe("batchCreate");
+        DataApiEndpointKind.BatchUpdate.ToWireName().ShouldBe("batchUpdate");
+        DataApiEndpointKind.BatchDelete.ToWireName().ShouldBe("batchDelete");
 
         var kinds = Enum.GetValues<DataApiEndpointKind>();
         kinds.Select(kind => kind.ToWireName()).Distinct(StringComparer.Ordinal).Count().ShouldBe(kinds.Length);
