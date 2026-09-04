@@ -265,7 +265,7 @@ internal sealed partial class AlvoEndpointDataSource : EndpointDataSource
     private static partial void AHostConventionFailed(ILogger logger, Exception? failure, string reason);
 
     /// <summary>
-    /// Maps one entity's five routes for every entity the applied schema declares, and flattens what the
+    /// Maps one entity's six routes for every entity the applied schema declares, and flattens what the
     /// <c>Map*</c> helpers produced.
     /// </summary>
     /// <remarks>

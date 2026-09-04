@@ -90,17 +90,24 @@ public sealed class LazyRouteMaterialisationTests
         {
             paths.ShouldContain($"/api/{entity}");
             paths.ShouldContain($"/api/{entity}/{{id}}");
+            paths.ShouldContain($"/api/{entity}/query");
         }
 
         paths.Count.ShouldBe(
             _entities.Length * PathsPerEntity,
-            $"the document must list a collection and an item path per declared entity: {string.Join(", ", paths)}");
+            "the document must list a collection, an item and a query path per declared entity: "
+            + string.Join(", ", paths));
     }
 
     /// <summary>
-    /// A collection path and an item path, which is what five routes collapse to once the verbs share a path.
+    /// A collection path, an item path and the query path, which is what six routes collapse to once the
+    /// verbs sharing a path are folded together.
     /// </summary>
-    private const int PathsPerEntity = 2;
+    /// <remarks>
+    /// The body-shaped read is a <em>path</em> and not a sixth verb on an existing one, which is why this
+    /// number moves by one where the route count moves by one too — the two are not the same arithmetic.
+    /// </remarks>
+    private const int PathsPerEntity = 3;
 
     /// <summary>
     /// <c>WebApplicationBuilder</c> wires <c>UseRouting</c>/<c>UseEndpoints</c> only when

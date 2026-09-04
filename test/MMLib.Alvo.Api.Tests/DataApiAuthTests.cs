@@ -179,6 +179,100 @@ public sealed class DataApiAuthTests
     }
 
     /// <summary>
+    /// The body-shaped read's gate. Its own fact rather than a variation of the <c>list</c> one: it is a
+    /// second route with its own filter, and the whole risk of a second way to reach one read is that only
+    /// one of the two is gated.
+    /// </summary>
+    /// <remarks>
+    /// The <c>vehicles</c> control is what makes "no statement" non-vacuous — the same key, over an entity
+    /// whose <c>list</c> rule is character-for-character identical, does reach the store through this same
+    /// route.
+    /// </remarks>
+    [Fact]
+    public async Task A_key_whose_scope_excludes_the_entity_cannot_query_it_through_a_body()
+    {
+        var narrow = new TestApiKey("narrow-key", ["authenticated"], ["vehicles:read"]);
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync([narrow]);
+        world.ClearStatements();
+
+        using var refused = await world.SendAsync(
+            HttpMethod.Post, "/api/owners/query", narrow, body: new JsonObject());
+        var statementsAfterRefusal = world.Statements;
+        using var allowed = await world.SendAsync(
+            HttpMethod.Post, "/api/vehicles/query", narrow, body: new JsonObject());
+
+        refused.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        statementsAfterRefusal.ShouldBeEmpty("the scope gate must refuse before the port composes a statement");
+        allowed.StatusCode.ShouldBe(HttpStatusCode.OK);
+        world.Statements.ShouldNotBeEmpty(
+            "the in-scope query must reach the store, or 'no statement' above proves nothing");
+    }
+
+    /// <summary>
+    /// An entity whose <c>list</c> the descriptor configures no rule for is refused for everybody through
+    /// this route too — default-deny is a property of the operation, and a second transport must not be a
+    /// second answer.
+    /// </summary>
+    /// <remarks>
+    /// The same caller's <c>create</c> on that entity is the control: <c>ledgers</c> configures one, so a
+    /// 403 here is about the unconfigured <c>list</c> and not about this key.
+    /// </remarks>
+    [Fact]
+    public async Task An_entity_whose_list_is_unconfigured_cannot_be_queried_through_a_body()
+    {
+        var caller = new TestApiKey("caller-key", ["authenticated"], ["*:read", "*:write"]);
+        await using var world = await AlvoApiWorld.FromDescriptorAsync("masked-notes.alvo.json", [caller]);
+        world.ClearStatements();
+
+        using var refused = await world.SendAsync(
+            HttpMethod.Post, "/api/ledgers/query", caller, body: new JsonObject());
+        var statementsAfterRefusal = world.Statements;
+        using var created = await world.SendAsync(
+            HttpMethod.Post, "/api/ledgers", caller, body: new JsonObject { ["title"] = "Ledger" });
+
+        refused.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        statementsAfterRefusal.ShouldBeEmpty("default-deny must refuse before the port composes a statement");
+        created.StatusCode.ShouldBe(
+            HttpStatusCode.Created, "or the 403 above is about this key rather than about the missing rule");
+    }
+
+    /// <summary>
+    /// An anonymous caller is judged by policy on the body-shaped read exactly as on the collection
+    /// <c>GET</c> — same status, same bytes — and a rule that excludes them yields an empty page rather
+    /// than rows.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Worth its own fact because a <c>POST</c>-that-reads is the shape a cross-site form produces.</b>
+    /// Alvo's credential is an explicit request header and never a cookie, so such a request arrives with no
+    /// credential at all — which is this fact's caller. What it must not do is answer differently from the
+    /// <c>GET</c>, or hand back a row.
+    /// </para>
+    /// <para>
+    /// This descriptor's <c>list</c> rule is a role test, which compiles to a row-level <c>USING</c>
+    /// predicate — so an anonymous caller receives an <em>allow</em> carrying a predicate that matches
+    /// nothing, and the documented answer is 200 with an empty page rather than 403. The unconfigured-rule
+    /// case, which is the one that really is a denial, is the fact above.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task An_anonymous_caller_is_answered_the_same_way_on_both_collection_reads()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin]);
+        await CreateOwnerAsync(world, "Acme Ltd");
+
+        using var byUrl = await world.SendAsync(HttpMethod.Get, "/api/owners", key: null);
+        using var byBody = await world.SendAsync(
+            HttpMethod.Post, "/api/owners/query", key: null, body: new JsonObject());
+
+        byBody.StatusCode.ShouldBe(byUrl.StatusCode);
+        var bodyText = await byBody.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        bodyText.ShouldBe(await byUrl.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        (await byBody.ReadJsonObjectAsync())["items"]!.AsArray().ShouldBeEmpty(
+            "a caller no rule admits must see no row, whichever surface they used");
+    }
+
+    /// <summary>
     /// The <c>get</c> endpoint's gate. Its own fact rather than a variation of the <c>list</c> one:
     /// <c>MapGet</c> carries its own filter with its own operation constant, and a read of one row by id
     /// is exactly the request a caller reaches for when a list was refused.

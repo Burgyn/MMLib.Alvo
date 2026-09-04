@@ -13,7 +13,7 @@ using System.Text.Json.Nodes;
 namespace MMLib.Alvo.Api.Internal;
 
 /// <summary>
-/// Maps the five minimal-API delegates one entity gets, onto the five <c>IAlvoData</c> members.
+/// Maps the six minimal-API delegates one entity gets, onto the five <c>IAlvoData</c> members.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -21,6 +21,13 @@ namespace MMLib.Alvo.Api.Internal;
 /// route for an entity the descriptor does not declare and answer it from the store — turning a routing
 /// question into a port question, and making the OpenAPI document unable to list real paths. With
 /// literals, "this entity does not exist" is a 404 that routing produces before anything is resolved.
+/// </para>
+/// <para>
+/// <b>Six delegates, five port members: the two collection reads are one read.</b>
+/// <c>POST {prefix}/{entity}/query</c> takes the same parameters in a JSON body, for a filter a request
+/// line cannot carry (#107), and reaches <c>QueryStringParser</c> through the same
+/// <see cref="PageAsync"/> tail — so there is exactly one place the projection, the count preference and
+/// the page envelope are assembled, and no second grammar for the two to disagree over.
 /// </para>
 /// <para>
 /// <b>PATCH, not PUT.</b> <c>UpdateAsync</c> is partial by contract — "a field this dictionary does not
@@ -33,20 +40,20 @@ namespace MMLib.Alvo.Api.Internal;
 /// <see cref="AlvoContext"/> as a parameter on purpose.
 /// </para>
 /// <para>
-/// <b>Four of the five delegates resolve the operation's decision before doing any work, and none of them
+/// <b>Five of the six delegates resolve the operation's decision before doing any work, and none of them
 /// is the authority for it.</b> The distinction is the whole of this layer's relationship with
 /// authorization, and it is worth stating precisely rather than as "this layer never re-checks a decision",
 /// which the code contradicts at four call sites. What each delegate does is refuse, up front, exactly what
 /// the port would refuse anyway — same engine, same catalog, same context — and then call the port, which
 /// resolves again and remains the authority. So nothing is admitted here that the port would refuse, and
-/// nothing is refused here that the port would admit. The fifth, <c>GET {id}</c>, has no such call because
+/// nothing is refused here that the port would admit. The one exception, <c>GET {id}</c>, has no such call because
 /// there it would be observationally inert; <see cref="EnsureOperationIsAllowed"/> carries both the reason
 /// and the trigger for adding it.
 /// </para>
 /// </remarks>
 internal static class DataApiEndpoints
 {
-    /// <summary>Maps one entity's five routes under <paramref name="prefix"/>.</summary>
+    /// <summary>Maps one entity's six routes under <paramref name="prefix"/>.</summary>
     /// <param name="endpoints">The route builder to map onto.</param>
     /// <param name="entity">The entity as the applied schema declares it.</param>
     /// <param name="prefix">The normalized route prefix, with no trailing slash.</param>
@@ -65,8 +72,10 @@ internal static class DataApiEndpoints
     {
         var collection = $"{prefix}/{entity.Name}";
         var item = $"{collection}/{{id:guid}}";
+        var query = $"{collection}/query";
 
         MapList(endpoints, entity, collection, options, filters, conventions);
+        MapQuery(endpoints, entity, query, options, filters, conventions);
         MapGet(endpoints, entity, item, filters, conventions);
         MapCreate(endpoints, entity, collection, options, filters, formats, conventions);
         MapUpdate(endpoints, entity, item, options, filters, formats, conventions);
@@ -92,23 +101,121 @@ internal static class DataApiEndpoints
                     var decision = EnsureOperationIsAllowed(
                         policies, entity.Name, DataApiEndpointKind.List.ToDataOperation(), context);
 
-                    // The parser needs this caller's mask so a filter over a hidden field is refused exactly
-                    // as one over an undeclared field is; the decision resolved above is that mask, which is
-                    // why the refusal has to come first. See EnsureOperationIsAllowed for the oracle it closes.
-                    if (!QueryStringParser.TryParse(
-                            http.Request.Query, entity, decision.HiddenFields, options,
-                            out var request, out var violations))
-                    {
-                        return ProblemResultFactory.MalformedQuery(violations);
-                    }
-
-                    var counted = PreferHeader.Count(http.Request.Headers[PreferHeader.Name]);
-                    var query = request!.Query with { IncludeTotalCount = counted is not null };
-                    var page = await data.QueryAsync(query, context, ct).ConfigureAwait(false);
-                    ApplyCountPreference(http.Response, counted);
-                    return Json(DataApiPage.From(page, request.Select));
+                    return await PageAsync(
+                        http, data, entity, options, decision, http.Request.Query, context, ct)
+                        .ConfigureAwait(false);
                 }))
             .Protect(entity, DataApiEndpointKind.List, filters, conventions);
+
+    /// <summary>
+    /// Maps the body-shaped collection read: the same parameters, the same parser and the same page, for a
+    /// filter a request line cannot carry.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Gated as <c>list</c>, and it resolves that decision before reading a byte of the body</b> — the
+    /// precedence a create keeps, for the same three reasons <see cref="EnsureOperationIsAllowed"/> gives:
+    /// a denied caller must be told they are denied rather than that their body is malformed; parsing up to
+    /// <see cref="AlvoApiOptions.MaxRequestBodyBytes"/> for a caller who cannot succeed is the amplifier the
+    /// payload bounds exist against; and the allow decision's <see cref="PolicyDecision.HiddenFields"/> is
+    /// the mask the parser needs, so the resolve replaces the one the mask already required.
+    /// </para>
+    /// <para>
+    /// The operation it gates as is read from the kind rather than named a second time here. Two encodings
+    /// of one mapping is how a route comes to be filtered as one operation and refused as another.
+    /// </para>
+    /// <para>
+    /// <b>A POST that reads is not a cross-site vector here</b>, and the reason is worth stating so the
+    /// absence of a token reads as a decision: a credential is presented in an explicit request header
+    /// (<see cref="Auth.AlvoAuthOptions.HeaderName"/>) and never in a cookie, so a cross-site form POST
+    /// carries none and is judged anonymous — which default-deny answers exactly as it answers any other
+    /// credential-less caller.
+    /// </para>
+    /// <para>
+    /// <c>Idempotency-Key</c> is accepted and ignored here. It is a read: no second row exists to prevent
+    /// and nothing could be replayed. It is declared in the operation's own prose rather than left to be
+    /// discovered, because <c>POST</c> is the verb that triggers the blanket-attach habit several SDKs have.
+    /// </para>
+    /// </remarks>
+    private static void MapQuery(
+        IEndpointRouteBuilder endpoints,
+        EntitySchema entity,
+        string pattern,
+        AlvoApiOptions options,
+        AlvoContextFilterFactory filters,
+        AlvoDataApiConventions conventions) =>
+        endpoints.MapPost(pattern, (
+                    HttpContext http,
+                    IAlvoData data,
+                    IPolicyEngine policies,
+                    IAlvoContextAccessor caller,
+                    CancellationToken ct) =>
+                ProblemResultFactory.GuardAsync(async () =>
+                {
+                    var context = Caller(caller);
+                    var decision = EnsureOperationIsAllowed(
+                        policies, entity.Name, DataApiEndpointKind.Query.ToDataOperation(), context);
+
+                    var body = await QueryBodyReader.ReadAsync(http.Request, options, ct).ConfigureAwait(false);
+                    if (body.Parameters is not { } parameters)
+                    {
+                        return ProblemResultFactory.MalformedQuery(body.Violations);
+                    }
+
+                    return await PageAsync(http, data, entity, options, decision, parameters, context, ct)
+                        .ConfigureAwait(false);
+                }))
+            .Protect(entity, DataApiEndpointKind.Query, filters, conventions);
+
+    /// <summary>
+    /// Parses one set of list parameters and answers the page they describe — the whole of what the two
+    /// collection reads have in common, which is everything after the parameters have been obtained.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>One method rather than two, and that is the design rather than an economy.</b> #107's binding
+    /// constraint is that the body must not become a second grammar; a second copy of this tail would be a
+    /// second place for the projection, the count preference and the envelope to be assembled, which is
+    /// where the two surfaces would begin to differ without any fact noticing.
+    /// </para>
+    /// <para>
+    /// <b>The parser is handed the caller's mask, which is why the decision is resolved by the caller and
+    /// passed in.</b> A filter over a hidden field must be refused exactly as one over an undeclared field
+    /// is, and a denied decision carries an <em>empty</em> mask — see
+    /// <see cref="EnsureOperationIsAllowed"/> for the oracle that closes and why the refusal has to come
+    /// first.
+    /// </para>
+    /// </remarks>
+    /// <param name="http">The request, read for its <c>Prefer</c> header and written for the applied one.</param>
+    /// <param name="data">The port the page is read through.</param>
+    /// <param name="entity">The entity being listed, as the applied schema declares it.</param>
+    /// <param name="options">The API options the paging defaults and bounds come from.</param>
+    /// <param name="decision">The caller's allow decision, whose mask the parser is handed.</param>
+    /// <param name="parameters">The list parameters, from the query string or from the body.</param>
+    /// <param name="context">The caller the read is performed as.</param>
+    /// <param name="ct">A token to cancel the read.</param>
+    private static async Task<IResult> PageAsync(
+        HttpContext http,
+        IAlvoData data,
+        EntitySchema entity,
+        AlvoApiOptions options,
+        PolicyDecision decision,
+        IQueryCollection parameters,
+        AlvoContext context,
+        CancellationToken ct)
+    {
+        if (!QueryStringParser.TryParse(
+                parameters, entity, decision.HiddenFields, options, out var request, out var violations))
+        {
+            return ProblemResultFactory.MalformedQuery(violations);
+        }
+
+        var counted = PreferHeader.Count(http.Request.Headers[PreferHeader.Name]);
+        var query = request!.Query with { IncludeTotalCount = counted is not null };
+        var page = await data.QueryAsync(query, context, ct).ConfigureAwait(false);
+        ApplyCountPreference(http.Response, counted);
+        return Json(DataApiPage.From(page, request.Select));
+    }
 
     /// <summary>
     /// Reports what was done with the caller's <c>count</c> preference, per RFC 7240 §3 — and always
@@ -372,7 +479,7 @@ internal static class DataApiEndpoints
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>Called on all five verbs, and the uniformity is load-bearing rather than tidiness.</b> It started
+    /// <b>Called on every generated route but one, and the uniformity is load-bearing rather than tidiness.</b> It started
     /// on the two write verbs, for two reasons that only applied there. First, resource cost: parsing up to
     /// <see cref="AlvoApiOptions.MaxRequestBodyBytes"/> on behalf of a caller who cannot succeed is a
     /// denial-of-service amplifier, and it is the same reasoning the payload bounds exist for. Second,
@@ -397,7 +504,7 @@ internal static class DataApiEndpoints
     /// get to use.
     /// </para>
     /// <para>
-    /// <b>Called on four of the five, not all five — <c>MapGet</c> deliberately has no such call.</b> There it
+    /// <b>Called on five of the six, not all six — <c>MapGet</c> deliberately has no such call.</b> There it
     /// would be indistinguishable: <c>GetAsync</c> resolves the same decision and raises the same exception, so
     /// a denied reader sees the same 403 either way and deleting the call fails nothing. It was added for
     /// uniformity and removed again for a better reason than symmetry — <b>a control no test can distinguish is
@@ -965,7 +1072,7 @@ internal static class DataApiEndpoints
     /// the router — there is no second place for the two to disagree.
     /// </para>
     /// <para>
-    /// <b>Not <c>LinkGenerator</c>, deliberately.</b> Generating by route name would mean naming all five of
+    /// <b>Not <c>LinkGenerator</c>, deliberately.</b> Generating by route name would mean naming every one of
     /// every entity's routes, and route names are process-global: two <c>MapAlvoDataApi()</c> calls under two
     /// groups — the very shape this fixes — would then collide at startup. The create endpoint's pattern
     /// <em>is</em> the collection path and carries no parameter to substitute, so appending the id needs no
