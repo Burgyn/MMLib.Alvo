@@ -121,6 +121,17 @@ internal static class QueryStringParser
         private IReadOnlyList<ProjectedField>? _select;
 
         /// <summary>Each response key the projection has claimed, and the field it answers from.</summary>
+        /// <remarks>
+        /// <b>A dictionary rather than a scan of the assembled list.</b> The lookup runs once per
+        /// comma-separated entry and the entry count is bounded only by the transport's URL length, while
+        /// the width bound caps the number of <em>distinct</em> keys — so a repeated entry that dedupes may
+        /// arrive thousands of times, and a list scan would have made the total quadratic in a length the
+        /// caller chooses.
+        /// </remarks>
+        /// <remarks>
+        /// Per-parse state rather than a parameter, which is safe because a second <c>select</c> is already
+        /// refused as a repeated parameter before either reader runs.
+        /// </remarks>
         private Dictionary<string, string>? _claimedKeys;
 
         /// <summary>
@@ -318,13 +329,6 @@ internal static class QueryStringParser
                 return;
             }
 
-            // A dictionary rather than a scan of the list: the claimed-key lookup runs once per comma-
-            // separated entry, and the entry count is bounded only by the transport's URL length. The
-            // width bound below caps the number of *distinct* keys, not the number of entries, so a
-            // repeated entry that dedupes is free to arrive thousands of times — with a list scan each one
-            // would have paid O(keys claimed so far), and the total would have been quadratic in a length
-            // the caller chooses. Safe as per-parse state because 'select' twice is already refused as a
-            // repeated parameter.
             _claimedKeys = new Dictionary<string, string>(StringComparer.Ordinal);
 
             var projected = new List<ProjectedField>();
@@ -476,10 +480,7 @@ internal static class QueryStringParser
                 Limit = _limit ?? options.DefaultPageSize,
                 Offset = _offset,
                 After = _after,
-
-                // Sources only, deduped: the port is asked for each declared field once, however many
-                // response keys the caller aliased onto it.
-                Select = _select?.Select(field => field.Source).Distinct(StringComparer.Ordinal).ToList(),
+                Select = DeclaredSources(),
             };
 
             EnsureWithinPortRules(query);
@@ -491,6 +492,13 @@ internal static class QueryStringParser
             parsed = new ParsedListQuery(query, _select);
             return true;
         }
+
+        /// <summary>
+        /// The declared fields the port is asked to read: one entry per source, however many response keys
+        /// the caller aliased onto it.
+        /// </summary>
+        private List<string>? DeclaredSources() =>
+            _select?.Select(field => field.Source).Distinct(StringComparer.Ordinal).ToList();
 
         /// <summary>
         /// Several top-level parameters are one conjunction — PostgREST's own semantics, and the only reading

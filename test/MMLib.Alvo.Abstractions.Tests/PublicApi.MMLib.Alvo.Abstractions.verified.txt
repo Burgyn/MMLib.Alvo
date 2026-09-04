@@ -1196,7 +1196,6 @@ namespace MMLib.Alvo.Schema
     }
     public static class AlvoManagedColumns
     {
-        public static System.Collections.Generic.IReadOnlySet<string> All { get; }
         public static System.Collections.Generic.IReadOnlyList<string> Audit { get; }
         public static string CreatedAt { get; }
         public static string CreatedBy { get; }

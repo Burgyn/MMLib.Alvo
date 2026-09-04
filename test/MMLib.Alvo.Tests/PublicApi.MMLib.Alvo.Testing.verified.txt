@@ -382,6 +382,8 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task A_filter_over_an_unselected_field_matches_the_same_rows_as_without_the_projection() { }
         public System.Threading.Tasks.Task A_framework_managed_column_survives_a_projection_that_did_not_name_it() { }
         public System.Threading.Tasks.Task A_projected_paged_read_over_an_unselected_sort_key_returns_each_row_exactly_once() { }
+        public System.Threading.Tasks.Task A_projected_read_admits_one_callers_rows_and_not_the_other_callers() { }
+        public System.Threading.Tasks.Task A_projected_read_never_crosses_the_tenant_boundary() { }
         public System.Threading.Tasks.Task A_projection_naming_a_hidden_field_is_refused_exactly_as_an_undeclared_one_is() { }
         public System.Threading.Tasks.Task A_projection_naming_no_field_is_refused() { }
         public System.Threading.Tasks.Task A_projection_over_an_entity_declaring_every_field_type_casts_every_null_it_projects() { }

@@ -246,6 +246,51 @@ public abstract class AlvoDataProjectionTests
         }
     }
 
+    /// <summary>
+    /// Two callers in one tenant, different rows: a projected read returns exactly the rows the caller's own
+    /// <c>USING</c> predicate admits, and the same rows the unprojected read admits.
+    /// </summary>
+    /// <remarks>
+    /// The security core's checklist asks for this as a test rather than an argument. The argument is that
+    /// the predicate is a <c>WHERE</c> term and a projection only rewrites the <c>SELECT</c> list — but the
+    /// projection aliases a <c>NULL</c> to the predicate's own column name, so "the predicate still filters"
+    /// is exactly the claim that has to be measured rather than reasoned about.
+    /// </remarks>
+    [Fact]
+    public async Task A_projected_read_admits_one_callers_rows_and_not_the_other_callers()
+    {
+        var world = await ScopedWorldAsync();
+
+        var mine = await world.Data.QueryAsync(
+            new AlvoQuery { Entity = Entity, Select = ["title"] }, world.Alice, Token);
+        var unprojected = await world.Data.QueryAsync(
+            new AlvoQuery { Entity = Entity }, world.Alice, Token);
+
+        mine.Items.Count.ShouldBe(2, "Alice owns two of the four rows in her tenant");
+        Ids(mine).Order().ShouldBe(Ids(unprojected).Order());
+        mine.Items.ShouldAllBe(row => (string)row["title"]! == "alice-row");
+    }
+
+    /// <summary>
+    /// Two tenants, otherwise identical: a projected read never crosses the tenant boundary. The
+    /// synthesized tenant scope is a <c>WHERE</c> term over a column the projection is free to exclude, so
+    /// this is the fact that would fail if an excluded column's <c>NULL</c> ever reached that clause.
+    /// </summary>
+    [Fact]
+    public async Task A_projected_read_never_crosses_the_tenant_boundary()
+    {
+        var world = await ScopedWorldAsync();
+
+        var ours = await world.Data.QueryAsync(
+            new AlvoQuery { Entity = Entity, Select = ["title"] }, world.Alice, Token);
+        var theirs = await world.Data.QueryAsync(
+            new AlvoQuery { Entity = Entity, Select = ["title"] }, world.OtherTenantAlice!, Token);
+
+        ours.Items.Count.ShouldBe(2);
+        theirs.Items.Count.ShouldBe(2, "the other tenant's rows are seeded identically");
+        Ids(ours).Intersect(Ids(theirs)).ShouldBeEmpty("no row is visible to both tenants");
+    }
+
     private static IReadOnlyList<object?> Ids(AlvoPage page) => [.. page.Items.Select(row => row["id"])];
 
     private static IReadOnlyList<string> Keys(AlvoPage page) =>
@@ -351,6 +396,87 @@ public abstract class AlvoDataProjectionTests
         return await WorldAsync(descriptor, schema, seed);
     }
 
+    /// <summary>
+    /// A tenant-scoped <c>notes</c> under <c>owner_id == @user.id</c>: two tenants, two owners each, two
+    /// rows per owner. The projection excludes both <c>tenant_id</c> and <c>owner_id</c> from the response,
+    /// which is what makes the two facts above adversarial rather than decorative.
+    /// </summary>
+    private async Task<SeededWorld> ScopedWorldAsync()
+    {
+        var tenant = Guid.NewGuid();
+        var otherTenant = Guid.NewGuid();
+        var alice = UserId.New();
+        var bob = UserId.New();
+
+        var descriptor = new AlvoDescriptor
+        {
+            ApiVersion = "alvo.dev/v1",
+            Name = "projection-scoped-fixture",
+            Entities = new Dictionary<string, EntityDescriptor>(StringComparer.Ordinal)
+            {
+                [Entity] = new EntityDescriptor
+                {
+                    Tenancy = EntityTenancy.Scoped,
+                    Fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
+                    {
+                        ["owner_id"] = new() { Type = DescField.Uuid, Required = true },
+                        ["title"] = new() { Type = DescField.String, Required = true },
+                        ["body"] = new() { Type = DescField.String },
+                    },
+                    Rules = new AccessRules { List = "owner_id == @user.id", Get = "owner_id == @user.id" },
+                },
+            },
+        };
+
+        var schema = new SchemaModel([
+            new EntitySchema
+            {
+                Name = Entity,
+                Tenancy = TenancyMode.Scoped,
+                Fields =
+                [
+                    new FieldSchema { Name = "id", Type = SchemaField.Uuid, Required = true },
+                    new FieldSchema { Name = "tenant_id", Type = SchemaField.Uuid, Required = true, Indexed = true },
+                    new FieldSchema { Name = "owner_id", Type = SchemaField.Uuid, Required = true },
+                    new FieldSchema { Name = "title", Type = SchemaField.String, Required = true, MaxLength = 32 },
+                    new FieldSchema { Name = "body", Type = SchemaField.String, Nullable = true },
+                ],
+            },
+        ]);
+
+        List<AlvoRecord> seed =
+        [
+            .. ScopedRows(tenant, alice.Value, "alice-row"),
+            .. ScopedRows(tenant, bob.Value, "bob-row"),
+            .. ScopedRows(otherTenant, alice.Value, "alice-row"),
+            .. ScopedRows(otherTenant, bob.Value, "bob-row"),
+        ];
+
+        var data = await CreateAsync(
+            schema,
+            descriptor,
+            new Dictionary<string, IReadOnlyList<AlvoRecord>>(StringComparer.Ordinal) { [Entity] = seed });
+
+        return new SeededWorld(data, ScopedCaller(alice, tenant), ScopedCaller(alice, otherTenant));
+    }
+
+    private static IEnumerable<AlvoRecord> ScopedRows(Guid tenant, Guid owner, string title) =>
+        Enumerable.Range(0, 2).Select(_ => new AlvoRecord(new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["id"] = Guid.NewGuid(),
+            ["tenant_id"] = tenant,
+            ["owner_id"] = owner,
+            ["title"] = title,
+            ["body"] = new string('x', 128),
+        }));
+
+    private static AlvoContext ScopedCaller(UserId user, Guid tenant) => new()
+    {
+        User = user,
+        Roles = new HashSet<Role> { Role.Authenticated },
+        Tenant = new TenantId(tenant),
+    };
+
     private static AlvoRecord Row(string title, string? label) =>
         new(new Dictionary<string, object?>(StringComparer.Ordinal)
         {
@@ -409,7 +535,15 @@ public abstract class AlvoDataProjectionTests
         return new SeededWorld(data, Caller);
     }
 
-    private sealed record SeededWorld(IAlvoData Data, AlvoContext Alice);
+    /// <summary>One seeded store, plus the callers the facts above query as.</summary>
+    /// <param name="Data">The seeded store.</param>
+    /// <param name="Alice">The caller every fact queries as.</param>
+    /// <param name="OtherTenantAlice">
+    /// The same user identity in a different tenant, for the cross-tenant fact. The same <em>user</em> on
+    /// purpose: it makes the tenant scope the only thing separating the two reads, so a fact that passes
+    /// cannot be passing because the row-level predicate happened to do the work.
+    /// </param>
+    private sealed record SeededWorld(IAlvoData Data, AlvoContext Alice, AlvoContext? OtherTenantAlice = null);
 
     private static AlvoContext Caller => new()
     {

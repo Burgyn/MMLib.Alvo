@@ -113,8 +113,17 @@ public static class AlvoManagedColumns
     /// dependency: <c>For</c> reads <see cref="Audit"/>, so this initializer must stay <b>below</b> it.
     /// Moving it above would leave <see cref="Audit"/> null and fail at type initialisation.
     /// </para>
+    /// <para>
+    /// <b><see langword="internal"/> where the rest of this class is public, and the asymmetry is the
+    /// point.</b> <see cref="For(EntitySchema)"/> and <see cref="VersionColumn"/> are public because a
+    /// provider needs them — an out-of-tree driver must know which columns it may not let a caller write.
+    /// Nothing outside this framework mints a name: the one caller is the Data API's own query parser, which
+    /// the core reaches through <c>InternalsVisibleTo</c>. Publishing it would have added a member to the
+    /// package's surface that no consumer of the package has a use for, and every public member is a
+    /// promise that has to be kept.
+    /// </para>
     /// </remarks>
-    public static IReadOnlySet<string> All { get; } =
+    internal static IReadOnlySet<string> All { get; } =
         For(TenancyMode.Scoped, audit: true, softDelete: true);
 
     /// <summary>

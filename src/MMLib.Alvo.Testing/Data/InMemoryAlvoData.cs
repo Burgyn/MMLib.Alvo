@@ -106,13 +106,11 @@ public sealed class InMemoryAlvoData : IAlvoData
         var ordered = ApplySort(visible, query.Sort).ToList();
         var (page, nextCursor) = Page(ordered, query.Limit, query.Offset, query.After);
 
-        // Hoisted out of the row projection below: it allocates a set, and computing it per returned row
-        // would do that once per row for an answer that is a property of the query.
-        var unselected = Unselected(query, FindEntity(query.Entity));
+        var unselectedForThisQuery = Unselected(query, FindEntity(query.Entity));
 
         return Task.FromResult(new AlvoPage
         {
-            Items = [.. page.Select(row => Mask(row, decision.HiddenFields, unselected))],
+            Items = [.. page.Select(row => Mask(row, decision.HiddenFields, unselectedForThisQuery))],
             NextCursor = nextCursor,
 
             // Counted over the ordered, policy-filtered set — before paging, which is the whole distinction
