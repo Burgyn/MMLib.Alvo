@@ -161,6 +161,15 @@ source), while an **unselected** field whose store type cannot be resolved is an
 derived from `entity.Fields`, so reaching it means the read model and the applied schema
 disagree. That is a bug in Alvo, and it must not be dressed as a decision about the caller.
 
+**They are not disjoint, and the mask wins.** A hidden field is never in `Select` (§1.2
+refuses it), is never a sort key and is never framework-managed — so on every projected
+read of an entity that has a mask, *every hidden field is also in the unselected set*. Both
+sets agree about the render, so that overlap is invisible there. It is **not** invisible in
+the throw: an implementation that tested `unselected` first would turn a masked field's
+unresolvable store type into an `InvalidOperationException` and undo the split above in the
+one direction that matters. So the order is fixed — `hiddenFields` is consulted first,
+always — and §4 pins it with a field that is in both.
+
 The two sets are also different in kind, and naming them separately is what keeps that
 visible:
 
@@ -291,18 +300,25 @@ either:
 internal static AlvoRecord ToRecord(
     IDictionary<string, object> row,
     IReadOnlySet<string> hiddenFields,
-    IReadOnlySet<string>? unselectedFields = null)
+    IReadOnlySet<string> unselectedFields)
 ```
 
-**Defaulted here, required on `Compose` — a deliberate asymmetry.** `Compose` has exactly
-one production caller (`ReadStatementComposer.cs:118`), so requiring both sets costs one
-edit and makes the pair explicit at the single point where the union is formed.
-`ToRecord` has **seven** (`EfAlvoData.cs:137, 219, 260, 536, 605, 821, 1377`), six of them
-on write paths where "unselected" has no meaning: `null` there says *nothing was
-unselected*, which is exactly what a write means, and keeps six unrelated call sites out
-of this diff. The default can only ever widen what is returned to a value the caller was
-already entitled to see, so it fails in the safe direction — unlike a defaulted
-`hiddenFields`, which is why that one stays required.
+**Required, not defaulted, and this was the second draft's mistake.** A default reads as
+the cheaper option: `ToRecord` has seven call sites (`EfAlvoData.cs:137, 219, 260, 536,
+605, 821, 1377`) and only four of them are writes — `:219` is `GetAsync`, a read, and
+`:1377` is the unmasked-read helper — so a default would keep six lines out of the diff and
+say something true at each of them (nothing was unselected).
+
+It would also mean that the **next** author to touch this — the one who adds `select` to
+`GET /{entity}/{id}`, which §6 names as the obvious follow-up — is never made to look at
+`GetAsync`'s call site. A projection that reached `GetAsync`'s statement while its
+materialization silently kept every key would be exactly the "advisory member" defect this
+whole PR exists to avoid, one layer down. `ReadStatementComposer`'s own remark makes the
+same argument for handing `ComposeCount` the whole options record rather than a narrowed
+copy — *"so that a term added to the read cannot be silently missed here"* — and this is
+that argument applied to a parameter. Six explicit `FrozenSet<string>.Empty` arguments are
+the price, and they are the readable half of the trade: a reader of `GetAsync` can see that
+this path narrows nothing.
 
 The `Paginated` split runs on the raw property-bag rows **before** `ToRecord`, so the
 cursor still finds `id` there whatever the caller selected. Stated because it is the one
@@ -412,38 +428,67 @@ Four refusals, each with a violation code and a fix suggestion, all pointing at 
    a caller make the server compose an unbounded `ORDER BY`. `select` deduped silently
    before this PR, that is published behaviour, and changing it would 422 requests that
    work today — so the dedupe stays and the unboundedness worry is answered where it
-   actually bites, in §2.4.
+   actually bites, in §2.4 — which is charged per *distinct* key precisely so that it does
+   not refuse a repeat.
 
-### 2.4 The bound aliases make necessary
+### 2.4 The bound aliases make necessary, and where it is charged
 
-Before this PR the projection was self-bounding: `select` named declared fields, duplicates
-collapsed, so the response could never carry more keys than the entity has fields. **An
-alias breaks that.** `select=a:name,b:name,c:name,…` names one column under arbitrarily
-many distinct keys, every one of them legal by the rules above, and the response carries a
-copy of that value per key. The only remaining limit is the URL length the transport
-happens to allow — which is exactly the "a bound the caller controls" shape §2.1 of the
-analysis warns about and which `AlvoFilter.MaxTerms` exists to close on the filter side.
+Before this PR the projection was self-bounding, and by a stronger mechanism than it looks:
+`ReadSelect` resolves every entry through `QueryFieldResolver.Resolve`, which answers with a
+**declared** `FieldSchema` out of a frozen dictionary of the fields this caller can see. So
+the accumulated list could never grow past the visible field count however long the query
+string was, and a response could never carry more keys than the entity has fields.
+
+**An alias breaks that**, because the key becomes the caller's to choose:
+`select=a:name,b:name,c:name,…` names one column under arbitrarily many distinct keys, every
+one legal by the rules above, and the response carries a copy of that value per key. The
+only remaining limit is whatever URL length the transport happens to allow — the "a bound
+the caller controls" shape §2.1 of the analysis warns about, and the one
+`AlvoFilter.MaxTerms` exists to close on the filter side.
 
 The bound is **derived, not chosen**: a projection may name at most as many keys as the
 entity declares fields.
 
 ```
-projection key count ≤ entity.Fields.Count
+distinct projection keys ≤ entity.Fields.Count
 ```
 
-A response with more keys than the entity has fields is a duplication request, not a
-read — no caller has a use for it, and the number needs no judgement call, no configuration
-knob and no per-engine measurement. It is generous by construction (a ten-field entity
-admits ten aliases over one column) and it makes the amplification factor exactly one.
+A response with more keys than the entity has fields is a duplication request, not a read —
+no caller has a use for it, and the number needs no judgement call, no configuration knob
+and no per-engine measurement. It is generous by construction, and more so than it first
+looks, because `entity.Fields` includes the framework-managed columns: an audited,
+tenant-scoped entity with four descriptor fields admits nine keys.
+
+**Charged on arrival, per distinct key — not on the entry count, and not after the loop.**
+This is the whole of whether the bound works, and this repo has already paid to learn it.
+`FilterParseScope.TryChargeNode` is `++_nodes <= AlvoFilter.MaxTerms`, and
+`ChargeTheConjunction`'s remark records the measured incident: *"a budget spent after the
+tree is assembled does not bound the tree"* — 256 repeated parameters charged 256 leaves,
+added the 257th anyway, and left the port's guard to answer with a code documented as
+unreachable. A cap tested after the parse loop repeats that exactly: the whole amplification
+is already paid for by the time the 422 is composed.
+
+Two spellings of "on arrival" are not equivalent, and only one of them is compatible with
+§2.3:
+
+- **On the raw entry count** (`value.Split(',').Length > Fields.Count`) would refuse
+  `?select=id,id,id,id,id,id` on a five-field entity — a request that dedupes to one key
+  today and works. That contradicts §2.3's promise directly, for no gain.
+- **On each newly claimed distinct key** — refuse the moment a key not already claimed
+  would take the count past `entity.Fields.Count` — leaves the dedupe untouched, because a
+  repeat claims nothing. This is the one implemented.
+
+The honest claim about cost, then, is not that this retires an existing quadratic — there
+was none, the pre-alias scan was linear in the query string with a schema-bounded factor.
+It is that **the alias introduces one and the bound contains it**: the collision check in
+§2.3 is a scan of the claimed keys, which without a cap would be quadratic in
+caller-controlled length, and with it is linear in that length times the field count.
+
+Nor does the cap make the *amplification* one: ten aliases over one wide column still return
+that column's bytes ten times. What it bounds is the key count — one row's worth of keys —
+which is the part expressible without inventing a byte budget and a knob to configure it.
 
 Refused with its own violation code, pointing at `select`.
-
-**It also retires a pre-existing cost that has nothing to do with aliases.** `AddOnce`
-dedupes with `List.Contains`, so today's uncapped `select` is an O(n²) scan over a
-caller-controlled length — Kestrel's default 8 KB request line admits a few thousand
-entries, which is millions of ordinal comparisons per request. The cap bounds it at the
-field count, which is why this is filed as a bound rather than as a rewrite of the
-dedupe.
 
 ## 3. Where each refusal lives, and with which status
 
@@ -495,7 +540,9 @@ document snapshot for `select`'s updated description.
 merged-set implementation and fail loudly on the specific defects §1.3 describes: a
 malformed `select` answers 422 and not 403; an unresolvable *unselected* store type raises
 `InvalidOperationException` while an unresolvable *masked* one raises
-`AlvoAuthorizationException`; and `EnsureMaskable` still refuses a mask over the key when
+`AlvoAuthorizationException`, **and a field in both sets raises the authorization one** —
+the sets overlap on every masked projected read (§1.3), so this is the case that pins the
+precedence rather than an exotic one; and `EnsureMaskable` still refuses a mask over the key when
 the caller selected every field.
 
 **That the response's key list and the port's `Select` cannot drift** — one test asserting
@@ -573,9 +620,12 @@ file a naive reading leaves untouched:
   here yet; they land in PR3."* That sentence becomes false with the member it describes.
 - **`IAlvoData`'s returned-key-set contract** (§1.4) must be amended, not left to be
   falsified: the key set stays contract, and `AlvoQuery.Select` becomes the one thing that
-  narrows it, with framework-managed columns explicitly exempt. A contract paragraph that
-  a new member quietly makes untrue is worse than no paragraph, because the next reader
-  budgets trust against it.
+  narrows it — **exempting framework-managed columns *and* every field named in
+  `AlvoQuery.Sort`**. Both exemptions, or the paragraph is still wrong: an embedded caller
+  who read "`Select` ∪ managed" and received "`Select` ∪ managed ∪ sort keys" has been
+  misled by the fix rather than by the omission. A contract paragraph that a new member
+  quietly makes untrue is worse than no paragraph, because the next reader budgets trust
+  against it.
 - **`ReadStatementComposer.cs:118`** is `ReadProjection.Compose`'s single production
   caller, and `Compose` is reached from three paths — `PageAsync`, `SingleAsync` and
   `PolicyRoot` — so the new parameter is threaded there once and the two non-page paths
@@ -617,6 +667,6 @@ parsed projection, not a change to the port member.
 | A projection may name at most `entity.Fields.Count` keys | PostgREST imposes no such cap | §2.4 — the alias is what makes the projection able to amplify, so the bound arrives with it. Derived from the schema, not chosen. |
 | A repeated `select` name dedupes, while a repeated `order` key is refused | Internal consistency | §2.3, item 4 — the dedupe is published behaviour; refusing it now would 422 requests that work today, and the bound in §2.4 answers the reason `order` refuses. |
 | `?select=name` still hides `id` from the response although the port now returns it | — | §2.2. Preserves the pre-PR wire shape exactly; the port's guarantee and the response's key list are two different lists. |
-| A projected read returns fewer keys than *"every non-hidden field the schema declares"* | `IAlvoData`'s returned-key-set contract | The feature is the narrowing. The contract paragraph is amended in this PR to name `Select` as the one narrowing channel, with framework-managed columns exempt — §1.4. |
+| A projected read returns fewer keys than *"every non-hidden field the schema declares"* | `IAlvoData`'s returned-key-set contract | The feature is the narrowing. The contract paragraph is amended in this PR to name `Select` as the one narrowing channel, exempting both framework-managed columns and every field named in `Sort` — §1.4. |
 | A sort key survives the projection even when unselected | Nothing in #117 or PR-D anticipates it | §1.4 — measured: `ORDER BY` resolves a bare identifier against the output alias on both engines, which would break keyset paging. The alternative (qualifying every emitted identifier) was declined for blast radius, and is recorded as the route if this ever needs to change. |
 | #118 gets two recorded facts and no code | #118 as filed (a request-scoped decision cache) | PR-D §3.2 declined it on a measurement. §0.1, §5. |
