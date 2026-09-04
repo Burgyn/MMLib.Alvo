@@ -847,4 +847,26 @@ public sealed class InMemoryAlvoData : IAlvoData
     /// </summary>
     private static AlvoAuthorizationException Denied(PolicyDecision decision) =>
         new(decision.DenyReason ?? "The operation was not authorized.");
+
+    /// <inheritdoc/>
+    public Task<AlvoBatchResult> CreateManyAsync(
+        string entity, IReadOnlyList<IReadOnlyDictionary<string, object?>> rows, AlvoContext context,
+        AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default) =>
+        throw new NotImplementedException(BatchNotImplementedYet);
+
+    /// <inheritdoc/>
+    public Task<AlvoBatchResult> UpdateManyAsync(
+        string entity, IReadOnlyList<AlvoRowPatch> rows, AlvoContext context,
+        AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default) =>
+        throw new NotImplementedException(BatchNotImplementedYet);
+
+    /// <inheritdoc/>
+    public Task<AlvoBatchResult> DeleteManyAsync(
+        string entity, IReadOnlyList<Guid> ids, AlvoContext context, AlvoIdempotency? idempotency = null,
+        CancellationToken cancellationToken = default) =>
+        throw new NotImplementedException(BatchNotImplementedYet);
+
+    /// <summary>The placeholder every batch member carries until its own task implements it.</summary>
+    private const string BatchNotImplementedYet =
+        "The batch write paths are declared but not yet implemented on this driver.";
 }
