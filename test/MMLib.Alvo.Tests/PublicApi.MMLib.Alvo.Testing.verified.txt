@@ -127,6 +127,21 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task Update_of_another_users_row_reports_not_found() { }
         public static Xunit.TheoryData<MMLib.Alvo.Data.AlvoFilter> MalformedFilters() { }
     }
+    public abstract class AlvoDataBatchTests : MMLib.Alvo.Testing.Data.AlvoDataFixture
+    {
+        protected AlvoDataBatchTests() { }
+        public System.Threading.Tasks.Task A_batch_delete_removes_every_named_row_or_none() { }
+        public System.Threading.Tasks.Task A_batch_naming_another_tenants_row_writes_nothing() { }
+        public System.Threading.Tasks.Task A_batch_whose_last_row_fails_writes_nothing() { }
+        public System.Threading.Tasks.Task A_caller_the_policy_denies_outright_is_refused_before_any_row_is_judged() { }
+        public System.Threading.Tasks.Task A_refusal_never_echoes_what_the_caller_sent() { }
+        public System.Threading.Tasks.Task A_replayed_batch_writes_no_second_set_of_rows() { }
+        public System.Threading.Tasks.Task A_row_the_check_refuses_is_refused_even_beside_rows_it_admits() { }
+        public System.Threading.Tasks.Task A_successful_delete_is_not_an_empty_refusal() { }
+        public System.Threading.Tasks.Task An_empty_batch_is_refused_rather_than_answered_as_a_write_of_nothing() { }
+        public System.Threading.Tasks.Task An_invisible_row_and_an_absent_row_are_one_refusal() { }
+        public System.Threading.Tasks.Task Every_offending_row_is_reported_with_its_index() { }
+    }
     public abstract class AlvoDataBeforeHookTests
     {
         protected AlvoDataBeforeHookTests() { }
@@ -224,7 +239,7 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task The_whole_ladder_moves_when_a_child_is_added_and_again_when_one_is_removed() { }
         public System.Threading.Tasks.Task Updating_an_aggregated_child_field_moves_the_parents_rollup() { }
     }
-    public abstract class AlvoDataConcurrencyTests
+    public abstract class AlvoDataConcurrencyTests : MMLib.Alvo.Testing.Data.AlvoDataFixture
     {
         protected AlvoDataConcurrencyTests() { }
         public System.Threading.Tasks.Task A_blank_idempotency_key_is_refused_by_the_port() { }
@@ -243,7 +258,6 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task An_idempotency_token_from_the_system_context_is_accepted() { }
         public System.Threading.Tasks.Task An_update_whose_precondition_is_stale_is_refused_and_changes_nothing() { }
         public System.Threading.Tasks.Task An_update_whose_precondition_matches_the_stored_version_succeeds() { }
-        protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Data.IAlvoData> CreateAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, System.Collections.Generic.IReadOnlyDictionary<string, System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRecord>> seed);
         public System.Threading.Tasks.Task One_key_reused_for_a_different_update_is_a_conflict() { }
         public System.Threading.Tasks.Task Replaying_an_idempotency_key_returns_the_row_and_creates_no_second_one() { }
         public System.Threading.Tasks.Task Replaying_an_idempotency_key_with_the_same_fingerprint_returns_the_first_row() { }
@@ -274,6 +288,11 @@ namespace MMLib.Alvo.Testing.Data
         public static MMLib.Alvo.Schema.EntitySchema DifferentialEntity { get; }
         protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Testing.Data.IDifferentialProbe> CreateProbeAsync(MMLib.Alvo.Schema.EntitySchema entity);
         public System.Threading.Tasks.Task This_engine_and_the_in_memory_backend_agree_on_every_case() { }
+    }
+    public abstract class AlvoDataFixture
+    {
+        protected AlvoDataFixture() { }
+        protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Data.IAlvoData> CreateAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, System.Collections.Generic.IReadOnlyDictionary<string, System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRecord>> seed);
     }
     public static class AlvoDataFixtures
     {

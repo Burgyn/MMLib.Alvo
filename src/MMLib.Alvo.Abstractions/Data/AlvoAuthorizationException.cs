@@ -67,6 +67,27 @@ public sealed class AlvoAuthorizationException : Exception
     /// </remarks>
     public const string QueryFieldUnavailable = "The query references a field that is not available to this caller.";
 
+    /// <summary>
+    /// The refusal for a row a batch names that this caller cannot act on — one that does not exist,
+    /// <b>or</b> one the caller's <c>USING</c> predicate excludes.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Its sameness is the security property, exactly as <see cref="QueryFieldUnavailable"/>'s is</b>, and
+    /// a batch is where it matters most. A single write already conflates the two into one
+    /// <see cref="AlvoRecordNotFoundException"/>; a batch answers one refusal per row, so distinguishing them
+    /// would make one request answer as many existence questions as it carries rows. That turns the oracle a
+    /// single call closes into a bulk one — the same channel, multiplied by the batch size.
+    /// </para>
+    /// <para>
+    /// It names neither the row nor which of the two conditions applied, and it lives here rather than in
+    /// each driver because two drivers wording it differently is how the guarantee is lost with nothing to
+    /// catch it. <see cref="Rules.PolicyDecision"/>'s own predicate is what decides visibility; this is only
+    /// the sentence both answers share.
+    /// </para>
+    /// </remarks>
+    public const string RowUnavailable = "The row is not available to this caller.";
+
     /// <summary>Initializes a new instance of the <see cref="AlvoAuthorizationException"/> class.</summary>
     public AlvoAuthorizationException()
         : base(DefaultMessage)

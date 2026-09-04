@@ -224,10 +224,10 @@ public sealed class InMemoryAlvoData : IAlvoData
         var read = _policy.Resolve(entity, DataOperation.Get, context);
         if (read.IsDenied)
         {
-            return IdOnly(record.RowId);
+            return IdOnly(RecordedRow(record));
         }
 
-        var stored = RowsForLocked(entity).Find(row => IsRow(row, record.RowId));
+        var stored = RowsForLocked(entity).Find(row => IsRow(row, RecordedRow(record)));
         return stored is not null && IsVisible(stored, read, context)
             ? Mask(stored, read.HiddenFields, FrozenSet<string>.Empty)
             : throw new AlvoRecordNotFoundException();
@@ -244,6 +244,20 @@ public sealed class InMemoryAlvoData : IAlvoData
         }
     }
 
+    /// <summary>The one row a single-row write's record names.</summary>
+    /// <remarks>
+    /// An empty list is a broken invariant of this type rather than a caller error — every write records at
+    /// least one row — so it is raised loudly rather than answered as a miss, which would silently re-execute
+    /// a write the caller has already been told succeeded.
+    /// </remarks>
+    /// <param name="record">The record this replay matched.</param>
+    private static Guid RecordedRow(IdempotencyRecord record) =>
+        record.RowIds.Count > 0
+            ? record.RowIds[0]
+            : throw new InvalidOperationException(
+                "An idempotency record names no row. Every write records at least one, so an empty list means "
+                + "the record was written by something other than this store's write paths.");
+
     /// <summary>
     /// The narrowest possible answer to a replay: <paramref name="rowId"/> and nothing else, matching
     /// <c>EfAlvoData</c>'s own id-only answer so both implementations of this port agree on the shape a
@@ -253,11 +267,19 @@ public sealed class InMemoryAlvoData : IAlvoData
     private static AlvoRecord IdOnly(Guid rowId) =>
         new(new Dictionary<string, object?>(StringComparer.Ordinal) { [IdField] = rowId });
 
-    private void RecordIdempotencyLocked(AlvoIdempotency? idempotency, AlvoContext context, Guid rowId)
+    private void RecordIdempotencyLocked(AlvoIdempotency? idempotency, AlvoContext context, Guid rowId) =>
+        RecordIdempotencyLocked(idempotency, context, [rowId]);
+
+    /// <inheritdoc cref="RecordIdempotencyLocked(AlvoIdempotency?, AlvoContext, Guid)"/>
+    /// <param name="idempotency">The caller's token, or <see langword="null"/>.</param>
+    /// <param name="context">The caller whose tenant and user scope the record.</param>
+    /// <param name="rowIds">Every row the write touched, in the order it touched them.</param>
+    private void RecordIdempotencyLocked(
+        AlvoIdempotency? idempotency, AlvoContext context, IReadOnlyList<Guid> rowIds)
     {
         if (idempotency is { } token)
         {
-            _idempotency[IdempotencyKey(token, context)] = new IdempotencyRecord(token.Fingerprint, rowId);
+            _idempotency[IdempotencyKey(token, context)] = new IdempotencyRecord(token.Fingerprint, rowIds);
         }
     }
 
@@ -272,8 +294,15 @@ public sealed class InMemoryAlvoData : IAlvoData
     private static (string Key, string Scope) IdempotencyKey(AlvoIdempotency token, AlvoContext context) =>
         (token.Key, AlvoIdempotency.IdentityOf(context));
 
-    /// <summary>What one used idempotency key recorded: the request it was used for, and the row it touched.</summary>
-    private readonly record struct IdempotencyRecord(string Fingerprint, Guid RowId);
+    /// <summary>What one used idempotency key recorded: the request it was used for, and every row it touched.</summary>
+    /// <remarks>
+    /// A list rather than one id, because a batch's replay has to answer every row the first batch wrote.
+    /// The single-row paths store a list of one, so there is one shape rather than two — and the replay that
+    /// reads it does not have to know which verb wrote it.
+    /// </remarks>
+    /// <param name="Fingerprint">The request this key was used for.</param>
+    /// <param name="RowIds">Every row the write touched, in the order it touched them.</param>
+    private readonly record struct IdempotencyRecord(string Fingerprint, IReadOnlyList<Guid> RowIds);
 
     /// <summary>
     /// Records by (key, scope). A value tuple of strings compares each half with
@@ -851,22 +880,403 @@ public sealed class InMemoryAlvoData : IAlvoData
     /// <inheritdoc/>
     public Task<AlvoBatchResult> CreateManyAsync(
         string entity, IReadOnlyList<IReadOnlyDictionary<string, object?>> rows, AlvoContext context,
-        AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default) =>
-        throw new NotImplementedException(BatchNotImplementedYet);
+        AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default)
+    {
+        var decision = BatchDecision(entity, DataOperation.Create, rows.Count, context, idempotency, cancellationToken);
+
+        lock (_gate)
+        {
+            if (ReplayedBatch(entity, context, idempotency) is { } replayed)
+            {
+                return Task.FromResult(replayed);
+            }
+
+            var (judged, refusals) = JudgedCreates(entity, rows, decision, context);
+            if (refusals.Count > 0)
+            {
+                return Task.FromResult(AlvoBatchResult.Refused(refusals));
+            }
+
+            return Task.FromResult(WrittenCreates(entity, judged, decision, context, idempotency));
+        }
+    }
 
     /// <inheritdoc/>
     public Task<AlvoBatchResult> UpdateManyAsync(
         string entity, IReadOnlyList<AlvoRowPatch> rows, AlvoContext context,
-        AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default) =>
-        throw new NotImplementedException(BatchNotImplementedYet);
+        AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default)
+    {
+        var decision = BatchDecision(entity, DataOperation.Update, rows.Count, context, idempotency, cancellationToken);
+
+        lock (_gate)
+        {
+            if (ReplayedBatch(entity, context, idempotency) is { } replayed)
+            {
+                return Task.FromResult(replayed);
+            }
+
+            var (judged, refusals) = JudgedUpdates(entity, rows, decision, context);
+            if (refusals.Count > 0)
+            {
+                return Task.FromResult(AlvoBatchResult.Refused(refusals));
+            }
+
+            return Task.FromResult(WrittenUpdates(entity, judged, decision, context, idempotency));
+        }
+    }
 
     /// <inheritdoc/>
     public Task<AlvoBatchResult> DeleteManyAsync(
         string entity, IReadOnlyList<Guid> ids, AlvoContext context, AlvoIdempotency? idempotency = null,
-        CancellationToken cancellationToken = default) =>
-        throw new NotImplementedException(BatchNotImplementedYet);
+        CancellationToken cancellationToken = default)
+    {
+        var decision = BatchDecision(entity, DataOperation.Delete, ids.Count, context, idempotency, cancellationToken);
+        EnsureNotSoftDeleted(entity);
 
-    /// <summary>The placeholder every batch member carries until its own task implements it.</summary>
-    private const string BatchNotImplementedYet =
-        "The batch write paths are declared but not yet implemented on this driver.";
+        lock (_gate)
+        {
+            if (IsSpent(context, idempotency))
+            {
+                return Task.FromResult(AlvoBatchResult.Wrote([], ids.Count));
+            }
+
+            var (removable, refusals) = JudgedDeletes(entity, ids, decision, context);
+
+            return Task.FromResult(refusals.Count > 0
+                ? AlvoBatchResult.Refused(refusals)
+                : RemovedRows(entity, removable, context, idempotency));
+        }
+    }
+
+    /// <summary>
+    /// The one decision a whole batch is gated by, plus the guards that precede every row of it.
+    /// </summary>
+    /// <remarks>
+    /// Resolved once rather than per row, and that is not an optimisation: a policy denial is decided before
+    /// any row is looked at, so it must throw rather than travel on the result — otherwise refusing a caller
+    /// outright would be reported as a per-row fact and disclose how many rows they sent were real.
+    /// </remarks>
+    /// <param name="entity">The entity name.</param>
+    /// <param name="operation">The operation the batch performs.</param>
+    /// <param name="rowCount">How many rows the caller supplied, checked only for being non-zero.</param>
+    /// <param name="context">The caller performing the batch.</param>
+    /// <param name="idempotency">The caller's token for the whole batch, or <see langword="null"/>.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    private PolicyDecision BatchDecision(
+        string entity, DataOperation operation, int rowCount, AlvoContext context,
+        AlvoIdempotency? idempotency, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(entity);
+        ArgumentNullException.ThrowIfNull(context);
+        AlvoIdempotency.EnsureUsableToken(idempotency, context);
+        EnsureBatchIsNotEmpty(rowCount);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var decision = _policy.Resolve(entity, operation, context);
+
+        return decision.IsDenied ? throw Denied(decision) : decision;
+    }
+
+    /// <summary>Refuses an empty batch rather than reading it as a successful write of nothing.</summary>
+    /// <param name="rowCount">How many rows the caller supplied.</param>
+    private static void EnsureBatchIsNotEmpty(int rowCount)
+    {
+        if (rowCount == 0)
+        {
+            throw new ArgumentException(
+                "A batch must carry at least one row. An empty batch is refused rather than answered as a "
+                + "write of nothing, because an intermediary that stripped the body would otherwise look "
+                + "like a success.",
+                nameof(rowCount));
+        }
+    }
+
+    /// <summary>
+    /// The judging pass of a batch create: every row's complete post-image, or every reason one was refused.
+    /// </summary>
+    /// <remarks>
+    /// <b>Every row is judged before any is written, and the judged image is what lands.</b> A pass that
+    /// wrote as it judged would leave the rows before a refusal in the store; a write pass that re-derived
+    /// the row would store something no verdict ever saw.
+    /// </remarks>
+    /// <param name="entity">The entity name.</param>
+    /// <param name="rows">The payloads to create.</param>
+    /// <param name="decision">The verdict the policy engine returned for this caller.</param>
+    /// <param name="context">The caller performing the batch.</param>
+    private (List<AlvoRecord> Judged, List<AlvoRowRefusal> Refusals) JudgedCreates(
+        string entity, IReadOnlyList<IReadOnlyDictionary<string, object?>> rows, PolicyDecision decision,
+        AlvoContext context)
+    {
+        var judged = new List<AlvoRecord>(rows.Count);
+        var refusals = new List<AlvoRowRefusal>();
+
+        for (var index = 0; index < rows.Count; index++)
+        {
+            var values = rows[index];
+            if (PayloadRefusal(entity, values, decision, isUpdate: false) is { } refused)
+            {
+                refusals.Add(Forbidden(index, refused));
+                continue;
+            }
+
+            var schema = FindEntity(entity)!;
+            var stamped = AlvoAuditStamp.Applied(schema, values, context, _time, isUpdate: false);
+            var postImage = new AlvoRecord(
+                new Dictionary<string, object?>(stamped, StringComparer.Ordinal) { [IdField] = Guid.NewGuid() });
+
+            if (WriteRefusal(decision, postImage, previous: null, context) is { } rejected)
+            {
+                refusals.Add(Forbidden(index, rejected));
+                continue;
+            }
+
+            judged.Add(postImage);
+        }
+
+        return (judged, refusals);
+    }
+
+    /// <summary>The write pass of a batch create: the judged images, stored, and the key recorded.</summary>
+    /// <param name="entity">The entity name.</param>
+    /// <param name="judged">The post-images the judging pass approved.</param>
+    /// <param name="decision">The verdict the policy engine returned for this caller.</param>
+    /// <param name="context">The caller performing the batch.</param>
+    /// <param name="idempotency">The caller's token for the whole batch, or <see langword="null"/>.</param>
+    private AlvoBatchResult WrittenCreates(
+        string entity, List<AlvoRecord> judged, PolicyDecision decision, AlvoContext context,
+        AlvoIdempotency? idempotency)
+    {
+        RowsForLocked(entity).AddRange(judged);
+        RecordIdempotencyLocked(idempotency, context, [.. judged.Select(RowIdOf)]);
+
+        return AlvoBatchResult.Wrote(
+            [.. judged.Select(row => Mask(row, decision.HiddenFields, FrozenSet<string>.Empty))], judged.Count);
+    }
+
+    /// <summary>The judging pass of a batch update: each row's merged post-image, or every refusal.</summary>
+    /// <inheritdoc cref="JudgedCreates"/>
+    /// <param name="entity">The entity name.</param>
+    /// <param name="rows">The patches to apply.</param>
+    /// <param name="decision">The verdict the policy engine returned for this caller.</param>
+    /// <param name="context">The caller performing the batch.</param>
+    private (List<(int Index, AlvoRecord Merged)> Judged, List<AlvoRowRefusal> Refusals) JudgedUpdates(
+        string entity, IReadOnlyList<AlvoRowPatch> rows, PolicyDecision decision, AlvoContext context)
+    {
+        var stored = RowsForLocked(entity);
+        var judged = new List<(int Index, AlvoRecord Merged)>(rows.Count);
+        var refusals = new List<AlvoRowRefusal>();
+
+        for (var index = 0; index < rows.Count; index++)
+        {
+            var patch = rows[index];
+            if (PayloadRefusal(entity, patch.Values, decision, isUpdate: true) is { } refused)
+            {
+                refusals.Add(Forbidden(index, refused));
+                continue;
+            }
+
+            var position = VisibleRow(stored, patch.Id, decision, context);
+            if (position < 0)
+            {
+                refusals.Add(Unavailable(index));
+                continue;
+            }
+
+            var schema = FindEntity(entity)!;
+            var merged = Merge(
+                stored[position], AlvoAuditStamp.Applied(schema, patch.Values, context, _time, isUpdate: true));
+
+            if (WriteRefusal(decision, merged, stored[position], context) is { } rejected)
+            {
+                refusals.Add(Forbidden(index, rejected));
+                continue;
+            }
+
+            judged.Add((position, merged));
+        }
+
+        return (judged, refusals);
+    }
+
+    /// <summary>The write pass of a batch update: the merged images, stored in place.</summary>
+    /// <param name="entity">The entity name.</param>
+    /// <param name="judged">The merged images the judging pass approved, with the positions they replace.</param>
+    /// <param name="decision">The verdict the policy engine returned for this caller.</param>
+    /// <param name="context">The caller performing the batch.</param>
+    /// <param name="idempotency">The caller's token for the whole batch, or <see langword="null"/>.</param>
+    private AlvoBatchResult WrittenUpdates(
+        string entity, List<(int Index, AlvoRecord Merged)> judged, PolicyDecision decision, AlvoContext context,
+        AlvoIdempotency? idempotency)
+    {
+        var stored = RowsForLocked(entity);
+        foreach (var (position, merged) in judged)
+        {
+            stored[position] = merged;
+        }
+
+        RecordIdempotencyLocked(idempotency, context, [.. judged.Select(row => RowIdOf(row.Merged))]);
+
+        return AlvoBatchResult.Wrote(
+            [.. judged.Select(row => Mask(row.Merged, decision.HiddenFields, FrozenSet<string>.Empty))],
+            judged.Count);
+    }
+
+    /// <summary>The judging pass of a batch delete: the positions to remove, or every refusal.</summary>
+    /// <inheritdoc cref="JudgedCreates"/>
+    /// <param name="entity">The entity name.</param>
+    /// <param name="ids">The rows to remove.</param>
+    /// <param name="decision">The verdict the policy engine returned for this caller.</param>
+    /// <param name="context">The caller performing the batch.</param>
+    private (List<Guid> Removable, List<AlvoRowRefusal> Refusals) JudgedDeletes(
+        string entity, IReadOnlyList<Guid> ids, PolicyDecision decision, AlvoContext context)
+    {
+        var stored = RowsForLocked(entity);
+        var removable = new List<Guid>(ids.Count);
+        var refusals = new List<AlvoRowRefusal>();
+
+        for (var index = 0; index < ids.Count; index++)
+        {
+            if (VisibleRow(stored, ids[index], decision, context) < 0)
+            {
+                refusals.Add(Unavailable(index));
+                continue;
+            }
+
+            removable.Add(ids[index]);
+        }
+
+        return (removable, refusals);
+    }
+
+    /// <summary>The write pass of a batch delete: the approved rows, removed, and the key recorded.</summary>
+    /// <remarks>
+    /// The rows are removed <b>by id</b> rather than by the positions the judging pass found, because every
+    /// removal shifts the ones after it — a second pass over stale positions deletes the wrong rows, and on a
+    /// batch it deletes several of them.
+    /// </remarks>
+    /// <param name="entity">The entity name.</param>
+    /// <param name="removable">The rows the judging pass approved.</param>
+    /// <param name="context">The caller performing the batch.</param>
+    /// <param name="idempotency">The caller's token for the whole batch, or <see langword="null"/>.</param>
+    private AlvoBatchResult RemovedRows(
+        string entity, List<Guid> removable, AlvoContext context, AlvoIdempotency? idempotency)
+    {
+        var stored = RowsForLocked(entity);
+        foreach (var id in removable)
+        {
+            stored.RemoveAll(row => IsRow(row, id));
+        }
+
+        RecordIdempotencyLocked(idempotency, context, removable);
+
+        return AlvoBatchResult.Wrote([], removable.Count);
+    }
+
+    /// <summary>The narrowest refusal a policy can produce: an index and a server-owned sentence.</summary>
+    /// <param name="index">The row's position in the list the caller supplied.</param>
+    /// <param name="message">The refusal, built from constants and never from the caller's own text.</param>
+    private static AlvoRowRefusal Forbidden(int index, string message) =>
+        new(index, ForbiddenCode, message, "Change the row so the entity's rules admit it, or drop it from the batch.");
+
+    /// <summary>
+    /// The refusal for a row this caller cannot act on, whether because it does not exist or because their
+    /// own predicate excludes it — <b>one</b> answer, from
+    /// <see cref="AlvoAuthorizationException.RowUnavailable"/>, so a batch cannot be used to ask which.
+    /// </summary>
+    /// <param name="index">The row's position in the list the caller supplied.</param>
+    private static AlvoRowRefusal Unavailable(int index) =>
+        new(index, ForbiddenCode, AlvoAuthorizationException.RowUnavailable, "Check the row id, or drop it from the batch.");
+
+    /// <summary>
+    /// The one code the port emits. Every refusal a driver can decide is a policy refusal — a shape refusal
+    /// is the request layer's, and it never reaches here.
+    /// </summary>
+    private const string ForbiddenCode = "forbidden";
+
+    /// <summary>The position of <paramref name="id"/> in <paramref name="stored"/>, or -1 when this caller cannot act on it.</summary>
+    /// <param name="stored">Every row of the entity.</param>
+    /// <param name="id">The row the caller named.</param>
+    /// <param name="decision">The verdict the policy engine returned for this caller.</param>
+    /// <param name="context">The caller performing the batch.</param>
+    private int VisibleRow(List<AlvoRecord> stored, Guid id, PolicyDecision decision, AlvoContext context)
+    {
+        var position = stored.FindIndex(row => IsRow(row, id));
+
+        return position >= 0 && IsVisible(stored[position], decision, context) ? position : -1;
+    }
+
+    /// <summary>Why <paramref name="values"/> may not be written, or <see langword="null"/> when it may.</summary>
+    /// <remarks>
+    /// The three payload rules of a single write, collected rather than thrown — the same inversion
+    /// <c>WritePayloadGuard.PayloadRefusal</c> performs on the shipped drivers, so a batch refuses exactly
+    /// what a single write refuses.
+    /// </remarks>
+    /// <param name="entity">The entity name.</param>
+    /// <param name="values">The caller-supplied payload.</param>
+    /// <param name="decision">The verdict the policy engine returned for this caller.</param>
+    /// <param name="isUpdate">Whether this is an update rather than a create.</param>
+    private string? PayloadRefusal(
+        string entity, IReadOnlyDictionary<string, object?> values, PolicyDecision decision, bool isUpdate)
+    {
+        var (schema, undeclared) = DeclaredFieldsRefusal(entity, values);
+
+        return undeclared
+            ?? ManagedColumnRefusal(values, schema!, isUpdate)
+            ?? ReadOnlyRefusal(values, decision.ReadOnlyFields);
+    }
+
+    private static Guid RowIdOf(AlvoRecord row) => (Guid)row[IdField]!;
+
+    /// <summary>
+    /// The result a replay of <paramref name="idempotency"/> answers with, or <see langword="null"/> when
+    /// this key has not been used in this scope yet.
+    /// </summary>
+    /// <remarks>
+    /// Every recorded row is re-read under a freshly resolved <c>get</c> decision, exactly as a single
+    /// write's replay is and for the same reason: the <c>create</c> and <c>update</c> decisions the batch
+    /// arrived with do not filter the rows this caller may <em>read</em>. A row that has since been deleted,
+    /// or that a configured <c>get</c> predicate now excludes, drops out — a replay is a read, so it answers
+    /// what a read would.
+    /// </remarks>
+    /// <param name="entity">The entity the batch wrote.</param>
+    /// <param name="context">The replaying caller.</param>
+    /// <param name="idempotency">The token this request carries, or <see langword="null"/>.</param>
+    private AlvoBatchResult? ReplayedBatch(string entity, AlvoContext context, AlvoIdempotency? idempotency)
+    {
+        if (idempotency is not { } token || !_idempotency.TryGetValue(IdempotencyKey(token, context), out var record))
+        {
+            return null;
+        }
+
+        EnsureSameRequest(record, token);
+
+        var read = _policy.Resolve(entity, DataOperation.Get, context);
+        var stored = RowsForLocked(entity);
+        var rows = read.IsDenied
+            ? [.. record.RowIds.Select(IdOnly)]
+            : RecordedRows(stored, record, read, context);
+
+        return AlvoBatchResult.Wrote(rows, record.RowIds.Count);
+    }
+
+    /// <inheritdoc cref="ReplayedBatch"/>
+    /// <param name="stored">Every row of the entity.</param>
+    /// <param name="record">The record this replay matched.</param>
+    /// <param name="read">The <c>get</c> decision resolved for the replaying caller.</param>
+    /// <param name="context">The replaying caller.</param>
+    private List<AlvoRecord> RecordedRows(
+        List<AlvoRecord> stored, IdempotencyRecord record, PolicyDecision read, AlvoContext context)
+    {
+        var rows = new List<AlvoRecord>(record.RowIds.Count);
+        foreach (var id in record.RowIds)
+        {
+            var row = stored.Find(candidate => IsRow(candidate, id));
+            if (row is not null && IsVisible(row, read, context))
+            {
+                rows.Add(Mask(row, read.HiddenFields, FrozenSet<string>.Empty));
+            }
+        }
+
+        return rows;
+    }
 }

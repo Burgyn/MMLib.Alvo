@@ -146,6 +146,7 @@ namespace MMLib.Alvo.Data
     public sealed class AlvoAuthorizationException : System.Exception
     {
         public const string QueryFieldUnavailable = "The query references a field that is not available to this caller.";
+        public const string RowUnavailable = "The row is not available to this caller.";
         public const string WriteRejectedByPolicy = "The write was rejected by policy.";
         public AlvoAuthorizationException() { }
         public AlvoAuthorizationException(string message) { }
