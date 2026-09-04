@@ -219,10 +219,7 @@ public sealed class InMemoryAlvoData : IAlvoData
             return null;
         }
 
-        if (!token.Matches(record.Fingerprint))
-        {
-            throw new AlvoIdempotencyConflictException();
-        }
+        EnsureSameRequest(record, token);
 
         var read = _policy.Resolve(entity, DataOperation.Get, context);
         if (read.IsDenied)
@@ -234,6 +231,17 @@ public sealed class InMemoryAlvoData : IAlvoData
         return stored is not null && IsVisible(stored, read, context)
             ? Mask(stored, read.HiddenFields, FrozenSet<string>.Empty)
             : throw new AlvoRecordNotFoundException();
+    }
+
+    /// <summary>Refuses a key reused for a different request, matching <c>EfAlvoData.EnsureSameRequest</c>.</summary>
+    /// <param name="record">The record found under this key.</param>
+    /// <param name="token">The token this request carries.</param>
+    private static void EnsureSameRequest(IdempotencyRecord record, AlvoIdempotency token)
+    {
+        if (!token.Matches(record.Fingerprint))
+        {
+            throw new AlvoIdempotencyConflictException();
+        }
     }
 
     /// <summary>
@@ -264,7 +272,7 @@ public sealed class InMemoryAlvoData : IAlvoData
     private static (string Key, string Scope) IdempotencyKey(AlvoIdempotency token, AlvoContext context) =>
         (token.Key, AlvoIdempotency.IdentityOf(context));
 
-    /// <summary>What one used idempotency key recorded: the request it was used for, and the row it created.</summary>
+    /// <summary>What one used idempotency key recorded: the request it was used for, and the row it touched.</summary>
     private readonly record struct IdempotencyRecord(string Fingerprint, Guid RowId);
 
     /// <summary>
@@ -300,6 +308,11 @@ public sealed class InMemoryAlvoData : IAlvoData
 
         lock (_gate)
         {
+            if (Replay(entity, context, idempotency) is { } replayed)
+            {
+                return Task.FromResult(replayed);
+            }
+
             var list = RowsForLocked(entity);
             var index = list.FindIndex(row => IsRow(row, id));
             var stored = index >= 0 ? list[index] : null;
@@ -313,6 +326,8 @@ public sealed class InMemoryAlvoData : IAlvoData
             EnsureWriteAllowed(decision, merged, stored, context);
 
             list[index] = merged;
+            RecordIdempotencyLocked(idempotency, context, id);
+
             return Task.FromResult(Mask(merged, decision.HiddenFields, FrozenSet<string>.Empty));
         }
     }
@@ -342,6 +357,11 @@ public sealed class InMemoryAlvoData : IAlvoData
 
         lock (_gate)
         {
+            if (IsSpent(context, idempotency))
+            {
+                return Task.CompletedTask;
+            }
+
             var list = RowsForLocked(entity);
             var index = list.FindIndex(row => IsRow(row, id));
             var stored = index >= 0 ? list[index] : null;
@@ -352,9 +372,33 @@ public sealed class InMemoryAlvoData : IAlvoData
 
             AlvoPrecondition.EnsureMatches(precondition, StoredVersion(schema, stored));
             list.RemoveAt(index);
+            RecordIdempotencyLocked(idempotency, context, id);
         }
 
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Whether this key has already been used for this same request, so the delete it names is already done.
+    /// </summary>
+    /// <remarks>
+    /// A delete's replay reads nothing, which is why it needs its own lookup rather than <see cref="Replay"/>:
+    /// the row is gone by construction, so there is no stored row to re-read under a <c>get</c> decision and
+    /// the record itself is the whole answer. A different fingerprint under the same key is still refused
+    /// here — without that check a reused key would report success for a delete that never happened, and on
+    /// this verb nothing downstream would catch it.
+    /// </remarks>
+    /// <param name="context">The replaying caller, whose tenant and user scope the record.</param>
+    /// <param name="idempotency">The token this request carries, or <see langword="null"/>.</param>
+    private bool IsSpent(AlvoContext context, AlvoIdempotency? idempotency)
+    {
+        if (idempotency is not { } token || !_idempotency.TryGetValue(IdempotencyKey(token, context), out var record))
+        {
+            return false;
+        }
+
+        EnsureSameRequest(record, token);
+        return true;
     }
 
     /// <summary>

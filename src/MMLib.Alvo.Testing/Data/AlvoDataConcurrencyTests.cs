@@ -265,6 +265,109 @@ public abstract class AlvoDataConcurrencyTests
     }
 
     /// <summary>
+    /// A retried update is answered with the row rather than refused, which is the whole of #102: without a
+    /// key the retry is a precondition failure the caller cannot tell from someone else having changed the
+    /// row underneath them.
+    /// </summary>
+    /// <remarks>
+    /// The version is what makes this non-vacuous. A second write would advance it again, so asserting that
+    /// it did <b>not</b> move is what proves the replay wrote nothing — a returned row alone could not, since
+    /// a second write returns a row too.
+    /// </remarks>
+    [Fact]
+    public async Task A_retried_update_answers_the_row_and_writes_nothing()
+    {
+        var world = await AuditedWorldAsync();
+        var created = await world.Data.CreateAsync(Orders, Payload("first"), world.Caller, cancellationToken: Ct);
+        var token = TokenFor(Orders);
+
+        var first = await world.Data.UpdateAsync(
+            Orders, IdOf(created), Payload("second"), world.Caller, idempotency: token, cancellationToken: Ct);
+        var replay = await world.Data.UpdateAsync(
+            Orders, IdOf(created), Payload("second"), world.Caller, idempotency: token, cancellationToken: Ct);
+
+        IdOf(replay).ShouldBe(IdOf(first));
+        VersionOf(replay).ShouldBe(
+            VersionOf(first), "a replay must not write again — a second write would advance the version");
+    }
+
+    /// <summary>
+    /// A retried delete answers that the row is gone rather than that it was never there. Without the key the
+    /// retry is an <see cref="AlvoRecordNotFoundException"/> the caller cannot tell from somebody else's
+    /// delete, which is the ambiguity #102 exists to remove.
+    /// </summary>
+    /// <remarks>
+    /// The control is the delete itself: the row must actually be gone afterwards, or "did not throw" would
+    /// also be satisfied by a delete that quietly did nothing at all.
+    /// </remarks>
+    [Fact]
+    public async Task A_retried_delete_answers_as_done_rather_than_as_absent()
+    {
+        var world = await AuditedWorldAsync();
+        var created = await world.Data.CreateAsync(Orders, Payload("first"), world.Caller, cancellationToken: Ct);
+        var token = TokenFor(Orders);
+
+        await world.Data.DeleteAsync(Orders, IdOf(created), world.Caller, idempotency: token, cancellationToken: Ct);
+        (await world.Data.GetAsync(Orders, IdOf(created), world.Caller, Ct)).ShouldBeNull();
+
+        await Should.NotThrowAsync(() => world.Data.DeleteAsync(
+            Orders, IdOf(created), world.Caller, idempotency: token, cancellationToken: Ct));
+    }
+
+    /// <summary>
+    /// A key reused for a different update is refused, and the second payload is not written. A delete's
+    /// replay reads nothing, so on that verb this check is the <em>only</em> thing between a reused key and a
+    /// caller told a write succeeded that never happened.
+    /// </summary>
+    [Fact]
+    public async Task One_key_reused_for_a_different_update_is_a_conflict()
+    {
+        var world = await AuditedWorldAsync();
+        var created = await world.Data.CreateAsync(Orders, Payload("first"), world.Caller, cancellationToken: Ct);
+        var key = NewKey();
+
+        await world.Data.UpdateAsync(
+            Orders, IdOf(created), Payload("second"), world.Caller,
+            idempotency: new AlvoIdempotency(key, "fingerprint-of-the-first"), cancellationToken: Ct);
+
+        await Should.ThrowAsync<AlvoIdempotencyConflictException>(() => world.Data.UpdateAsync(
+            Orders, IdOf(created), Payload("third"), world.Caller,
+            idempotency: new AlvoIdempotency(key, "fingerprint-of-the-second"), cancellationToken: Ct));
+
+        var stored = await world.Data.GetAsync(Orders, IdOf(created), world.Caller, Ct);
+        stored.ShouldNotBeNull()["title"].ShouldBe("second", "the refused request must not have written");
+    }
+
+    /// <summary>
+    /// The 412 #102 exists to remove: a conditional update retried with the same key is not refused by its
+    /// own first write. Without the key the retry carries a version the first attempt already advanced past,
+    /// and the caller is told they lost a race with themselves.
+    /// </summary>
+    /// <remarks>
+    /// The precondition is minted before either call, so the second one genuinely carries the stale version.
+    /// An implementation that ignores the token therefore fails this with an
+    /// <see cref="AlvoPreconditionFailedException"/> out of the second call, which is the failure this fact
+    /// is named for — no <c>NotThrow</c> wrapper is needed to see it.
+    /// </remarks>
+    [Fact]
+    public async Task A_retried_conditional_update_is_not_refused_by_its_own_first_write()
+    {
+        var world = await AuditedWorldAsync();
+        var created = await world.Data.CreateAsync(Orders, Payload("first"), world.Caller, cancellationToken: Ct);
+        var precondition = new AlvoPrecondition(VersionOf(created));
+        var token = TokenFor(Orders);
+
+        var first = await world.Data.UpdateAsync(
+            Orders, IdOf(created), Payload("second"), world.Caller, precondition, token, Ct);
+
+        var replay = await world.Data.UpdateAsync(
+            Orders, IdOf(created), Payload("second"), world.Caller, precondition, token, Ct);
+
+        VersionOf(replay).ShouldBe(
+            VersionOf(first), "the retry was answered as a replay rather than refused by its own first write");
+    }
+
+    /// <summary>
     /// A key reused for a <em>different</em> request is not a replay: answering with the first row would
     /// report success for a create that never happened and silently discard the second payload. Refused, and
     /// the second row is not created either — the only two answers that do not lose data.

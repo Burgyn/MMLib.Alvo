@@ -233,6 +233,9 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task A_replay_by_a_second_user_in_the_same_tenant_never_returns_the_first_users_row() { }
         public System.Threading.Tasks.Task A_replay_on_an_entity_the_caller_cannot_read_performs_no_row_read() { }
         public System.Threading.Tasks.Task A_replay_returns_the_same_field_set_a_get_by_that_caller_returns() { }
+        public System.Threading.Tasks.Task A_retried_conditional_update_is_not_refused_by_its_own_first_write() { }
+        public System.Threading.Tasks.Task A_retried_delete_answers_as_done_rather_than_as_absent() { }
+        public System.Threading.Tasks.Task A_retried_update_answers_the_row_and_writes_nothing() { }
         public System.Threading.Tasks.Task A_stale_precondition_is_refused_before_the_policy_check_reveals_anything() { }
         public System.Threading.Tasks.Task An_idempotency_key_is_scoped_to_its_tenant_so_one_tenant_cannot_replay_anothers() { }
         public System.Threading.Tasks.Task An_idempotency_key_past_the_ports_byte_bound_is_refused() { }
@@ -241,6 +244,7 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task An_update_whose_precondition_is_stale_is_refused_and_changes_nothing() { }
         public System.Threading.Tasks.Task An_update_whose_precondition_matches_the_stored_version_succeeds() { }
         protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Data.IAlvoData> CreateAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, System.Collections.Generic.IReadOnlyDictionary<string, System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRecord>> seed);
+        public System.Threading.Tasks.Task One_key_reused_for_a_different_update_is_a_conflict() { }
         public System.Threading.Tasks.Task Replaying_an_idempotency_key_returns_the_row_and_creates_no_second_one() { }
         public System.Threading.Tasks.Task Replaying_an_idempotency_key_with_the_same_fingerprint_returns_the_first_row() { }
         public System.Threading.Tasks.Task The_same_idempotency_key_with_a_different_fingerprint_is_a_conflict() { }

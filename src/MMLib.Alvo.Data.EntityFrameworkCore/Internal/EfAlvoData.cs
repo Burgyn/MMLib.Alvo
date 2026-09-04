@@ -402,24 +402,42 @@ internal sealed class EfAlvoData : IAlvoData
     /// implementation relies on, with the provider exception preserved as the inner one.
     /// </para>
     /// </remarks>
-    private async Task<AlvoRecord> ReplayableCreateAsync(
+    private Task<AlvoRecord> ReplayableCreateAsync(
         string entity, IReadOnlyDictionary<string, object?> values, PolicyDecision decision, AlvoContext context,
-        AlvoIdempotency token, CancellationToken cancellationToken)
+        AlvoIdempotency token, CancellationToken cancellationToken) =>
+        ReplayableWriteAsync(
+            () => CreatedOrReplayedAsync(entity, values, decision, context, token, cancellationToken),
+            cancellationToken);
+
+    /// <summary>
+    /// One idempotent write's attempt loop, over whichever verb <paramref name="attempt"/> performs.
+    /// </summary>
+    /// <remarks>
+    /// Generalised over a delegate rather than copied per verb: the record's primary key is the concurrency
+    /// control on all three, so a create, an update and a delete lose a race the same way and must wait the
+    /// same way. Two copies of a backoff policy is two places for it to drift, and the drift would only show
+    /// up as one verb hanging under contention the others survive.
+    /// </remarks>
+    /// <param name="attempt">One whole attempt, including its own transaction.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <typeparam name="T">What the attempt answers with.</typeparam>
+    private static async Task<T> ReplayableWriteAsync<T>(
+        Func<Task<T>> attempt, CancellationToken cancellationToken)
     {
-        for (var attempt = 1; ; attempt++)
+        for (var attempts = 1; ; attempts++)
         {
             try
             {
-                return await CreatedOrReplayedAsync(entity, values, decision, context, token, cancellationToken);
+                return await attempt();
             }
             catch (Exception failure) when (IsStorageWriteFailure(failure))
             {
-                if (attempt >= ContendedCreateAttempts)
+                if (attempts >= ContendedCreateAttempts)
                 {
                     throw ExhaustedAsRetryLimit(failure);
                 }
 
-                await Task.Delay(_contentionBackoff * attempt, cancellationToken);
+                await Task.Delay(_contentionBackoff * attempts, cancellationToken);
             }
         }
     }
@@ -445,10 +463,10 @@ internal sealed class EfAlvoData : IAlvoData
     /// <param name="failure">The last storage write failure, preserved as the inner exception.</param>
     private static InvalidOperationException ExhaustedAsRetryLimit(Exception failure) =>
         new(
-            $"An idempotent create was retried {ContendedCreateAttempts} times and storage refused the write "
-            + "every time. The write is guarded by the idempotency table's primary key "
+            $"An idempotent write was retried {ContendedCreateAttempts} times and storage refused it every "
+            + "time. The write is guarded by the idempotency table's primary key "
             + "(idempotency_key, scope), so a refusal this persistent is either sustained contention on that "
-            + "one key or a constraint this create violates on its own — the inner exception says which.",
+            + "one key or a constraint this write violates on its own — the inner exception says which.",
             failure);
 
     /// <summary>
@@ -590,10 +608,7 @@ internal sealed class EfAlvoData : IAlvoData
         AlvoDataContext db, EntitySchema schema, AlvoContext context,
         IdempotencyTable.IdempotencyRecord record, AlvoIdempotency token, CancellationToken cancellationToken)
     {
-        if (!token.Matches(record.Fingerprint))
-        {
-            throw new AlvoIdempotencyConflictException();
-        }
+        EnsureSameRequest(record, token);
 
         var read = _policy.Resolve(schema.Name, DataOperation.Get, context);
         if (read.IsDenied)
@@ -605,6 +620,25 @@ internal sealed class EfAlvoData : IAlvoData
             ?? throw new AlvoRecordNotFoundException();
 
         return RecordMaterializer.ToRecord(row, read.HiddenFields, FrozenSet<string>.Empty);
+    }
+
+    /// <summary>
+    /// Refuses a key reused for a different request, before anything is read or written.
+    /// </summary>
+    /// <remarks>
+    /// The first check on every replay path, and the reason is the same on all three verbs: a different
+    /// fingerprint is not a retry, so answering it with the first request's outcome would report success for
+    /// a write that never happened. On a delete that is the sharpest case — the replay reads nothing, so this
+    /// is the <em>only</em> thing standing between a reused key and a caller told their delete succeeded.
+    /// </remarks>
+    /// <param name="record">The record found under this key.</param>
+    /// <param name="token">The token this request carries.</param>
+    private static void EnsureSameRequest(IdempotencyTable.IdempotencyRecord record, AlvoIdempotency token)
+    {
+        if (!token.Matches(record.Fingerprint))
+        {
+            throw new AlvoIdempotencyConflictException();
+        }
     }
 
     /// <summary>The one row a single-row write's record names.</summary>
@@ -820,24 +854,109 @@ internal sealed class EfAlvoData : IAlvoData
 
         var decision = Resolve(entity, DataOperation.Update, context);
 
-        using var db = _contexts.Create();
-        var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
-        WritePayloadGuard.EnsureWritable(values, schema, decision, isUpdate: true);
-        AlvoPrecondition.EnsureSupported(precondition, schema);
+        return idempotency is { } token
+            ? await ReplayableWriteAsync(
+                () => UpdatedOrReplayedAsync(entity, id, values, decision, context, precondition, token, cancellationToken),
+                cancellationToken)
+            : await UpdatedAsync(entity, id, values, decision, context, precondition, cancellationToken);
+    }
 
+    /// <summary>One ordinary update: the write and its event, inside one transaction.</summary>
+    private async Task<AlvoRecord> UpdatedAsync(
+        string entity, Guid id, IReadOnlyDictionary<string, object?> values, PolicyDecision decision,
+        AlvoContext context, AlvoPrecondition? precondition, CancellationToken cancellationToken)
+    {
+        using var db = _contexts.Create();
+        var schema = UpdatableEntity(db, entity, values, decision, precondition);
         var now = WriteInstantNow();
         await EnsureOutboxTableAsync(db, cancellationToken);
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var postImage = await WrittenAsync(
+            db, transaction, schema, decision, context, id, values, precondition, now, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        return RecordMaterializer.ToRecord(postImage, decision.HiddenFields, FrozenSet<string>.Empty);
+    }
+
+    /// <summary>
+    /// One attempt at an idempotent update, inside one transaction: look the key up, then either replay the
+    /// recorded row or perform this write and record it against the key.
+    /// </summary>
+    /// <remarks>
+    /// The shape <see cref="CreatedOrReplayedAsync"/> already has, for the same reason: the lookup, the write
+    /// and the record share one transaction, so "the row changed" and "the key is spent" are one fact.
+    /// </remarks>
+    private async Task<AlvoRecord> UpdatedOrReplayedAsync(
+        string entity, Guid id, IReadOnlyDictionary<string, object?> values, PolicyDecision decision,
+        AlvoContext context, AlvoPrecondition? precondition, AlvoIdempotency token,
+        CancellationToken cancellationToken)
+    {
+        using var db = _contexts.Create();
+        var schema = UpdatableEntity(db, entity, values, decision, precondition);
+        var now = WriteInstantNow();
+        await EnsureIdempotencyTableAsync(db, cancellationToken);
+        await EnsureOutboxTableAsync(db, cancellationToken);
+
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var records = new IdempotencyScope(
+            db.Database.GetDbConnection(), transaction.GetDbTransaction(), _idempotencyTable, token, context);
+
+        var recorded = await records.FindAsync(cancellationToken);
+        var result = recorded is { } record
+            ? await ReplayedAsync(db, schema, context, record, token, cancellationToken)
+            : await RecordedUpdateAsync(
+                db, transaction, schema, decision, context, id, values, precondition, records, now,
+                cancellationToken);
+
+        await transaction.CommitAsync(cancellationToken);
+        return result;
+    }
+
+    /// <summary>The write, its event and the key's record — in that order and in one transaction.</summary>
+    /// <remarks>
+    /// The event precedes the record for the reason <see cref="RecordedCreateAsync"/> gives: the record's
+    /// primary key is the only write here a rival can make fail after the event exists, so the loser rolls
+    /// the pair back together and its retry answers as a replay.
+    /// </remarks>
+    private async Task<AlvoRecord> RecordedUpdateAsync(
+        AlvoDataContext db, IDbContextTransaction transaction, EntitySchema schema, PolicyDecision decision,
+        AlvoContext context, Guid id, IReadOnlyDictionary<string, object?> values, AlvoPrecondition? precondition,
+        IdempotencyScope records, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var postImage = await WrittenAsync(
+            db, transaction, schema, decision, context, id, values, precondition, now, cancellationToken);
+        await records.InsertAsync([id], now, cancellationToken);
+
+        return RecordMaterializer.ToRecord(postImage, decision.HiddenFields, FrozenSet<string>.Empty);
+    }
+
+    /// <summary>The body of one update inside the caller's transaction: the write, then its event.</summary>
+    private async Task<Dictionary<string, object>> WrittenAsync(
+        AlvoDataContext db, IDbContextTransaction transaction, EntitySchema schema, PolicyDecision decision,
+        AlvoContext context, Guid id, IReadOnlyDictionary<string, object?> values, AlvoPrecondition? precondition,
+        DateTimeOffset now, CancellationToken cancellationToken)
+    {
         var (preImage, postImage) = await WriteAsync(
             db, schema, decision, context, id, Stamped(schema, values, context, now, isUpdate: true), precondition,
             now, cancellationToken);
         await EmitAsync(
             db, transaction, schema, OutboxOperation.Updated, context, now, Unmasked(postImage), preImage,
             cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
 
-        return RecordMaterializer.ToRecord(postImage, decision.HiddenFields, FrozenSet<string>.Empty);
+        return postImage;
+    }
+
+    /// <summary>The entity an update may write, with both of the update's own payload guards applied.</summary>
+    private static EntitySchema UpdatableEntity(
+        AlvoDataContext db, string entity, IReadOnlyDictionary<string, object?> values, PolicyDecision decision,
+        AlvoPrecondition? precondition)
+    {
+        var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
+        WritePayloadGuard.EnsureWritable(values, schema, decision, isUpdate: true);
+        AlvoPrecondition.EnsureSupported(precondition, schema);
+
+        return schema;
     }
 
     /// <summary>
@@ -901,20 +1020,98 @@ internal sealed class EfAlvoData : IAlvoData
 
         var decision = Resolve(entity, DataOperation.Delete, context);
 
-        using var db = _contexts.Create();
-        var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
-        EnsureNotSoftDeleted(schema);
-        AlvoPrecondition.EnsureSupported(precondition, schema);
+        if (idempotency is { } token)
+        {
+            _ = await ReplayableWriteAsync(
+                () => ErasedOrReplayedAsync(entity, id, decision, context, precondition, token, cancellationToken),
+                cancellationToken);
+            return;
+        }
 
+        await ErasedAsync(entity, id, decision, context, precondition, cancellationToken);
+    }
+
+    /// <summary>One ordinary delete: the erase and its event, inside one transaction.</summary>
+    private async Task ErasedAsync(
+        string entity, Guid id, PolicyDecision decision, AlvoContext context, AlvoPrecondition? precondition,
+        CancellationToken cancellationToken)
+    {
+        using var db = _contexts.Create();
+        var schema = ErasableEntity(db, entity, precondition);
         var now = WriteInstantNow();
         await EnsureOutboxTableAsync(db, cancellationToken);
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await ErasedAndEmittedAsync(
+            db, transaction, schema, decision, context, id, precondition, now, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// One attempt at an idempotent delete: look the key up, and either answer that the delete is already
+    /// done or erase the row and record the key against it.
+    /// </summary>
+    /// <remarks>
+    /// <b>A delete's replay reads nothing, and that is the point rather than an optimisation.</b> The row it
+    /// would read is gone by construction, so there is nothing left to re-read under a <c>get</c> decision the
+    /// way an update's replay does — the recorded key <em>is</em> the whole answer, and it says the same thing
+    /// the first call said. Without it the retry is an <see cref="AlvoRecordNotFoundException"/> the caller
+    /// cannot tell from somebody else having deleted the row, which is exactly what #102 exists to remove.
+    /// </remarks>
+    /// <returns>
+    /// Whether this call performed the delete, rather than answering one already recorded. Nothing reads it
+    /// today; the retry loop is generic over a result, and this is the honest one for a delete to give it.
+    /// </returns>
+    private async Task<bool> ErasedOrReplayedAsync(
+        string entity, Guid id, PolicyDecision decision, AlvoContext context, AlvoPrecondition? precondition,
+        AlvoIdempotency token, CancellationToken cancellationToken)
+    {
+        using var db = _contexts.Create();
+        var schema = ErasableEntity(db, entity, precondition);
+        var now = WriteInstantNow();
+        await EnsureIdempotencyTableAsync(db, cancellationToken);
+        await EnsureOutboxTableAsync(db, cancellationToken);
+
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var records = new IdempotencyScope(
+            db.Database.GetDbConnection(), transaction.GetDbTransaction(), _idempotencyTable, token, context);
+
+        var recorded = await records.FindAsync(cancellationToken);
+        if (recorded is { } record)
+        {
+            EnsureSameRequest(record, token);
+        }
+        else
+        {
+            await ErasedAndEmittedAsync(
+                db, transaction, schema, decision, context, id, precondition, now, cancellationToken);
+            await records.InsertAsync([id], now, cancellationToken);
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+        return recorded is null;
+    }
+
+    /// <summary>The body of one delete inside the caller's transaction: the erase, then its event.</summary>
+    private async Task ErasedAndEmittedAsync(
+        AlvoDataContext db, IDbContextTransaction transaction, EntitySchema schema, PolicyDecision decision,
+        AlvoContext context, Guid id, AlvoPrecondition? precondition, DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
         var preImage = await EraseAsync(db, schema, decision, context, id, precondition, now, cancellationToken);
         await EmitAsync(
             db, transaction, schema, OutboxOperation.Deleted, context, now, postImage: null, preImage,
             cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+    }
+
+    /// <summary>The entity a delete may erase, with the delete's own two guards applied.</summary>
+    private static EntitySchema ErasableEntity(AlvoDataContext db, string entity, AlvoPrecondition? precondition)
+    {
+        var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
+        EnsureNotSoftDeleted(schema);
+        AlvoPrecondition.EnsureSupported(precondition, schema);
+
+        return schema;
     }
 
     /// <summary>
