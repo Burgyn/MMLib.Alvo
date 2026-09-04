@@ -150,7 +150,11 @@ internal static class DataApiDocumentation
                 or DataApiEndpointKind.BatchDelete =>
                 [Ok(ResponseBody.Batch, "Every row the batch wrote, in request order, and how many it "
                     + "affected. A batch delete answers an empty 'items' with a non-zero 'affected'."),
-                 .. Refusals(Malformed, Precondition, Conflict)],
+                 Unauthenticated,
+                 ForbiddenOnBatch,
+                 Malformed,
+                 Precondition,
+                 Conflict],
             _ => throw new InvalidOperationException($"No response catalogue for endpoint kind '{kind}'."),
         };
     }
@@ -217,6 +221,29 @@ internal static class DataApiDocumentation
         + "descriptor, the caller has no tenant on a tenant-scoped entity, or the policy reads a caller value "
         + "this caller does not carry. It is never 'your rule excluded these rows'; see the 200.",
         SharedId: "forbidden");
+
+    /// <summary>
+    /// The <c>403</c> as a batch answers it, which is the one route where it <b>is</b> "your rule excluded
+    /// these rows".
+    /// </summary>
+    /// <remarks>
+    /// <b>Narrowed rather than reworded, so the five single-row operations keep the sentence they publish.</b>
+    /// <see cref="Forbidden"/> says a policy refusal is never per row — true everywhere else, and false here
+    /// the moment a batch began answering a refused row by name. A shared component that denied what one of
+    /// its referrers does is the defect this narrowing exists to prevent, and it is the shape
+    /// <see cref="PreconditionOn"/> already uses.
+    /// </remarks>
+    private static Response ForbiddenOnBatch => Forbidden with
+    {
+        SharedNarrowing =
+            "The operation is refused, or one or more rows are — and on this route a policy refusal CAN be "
+            + "per row, unlike every other operation. Each entry of 'violations' carries a '/rows/{index}' "
+            + "pointer naming a row policy refused: its 'WITH CHECK' predicate, the tenant scope, a row that "
+            + "is not yours or does not exist (one refusal for both, so a batch cannot be used to ask which), "
+            + "or a row the batch named twice. A batch is one transaction, so nothing was written — repair "
+            + "the rows the response names and resend the whole batch. A refusal the entity's declared SHAPE "
+            + "produced is a 422 instead, and carries the same pointers.",
+    };
 
     private static Response Absent => new(
         StatusCodes.Status404NotFound,

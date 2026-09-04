@@ -311,16 +311,24 @@ disagreed:
 |---|---|
 | any policy refusal — `WITH CHECK`, the tenant scope, a `readOnly` field, a managed column, an invisible or absent row | **403** |
 | anything the entity's declared shape refuses — a type, a `maxLength`, a missing `required` | **422** |
-| a mix | **403** — default-deny dominates, and a caller told to fix a field would fix it and be refused again |
-
-**A refinement the implementation forced, recorded here rather than left as drift.** The table above reads as
-one decision over one list, and the two refusals never actually meet in one list: the *reader* refuses what
-the entity's declared shape refuses and answers **422**, and the *port* refuses what policy refuses and
-answers **403** — the reader short-circuits before the port is called, so there is no mix to resolve. The one
-case the table would have put at 403 and the code puts at 422 is a `readOnly` field, which `RecordValidator`
-refuses in the reader: it answers 422 on the batch exactly as it does on the single-row create and update, and
-matching the single-row route was judged to matter more than matching this table.
+| a mix | ~~**403** — default-deny dominates~~ — **struck**, see below |
 | a constraint the database enforces | **409**, naming the field and no index |
+
+**A refinement the implementation forced, recorded here rather than left as drift.**
+
+The table reads as one decision over one list, and the two refusals never actually meet in one list. The
+*reader* refuses what the entity's declared shape refuses and answers **422**; the *port* refuses what policy
+refuses and answers **403**, carrying a `violations` array with one `/rows/{index}` entry per refused row. The
+reader short-circuits before the port is called, so **the third row is unreachable** and is struck rather than
+implemented.
+
+The one case the first row would have put at 403 and the code puts at 422 is a `readOnly` write, which
+`RecordValidator` refuses in the reader. It answers 422 on a batch exactly as it does on the single-row create
+and update, and matching the single-row route was judged to matter more than matching this table.
+
+A 403 carrying `violations` is new to this API — the single-row 403 carries only a message — so the generated
+document narrows the shared `forbidden` component on the three batch operations rather than rewording it for
+all eight. The unnarrowed sentence says a policy refusal is never per row, which stays true everywhere else.
 
 ## 7. #106 — the bound, and it will be measured
 
@@ -419,8 +427,9 @@ to the shared suite.
   and 250 lines of duplicated scaffolding is how two fixtures that must agree come to disagree.
 - `AlvoAuthorizationException.RowNamedTwice` — the refusal for a batch naming one row more than once, added
   when review found that judging two patches for one row against the same pre-image is a `WITH CHECK`
-  bypass. It lives beside `RowUnavailable` and `QueryFieldUnavailable` for the reason those do: a provider
-  that cannot read the constant words it themselves, and the wording is the contract.
+  bypass. It lives beside `RowUnavailable` and `QueryFieldUnavailable` for the reason those do: a provider that
+  cannot read the constant words the refusal itself, and on this rule the wording *is* the guarantee.
+
 ## 10. How each claim is proved
 
 The contract suite (`src/MMLib.Alvo.Testing`) is where the port-level facts go, because they must hold

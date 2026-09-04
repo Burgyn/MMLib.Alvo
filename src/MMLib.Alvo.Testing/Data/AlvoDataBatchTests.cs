@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Data;
+using MMLib.Alvo.Schema;
 using Shouldly;
 using Xunit;
 
@@ -335,6 +336,45 @@ public abstract class AlvoDataBatchTests : AlvoDataFixture
             first.Rows.Select(IdOf), ignoreOrder: false,
             customMessage: "a replay answers the rows the first batch wrote, in the order it wrote them");
         (await CountAsync(world, Orders, world.Caller)).ShouldBe(2, "two rows, not four");
+    }
+
+    /// <summary>
+    /// A caller who may write and not read gets their rows' <b>ids</b> back on a replay, and no field values.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A replay re-reads under a freshly resolved <c>get</c>, and when <c>get</c> is denied outright there is
+    /// nothing to read — so the answer is the ids alone. That is not a refusal: the retry must not be worse
+    /// than the batch it replays, and the record's identity (key, tenant, acting user) already proves this
+    /// caller wrote those rows. The ids are exactly what their own first response gave them.
+    /// </para>
+    /// <para>
+    /// <b>Pinned because the branch had no driver.</b> The HTTP replay fact used to reach it by accident, on
+    /// a key that happened to lack the read role; widening that key for an unrelated fact moved it off, and
+    /// nothing else covered an id-only replay. It fails closed, so this is a proof gap rather than a hole —
+    /// but it is a replay path in the security core.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_replayed_batch_by_a_caller_who_cannot_read_answers_ids_and_no_values()
+    {
+        var world = await WriteOnlyWorldAsync();
+        var token = TokenFor(Dropbox);
+
+        var first = await world.Data.CreateManyAsync(
+            Dropbox, [Payload("a"), Payload("b")], world.Caller, token, Ct);
+        var replay = await world.Data.CreateManyAsync(
+            Dropbox, [Payload("a"), Payload("b")], world.Caller, token, Ct);
+
+        replay.Rows.Select(IdOf).ShouldBe(
+            first.Rows.Select(IdOf), ignoreOrder: false,
+            customMessage: "the ids the caller's own first answer already gave them");
+        foreach (var row in replay.Rows)
+        {
+            row.Values.Keys.ShouldBe(
+                [AlvoManagedColumns.Id],
+                customMessage: "a caller who may not read is told no field value, not even one they wrote");
+        }
     }
 
     /// <summary>A delete removes every named row, or none of them.</summary>
