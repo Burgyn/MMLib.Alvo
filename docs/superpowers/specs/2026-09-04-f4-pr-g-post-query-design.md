@@ -5,8 +5,8 @@ Closes **#107**.
 One new route per entity, gated as `list`, answering the same page envelope from the same
 parser. Nothing about the port changes and nothing about the grammar changes; what changes
 is which side of the request the parameters arrive on — and, because the transport stops
-bounding two comma-separated lists, one budget that the URL length was silently providing
-becomes explicit (§2.5).
+bounding four caller-supplied lengths, the budgets the URL was silently providing become
+explicit (§2.5, §2.6).
 
 ## 0. The problem, restated from the source rather than from the issue title
 
@@ -188,6 +188,12 @@ parameter documentation says the pointer is *"a JSON Pointer (RFC 6901) into the
 body, **or the role of the query-string parameter** the refusal concerns"*. This endpoint is
 the first place both can appear in one response, so it is worth stating that they can.
 
+**The rule that resolves the two, stated where a caller reads it.** A `pointer` that is empty
+or begins with `/` is an RFC 6901 pointer into the request body; any other value is the role of
+a query parameter. That sentence goes on `AlvoViolation`'s own `pointer` documentation, because
+this is the first endpoint where one response can carry both and an agent branching on the
+field otherwise has to infer the rule.
+
 The role discipline is load-bearing on this surface: a pointer naming a field would answer
 "does this entity have a field called X" for exactly the caller most likely to be asking —
 the bit the byte-identical `unavailable-field` refusal exists to withhold.
@@ -284,13 +290,48 @@ allocation instead of after it.** Two of the three then need no new bound at all
 
 Two properties this deliberately keeps:
 
-- **A repeated identical entry still dedupes.** `?select=id,id,id,id,id,id` on a five-field
-  entity is six entries and one key, and stays a 200 — the behaviour PR-F recorded and
-  tested. The cap is on entries, well above any real projection.
+- **A repeated identical entry still dedupes.** `?select=id,id,id,…` is many entries and
+  one key, and stays a 200 — the behaviour PR-F recorded and tested. The cap is on
+  entries, well above any real projection.
 - **The GET surface is tightened too, and no legitimate URL can reach it.** 256 select
   entries of at least two characters is under 800 bytes.
 
-**Every other parser budget then really does apply unchanged**, which is #107's fourth
+### 2.6 The fourth channel: the operand that never splits
+
+The three readers above all split on a comma, which is why making the split lazy fixes them.
+There is a fourth channel that does not split at all, and the first draft of this design
+missed it: **a single operand**. `FilterTermParser` bounds no operand's length —
+`MaxCursorLength` bounds `after` and nothing else — so `{"make": "like.<a megabyte of
+%_%_…>"}` reaches the engine as a `LIKE` pattern matched against every row. Under a request
+line that was a few kilobytes; under a body it is a megabyte, and the claim below that *"this
+endpoint cannot express a filter the GET could not"* was false while it stood.
+
+**Only `like` and `ilike` are bounded, and the asymmetry is about cost rather than about
+size.** Every other operand is a bound *value*: the engine compares it per row, the comparison
+is linear in its length and short-circuits on the first differing byte, and the sum of all
+operands is already capped by the body bound. A pattern is *matched* rather than compared, and
+its cost is not linear in its length. Refusing a long `eq` operand would be a bound on the
+caller's data; refusing a long pattern is a bound on the server's work.
+
+`QueryStringParser.MaxPatternLength` is **512, and it is chosen rather than measured** —
+recorded as chosen. It is `MaxCursorLength`'s number for the same kind of reason: far past
+anything a real caller sends, and the length past which the string has stopped being plausibly
+the thing it claims to be. A search pattern longer than a keyset cursor is not a search. The
+refusal is `pattern-too-long`, its own code rather than `invalid-filter-value`'s, because
+nothing is wrong with the value — a caller told their value was unrepresentable would go
+looking for a type mistake.
+
+### 2.7 One bound that was checked and is correct
+
+The shape scan admits a body whose deepest token sits at `MaxPayloadDepth`, and both readers
+then parse with `MaxDepth = MaxPayloadDepth` — which counts the outermost container as level
+1 where the scan's `CurrentDepth` reports it as 0. That reads like an off-by-one that would
+turn an accepted body into an uncaught `JsonException`. **It was measured rather than argued**:
+at 32 levels the scan accepts and the parse succeeds, and at 33 the scan refuses first. The
+scan is exactly one level stricter than the parse, on both readers, and §5 pins the boundary
+so the relationship is held rather than rediscovered.
+
+**With §2.6 in place, every other parser budget really does apply unchanged**, which is #107's fourth
 constraint: `AlvoFilter.MaxTerms` charged while descending, `MaxInCandidates` per list and
 per request, `MaxPageSize`, `MaxCursorLength`, and the port's own `EnsureWithinLimits` belt.
 This endpoint cannot express a filter the GET could not.
@@ -358,6 +399,13 @@ collide with `{prefix}/{entity}/{id:guid}`: no POST is mapped there, and a liter
 satisfies a GUID constraint anyway. It needs no entry in `ReservedQueryKeys`, which is about
 query-string *keys*; an entity named `query` simply gets `/api/query/query`.
 
+**A second stated consequence, and it is not about status codes.** A host convention keyed on
+the HTTP **verb** — "POST means a write", which is a common shape for rate limiting or audit
+logging — now applies write shaping to a read, while a GET-keyed convention misses this route
+entirely. Alvo cannot prevent that, and the fix is available: a convention should key on the
+`DataApiOperationMetadata` marker, which is what it exists for. Recorded in `data-api.md`
+beside the 405.
+
 **A stated consequence:** `GET`, `PATCH` and `DELETE` on `{prefix}/{entity}/query` change
 from **404 to 405**. The path now matches an endpoint, so routing answers method-not-allowed
 before anything Alvo wrote runs — which means no problem document and no `Cache-Control:
@@ -420,9 +468,12 @@ to avoid, one layer up.
 | End to end, the two surfaces answer identically | `GET /api/vehicles?<qs>` and `POST /api/vehicles/query` answer the same status and the same body bytes, over the shared `AlvoApiWorld`, for representative queries including one `select` alias and one `Prefer: count=exact`. |
 | It solves the issue's actual case | A 400-element `in.(…)` list — past a common request-line limit as a URL — is answered 200 through the body, with the rows asked for. |
 | It is a read, and default-deny holds | A key whose scopes exclude `vehicles:read` is 403; a descriptor with `list` unconfigured is 403 for everybody; an anonymous caller is 403. Asserted on the new route, not inherited. |
-| The mask is applied before the body is read | A caller for whom `secret` is hidden gets the byte-identical `unavailable-field` refusal for `{"secret":"eq.x"}` that an undeclared name earns — and a **denied** caller gets 403, never a 422 about their body. |
+| The mask really is threaded in | Over `masked-notes.alvo.json`, whose `notes.secret` is genuinely `hidden` — **not** the vehicle registry, which declares no hidden field at all and would have made this fact pass while exercising nothing. A masked name, an undeclared name and the same masked name through the query string are one refusal, byte for byte. |
+| The decision precedes the **read**, not merely the parse | A denied caller (`ledgers`, which configures no `list` rule) sending a body past `MaxRequestBodyBytes` is answered **403, never `body-too-large`**. No statement-count assertion can see this: a refusal after buffering touches no database either. |
+| The 2.7 boundary holds | A body at exactly `MaxPayloadDepth` is accepted by both readers; one level deeper is `body-too-deep` and never an uncaught `JsonException`. |
 | The body-level refusals are the read's own | Each of the six carries a fix suggestion that does not mention writing, under the same code the write path uses. |
 | The bounds bound | Over `MaxRequestBodyBytes`, refused without buffering; over `MaxPayloadKeys`, refused mid-scan; a duplicate name, a `null`, an object and a nested array each refused at the right pointer. |
+| §2.6's pattern bound | A `like` pattern one character past `MaxPatternLength` is `pattern-too-long`; an `eq` operand of the same length is **not** refused, because the bound is on matching cost rather than on value size. |
 | §2.5's lazy splits | 257 `select` entries is `too-many-select-entries`; `select=id,id,id,id,id,id` on a five-field entity is still 200; an over-long `in` list is `too-many-in-candidates` and an over-wide group `filter-too-wide` — the codes they already earned, now reached before the split materialises. Each also fires on the **GET** surface. |
 | No new way past the parser's budgets | 257 filter terms and 1001 `in` candidates are refused through the body with the same codes and fix suggestions as through the URL. |
 | The 405 | `GET`/`PATCH`/`DELETE` on `{entity}/query` is 405 with an empty body — recorded, not incidental. |
@@ -447,6 +498,9 @@ end-to-end facts send requests through the world, which they do.
 | `OpenApiDocumentTests.The_count_preference_is_documented_on_the_list_and_nowhere_else` | renamed and widened to the query operation |
 | `OpenApiDocumentTests.The_document_is_stable.verified.txt` | snapshot moves |
 | `OpenApiDocumentCostTests`, `Operations(document).ShouldBe(entities.Count * 5)` | → `* 6`, with the class prose |
+| `ConcurrencyTests.Every_response_a_generated_endpoint_produces_is_no_store` | enumerates its probes explicitly, so the new route is otherwise unmeasured against §4's `no-store` promise |
+| `LazyRouteMaterialisationTests` | also gains an assertion that the third path is *this* path, not only that there are three |
+| Six `"five routes"` doc comments | `data-api.md` ×3, `DataApiEndpoints` ×2, `AlvoEndpointDataSource`, and two test files |
 | `AlvoExceptionHandlerTests` and `AlvoExceptionHandlerScopeTests` | both construct `new DataApiOperationMetadata("owners", DataOperation.List)` positionally — a compile break when the record's parameter becomes a kind |
 
 Unaffected, checked: `PolicyResolutionCountTests` (per-request), `DataApiConventionTests`
@@ -495,7 +549,7 @@ learns a rule the other two keep elsewhere.
 ## 7. Scope
 
 **In:** the route, `QueryBodyReader`, `BoundedJsonBody`, the endpoint-kind split, §2.5's
-lazy split and entry cap, the OpenAPI operation and body component, the prose, the facts
+lazy splits and entry cap, §2.6's pattern bound, the OpenAPI operation and body component, the prose, the facts
 above, and the `data-api.md` edits — which are **not only the route table**: `:3` and `:577`
 both say "five routes per entity", the URL-grammar block gains the sixth line, the budget
 table's "Request body" row stops being a write row and gains the entry cap, and the status
@@ -522,8 +576,9 @@ catalogue records that the six body-shape codes are now reachable under `malform
    that is what this ships.
 4. **From issue #107 as filed** — none on the constraints. The issue left "the same query
    string, or a JSON shape" open; §1.3 chooses the second and says why.
-5. **A tightening of Alvo's own published behaviour, recorded as one** — §2.5 adds
-   `too-many-select-entries` and applies it to the existing GET surface too. No query string
+5. **Two tightenings of Alvo's own published behaviour, recorded as such** — §2.5 adds
+   `too-many-select-entries` and §2.6 adds `pattern-too-long`, and both apply to the existing
+   GET surface too. No query string
    a proxy would carry can reach it, and the alternative was shipping an authenticated-caller
    allocation amplification that only the URL length had been preventing. The other two
    readers gain no bound: they gain the *timing* of a bound they already had.

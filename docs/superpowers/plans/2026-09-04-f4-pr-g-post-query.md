@@ -571,7 +571,7 @@ Mechanical, and every existing output must stay identical. In each case the para
 4. `DataApiDocumentation.ResponsesFor/SummaryOf/DescriptionOf` take a kind. `Query` reuses `List`'s arm in all three **for now**; Task 6 gives it its own summary and description.
 5. `DataApiParameters.For/UsedSharedIds/Names/HeaderNames/AddressesOneRow` take kinds. `Query` reuses `List`'s arms **for now**; Task 6 narrows them.
 6. `DataApiHeaders.AddTo/UsedIds` take `IEnumerable<(DataApiEndpointKind Kind, EntitySchema Entity)>`.
-7. `AlvoDocumentTransformer.Operations` returns `IReadOnlyList<(DataApiEndpointKind Kind, EntitySchema Entity)>` built from `endpoint.Marker.Kind`; `Reusable` takes that type; `Enrich`, `OperationId`, `RequestBody`, `BodyComponent` and `Responses` read `endpoint.Marker.Kind`.
+7. `AlvoDocumentTransformer.Operations` returns `IReadOnlyList<(DataApiEndpointKind Kind, EntitySchema Entity)>` built from `endpoint.Marker.Kind`, and `Reusable` takes that type. `Enrich` passes `endpoint.Marker.Kind` to `SummaryOf`, `DescriptionOf` and `DataApiParameters.For`. `OperationId(DataApiOperationMetadata marker)`, `RequestBody(DataApiOperationMetadata marker, …)` and `Responses(DataApiOperationMetadata marker, …)` keep taking the marker and change what they read from it: `marker.Kind.ToWireName()`, `BodyComponent(marker.Kind, …)` and `ResponsesFor(marker.Kind, entity)` respectively. None of them takes an `Endpoint`.
 
 `BodyComponent` becomes:
 
@@ -627,7 +627,9 @@ The one budget the URL length was silently providing. Design §2.5.
 - Produces:
   - `internal enum ListSplit { Ok, Malformed, TooMany }`
   - `internal static ListSplit ParenthesisedList.Split(string raw, int maxMembers, out IReadOnlyList<string> members)`
-  - `internal const int QueryStringParser.MaxSelectEntries`
+  - `internal static int QueryStringParser.MaxSelectEntries { get; }`
+  - `internal static int QueryStringParser.MaxPatternLength { get; }`
+  - `internal static AlvoViolation QueryViolations.PatternTooLong(int maxLength)`
   - `internal static AlvoViolation QueryViolations.TooManySelectEntries(int maxEntries)`
 
 - [ ] **Step 1: Write the failing tests**
@@ -652,40 +654,67 @@ Add to `QueryStringParserTests.cs`:
     }
 
     /// <summary>
-    /// And the entry bound does not retire the deduplication the width bound was written around: naming one
-    /// field six times on a five-field entity is one key and stays a 200.
+    /// The entry bound does not retire the deduplication the width bound was written around: a projection
+    /// naming one field far more often than the entity has fields is still one key and still a 200. The
+    /// existing <c>A_projection_repeating_one_field_past_the_field_count_still_dedupes</c> asserts the same
+    /// property against the <em>width</em> bound; this one asserts it survives the new entry bound, which is
+    /// a different thing to lose.
     /// </summary>
     [Fact]
     public void A_repeated_projection_entry_still_deduplicates_under_the_entry_bound()
     {
-        TryParse("select=id,id,id,id,id,id", out var parsed, out var violations).ShouldBeTrue(Because(violations));
+        var entries = string.Join(',', Enumerable.Repeat("id", QueryStringParser.MaxSelectEntries));
+
+        TryParse($"select={entries}", out var parsed, out var violations).ShouldBeTrue(Because(violations));
 
         parsed!.Select!.Count.ShouldBe(1);
     }
 
     /// <summary>
-    /// An over-long candidate list earns the refusal it already earned — the point of the change is that it
-    /// is reached before the whole list is materialised, not that the answer moved.
+    /// A group carrying more members than the node budget is refused as too wide — the code it already
+    /// earned. What changed is that it is reached before the member list is materialised, which no
+    /// assertion on the answer can see; the existing candidate-limit fact
+    /// (<c>An_in_list_is_capped_at_the_ports_candidate_limit</c>) already pins the <c>in</c> side of the
+    /// same boundary, so only the group side is added here.
     /// </summary>
     [Fact]
-    public void An_in_list_past_the_candidate_bound_is_still_refused_as_too_many_candidates()
-    {
-        var candidates = string.Join(',', Enumerable.Range(0, AlvoFilter.MaxInCandidates + 1));
-
-        TryParse($"year=in.({candidates})", out _, out var violations).ShouldBeFalse();
-
-        violations.ShouldContain(violation => violation.Code == "too-many-in-candidates");
-    }
-
-    /// <summary>A group carrying more members than the node budget is still refused as too wide.</summary>
-    [Fact]
-    public void A_group_past_the_node_budget_is_still_refused_as_too_wide()
+    public void A_group_past_the_node_budget_is_refused_as_too_wide()
     {
         var members = string.Join(',', Enumerable.Repeat("year.eq.1", AlvoFilter.MaxTerms + 1));
 
         TryParse($"or=({members})", out _, out var violations).ShouldBeFalse();
 
         violations.ShouldContain(violation => violation.Code == "filter-too-wide");
+    }
+
+    /// <summary>
+    /// A <c>like</c> pattern is bounded and every other operand is not, because the two cost different
+    /// things: an <c>eq</c> operand is a bound value whose comparison is linear in its size and
+    /// short-circuits on the first differing byte, while a pattern is matched against every row and its
+    /// cost is not linear in its length. Under a URL both were capped by the request line; a body caps
+    /// neither.
+    /// </summary>
+    [Fact]
+    public void A_like_pattern_longer_than_the_parser_matches_is_refused()
+    {
+        var pattern = new string('%', QueryStringParser.MaxPatternLength + 1);
+
+        TryParse($"make=like.{pattern}", out _, out var violations).ShouldBeFalse();
+
+        violations.ShouldContain(violation => violation.Code == "pattern-too-long");
+    }
+
+    /// <summary>
+    /// And the bound reaches only the two pattern operators: an equality against a long value is a
+    /// comparison a caller may legitimately want, and refusing it would be a bound on data rather than on
+    /// cost.
+    /// </summary>
+    [Fact]
+    public void A_long_equality_operand_is_not_a_pattern_and_is_not_refused()
+    {
+        var value = new string('a', QueryStringParser.MaxPatternLength + 1);
+
+        TryParse($"make=eq.{value}", out _, out var violations).ShouldBeTrue(Because(violations));
     }
 ```
 
@@ -726,6 +755,13 @@ Replace `TrySplit`/`SplitTopLevel` with:
     /// <see cref="AlvoFilter.MaxInCandidates"/> — but only after this method had allocated every member. A
     /// request line capped that at a few hundred; a request <em>body</em> does not, so the bound has to be
     /// spent while splitting, exactly as <c>FilterParseScope</c>'s node budget is spent while descending.
+    /// </remarks>
+    /// <remarks>
+    /// The refusal is raised after a member is added and only when a separator proves another is coming, so
+    /// exactly <paramref name="maxMembers"/> members split cleanly and the first one past it refuses. Written
+    /// the other way round — refusing before the add — the trailing member the loop appends afterwards made
+    /// the effective bound <paramref name="maxMembers"/> plus one, which no test could see because the
+    /// caller's own budget then produced the same code one line later.
     /// </remarks>
     /// <param name="raw">The caller-supplied bracketed text.</param>
     /// <param name="maxMembers">The most members the caller will accept.</param>
@@ -771,14 +807,13 @@ Replace `TrySplit`/`SplitTopLevel` with:
             }
             else if (character == ',' && depth == 0)
             {
+                members.Add(inner[start..index]);
+                start = index + 1;
                 if (members.Count == maxMembers)
                 {
                     members = null;
                     return ListSplit.TooMany;
                 }
-
-                members.Add(inner[start..index]);
-                start = index + 1;
             }
         }
 
@@ -879,7 +914,38 @@ In `QueryStringParser`, beside `MaxCursorLength`:
     /// measured "how many of a thing may one request carry", and 256 entries of at least two characters is
     /// under 800 bytes — unreachable from any query string a proxy would have carried.
     /// </remarks>
-    internal const int MaxSelectEntries = AlvoFilter.MaxTerms;
+    /// <remarks>
+    /// <b>The coupling to <see cref="AlvoFilter.MaxTerms"/> is deliberate and is the only thing tying these
+    /// two budgets together</b>: they count different things — filter nodes and projection entries — and a
+    /// change to the filter's breadth would move this one with it. That is accepted rather than overlooked,
+    /// because the alternative is a second unmeasured number, and both answer the same question about the
+    /// same request. Give this its own literal the day the two need to differ.
+    /// </remarks>
+    internal static int MaxSelectEntries { get; } = AlvoFilter.MaxTerms;
+
+    /// <summary>The longest <c>like</c>/<c>ilike</c> pattern this API passes to an engine.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Only the two pattern operators are bounded, and the asymmetry is about cost rather than about
+    /// size.</b> Every other operand is a bound value: the engine compares it per row, the comparison is
+    /// linear in its length and short-circuits on the first differing byte, and its total size is already
+    /// bounded by the request body. A <em>pattern</em> is matched rather than compared, and its cost is not
+    /// linear in its length — so a caller who could send a megabyte of <c>%_%_%_…</c> would be buying an
+    /// engine-side match per row for the price of one request.
+    /// </para>
+    /// <para>
+    /// <b>Until the query body existed, the request line was what bounded this</b> — the same transport
+    /// budget <see cref="MaxSelectEntries"/> exists to replace, applied to the one channel that never
+    /// splits on a comma and so was not covered by making the three splitters lazy.
+    /// </para>
+    /// <para>
+    /// <b>512 is chosen rather than measured, and it is recorded as chosen.</b> It is the number
+    /// <see cref="MaxCursorLength"/> uses, for the same kind of reason: far past anything a real caller
+    /// sends, and the length past which the string has stopped being plausibly the thing it claims to be. A
+    /// search pattern longer than a keyset cursor is not a search.
+    /// </para>
+    /// </remarks>
+    internal static int MaxPatternLength { get; } = MaxCursorLength;
 ```
 
 and replace `ReadSelect`:
@@ -915,7 +981,31 @@ and replace `ReadSelect`:
         }
 ```
 
-- [ ] **Step 7: Add the violation**
+- [ ] **Step 7: Bound the one channel that never splits — a `like`/`ilike` pattern**
+
+`FilterTermParser.TryReadPattern(string operand, …)` is the single place both pattern operators pass
+through. Add the guard at its head:
+
+```csharp
+    private static bool TryReadPattern(string operand, out object? value, out AlvoViolation? violation)
+    {
+        if (operand.Length > QueryStringParser.MaxPatternLength)
+        {
+            value = null;
+            violation = QueryViolations.PatternTooLong(QueryStringParser.MaxPatternLength);
+            return false;
+        }
+
+        var read = FilterValueReader.TryReadPattern(operand, out var pattern, out violation);
+        …
+    }
+```
+
+Nothing else gains a length bound: the other operands are bound values whose total size the request body
+already caps, and refusing a long `eq` operand would be a bound on the caller's *data* rather than on the
+server's cost.
+
+- [ ] **Step 8: Add the violations**
 
 In `QueryViolations.cs`, beside `ProjectionTooWide`:
 
@@ -935,24 +1025,43 @@ In `QueryViolations.cs`, beside `ProjectionTooWide`:
         "The projection carries more comma-separated entries than this API reads.",
         $"List at most {maxEntries} entries. A repeated entry answers under one key, so naming one field "
         + "many times returns the same value once and costs a parse each time.");
+
+    /// <summary>The refusal for a <c>like</c>/<c>ilike</c> pattern longer than this API passes to an engine.</summary>
+    /// <remarks>
+    /// Its own code rather than <see cref="UnrepresentableValue"/>'s, because nothing is wrong with the
+    /// <em>value</em>: it is a perfectly representable string, and what is refused is the cost of matching
+    /// it against every row. A caller told their value was unrepresentable would go looking for a type
+    /// mistake.
+    /// </remarks>
+    /// <param name="maxLength">The longest pattern this API passes through.</param>
+    internal static AlvoViolation PatternTooLong(int maxLength) => new(
+        FilterPointer,
+        "pattern-too-long",
+        "A 'like' or 'ilike' pattern is longer than this API matches.",
+        $"Send a pattern of at most {maxLength} characters. Only the two pattern operators are bounded this "
+        + "way: every other operand is compared rather than matched, so its cost is its size.");
 ```
 
-- [ ] **Step 8: Run the tests**
+- [ ] **Step 9: Run the tests**
 
 Run: `scripts/test-ring0`
-Expected: `[ring0] OK`, with the four new facts passing and `QueryStringParserPropertyTests` still green.
+Expected: `[ring0] OK`, with the five new facts passing and `QueryStringParserPropertyTests` still green.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 git add src/MMLib.Alvo/Api/Internal/ test/MMLib.Alvo.Api.Tests/QueryStringParserTests.cs
-git commit -m "fix(api): spend the list bounds while splitting, not after
+git commit -m "fix(api): spend the list bounds while splitting, and bound the one channel that never splits
 
 A group's members, an in list's candidates and a projection's entries were
 all materialised in full and refused afterwards; the only thing bounding
 them was the URL length, which the query body removes. Two of the three
 reach the refusal they already had; select gains an entry bound, because a
 repeated entry claims no key and can never trip the width bound.
+
+A like/ilike pattern never splits at all and had no bound but the request
+line either. It is matched per row rather than compared, so it is the one
+operand whose cost is not its size, and it is the one that gains a length.
 
 Claude-Session: https://claude.ai/code/session_01Uh7NkobnQZy5fDftEZbVLp"
 ```
@@ -964,6 +1073,7 @@ Claude-Session: https://claude.ai/code/session_01Uh7NkobnQZy5fDftEZbVLp"
 **Files:**
 - Create: `src/MMLib.Alvo/Api/Internal/QueryBodyReader.cs`
 - Modify: `src/MMLib.Alvo/Api/Internal/QueryViolations.cs` (`Body`, `UnrepresentableQueryValue`)
+- Modify: `src/MMLib.Alvo/Api/AlvoViolation.cs` (the `pointer` parameter's documentation only)
 - Test: `test/MMLib.Alvo.Api.Tests/QueryBodyReaderTests.cs` (create)
 
 **Interfaces:**
@@ -981,7 +1091,6 @@ Create `test/MMLib.Alvo.Api.Tests/QueryBodyReaderTests.cs`:
 ```csharp
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.WebUtilities;
-using MMLib.Alvo.Api;
 using MMLib.Alvo.Api.Internal;
 using System.Text;
 
@@ -1167,12 +1276,12 @@ In `QueryViolations.cs`:
     {
         BodyRefusal.NotAnObject => "The query body must be a JSON object of query parameters.",
         BodyRefusal.MalformedJson => "The query body is not well-formed JSON.",
-        BodyRefusal.TooLarge => Text(
-            $"The query body is larger than {options.MaxRequestBodyBytes} bytes, the configured maximum."),
-        BodyRefusal.TooDeep => Text(
-            $"The query body nests deeper than {options.MaxPayloadDepth} levels, the configured maximum."),
-        BodyRefusal.TooManyKeys => Text(
-            $"The query body carries more than {options.MaxPayloadKeys} parameters, the configured maximum."),
+        BodyRefusal.TooLarge =>
+            $"The query body is larger than {options.MaxRequestBodyBytes} bytes, the configured maximum.",
+        BodyRefusal.TooDeep =>
+            $"The query body nests deeper than {options.MaxPayloadDepth} levels, the configured maximum.",
+        BodyRefusal.TooManyKeys =>
+            $"The query body carries more than {options.MaxPayloadKeys} parameters, the configured maximum.",
         BodyRefusal.DuplicateName => "The query body names one parameter twice.",
         _ => throw new ArgumentOutOfRangeException(
             nameof(refusal), refusal, "Unmapped body refusal; give it the read path's wording here."),
@@ -1185,23 +1294,20 @@ In `QueryViolations.cs`:
             + "carries. An empty object {} reads the first page with no filter.",
         BodyRefusal.MalformedJson =>
             "Check for an unterminated string, a trailing comma, or a truncated body.",
-        BodyRefusal.TooLarge => Text(
+        BodyRefusal.TooLarge =>
             $"Narrow the query. {AlvoFilter.MaxInCandidates} 'in' candidates and {AlvoFilter.MaxTerms} "
-            + "filter terms fit well inside the bound; split a larger read across requests."),
+            + "filter terms fit well inside the bound; split a larger read across requests.",
         BodyRefusal.TooDeep =>
             "A query body is one level deep, or two where a repeated parameter is an array of strings.",
-        BodyRefusal.TooManyKeys => Text(
+        BodyRefusal.TooManyKeys =>
             $"Send at most {options.MaxPayloadKeys} parameters. Repeat one parameter as an array of "
-            + "strings rather than spreading a filter across many."),
+            + "strings rather than spreading a filter across many.",
         BodyRefusal.DuplicateName =>
             "Send a repeated parameter once, as an array of strings: {\"or\":[\"(a.eq.1)\",\"(b.eq.2)\"]}. "
             + "Two members with one name have no defined order, so answering with either would be a guess.",
         _ => throw new ArgumentOutOfRangeException(
             nameof(refusal), refusal, "Unmapped body refusal; give it the read path's fix suggestion here."),
     };
-
-    private static string Text(FormattableString text) =>
-        string.Create(System.Globalization.CultureInfo.InvariantCulture, text);
 
     /// <summary>The refusal for a query parameter whose JSON value is not a value a query string could carry.</summary>
     /// <remarks>
@@ -1220,7 +1326,14 @@ In `QueryViolations.cs`:
         + "Repeat a parameter as an array of strings; null, an object and an empty array name no value.");
 ```
 
-`PayloadViolations.BodyPointer` is already `internal`, so `QueryViolations` can reference it rather than declaring a second empty-string constant.
+`PayloadViolations.BodyPointer` is already `internal`, so `QueryViolations` can reference it rather than
+declaring a second empty-string constant.
+
+**And state the disambiguation rule where a caller reads it.** This endpoint is the first whose `violations`
+array can carry both conventions at once — `""` for the body and `filter`/`limit` for a parameter — so
+`AlvoViolation`'s `pointer` parameter documentation gains the rule that resolves them, in one sentence: a
+value that is empty or begins with `/` is an RFC 6901 pointer into the request body; any other value is the
+role of a query parameter. XML doc only; no member moves and the public baseline does not.
 
 - [ ] **Step 4: Create `QueryBodyReader.cs`**
 
@@ -1501,7 +1614,11 @@ and in the marker fact, `endpoints.Count.ShouldBe(_entities.Length * 6, …)` pl
     }
 ```
 
-In `DataApiQueryTests.cs`, add the end-to-end equivalence and the issue's own case:
+In `DataApiQueryTests.cs`, add two usings the file does not have —
+`using Microsoft.AspNetCore.WebUtilities;` and `using System.Net.Http.Json;` — and add the end-to-end
+equivalence and the issue's own case. **Every fact below uses `SeededAsync()`**, the file's own three-vehicle
+seed: minting a fresh key over an unseeded world would leave each of them comparing two empty pages, which
+is a fact that cannot fail.
 
 ```csharp
     /// <summary>
@@ -1514,12 +1631,11 @@ In `DataApiQueryTests.cs`, add the end-to-end equivalence and the issue's own ca
     [InlineData("or=(make.eq.skoda,make.eq.vw)&limit=3")]
     public async Task A_query_body_answers_exactly_what_the_same_query_string_answers(string queryString)
     {
-        var reader = new TestApiKey("reader", ["authenticated"], ["*:read"]);
-        await using var world = await AlvoApiWorld.VehicleRegistryAsync([reader]);
+        await using var world = await SeededAsync();
 
-        using var byUrl = await world.SendAsync(HttpMethod.Get, $"/api/vehicles?{queryString}", reader);
+        using var byUrl = await world.SendAsync(HttpMethod.Get, $"/api/vehicles?{queryString}", _admin);
         using var byBody = await world.SendRawAsync(
-            HttpMethod.Post, "/api/vehicles/query", reader, content: QueryBody(queryString));
+            HttpMethod.Post, "/api/vehicles/query", _admin, content: QueryBody(queryString));
 
         byBody.StatusCode.ShouldBe(byUrl.StatusCode);
         (await byBody.Content.ReadAsStringAsync(TestContext.Current.CancellationToken))
@@ -1533,20 +1649,20 @@ In `DataApiQueryTests.cs`, add the end-to-end equivalence and the issue's own ca
     [Fact]
     public async Task A_candidate_list_past_any_request_line_limit_is_answered_through_the_body()
     {
-        var reader = new TestApiKey("reader", ["authenticated"], ["*:read"]);
-        await using var world = await AlvoApiWorld.VehicleRegistryAsync([reader]);
+        await using var world = await SeededAsync();
 
-        using var seeded = await world.SendAsync(HttpMethod.Get, "/api/vehicles?limit=200", reader);
+        using var seeded = await world.SendAsync(HttpMethod.Get, "/api/vehicles?limit=200", _admin);
         var wanted = (await seeded.ReadJsonObjectAsync())["items"]!.AsArray()
             .Select(row => row!["id"]!.GetValue<string>())
             .ToList();
+        wanted.Count.ShouldBe(_fleet.Length, "or the fact below compares two empty pages");
         var padding = Enumerable.Range(0, 400).Select(_ => Guid.NewGuid().ToString());
         var candidates = string.Join(',', wanted.Concat(padding));
 
         using var response = await world.SendRawAsync(
             HttpMethod.Post,
             "/api/vehicles/query",
-            reader,
+            _admin,
             content: JsonContent.Create(new Dictionary<string, string>
             {
                 ["id"] = $"in.({candidates})",
@@ -1565,13 +1681,12 @@ In `DataApiQueryTests.cs`, add the end-to-end equivalence and the issue's own ca
     [Fact]
     public async Task The_query_body_honours_the_count_preference()
     {
-        var reader = new TestApiKey("reader", ["authenticated"], ["*:read"]);
-        await using var world = await AlvoApiWorld.VehicleRegistryAsync([reader]);
+        await using var world = await SeededAsync();
 
         using var response = await world.SendRawAsync(
             HttpMethod.Post,
             "/api/vehicles/query",
-            reader,
+            _admin,
             content: QueryBody("limit=1"),
             headers: [new KeyValuePair<string, string>(PreferHeader.Name, "count=exact")]);
 
@@ -1580,22 +1695,61 @@ In `DataApiQueryTests.cs`, add the end-to-end equivalence and the issue's own ca
     }
 
     /// <summary>
-    /// A hidden field is refused through the body exactly as through the query string — byte for byte, so
-    /// the surface a caller picks cannot be used to tell a masked field from an undeclared one.
+    /// The mask really is threaded into the parser on this surface, and a masked field is refused exactly
+    /// as an undeclared one is — byte for byte, on both surfaces, so neither the surface a caller picks nor
+    /// the refusal they read can be used to tell "hidden from you" from "does not exist".
     /// </summary>
+    /// <remarks>
+    /// Over <c>masked-notes.alvo.json</c> and not the vehicle registry, which declares no hidden field
+    /// anywhere: there <c>PolicyDecision.HiddenFields</c> is empty, both names are simply undeclared, and
+    /// the fact would pass while exercising none of the mask threading it exists to hold.
+    /// </remarks>
     [Fact]
-    public async Task A_masked_field_is_refused_identically_on_both_surfaces()
+    public async Task A_masked_field_is_refused_exactly_as_an_undeclared_one_on_both_surfaces()
     {
         var reader = new TestApiKey("reader", ["authenticated"], ["*:read"]);
-        await using var world = await AlvoApiWorld.VehicleRegistryAsync([reader]);
+        await using var world = await AlvoApiWorld.FromDescriptorAsync("masked-notes.alvo.json", [reader]);
 
-        using var byUrl = await world.SendAsync(HttpMethod.Get, "/api/owners?secret=eq.x", reader);
-        using var byBody = await world.SendRawAsync(
-            HttpMethod.Post, "/api/owners/query", reader, content: QueryBody("secret=eq.x"));
+        using var maskedByUrl = await world.SendAsync(HttpMethod.Get, "/api/notes?secret=eq.x", reader);
+        using var maskedByBody = await world.SendRawAsync(
+            HttpMethod.Post, "/api/notes/query", reader, content: QueryBody("secret=eq.x"));
+        using var unknownByBody = await world.SendRawAsync(
+            HttpMethod.Post, "/api/notes/query", reader, content: QueryBody("nosuchfield=eq.x"));
 
-        byBody.StatusCode.ShouldBe(byUrl.StatusCode);
-        (await byBody.Content.ReadAsStringAsync(TestContext.Current.CancellationToken))
-            .ShouldBe(await byUrl.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        var masked = await maskedByBody.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        maskedByBody.StatusCode.ShouldBe(maskedByUrl.StatusCode);
+        masked.ShouldBe(await maskedByUrl.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        masked.ShouldBe(
+            await unknownByBody.Content.ReadAsStringAsync(TestContext.Current.CancellationToken),
+            "a masked field and an undeclared one must be one refusal, byte for byte");
+    }
+
+    /// <summary>
+    /// A denied caller is refused <em>before</em> their body is read, not after — so an oversized body from
+    /// one earns the 403 they were always going to get, never <c>body-too-large</c>. That is the fact
+    /// separating "the decision precedes the read" from "the decision precedes the parse", and no
+    /// database-statement assertion can see it: a refusal after buffering touches no database either.
+    /// </summary>
+    /// <remarks>
+    /// <c>ledgers</c> configures no <c>list</c> rule at all, so default-deny refuses every reader outright —
+    /// which is the only way to reach a genuinely denied decision, since a rule that excludes a caller
+    /// compiles to an allow carrying a predicate that matches nothing.
+    /// </remarks>
+    [Fact]
+    public async Task A_denied_caller_sending_an_oversized_body_is_refused_before_it_is_read()
+    {
+        var reader = new TestApiKey("reader", ["authenticated"], ["*:read"]);
+        await using var world = await AlvoApiWorld.FromDescriptorAsync("masked-notes.alvo.json", [reader]);
+        var oversized = new string('x', new AlvoApiOptions().MaxRequestBodyBytes + 1024);
+
+        using var response = await world.SendRawAsync(
+            HttpMethod.Post,
+            "/api/ledgers/query",
+            reader,
+            content: new StringContent(
+                $$"""{"title":"eq.{{oversized}}"}""", Encoding.UTF8, "application/json"));
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
     }
 
     /// <summary>The transposition every end-to-end fact above sends: the parsed collection, as JSON.</summary>
@@ -1607,9 +1761,21 @@ In `DataApiQueryTests.cs`, add the end-to-end equivalence and the issue's own ca
                 StringComparer.Ordinal));
 ```
 
-In `DataApiAuthTests.cs`, add the three gating facts on the new route, following the file's existing per-verb pattern: a key whose scopes exclude the entity's read is 403; an anonymous caller is 403; and a descriptor whose `list` is unconfigured is 403 for everybody. Each must assert that **no statement reached the database** (`world.Statements.ShouldBeEmpty()`), which is what proves the refusal preceded the body read.
+In `DataApiAuthTests.cs`, add the three gating facts on the new route, following the file's existing
+per-verb pattern: a key whose scopes exclude the entity's read is 403; an anonymous caller is 403; and a
+descriptor whose `list` is unconfigured is 403 for everybody. Each must call **`world.ClearStatements()`
+before the request** — `Statements` is everything since the last clear and world startup runs the whole
+code-first migration, so without it `ShouldBeEmpty` fails on DDL — and then assert
+`world.Statements.ShouldBeEmpty()`, which is what proves nothing reached the store.
 
-In `LazyRouteMaterialisationTests.cs`, change `private const int PathsPerEntity = 2;` to `3` and update the constant's summary to name the third path.
+In `ConcurrencyTests.cs`, `Every_response_a_generated_endpoint_produces_is_no_store` enumerates its probes
+explicitly in `Everything(owner)`, so the new route is otherwise unmeasured — §4 promises the same
+`Cache-Control: no-store` and nothing would hold it. Add a `POST /api/owners/query` probe with a `{}` body,
+expecting 200.
+
+In `LazyRouteMaterialisationTests.cs`, change `private const int PathsPerEntity = 2;` to `3`, update the
+constant's summary to name the third path, and extend the `foreach` that asserts the two known paths with
+`paths.ShouldContain($"/api/{entity}/query");` — the count alone would pass with the wrong third path.
 
 - [ ] **Step 2: Run to verify they fail**
 
@@ -1637,7 +1803,8 @@ In `DataApiEndpoints.cs`, replace `MapList`'s delegate body so both readers shar
                 ProblemResultFactory.GuardAsync(async () =>
                 {
                     var context = Caller(caller);
-                    var decision = EnsureOperationIsAllowed(policies, entity.Name, DataOperation.List, context);
+                    var decision = EnsureOperationIsAllowed(
+                        policies, entity.Name, DataApiEndpointKind.List.ToDataOperation(), context);
 
                     return await PageAsync(
                         http, data, entity, options, decision, http.Request.Query, context, ct)
@@ -1730,7 +1897,8 @@ In `DataApiEndpoints.cs`, replace `MapList`'s delegate body so both readers shar
                 ProblemResultFactory.GuardAsync(async () =>
                 {
                     var context = Caller(caller);
-                    var decision = EnsureOperationIsAllowed(policies, entity.Name, DataOperation.List, context);
+                    var decision = EnsureOperationIsAllowed(
+                        policies, entity.Name, DataApiEndpointKind.Query.ToDataOperation(), context);
 
                     var body = await QueryBodyReader.ReadAsync(http.Request, options, ct).ConfigureAwait(false);
                     if (body.Parameters is not { } parameters)
@@ -1802,7 +1970,16 @@ In `OpenApiDocumentTests.cs`:
 - `private const int RoutesPerEntity = 5;` → `6`.
 - `documented.Count.ShouldBe(55, "27 … and 28 …")` → `63`, with the reason text updated to name the four statuses the query operation adds per entity (200, 401, 403, 422).
 - `refusals.Count.ShouldBe(44, "twenty-two per entity — three on a list and a read, …")` → `50`, reason updated.
-- `ProvokeEveryStatusAsync` must drive all four on `POST /api/{entity}/query`: a 200 with `{}`, a 401 with a bad key, a 403 with a key lacking the scope, a 422 with `{"nope":"eq.1"}`.
+- The new probes go in **`ProbesAsync`**, not in `ProvokeEveryStatusAsync` (which is a generic loop over
+  whatever `ProbesAsync` returns). A probe's `Operation` string is keyed into `$"{entity}.{Operation} {Status}"`,
+  so it must be `"query"` to match the `{entity}.query` operationId. Add to the returned collection
+  expression, where `Gated` already emits the 401 and the 403:
+
+  ```csharp
+  .. Gated($"{collection}/query", "query", HttpMethod.Post, new JsonObject()),
+  new("query", 200, HttpMethod.Post, $"{collection}/query", _admin, new JsonObject()),
+  new("query", 422, HttpMethod.Post, $"{collection}/query", _admin, new JsonObject { ["nope"] = "eq.1" }),
+  ```
 - `The_count_preference_is_documented_on_the_list_and_nowhere_else` → rename to `…_on_the_two_collection_reads_and_nowhere_else` and assert `prefer` is referenced by exactly the `get` on the collection path and the `post` on the `/query` path.
 
 In `OpenApiDocumentCostTests.cs`: `Operations(document).ShouldBe(entities.Count * 5, "five operations per entity…")` → `* 6`, prose updated, and the class summary at the top.
@@ -2006,11 +2183,13 @@ a private factory and have the parameter read from it:
 
 and change the five parameter definitions to `Schema = SelectSchema`, `Schema = OrderSchema`,
 `Schema = LimitSchema(options)`, `Schema = OffsetSchema`, `Schema = AfterSchema`, and `Filter`/`Group`/
-`IfMatch`/`IfNoneMatch`/`Tenant`/`Prefer` to `Schema = TextSchema` where they are a bare string today —
-**except** `Tenant` and `RowId`, which carry `Format = "uuid"` and keep their own literal. The document
-must not move for any of them: check the snapshot after this step, before Task 6 Step 6's intended move.
+`IfMatch`/`IfNoneMatch`/`Prefer` to `Schema = TextSchema`, which is what they already are. `RowId` and
+`Tenant` keep their own literal: both carry `Format = "uuid"` and are not bare strings. The document must
+not move for any of them — check the snapshot after this step, before Task 6 Step 6's intended move.
 
-In `AlvoDocumentTransformer.cs`, `Describe` becomes an instance method and registers the component:
+In `AlvoDocumentTransformer.cs`, `Describe` is `private static` today and **drops `static`** so it can
+reach the injected `options.Value`; its one call site is already inside the instance `TransformAsync`, so
+nothing else moves. It then registers the component:
 
 ```csharp
     private void Describe(OpenApiDocument document, EntityView view)
@@ -2077,12 +2256,34 @@ Claude-Session: https://claude.ai/code/session_01Uh7NkobnQZy5fDftEZbVLp"
 
 - [ ] **Step 1: Make the six edits**
 
-1. **Line 3** and **line ~577** both say "five generated minimal-API routes per declared entity" / "all five routes per entity" → six, naming the new one.
+1. **Every "five routes" site**, not only the two in this file. Grep the repo for `five routes`, `all five`
+   and `five operations` and fix each: `docs/architecture/data-api.md:3`, `:577` and `:655`
+   ("attached to all five"); `src/MMLib.Alvo/Api/Internal/DataApiEndpoints.cs` — both the type `<remarks>`
+   *and* `Map`'s own `<summary>`; `src/MMLib.Alvo/Api/Internal/AlvoEndpointDataSource.cs`'s `Build`
+   `<summary>`; and the doc comments in `test/MMLib.Alvo.Api.Tests/OpenApiDocumentTests.cs` and
+   `OpenApiDocumentCostTests.cs`. (The source-file ones belong to Tasks 5 and 2 respectively; do them there
+   and check here that none is left.)
 2. **The URL grammar block** (§"The URL grammar, and the two allow-lists that bound it") gains `POST   {prefix}/{entity}/query` and a paragraph: the body is the parameters as an object, values are not percent-encoded, an array repeats a parameter, a duplicate name is refused, `{}` is the empty query, and it is gated as `list`.
-3. **The budget table** — the "Request body" row stops being a write-only row ("1 MiB, depth 32, 512 keys — a write payload **or a query body**"), and gains a row for the projection's entry bound (`select` entries, 256, API).
+3. **The budget table** — the "Request body" row stops being a write-only row ("1 MiB, depth 32, 512 keys —
+   a write payload **or a query body**"), and gains two rows: the projection's entry bound (`select` entries,
+   256, API) and the pattern bound (`like`/`ilike` pattern length, 512, API), each with one line on why the
+   URL used to provide it.
 4. **A new subsection under the URL grammar**, "Why a JSON object and not the query string in a `text/plain` body", recording the OData §11.2.6.1 deviation and the `x-www-form-urlencoded` rejection, in the design's §1.3 terms.
-5. **The status/slug catalogue** — note that the six body-shape codes (`not-an-object`, `malformed-json`, `body-too-large`, `body-too-deep`, `body-too-many-fields`, `duplicate-field`) are now reachable under `malformed-query` as well as under `validation`, with the read's own fix suggestions.
-6. **"Alternatives rejected"** gains: a second JSON query DSL, `X-HTTP-Method-Override`, and a `POST {entity}/{id}/query`.
+5. **The status/slug catalogue** — note that the six body-shape codes (`not-an-object`, `malformed-json`,
+   `body-too-large`, `body-too-deep`, `body-too-many-fields`, `duplicate-field`) are now reachable under
+   `malformed-query` as well as under `validation`, with the read's own fix suggestions; and add the three
+   codes this PR mints: `unrepresentable-query-value`, `too-many-select-entries` and `pattern-too-long`.
+7. **The 405, and one consequence of it that is not about status codes.** Record that `GET`/`PATCH`/`DELETE`
+   on `{entity}/query` are now 405 from routing rather than 404, and that a **host convention keyed on the
+   HTTP verb** — "POST means a write", a common shape for rate limiting or audit logging — now applies write
+   shaping to a read, while a GET-keyed convention misses this route. A host that shapes by verb should
+   switch to the operation marker, which is what it is for.
+8. **A pointer-disambiguation sentence**, because this is the first endpoint whose `violations` array can
+   mix both conventions: a `pointer` that is empty or begins with `/` is an RFC 6901 pointer into the body;
+   anything else is the *role* of a query parameter. The same sentence goes on `AlvoViolation`'s own
+   `pointer` parameter documentation (Task 4).
+6. **"Alternatives rejected"** gains: a second JSON query DSL, `X-HTTP-Method-Override`, a
+   `POST {entity}/{id}/query`, and `application/x-www-form-urlencoded`.
 
 - [ ] **Step 2: Check the brief-freshness gate**
 
