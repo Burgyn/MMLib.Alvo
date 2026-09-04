@@ -154,10 +154,21 @@ internal static class QueryBodyReader
     /// <c>filter</c> for everything else.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The same roles <see cref="QueryViolations"/> uses, and for its reason: in PostgREST's grammar a
     /// filter's parameter name <em>is</em> a field name, so a pointer carrying it would answer "does this
     /// entity have a field called X" for exactly the caller most likely to be asking. <c>or</c>, <c>and</c>
     /// and <c>not</c> are reserved and still point at <c>filter</c>, because they are filters.
+    /// </para>
+    /// <para>
+    /// <b>The comparison is ordinal, and deliberately not the <see cref="StringComparer.OrdinalIgnoreCase"/>
+    /// the parameter dictionary uses.</b> The two answer different questions: the dictionary decides which
+    /// values <em>merge</em> into one parameter, while this decides which role a refusal names — and the
+    /// authority on that is <c>QueryStringParser.IsSetting</c>, whose constant patterns are ordinal. A key
+    /// spelled <c>LIMIT</c> that reaches the parser alone is read as a filter on a field of that name, so
+    /// <c>filter</c> is the role its refusal really carries; answering <c>limit</c> here would name a role
+    /// the parser would not have used.
+    /// </para>
     /// </remarks>
     private static string RoleOf(string name) => name switch
     {

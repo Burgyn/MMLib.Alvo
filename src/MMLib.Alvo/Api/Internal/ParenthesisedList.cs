@@ -56,6 +56,13 @@ internal static class ParenthesisedList
     /// afterwards made the effective bound one higher, which no fact could have seen: the caller's own
     /// budget then produced the same code one line later.
     /// </para>
+    /// <para>
+    /// <b>Stopping early reorders one refusal, and the reorder is the truer answer.</b> A list that is both
+    /// over-wide and unbalanced — three hundred members and a stray bracket at the end — used to be reported
+    /// as malformed, because the whole scan ran before anything was counted; it is now reported as too wide,
+    /// because the scan stops before it reaches the bracket. Both are the same 422, and a caller told to
+    /// narrow a list they must narrow anyway is not told to fix the wrong thing.
+    /// </para>
     /// </remarks>
     /// <param name="raw">The caller-supplied bracketed text.</param>
     /// <param name="maxMembers">The most members the caller will accept.</param>

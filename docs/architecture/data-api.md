@@ -274,7 +274,9 @@ credential at all. It stops being harmless in **embedded mode inside a host whos
 and which populates `IAlvoContextAccessor`**: a POST-that-reads is then a live, read-only CSRF vector.
 Requiring `application/json` would force a preflight and cost nothing. The gap is pre-existing — the create
 and the update have it too, and worse — so it is not this route's to close; the query route is simply the
-first *read* to acquire it, which is why it is written down.
+first *read* to acquire it, which is why it is written down. Tracked as **#191**, which also carries the
+three things that need deciding rather than committing: which media types are accepted, whether a body with
+no `Content-Type` at all is refused, and whether an embedded host may opt out.
 
 **Two consequences, recorded rather than discovered.** `GET`/`PATCH`/`DELETE` on `{entity}/query` are now
 **405 from routing** rather than 404 — no problem document and no `no-store`, the same class of answer as
