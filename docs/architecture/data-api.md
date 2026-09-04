@@ -1,8 +1,8 @@
 # The HTTP Data API
 
-> What a host gets when it calls `MapAlvoDataApi()`: six generated minimal-API routes per declared
+> What a host gets when it calls `MapAlvoDataApi()`: nine generated minimal-API routes per declared
 > entity, a PostgREST-shaped query string (in the URL or in a request body), RFC 9457 problem documents, `ETag`/`If-Match` optimistic
-> concurrency and `Idempotency-Key` on create. This file records the decisions that outlive PR3's
+> concurrency, `Idempotency-Key` on every write, and a transactional batch. This file records the decisions that outlive PR3's
 > plan — the URL grammar and its allow-lists, the cursor's contract, what the framework treats as
 > confidential and what it publishes, and the surprises a reader will otherwise rediscover. Spec §2.1
 > (Data API), §0 principle 8 (minimal API, not MVC), §0 principle 5 (secure-by-default / default-deny).
@@ -360,6 +360,7 @@ in the grammar distinguishes them.
 | Page size | `limit` ≤ `MaxPageSize` (200); absent ⇒ `DefaultPageSize` (50) | API options |
 | Request body | 1 MiB, depth 32, 512 keys — a **write payload or a query body** | API options |
 | `Idempotency-Key` | ≤ 255 UTF-8 **bytes**, and a host may only narrow that | port + options |
+| Batch rows, per request | 1000 (`AlvoApiOptions.MaxBatchRows`) — and `MaxPayloadKeys` applies **per row** | API options |
 
 **The value row exists because a JSON array's elements are not property names.** `BoundedJsonBody`'s key
 bound counts property names at every depth, so `{"or": […500 000 strings…]}` is **one key**: it satisfies
@@ -585,9 +586,66 @@ honest reason for the asymmetry is not cost — honouring it would be about thre
 they were sent. An unhonoured header on a read costs a body the caller said they already had; on a write it
 costs somebody their change.
 
+## The batch: one path, three verbs, one transaction (#106)
+
+`{prefix}/{entity}/batch` answers `POST`, `PATCH` and `DELETE`, each taking `{"rows": [ … ]}`.
+
+**Three routes rather than one route with a mode in its body, and the reason is authorization.** A mode is
+gated once — as whichever operation the route was declared to be — so a caller permitted to create could
+reach the delete through it. Three verbs are gated as three operations by the filters that already gate the
+single-row routes: no new policy vocabulary, and nothing a descriptor has to opt into.
+
+**Every row is judged before any row is written.** The shape is forced rather than chosen: the single-row
+helpers throw on the first failure, and PostgreSQL aborts a transaction after any statement error — so
+"insert, catch, keep going" is not available inside one transaction, and a batch has to be one transaction.
+Judging first is the only shape that can report every offending row.
+
+**The failure this design exists to forbid is "checks the first row and lets the rest through."** It is the
+one place in the framework where a plausible implementation — resolve once, check once, write many — is a
+bulk authorization bypass. Every row is evaluated against its own post-image, and the contract suite proves
+it on all three implementations; the facts were verified by *injecting* the bypass rather than by watching
+them pass.
+
+**A row you cannot see and a row that does not exist are one refusal**, byte for byte, from
+`AlvoAuthorizationException.RowUnavailable`. A single write already conflates them into one 404; a batch
+answers one refusal per row, so distinguishing them would let one request ask as many existence questions as
+it carries rows. That is the same oracle, multiplied by the batch size.
+
+**A `409` names the field and no row index.** A `unique` value is caller-guessable where a framework-assigned
+row id is not, so an index would turn one collision probe into as many per request as the batch carries rows.
+An intra-batch collision — two rows of one batch carrying the same unique value — is invisible to the judging
+pass and surfaces the same way; recorded rather than fixed, because catching it would mean re-implementing
+every `unique` constraint in the judging pass.
+
+**Rows are locked in id order.** Each row's verdict is reached over that row's *locked* pre-image, so two
+concurrent batches whose id sets overlap would otherwise take the same locks in the order their callers wrote
+them — a deadlock on PostgreSQL rather than a slowdown. The request order is carried separately, because a
+caller's row 3 must be reported as row 3; reporting the sorted position would be worse than reporting
+nothing, since it looks like an index.
+
+**One instant covers the batch**, so all N rows share one `updated_at` and therefore one `ETag`. They were
+written together.
+
+**`DELETE` carries a body, which RFC 9110 §9.3.5 leaves undefined**, so an intermediary is permitted to strip
+it. An empty batch is therefore refused with 422 rather than read as "no rows to delete" — which would be a
+silent success for a request that never arrived. The response is `200` with an empty `items` and a non-zero
+`affected`, not `204`: it reports on many rows, and `affected` is what tells a five-row delete from a
+refusal.
+
+**No precondition on the batch delete.** One version cannot condition many rows, and accepting one would
+either check a single row or check none while looking as though it checked all of them.
+
+**The cost, stated: one event per row.** A 500-row import fans out to 500 outbox rows and 500 deliveries.
+`baas-analyza` §3 asks for the opposite — *"import 10k riadkov nesmie znamenať 10k webhookov"*, with the
+acceptance criterion *"Bulk insert 10k riadkov s batch pravidlom = 1 batch event"* — and this PR does not
+deliver it, because coalescing is a **descriptor** feature: a rule has to declare batch delivery, which is a
+schema change, a compiler change and a new event shape. Building it inside a data-path PR would make the
+descriptor change invisible. Tracked as **#193**.
+
 ## `Idempotency-Key`: what is stored, and where it is honoured
 
-Sent on **create**. The record's shape:
+Honoured on **every write** — create, update, delete, and all three batch verbs (#102, #106). The record's
+shape:
 
 ```sql
 CREATE TABLE IF NOT EXISTS alvo_idempotency (
@@ -1133,6 +1191,17 @@ answer it per caller.
   perform, and upsert needs a port that can create-or-replace. `PATCH` only; upsert is **#105**.
 - **Storing the response body in the idempotency record.** See above: a stored body would replay a
   representation the caller's policy would no longer produce.
+- **A mixed batch** — one body carrying creates, updates and deletes together. That is upsert's shape, and
+  upsert is **#105**; building it here would foreclose the decision that issue exists to make.
+- **A bare array as the batch body** (`POST {entity}/batch` taking `[ … ]` rather than `{"rows": [ … ]}`).
+  A top-level array leaves nowhere to add a member later without a breaking change, and the reserved `rows`
+  member is what lets a violation carry an RFC 6901 pointer — `/rows/3/quoted_price` resolves; `/3/quoted_price`
+  is a pointer into a document whose root is an array, which is legal but reads as an accident.
+- **A filter-based bulk update** (`PATCH {entity}?status=eq.draft`). It writes rows the caller never named
+  and cannot count in advance, so a mistyped filter is unbounded damage with no confirmation step — and the
+  refusal report has nothing to point at, because there are no rows the caller sent. Explicit ids only.
+- **Reporting a batch's `409` with the offending row index.** See above: unique values are guessable, so the
+  index re-attaches the value by position and turns one probe into `MaxBatchRows` of them.
 - **A slug for the 500**, and **a slug encoding why policy refused**. Both above.
 - **Refusing a write to a `hidden` field**, and **refusing `required` + `hidden` at apply.** A mandatory
   secret — a password, an API token the caller supplies and can never read back — is exactly

@@ -12,9 +12,9 @@ await tp.Test("The document is OpenAPI 3.1 and its paths are this descriptor's e
     Equal(
         new[]
         {
-            "/api/customers", "/api/customers/query", "/api/customers/{id}",
-            "/api/regions", "/api/regions/query", "/api/regions/{id}",
-            "/api/work_orders", "/api/work_orders/query", "/api/work_orders/{id}",
+            "/api/customers", "/api/customers/batch", "/api/customers/query", "/api/customers/{id}",
+            "/api/regions", "/api/regions/batch", "/api/regions/query", "/api/regions/{id}",
+            "/api/work_orders", "/api/work_orders/batch", "/api/work_orders/query", "/api/work_orders/{id}",
         },
         paths);
 });
