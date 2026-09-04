@@ -267,6 +267,15 @@ told they are denied rather than that their body is malformed, and never pays fo
 `If-Match`, `If-None-Match` (a page has no version) and `Idempotency-Key` (nothing is written). Honoured:
 `Prefer: count`. `Cache-Control: no-store`, as everywhere.
 
+**No endpoint requires a `Content-Type`, and that is worth recording here rather than only in the code.**
+`POST …/query` reads its body unconditionally, so it is reachable as a CORS *simple* request — no preflight.
+That is harmless while Alvo's credential is a request header, because a cross-site form POST arrives with no
+credential at all. It stops being harmless in **embedded mode inside a host whose own auth is cookie-based
+and which populates `IAlvoContextAccessor`**: a POST-that-reads is then a live, read-only CSRF vector.
+Requiring `application/json` would force a preflight and cost nothing. The gap is pre-existing — the create
+and the update have it too, and worse — so it is not this route's to close; the query route is simply the
+first *read* to acquire it, which is why it is written down.
+
 **Two consequences, recorded rather than discovered.** `GET`/`PATCH`/`DELETE` on `{entity}/query` are now
 **405 from routing** rather than 404 — no problem document and no `no-store`, the same class of answer as
 the routing 404 for an undeclared entity. And a host convention keyed on the **verb** — "POST means a
@@ -357,7 +366,13 @@ pattern had no length bound whatsoever. Under an ~8 KB request line that was a f
 reaches the refusal they already earned (`filter-too-wide`, `too-many-in-candidates`) rather than adding
 one; only `select` needed a new code, because a repeated entry claims no key and can therefore never trip
 the *width* bound that keeps `?select=id,id,id` deduplicating. `MaxSelectEntries` is `AlvoFilter.MaxTerms`
-rather than a second number, and the coupling is deliberate. **`MaxPatternLength` is chosen, not measured**,
+rather than a second number, and the coupling is deliberate. **A splitter is handed what the request can
+still *afford*, not the per-list maximum** (`FilterParseScope.AffordableCandidates`/`AffordableNodes`): the
+`in`-candidate budget is a running total across the whole query, so a splitter using the per-list bound
+alone would let 256 terms each build a full 1000-element list — 256 000 substrings — before the total
+refused, which is the very number that bound was introduced to keep out of a statement. The remaining
+allowance is floored at one, because a charge that fails still spends and a splitter given a maximum of zero
+would turn a caller's over-wide filter into a 500. **`MaxPatternLength` is chosen, not measured**,
 and only the two pattern operators are bounded: every other operand is a value the engine *compares* —
 linear in its length, short-circuiting on the first differing byte, and already capped in total by the body
 bound — while a pattern is *matched*, per row, at a cost that is not linear in its length. Both bounds apply

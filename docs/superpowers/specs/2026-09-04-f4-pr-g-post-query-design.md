@@ -273,9 +273,18 @@ allocation instead of after it.** Two of the three then need no new bound at all
 - **`ParenthesisedList`** stops at a caller-supplied maximum and reports which of the three
   outcomes it reached — split, unbalanced, or over the maximum — instead of a bool. Its two
   callers pass the bound they were already going to enforce a line later:
-  `AlvoFilter.MaxTerms` for a group's members and `AlvoFilter.MaxInCandidates` for an `in`
-  list, reported with the existing `filter-too-wide` and `too-many-in-candidates`. **No new
-  code and no new published bound** — the same refusals, reached earlier.
+  the **remaining** node budget for a group's members and the remaining `in`-candidate
+  allowance for an `in` list, reported with the existing `filter-too-wide` and
+  `too-many-in-candidates`. **No new code and no new published bound** — the same refusals,
+  reached earlier.
+
+  *Remaining*, not the per-list maximum, and the difference is the whole of whether it works:
+  the candidate budget is a running total across the query, so a splitter using
+  `MaxInCandidates` alone would let 256 terms each build a full 1000-element list — the
+  256 000 substrings that bound exists to keep out of a statement — before the total refused.
+  The allowance is floored at one, because a charge that fails still spends: without the floor
+  a second over-long list arrives with a negative allowance and a caller's over-wide filter
+  becomes a 500 instead of the 422 it earns.
 - **`SortParser`** enumerates the comma-separated entries over the source span and returns on
   the first violation, which it already does. `order` is self-bounding: once every readable
   field is named once, the next entry must repeat one and earn `repeated-sort-key`, so the

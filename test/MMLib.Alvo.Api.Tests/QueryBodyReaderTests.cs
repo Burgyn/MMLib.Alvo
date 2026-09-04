@@ -70,14 +70,31 @@ public sealed class QueryBodyReaderTests
     /// are one parameter sent twice — the same collection the query string produces, and therefore the same
     /// refusal downstream rather than a different one.
     /// </summary>
-    [Fact]
-    public async Task Two_names_differing_only_in_case_are_one_parameter_sent_twice()
+    /// <remarks>
+    /// Driven in <b>both orders</b>, because which spelling survives as the key is what decides whether the
+    /// parser reads the parameter as a setting or as a filter — and the two surfaces must agree on that. A
+    /// dictionary indexer keeps the first key it saw, exactly as <c>KeyValueAccumulator</c> does for a query
+    /// string, so <c>LIMIT</c> first is a filter on both surfaces and <c>limit</c> first is a repeated
+    /// setting on both.
+    /// </remarks>
+    [Theory]
+    [InlineData("""{"limit":1,"LIMIT":2}""", "limit")]
+    [InlineData("""{"LIMIT":1,"limit":2}""", "LIMIT")]
+    public async Task Two_names_differing_only_in_case_are_one_parameter_sent_twice(string body, string key)
     {
-        var read = await ReadAsync("""{"limit":1,"LIMIT":2}""");
+        var expected = new QueryCollection(
+            QueryHelpers.ParseQuery("?" + string.Join('&', body.Trim('{', '}')
+                .Replace("\"", string.Empty, StringComparison.Ordinal)
+                .Split(',')
+                .Select(member => member.Replace(':', '=')))));
+
+        var read = await ReadAsync(body);
 
         read.Violations.ShouldBeEmpty();
         read.Parameters!.Count.ShouldBe(1);
-        read.Parameters["limit"].Count.ShouldBe(2);
+        read.Parameters[key].Count.ShouldBe(2);
+        Rendered(read.Parameters).ShouldBe(
+            Rendered(expected), "the two surfaces must merge a case-differing repeat identically");
     }
 
     /// <summary>

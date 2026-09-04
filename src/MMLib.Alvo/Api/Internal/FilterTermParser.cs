@@ -194,7 +194,7 @@ internal static class FilterTermParser
         out AlvoViolation? violation)
     {
         value = null;
-        var split = ParenthesisedList.Split(operand, AlvoFilter.MaxInCandidates, out var candidates);
+        var split = ParenthesisedList.Split(operand, scope.AffordableCandidates, out var candidates);
         if (split != ListSplit.Ok)
         {
             violation = split == ListSplit.TooMany

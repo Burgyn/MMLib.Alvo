@@ -2,6 +2,19 @@
 
 namespace MMLib.Alvo.Api.Internal;
 
+/// <summary>What splitting a bracketed list produced.</summary>
+internal enum ListSplit
+{
+    /// <summary>The members, in the order written.</summary>
+    Ok,
+
+    /// <summary>The text is not a balanced, non-empty <c>(…)</c>.</summary>
+    Malformed,
+
+    /// <summary>The list carries more members than the caller will accept.</summary>
+    TooMany,
+}
+
 /// <summary>
 /// Splits the one bracketed form PostgREST's grammar uses twice — a group's member list
 /// (<c>or=(a,b)</c>) and an <c>in</c> filter's candidate list (<c>in.(skoda,vw)</c>).
@@ -20,19 +33,6 @@ namespace MMLib.Alvo.Api.Internal;
 /// unreachable.
 /// </para>
 /// </remarks>
-/// <summary>What splitting a bracketed list produced.</summary>
-internal enum ListSplit
-{
-    /// <summary>The members, in the order written.</summary>
-    Ok,
-
-    /// <summary>The text is not a balanced, non-empty <c>(…)</c>.</summary>
-    Malformed,
-
-    /// <summary>The list carries more members than the caller will accept.</summary>
-    TooMany,
-}
-
 internal static class ParenthesisedList
 {
     /// <summary>

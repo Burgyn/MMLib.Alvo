@@ -72,6 +72,12 @@ internal static class BoundedJsonBody
     /// <param name="destination">Where the body is buffered; the caller owns it.</param>
     /// <param name="options">The payload bounds to enforce.</param>
     /// <param name="cancellationToken">A token to cancel the read.</param>
+    /// <remarks>
+    /// The cast to <see cref="int"/> below is safe because <see cref="ReadBoundedAsync"/> refuses before
+    /// writing a chunk that would take the buffer past <see cref="AlvoApiOptions.MaxRequestBodyBytes"/>,
+    /// which is itself an <see cref="int"/> — stated here because the guard is a property of the line above
+    /// rather than of the cast, and a reader arriving at the cast alone cannot see it.
+    /// </remarks>
     internal static async Task<BodyRefusal?> ReadAsync(
         HttpRequest request,
         MemoryStream destination,

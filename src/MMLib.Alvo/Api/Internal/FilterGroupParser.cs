@@ -191,7 +191,7 @@ internal static class FilterGroupParser
             return false;
         }
 
-        var split = ParenthesisedList.Split(list, AlvoFilter.MaxTerms, out var members);
+        var split = ParenthesisedList.Split(list, scope.AffordableNodes, out var members);
         if (split != ListSplit.Ok)
         {
             violation = split == ListSplit.TooMany

@@ -747,6 +747,46 @@ public sealed class QueryStringParserTests
     }
 
     /// <summary>
+    /// A group carrying <b>exactly</b> the node budget splits cleanly, so the bound the splitter now takes
+    /// is the one the charge would have applied rather than one narrower.
+    /// </summary>
+    /// <remarks>
+    /// The refusing side is <see cref="A_group_past_the_node_budget_is_refused_as_too_wide"/>. Both sides are
+    /// needed: a splitter that refused at the bound rather than past it would answer <c>filter-too-wide</c>
+    /// for a filter the port accepts, and the refusing fact alone cannot see that.
+    /// </remarks>
+    [Fact]
+    public void A_group_carrying_exactly_the_node_budget_is_accepted()
+    {
+        var members = string.Join(',', Enumerable.Repeat("year.eq.1", AlvoFilter.MaxTerms - 1));
+
+        TryParse($"or=({members})", out var parsed, out var violations).ShouldBeTrue(Because(violations));
+
+        parsed!.Query.Filter.ShouldBeOfType<AlvoOr>().Filters.Count.ShouldBe(AlvoFilter.MaxTerms - 1);
+    }
+
+    /// <summary>
+    /// A second over-long <c>in</c> list, after the first has already exhausted the request's candidate
+    /// allowance, is still the ordinary 422 — never a 500.
+    /// </summary>
+    /// <remarks>
+    /// <b>This is the case the splitter's new bound made reachable.</b> The splitter is handed what the
+    /// request can still afford, and a charge that fails still spends — so by the second list the remaining
+    /// allowance is negative. A bound of zero or less is one a splitter is entitled to reject outright, so
+    /// without the floor on <c>FilterParseScope.AffordableCandidates</c> a caller's over-wide filter would
+    /// have become an <see cref="ArgumentOutOfRangeException"/> and a 500.
+    /// </remarks>
+    [Fact]
+    public void A_second_over_long_in_list_after_the_allowance_is_spent_is_still_refused_not_thrown()
+    {
+        var candidates = string.Join(',', Enumerable.Range(0, AlvoFilter.MaxInCandidates + 1));
+
+        TryParse($"year=in.({candidates})&price=in.({candidates})", out _, out var violations).ShouldBeFalse();
+
+        violations.ShouldContain(violation => violation.Code == "too-many-in-candidates");
+    }
+
+    /// <summary>
     /// A <c>like</c> pattern is bounded and every other operand is not, because the two cost different
     /// things: an <c>eq</c> operand is a bound value whose comparison is linear in its size and
     /// short-circuits on the first differing byte, while a pattern is matched against every row and its

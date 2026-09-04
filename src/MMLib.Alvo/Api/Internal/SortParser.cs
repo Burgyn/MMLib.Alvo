@@ -89,10 +89,6 @@ internal static class SortParser
     }
 
     /// <summary>
-    /// Reads the modifiers a key carries, in PostgREST's own order and each at most once. The order is
-    /// enforced rather than tolerated so that one sort key has exactly one spelling.
-    /// </summary>
-    /// <summary>
     /// How many dot-separated parts one sort key can carry: the field, a direction and a null placement.
     /// </summary>
     /// <remarks>
@@ -104,6 +100,10 @@ internal static class SortParser
     /// </remarks>
     private const int SortKeyParts = 3;
 
+    /// <summary>
+    /// Reads the modifiers a key carries, in PostgREST's own order and each at most once. The order is
+    /// enforced rather than tolerated so that one sort key has exactly one spelling.
+    /// </summary>
     private static bool TryReadModifiers(string[] parts, out bool descending, out AlvoNullPlacement nulls)
     {
         descending = false;

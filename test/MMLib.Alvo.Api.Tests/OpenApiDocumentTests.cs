@@ -1109,6 +1109,12 @@ public sealed class OpenApiDocumentTests
     }
 
     /// <summary>
+    /// A query body naming a field the entity does not declare, which is the body-shaped read's 422 — the
+    /// counterpart of <c>?limit=0</c> on the collection <c>GET</c>.
+    /// </summary>
+    private static JsonObject UnreadableFilter() => new() { ["nosuchfield"] = "eq.1" };
+
+    /// <summary>
     /// The two refusals the gate answers on every operation: a credential that cannot be resolved, and a key
     /// whose scopes do not cover the entity.
     /// </summary>
@@ -1117,12 +1123,6 @@ public sealed class OpenApiDocumentTests
     /// single probe would leave the rest unevidenced, which is exactly the shape of coverage
     /// <c>DataApiRoutingTests</c>' own marker fact exists to avoid.
     /// </remarks>
-    /// <summary>
-    /// A query body naming a field the entity does not declare, which is the body-shaped read's 422 — the
-    /// counterpart of <c>?limit=0</c> on the collection <c>GET</c>.
-    /// </summary>
-    private static JsonObject UnreadableFilter() => new() { ["nosuchfield"] = "eq.1" };
-
     private static IEnumerable<Probe> Gated(string path, string operation, HttpMethod method, JsonObject? body = null) =>
     [
         new(operation, 401, method, path, _ghost, body),

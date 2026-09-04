@@ -258,6 +258,31 @@ public sealed class QueryStringInjectionTests
     }
 
     /// <summary>
+    /// The same screen on the body-shaped read: a refusal never echoes the parameter name the caller asked
+    /// about, whichever side of the request it arrived on.
+    /// </summary>
+    /// <remarks>
+    /// The unit facts assert the <em>pointer</em> a refusal carries; this asserts the whole response, which
+    /// is the only form that catches a name reaching some other member — a <c>detail</c>, a fix suggestion,
+    /// a header. The GET twin is <see cref="A_refusal_over_http_never_echoes_the_field_name_the_caller_asked_about"/>,
+    /// and a second route reaching one read is a second place the property has to hold.
+    /// </remarks>
+    [Fact]
+    public async Task A_refusal_over_the_query_body_never_echoes_the_field_name_the_caller_asked_about()
+    {
+        await using var world = await SeededAsync();
+
+        using var response = await world.SendAsync(
+            HttpMethod.Post,
+            $"/api/{Table}/query",
+            _caller,
+            body: new JsonObject { ["zqmarkerqz"] = "eq.1" });
+
+        response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
+        (await response.ReadTextAsync()).ShouldNotContain("zqmarkerqz", Case.Insensitive);
+    }
+
+    /// <summary>
     /// Each operator with a payload in the position that operator actually reads: <c>in</c> takes a list and
     /// <c>is</c> takes only null/true/false, so handing either a bare payload would test the wrong refusal.
     /// </summary>

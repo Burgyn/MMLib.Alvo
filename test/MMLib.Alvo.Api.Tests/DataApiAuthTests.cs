@@ -433,6 +433,80 @@ public sealed class DataApiAuthTests
             ["note-a"], "the tenant's own key must see its own row, and only its own");
     }
 
+    /// <summary>
+    /// One tenant's row is unreachable through the body-shaped read, by a caller of another tenant asking
+    /// for it <b>by name</b> — and the same body sent by its own tenant returns it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Its own fact rather than an inheritance from the collection <c>GET</c>'s.</b> The mitigating
+    /// argument — that both routes share one <c>PageAsync</c> and the tenant predicate is enforced inside the
+    /// port — is exactly the argument this file already rejects for the scope gate: a second way to reach one
+    /// read is a second thing that has to be gated, and "it cannot possibly be wrong" is not a fact.
+    /// </para>
+    /// <para>
+    /// <b>The control is what makes the empty page mean something.</b> Without it, an empty answer would be
+    /// satisfied by a filter that matched nothing, by a route that returned nothing, or by a body the reader
+    /// silently dropped. The same body, from the row's own tenant, must return the row.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task One_tenants_row_is_unreachable_through_the_body_shaped_read_by_another_tenant()
+    {
+        var keyA = new TestApiKey("tenant-a", ["authenticated"], ["notes:read", "notes:write"], Guid.NewGuid());
+        var keyB = new TestApiKey("tenant-b", ["authenticated"], ["notes:read", "notes:write"], Guid.NewGuid());
+        await using var world = await AlvoApiWorld.TenantNotesAsync([keyA, keyB]);
+        await SeedNoteAsync(world, keyA, "note-a");
+        await SeedNoteAsync(world, keyB, "note-b");
+        var askingForAsRow = new JsonObject { ["title"] = "eq.note-a" };
+
+        using var asOtherTenant = await world.SendAsync(
+            HttpMethod.Post, "/api/notes/query", keyB, body: askingForAsRow);
+        using var asOwnTenant = await world.SendAsync(
+            HttpMethod.Post, "/api/notes/query", keyA, body: askingForAsRow);
+
+        asOtherTenant.StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await asOtherTenant.ReadTextAsync()).Contains("note-a", StringComparison.Ordinal).ShouldBeFalse(
+            "another tenant's row must not be reachable by filtering for it");
+        (await asOwnTenant.ReadFieldAsync("title")).ShouldBe(
+            ["note-a"], "the same body from the row's own tenant must return it, or the empty page above "
+            + "proves nothing");
+    }
+
+    /// <summary>
+    /// The body-shaped twin of
+    /// <see cref="A_tenant_scoped_entity_read_with_no_tenant_context_returns_no_rows_of_any_tenant"/>: a
+    /// tenantless caller cannot read a tenant-scoped entity through it, and cannot acquire a tenant by
+    /// asking for one in a header either.
+    /// </summary>
+    [Fact]
+    public async Task A_tenantless_caller_cannot_query_a_tenant_scoped_entity_through_a_body()
+    {
+        var tenantA = Guid.NewGuid();
+        var keyA = new TestApiKey("tenant-a", ["authenticated"], ["notes:read", "notes:write"], tenantA);
+        var tenantless = new TestApiKey("no-tenant", ["authenticated"], ["notes:read"]);
+        await using var world = await AlvoApiWorld.TenantNotesAsync([keyA, tenantless]);
+        await SeedNoteAsync(world, keyA, "note-a");
+
+        using var withoutTenant = await world.SendAsync(
+            HttpMethod.Post, "/api/notes/query", tenantless, body: new JsonObject());
+        using var askingForTenantA = await world.SendAsync(
+            HttpMethod.Post, "/api/notes/query", tenantless, tenant: tenantA.ToString(),
+            body: new JsonObject());
+        using var control = await world.SendAsync(
+            HttpMethod.Post, "/api/notes/query", keyA, body: new JsonObject());
+
+        withoutTenant.StatusCode.ShouldBe(
+            HttpStatusCode.Forbidden, "the tenant guard denies a tenantless caller on a tenant-scoped entity");
+        (await withoutTenant.ReadTextAsync()).ShouldNotContain("note-");
+        askingForTenantA.StatusCode.ShouldBe(
+            HttpStatusCode.Unauthorized,
+            "a key with no tenant of its own cannot request one — TenantResolver refuses the credential outright");
+        (await askingForTenantA.ReadTextAsync()).ShouldNotContain("note-");
+        (await control.ReadFieldAsync("title")).ShouldBe(
+            ["note-a"], "the tenant's own key must see its own row through this route too");
+    }
+
     private static async Task<Guid> CreateOwnerAsync(AlvoApiWorld world, string name)
     {
         using var response = await world.SendAsync(HttpMethod.Post, "/api/owners", _admin, body: Owner(name));
