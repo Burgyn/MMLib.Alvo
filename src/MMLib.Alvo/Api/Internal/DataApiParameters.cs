@@ -208,7 +208,13 @@ internal static class DataApiParameters
     /// an invitation to send it. The gaps that remain — <c>If-Match</c> on a read, and <c>Idempotency-Key</c>
     /// on the body-shaped read — are stated in the operation's own description instead, where the text can say
     /// that sending them has no effect. <c>Idempotency-Key</c> on an update or a delete used to be the other
-    /// one; it is honoured on every write now, so all three write kinds publish it.
+    /// one; it is honoured on every write now, so all six write kinds publish it.
+    /// </para>
+    /// <para>
+    /// <b>The batch kinds publish the key and not <c>If-Match</c>, which is the asymmetry to notice.</b> A
+    /// batch honours the key — one for the whole request — and refuses a precondition outright, because one
+    /// version cannot condition many rows. Falling through to the empty arm, which is what the first version
+    /// did, published neither and left a supported retry-control header undiscoverable.
     /// </para>
     /// <para>
     /// <b>A header the operation <em>refuses</em> is not listed either, which is why the write arm carries the
@@ -231,6 +237,8 @@ internal static class DataApiParameters
             DataApiEndpointKind.Update or DataApiEndpointKind.Delete
                 when AlvoManagedColumns.VersionColumn(entity) is not null => [IfMatchId, IdempotencyKeyId],
             DataApiEndpointKind.Update or DataApiEndpointKind.Delete => [IdempotencyKeyId],
+            DataApiEndpointKind.BatchCreate or DataApiEndpointKind.BatchUpdate
+                or DataApiEndpointKind.BatchDelete => [IdempotencyKeyId],
             _ => [],
         };
 

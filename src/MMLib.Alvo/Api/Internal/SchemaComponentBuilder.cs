@@ -132,7 +132,12 @@ internal sealed class SchemaComponentBuilder(
     /// be worse than building it where the options already are.
     /// </remarks>
     /// <param name="document">The document being built.</param>
-    internal void AddTo(OpenApiDocument document)
+    /// <param name="maxRows">
+    /// <see cref="AlvoApiOptions.MaxBatchRows"/>, published as the batch arrays' <c>maxItems</c>. Threaded in
+    /// rather than read here for the reason the <c>Query</c> component is built elsewhere: this builder holds
+    /// a schema view and no options.
+    /// </param>
+    internal void AddTo(OpenApiDocument document, int maxRows)
     {
         ArgumentNullException.ThrowIfNull(document);
         document.AddComponent(RowId(entity.Name), Row());
@@ -142,9 +147,9 @@ internal sealed class SchemaComponentBuilder(
         document.AddComponent(PageId(entity.Name), Page(document));
         document.AddComponent(BatchPatchId(entity.Name), BatchPatch(document));
         document.AddComponent(BatchResultId(entity.Name), BatchResult(document));
-        document.AddComponent(BatchCreateId(entity.Name), Rows(CreateId(entity.Name), document));
-        document.AddComponent(BatchUpdateId(entity.Name), Rows(BatchPatchId(entity.Name), document));
-        document.AddComponent(BatchDeleteId(entity.Name), RowIds());
+        document.AddComponent(BatchCreateId(entity.Name), Rows(CreateId(entity.Name), document, maxRows));
+        document.AddComponent(BatchUpdateId(entity.Name), Rows(BatchPatchId(entity.Name), document, maxRows));
+        document.AddComponent(BatchDeleteId(entity.Name), RowIds(maxRows));
     }
 
     /// <summary>A batch body: the reserved <c>rows</c> array, whose elements are <paramref name="item"/>.</summary>
@@ -156,7 +161,8 @@ internal sealed class SchemaComponentBuilder(
     /// </remarks>
     /// <param name="item">The component id one row references.</param>
     /// <param name="document">The document the item component is referenced from.</param>
-    private static OpenApiSchema Rows(string item, OpenApiDocument document) => new()
+    /// <param name="maxRows">The configured row bound, published so a generator refuses before sending.</param>
+    private static OpenApiSchema Rows(string item, OpenApiDocument document, int maxRows) => new()
     {
         Type = JsonSchemaType.Object,
         Description = "The rows to write, in one transaction.",
@@ -166,6 +172,7 @@ internal sealed class SchemaComponentBuilder(
             {
                 Type = JsonSchemaType.Array,
                 MinItems = 1,
+                MaxItems = maxRows,
                 Description = "One element per row, in the order you want them reported.",
                 Items = new OpenApiSchemaReference(item, document),
             },
@@ -174,7 +181,8 @@ internal sealed class SchemaComponentBuilder(
     };
 
     /// <summary>A batch delete's body: the reserved <c>rows</c> array of row ids.</summary>
-    private static OpenApiSchema RowIds() => new()
+    /// <param name="maxRows">The configured row bound, published so a generator refuses before sending.</param>
+    private static OpenApiSchema RowIds(int maxRows) => new()
     {
         Type = JsonSchemaType.Object,
         Description = "The rows to remove, in one transaction.",
@@ -184,6 +192,7 @@ internal sealed class SchemaComponentBuilder(
             {
                 Type = JsonSchemaType.Array,
                 MinItems = 1,
+                MaxItems = maxRows,
                 Description = "One row id per element.",
                 Items = new OpenApiSchema { Type = JsonSchemaType.String, Format = "uuid" },
             },

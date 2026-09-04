@@ -340,7 +340,8 @@ internal sealed class AlvoDocumentTransformer(
     /// </remarks>
     private void Describe(OpenApiDocument document, EntityView view)
     {
-        new SchemaComponentBuilder(view.Schema, view.Hidden, view.ReadOnly).AddTo(document);
+        new SchemaComponentBuilder(view.Schema, view.Hidden, view.ReadOnly)
+            .AddTo(document, options.Value.MaxBatchRows);
         document.AddComponent(
             SchemaComponentBuilder.QueryId(view.Schema.Name),
             DataApiParameters.QueryBody(view.Schema, view.Hidden, options.Value));

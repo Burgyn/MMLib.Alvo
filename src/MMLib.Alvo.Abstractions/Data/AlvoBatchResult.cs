@@ -19,12 +19,61 @@
 /// halves that pass. Every refused row is named, never only the first.
 /// </para>
 /// </remarks>
-/// <param name="Affected">How many rows the batch wrote or removed; zero when it was refused.</param>
-/// <param name="Rows">The rows the batch wrote, in request order; empty for a delete and for a refusal.</param>
-/// <param name="Refusals">Every reason the batch wrote nothing; empty when it wrote.</param>
-public sealed record AlvoBatchResult(
-    int Affected, IReadOnlyList<AlvoRecord> Rows, IReadOnlyList<AlvoRowRefusal> Refusals)
+public sealed record AlvoBatchResult
 {
+    /// <summary>Initializes a new instance of the <see cref="AlvoBatchResult"/> class.</summary>
+    /// <remarks>
+    /// <b>The invariant is enforced here rather than only described, because this type crosses the port.</b>
+    /// A third-party <see cref="IAlvoData"/> builds one of these, and the remarks above say a result carrying
+    /// both rows and refusals "would describe one that cannot happen" — a sentence that binds nobody. A
+    /// provider that returned <c>(1, rows, refusals)</c> would make <see cref="Succeeded"/> answer
+    /// <see langword="false"/> while the result reported written rows, and every caller branching on it would
+    /// be wrong in the same direction.
+    /// </remarks>
+    /// <param name="Affected">How many rows the batch wrote or removed; zero when it was refused.</param>
+    /// <param name="Rows">The rows the batch wrote, in request order; empty for a delete and for a refusal.</param>
+    /// <param name="Refusals">Every reason the batch wrote nothing; empty when it wrote.</param>
+    /// <exception cref="ArgumentException">
+    /// The result carries both rows and refusals, or reports rows affected while carrying refusals, or claims
+    /// to have written nothing while naming no reason.
+    /// </exception>
+    public AlvoBatchResult(
+        int Affected, IReadOnlyList<AlvoRecord> Rows, IReadOnlyList<AlvoRowRefusal> Refusals)
+    {
+        ArgumentNullException.ThrowIfNull(Rows);
+        ArgumentNullException.ThrowIfNull(Refusals);
+        ArgumentOutOfRangeException.ThrowIfNegative(Affected);
+
+        if (Refusals.Count > 0 && (Rows.Count > 0 || Affected > 0))
+        {
+            throw new ArgumentException(
+                "A batch is one transaction, so a refused one wrote nothing: a result carrying refusals may "
+                + "carry neither rows nor a non-zero affected count.",
+                nameof(Refusals));
+        }
+
+        if (Refusals.Count == 0 && Affected == 0)
+        {
+            throw new ArgumentException(
+                "A result that wrote nothing must name at least one reason, or it reads as a successful "
+                + "write of nothing — which an empty batch is already refused for being.",
+                nameof(Affected));
+        }
+
+        this.Affected = Affected;
+        this.Rows = Rows;
+        this.Refusals = Refusals;
+    }
+
+    /// <summary>How many rows the batch wrote or removed; zero when it was refused.</summary>
+    public int Affected { get; init; }
+
+    /// <summary>The rows the batch wrote, in request order; empty for a delete and for a refusal.</summary>
+    public IReadOnlyList<AlvoRecord> Rows { get; init; }
+
+    /// <summary>Every reason the batch wrote nothing; empty when it wrote.</summary>
+    public IReadOnlyList<AlvoRowRefusal> Refusals { get; init; }
+
     /// <summary>Whether the batch wrote. A refused batch wrote nothing at all.</summary>
     public bool Succeeded => Refusals.Count == 0;
 

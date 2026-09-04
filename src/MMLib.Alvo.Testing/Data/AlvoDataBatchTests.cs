@@ -141,6 +141,12 @@ public abstract class AlvoDataBatchTests : AlvoDataFixture
         untouched.ShouldNotBeNull()["title"].ShouldBe(
             "theirs", "the other tenant's row must be exactly as they left it");
 
+        var ownRow = await world.Data.GetAsync(Invoices, mine, world.AcmeCaller, Ct);
+        ownRow.ShouldNotBeNull()["title"].ShouldBe(
+            "mine",
+            "and the caller's OWN row is unwritten — without this a driver could write row 0, refuse row 1, "
+            + "and still satisfy every other assertion here");
+
         var allowed = await world.Data.UpdateManyAsync(
             Invoices, [new AlvoRowPatch(mine, Payload("renamed"))], world.AcmeCaller, cancellationToken: Ct);
         allowed.Rows.Count.ShouldBe(1, "the same batch without the other tenant's row must succeed");
@@ -175,6 +181,12 @@ public abstract class AlvoDataBatchTests : AlvoDataFixture
 
         var untouched = await world.Data.GetAsync(Tickets, his, world.Bob, Ct);
         untouched.ShouldNotBeNull()["title"].ShouldBe("his", "the other user's row must be as they left it");
+
+        var ownRow = await world.Data.GetAsync(Tickets, hers, world.Alice, Ct);
+        ownRow.ShouldNotBeNull()["title"].ShouldBe(
+            "hers",
+            "and her OWN row is unwritten — the batch put it FIRST, so a driver that wrote as it judged "
+            + "would have committed it before reaching the row it refused");
 
         var allowed = await world.Data.UpdateManyAsync(
             Tickets, [new AlvoRowPatch(hers, Payload("renamed"))], world.Alice, cancellationToken: Ct);
