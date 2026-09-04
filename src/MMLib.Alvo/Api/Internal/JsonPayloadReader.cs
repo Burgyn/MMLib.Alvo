@@ -25,11 +25,11 @@ namespace MMLib.Alvo.Api.Internal;
 /// cannot succeed is a denial-of-service amplifier, and it is also the correct precedence: an unauthorized
 /// caller must not be told their body was malformed. It is still bounded three ways
 /// (<see cref="AlvoApiOptions.MaxRequestBodyBytes"/>, <see cref="AlvoApiOptions.MaxPayloadDepth"/>,
-/// <see cref="AlvoApiOptions.MaxPayloadKeys"/>), because an <em>authorized</em> caller can be hostile too,
-/// and every bound refuses <em>before</em> the work it exists to prevent: the size bound stops at the first
-/// chunk that would cross it rather than buffering the body first, and the depth and key bounds are decided
-/// by a forward-only <see cref="Utf8JsonReader"/> scan that builds no node tree. A bound applied to a
-/// finished document has already paid the cost.
+/// <see cref="AlvoApiOptions.MaxPayloadKeys"/>), because an <em>authorized</em> caller can be hostile too —
+/// and all three are enforced by <see cref="BoundedJsonBody"/>, which the query surface reads its own body
+/// through as well, so a bound cannot be tightened for one surface and left alone for the other. What stays
+/// here is the parse and the binding: the node tree exists because <see cref="IdempotencyFingerprint"/>
+/// cannot be built from a bound value bag, which is a write's requirement rather than a shared one.
 /// </para>
 /// <para>
 /// <b>An undeclared key is refused before its value is materialised</b> — not to withhold anything, but so
@@ -46,9 +46,6 @@ namespace MMLib.Alvo.Api.Internal;
 /// </remarks>
 internal static class JsonPayloadReader
 {
-    /// <summary>One buffer's worth of body; the size bound trips on chunk boundaries, so this only sets the granularity.</summary>
-    private const int ReadChunkBytes = 8 * 1024;
-
     /// <summary>What one body read produced: the bound values, and every reason a field or the body was refused.</summary>
     /// <remarks>
     /// <para>
@@ -117,212 +114,17 @@ internal static class JsonPayloadReader
         ArgumentNullException.ThrowIfNull(options);
 
         using var body = new MemoryStream();
-        var readFailure = await ReadBoundedAsync(request, body, options.MaxRequestBodyBytes, cancellationToken)
-            .ConfigureAwait(false);
-        if (readFailure is not null)
-        {
-            return Refused(readFailure);
-        }
+        var refusal = await BoundedJsonBody
+            .ReadAsync(request, body, options, cancellationToken).ConfigureAwait(false);
 
-        var shapeFailure = EnsureWithinShapeBounds(body.GetBuffer().AsSpan(0, (int)body.Length), options);
-        return shapeFailure is not null ? Refused(shapeFailure) : Bind(body, entity, options);
+        return refusal is { } refused
+            ? Refused(PayloadViolations.Body(refused, options))
+            : Bind(body, entity, options);
     }
 
     /// <summary>A body that bound nothing at all, carrying the one violation that stopped it.</summary>
     private static Payload Refused(AlvoViolation violation) =>
         new([], [violation], BoundAsAnObject: false, Document: null);
-
-    /// <summary>
-    /// Copies the body into <paramref name="destination"/>, refusing at the first chunk that would cross
-    /// <paramref name="maxBytes"/>. A declared <c>Content-Length</c> past the bound is refused without
-    /// reading a byte; a chunked body that declares no length is bounded all the same, because the check
-    /// is on what has actually arrived.
-    /// </summary>
-    private static async Task<AlvoViolation?> ReadBoundedAsync(
-        HttpRequest request, MemoryStream destination, int maxBytes, CancellationToken cancellationToken)
-    {
-        if (request.ContentLength > maxBytes)
-        {
-            return PayloadViolations.TooLarge(maxBytes);
-        }
-
-        var chunk = new byte[ReadChunkBytes];
-        int read;
-        while ((read = await request.Body.ReadAsync(chunk, cancellationToken).ConfigureAwait(false)) > 0)
-        {
-            if (destination.Length + read > maxBytes)
-            {
-                return PayloadViolations.TooLarge(maxBytes);
-            }
-
-            destination.Write(chunk, 0, read);
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// Decides the shape bounds — is it an object at all, how deep does it nest, how many property names does
-    /// it carry <em>anywhere</em> — from a forward-only scan that builds nothing.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// The reader's own <see cref="JsonReaderOptions.MaxDepth"/> is deliberately given headroom over
-    /// <see cref="AlvoApiOptions.MaxPayloadDepth"/>. The reader raises the same <see cref="JsonException"/>
-    /// for a too-deep body as for a malformed one, so anything the reader refuses could only ever be reported
-    /// as "not well-formed JSON" — the one bound whose message could not name itself, which sends an agent
-    /// hunting a syntax error that is not there. Checking <see cref="Utf8JsonReader.CurrentDepth"/> first
-    /// means the depth refusal names the depth.
-    /// </para>
-    /// <para>
-    /// The headroom is <b>two</b> levels, not one, because the two numbers are counted differently:
-    /// <see cref="JsonReaderOptions.MaxDepth"/> counts the outermost container as level 1 while
-    /// <see cref="Utf8JsonReader.CurrentDepth"/> reports it as 0. With only one level of slack the reader
-    /// threw on the very token whose <see cref="Utf8JsonReader.CurrentDepth"/> the check needed to see, and
-    /// the named message was unreachable — measured, not reasoned. The reader remains a hard backstop; it is
-    /// simply never the first to speak.
-    /// </para>
-    /// </remarks>
-    private static AlvoViolation? EnsureWithinShapeBounds(ReadOnlySpan<byte> utf8Body, AlvoApiOptions options)
-    {
-        var reader = new Utf8JsonReader(
-            utf8Body,
-            new JsonReaderOptions { MaxDepth = options.MaxPayloadDepth + 2, AllowTrailingCommas = false });
-
-        try
-        {
-            if (!reader.Read() || reader.TokenType != JsonTokenType.StartObject)
-            {
-                return PayloadViolations.NotAnObject();
-            }
-
-            return ScanShape(ref reader, options);
-        }
-        catch (JsonException)
-        {
-            return PayloadViolations.MalformedJson();
-        }
-    }
-
-    /// <summary>
-    /// Walks every token of the body, refusing as soon as the property-name count or the nesting depth
-    /// crosses its bound — or as soon as one object uses a name twice.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <b>Property names are counted at every depth, not just the top level.</b> Counting only depth 1 was a
-    /// bound that did not bound: <c>{"name":{…150 000 keys…}}</c> satisfied it, satisfied the depth cap at
-    /// depth 2, fitted inside <see cref="AlvoApiOptions.MaxRequestBodyBytes"/>, and was then materialised in
-    /// full — a ~20–40× memory amplification per request, refused only afterwards. The scan already visits
-    /// every token (it no longer <c>Skip</c>s a property's value), so this is a counter placement rather
-    /// than a second pass.
-    /// </para>
-    /// <para>
-    /// <b>The duplicate-name check is here for the same reason, and it is the one bound whose absence was a
-    /// leak rather than a cost.</b> A repeated name passed this scan (both names counted, neither compared) and
-    /// passed <c>JsonNode.Parse</c> too, because a <see cref="JsonObject"/>'s backing dictionary materialises
-    /// lazily — so the <c>foreach</c> in <see cref="Bind"/> was the first thing to touch it and threw
-    /// <see cref="ArgumentException"/> with a .NET dictionary message that
-    /// <see cref="ProblemResultFactory.GuardAsync"/> then rendered to the caller as the malformed-request 422.
-    /// Deciding it here refuses the body <em>before</em> the node tree exists, which is this type's rule for
-    /// every other bound.
-    /// </para>
-    /// <para>
-    /// <b>It is checked at every depth, which is wider than the throw was.</b> Only the top-level object is
-    /// enumerated, so a duplicate nested inside a <c>json</c> field's value never threw — it was accepted and
-    /// stored verbatim, leaving a document in the database that <see cref="JsonObject"/> itself cannot
-    /// enumerate. One rule for the whole body is also the simpler code: the scan is depth-agnostic, so
-    /// restricting the check to depth 1 would mean <em>adding</em> a condition whose only justification is
-    /// "that is the depth that happens to crash today".
-    /// </para>
-    /// <para>
-    /// The comparison matches <see cref="JsonObject"/>'s own exactly, which is what makes this a pre-emption
-    /// rather than a second opinion: the name is read through <see cref="Utf8JsonReader.GetString"/>, so
-    /// <c>"a"</c> and <c>"a"</c> are one name as the parser would also see them, and it is
-    /// <see cref="StringComparer.Ordinal"/>, so <c>a</c> and <c>A</c> are two.
-    /// </para>
-    /// </remarks>
-    private static AlvoViolation? ScanShape(ref Utf8JsonReader reader, AlvoApiOptions options)
-    {
-        var names = 0;
-        var seen = new NamesByDepth();
-
-        // The caller has already read the body's opening brace, so the root object's own property names are
-        // one level below the depth the reader is sitting at. Every nested object enters below.
-        seen.Enter(reader.CurrentDepth + 1);
-
-        while (reader.Read())
-        {
-            if (reader.CurrentDepth > options.MaxPayloadDepth)
-            {
-                return PayloadViolations.TooDeep(options.MaxPayloadDepth);
-            }
-
-            if (reader.TokenType == JsonTokenType.StartObject)
-            {
-                seen.Enter(reader.CurrentDepth + 1);
-            }
-            else if (reader.TokenType == JsonTokenType.PropertyName)
-            {
-                if (++names > options.MaxPayloadKeys)
-                {
-                    return PayloadViolations.TooManyKeys(options.MaxPayloadKeys);
-                }
-
-                if (!seen.Add(reader.CurrentDepth, reader.GetString()!))
-                {
-                    return PayloadViolations.DuplicateField();
-                }
-            }
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// The property names seen so far in the object currently open at each depth — enough to decide "this
-    /// object already has that name" from a forward-only scan that keeps no node tree.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <b>Keyed by depth and cleared on entry, which is what makes sibling objects independent.</b> In
-    /// <c>{"a":{"x":1},"b":{"x":2}}</c> both <c>x</c> sit at the same depth and are <em>not</em> duplicates, so
-    /// a single set for the whole body would refuse a perfectly ordinary payload. Clearing the depth's set
-    /// every time an object opens is what scopes it to one object rather than to one level.
-    /// </para>
-    /// <para>
-    /// The sets are reused rather than allocated per object, because a wide array of small objects would
-    /// otherwise allocate one <see cref="HashSet{T}"/> per element on a path that already refuses to build a
-    /// node tree. Both the number of sets and their total contents are bounded by
-    /// <see cref="AlvoApiOptions.MaxPayloadDepth"/> and <see cref="AlvoApiOptions.MaxPayloadKeys"/>, which the
-    /// same loop enforces.
-    /// </para>
-    /// </remarks>
-    private sealed class NamesByDepth
-    {
-        private readonly List<HashSet<string>> _byDepth = [];
-
-        /// <summary>Opens a fresh object whose own property names will be reported at <paramref name="depth"/>.</summary>
-        internal void Enter(int depth)
-        {
-            while (_byDepth.Count <= depth)
-            {
-                _byDepth.Add(new HashSet<string>(StringComparer.Ordinal));
-            }
-
-            _byDepth[depth].Clear();
-        }
-
-        /// <summary>
-        /// Records one property name, answering <see langword="false"/> when the object open at
-        /// <paramref name="depth"/> already carried it.
-        /// </summary>
-        /// <remarks>
-        /// The depth is always one <see cref="Enter"/> has seen: a property name is only ever reported inside an
-        /// object, and every object's opening brace — the root's included — enters before its names arrive.
-        /// </remarks>
-        internal bool Add(int depth, string name) => _byDepth[depth].Add(name);
-    }
 
     /// <summary>Parses the already-bounded body into a node tree and binds every key to its declared type.</summary>
     /// <remarks>
