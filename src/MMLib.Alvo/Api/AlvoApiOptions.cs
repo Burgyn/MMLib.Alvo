@@ -71,6 +71,33 @@ public sealed class AlvoApiOptions
     /// </remarks>
     public int MaxPayloadKeys { get; set; } = 512;
 
+    /// <summary>The most rows one batch request may carry. Default 1000.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Not <see cref="MaxPayloadKeys"/>, and that is the whole reason this exists.</b> The key bound counts
+    /// property names at every depth, so a batch of N rows with K fields spends <c>1 + N·K</c> of it — about a
+    /// hundred rows for a five-field entity. A batch refused by that bound is told it sent too many
+    /// <em>fields</em>, which is advice about the wrong thing. The batch reader counts rows against this and
+    /// applies <see cref="MaxPayloadKeys"/> per row, which is what that number has always meant on a single
+    /// write.
+    /// </para>
+    /// <para>
+    /// <b>Chosen rather than measured to a ceiling, and the difference is stated because
+    /// <see cref="Data.AlvoFilter.MaxTerms"/> had a real one to point at.</b> Both shipped engines stayed
+    /// linear to 5000 rows over a policed entity and nothing failed, so two properties decide the number
+    /// instead: a batch holds each row's lock until it commits, and 1000 rows is 893 ms of that on PostgreSQL
+    /// against 3.1 s at 5000; and one request allocates ~195 MB at 1000 against ~960 MB at 5000, which is a
+    /// cheap denial-of-service lever for one authenticated caller. It also matches
+    /// <see cref="Data.AlvoFilter.MaxInCandidates"/>, the framework's other "how many things may one request
+    /// name" count.
+    /// </para>
+    /// <para>
+    /// The numbers, the harness and the O(N²) defect the measurement found are in
+    /// <c>docs/superpowers/specs/evidence/2026-09-04-batch-row-bound/measurement.md</c>.
+    /// </para>
+    /// </remarks>
+    public int MaxBatchRows { get; set; } = 1000;
+
     /// <summary>
     /// The longest <c>Idempotency-Key</c> a create will accept, in <b>UTF-8 bytes</b>. Defaults to
     /// <see cref="Data.AlvoIdempotency.MaxKeyBytes"/>, and may only be lowered.
