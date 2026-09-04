@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.DependencyInjection;
 using MMLib.Alvo.Api.Internal;
 using MMLib.Alvo.Data;
@@ -9,6 +10,8 @@ using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Schema;
 using System.Net;
+using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Api.Tests;
@@ -458,6 +461,152 @@ public sealed class DataApiQueryTests
     {
         public SchemaModel GetSchema() => schema;
     }
+
+    /// <summary>
+    /// The two surfaces are one read. Asserted on the bytes, for queries carrying a projection alias, a
+    /// group, a sort and a page size — if these ever diverge, one of them has grown a grammar of its own.
+    /// </summary>
+    [Theory]
+    [InlineData("make=eq.skoda&order=year.desc&limit=2")]
+    [InlineData("select=id,label:make&order=year.asc")]
+    [InlineData("or=(make.eq.skoda,make.eq.vw)&limit=3")]
+    [InlineData("year=gte.1999&year=lte.2020&order=year.asc")]
+    public async Task A_query_body_answers_exactly_what_the_same_query_string_answers(string queryString)
+    {
+        await using var world = await SeededAsync();
+
+        using var byUrl = await world.SendAsync(HttpMethod.Get, $"/api/vehicles?{queryString}", _admin);
+        using var byBody = await world.SendRawAsync(
+            HttpMethod.Post, "/api/vehicles/query", _admin, content: QueryBody(queryString));
+
+        byBody.StatusCode.ShouldBe(byUrl.StatusCode);
+        (await byBody.Content.ReadAsStringAsync(TestContext.Current.CancellationToken))
+            .ShouldBe(await byUrl.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>
+    /// The request the endpoint exists for: a candidate list far past what a request line carries, sent as a
+    /// body and answered with the rows it names.
+    /// </summary>
+    [Fact]
+    public async Task A_candidate_list_past_any_request_line_limit_is_answered_through_the_body()
+    {
+        await using var world = await SeededAsync();
+
+        using var seeded = await world.SendAsync(HttpMethod.Get, "/api/vehicles?limit=200", _admin);
+        var wanted = (await seeded.ReadJsonObjectAsync())["items"]!.AsArray()
+            .Select(row => row!["id"]!.GetValue<string>())
+            .ToList();
+        wanted.Count.ShouldBe(_fleet.Length, "or the fact below compares two empty pages");
+
+        var padding = Enumerable.Range(0, 400).Select(_ => Guid.NewGuid().ToString());
+        var candidates = string.Join(',', wanted.Concat(padding));
+        var body = new JsonObject { ["id"] = $"in.({candidates})", ["limit"] = "200" };
+
+        using var response = await world.SendAsync(
+            HttpMethod.Post, "/api/vehicles/query", _admin, body: body);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        body["id"]!.GetValue<string>().Length.ShouldBeGreaterThan(
+            8 * 1024, "or this is not the request a request line would have refused");
+        (await response.ReadJsonObjectAsync())["items"]!.AsArray().Count.ShouldBe(wanted.Count);
+    }
+
+    /// <summary>
+    /// A <c>Prefer: count</c> preference is a header, so it is unaffected by which side the parameters
+    /// arrived on and is honoured here exactly as on the list.
+    /// </summary>
+    [Fact]
+    public async Task The_query_body_honours_the_count_preference()
+    {
+        await using var world = await SeededAsync();
+
+        using var response = await world.SendAsync(
+            HttpMethod.Post,
+            "/api/vehicles/query",
+            _admin,
+            body: new JsonObject { ["limit"] = "1" },
+            headers: [new KeyValuePair<string, string>(PreferHeader.Name, "count=exact")]);
+
+        response.Headers.GetValues(PreferHeader.AppliedName).ShouldContain("count=exact");
+        (await response.ReadJsonObjectAsync())["count"]!.GetValue<long>().ShouldBe(_fleet.Length);
+    }
+
+    /// <summary>
+    /// The mask really is threaded into the parser on this surface, and a masked field is refused exactly as
+    /// an undeclared one is — byte for byte, on both surfaces, so neither the surface a caller picks nor the
+    /// refusal they read can be used to tell "hidden from you" from "does not exist".
+    /// </summary>
+    /// <remarks>
+    /// Over <c>masked-notes.alvo.json</c> and not the vehicle registry, which declares no hidden field
+    /// anywhere: there <c>PolicyDecision.HiddenFields</c> is empty, both names are simply undeclared, and the
+    /// fact would pass while exercising none of the mask threading it exists to hold.
+    /// </remarks>
+    [Fact]
+    public async Task A_masked_field_is_refused_exactly_as_an_undeclared_one_on_both_surfaces()
+    {
+        var reader = new TestApiKey("reader", ["authenticated"], ["*:read"]);
+        await using var world = await AlvoApiWorld.FromDescriptorAsync("masked-notes.alvo.json", [reader]);
+
+        using var maskedByUrl = await world.SendAsync(HttpMethod.Get, "/api/notes?secret=eq.x", reader);
+        using var maskedByBody = await world.SendRawAsync(
+            HttpMethod.Post, "/api/notes/query", reader, content: QueryBody("secret=eq.x"));
+        using var unknownByBody = await world.SendRawAsync(
+            HttpMethod.Post, "/api/notes/query", reader, content: QueryBody("nosuchfield=eq.x"));
+
+        maskedByBody.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
+        maskedByBody.StatusCode.ShouldBe(maskedByUrl.StatusCode);
+
+        var masked = await maskedByBody.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        masked.ShouldBe(
+            await maskedByUrl.Content.ReadAsStringAsync(TestContext.Current.CancellationToken),
+            "the two surfaces must answer one refusal for a masked field");
+        masked.ShouldBe(
+            await unknownByBody.Content.ReadAsStringAsync(TestContext.Current.CancellationToken),
+            "a masked field and an undeclared one must be one refusal, byte for byte");
+    }
+
+    /// <summary>
+    /// A denied caller is refused <em>before</em> their body is read, not after — so an oversized body from
+    /// one earns the 403 they were always going to get, never <c>body-too-large</c>. That is the fact
+    /// separating "the decision precedes the read" from "the decision precedes the parse", and no
+    /// database-statement assertion can see it: a refusal after buffering touches no database either.
+    /// </summary>
+    /// <remarks>
+    /// <c>ledgers</c> configures no <c>list</c> rule at all, so default-deny refuses every reader outright —
+    /// which is the only way to reach a genuinely denied decision, since a rule that merely excludes a caller
+    /// compiles to an allow carrying a predicate that matches nothing.
+    /// </remarks>
+    [Fact]
+    public async Task A_denied_caller_sending_an_oversized_body_is_refused_before_it_is_read()
+    {
+        var reader = new TestApiKey("reader", ["authenticated"], ["*:read"]);
+        await using var world = await AlvoApiWorld.FromDescriptorAsync("masked-notes.alvo.json", [reader]);
+        var oversized = new string('x', new AlvoApiOptions().MaxRequestBodyBytes + 1024);
+
+        using var response = await world.SendRawAsync(
+            HttpMethod.Post,
+            "/api/ledgers/query",
+            reader,
+            content: new StringContent(
+                $$$"""{"title":"eq.{{{oversized}}}"}""", Encoding.UTF8, "application/json"));
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+    }
+
+    /// <summary>The transposition every end-to-end fact above sends: the parsed collection, as JSON.</summary>
+    /// <remarks>
+    /// Transposing the <em>parsed</em> collection rather than the raw text is the whole of what makes the
+    /// equivalence claim about decoded values: a body carries the operand, a query string carries its
+    /// percent-encoding.
+    /// </remarks>
+    /// <param name="queryString">The query string to send as a body instead.</param>
+    private static JsonContent QueryBody(string queryString) =>
+        JsonContent.Create(
+            new QueryCollection(QueryHelpers.ParseQuery("?" + queryString)).ToDictionary(
+                parameter => parameter.Key,
+                parameter => parameter.Value.Select(value => value ?? string.Empty).ToArray(),
+                StringComparer.Ordinal));
 
     private static async Task<AlvoApiWorld> SeededAsync()
     {

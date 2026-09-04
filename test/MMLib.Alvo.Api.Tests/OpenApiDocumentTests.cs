@@ -55,10 +55,10 @@ public sealed class OpenApiDocumentTests
     /// <summary>A credential that was presented and cannot be resolved, so every operation is 401.</summary>
     private static readonly TestApiKey _ghost = new("ghost-key", ["admin"], ["*:read", "*:write"]);
 
-    /// <summary>The two entities the fixture descriptor declares, and the five routes each of them gets.</summary>
+    /// <summary>The two entities the fixture descriptor declares, and the six routes each of them gets.</summary>
     private static readonly string[] _entities = ["categories", "products"];
 
-    private const int RoutesPerEntity = 5;
+    private const int RoutesPerEntity = 6;
 
     /// <summary>
     /// .NET 10 emits OpenAPI 3.1 over JSON Schema draft 2020-12 by default, and #75 requires keeping it —
@@ -147,11 +147,12 @@ public sealed class OpenApiDocumentTests
         }
 
         documented.Count.ShouldBe(
-            55,
-            "27 on the version-less entity and 28 on the audited one, whose read adds a 304 — pinned from "
+            63,
+            "31 on the version-less entity and 32 on the audited one, whose read adds a 304 — pinned from "
             + "outside so the equality below cannot be satisfied by two empty sets. It went 51 -> 55 with "
-            + "#138: an update and a delete can each now answer 409 when a database constraint refuses the "
-            + "write, on both entities");
+            + "#138 (an update and a delete can each answer 409 when a database constraint refuses the "
+            + "write), and 55 -> 63 with #107: the body-shaped read answers the list's own four statuses, "
+            + "on both entities");
         observed.ShouldBe(documented, "a documented status no request reaches, or a status no document lists");
     }
 
@@ -292,6 +293,46 @@ public sealed class OpenApiDocumentTests
     }
 
     /// <summary>
+    /// The query body's field properties are <b>exactly</b> the filter parameters the collection <c>GET</c>
+    /// publishes — no more, so a <c>hidden</c> field cannot appear on one surface and not the other, and no
+    /// fewer, so the body cannot silently refuse a filter the URL accepts.
+    /// </summary>
+    /// <remarks>
+    /// The two are built from one source, and this is what holds that: a second list assembled by hand is
+    /// precisely how the document would come to describe two grammars for one parser. The settings
+    /// (<c>select</c>, <c>order</c>, <c>limit</c>, <c>offset</c>, <c>after</c>, <c>or</c>, <c>and</c>) are
+    /// the difference between the two sets and are asserted as such rather than skipped — <c>not</c> is in
+    /// neither, because it is only ever a prefix on another parameter's name.
+    /// </remarks>
+    [Fact]
+    public async Task The_query_bodys_field_properties_are_the_lists_filter_parameters()
+    {
+        await using var world = await StoreAsync();
+        var document = await world.OpenApiDocumentAsync();
+
+        foreach (var entity in _entities)
+        {
+            var body = Component(document, "schemas", entity + "Query")["properties"]!.AsObject()
+                .Select(property => property.Key)
+                .ToHashSet(StringComparer.Ordinal);
+            var filters = document["paths"]![$"/api/{entity}"]!["get"]!["parameters"]!.AsArray()
+                .Where(parameter => parameter!["name"] is not null)
+                .Select(parameter => (string)parameter!["name"]!)
+                .ToHashSet(StringComparer.Ordinal);
+
+            IReadOnlyList<string> settings = ["after", "and", "limit", "offset", "or", "order", "select"];
+            IReadOnlyList<string> beyondTheFilters =
+                [.. body.Except(filters).Order(StringComparer.Ordinal)];
+
+            beyondTheFilters.ShouldBe(
+                settings,
+                $"'{entity}' body properties that are not filter parameters must be exactly the settings");
+            filters.Except(body).ShouldBeEmpty(
+                $"'{entity}' publishes a filter parameter the query body does not accept");
+        }
+    }
+
+    /// <summary>
     /// The problem document is one component, and every refusal response resolves to it.
     /// </summary>
     /// <remarks>
@@ -310,9 +351,10 @@ public sealed class OpenApiDocumentTests
         var refusals = Refusals(document).ToList();
 
         refusals.Count.ShouldBe(
-            44,
-            "twenty-two per entity — three on a list and a read, five on a create, six on an update and five "
-            + "on a delete, the last two having each gained the 409 #138 made reachable");
+            50,
+            "twenty-five per entity — three on each of the two collection reads and on the row read, five on "
+            + "a create, six on an update and five on a delete, the last two having each gained the 409 "
+            + "#138 made reachable and the first three being what #107's body-shaped read added");
         foreach (var (route, status, response) in refusals)
         {
             var content = Resolve(document, response)["content"]!.AsObject();
@@ -915,7 +957,7 @@ public sealed class OpenApiDocumentTests
     }
 
     /// <summary>
-    /// Drives one request per status this entity's five operations can answer with, asserting each got what it
+    /// Drives one request per status this entity's six operations can answer with, asserting each got what it
     /// went for, and returns the <c>&lt;operationId&gt; &lt;status&gt;</c> pairs observed.
     /// </summary>
     private static async Task<IReadOnlyList<string>> ProvokeEveryStatusAsync(
@@ -972,6 +1014,10 @@ public sealed class OpenApiDocumentTests
             .. Gated(collection, "list", HttpMethod.Get),
             new("list", 200, HttpMethod.Get, collection, _admin, null),
             new("list", 422, HttpMethod.Get, $"{collection}?limit=0", _admin, null),
+
+            .. Gated($"{collection}/query", "query", HttpMethod.Post, new JsonObject()),
+            new("query", 200, HttpMethod.Post, $"{collection}/query", _admin, new JsonObject()),
+            new("query", 422, HttpMethod.Post, $"{collection}/query", _admin, UnreadableFilter()),
 
             .. Gated(row, "get", HttpMethod.Get),
             new("get", 200, HttpMethod.Get, row, _admin, null),
@@ -1063,12 +1109,18 @@ public sealed class OpenApiDocumentTests
     }
 
     /// <summary>
+    /// A query body naming a field the entity does not declare, which is the body-shaped read's 422 — the
+    /// counterpart of <c>?limit=0</c> on the collection <c>GET</c>.
+    /// </summary>
+    private static JsonObject UnreadableFilter() => new() { ["nosuchfield"] = "eq.1" };
+
+    /// <summary>
     /// The two refusals the gate answers on every operation: a credential that cannot be resolved, and a key
     /// whose scopes do not cover the entity.
     /// </summary>
     /// <remarks>
     /// Both are provoked per operation rather than once, because the document lists them per operation — a
-    /// single probe would leave four of the five unevidenced, which is exactly the shape of coverage
+    /// single probe would leave the rest unevidenced, which is exactly the shape of coverage
     /// <c>DataApiRoutingTests</c>' own marker fact exists to avoid.
     /// </remarks>
     private static IEnumerable<Probe> Gated(string path, string operation, HttpMethod method, JsonObject? body = null) =>

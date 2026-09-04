@@ -179,6 +179,100 @@ public sealed class DataApiAuthTests
     }
 
     /// <summary>
+    /// The body-shaped read's gate. Its own fact rather than a variation of the <c>list</c> one: it is a
+    /// second route with its own filter, and the whole risk of a second way to reach one read is that only
+    /// one of the two is gated.
+    /// </summary>
+    /// <remarks>
+    /// The <c>vehicles</c> control is what makes "no statement" non-vacuous — the same key, over an entity
+    /// whose <c>list</c> rule is character-for-character identical, does reach the store through this same
+    /// route.
+    /// </remarks>
+    [Fact]
+    public async Task A_key_whose_scope_excludes_the_entity_cannot_query_it_through_a_body()
+    {
+        var narrow = new TestApiKey("narrow-key", ["authenticated"], ["vehicles:read"]);
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync([narrow]);
+        world.ClearStatements();
+
+        using var refused = await world.SendAsync(
+            HttpMethod.Post, "/api/owners/query", narrow, body: new JsonObject());
+        var statementsAfterRefusal = world.Statements;
+        using var allowed = await world.SendAsync(
+            HttpMethod.Post, "/api/vehicles/query", narrow, body: new JsonObject());
+
+        refused.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        statementsAfterRefusal.ShouldBeEmpty("the scope gate must refuse before the port composes a statement");
+        allowed.StatusCode.ShouldBe(HttpStatusCode.OK);
+        world.Statements.ShouldNotBeEmpty(
+            "the in-scope query must reach the store, or 'no statement' above proves nothing");
+    }
+
+    /// <summary>
+    /// An entity whose <c>list</c> the descriptor configures no rule for is refused for everybody through
+    /// this route too — default-deny is a property of the operation, and a second transport must not be a
+    /// second answer.
+    /// </summary>
+    /// <remarks>
+    /// The same caller's <c>create</c> on that entity is the control: <c>ledgers</c> configures one, so a
+    /// 403 here is about the unconfigured <c>list</c> and not about this key.
+    /// </remarks>
+    [Fact]
+    public async Task An_entity_whose_list_is_unconfigured_cannot_be_queried_through_a_body()
+    {
+        var caller = new TestApiKey("caller-key", ["authenticated"], ["*:read", "*:write"]);
+        await using var world = await AlvoApiWorld.FromDescriptorAsync("masked-notes.alvo.json", [caller]);
+        world.ClearStatements();
+
+        using var refused = await world.SendAsync(
+            HttpMethod.Post, "/api/ledgers/query", caller, body: new JsonObject());
+        var statementsAfterRefusal = world.Statements;
+        using var created = await world.SendAsync(
+            HttpMethod.Post, "/api/ledgers", caller, body: new JsonObject { ["title"] = "Ledger" });
+
+        refused.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        statementsAfterRefusal.ShouldBeEmpty("default-deny must refuse before the port composes a statement");
+        created.StatusCode.ShouldBe(
+            HttpStatusCode.Created, "or the 403 above is about this key rather than about the missing rule");
+    }
+
+    /// <summary>
+    /// An anonymous caller is judged by policy on the body-shaped read exactly as on the collection
+    /// <c>GET</c> — same status, same bytes — and a rule that excludes them yields an empty page rather
+    /// than rows.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Worth its own fact because a <c>POST</c>-that-reads is the shape a cross-site form produces.</b>
+    /// Alvo's credential is an explicit request header and never a cookie, so such a request arrives with no
+    /// credential at all — which is this fact's caller. What it must not do is answer differently from the
+    /// <c>GET</c>, or hand back a row.
+    /// </para>
+    /// <para>
+    /// This descriptor's <c>list</c> rule is a role test, which compiles to a row-level <c>USING</c>
+    /// predicate — so an anonymous caller receives an <em>allow</em> carrying a predicate that matches
+    /// nothing, and the documented answer is 200 with an empty page rather than 403. The unconfigured-rule
+    /// case, which is the one that really is a denial, is the fact above.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task An_anonymous_caller_is_answered_the_same_way_on_both_collection_reads()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin]);
+        await CreateOwnerAsync(world, "Acme Ltd");
+
+        using var byUrl = await world.SendAsync(HttpMethod.Get, "/api/owners", key: null);
+        using var byBody = await world.SendAsync(
+            HttpMethod.Post, "/api/owners/query", key: null, body: new JsonObject());
+
+        byBody.StatusCode.ShouldBe(byUrl.StatusCode);
+        var bodyText = await byBody.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        bodyText.ShouldBe(await byUrl.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        (await byBody.ReadJsonObjectAsync())["items"]!.AsArray().ShouldBeEmpty(
+            "a caller no rule admits must see no row, whichever surface they used");
+    }
+
+    /// <summary>
     /// The <c>get</c> endpoint's gate. Its own fact rather than a variation of the <c>list</c> one:
     /// <c>MapGet</c> carries its own filter with its own operation constant, and a read of one row by id
     /// is exactly the request a caller reaches for when a list was refused.
@@ -337,6 +431,80 @@ public sealed class DataApiAuthTests
         (await askingForTenantA.ReadTextAsync()).ShouldNotContain("note-");
         (await control.ReadFieldAsync("title")).ShouldBe(
             ["note-a"], "the tenant's own key must see its own row, and only its own");
+    }
+
+    /// <summary>
+    /// One tenant's row is unreachable through the body-shaped read, by a caller of another tenant asking
+    /// for it <b>by name</b> — and the same body sent by its own tenant returns it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Its own fact rather than an inheritance from the collection <c>GET</c>'s.</b> The mitigating
+    /// argument — that both routes share one <c>PageAsync</c> and the tenant predicate is enforced inside the
+    /// port — is exactly the argument this file already rejects for the scope gate: a second way to reach one
+    /// read is a second thing that has to be gated, and "it cannot possibly be wrong" is not a fact.
+    /// </para>
+    /// <para>
+    /// <b>The control is what makes the empty page mean something.</b> Without it, an empty answer would be
+    /// satisfied by a filter that matched nothing, by a route that returned nothing, or by a body the reader
+    /// silently dropped. The same body, from the row's own tenant, must return the row.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task One_tenants_row_is_unreachable_through_the_body_shaped_read_by_another_tenant()
+    {
+        var keyA = new TestApiKey("tenant-a", ["authenticated"], ["notes:read", "notes:write"], Guid.NewGuid());
+        var keyB = new TestApiKey("tenant-b", ["authenticated"], ["notes:read", "notes:write"], Guid.NewGuid());
+        await using var world = await AlvoApiWorld.TenantNotesAsync([keyA, keyB]);
+        await SeedNoteAsync(world, keyA, "note-a");
+        await SeedNoteAsync(world, keyB, "note-b");
+        var askingForAsRow = new JsonObject { ["title"] = "eq.note-a" };
+
+        using var asOtherTenant = await world.SendAsync(
+            HttpMethod.Post, "/api/notes/query", keyB, body: askingForAsRow);
+        using var asOwnTenant = await world.SendAsync(
+            HttpMethod.Post, "/api/notes/query", keyA, body: askingForAsRow);
+
+        asOtherTenant.StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await asOtherTenant.ReadTextAsync()).Contains("note-a", StringComparison.Ordinal).ShouldBeFalse(
+            "another tenant's row must not be reachable by filtering for it");
+        (await asOwnTenant.ReadFieldAsync("title")).ShouldBe(
+            ["note-a"], "the same body from the row's own tenant must return it, or the empty page above "
+            + "proves nothing");
+    }
+
+    /// <summary>
+    /// The body-shaped twin of
+    /// <see cref="A_tenant_scoped_entity_read_with_no_tenant_context_returns_no_rows_of_any_tenant"/>: a
+    /// tenantless caller cannot read a tenant-scoped entity through it, and cannot acquire a tenant by
+    /// asking for one in a header either.
+    /// </summary>
+    [Fact]
+    public async Task A_tenantless_caller_cannot_query_a_tenant_scoped_entity_through_a_body()
+    {
+        var tenantA = Guid.NewGuid();
+        var keyA = new TestApiKey("tenant-a", ["authenticated"], ["notes:read", "notes:write"], tenantA);
+        var tenantless = new TestApiKey("no-tenant", ["authenticated"], ["notes:read"]);
+        await using var world = await AlvoApiWorld.TenantNotesAsync([keyA, tenantless]);
+        await SeedNoteAsync(world, keyA, "note-a");
+
+        using var withoutTenant = await world.SendAsync(
+            HttpMethod.Post, "/api/notes/query", tenantless, body: new JsonObject());
+        using var askingForTenantA = await world.SendAsync(
+            HttpMethod.Post, "/api/notes/query", tenantless, tenant: tenantA.ToString(),
+            body: new JsonObject());
+        using var control = await world.SendAsync(
+            HttpMethod.Post, "/api/notes/query", keyA, body: new JsonObject());
+
+        withoutTenant.StatusCode.ShouldBe(
+            HttpStatusCode.Forbidden, "the tenant guard denies a tenantless caller on a tenant-scoped entity");
+        (await withoutTenant.ReadTextAsync()).ShouldNotContain("note-");
+        askingForTenantA.StatusCode.ShouldBe(
+            HttpStatusCode.Unauthorized,
+            "a key with no tenant of its own cannot request one — TenantResolver refuses the credential outright");
+        (await askingForTenantA.ReadTextAsync()).ShouldNotContain("note-");
+        (await control.ReadFieldAsync("title")).ShouldBe(
+            ["note-a"], "the tenant's own key must see its own row through this route too");
     }
 
     private static async Task<Guid> CreateOwnerAsync(AlvoApiWorld world, string name)

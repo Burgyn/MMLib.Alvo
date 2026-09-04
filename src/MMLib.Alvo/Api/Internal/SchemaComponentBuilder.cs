@@ -5,7 +5,7 @@ using System.Text.Json.Nodes;
 namespace MMLib.Alvo.Api.Internal;
 
 /// <summary>
-/// Turns one entity of the applied schema into the five JSON Schema components the generated OpenAPI
+/// Turns one entity of the applied schema into the six JSON Schema components the generated OpenAPI
 /// document references: the row a single read, a create or an update returns; the page item a list's rows
 /// are (the same fields, without the row's <c>required</c> list); the body a create accepts; and the body a
 /// patch accepts.
@@ -92,6 +92,10 @@ internal sealed class SchemaComponentBuilder(
     /// <param name="entity">The entity name.</param>
     internal static string PatchId(string entity) => entity + "Patch";
 
+    /// <summary>The component id of the body the collection query accepts.</summary>
+    /// <param name="entity">The entity name.</param>
+    internal static string QueryId(string entity) => entity + "Query";
+
     /// <summary>The component id of the page envelope a list returns.</summary>
     /// <param name="entity">The entity name.</param>
     internal static string PageId(string entity) => entity + "Page";
@@ -100,7 +104,13 @@ internal sealed class SchemaComponentBuilder(
     /// <param name="entity">The entity name.</param>
     internal static string PageItemId(string entity) => entity + "PageItem";
 
-    /// <summary>Registers this entity's five components on <paramref name="document"/>.</summary>
+    /// <summary>Registers this entity's five schema components on <paramref name="document"/>.</summary>
+    /// <remarks>
+    /// The sixth, <c>{entity}Query</c>, is registered by <c>AlvoDocumentTransformer</c> instead: its
+    /// <c>limit</c> property carries <see cref="AlvoApiOptions.MaxPageSize"/> and this builder is
+    /// constructed with a schema view and no options, so threading options in to serve one component would
+    /// be worse than building it where the options already are.
+    /// </remarks>
     /// <param name="document">The document being built.</param>
     internal void AddTo(OpenApiDocument document)
     {

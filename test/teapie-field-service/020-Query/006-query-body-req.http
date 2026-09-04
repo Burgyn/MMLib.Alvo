@@ -1,0 +1,77 @@
+### The body-shaped collection read (#107), against real PostgreSQL in the container.
+### Every fact below pairs the body with the query string that means the same thing, because the
+### claim this route makes is not "it answers" but "it answers WHAT THE URL ANSWERS" — and only a
+### real engine can show that the transposed parameters reached the same statement.
+
+### A filter, a sort and a page size, sent as a body
+# @name BodyGroupOrderLimit
+## TEST-EXPECT-STATUS: [200]
+POST {{fsBaseUrl}}/api/work_orders/query
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{
+  "or": "(status.eq.completed,status.eq.cancelled)",
+  "order": "reference.asc",
+  "limit": "100"
+}
+
+### The same read as a query string, which is the control the comparison needs
+# @name UrlGroupOrderLimit
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?or=(status.eq.completed,status.eq.cancelled)&order=reference.asc&limit=100
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### A projection with an alias, through the body
+# @name BodyAliasedProjection
+## TEST-EXPECT-STATUS: [200]
+POST {{fsBaseUrl}}/api/work_orders/query
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "select": "ref:reference,status", "order": "reference.asc", "limit": "100" }
+
+### An empty object is the empty query: every readable field, the default page
+# @name BodyEmptyQuery
+## TEST-EXPECT-STATUS: [200]
+POST {{fsBaseUrl}}/api/work_orders/query
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{}
+
+### The tenant boundary holds on this route too: the SOUTH dispatcher asking for a NORTH row by name
+# @name BodyOtherTenantByName
+## TEST-EXPECT-STATUS: [200]
+POST {{fsBaseUrl}}/api/work_orders/query
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
+Content-Type: application/json
+
+{ "reference": "eq.WO-1001", "limit": "100" }
+
+### The same body from the row's own tenant, which is what makes the empty page above mean something
+# @name BodyOwnTenantByName
+## TEST-EXPECT-STATUS: [200]
+POST {{fsBaseUrl}}/api/work_orders/query
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "reference": "eq.WO-1001", "limit": "100" }
+
+### A field this caller may not read is refused exactly as an undeclared name is
+# @name BodyMaskedField
+## TEST-EXPECT-STATUS: [422]
+POST {{fsBaseUrl}}/api/work_orders/query
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "internal_notes": "eq.anything" }
+
+### ...and the undeclared name it must be indistinguishable from
+# @name BodyUndeclaredField
+## TEST-EXPECT-STATUS: [422]
+POST {{fsBaseUrl}}/api/work_orders/query
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "no_such_field_at_all": "eq.anything" }

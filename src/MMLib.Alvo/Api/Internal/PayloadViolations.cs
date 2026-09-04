@@ -32,6 +32,33 @@ internal static class PayloadViolations
     /// </summary>
     internal const string BodyPointer = "";
 
+    /// <summary>The write path's wording for a body one of the shared bounds refused.</summary>
+    /// <remarks>
+    /// <b>The stable <em>code</em> comes from <see cref="BoundedJsonBody.CodeOf"/> and the <em>prose</em>
+    /// stays here.</b> The bounds are the same on both surfaces and the fix suggestions cannot be: three of
+    /// the six below talk about fields to write, about the fields you are changing, and about a <c>json</c>
+    /// field's own value — every one of which is advice about an operation a read does not perform. A code
+    /// keys on the kind of refusal; the sentence belongs to the surface.
+    /// </remarks>
+    /// <param name="refusal">The bound that stopped the body.</param>
+    /// <param name="options">The options the bounds are published from.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="refusal"/> is not one of the named cases.</exception>
+    internal static AlvoViolation Body(BodyRefusal refusal, AlvoApiOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return refusal switch
+        {
+            BodyRefusal.NotAnObject => NotAnObject(),
+            BodyRefusal.MalformedJson => MalformedJson(),
+            BodyRefusal.TooLarge => TooLarge(options.MaxRequestBodyBytes),
+            BodyRefusal.TooDeep => TooDeep(options.MaxPayloadDepth),
+            BodyRefusal.TooManyKeys => TooManyKeys(options.MaxPayloadKeys),
+            BodyRefusal.DuplicateName => DuplicateField(),
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(refusal), refusal, "Unmapped body refusal; give it the write path's wording here."),
+        };
+    }
+
     /// <summary>The JSON Pointer (RFC 6901) to one top-level field of the request body.</summary>
     /// <remarks>
     /// The escaping is RFC 6901 §3's, and it is not decorative: a field named <c>a/b</c> would otherwise
@@ -62,14 +89,14 @@ internal static class PayloadViolations
     /// <summary>The refusal for a body that is not a JSON object of field names to values.</summary>
     internal static AlvoViolation NotAnObject() => new(
         BodyPointer,
-        "not-an-object",
+        BoundedJsonBody.CodeOf(BodyRefusal.NotAnObject),
         "The request body must be a JSON object mapping field names to values.",
         "Send {\"field\":value,…}. An array, a scalar or an absent body names no field to write.");
 
     /// <summary>The refusal for a body that is not well-formed JSON at all.</summary>
     internal static AlvoViolation MalformedJson() => new(
         BodyPointer,
-        "malformed-json",
+        BoundedJsonBody.CodeOf(BodyRefusal.MalformedJson),
         "The request body is not well-formed JSON.",
         "Check for an unterminated string, a trailing comma, or a truncated body.");
 
@@ -77,7 +104,7 @@ internal static class PayloadViolations
     /// <param name="maxBytes">The configured maximum.</param>
     internal static AlvoViolation TooLarge(int maxBytes) => new(
         BodyPointer,
-        "body-too-large",
+        BoundedJsonBody.CodeOf(BodyRefusal.TooLarge),
         string.Create(
             CultureInfo.InvariantCulture,
             $"The request body is larger than {maxBytes} bytes, the configured maximum."),
@@ -87,7 +114,7 @@ internal static class PayloadViolations
     /// <param name="maxDepth">The configured maximum.</param>
     internal static AlvoViolation TooDeep(int maxDepth) => new(
         BodyPointer,
-        "body-too-deep",
+        BoundedJsonBody.CodeOf(BodyRefusal.TooDeep),
         string.Create(
             CultureInfo.InvariantCulture,
             $"The request body nests deeper than {maxDepth} levels, the configured maximum."),
@@ -97,7 +124,7 @@ internal static class PayloadViolations
     /// <param name="maxKeys">The configured maximum.</param>
     internal static AlvoViolation TooManyKeys(int maxKeys) => new(
         BodyPointer,
-        "body-too-many-fields",
+        BoundedJsonBody.CodeOf(BodyRefusal.TooManyKeys),
         string.Create(
             CultureInfo.InvariantCulture,
             $"The request body carries more than {maxKeys} fields, the configured maximum."),
@@ -129,7 +156,7 @@ internal static class PayloadViolations
     /// </remarks>
     internal static AlvoViolation DuplicateField() => new(
         BodyPointer,
-        "duplicate-field",
+        BoundedJsonBody.CodeOf(BodyRefusal.DuplicateName),
         "The request body uses the same property name twice inside one object.",
         "Send each property once. A repeated name has no defined meaning, so it is refused rather than "
         + "resolved to the first or the last value — at every depth, not only the top level.");

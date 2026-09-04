@@ -20,10 +20,10 @@ public sealed class DataApiRoutingTests
 
     /// <summary>
     /// The whole route table, spelled out rather than derived from the code that builds it. The count is
-    /// asserted too: a sixth route per entity, or a stray catch-all, has to fail something.
+    /// asserted too: a seventh route per entity, or a stray catch-all, has to fail something.
     /// </summary>
     [Fact]
-    public async Task Every_entity_in_the_applied_schema_gets_five_routes()
+    public async Task Every_entity_in_the_applied_schema_gets_six_routes()
     {
         await using var world = await AlvoApiWorld.VehicleRegistryAsync();
 
@@ -34,13 +34,36 @@ public sealed class DataApiRoutingTests
             routes.ShouldContain($"GET /api/{entity}");
             routes.ShouldContain($"GET /api/{entity}/{{id:guid}}");
             routes.ShouldContain($"POST /api/{entity}");
+            routes.ShouldContain($"POST /api/{entity}/query");
             routes.ShouldContain($"PATCH /api/{entity}/{{id:guid}}");
             routes.ShouldContain($"DELETE /api/{entity}/{{id:guid}}");
         }
 
         routes.Count.ShouldBe(
-            _entities.Length * 5,
-            $"exactly five routes per declared entity and nothing else: {string.Join(", ", routes)}");
+            _entities.Length * 6,
+            $"exactly six routes per declared entity and nothing else: {string.Join(", ", routes)}");
+    }
+
+    /// <summary>
+    /// A verb the query route does not answer is a 405 from routing itself, not a 404 and not a problem
+    /// document: the path exists, and this is the one response on these paths that Alvo does not write.
+    /// Asserted so the change from 404 is a recorded behaviour rather than a discovery.
+    /// </summary>
+    [Theory]
+    [InlineData("GET")]
+    [InlineData("PATCH")]
+    [InlineData("DELETE")]
+    public async Task A_verb_the_query_route_does_not_answer_is_a_405_from_routing(string method)
+    {
+        var reader = new TestApiKey("reader", ["authenticated"], ["*:read"]);
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync([reader]);
+
+        using var response = await world.SendRawAsync(new HttpMethod(method), "/api/owners/query", reader);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.MethodNotAllowed);
+        (await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken)).ShouldBeEmpty(
+            "a 405 produced by routing carries no body; one produced by an endpoint would carry a problem "
+            + "document");
     }
 
     /// <summary>
@@ -289,7 +312,7 @@ public sealed class DataApiRoutingTests
 
         var endpoints = world.Endpoints;
 
-        endpoints.Count.ShouldBe(_entities.Length * 5, "or this fact is asserting over the wrong set");
+        endpoints.Count.ShouldBe(_entities.Length * 6, "or this fact is asserting over the wrong set");
         foreach (var endpoint in endpoints)
         {
             var marker = endpoint.Metadata.GetMetadata<DataApiOperationMetadata>();
@@ -300,22 +323,60 @@ public sealed class DataApiRoutingTests
     }
 
     /// <summary>
-    /// The operation a route's own shape implies, derived from the verb plus whether the pattern addresses one
-    /// row — so a marker that says <c>List</c> on a <c>DELETE</c> fails rather than being taken at its word.
+    /// The kind is the API layer's own vocabulary and the operation is policy's. Two kinds map to
+    /// <c>list</c> on purpose — a second, body-shaped way to reach the same read — and every other kind is
+    /// one-to-one, so a kind added later cannot silently gate as the wrong operation.
+    /// </summary>
+    [Fact]
+    public void Every_endpoint_kind_maps_to_the_operation_its_filter_must_gate()
+    {
+        DataApiEndpointKind.List.ToDataOperation().ShouldBe(DataOperation.List);
+        DataApiEndpointKind.Query.ToDataOperation().ShouldBe(DataOperation.List);
+        DataApiEndpointKind.Get.ToDataOperation().ShouldBe(DataOperation.Get);
+        DataApiEndpointKind.Create.ToDataOperation().ShouldBe(DataOperation.Create);
+        DataApiEndpointKind.Update.ToDataOperation().ShouldBe(DataOperation.Update);
+        DataApiEndpointKind.Delete.ToDataOperation().ShouldBe(DataOperation.Delete);
+    }
+
+    /// <summary>
+    /// A kind's wire name is what the document's <c>operationId</c> is built from, so the five that existed
+    /// before this split must keep the spelling they published — and the sixth must not collide with them.
+    /// </summary>
+    [Fact]
+    public void Every_endpoint_kind_has_its_own_wire_name_and_the_five_original_ones_are_unchanged()
+    {
+        DataApiEndpointKind.List.ToWireName().ShouldBe("list");
+        DataApiEndpointKind.Get.ToWireName().ShouldBe("get");
+        DataApiEndpointKind.Create.ToWireName().ShouldBe("create");
+        DataApiEndpointKind.Update.ToWireName().ShouldBe("update");
+        DataApiEndpointKind.Delete.ToWireName().ShouldBe("delete");
+        DataApiEndpointKind.Query.ToWireName().ShouldBe("query");
+
+        var kinds = Enum.GetValues<DataApiEndpointKind>();
+        kinds.Select(kind => kind.ToWireName()).Distinct(StringComparer.Ordinal).Count().ShouldBe(kinds.Length);
+    }
+
+    /// <summary>
+    /// The operation a route's own shape implies, derived from the verb, whether the pattern addresses one
+    /// row, and whether it is the body-shaped read — so a marker that says <c>List</c> on a <c>DELETE</c>
+    /// fails rather than being taken at its word.
     /// </summary>
     private static DataOperation ExpectedOperation(RouteEndpoint endpoint)
     {
         var method = endpoint.Metadata.GetMetadata<IHttpMethodMetadata>()!.HttpMethods.Single();
-        var addressesOneRow = endpoint.RoutePattern.RawText!.EndsWith("{id:guid}", StringComparison.Ordinal);
+        var pattern = endpoint.RoutePattern.RawText!;
+        var addressesOneRow = pattern.EndsWith("{id:guid}", StringComparison.Ordinal);
+        var isQueryByBody = pattern.EndsWith("/query", StringComparison.Ordinal);
 
         return method switch
         {
             "GET" when addressesOneRow => DataOperation.Get,
             "GET" => DataOperation.List,
+            "POST" when isQueryByBody => DataOperation.List,
             "POST" => DataOperation.Create,
             "PATCH" => DataOperation.Update,
             "DELETE" => DataOperation.Delete,
-            _ => throw new InvalidOperationException($"Unexpected generated route: {method} {endpoint.RoutePattern.RawText}"),
+            _ => throw new InvalidOperationException($"Unexpected generated route: {method} {pattern}"),
         };
     }
 }

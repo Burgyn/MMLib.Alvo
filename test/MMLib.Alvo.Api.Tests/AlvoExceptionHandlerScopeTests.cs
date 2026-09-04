@@ -99,7 +99,7 @@ public class AlvoExceptionHandlerScopeTests
             app.UseExceptionHandler();
             app.MapGet("/the-hosts-own/boom", void () => throw new InvalidOperationException("the host's own bug"));
             app.MapGet("/alvos-own/boom", void () => throw new InvalidOperationException("a broken invariant"))
-                .WithMetadata(new DataApiOperationMetadata("owners", DataOperation.List));
+                .WithMetadata(new DataApiOperationMetadata("owners", DataApiEndpointKind.List));
 
             await app.StartAsync(TestContext.Current.CancellationToken);
 

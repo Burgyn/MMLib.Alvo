@@ -1,7 +1,7 @@
 # The HTTP Data API
 
-> What a host gets when it calls `MapAlvoDataApi()`: five generated minimal-API routes per declared
-> entity, a PostgREST-shaped query string, RFC 9457 problem documents, `ETag`/`If-Match` optimistic
+> What a host gets when it calls `MapAlvoDataApi()`: six generated minimal-API routes per declared
+> entity, a PostgREST-shaped query string (in the URL or in a request body), RFC 9457 problem documents, `ETag`/`If-Match` optimistic
 > concurrency and `Idempotency-Key` on create. This file records the decisions that outlive PR3's
 > plan — the URL grammar and its allow-lists, the cursor's contract, what the framework treats as
 > confidential and what it publishes, and the surprises a reader will otherwise rediscover. Spec §2.1
@@ -134,6 +134,7 @@ PostgREST's syntax is adopted deliberately, so an agent recognises it from train
 
 ```
 GET    {prefix}/{entity}
+POST   {prefix}/{entity}/query
 GET    {prefix}/{entity}/{id:guid}
 POST   {prefix}/{entity}
 PATCH  {prefix}/{entity}/{id:guid}
@@ -234,6 +235,70 @@ and an unprojected list already tells the caller how many fields they can read �
 count would hand them the size of their own mask, the one bit the byte-identical `unavailable-field`
 refusal exists to withhold.
 
+### `POST {prefix}/{entity}/query` — the same parameters, on the other side of the request (#107)
+
+A filter is bounded by what proxies accept in a request line, commonly ~8 KB and not something Alvo
+controls. Alvo's own budgets are deliberately more generous — 256 terms, 1000 `in` candidates — so
+`?id=in.(…400 uuids…)` is about 37 KB and dies at an intermediary with a **414 carrying no `violations`
+array**, for a request Alvo would have served. "Fetch these 400 rows by id" is the ordinary shape of that.
+
+**The body is a JSON object whose members are the query parameters.** A member's name is a parameter, its
+value is the same `<operator>.<operand>` text, and an array is a repeated parameter. It is transposed into
+an `IQueryCollection` and handed to the **one** `QueryStringParser` — there is no second grammar, no second
+refusal catalogue and no second set of budgets.
+
+```http
+POST /api/vehicles/query
+Content-Type: application/json
+
+{ "id": "in.(…)", "year": "gte.2020", "or": ["(color.eq.red,color.eq.blue)"], "limit": 100 }
+```
+
+**Equality is on values, not on bytes, and that is the point.** The body carries decoded values; a query
+string carries their percent-encoding. So `{"make":"like.100%"}` is what `?make=like.100%25` means, and `+`
+is a plus here and a space there. Hand-escaping a 400-element list is most of what goes wrong with the URL
+form, and the body removes it. Keys compare `OrdinalIgnoreCase`, as `QueryCollection`'s do, so
+`{"limit":1,"LIMIT":2}` earns the same `repeated-parameter` the query string earns rather than a different
+refusal. A **duplicate JSON name** is refused, not collapsed (RFC 8259 §4 leaves it undefined); the array is
+the spelling that repeats a parameter. `{}` is the empty query; a body is required.
+
+**It is a read**, gated as `list` and resolved *before* a byte of the body is read — so a denied caller is
+told they are denied rather than that their body is malformed, and never pays for the parse. Ignored:
+`If-Match`, `If-None-Match` (a page has no version) and `Idempotency-Key` (nothing is written). Honoured:
+`Prefer: count`. `Cache-Control: no-store`, as everywhere.
+
+**No endpoint requires a `Content-Type`, and that is worth recording here rather than only in the code.**
+`POST …/query` reads its body unconditionally, so it is reachable as a CORS *simple* request — no preflight.
+That is harmless while Alvo's credential is a request header, because a cross-site form POST arrives with no
+credential at all. It stops being harmless in **embedded mode inside a host whose own auth is cookie-based
+and which populates `IAlvoContextAccessor`**: a POST-that-reads is then a live, read-only CSRF vector.
+Requiring `application/json` would force a preflight and cost nothing. The gap is pre-existing — the create
+and the update have it too, and worse — so it is not this route's to close; the query route is simply the
+first *read* to acquire it, which is why it is written down. Tracked as **#191**, which also carries the
+three things that need deciding rather than committing: which media types are accepted, whether a body with
+no `Content-Type` at all is refused, and whether an embedded host may opt out.
+
+**Two consequences, recorded rather than discovered.** `GET`/`PATCH`/`DELETE` on `{entity}/query` are now
+**405 from routing** rather than 404 — no problem document and no `no-store`, the same class of answer as
+the routing 404 for an undeclared entity. And a host convention keyed on the **verb** — "POST means a
+write", a common shape for rate limiting or audit logging — now shapes a read, while a GET-keyed one misses
+this route; a host that shapes by verb should key on the operation marker instead, which is what it is for.
+
+**Deviation from OData 4.01 §11.2.6.1, stated.** That is the published standard for this exact problem:
+`POST <resource>/$query`, `Content-Type: text/plain`, the body being the query options verbatim. Alvo sends
+a JSON object instead, because the source asks for one (`baas-analyza` §2.1) and because a `text/plain`
+body keeps the caller's percent-encoding burden — the thing this endpoint exists to remove — and cannot be
+described by a schema, so the document could offer a client generator nothing but "a string". The segment
+is `query`, not `$query`: `$` is OData's own escaping convention and means nothing to a caller who knows
+PostgREST.
+
+**Refused: `application/x-www-form-urlencoded`.** Literally the same octets as a query string and needing no
+transposition — but reading it means `HttpRequest.Form` and its own separate bounds
+(`ValueCountLimit`, `KeyLengthLimit`, `ValueLengthLimit`), a second set of limits Alvo neither owns nor
+publishes, refusing with a framework message rather than a `violations` array. That is the 414 problem one
+layer in. **Refused: a JSON query DSL** (Elasticsearch's `POST _search` shape) — the second grammar #107
+forbids. **Refused: `X-HTTP-Method-Override`** — it moves nothing.
+
 ### Allow-list 1: the ten operators, derived and not written out
 
 `eq neq gt gte lt lte like ilike in is` — `FilterOperators.WireNames` is derived from the
@@ -289,15 +354,60 @@ in the grammar distinguishes them.
 | Filter terms, per request | 256 (`AlvoFilter.MaxTerms`) | port |
 | `in` candidates, per list **and** per request in total | 1000 (`AlvoFilter.MaxInCandidates`) | port |
 | Cursor length | 512 chars (`QueryStringParser.MaxCursorLength`) | API |
+| `select` entries, per parameter | 256 (`QueryStringParser.MaxSelectEntries`) | API |
+| Query-body parameter **values** | `MaxPayloadKeys` (512) | API options |
+| `like`/`ilike` pattern length | 512 chars (`QueryStringParser.MaxPatternLength`) | API |
 | Page size | `limit` ≤ `MaxPageSize` (200); absent ⇒ `DefaultPageSize` (50) | API options |
-| Request body | 1 MiB, depth 32, 512 keys | API options |
+| Request body | 1 MiB, depth 32, 512 keys — a **write payload or a query body** | API options |
 | `Idempotency-Key` | ≤ 255 UTF-8 **bytes**, and a host may only narrow that | port + options |
+
+**The value row exists because a JSON array's elements are not property names.** `BoundedJsonBody`'s key
+bound counts property names at every depth, so `{"or": […500 000 strings…]}` is **one key**: it satisfies
+every shape bound and fits inside `MaxRequestBodyBytes`. The parser would have refused the 257th filter
+term — after the transposition had built all half a million values, one `StringValues.Concat` at a time,
+which copies. Counting values while reading them is what bounds it, and building each parameter's values
+once is what makes the bounded work linear. Found by CodeRabbit on #107's own PR. **The write path has the
+same shape and is untouched here:** a `json` field's array value is bounded only by the body's bytes, which
+is a smaller amplification (the array is stored, not interpreted) and not this route's to close.
+
+**The other bound rows exist because `POST …/query` removed the transport bound they had been relying on.**
+Three comma-splitting readers — a group's members, an `in` list's candidates, a projection's entries — used
+to materialise the whole list and refuse it afterwards, and one channel never splits at all: a `like`
+pattern had no length bound whatsoever. Under an ~8 KB request line that was a few hundred entries; under a
+1 MiB body it is hundreds of thousands. The three splits now spend their bound *while* splitting, which
+reaches the refusal they already earned (`filter-too-wide`, `too-many-in-candidates`) rather than adding
+one; only `select` needed a new code, because a repeated entry claims no key and can therefore never trip
+the *width* bound that keeps `?select=id,id,id` deduplicating. `MaxSelectEntries` is `AlvoFilter.MaxTerms`
+rather than a second number, and the coupling is deliberate. **A splitter is handed what the request can
+still *afford*, not the per-list maximum** (`FilterParseScope.AffordableCandidates`/`AffordableNodes`): the
+`in`-candidate budget is a running total across the whole query, so a splitter using the per-list bound
+alone would let 256 terms each build a full 1000-element list — 256 000 substrings — before the total
+refused, which is the very number that bound was introduced to keep out of a statement. The remaining
+allowance is floored at one, because a charge that fails still spends and a splitter given a maximum of zero
+would turn a caller's over-wide filter into a 500. **`MaxPatternLength` is chosen, not measured**,
+and only the two pattern operators are bounded: every other operand is a value the engine *compares* —
+linear in its length, short-circuiting on the first differing byte, and already capped in total by the body
+bound — while a pattern is *matched*, per row, at a cost that is not linear in its length. Both bounds apply
+to the URL surface too; no query string a proxy would carry can reach either.
 
 The two term/candidate numbers are measured rather than chosen: 900 filter terms answered in 14 ms and
 1000 threw a raw `SqliteException`; 40 000 `in` candidates threw `too many SQL variables` on SQLite after
 3.5 s where PostgreSQL answered in 0.27 s. The per-request candidate *total* exists because 256 terms each
 carrying a maximum list is 256 000 bind parameters in one statement, past the 32 766 ceiling the per-list
 bound was measured against.
+
+**The six body-shape codes are now reachable under `malformed-query` too**, not only under `validation`:
+`not-an-object`, `malformed-json`, `body-too-large`, `body-too-deep`, `body-too-many-fields` and
+`duplicate-field`. The *code* is shared with the write path and the *fix suggestion* is not — a read
+endpoint answering "send only the fields you are changing" hands an agent advice about another operation.
+Four codes are new: `unrepresentable-query-value` (a member whose JSON value is not a string, a number, a
+boolean or a non-empty array of those), `too-many-query-values`, `too-many-select-entries` and
+`pattern-too-long`.
+
+**A `pointer` carries one of two conventions and the rule that tells them apart is published on
+`AlvoViolation`:** empty or beginning with `/` is an RFC 6901 pointer into the request body; anything else
+is the *role* of a query parameter (`filter`, `order`, `limit`, `offset`, `after`, `select`). `POST …/query`
+is the first endpoint whose one response can carry both.
 
 Every parser refusal is a **422** with slug `malformed-query` and a `violations` array; refusals are
 de-duplicated on `(code, pointer)` rather than capped at a count, so one repeated `filter-too-wide` can no
@@ -574,7 +684,7 @@ the mapped literal does not carry, and all three used to be lost:
   rather than to the request. A grouped endpoint's `RoutePattern.RawText` is the combined pattern, so reading
   the collection path off `HttpContext.GetEndpoint()` is reading it from the router — there is no second
   place for the literal and the route to disagree. Not `LinkGenerator`: generating by name would mean naming
-  all five routes per entity, and route names are process-global, so two `MapAlvoDataApi()` calls under two
+  every route per entity, and route names are process-global, so two `MapAlvoDataApi()` calls under two
   groups — the very shape this fixes — would collide at startup.
 - **Encoding.** The header is `ToUriComponent()`, not `PathString.Value`. `Value` is decoded, and over
   Kestrel a non-ASCII path base (`/účty`) then throws while the response header is encoded as Latin-1 — a
@@ -629,7 +739,7 @@ why neither is documented on any operation.
 | 409 | `conflict` | a constraint the database enforces refused the write — a `unique` value another record holds, or a `restrict`-ed reference |
 | 412 | `precondition-failed` | a precondition this API cannot evaluate, or a version that does not match |
 | 422 | `validation` | schema-derived validation refused the body |
-| 422 | `malformed-query` | the query string or the body is malformed — the shape is wrong, nothing is hidden |
+| 422 | `malformed-query` | the query string or the query body is malformed — the shape is wrong, nothing is hidden |
 | 413, 408, 400 | `unreadable-request` | the **web server** refused the request before Alvo read it (a body over `MaxRequestBodySize`, one arriving too slowly, one whose framing broke) — same opt-in as `internal`, and likewise documented on no operation |
 | 500 | `internal` | an invariant Alvo relies on is broken — **only** in a host that called `AddAlvoProblemDetails()`; no endpoint produces it and no operation documents it |
 
@@ -652,7 +762,7 @@ references advertises a 409 on delete it cannot reach.
 
 Which operation can answer what is one table, `DataApiDocumentation.ResponsesFor`, read both by the
 endpoint metadata and by the OpenAPI transformer — so the document cannot advertise a status no delegate
-produces. **401 and 403 are unconditional on every route**, because the same gate is attached to all five.
+produces. **401 and 403 are unconditional on every route**, because the same gate is attached to every one of them.
 
 ### How a database constraint violation reaches the caller (#138, fixed)
 
@@ -1010,6 +1120,10 @@ answer it per caller.
   JSON body would have to parse HTTP headers to keep paging. Deliberately not shipped so `next` has exactly
   one home; if a consumer asks, **#104**.
 - **A bare array plus `Content-Range`** (PostgREST's own shape), for the same reason.
+- **A `text/plain` body carrying the query string** (OData `$query`), **`application/x-www-form-urlencoded`**,
+  **a JSON query DSL**, **`X-HTTP-Method-Override`**, and **`POST {entity}/{id}/query`** — the first four for
+  the reasons under *`POST {prefix}/{entity}/query`* above; the last because a single-row read addresses its
+  row in the path and has no filter to overflow.
 - **A `{entity}` catch-all route.** It would map a route for an entity the descriptor does not declare and
   answer it from the store — turning a routing question into a port question, and leaving the OpenAPI
   document unable to list real paths. With literals, "this entity does not exist" is a 404 routing produces

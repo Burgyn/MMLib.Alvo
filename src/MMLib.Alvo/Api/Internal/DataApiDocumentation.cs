@@ -1,4 +1,5 @@
 ﻿using Microsoft.AspNetCore.Http;
+using MMLib.Alvo.Data;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
 
@@ -89,7 +90,7 @@ internal static class DataApiDocumentation
         string? SharedNarrowing = null);
 
     /// <summary>
-    /// Every status <paramref name="operation"/> on <paramref name="entity"/> can actually answer with.
+    /// Every status <paramref name="kind"/> on <paramref name="entity"/> can actually answer with.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -123,25 +124,25 @@ internal static class DataApiDocumentation
     /// document listing it anyway would describe a behaviour that does not exist.
     /// </para>
     /// </remarks>
-    /// <param name="operation">The operation the endpoint performs.</param>
+    /// <param name="kind">The endpoint kind, which is what the document keys on.</param>
     /// <param name="entity">The entity it serves, consulted for whether a row of it can be versioned.</param>
-    internal static IReadOnlyList<Response> ResponsesFor(DataOperation operation, EntitySchema entity)
+    internal static IReadOnlyList<Response> ResponsesFor(DataApiEndpointKind kind, EntitySchema entity)
     {
         ArgumentNullException.ThrowIfNull(entity);
-        return operation switch
+        return kind switch
         {
-            DataOperation.List =>
+            DataApiEndpointKind.List or DataApiEndpointKind.Query =>
                 [Ok(ResponseBody.Page, "A page of rows the caller's policy admits."), .. Refusals(Malformed)],
-            DataOperation.Get =>
+            DataApiEndpointKind.Get =>
                 [Ok(ResponseBody.Row, "The row."), .. NotModified(entity), .. Refusals(Absent)],
-            DataOperation.Create =>
+            DataApiEndpointKind.Create =>
                 [Created(), .. Refusals(Malformed, Precondition, Conflict)],
-            DataOperation.Update =>
+            DataApiEndpointKind.Update =>
                 [Ok(ResponseBody.Row, "The row as it now stands."),
                  .. Refusals(Malformed, Absent, PreconditionOn(entity), Conflict)],
-            DataOperation.Delete =>
+            DataApiEndpointKind.Delete =>
                 [NoContent(), .. Refusals(Absent, PreconditionOn(entity), Conflict)],
-            _ => throw new InvalidOperationException($"No response catalogue for operation '{operation}'."),
+            _ => throw new InvalidOperationException($"No response catalogue for endpoint kind '{kind}'."),
         };
     }
 
@@ -287,34 +288,36 @@ internal static class DataApiDocumentation
     /// (<c>owners</c>, <c>inspections</c>), and guessing a singular form would invent a word the descriptor
     /// does not contain — which is exactly what an agent then cannot map back to anything.
     /// </remarks>
-    /// <param name="operation">The operation.</param>
+    /// <param name="kind">The endpoint kind.</param>
     /// <param name="entity">The entity name, as the applied schema declares it.</param>
-    internal static string SummaryOf(DataOperation operation, string entity) => operation switch
+    internal static string SummaryOf(DataApiEndpointKind kind, string entity) => kind switch
     {
-        DataOperation.List => $"List '{entity}' rows",
-        DataOperation.Get => $"Read one '{entity}' row",
-        DataOperation.Create => $"Create one '{entity}' row",
-        DataOperation.Update => $"Update one '{entity}' row",
-        DataOperation.Delete => $"Delete one '{entity}' row",
-        _ => throw new InvalidOperationException($"No summary for operation '{operation}'."),
+        DataApiEndpointKind.List => $"List '{entity}' rows",
+        DataApiEndpointKind.Query => $"Query '{entity}' rows through a request body",
+        DataApiEndpointKind.Get => $"Read one '{entity}' row",
+        DataApiEndpointKind.Create => $"Create one '{entity}' row",
+        DataApiEndpointKind.Update => $"Update one '{entity}' row",
+        DataApiEndpointKind.Delete => $"Delete one '{entity}' row",
+        _ => throw new InvalidOperationException($"No summary for endpoint kind '{kind}'."),
     };
 
     /// <summary>
     /// The operation's own <c>description</c>: what it does, and every header behaviour a caller cannot infer.
     /// </summary>
-    /// <param name="operation">The operation.</param>
+    /// <param name="kind">The endpoint kind.</param>
     /// <param name="entity">The entity it serves, consulted for whether a row of it can be versioned.</param>
-    internal static string DescriptionOf(DataOperation operation, EntitySchema entity)
+    internal static string DescriptionOf(DataApiEndpointKind kind, EntitySchema entity)
     {
         ArgumentNullException.ThrowIfNull(entity);
-        return operation switch
+        return kind switch
         {
-            DataOperation.List => List,
-            DataOperation.Get => ReadOne(entity),
-            DataOperation.Create => Create,
-            DataOperation.Update => Update(entity),
-            DataOperation.Delete => Delete(entity),
-            _ => throw new InvalidOperationException($"No description for operation '{operation}'."),
+            DataApiEndpointKind.List => List,
+            DataApiEndpointKind.Query => QueryByBody,
+            DataApiEndpointKind.Get => ReadOne(entity),
+            DataApiEndpointKind.Create => Create,
+            DataApiEndpointKind.Update => Update(entity),
+            DataApiEndpointKind.Delete => Delete(entity),
+            _ => throw new InvalidOperationException($"No description for endpoint kind '{kind}'."),
         };
     }
 
@@ -364,6 +367,41 @@ internal static class DataApiDocumentation
         + "because the page's statement carries the cursor boundary and a count composed into it would "
         + "report the rows after the cursor. So *exact* means \"not an estimate\", not \"atomically "
         + "consistent with `items`\": a write landing between the two can make the number differ by one.";
+
+    /// <summary>
+    /// The body-shaped collection read's prose: what it is for, what makes it the same read, and the two
+    /// things a caller can only learn here — that a value is not percent-encoded, and that a key is accepted
+    /// and does nothing.
+    /// </summary>
+    private static string QueryByBody =>
+        "Reads a page of rows the caller's policy admits, taking the same parameters in a JSON request "
+        + "body.\n\n"
+        + "**It exists for one reason: a filter a request line cannot carry.** Alvo's own budgets are "
+        + $"generous — {AlvoFilter.MaxTerms} filter terms and {AlvoFilter.MaxInCandidates} `in` candidates "
+        + "— and a proxy's URL limit is reached first, so `?id=in.(…400 ids…)` is refused by an "
+        + "intermediary with a 414 carrying no `violations` array at all. Sent as a body it is answered "
+        + "normally.\n\n"
+        + "**The body is a JSON object whose members are the query parameters**, and the grammar inside "
+        + "each value is exactly the one the query string carries: `{\"year\": \"gte.2020\", \"or\": "
+        + "[\"(color.eq.red,color.eq.blue)\"], \"select\": \"id,label:make\", \"limit\": 50}`. A "
+        + "repeated parameter is an array of strings; the same name twice in one object is refused, because "
+        + "JSON leaves the order of two such members undefined. `{}` is the empty query — every readable "
+        + "field, the default page.\n\n"
+        + "**Values are not percent-encoded here, and that is the point.** A query string carries the "
+        + "escaping of a value; a JSON string carries the value. So `{\"make\": \"like.100%\"}` is what "
+        + "`?make=like.100%25` means, and `+` is a plus rather than a space. Everything else is identical: "
+        + "the same parser, the same refusals, the same page envelope, the same `Prefer: count` "
+        + "preference.\n\n"
+        + "**This is a read and is gated as `list`.** A caller whose `list` is unconfigured is refused here "
+        + "exactly as on the collection `GET`, before the body is read at all — so a refusal never arrives "
+        + "dressed as a complaint about the body.\n\n"
+        + "**`Idempotency-Key` is accepted and ignored.** There is nothing to make idempotent: no row is "
+        + "written, so a retry costs a second read and nothing else. It is accepted rather than refused "
+        + "because several SDKs attach it to every `POST`.\n\n"
+        + "A refusal's `pointer` tells you where to look: an empty string or one beginning with `/` is a "
+        + "JSON Pointer into this body, and any other value is the *role* of a query parameter — `filter`, "
+        + "`order`, `limit`, `offset`, `after` or `select`.\n\n"
+        + Grammar;
 
     /// <summary>
     /// The filter, sort and paging grammar, stated once on the list operation rather than repeated on each of
