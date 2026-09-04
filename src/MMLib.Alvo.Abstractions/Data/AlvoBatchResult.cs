@@ -66,13 +66,22 @@ public sealed record AlvoBatchResult
     }
 
     /// <summary>How many rows the batch wrote or removed; zero when it was refused.</summary>
-    public int Affected { get; init; }
+    /// <remarks>
+    /// <b>Get-only, not <c>init</c>, and that is what makes the constructor's check binding.</b> An
+    /// <c>init</c> setter is reachable from a <c>with</c> expression, which does not run the constructor —
+    /// so <c>Wrote(rows, 1) with { Refusals = refusals }</c> would rebuild exactly the state the check
+    /// refuses, and <see cref="Succeeded"/> would answer <see langword="false"/> beside written rows. A
+    /// validated type with <c>init</c> members validates only the paths nobody was going to take.
+    /// </remarks>
+    public int Affected { get; }
 
+    /// <inheritdoc cref="Affected"/>
     /// <summary>The rows the batch wrote, in request order; empty for a delete and for a refusal.</summary>
-    public IReadOnlyList<AlvoRecord> Rows { get; init; }
+    public IReadOnlyList<AlvoRecord> Rows { get; }
 
+    /// <inheritdoc cref="Affected"/>
     /// <summary>Every reason the batch wrote nothing; empty when it wrote.</summary>
-    public IReadOnlyList<AlvoRowRefusal> Refusals { get; init; }
+    public IReadOnlyList<AlvoRowRefusal> Refusals { get; }
 
     /// <summary>Whether the batch wrote. A refused batch wrote nothing at all.</summary>
     public bool Succeeded => Refusals.Count == 0;

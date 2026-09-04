@@ -1723,6 +1723,7 @@ internal sealed class EfAlvoData : IAlvoData
             idempotency,
             (db, transaction, schema, now) =>
                 CreatedRowsAsync(db, transaction, schema, decision, context, rows, now, cancellationToken),
+            producesRows: true,
             cancellationToken);
     }
 
@@ -1740,6 +1741,7 @@ internal sealed class EfAlvoData : IAlvoData
             idempotency,
             (db, transaction, schema, now) =>
                 UpdatedRowsAsync(db, transaction, schema, decision, context, rows, now, cancellationToken),
+            producesRows: true,
             cancellationToken);
     }
 
@@ -1757,6 +1759,7 @@ internal sealed class EfAlvoData : IAlvoData
             idempotency,
             (db, transaction, schema, now) =>
                 RemovedRowsAsync(db, transaction, schema, decision, context, ids, now, cancellationToken),
+            producesRows: false,
             cancellationToken);
     }
 
@@ -1819,15 +1822,21 @@ internal sealed class EfAlvoData : IAlvoData
     /// <param name="context">The caller performing the batch.</param>
     /// <param name="idempotency">The caller's token for the whole batch, or <see langword="null"/>.</param>
     /// <param name="attempt">The verb's own judging and writing passes.</param>
+    /// <param name="producesRows">
+    /// Whether this verb's rows survive the write, so a replay has something to re-read. False for a delete,
+    /// whose rows are gone by construction.
+    /// </param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     private Task<AlvoBatchResult> BatchAsync(
         string entity,
         AlvoContext context,
         AlvoIdempotency? idempotency,
         Func<AlvoDataContext, IDbContextTransaction, EntitySchema, DateTimeOffset, Task<BatchOutcome>> attempt,
+        bool producesRows,
         CancellationToken cancellationToken)
     {
-        Task<AlvoBatchResult> Once() => OneBatchAsync(entity, context, idempotency, attempt, cancellationToken);
+        Task<AlvoBatchResult> Once() =>
+            OneBatchAsync(entity, context, idempotency, attempt, producesRows, cancellationToken);
 
         return idempotency is null
             ? Once()
@@ -1849,6 +1858,7 @@ internal sealed class EfAlvoData : IAlvoData
         AlvoContext context,
         AlvoIdempotency? idempotency,
         Func<AlvoDataContext, IDbContextTransaction, EntitySchema, DateTimeOffset, Task<BatchOutcome>> attempt,
+        bool producesRows,
         CancellationToken cancellationToken)
     {
         using var db = _contexts.Create();
@@ -1871,7 +1881,7 @@ internal sealed class EfAlvoData : IAlvoData
         {
             EnsureSameRequest(record, idempotency!.Value);
 
-            return await ReplayedBatchAsync(db, schema, context, record, cancellationToken);
+            return await ReplayedBatchAsync(db, schema, context, record, producesRows, cancellationToken);
         }
 
         var (result, rowIds) = await attempt(db, transaction, schema, now);
@@ -2335,21 +2345,30 @@ internal sealed class EfAlvoData : IAlvoData
     /// decision, exactly as a single write's replay is and for the same reason.
     /// </summary>
     /// <remarks>
-    /// <b>A replayed batch delete finds nothing, which is the same answer by a longer road.</b> Its rows are
-    /// gone by construction, so the reads below return none and the count comes from the record either way.
-    /// Reading anyway is N wasted round trips on a replayed delete and is the price of one shape for all
-    /// three verbs; a verb-aware short circuit here would be a second place that has to know which verb
-    /// wrote a record, and the record deliberately does not say.
+    /// <b>A replayed batch delete reads nothing, and the caller tells this method so.</b> Its rows are gone
+    /// by construction, so reading them is N round trips that find nothing — and the port's own contract
+    /// says a replayed delete performs no read, which reading anyway quietly contradicted. The verb is
+    /// passed in rather than recorded, because the <em>record</em> deliberately does not say which verb
+    /// wrote it: it names rows, and a second meaning inside it is a second thing to keep true.
     /// </remarks>
     /// <param name="db">The store this attempt runs against.</param>
     /// <param name="schema">The entity being written.</param>
     /// <param name="context">The replaying caller.</param>
     /// <param name="record">The record this replay matched.</param>
+    /// <param name="producesRows">
+    /// Whether this verb's rows survive the write, so a replay has something to re-read. False for a delete,
+    /// whose rows are gone by construction.
+    /// </param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     private async Task<AlvoBatchResult> ReplayedBatchAsync(
         AlvoDataContext db, EntitySchema schema, AlvoContext context,
-        IdempotencyTable.IdempotencyRecord record, CancellationToken cancellationToken)
+        IdempotencyTable.IdempotencyRecord record, bool producesRows, CancellationToken cancellationToken)
     {
+        if (!producesRows)
+        {
+            return AlvoBatchResult.Wrote([], record.RowIds.Count);
+        }
+
         var read = _policy.Resolve(schema.Name, DataOperation.Get, context);
         if (read.IsDenied)
         {

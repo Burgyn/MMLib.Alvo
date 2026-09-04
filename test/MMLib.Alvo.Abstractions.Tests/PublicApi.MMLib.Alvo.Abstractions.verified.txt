@@ -156,9 +156,9 @@ namespace MMLib.Alvo.Data
     public sealed class AlvoBatchResult : System.IEquatable<MMLib.Alvo.Data.AlvoBatchResult>
     {
         public AlvoBatchResult(int Affected, System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRecord> Rows, System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRowRefusal> Refusals) { }
-        public int Affected { get; init; }
-        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRowRefusal> Refusals { get; init; }
-        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRecord> Rows { get; init; }
+        public int Affected { get; }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRowRefusal> Refusals { get; }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRecord> Rows { get; }
         public bool Succeeded { get; }
         public static MMLib.Alvo.Data.AlvoBatchResult Refused(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRowRefusal> refusals) { }
         public static MMLib.Alvo.Data.AlvoBatchResult Wrote(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRecord> rows, int affected) { }

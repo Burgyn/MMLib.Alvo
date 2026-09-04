@@ -403,6 +403,43 @@ public abstract class AlvoDataBatchTests : AlvoDataFixture
         }
     }
 
+    /// <summary>
+    /// A replayed batch <b>delete</b> performs no row read, and the entity it runs on is what proves it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Asserting the answer cannot prove this, and my first attempt did exactly that.</b> A replay that
+    /// re-reads deleted rows finds none, so <see cref="AlvoBatchResult.Rows"/> is empty and
+    /// <see cref="AlvoBatchResult.Affected"/> still comes from the record — the two paths are
+    /// indistinguishable from the outcome. Reintroducing the read left that version green.
+    /// </para>
+    /// <para>
+    /// <b>The write-only entity is the discriminator.</b> On an entity with no <c>get</c> rule, a replay that
+    /// reaches the read path takes the id-only branch and answers one <see cref="AlvoManagedColumns.Id"/>
+    /// record per recorded row; a replay that reads nothing answers no rows at all. So the row count here
+    /// separates "did not read" from "read and found nothing", which no assertion over a readable entity can.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_replayed_batch_delete_reads_nothing_at_all()
+    {
+        var world = await WriteOnlyWorldAsync();
+        var rows = await world.Data.CreateManyAsync(
+            Dropbox, [Payload("a"), Payload("b")], world.Caller, cancellationToken: Ct);
+        var ids = rows.Rows.Select(IdOf).ToList();
+        var token = TokenFor(Dropbox);
+
+        var removed = await world.Data.DeleteManyAsync(Dropbox, ids, world.Caller, token, Ct);
+        removed.Affected.ShouldBe(2);
+
+        var replay = await world.Data.DeleteManyAsync(Dropbox, ids, world.Caller, token, Ct);
+
+        replay.Affected.ShouldBe(2, "answered from the record");
+        replay.Rows.ShouldBeEmpty(
+            "a replay that reached the read path would answer one id-only row per recorded row, because this "
+            + "caller has no 'get' — an empty list is what says no read was attempted");
+    }
+
     /// <summary>A delete removes every named row, or none of them.</summary>
     [Fact]
     public async Task A_batch_delete_removes_every_named_row_or_none()
