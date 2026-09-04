@@ -60,14 +60,14 @@ await tp.Test("A masked field and an undeclared one are one refusal on this surf
     // per request — so two responses can never be byte-identical over this surface, and a comparison
     // that demanded it would be red for a reason that has nothing to do with the claim. The claim is
     // that nothing a caller could branch on distinguishes the two.
-    string Refusal(string request) => string.Concat(
-        JsonDocument.Parse(tp.Responses[request].Content.ReadAsStringAsync().Result).RootElement
+    async Task<string> Refusal(string request) => string.Concat(
+        (await BodyOf(tp.Responses[request]))
             .EnumerateObject()
             .Where(member => member.Name != "traceId")
             .OrderBy(member => member.Name, StringComparer.Ordinal)
             .Select(member => member.Name + "=" + member.Value.GetRawText()));
 
-    Equal(Refusal("BodyUndeclaredField"), Refusal("BodyMaskedField"));
+    Equal(await Refusal("BodyUndeclaredField"), await Refusal("BodyMaskedField"));
 
     // And neither names what was asked about — the whole response, not just the pointer, because a
     // name reaching `detail` or a fix suggestion would be the same leak by another route.
