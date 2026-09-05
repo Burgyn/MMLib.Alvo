@@ -22,7 +22,12 @@ makes the spec's own acceptance criterion — *"dvakrát rovnaké PUT = ten ist�
 (`alvo-specifikacia.md:309`) — mean anything.
 
 Not in scope, each with its reason in §9: batch upsert, a mixed batch, upsert on a natural unique key,
-`If-None-Match: *`.
+`If-None-Match: *`, and the composite `(tenant_id, id)` primary key that would close §3's residual
+cross-tenant oracle.
+
+One thing it does that is not a route: **a primary-key collision on a caller-supplied `id` becomes a
+translated `409`** instead of the `500` it is today. §3 says why that is a correction rather than a
+loosening.
 
 ---
 
@@ -108,32 +113,86 @@ Exactly as `UpdateAsync` chooses today, with no new read:
 2. **Row returned → replace branch.**
 3. **No row → create branch**, a plain `INSERT`.
 
-### The oracle, stated
+### The collision does not answer 409 today, and this PR has to make it
 
 A row that exists but that the caller's `USING` excludes returns nothing from step 1, so the create branch
-runs and its `INSERT` collides with the primary key. `ConstraintViolationTranslator` turns that into
-`AlvoConstraintViolationException`, which `ProblemResultFactory` already answers as **409**.
+runs and its `INSERT` collides with the primary key. **Today that is a `500`, deliberately**, and the design
+must change it:
 
-So a caller who holds a UUID and may create in this entity learns:
+- `ConstraintViolationTranslator.CallerFields` strips every framework-managed column and `Translate` returns
+  `null` when nothing survives (`ConstraintViolationTranslator.cs:142-149`). A collision on `id` is a
+  collision on a managed column and only a managed column, so nothing survives and the raw provider
+  exception propagates.
+- The **public** contract says so too: *"Framework-managed columns are excluded, because a caller cannot
+  change one — a collision confined to them is a broken invariant rather than a conflict, and an
+  implementation must let that keep propagating as one"* (`AlvoConstraintViolationException.cs:26-32`).
+- Worse, on the idempotent path the untranslated `DbException` matches `IsStorageWriteFailure`
+  (`EfAlvoData.cs:486`) and is retried ten times before exhausting — reproducing the #138 defect the same
+  file documents.
 
-- **409** — a row with that id exists somewhere, invisible to them;
+**The exclusion's own premise expires here.** It says *a caller cannot change one*. On this route the caller
+supplies `id`, so a collision on it is an ordinary caller-caused conflict, not a broken invariant. PR-I
+therefore teaches the translator that **this write was keyed by the caller**, and on such a write `id`
+survives `CallerFields` and the violation translates to `AlvoConstraintKind.Unique` with `Fields: ["id"]`.
+
+No new `AlvoConstraintKind` member: a primary key is a uniqueness constraint, and `id` is a *name* the
+caller already sent, which is exactly what the type's own rule permits `Fields` to carry. Nothing changes
+for any existing write — on every route that mints its own key the premise still holds and the collision
+still propagates as the broken invariant it is. The public remark is amended to say *which* writes it
+speaks for, rather than being contradicted by a route it predates.
+
+### The oracle, and the deviation from #137
+
+Once the collision answers `409`, a caller who holds a UUID and may create in this entity learns:
+
+- **409** — a row with that id exists, invisible to them, possibly in another tenant;
 - **201** — that id is free.
 
-**This is inherent, not an implementation slip.** A primary key cannot collide silently, so no arrangement
-of an id-addressed create-or-replace avoids it. Answering `404` for the invisible row instead of `409`
-relabels the oracle, it does not remove it: `404` versus `201` distinguishes the same two states. The only
-option that removed it was B, which never creates.
+**The repo has already ruled on this shape of oracle, and against it.** #137 put the tenant column into
+every unique index on a scoped entity, and said why:
 
-**What narrows it:**
+> "A bare `HasIndex(field).IsUnique()` on a scoped entity enforces uniqueness across the *whole instance* …
+> the two requests differ in exactly one thing, whether another tenant holds the value, so any observable
+> difference between the answers discloses that fact. That is a cross-tenant existence oracle, and it
+> contradicts the premise that Alvo's app-side rules are as safe as native row-level security.
+> `(tenant_id, field)` keeps the constraint doing its job *within* a tenant and removes the signal between
+> tenants; note that mapping the underlying violation to a clean `409` (#138) does **not** close it, because
+> `409`-versus-`201` is the same one-bit signal as `500`-versus-`201`."
+> — `DescriptorModelBuilder.cs:64-72`
+
+The primary key is global today — `entityBuilder.HasKey("id")` (`DescriptorModelBuilder.cs:52`),
+`builder.HasKey(IdColumn)` (`AlvoDataContext.cs:141`) — so the analogous fix is a composite
+`(tenant_id, id)` key, and it would remove the cross-tenant half of the signal outright.
+
+**This is a deliberate deviation, decided by the maintainer on 2026-09-05, and PR-I ships without the
+composite key.** The reason is that the two cases differ in what the oracle is *worth*, not in shape:
+
+| | #137 | here |
+|---|---|---|
+| the value the caller supplies | a natural key — an e-mail, an order number | a UUID |
+| can it be guessed? | **yes** — the oracle turns a guess into knowledge | **no** — v4/v7 UUID space is not sweepable |
+| what the answer tells them | a fact they did not have | a fact they had to already hold to ask |
+
+#137's harm is *discovery*: an attacker enumerates plausible values and learns which ones some tenant holds.
+That path does not exist here — to ask the question at all, the caller must already possess the UUID, which
+means they already knew the row existed. The residue is confirmation that a UUID obtained out of band is
+still live. Structurally it is the same one bit; in risk it is not the same bit.
+
+The alternatives were weighed and rejected: the composite key is a physical-schema change to every scoped
+entity — migrations, foreign keys, the read path — and belongs in its own PR rather than riding along with
+a route; and restricting PUT to `tenancy: global` entities would publish a document where the same verb
+exists for some entities and not others, which is the inconsistency an agent-first API least affords.
+
+**If the composite key ever lands, this section is what it closes.** Recorded here so the residue is a
+tracked decision rather than a discovered one.
+
+**What further narrows it, meanwhile:**
 
 - **PUT requires both `create` and `update`** (§4). A caller who lacks `create` is refused before any row
   is read, so the oracle is unreachable for them.
-- The caller must **already hold the UUID**. Ids are v4/v7 UUIDs and Alvo treats them as identifiers, not as
-  secrets — nothing in the codebase relies on an id being unguessable — but they are not enumerable either,
-  so the oracle answers a question the caller had to bring rather than one they can sweep for.
-- The `409` **names no value and no owner**. `data-api.md` already rejected reporting a batch's `409` with
-  the offending row index because unique values are guessable; here the only value involved is the
-  caller's own id, so the body adds nothing they did not send.
+- The `409` **names no value and no owner** — only the field name `id`, which the caller sent.
+- On a `tenancy: global` entity there is no cross-tenant half at all; the residue there is the ordinary
+  within-tenant `USING` case.
 
 **Every existing answer is unchanged.** `PATCH` and `DELETE` still answer `AlvoRecordNotFoundException` for
 an invisible row, indistinguishable from an absent one. This design adds no path that makes an existing
@@ -165,12 +224,31 @@ The `WITH CHECK` half of Postgres' rule **is** followed exactly — see §4.
 unless both allow. A caller permitted only to update may not reach the create branch by naming an unused
 id, and a caller permitted only to create may not reach the replace branch by naming a used one.
 
+**Which `PolicyDecision` does what has to be stated, because getting it wrong is a bypass this repo has
+already shipped once.** `PolicyDecision.Using`'s own remarks: *"a `create` decision must never be used to
+read a stored row: doing so returns the row whoever owns it, with no predicate at all. That is not
+hypothetical — it is the bypass F3 PR3 shipped and then fixed"* (`PolicyDecision.cs:62-69`). So:
+
+| what | which decision |
+|---|---|
+| `Using` for the locked pre-image read | the **update** decision |
+| `WITH CHECK` + tenant scope, replace branch | the **update** decision |
+| `WITH CHECK` + tenant scope, create branch | the **create** decision |
+| `ReadOnlyFields` for `WritePayloadGuard` | both — a field read-only under either is refused |
+| `HiddenFields` masking the response | the **get** decision, re-resolved, exactly as a replay does |
+
 **No new `DataOperation` member.** `DataApiEndpointKind`'s own remarks say why: `DataOperation` is the
 *policy* vocabulary that a descriptor's `rules` name and `PolicyCatalog` is keyed by, so a member added
 there would let a descriptor configure a rule for a transport. `DataApiEndpointKind.Replace` is a new
-*route* kind; `ToDataOperation()` maps it to `DataOperation.Update` for the endpoint's early advisory
-filter, and the port — the sole authority, as `DataApiEndpoints`' own remarks state — requires both. The
-filter can only under-refuse relative to the port, never over-refuse.
+*route* kind, and it maps to `DataOperation.Update` wherever one operation is asked for.
+
+**The endpoint filter gates both operations, and it must.** `DataApiEndpoints`' remarks state a symmetric
+invariant, not an advisory one: *"nothing is admitted here that the port would refuse, and nothing is
+refused here that the port would admit"* (`DataApiEndpoints.cs:44-51`). A filter that checked only `update`
+would admit an update-only caller whom the port then refuses — breaking the first half. So the `PUT`
+delegate resolves and checks **both** operations up front, and the invariant holds in both directions. This
+is the one place `DataApiEndpointKind.Replace` needs more than `ToDataOperation()` can express, and the
+delegate is where that is written rather than in the enum.
 
 **`WITH CHECK` runs on the candidate row in both branches**, which is #105's item 1 and the one thing an
 upsert must not get wrong:
@@ -184,10 +262,19 @@ This is `EnsureWriteAllowed` in both cases — the existing in-process CEL evalu
 candidate dictionary, with `previous: null` on create and the locked pre-image on replace. It matches
 Postgres' table for `ON CONFLICT DO UPDATE` row for row on the check half.
 
-**The before-hook re-verdict is kept.** If a `beforeCreate`/`beforeUpdate` hook patches the candidate,
-`WITH CHECK` is evaluated **again** over the patched post-image, exactly as `RunBeforeCreate` and
-`RunBeforeUpdate` do today. A hook that could move a row past a rule the caller could not is the same hole
-in a new place.
+**A hook never writes a row `WITH CHECK` has not judged**, and the two branches reach that guarantee by the
+two different routes the code already uses — which is worth stating precisely, because the two are easy to
+describe wrongly:
+
+- **Create branch:** `AuthorizedCandidate` evaluates `WITH CHECK` on the candidate, then `RunBeforeCreate`
+  evaluates it **a second time** over the patched post-image when the hook changed anything
+  (`EfAlvoData.cs:359` and `:305`).
+- **Replace branch:** the hook runs **first** and `WITH CHECK` is evaluated **once**, afterwards, over the
+  merged post-image (`WriteAsync`, `EfAlvoData.cs:1329-1331`). `RunBeforeUpdate` contains no evaluation of
+  its own — an implementer looking for a re-verdict inside it will not find one, and must not add a
+  pre-hook evaluation "for symmetry": that would judge an image the store never sees.
+
+`ReplaceAsync` reuses each branch's existing shape rather than imposing one on both.
 
 ---
 
@@ -211,13 +298,38 @@ gets a say. A caller who legitimately needs to create a row **into another tenan
 accepts `tenant_id` and still judges it against the same scope. Nothing that was possible becomes
 impossible; it moves to the route that already did it.
 
+Two boundaries on the claim, so it is not read wider than it is. The oracle exists only on a
+`tenancy: scoped` entity — on a global one `tenant_id` is not among the entity's managed columns and
+`QueryFieldGuard.EnsureDeclared` refuses it identically on both branches, so there is no difference to
+observe. And a branch-dependent guard would additionally have to run *after* the pre-image read, which
+already contradicts the guard's stated position ("before any row is looked up"); the leak and the
+structural violation arrive together.
+
+**Implementation note, because the existing helper cannot express this.** `AuthorizedCandidate` couples the
+two `isUpdate` values in adjacent lines — `EnsureWritable(…, isUpdate: false)` then
+`Stamped(…, isUpdate: false)` (`EfAlvoData.cs:357-359`). PUT's create branch needs `isUpdate: true` for the
+guard (this section) and `isUpdate: false` for the stamp (§7), so it cannot reuse `AuthorizedCandidate` as
+written. The two arguments are separated — the guard is told whether the *caller* may write the column, the
+stamp is told whether the *row already exists* — and they stop being one flag that happens to answer both.
+
 ---
 
 ## 6. Replacement semantics for the fields the caller omits
 
-This is #105's item 3, and it is decided **without** `field.default`, which does not exist —
-`FieldSchema` has no `Default` member and the descriptor schema declares none. It is
-[#113](https://github.com/Burgyn/MMLib.Alvo/issues/113), still open.
+This is #105's item 3, and the state of `field.default` has to be stated exactly, because it is neither
+"shipped" nor "absent":
+
+- **The descriptor schema declares it.** `schema/project.schema.json:621` defines `default` on `$defs/field`
+  as a JSON literal or a tagged `{"$cel": "…"}` expression "evaluated at insert time", and two conditional
+  branches already forbid it beside `computed`/`rollup`. **A descriptor may write it today.**
+- **Nothing reads it.** `FieldSchema` has no `Default` member, so the mapper drops it silently. Implementing
+  it is [#113](https://github.com/Burgyn/MMLib.Alvo/issues/113), still open.
+
+So a declared default is currently inert on *every* path, PUT included — there is no stored default for a
+replacement to fall back to, and a `required` field with a declared default is, as far as the runtime is
+concerned, a `required` field with nothing. The table below is written against that reality rather than
+against the schema's promise. (That a valid descriptor can declare a default which is silently dropped is a
+defect in its own right, and it belongs to #113 rather than here; PR-I notes it on that issue.)
 
 | The omitted field is… | PUT writes |
 |---|---|
@@ -227,11 +339,17 @@ This is #105's item 3, and it is decided **without** `field.default`, which does
 | a descriptor field that is nullable | `null` |
 | a descriptor field that is `required` | **nothing is written — the request is refused, `422`, naming the field** |
 
-**Why `required` is refused rather than preserved.** Preserving the stored value is what `PATCH` does. A
-`PUT` that quietly did it would make two identical PUTs from two different starting states produce two
-different rows, which is precisely the acceptance criterion at `alvo-specifikacia.md:309`
-(*"dvakrát rovnaké PUT = ten istý stav"*) inverted. The refusal names the field and suggests `PATCH`, per
-principle 4 (structured errors with fix suggestions).
+**Why `required` is refused rather than preserved.** Preserving the stored value is what `PATCH` does, and
+a `PUT` that quietly did it would be a `PATCH` wearing another verb's name — RFC 9110 §9.3.4 says PUT
+replaces the target resource's state with the enclosed representation, and a representation that leaves a
+field to whatever was already there has not replaced anything. Two identical PUTs from two different
+starting states would then produce two different rows. The refusal names the field and suggests `PATCH`,
+per principle 4 (structured errors with fix suggestions).
+
+The spec's *"dvakrát rovnaké PUT = ten istý stav"* (`alvo-specifikacia.md:309`) is consistent with this but
+does **not** decide it: read literally it is the same PUT applied twice, which a merge satisfies too — PATCH
+is idempotent in exactly that sense. The criterion is why §10 asserts the property from **two different
+starting states**; RFC 9110 is what makes the answer replacement rather than merge.
 
 **The `required` + `hidden` corner is stated, not papered over.** `data-api.md` already establishes that a
 mandatory secret — a password, an API token the caller supplies and can never read back — is exactly
@@ -300,8 +418,10 @@ fields on an update), so an existing consumer needs no change at all.
 | a unique or reference constraint | `409`, as today |
 | same `Idempotency-Key`, different body | `409` |
 
-Every status above is produced by an existing `ProblemResultFactory` arm. No new problem type is minted,
-and no existing one changes meaning.
+Every status above is rendered by an existing `ProblemResultFactory` arm and no new problem type is minted.
+**One of them does not reach its arm today**: "the id is taken by a row the caller cannot see" needs the
+translator change in §3, without which it is a `500` and, on the idempotent path, ten retries first. That is
+work this PR does, not a status it inherits.
 
 **The route is `PUT` on the existing `item` pattern** (`{prefix}/{entity}/{{id:guid}}`), beside `GET`,
 `PATCH` and `DELETE`.
@@ -335,8 +455,19 @@ route in the document disappears** — 229 tests went red on exactly this during
   say what happens when the two disagree — a real gap in the prior art. Alvo removes the disagreement by
   construction: `id` lives in the path, and in the body it is refused with the message it is already
   refused with everywhere else.
+- **A composite `(tenant_id, id)` primary key**, the analogue of #137's fix for unique indexes. It would
+  remove the cross-tenant half of §3's oracle outright, and it is the right eventual answer — but it
+  rewrites the physical key of every scoped entity, with the migrations, foreign keys and read path that
+  implies, and that does not belong inside a PR whose subject is a route. §3 records the deviation and the
+  maintainer's decision; a follow-up issue carries the key.
+- **Restricting PUT to `tenancy: global` entities** until that key lands. It removes the cross-tenant oracle
+  by removing the tenants, and publishes a document in which the same verb exists for some entities and not
+  others — the inconsistency an agent-first API can least afford.
 - **A new `DataOperation.Replace`.** §4: it would let a descriptor write a rule for a transport, and would
   make "`update` is unconfigured" stop answering for a route that updates.
+- **A new `AlvoConstraintKind` for a primary-key collision.** §3: a primary key *is* a uniqueness
+  constraint, and `Unique` with `Fields: ["id"]` already says everything the caller can act on. A second
+  member would give two names to one condition.
 - **A new `entity.x.replaced` event type.** §7: it would make every existing `updated` subscriber silently
   incomplete.
 - **Deciding the branch with an unfiltered read**, so an invisible row could answer `404` like `PATCH`. It
@@ -358,6 +489,11 @@ bypass, and it is the failure this design is most likely to have.
 - **The oracle is pinned as designed behaviour**, not left to chance: a test asserts that a PUT on an id
   held by a row outside the caller's `USING` answers `409`, and one asserts that a caller lacking `create`
   gets `403` for that same id — i.e. that the narrowing in §3 actually narrows.
+- **The translator change is fenced on both sides.** A caller-keyed collision on `id` translates to
+  `AlvoConstraintKind.Unique` with `Fields: ["id"]` and renders `409`; a collision on a **framework-minted**
+  id — every other write path — still propagates untranslated, because it is still the broken invariant the
+  existing remark describes. A third test pins that the idempotent PUT does **not** burn ten retries on it,
+  which is the #138 shape the untranslated exception would otherwise re-enter.
 - **`tenant_id` is refused on both branches** (§5), with a test that would fail if the guard's `isUpdate`
   ever followed the branch.
 - **Replacement semantics**: a nullable omitted field becomes `null`; a `required` omitted field is `422`
@@ -376,13 +512,23 @@ bypass, and it is the failure this design is most likely to have.
 
 ## 11. Public API delta, and why each symbol
 
-`public` is the contract, so each addition is argued rather than assumed:
+`public` is the contract, so each addition is argued rather than assumed. The `turn-review-gate` hook fires
+on any `PublicApi.*.verified.txt` that grew, so this list is what that check will be answered with:
 
-| Symbol | Why it must be public |
-|---|---|
-| `IAlvoData.ReplaceAsync` | the port is the published contract; a provider implements it |
-| `AlvoReplaceResult` | it is that member's return type |
-| `AlvoReplaceResult.Row` / `.Created` | the caller cannot answer `201` vs `200` without `Created` |
+| Symbol | Baseline | Why it must be public |
+|---|---|---|
+| `IAlvoData.ReplaceAsync` | Abstractions | the port is the published contract; a provider implements it |
+| `AlvoReplaceResult` | Abstractions | it is that member's return type |
+| `AlvoReplaceResult.Row` / `.Created` | Abstractions | the caller cannot answer `201` vs `200` without `Created` |
+| the `record`'s synthesized members | Abstractions | `EqualityContract`, `PrintMembers`, `ToString`, `Equals`, `GetHashCode`, `op_Equality`/`op_Inequality`, the copy constructor — the cost of `record`, paid identically by `AlvoBatchResult` |
+| `InMemoryAlvoData.ReplaceAsync` | Testing | the reference implementation is `public sealed` and implements the port; a new interface member forces it |
+| each new `AlvoDataAdversarialTests` fact | Testing | the class is `public abstract` and every implementation's suite inherits it — that is how one contract is held across three drivers |
 
-Nothing else. `DataApiEndpointKind.Replace` is `internal`, as its enum already is; the endpoint mapping,
-the branch selection and the guard call are all `internal` to the core.
+`DataApiEndpointKind.Replace` stays `internal`, as its enum already is; the endpoint mapping, the branch
+selection, the guard call and the translator's caller-keyed flag are all `internal` to their packages.
+
+**Adding a member to `IAlvoData` is source- and binary-breaking for any out-of-tree provider**, and this
+design does it without a default implementation on purpose: a port member with a default body would let a
+provider silently *not* implement create-or-replace and still compile, which for a security-core port means
+a provider that answers a write with whatever the default did. Nothing is released — the repo has no tags
+and no published packages — so the break costs nobody today, and that is the cheapest moment to take it.
