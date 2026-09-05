@@ -291,6 +291,14 @@ namespace MMLib.Alvo.Data
         public AlvoRecordNotFoundException(string message) { }
         public AlvoRecordNotFoundException(string message, System.Exception innerException) { }
     }
+    public sealed class AlvoReplaceResult : System.IEquatable<MMLib.Alvo.Data.AlvoReplaceResult>
+    {
+        public AlvoReplaceResult(MMLib.Alvo.Data.AlvoRecord Row, bool Created) { }
+        public bool Created { get; }
+        public MMLib.Alvo.Data.AlvoRecord Row { get; }
+        public static MMLib.Alvo.Data.AlvoReplaceResult CreatedRow(MMLib.Alvo.Data.AlvoRecord row) { }
+        public static MMLib.Alvo.Data.AlvoReplaceResult ReplacedRow(MMLib.Alvo.Data.AlvoRecord row) { }
+    }
     public sealed class AlvoRowPatch : System.IEquatable<MMLib.Alvo.Data.AlvoRowPatch>
     {
         public AlvoRowPatch(System.Guid Id, System.Collections.Generic.IReadOnlyDictionary<string, object?> Values) { }
