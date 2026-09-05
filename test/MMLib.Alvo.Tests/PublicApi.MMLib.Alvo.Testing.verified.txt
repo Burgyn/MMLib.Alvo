@@ -439,6 +439,22 @@ namespace MMLib.Alvo.Testing.Data
         protected virtual void EnsureEngineAvailable() { }
         public System.Threading.Tasks.Task Probing_twice_answers_twice() { }
     }
+    public abstract class AlvoDataReplaceTests : MMLib.Alvo.Testing.Data.AlvoDataFixture
+    {
+        protected AlvoDataReplaceTests() { }
+        public System.Threading.Tasks.Task Creating_through_a_replace_lands_the_row_in_the_caller_s_own_tenant() { }
+        public System.Threading.Tasks.Task Replacing_a_row_in_another_tenant_is_refused_and_leaves_it_untouched() { }
+        public System.Threading.Tasks.Task Replacing_a_visible_row_replaces_it() { }
+        public System.Threading.Tasks.Task Replacing_an_absent_row_creates_it_under_the_id_the_caller_named() { }
+        [Xunit.InlineData(new object[] {
+                false})]
+        [Xunit.InlineData(new object[] {
+                true})]
+        public System.Threading.Tasks.Task Tenant_id_in_the_payload_is_refused_whether_or_not_the_row_exists(bool rowExists) { }
+        public System.Threading.Tasks.Task The_write_check_admits_a_candidate_that_satisfies_it_on_both_branches() { }
+        public System.Threading.Tasks.Task The_write_check_refuses_the_candidate_on_the_create_branch() { }
+        public System.Threading.Tasks.Task The_write_check_refuses_the_candidate_on_the_replace_branch() { }
+    }
     public abstract class AlvoDataSqlSnapshotTests
     {
         protected AlvoDataSqlSnapshotTests() { }
@@ -498,6 +514,7 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoBatchResult> DeleteManyAsync(string entity, System.Collections.Generic.IReadOnlyList<System.Guid> ids, MMLib.Alvo.AlvoContext context, MMLib.Alvo.Data.AlvoIdempotency? idempotency = default, System.Threading.CancellationToken cancellationToken = default) { }
         public System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord?> GetAsync(string entity, System.Guid id, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default) { }
         public System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoPage> QueryAsync(MMLib.Alvo.Data.AlvoQuery query, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default) { }
+        public System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoReplaceResult> ReplaceAsync(string entity, System.Guid id, System.Collections.Generic.IReadOnlyDictionary<string, object?> values, MMLib.Alvo.AlvoContext context, MMLib.Alvo.Data.AlvoPrecondition? precondition = default, MMLib.Alvo.Data.AlvoIdempotency? idempotency = default, System.Threading.CancellationToken cancellationToken = default) { }
         public void Seed(string entity, params MMLib.Alvo.Data.AlvoRecord[] rows) { }
         public System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord> UpdateAsync(string entity, System.Guid id, System.Collections.Generic.IReadOnlyDictionary<string, object?> values, MMLib.Alvo.AlvoContext context, MMLib.Alvo.Data.AlvoPrecondition? precondition = default, MMLib.Alvo.Data.AlvoIdempotency? idempotency = default, System.Threading.CancellationToken cancellationToken = default) { }
         public System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoBatchResult> UpdateManyAsync(string entity, System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRowPatch> rows, MMLib.Alvo.AlvoContext context, MMLib.Alvo.Data.AlvoIdempotency? idempotency = default, System.Threading.CancellationToken cancellationToken = default) { }

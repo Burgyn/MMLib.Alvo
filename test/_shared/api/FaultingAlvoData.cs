@@ -28,6 +28,9 @@ internal sealed class FaultingAlvoData : IAlvoData
     public Task<AlvoRecord> UpdateAsync(string entity, Guid id, IReadOnlyDictionary<string, object?> values, AlvoContext context, AlvoPrecondition? precondition = null, AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default) =>
         throw new InvalidOperationException(FailureMessage);
 
+    public Task<AlvoReplaceResult> ReplaceAsync(string entity, Guid id, IReadOnlyDictionary<string, object?> values, AlvoContext context, AlvoPrecondition? precondition = null, AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default) =>
+        throw new InvalidOperationException(FailureMessage);
+
     public Task DeleteAsync(string entity, Guid id, AlvoContext context, AlvoPrecondition? precondition = null, AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default) =>
         throw new InvalidOperationException(FailureMessage);
 

@@ -769,12 +769,12 @@ internal sealed class EfAlvoData : IAlvoData
     /// </remarks>
     private async Task<Dictionary<string, object>> InsertAsync(
         AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context,
-        Dictionary<string, object> candidate, CancellationToken cancellationToken)
+        Dictionary<string, object> candidate, CancellationToken cancellationToken, bool callerKeyed = false)
     {
         db.Rows(schema.Name).Add(candidate);
         await ConstraintViolationTranslator.TranslatedAsync(
             () => db.SaveChangesAsync(cancellationToken), _dialect, db.Rows(schema.Name).EntityType, schema,
-            callerKeyed: false);
+            callerKeyed);
 
         var id = (Guid)candidate[AlvoDataContext.IdColumn];
         return await SingleAsync(db, schema, decision, context, id, lockFor: null, cancellationToken, unmasked: true)
@@ -1057,6 +1057,208 @@ internal sealed class EfAlvoData : IAlvoData
         EntitySchema schema, IReadOnlyDictionary<string, object?> values, AlvoContext context, DateTimeOffset now,
         bool isUpdate) =>
         AlvoAuditStamp.Applied(schema, values, context, new WriteInstant(now), isUpdate);
+
+    /// <inheritdoc/>
+    public async Task<AlvoReplaceResult> ReplaceAsync(
+        string entity, Guid id, IReadOnlyDictionary<string, object?> values, AlvoContext context,
+        AlvoPrecondition? precondition = null, AlvoIdempotency? idempotency = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(entity);
+        ArgumentNullException.ThrowIfNull(values);
+        ArgumentNullException.ThrowIfNull(context);
+        AlvoIdempotency.EnsureUsableToken(idempotency, context);
+
+        var branches = new ReplaceDecisions(
+            Resolve(entity, DataOperation.Create, context), Resolve(entity, DataOperation.Update, context));
+
+        return await ReplacedAsync(entity, id, values, branches, context, precondition, cancellationToken);
+    }
+
+    /// <summary>One ordinary create-or-replace: the write and its event, inside one transaction.</summary>
+    private async Task<AlvoReplaceResult> ReplacedAsync(
+        string entity, Guid id, IReadOnlyDictionary<string, object?> values, ReplaceDecisions branches,
+        AlvoContext context, AlvoPrecondition? precondition, CancellationToken cancellationToken)
+    {
+        using var db = _contexts.Create();
+        var schema = ReplaceableEntity(db, entity, values, branches, precondition);
+        var now = WriteInstantNow();
+        await EnsureOutboxTableAsync(db, cancellationToken);
+
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var result = await ReplaceWrittenAsync(
+            db, transaction, schema, branches, context, id, values, precondition, now, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        return result;
+    }
+
+    /// <summary>The body of one create-or-replace inside the caller's transaction: the branch, then its event.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The branch is chosen from the same policy-scoped, row-locking read an update performs</b>, so a row
+    /// this caller's <c>USING</c> excludes reads as absent and falls to the create branch — where its key
+    /// collides and the answer is a constraint violation rather than an overwrite. Reading it under a
+    /// predicate-free query to "know better" is the bypass this port exists to make impossible.
+    /// </para>
+    /// <para>
+    /// <b>The pre-image is read twice on the replace branch</b>, once here to pick the branch and once inside
+    /// <see cref="WriteAsync"/>, and that is deliberate: both reads take the same row lock inside the same
+    /// transaction, so the second cannot see anything different, and the alternative — driving control flow
+    /// by catching <see cref="AlvoRecordNotFoundException"/> — would also swallow the genuine not-found that
+    /// a lost race raises after the lock.
+    /// </para>
+    /// </remarks>
+    private async Task<AlvoReplaceResult> ReplaceWrittenAsync(
+        AlvoDataContext db, IDbContextTransaction transaction, EntitySchema schema, ReplaceDecisions branches,
+        AlvoContext context, Guid id, IReadOnlyDictionary<string, object?> values, AlvoPrecondition? precondition,
+        DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var visible = await SingleAsync(
+            db, schema, branches.Update, context, id, PreImageMutation.Update, cancellationToken, unmasked: true);
+
+        return visible is null
+            ? await CreatedByReplaceAsync(
+                db, transaction, schema, branches.Create, context, id, values, precondition, now, cancellationToken)
+            : await ReplacedRowAsync(
+                db, transaction, schema, branches.Update, context, id, values, precondition, now, cancellationToken);
+    }
+
+    /// <summary>The replace branch: the row is there and this caller can see it.</summary>
+    /// <remarks>
+    /// The stamp is told <c>isUpdate: true</c>, so <c>created_at</c> and <c>created_by</c> survive — a
+    /// replaced row is the same row, and the event it emits is an <c>updated</c> for the same reason.
+    /// </remarks>
+    private async Task<AlvoReplaceResult> ReplacedRowAsync(
+        AlvoDataContext db, IDbContextTransaction transaction, EntitySchema schema, PolicyDecision decision,
+        AlvoContext context, Guid id, IReadOnlyDictionary<string, object?> values, AlvoPrecondition? precondition,
+        DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var (preImage, postImage) = await WriteAsync(
+            db, schema, decision, context, id, Stamped(schema, values, context, now, isUpdate: true), precondition,
+            now, cancellationToken);
+        await EmitAsync(
+            db, transaction, schema, OutboxOperation.Updated, context, now, Unmasked(postImage), preImage,
+            cancellationToken);
+
+        return AlvoReplaceResult.ReplacedRow(
+            RecordMaterializer.ToRecord(postImage, decision.HiddenFields, FrozenSet<string>.Empty));
+    }
+
+    /// <summary>The create branch: no row this caller can see holds this id.</summary>
+    /// <remarks>
+    /// <b>A precondition cannot match here</b>, and that is checked before anything is built: naming a
+    /// version is asserting the row exists, so <see cref="AlvoPrecondition.EnsureMatches"/> against nothing
+    /// refuses it — the same answer a caller would get for a version that had moved.
+    /// </remarks>
+    private async Task<AlvoReplaceResult> CreatedByReplaceAsync(
+        AlvoDataContext db, IDbContextTransaction transaction, EntitySchema schema, PolicyDecision decision,
+        AlvoContext context, Guid id, IReadOnlyDictionary<string, object?> values, AlvoPrecondition? precondition,
+        DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        AlvoPrecondition.EnsureMatches(precondition, storedVersion: null);
+
+        var candidate = ReplaceCandidate(db, schema, context, id, values, now);
+        EnsureWriteAllowed(decision, Unmasked(candidate), previous: null, context);
+
+        var stored = await InsertAsync(db, schema, decision, context, candidate, cancellationToken, callerKeyed: true);
+        await EmitAsync(
+            db, transaction, schema, OutboxOperation.Created, context, now, Unmasked(stored), preImage: null,
+            cancellationToken);
+
+        return AlvoReplaceResult.CreatedRow(
+            RecordMaterializer.ToRecord(stored, decision.HiddenFields, FrozenSet<string>.Empty));
+    }
+
+    /// <summary>The candidate a create-or-replace inserts: the caller's payload under the caller's own id.</summary>
+    /// <remarks>
+    /// <b>Deliberately not <see cref="AuthorizedCandidate"/>.</b> That helper passes one <c>isUpdate</c> to
+    /// both the payload guard and the audit stamp, and this route needs the two to disagree: the guard is
+    /// told <see langword="true"/>, because <c>tenant_id</c> must be refused on both branches or its refusal
+    /// reports whether the row exists; the stamp is told <see langword="false"/>, because this row really is
+    /// being created and wants its <c>created_at</c>. The guard runs in
+    /// <see cref="ReplaceableEntity"/>, before any row is read, exactly where it belongs.
+    /// </remarks>
+    /// <param name="db">The write's own context.</param>
+    /// <param name="schema">The entity being written.</param>
+    /// <param name="context">The caller the write is performed as.</param>
+    /// <param name="id">The id the caller named in the path.</param>
+    /// <param name="values">The caller's own payload.</param>
+    /// <param name="now">The write's own instant.</param>
+    private static Dictionary<string, object> ReplaceCandidate(
+        AlvoDataContext db, EntitySchema schema, AlvoContext context, Guid id,
+        IReadOnlyDictionary<string, object?> values, DateTimeOffset now)
+    {
+        var candidate = WritePropertyBag.For(
+            db.Rows(schema.Name).EntityType, Stamped(schema, values, context, now, isUpdate: false));
+        candidate[AlvoDataContext.IdColumn] = id;
+        StampTenant(candidate, schema, context);
+
+        return candidate;
+    }
+
+    /// <summary>Places a created row in the caller's own tenant, on an entity that is scoped at all.</summary>
+    /// <remarks>
+    /// <b>The tenant scope checks a candidate's tenant; it never produces one</b>, and
+    /// <see cref="AlvoAuditStamp"/> deliberately never touches this column. With the payload guard refusing
+    /// <c>tenant_id</c> on both branches, nothing else would supply it — the candidate would carry no tenant
+    /// and its own scope would refuse it, so the route would not work on any scoped entity. A caller
+    /// creating into <em>another</em> tenant uses <see cref="CreateAsync"/>, which still takes the column.
+    /// </remarks>
+    /// <param name="candidate">The candidate row being built.</param>
+    /// <param name="schema">The entity being written.</param>
+    /// <param name="context">The caller the write is performed as.</param>
+    private static void StampTenant(
+        Dictionary<string, object> candidate, EntitySchema schema, AlvoContext context)
+    {
+        if (AlvoManagedColumns.For(schema).Contains(AlvoManagedColumns.TenantId) && context.Tenant is { } tenant)
+        {
+            candidate[AlvoManagedColumns.TenantId] = tenant.Value;
+        }
+    }
+
+    /// <summary>The entity a create-or-replace may write, with the guards both branches share applied.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The payload guard is told <c>isUpdate: true</c> unconditionally, and this is the whole of that
+    /// decision.</b> <c>tenant_id</c> is the one column caller-writable on a create and refused on an update,
+    /// so a guard following the branch would answer "does this row exist?" through "was my <c>tenant_id</c>
+    /// refused?" — an existence oracle decided from the payload alone, before any row is read, and one a
+    /// caller triggers deliberately by naming the column.
+    /// </para>
+    /// <para>
+    /// <b>Read-only fields are judged against both decisions</b>, refusing on the first that refuses. A field
+    /// the <c>create</c> rule freezes must not become writable because the row happened to already exist,
+    /// and default-deny makes the union the only defensible reading of two rules.
+    /// </para>
+    /// </remarks>
+    /// <param name="db">The write's own context.</param>
+    /// <param name="entity">The entity name.</param>
+    /// <param name="values">The caller's own payload.</param>
+    /// <param name="branches">The caller's decision for each branch.</param>
+    /// <param name="precondition">The caller's precondition, if any.</param>
+    private static EntitySchema ReplaceableEntity(
+        AlvoDataContext db, string entity, IReadOnlyDictionary<string, object?> values, ReplaceDecisions branches,
+        AlvoPrecondition? precondition)
+    {
+        var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
+        WritePayloadGuard.EnsureWritable(values, schema, branches.Create, isUpdate: true);
+        WritePayloadGuard.EnsureWritable(values, schema, branches.Update, isUpdate: true);
+        AlvoPrecondition.EnsureSupported(precondition, schema);
+
+        return schema;
+    }
+
+    /// <summary>The caller's resolved decision for each branch of one create-or-replace.</summary>
+    /// <remarks>
+    /// <b>Both are resolved before either branch is chosen, and both must allow.</b> Resolving only the
+    /// branch that ran would make the permission a caller needs depend on stored data — so "which rule
+    /// refused me" would itself report whether the row exists — and would let a caller permitted only to
+    /// update reach the create branch by naming an unused id.
+    /// </remarks>
+    /// <param name="Create">The decision gating the create branch.</param>
+    /// <param name="Update">The decision gating the replace branch, and the pre-image read's own predicate.</param>
+    private readonly record struct ReplaceDecisions(PolicyDecision Create, PolicyDecision Update);
 
     /// <summary>
     /// The instant one write happens at: this store's clock, at the precision the row it is about to stamp

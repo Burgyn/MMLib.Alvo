@@ -362,6 +362,136 @@ public sealed class InMemoryAlvoData : IAlvoData
     }
 
     /// <inheritdoc/>
+    public Task<AlvoReplaceResult> ReplaceAsync(
+        string entity, Guid id, IReadOnlyDictionary<string, object?> values, AlvoContext context,
+        AlvoPrecondition? precondition = null, AlvoIdempotency? idempotency = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(entity);
+        ArgumentNullException.ThrowIfNull(values);
+        ArgumentNullException.ThrowIfNull(context);
+        AlvoIdempotency.EnsureUsableToken(idempotency, context);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var create = Allowed(entity, DataOperation.Create, context);
+        var update = Allowed(entity, DataOperation.Update, context);
+
+        var schema = EnsureFieldsDeclared(entity, values);
+        EnsureNoManagedColumnWrite(values, schema, isUpdate: true);
+        EnsureNoReadOnlyWrite(values, create.ReadOnlyFields);
+        EnsureNoReadOnlyWrite(values, update.ReadOnlyFields);
+        AlvoPrecondition.EnsureSupported(precondition, schema);
+
+        lock (_gate)
+        {
+            var list = RowsForLocked(entity);
+            var index = list.FindIndex(row => IsRow(row, id));
+            var stored = index >= 0 ? list[index] : null;
+
+            return stored is not null && IsVisible(stored, update, context)
+                ? ReplacedLocked(entity, schema, update, context, list, index, stored, values, precondition, idempotency)
+                : CreatedByReplaceLocked(entity, schema, create, context, list, stored, id, values, precondition, idempotency);
+        }
+    }
+
+    /// <summary>The replace branch: the row is there and this caller can see it.</summary>
+    /// <remarks>
+    /// The stamp is told <c>isUpdate: true</c>, so <c>created_at</c> and <c>created_by</c> survive — a
+    /// replaced row is the same row. <c>WITH CHECK</c> judges the post-image against the pre-image, exactly
+    /// as an update does.
+    /// </remarks>
+    private Task<AlvoReplaceResult> ReplacedLocked(
+        string entity, EntitySchema schema, PolicyDecision decision, AlvoContext context,
+        List<AlvoRecord> list, int index, AlvoRecord stored, IReadOnlyDictionary<string, object?> values,
+        AlvoPrecondition? precondition, AlvoIdempotency? idempotency)
+    {
+        if (Replay(entity, context, idempotency) is { } replayed)
+        {
+            return Task.FromResult(AlvoReplaceResult.ReplacedRow(replayed));
+        }
+
+        AlvoPrecondition.EnsureMatches(precondition, StoredVersion(schema, stored));
+
+        var stamped = AlvoAuditStamp.Applied(schema, values, context, _time, isUpdate: true);
+        var merged = Merge(stored, stamped);
+        EnsureWriteAllowed(decision, merged, stored, context);
+
+        list[index] = merged;
+        RecordIdempotencyLocked(idempotency, context, (Guid)merged[IdField]!);
+
+        return Task.FromResult(
+            AlvoReplaceResult.ReplacedRow(Mask(merged, decision.HiddenFields, FrozenSet<string>.Empty)));
+    }
+
+    /// <summary>The create branch: no row this caller can see holds this id.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A row that exists but which this caller's <c>USING</c> excludes lands here too</b>, and its
+    /// collision with the stored key is what <paramref name="stored"/> reports. The answer is a constraint
+    /// violation rather than a silent overwrite or a success — see the port's own remarks for the
+    /// disclosure that carries and why no arrangement avoids it.
+    /// </para>
+    /// <para>
+    /// <b><c>tenant_id</c> is stamped from the caller's context</b>, because the payload guard refused it and
+    /// the tenant scope only ever checks a candidate's tenant — it never produces one. Without this the
+    /// candidate would carry no tenant and its own scope would refuse it.
+    /// </para>
+    /// </remarks>
+    private Task<AlvoReplaceResult> CreatedByReplaceLocked(
+        string entity, EntitySchema schema, PolicyDecision decision, AlvoContext context,
+        List<AlvoRecord> list, AlvoRecord? stored, Guid id, IReadOnlyDictionary<string, object?> values,
+        AlvoPrecondition? precondition, AlvoIdempotency? idempotency)
+    {
+        if (Replay(entity, context, idempotency) is { } replayed)
+        {
+            return Task.FromResult(AlvoReplaceResult.ReplacedRow(replayed));
+        }
+
+        AlvoPrecondition.EnsureMatches(precondition, storedVersion: null);
+
+        var stamped = AlvoAuditStamp.Applied(schema, values, context, _time, isUpdate: false);
+        var candidate = new Dictionary<string, object?>(stamped, StringComparer.Ordinal) { [IdField] = id };
+        StampTenant(candidate, schema, context);
+
+        var postImage = new AlvoRecord(candidate);
+        EnsureWriteAllowed(decision, postImage, previous: null, context);
+
+        if (stored is not null)
+        {
+            throw new AlvoConstraintViolationException(AlvoConstraintKind.Unique, [IdField]);
+        }
+
+        list.Add(postImage);
+        RecordIdempotencyLocked(idempotency, context, id);
+
+        return Task.FromResult(
+            AlvoReplaceResult.CreatedRow(Mask(postImage, decision.HiddenFields, FrozenSet<string>.Empty)));
+    }
+
+    /// <summary>Places a created row in the caller's own tenant, on an entity that is scoped at all.</summary>
+    /// <param name="candidate">The candidate row being built.</param>
+    /// <param name="schema">The entity as the applied schema declares it.</param>
+    /// <param name="context">The caller performing the write.</param>
+    private static void StampTenant(
+        Dictionary<string, object?> candidate, EntitySchema schema, AlvoContext context)
+    {
+        if (AlvoManagedColumns.For(schema).Contains(AlvoManagedColumns.TenantId) && context.Tenant is { } tenant)
+        {
+            candidate[AlvoManagedColumns.TenantId] = tenant.Value;
+        }
+    }
+
+    /// <summary>The caller's decision for one operation, or the refusal it earned.</summary>
+    /// <param name="entity">The entity name.</param>
+    /// <param name="operation">The operation to resolve.</param>
+    /// <param name="context">The caller.</param>
+    private PolicyDecision Allowed(string entity, DataOperation operation, AlvoContext context)
+    {
+        var decision = _policy.Resolve(entity, operation, context);
+        return decision.IsDenied ? throw Denied(decision) : decision;
+    }
+
+    /// <inheritdoc/>
     public Task DeleteAsync(
         string entity, Guid id, AlvoContext context, AlvoPrecondition? precondition = null,
         AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default)
