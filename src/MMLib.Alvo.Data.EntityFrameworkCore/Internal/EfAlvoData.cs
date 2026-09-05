@@ -773,7 +773,8 @@ internal sealed class EfAlvoData : IAlvoData
     {
         db.Rows(schema.Name).Add(candidate);
         await ConstraintViolationTranslator.TranslatedAsync(
-            () => db.SaveChangesAsync(cancellationToken), _dialect, db.Rows(schema.Name).EntityType, schema);
+            () => db.SaveChangesAsync(cancellationToken), _dialect, db.Rows(schema.Name).EntityType, schema,
+            callerKeyed: false);
 
         var id = (Guid)candidate[AlvoDataContext.IdColumn];
         return await SingleAsync(db, schema, decision, context, id, lockFor: null, cancellationToken, unmasked: true)
@@ -815,7 +816,8 @@ internal sealed class EfAlvoData : IAlvoData
         }
 
         await ConstraintViolationTranslator.TranslatedAsync(
-            () => db.SaveChangesAsync(cancellationToken), _dialect, db.Rows(schema.Name).EntityType, schema);
+            () => db.SaveChangesAsync(cancellationToken), _dialect, db.Rows(schema.Name).EntityType, schema,
+            callerKeyed: false);
 
         var stored = new List<Dictionary<string, object>>(candidates.Count);
         foreach (var candidate in candidates)
@@ -1233,7 +1235,8 @@ internal sealed class EfAlvoData : IAlvoData
             () => RowOf(PolicyRoot(db, schema, decision, context), id).ExecuteDeleteAsync(cancellationToken),
             _dialect,
             db.Rows(schema.Name).EntityType,
-            schema);
+            schema,
+            callerKeyed: false);
         if (affected == 0)
         {
             throw new AlvoRecordNotFoundException();
@@ -1408,7 +1411,8 @@ internal sealed class EfAlvoData : IAlvoData
                 .ExecuteUpdateAsync(UpdateSetterFactory.For(schema, values), cancellationToken),
             _dialect,
             db.Rows(schema.Name).EntityType,
-            schema);
+            schema,
+            callerKeyed: false);
 
     /// <summary>
     /// The queryable a write is composed over: a <c>FromSql</c> root whose <c>WHERE</c> already carries the
@@ -2287,7 +2291,8 @@ internal sealed class EfAlvoData : IAlvoData
                 () => RowOf(PolicyRoot(db, schema, decision, context), id).ExecuteDeleteAsync(cancellationToken),
                 _dialect,
                 db.Rows(schema.Name).EntityType,
-                schema);
+                schema,
+                callerKeyed: false);
             if (affected == 0)
             {
                 throw new AlvoRecordNotFoundException();
