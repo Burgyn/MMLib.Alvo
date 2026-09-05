@@ -302,11 +302,20 @@ before any of §3's narrowing applies.
 **So PUT runs `WritePayloadGuard.EnsureWritable` with `isUpdate: true` unconditionally.** `tenant_id` is
 never caller-writable on this route, on either branch.
 
-The consequence is stated rather than hidden: a PUT that creates places the row in the caller's own tenant,
-because the synthesized tenant scope in `WITH CHECK` is what decides the tenant and the payload no longer
-gets a say. A caller who legitimately needs to create a row **into another tenant** uses `POST`, which still
-accepts `tenant_id` and still judges it against the same scope. Nothing that was possible becomes
-impossible; it moves to the route that already did it.
+**Which means the framework has to supply the value, and that is the other half of this decision.** The
+tenant scope in `WITH CHECK` *checks* the candidate's `tenant_id`; it does not set one, and
+`AlvoAuditStamp` deliberately never touches that column. So on a tenant-scoped entity the create branch
+would build a candidate with no `tenant_id` at all and be refused by its own scope — the route would simply
+not work.
+
+So on this route, and only on the create branch, **`tenant_id` is stamped from the caller's own context**.
+The two halves fit: the caller may not name a tenant, and the framework names the only one the scope would
+have accepted anyway. On an anonymous caller, or one with no tenant, there is nothing to stamp and the
+scope refuses the candidate exactly as it would refuse any other row with no tenant — no special case.
+
+A caller who legitimately needs to create a row **into another tenant** uses `POST`, which still accepts
+`tenant_id` and still judges it against the same scope. Nothing that was possible becomes impossible; it
+moves to the route that already did it.
 
 Two boundaries on the claim, so it is not read wider than it is. The oracle exists only on a
 `tenancy: scoped` entity — on a global one `tenant_id` is not among the entity's managed columns and
