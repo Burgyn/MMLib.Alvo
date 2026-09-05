@@ -1135,7 +1135,8 @@ internal sealed class EfAlvoData : IAlvoData
         DateTimeOffset now, CancellationToken cancellationToken)
     {
         var (preImage, postImage) = await WriteAsync(
-            db, schema, decision, context, id, Stamped(schema, values, context, now, isUpdate: true), precondition,
+            db, schema, decision, context, id,
+            WholeRowGuard.WholeRow(Stamped(schema, values, context, now, isUpdate: true), schema), precondition,
             now, cancellationToken);
         await EmitAsync(
             db, transaction, schema, OutboxOperation.Updated, context, now, Unmasked(postImage), preImage,
@@ -1190,7 +1191,8 @@ internal sealed class EfAlvoData : IAlvoData
         IReadOnlyDictionary<string, object?> values, DateTimeOffset now)
     {
         var candidate = WritePropertyBag.For(
-            db.Rows(schema.Name).EntityType, Stamped(schema, values, context, now, isUpdate: false));
+            db.Rows(schema.Name).EntityType,
+            WholeRowGuard.WholeRow(Stamped(schema, values, context, now, isUpdate: false), schema));
         candidate[AlvoDataContext.IdColumn] = id;
         StampTenant(candidate, schema, context);
 
@@ -1244,6 +1246,7 @@ internal sealed class EfAlvoData : IAlvoData
         var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
         WritePayloadGuard.EnsureWritable(values, schema, branches.Create, isUpdate: true);
         WritePayloadGuard.EnsureWritable(values, schema, branches.Update, isUpdate: true);
+        WholeRowGuard.EnsureWholeRow(values, schema);
         AlvoPrecondition.EnsureSupported(precondition, schema);
 
         return schema;

@@ -58,6 +58,7 @@ public abstract class AlvoDataFixture
     private protected const string Invoices = "invoices";
     private protected const string Vaults = "vaults";
     private protected const string Dropbox = "dropbox";
+    private protected const string Extras = "extras";
 
     private protected static CancellationToken Ct => TestContext.Current.CancellationToken;
 
@@ -79,6 +80,21 @@ public abstract class AlvoDataFixture
 
     private protected static Dictionary<string, object?> TenantPayload(string title, TenantId tenant) =>
         new(StringComparer.Ordinal) { ["title"] = title, ["tenant_id"] = tenant.Value };
+
+    /// <summary>
+    /// A payload for <see cref="ExtraWorldAsync"/>'s entity, which declares a <b>required</b> field beside
+    /// the nullable <c>title</c> — the pair a create-or-replace needs, since one shows what a replacement
+    /// nulls and the other shows what it may not omit.
+    /// </summary>
+    /// <param name="title">The nullable field.</param>
+    /// <param name="rank">The required field.</param>
+    private protected static Dictionary<string, object?> ExtraPayload(string title, int rank) =>
+        new(StringComparer.Ordinal) { ["title"] = title, [ExtraField] = rank };
+
+    /// <summary>The same payload with the nullable field left out, so a replacement has one to drop.</summary>
+    /// <param name="rank">The required field.</param>
+    private protected static Dictionary<string, object?> ExtraOnlyPayload(int rank) =>
+        new(StringComparer.Ordinal) { [ExtraField] = rank };
 
     private protected static Guid IdOf(AlvoRecord record) => (Guid)record[AlvoManagedColumns.Id]!;
 
@@ -137,6 +153,21 @@ public abstract class AlvoDataFixture
         {
             Rules = new AccessRules { Create = "true", Delete = "true" },
         });
+
+    /// <summary>
+    /// An audited, permissive <c>receipts</c> entity carrying a <b>required</b> field beside the nullable
+    /// <c>title</c>.
+    /// </summary>
+    /// <remarks>
+    /// The fixture a replacement's semantics need, and the reason it needs two fields rather than one: a
+    /// nullable field shows what a replacement <em>drops</em>, and a required one shows what it may not
+    /// omit. With a single field there is nothing to distinguish replacing from merging.
+    /// </remarks>
+    private protected Task<World> ExtraWorldAsync() => WorldAsync(
+        EntityFixture.Permissive(Extras, audit: true) with { Extra = (ExtraField, DescField.Integer) });
+
+    /// <summary>The required field <see cref="ExtraWorldAsync"/>'s entity declares.</summary>
+    private protected const string ExtraField = "rank";
 
     /// <summary>Two audited, permissive entities in one store, for the one-key-two-entities fact.</summary>
     private protected Task<World> TwoEntityWorldAsync() => WorldAsync(

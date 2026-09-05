@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Data;
+using MMLib.Alvo.Schema;
 using Shouldly;
 using Xunit;
 
@@ -160,6 +161,79 @@ public abstract class AlvoDataReplaceTests : AlvoDataFixture
 
         var theirs = await world.Data.GetAsync(Invoices, id, world.GlobexCaller, cancellationToken: Ct);
         theirs.ShouldBeNull("and in no other");
+    }
+
+    /// <summary>A nullable field the replacement omits does not keep its stored value.</summary>
+    /// <remarks>
+    /// <b>This is what separates a replacement from a patch</b>, and it is asserted from a row that already
+    /// has the field set — a starting state where the field was empty cannot tell the two apart, because
+    /// both leave it empty.
+    /// </remarks>
+    [Fact]
+    public async Task A_nullable_field_the_replacement_omits_becomes_null()
+    {
+        var world = await ExtraWorldAsync();
+        var existing = await world.Data.CreateAsync(
+            Extras, ExtraPayload("Ring the bell", 7), world.Caller, cancellationToken: Ct);
+
+        var replaced = await world.Data.ReplaceAsync(
+            Extras, IdOf(existing), ExtraOnlyPayload(7), world.Caller, cancellationToken: Ct);
+
+        replaced.Row["title"].ShouldBeNull("a replacement replaces the row; it does not merge into it");
+    }
+
+    /// <summary>A required field the replacement omits is refused, naming the field.</summary>
+    /// <remarks>
+    /// A body that cannot express the whole row is a caller error rather than a partial write — accepting it
+    /// and keeping the stored value is exactly the merge the fact above rules out, arriving through the one
+    /// field where it cannot be undone.
+    /// </remarks>
+    [Fact]
+    public async Task A_required_field_the_replacement_omits_is_refused()
+    {
+        var world = await ExtraWorldAsync();
+        var existing = await world.Data.CreateAsync(
+            Extras, ExtraPayload("First", 7), world.Caller, cancellationToken: Ct);
+
+        var refusal = await Should.ThrowAsync<ArgumentException>(
+            () => world.Data.ReplaceAsync(
+                Extras, IdOf(existing), Payload("Second"), world.Caller, cancellationToken: Ct));
+
+        refusal.Message.ShouldContain(ExtraField);
+    }
+
+    /// <summary>The same rule refuses a create that cannot express the row either.</summary>
+    /// <remarks>
+    /// The control the refusal above needs, and a claim of its own: the branch does not decide whether a
+    /// body has to be complete. If only the replace branch checked, a caller could write a half row simply
+    /// by naming an unused id.
+    /// </remarks>
+    [Fact]
+    public async Task A_required_field_is_refused_on_the_create_branch_too()
+    {
+        var world = await ExtraWorldAsync();
+
+        await Should.ThrowAsync<ArgumentException>(
+            () => world.Data.ReplaceAsync(
+                Extras, Guid.NewGuid(), Payload("No rank"), world.Caller, cancellationToken: Ct));
+    }
+
+    /// <summary><c>created_at</c> and <c>created_by</c> survive a replacement, because it is the same row.</summary>
+    /// <remarks>
+    /// The boundary of the rule above: a replacement replaces the <em>caller's</em> fields. A framework
+    /// column nulled by a replacement would make a row's own history depend on how it was last written.
+    /// </remarks>
+    [Fact]
+    public async Task The_creation_stamp_survives_a_replacement()
+    {
+        var world = await AuditedWorldAsync();
+        var existing = await world.Data.CreateAsync(Orders, Payload("First"), world.Caller, cancellationToken: Ct);
+
+        var replaced = await world.Data.ReplaceAsync(
+            Orders, IdOf(existing), Payload("Second"), world.Caller, cancellationToken: Ct);
+
+        replaced.Row[AlvoManagedColumns.CreatedAt].ShouldBe(existing[AlvoManagedColumns.CreatedAt]);
+        replaced.Row[AlvoManagedColumns.CreatedBy].ShouldBe(existing[AlvoManagedColumns.CreatedBy]);
     }
 
     /// <summary><c>tenant_id</c> is refused on this route whether or not the row already exists.</summary>

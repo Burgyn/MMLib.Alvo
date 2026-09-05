@@ -380,6 +380,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         EnsureNoManagedColumnWrite(values, schema, isUpdate: true);
         EnsureNoReadOnlyWrite(values, create.ReadOnlyFields);
         EnsureNoReadOnlyWrite(values, update.ReadOnlyFields);
+        EnsureWholeRow(values, schema);
         AlvoPrecondition.EnsureSupported(precondition, schema);
 
         lock (_gate)
@@ -413,7 +414,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         AlvoPrecondition.EnsureMatches(precondition, StoredVersion(schema, stored));
 
         var stamped = AlvoAuditStamp.Applied(schema, values, context, _time, isUpdate: true);
-        var merged = Merge(stored, stamped);
+        var merged = Merge(stored, WholeRow(stamped, schema));
         EnsureWriteAllowed(decision, merged, stored, context);
 
         list[index] = merged;
@@ -450,7 +451,10 @@ public sealed class InMemoryAlvoData : IAlvoData
         AlvoPrecondition.EnsureMatches(precondition, storedVersion: null);
 
         var stamped = AlvoAuditStamp.Applied(schema, values, context, _time, isUpdate: false);
-        var candidate = new Dictionary<string, object?>(stamped, StringComparer.Ordinal) { [IdField] = id };
+        var candidate = new Dictionary<string, object?>(WholeRow(stamped, schema), StringComparer.Ordinal)
+        {
+            [IdField] = id,
+        };
         StampTenant(candidate, schema, context);
 
         var postImage = new AlvoRecord(candidate);
@@ -466,6 +470,68 @@ public sealed class InMemoryAlvoData : IAlvoData
 
         return Task.FromResult(
             AlvoReplaceResult.CreatedRow(Mask(postImage, decision.HiddenFields, FrozenSet<string>.Empty)));
+    }
+
+    /// <summary>
+    /// The payload as a <b>whole row</b>: every field the caller left out written <see langword="null"/>
+    /// rather than left to whatever was stored.
+    /// </summary>
+    /// <remarks>
+    /// <b>This is the one behaviour separating a replacement from a patch.</b> Keeping the stored value is
+    /// what <see cref="UpdateAsync"/> does by contract; doing it here would make two identical replacements
+    /// applied to two different rows produce two different rows. Framework-managed columns are left alone —
+    /// a replaced row is the same row, so its <c>created_at</c> is not the caller's to drop — and a computed
+    /// field is left alone because the engine owns it.
+    /// </remarks>
+    /// <param name="values">The caller's payload, already stamped.</param>
+    /// <param name="schema">The entity as the applied schema declares it.</param>
+    private static Dictionary<string, object?> WholeRow(
+        IReadOnlyDictionary<string, object?> values, EntitySchema schema)
+    {
+        var whole = new Dictionary<string, object?>(values, StringComparer.Ordinal);
+        foreach (var field in CallerOwnedFields(schema))
+        {
+            if (!whole.ContainsKey(field.Name))
+            {
+                whole[field.Name] = null;
+            }
+        }
+
+        return whole;
+    }
+
+    /// <summary>Refuses a payload that cannot express the whole row, naming the field it left out.</summary>
+    /// <remarks>
+    /// <b>Refused rather than merged</b>, and on both branches: a body missing a mandatory field is a caller
+    /// error, and accepting it by keeping the stored value would reintroduce the merge
+    /// <see cref="WholeRow"/> exists to remove — through the one field where it cannot be undone. It is an
+    /// <see cref="ArgumentException"/> because it is a broken caller, not a refused one.
+    /// </remarks>
+    /// <param name="values">The caller's payload.</param>
+    /// <param name="schema">The entity as the applied schema declares it.</param>
+    private static void EnsureWholeRow(IReadOnlyDictionary<string, object?> values, EntitySchema schema)
+    {
+        var missing = CallerOwnedFields(schema)
+            .FirstOrDefault(field => field.Required && !values.ContainsKey(field.Name));
+
+        if (missing is not null)
+        {
+            throw new ArgumentException(
+                $"Field '{missing.Name}' is required and this write replaces the whole row, so leaving it out "
+                + "would store no value for it. Supply it, or use a partial update instead. A field that is "
+                + "both required and hidden cannot be supplied by a caller who cannot read it, which makes "
+                + "this entity replaceable only through a partial update for them.",
+                nameof(values));
+        }
+    }
+
+    /// <summary>The fields a replacement owns: declared, not framework-managed, not engine-computed.</summary>
+    /// <param name="schema">The entity as the applied schema declares it.</param>
+    private static IEnumerable<FieldSchema> CallerOwnedFields(EntitySchema schema)
+    {
+        var managed = AlvoManagedColumns.For(schema);
+        return schema.Fields.Where(field =>
+            !managed.Contains(field.Name) && field.ComputedExpression is null && field.Rollup is null);
     }
 
     /// <summary>Places a created row in the caller's own tenant, on an entity that is scoped at all.</summary>
