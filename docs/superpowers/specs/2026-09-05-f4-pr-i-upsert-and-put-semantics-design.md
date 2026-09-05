@@ -235,7 +235,17 @@ hypothetical — it is the bypass F3 PR3 shipped and then fixed"* (`PolicyDecisi
 | `WITH CHECK` + tenant scope, replace branch | the **update** decision |
 | `WITH CHECK` + tenant scope, create branch | the **create** decision |
 | `ReadOnlyFields` for `WritePayloadGuard` | both — a field read-only under either is refused |
-| `HiddenFields` masking the response | the **get** decision, re-resolved, exactly as a replay does |
+| `HiddenFields` masking the response | the branch's **own write** decision, exactly as `CreateAsync` and `UpdateAsync` mask today |
+
+`WritePayloadGuard.EnsureWritable` takes **one** decision (`WritePayloadGuard.cs:52`), so "read-only under
+either" is two calls to `PayloadRefusal` and a refusal on the first non-null answer — not a merged set, which
+would be a second place the union is computed. Default-deny makes the union the only defensible reading: a
+field the `create` rule freezes must not become writable because the row happened to exist.
+
+Masking follows the existing convention rather than the replay's. A replay re-resolves a fresh `get`
+decision because it answers a row it did **not** write; a write masks with the decision that authorised it,
+which is what `UpdatedAsync` does (`EfAlvoData.cs:955`). Giving this one route a third behaviour would make
+"which decision masks a write's response" a per-route question for no gain.
 
 **No new `DataOperation` member.** `DataApiEndpointKind`'s own remarks say why: `DataOperation` is the
 *policy* vocabulary that a descriptor's `rules` name and `PolicyCatalog` is keyed by, so a member added
@@ -426,12 +436,26 @@ work this PR does, not a status it inherits.
 **The route is `PUT` on the existing `item` pattern** (`{prefix}/{entity}/{{id:guid}}`), beside `GET`,
 `PATCH` and `DELETE`.
 
-**Three switches must be extended with the new kind, and this is a hard implementation note, not a
-reminder.** `DataApiEndpointKind.Replace` needs its own `ToWireName()` arm (`"replace"`) or its
+**Five switches must be extended with the new kind, and two of them fail silently.** This is a hard
+implementation note, not a reminder.
+
+*The loud ones.* `DataApiEndpointKind.Replace` needs its own `ToWireName()` arm (`"replace"`) or its
 `operationId` collides with `update`'s and one route's prose is published for the other; and
-`DataApiDocumentation`'s three switches must each gain an arm, because
+`DataApiDocumentation`'s three switches (`:158`, `:344`, `:366`) must each gain an arm, because
 `AlvoEndpointDataSource.BuildOrRefuseToRoute` catches the resulting `InvalidOperationException` and **every
 route in the document disappears** — 229 tests went red on exactly this during PR-H.
+
+*The silent ones, in `DataApiParameters.cs`, and these are the dangerous half:*
+
+- `AddressesOneRow` (`:164`) is an `is` pattern listing `Get`/`Update`/`Delete`. A kind missing from it is
+  simply `false`, so the published `PUT` **declares no `{id}` path parameter** while its own path template
+  has one.
+- `HeaderNames` (`:232-243`) is a `switch` whose default arm is `[]`. A kind missing from it publishes
+  **no `If-Match` and no `Idempotency-Key`**, silently contradicting §7 — which is exactly the bug PR-H
+  shipped and had to fix for the batch kinds.
+
+Neither throws, so `BuildOrRefuseToRoute` never sees them and the route-count canary stays green. They are
+caught only by a test that asserts the published parameters and headers for `PUT` by name.
 
 ---
 
