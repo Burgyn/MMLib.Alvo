@@ -180,5 +180,24 @@ internal static class ConstraintViolationTranslator
             : rows.GetIndexes()
                 .Where(index => string.Equals(index.GetDatabaseName(), constraintName, StringComparison.Ordinal))
                 .SelectMany(index => index.Properties)
-                .Select(property => property.Name);
+                .Select(property => property.Name)
+                .Concat(PrimaryKeyColumns(constraintName, rows));
+
+    /// <summary>The row key's properties, when the constraint the engine named is the primary key.</summary>
+    /// <remarks>
+    /// <b>A primary key is a constraint but not an index</b>, so <see cref="IEntityType.GetIndexes"/> does not
+    /// carry it and the lookup above finds nothing for a key collision. That was harmless while every key was
+    /// framework-minted — such a collision is a broken invariant and is meant to propagate untranslated — and
+    /// stopped being harmless the moment a route let the caller choose the key: the collision it must answer
+    /// as a conflict was resolving to no columns and falling through to the raw provider exception.
+    /// PostgreSQL is where this surfaces, because its unique violation reports a constraint name and no
+    /// columns at all.
+    /// </remarks>
+    /// <param name="constraintName">The engine's own constraint name.</param>
+    /// <param name="rows">The entity type being written.</param>
+    private static IEnumerable<string> PrimaryKeyColumns(string constraintName, IEntityType rows) =>
+        rows.FindPrimaryKey() is { } key
+        && string.Equals(key.GetName(), constraintName, StringComparison.Ordinal)
+            ? key.Properties.Select(property => property.Name)
+            : [];
 }
