@@ -81,6 +81,44 @@ public abstract class AlvoDataOutboxTests
     }
 
     /// <summary>
+    /// <b>A batch emits one event per row, and that is a cost rather than a design goal.</b> Three rows in
+    /// one transaction queue three events, so a thousand-row import fans out to a thousand deliveries.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>baas-analyza</c> §3 asks for the opposite — <em>"import 10k riadkov nesmie znamenať 10k
+    /// webhookov"</em>, with the acceptance criterion <em>"Bulk insert 10k riadkov s batch pravidlom = 1
+    /// batch event"</em>. Coalescing is a descriptor feature (a rule declares batch delivery: a schema
+    /// change, a compiler change and a new event shape), so it is <b>#193</b> rather than this PR.
+    /// </para>
+    /// <para>
+    /// <b>Asserted so the follow-up has a failing test to flip rather than only prose to edit.</b> When #193
+    /// lands, this fact is the one that has to change, and it will say so out loud instead of a subscriber
+    /// discovering the fan-out in production.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_batch_emits_one_event_per_row()
+    {
+        var world = await VehiclesWorldAsync();
+
+        var result = await world.Data.CreateManyAsync(
+            Vehicles,
+            [Payload("vw", vin: null), Payload("audi", vin: null), Payload("skoda", vin: null)],
+            Caller,
+            cancellationToken: Ct);
+
+        result.Rows.Count.ShouldBe(3);
+
+        var events = await world.EventsAsync();
+        events.Select(queued => queued.Type).ShouldBe(
+            [Created, Created, Created],
+            customMessage: "one per row today — #193 is where this becomes one per batch");
+        events.Select(queued => queued.Subject).Distinct(StringComparer.Ordinal).Count().ShouldBe(
+            3, "each names its own row, so a subscriber can tell them apart");
+    }
+
+    /// <summary>
     /// A delete queues one event carrying the pre-image, and no record at all.
     /// </summary>
     /// <remarks>

@@ -224,31 +224,6 @@ internal static class QueryViolations
         + "order, and each at most once.");
 
     /// <summary>
-    /// The refusal for a sort key a paged read cannot use, carrying the port's own wording.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// This one <em>does</em> name the field, because the port's message does and because the field is
-    /// provably declared and unmasked by the time this is reachable — the availability check runs first, so
-    /// naming it answers nothing the caller did not already know.
-    /// </para>
-    /// <para>
-    /// <b>The fix names only the achievable action.</b> The port's own message offers a second one — read the
-    /// whole set with no limit, offset or cursor — which <em>this surface cannot do</em>: every list gets
-    /// <see cref="AlvoApiOptions.DefaultPageSize"/>, so a caller following that advice sends the identical
-    /// request, is refused identically, and has nowhere left to go. Repeating a suggestion the layer forbids is
-    /// worse than omitting it. The underlying limitation belongs in the Data API's own documentation, not in a
-    /// per-request message.
-    /// </para>
-    /// </remarks>
-    /// <param name="message">The port's own refusal text.</param>
-    internal static AlvoViolation UnpageableSortKey(string message) => new(
-        ReservedQueryKeys.Order,
-        "unpageable-sort-key",
-        message,
-        "Sort by a field the entity declares required.");
-
-    /// <summary>
     /// The refusal for a sort key named twice. A repeated key can never change the order — the first
     /// occurrence already decides it — so it is a mistake rather than a request, and admitting it would let a
     /// caller make the server compose an unbounded <c>ORDER BY</c>.
@@ -265,6 +240,222 @@ internal static class QueryViolations
         "malformed-select",
         "The projection names no fields.",
         "Write select=make,model — or omit 'select' entirely for every readable field.");
+
+    /// <summary>
+    /// The refusal for a projection entry that is neither <c>field</c> nor <c>alias:field</c>, or whose
+    /// alias is not shaped like a field name.
+    /// </summary>
+    /// <remarks>
+    /// <b>An alias must match the field-name grammar</b> (<c>^[a-z][a-z0-9_]{0,62}$</c>) and must not be one
+    /// of the reserved names. A deliberate narrowing of PostgREST, which admits an arbitrary alias: an alias
+    /// is a field name <em>in the response</em>, so an agent reading the body should not have to tell a real
+    /// field from caller-supplied text, and an unbounded alias is caller-controlled bytes in a response key
+    /// for no gain. The reserved-name half is consistency rather than necessity — an alias is never a query
+    /// key and creates no ambiguity — but a response key no descriptor is allowed to declare should not be
+    /// reachable by renaming.
+    /// </remarks>
+    internal static AlvoViolation MalformedSelectAlias() => new(
+        ReservedQueryKeys.Select,
+        "malformed-select-alias",
+        "A projection entry is not a field name or an 'alias:field' pair.",
+        "Write select=make or select=label:make; an alias is lower snake_case, starts with a letter, is at "
+        + $"most 63 characters, and is none of {ReservedQueryKeys.AsList}.");
+
+    /// <summary>
+    /// The refusal for one response key claimed twice — by two different fields, or by an alias onto a name
+    /// the framework owns.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Two sources for one key</b> is a request with no correct answer, and answering with either would
+    /// silently drop a field the caller asked for. A repeated <em>identical</em> entry is not this
+    /// condition: it dedupes, as it always has, because a repeat claims nothing new.
+    /// </para>
+    /// <para>
+    /// <b>An alias onto a framework-owned name</b> — <c>select=id:make</c>, <c>select=tenant_id:make</c> —
+    /// is refused for a different reason, and the reason is worth stating correctly because an earlier
+    /// draft of this remark got it wrong. It is <em>not</em> that two values would arrive under one key:
+    /// <c>DataApiPage.Render</c> emits only the projection's own keys, so the port's real <c>id</c> is
+    /// dropped and nothing collides. It is that the response would carry a key that reads as a framework
+    /// column and is not one — the same outcome <see cref="MalformedSelectAlias"/>'s reserved-name check
+    /// exists to prevent, and for the same reason: a key no descriptor is allowed to declare should not be
+    /// reachable by renaming. Tested against <em>every</em> managed name rather than the ones this entity
+    /// happens to carry, because a global entity has no <c>tenant_id</c> and a response key called
+    /// <c>tenant_id</c> would still read as one.
+    /// </para>
+    /// <para>
+    /// <b>What this deliberately does not refuse:</b> an alias onto another <em>declared</em> field's name
+    /// — <c>select=year:make</c> answers <c>{"year": "skoda"}</c> where the published schema declares
+    /// <c>year</c> an integer. That is inherent to PostgREST-style aliasing, which Alvo adopts rather than
+    /// narrows here: the caller chose both halves, the value is one they may read, and refusing it would
+    /// make the alias useless for the renaming it exists for. Recorded so the asymmetry with the managed
+    /// names reads as a decision.
+    /// </para>
+    /// </remarks>
+    internal static AlvoViolation CollidingProjectionKey() => new(
+        ReservedQueryKeys.Select,
+        "colliding-projection-key",
+        "Two projected fields would answer under the same response key.",
+        "Give each projected field its own key, and do not alias onto a framework-managed column's name.");
+
+    /// <summary>The refusal for a projection naming more distinct keys than the caller can read fields.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The bound aliases make necessary.</b> Before them the projection was self-bounding: every entry
+    /// resolved to a declared field and duplicates collapsed, so a response could never carry more keys than
+    /// the entity has fields. An alias can name one column under arbitrarily many keys, leaving only the
+    /// transport's URL limit in the way — the "a bound the caller controls" shape
+    /// <see cref="AlvoFilter.MaxTerms"/> exists to close on the filter side.
+    /// </para>
+    /// <para>
+    /// <b>Derived rather than chosen</b>, so it needs no judgement call, no configuration knob and no
+    /// per-engine measurement: a response with more keys than the caller has readable fields is a
+    /// duplication request, not a read. Charged per newly claimed <em>distinct</em> key, which is what keeps
+    /// a repeated entry deduping instead of counting.
+    /// </para>
+    /// <para>
+    /// <b>The caller's readable count, not the entity's declared one</b> — a deliberate change from the
+    /// design's first shape, which said <c>entity.Fields.Count</c>. That number, published here in the fix
+    /// suggestion, would have told a caller who hit the bound how many fields the entity declares, while an
+    /// unprojected list already tells them how many they can read: the difference is exactly the number of
+    /// fields hidden from them. An alias makes that cheap to ask for, because one readable field mints
+    /// unlimited distinct keys. The readable count is both tighter and silent.
+    /// </para>
+    /// </remarks>
+    /// <param name="maxKeys">How many fields this caller can read.</param>
+    internal static AlvoViolation ProjectionTooWide(int maxKeys) => new(
+        ReservedQueryKeys.Select,
+        "projection-too-wide",
+        "The projection names more keys than there are fields to read.",
+        $"Name at most {maxKeys} distinct keys; aliasing one field under many keys returns the same value "
+        + "repeatedly.");
+
+    /// <summary>The read path's wording for a body one of the shared bounds refused.</summary>
+    /// <remarks>
+    /// <b>The same stable code as the write path's, and deliberately not the same fix suggestion.</b>
+    /// <see cref="PayloadViolations"/>' four bound refusals tell a caller to send fewer fields, to flatten a
+    /// <c>json</c> field's value, or that a write payload is a flat map of declared fields — every one of
+    /// which is advice about an operation this endpoint does not perform. A code keys on the kind of
+    /// refusal; the sentence belongs to the surface.
+    /// </remarks>
+    /// <param name="refusal">The bound that stopped the body.</param>
+    /// <param name="options">The options the bounds are published from.</param>
+    internal static AlvoViolation Body(BodyRefusal refusal, AlvoApiOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return new AlvoViolation(
+            PayloadViolations.BodyPointer,
+            BoundedJsonBody.CodeOf(refusal),
+            BodyMessage(refusal, options),
+            BodyFix(refusal, options));
+    }
+
+    /// <summary>What went wrong, said as a read rather than as a write.</summary>
+    /// <param name="refusal">The bound that stopped the body.</param>
+    /// <param name="options">The options the bounds are published from.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="refusal"/> is not one of the named cases.</exception>
+    private static string BodyMessage(BodyRefusal refusal, AlvoApiOptions options) => refusal switch
+    {
+        BodyRefusal.NotAnObject => "The query body must be a JSON object of query parameters.",
+        BodyRefusal.MalformedJson => "The query body is not well-formed JSON.",
+        BodyRefusal.TooLarge =>
+            $"The query body is larger than {options.MaxRequestBodyBytes} bytes, the configured maximum.",
+        BodyRefusal.TooDeep =>
+            $"The query body nests deeper than {options.MaxPayloadDepth} levels, the configured maximum.",
+        BodyRefusal.TooManyKeys =>
+            $"The query body carries more than {options.MaxPayloadKeys} parameters, the configured maximum.",
+        BodyRefusal.DuplicateName => "The query body names one parameter twice.",
+        _ => throw new ArgumentOutOfRangeException(
+            nameof(refusal), refusal, "Unmapped body refusal; give it the read path's wording here."),
+    };
+
+    /// <summary>What to change, in terms of the parameters a query carries rather than the fields a write sends.</summary>
+    /// <param name="refusal">The bound that stopped the body.</param>
+    /// <param name="options">The options the bounds are published from.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="refusal"/> is not one of the named cases.</exception>
+    private static string BodyFix(BodyRefusal refusal, AlvoApiOptions options) => refusal switch
+    {
+        BodyRefusal.NotAnObject =>
+            "Send {\"<parameter>\":\"<operator>.<operand>\",…} — the same parameters a query string "
+            + "carries. An empty object {} reads the first page with no filter.",
+        BodyRefusal.MalformedJson =>
+            "Check for an unterminated string, a trailing comma, or a truncated body.",
+        BodyRefusal.TooLarge =>
+            "Narrow the query, or split the read across requests. A body carries the parameters a query "
+            + "string would; if it is over the bound, it is carrying a candidate list or a filter this host "
+            + "has configured itself not to read in one request.",
+        BodyRefusal.TooDeep =>
+            "A query body is one level deep, or two where a repeated parameter is an array of strings.",
+        BodyRefusal.TooManyKeys =>
+            $"Send at most {options.MaxPayloadKeys} parameters. Repeat one parameter as an array of strings "
+            + "rather than spreading a filter across many.",
+        BodyRefusal.DuplicateName =>
+            "Send a repeated parameter once, as an array of strings: {\"or\":[\"(a.eq.1)\",\"(b.eq.2)\"]}. "
+            + "Two members with one name have no defined order, so answering with either would be a guess.",
+        _ => throw new ArgumentOutOfRangeException(
+            nameof(refusal), refusal, "Unmapped body refusal; give it the read path's fix suggestion here."),
+    };
+
+    /// <summary>The refusal for a query body carrying more parameter values than this API reads.</summary>
+    /// <remarks>
+    /// <b>Its own code because it counts something no other bound counts.</b>
+    /// <see cref="BoundedJsonBody"/>'s key bound counts property names at every depth, and an array's
+    /// elements are not property names — so a single parameter repeated half a million times satisfies every
+    /// shape bound the body is read under. The parser's own budgets would refuse the query, but only after
+    /// the transposition had built every value, which is the cost this refuses instead.
+    /// </remarks>
+    /// <param name="maxValues">The most values the body may carry.</param>
+    internal static AlvoViolation TooManyQueryValues(int maxValues) => new(
+        PayloadViolations.BodyPointer,
+        "too-many-query-values",
+        $"The query body carries more than {maxValues} parameter values, the configured maximum.",
+        "Repeat a parameter only as often as the query needs it. An array stands for the same parameter "
+        + "sent again, so a long one is a filter with that many terms.");
+
+    /// <summary>The refusal for a query parameter whose JSON value is not a value a query string could carry.</summary>
+    /// <remarks>
+    /// One code for null, an object, a nested array and an empty array alike: what they have in common is
+    /// that none of them names a value, and distinguishing them would describe the caller's own body back to
+    /// them for no fix they could not already make. The pointer is the parameter's <em>role</em>, so a
+    /// filter on a masked field cannot be told from one on an undeclared field by where the refusal points.
+    /// </remarks>
+    /// <param name="pointer">The role of the parameter the value belongs to.</param>
+    internal static AlvoViolation UnrepresentableQueryValue(string pointer) => new(
+        pointer,
+        "unrepresentable-query-value",
+        "A query parameter's value is not a string, a number, a boolean, or a non-empty array of those.",
+        "Write {\"year\":\"gte.2020\"} — a parameter's value is the text a query string would carry. "
+        + "Repeat a parameter as an array of strings; null, an object and an empty array name no value.");
+
+    /// <summary>The refusal for a projection carrying more comma-separated entries than the parser reads.</summary>
+    /// <remarks>
+    /// A separate code from <see cref="ProjectionTooWide"/> because it has a different cause and a different
+    /// fix: that one means "you asked for more keys than there are fields to read", this one means "you sent
+    /// more entries than this API will read", and a caller who repeated one field ten thousand times has hit
+    /// only the second. Charged while splitting rather than after, for the reason
+    /// <c>FilterParseScope</c>'s node budget is: a budget spent after the list is built does not bound it.
+    /// </remarks>
+    /// <param name="maxEntries">The most entries the parser reads.</param>
+    internal static AlvoViolation TooManySelectEntries(int maxEntries) => new(
+        ReservedQueryKeys.Select,
+        "too-many-select-entries",
+        "The projection carries more comma-separated entries than this API reads.",
+        $"List at most {maxEntries} entries. A repeated entry answers under one key, so naming one field "
+        + "many times returns the same value once and costs a parse each time.");
+
+    /// <summary>The refusal for a <c>like</c>/<c>ilike</c> pattern longer than this API passes to an engine.</summary>
+    /// <remarks>
+    /// Its own code rather than <see cref="UnrepresentableValue"/>'s, because nothing is wrong with the
+    /// <em>value</em>: it is a perfectly representable string, and what is refused is the cost of matching it
+    /// against every row. A caller told their value was unrepresentable would go looking for a type mistake.
+    /// </remarks>
+    /// <param name="maxLength">The longest pattern this API passes through.</param>
+    internal static AlvoViolation PatternTooLong(int maxLength) => new(
+        FilterPointer,
+        "pattern-too-long",
+        "A 'like' or 'ilike' pattern is longer than this API matches.",
+        $"Send a pattern of at most {maxLength} characters. Only the two pattern operators are bounded this "
+        + "way: every other operand is compared rather than matched, so its cost is its size.");
 
     /// <summary>The refusal for a parameter sent more than once, which anchors one setting two ways.</summary>
     /// <param name="pointer">The parameter that was repeated.</param>

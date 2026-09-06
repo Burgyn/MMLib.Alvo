@@ -67,13 +67,19 @@ await tp.Test("select narrows every row to exactly the named fields, in the orde
         first.EnumerateObject().Select(property => property.Name).ToArray());
 });
 
-await tp.Test("A paged read sorted by a nullable field is refused, naming the field and the fix.", async () =>
+await tp.Test("A paged read sorted by a nullable field is answered, and the placement decides the page.", async () =>
 {
-    var refused = tp.Responses["UnpageableSortKey"];
+    // Two of the seven rows carry a `scheduled_for`; five do not. Under `nullslast` the dated pair
+    // leads, newest first; under `nullsfirst` the first page is nothing but null-keyed rows. Both
+    // requests were a 422 before F4 — every list over HTTP is paged, and a paged read over a nullable
+    // sort key was refused, which made half the order grammar unreachable.
+    Equal(
+        new[] { "WO-1002", "WO-1001" },
+        (await PageColumn(tp.Responses["NullableSortKeyLast"], "reference")).Take(2).ToArray());
 
-    Equal("https://alvo.dev/errors/malformed-query", await ProblemType(refused));
-    Equal(new[] { "unpageable-sort-key" }, await ViolationCodes(refused));
-    Equal(new[] { "order" }, await ViolationPointers(refused));
+    var first = await BodyOf(tp.Responses["NullableSortKeyFirst"]);
+    True(first.GetProperty("items").EnumerateArray()
+        .All(row => row.GetProperty("scheduled_for").ValueKind == System.Text.Json.JsonValueKind.Null));
 });
 
 await tp.Test("An unrecognised sort modifier is refused rather than silently ignored.", async () =>

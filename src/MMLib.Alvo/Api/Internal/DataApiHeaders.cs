@@ -66,11 +66,24 @@ internal static class DataApiHeaders
             headers[ChallengeHeader] = new OpenApiHeaderReference(ChallengeHeader, document);
         }
 
+        if (CarriesPreferenceApplied(response))
+        {
+            headers[PreferenceAppliedHeader] = new OpenApiHeaderReference(PreferenceAppliedHeader, document);
+        }
+
         return headers;
     }
 
     /// <summary>
-    /// Registers, as document components, every one of the four headers that at least one of
+    /// Whether <paramref name="response"/> can carry <c>Preference-Applied</c>: the 200 that answers a list,
+    /// and nothing else. It is the only response that acts on a preference, and describing it elsewhere would
+    /// invite a client to send <c>Prefer</c> where nothing reads it.
+    /// </summary>
+    private static bool CarriesPreferenceApplied(DataApiDocumentation.Response response) =>
+        response.Status == StatusCodes.Status200OK && response.Body == DataApiDocumentation.ResponseBody.Page;
+
+    /// <summary>
+    /// Registers, as document components, every one of the five headers that at least one of
     /// <paramref name="operations"/> can actually answer with — so each described header is described once
     /// rather than once per response object, and a header no generated response ever carries (<c>ETag</c> on
     /// a descriptor with no audited entity) is never an orphan component.
@@ -81,9 +94,9 @@ internal static class DataApiHeaders
     /// cannot collide with a schema or a parameter component.
     /// </remarks>
     /// <param name="document">The document being built.</param>
-    /// <param name="operations">Every generated endpoint's operation and the entity it serves.</param>
+    /// <param name="operations">Every generated endpoint's kind and the entity it serves.</param>
     internal static void AddTo(
-        OpenApiDocument document, IEnumerable<(DataOperation Operation, EntitySchema Entity)> operations)
+        OpenApiDocument document, IEnumerable<(DataApiEndpointKind Kind, EntitySchema Entity)> operations)
     {
         ArgumentNullException.ThrowIfNull(document);
         ArgumentNullException.ThrowIfNull(operations);
@@ -104,6 +117,11 @@ internal static class DataApiHeaders
         {
             document.AddComponent(ChallengeHeader, Challenge);
         }
+
+        if (used.Contains(PreferenceAppliedHeader))
+        {
+            document.AddComponent(PreferenceAppliedHeader, PreferenceApplied);
+        }
     }
 
     /// <summary>
@@ -111,13 +129,14 @@ internal static class DataApiHeaders
     /// not among them — <see cref="AddTo"/> registers it unconditionally, since every generated response
     /// carries it, refusals included.
     /// </summary>
-    /// <param name="operations">Every generated endpoint's operation and the entity it serves.</param>
-    private static HashSet<string> UsedIds(IEnumerable<(DataOperation Operation, EntitySchema Entity)> operations)
+    /// <param name="operations">Every generated endpoint's kind and the entity it serves.</param>
+    private static HashSet<string> UsedIds(
+        IEnumerable<(DataApiEndpointKind Kind, EntitySchema Entity)> operations)
     {
         var used = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var (operation, entity) in operations)
+        foreach (var (kind, entity) in operations)
         {
-            foreach (var response in DataApiDocumentation.ResponsesFor(operation, entity))
+            foreach (var response in DataApiDocumentation.ResponsesFor(kind, entity))
             {
                 if (CarriesEntityTag(response.Status) && AlvoManagedColumns.VersionColumn(entity) is not null)
                 {
@@ -133,6 +152,11 @@ internal static class DataApiHeaders
                 {
                     used.Add(ChallengeHeader);
                 }
+
+                if (CarriesPreferenceApplied(response))
+                {
+                    used.Add(PreferenceAppliedHeader);
+                }
             }
         }
 
@@ -146,6 +170,8 @@ internal static class DataApiHeaders
     private const string LocationHeader = "Location";
 
     private const string ChallengeHeader = "WWW-Authenticate";
+
+    private const string PreferenceAppliedHeader = PreferHeader.AppliedName;
 
     /// <summary>
     /// Which statuses carry a tag: the ones that wrote a row, plus the 304 that stands in for one.
@@ -184,6 +210,18 @@ internal static class DataApiHeaders
     {
         Description = "The path of the created row, under the same route prefix the create was sent to.",
         Schema = new OpenApiSchema { Type = JsonSchemaType.String },
+    };
+
+    private static OpenApiHeader PreferenceApplied => new()
+    {
+        Description =
+            "What was done with the request's `Prefer` header (RFC 7240 §3). Present only when a preference "
+            + "was applied, and always `count=exact` — `count=planned` and `count=estimated` degrade to a "
+            + "real count, and this is where a caller who asked for an estimate learns they received the "
+            + "exact one. Absent means no preference was applied, which is how RFC 7240 reports one this "
+            + "server does not recognise.",
+        Schema = new OpenApiSchema { Type = JsonSchemaType.String },
+        Example = JsonValue.Create("count=exact"),
     };
 
     private static OpenApiHeader Challenge => new()

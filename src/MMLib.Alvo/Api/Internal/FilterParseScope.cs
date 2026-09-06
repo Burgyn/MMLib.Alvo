@@ -50,4 +50,42 @@ internal sealed class FilterParseScope(QueryFieldResolver fields)
     /// <param name="count">How many candidates one list carries.</param>
     internal bool TryChargeCandidates(int count) =>
         (_candidates += count) <= AlvoFilter.MaxInCandidates;
+
+    /// <summary>
+    /// How many <c>in</c> candidates this request may still spend, plus one — the largest list a splitter
+    /// should bother producing before the charge below would refuse it anyway.
+    /// </summary>
+    /// <remarks>
+    /// <b>A splitter that used the per-list bound alone would materialise the whole list and only then be
+    /// refused by the running total.</b> That is the defect making the split lazy exists to close, one level
+    /// up: 256 terms each carrying a full list is 256 000 substrings built and thrown away, and a request
+    /// body — unlike a request line — is large enough to send them. Passing this instead makes the split stop
+    /// at the first list the total cannot afford.
+    /// <para>
+    /// <b>Plus one, so the caller still refuses rather than accepts.</b> A splitter given exactly the
+    /// remaining allowance would produce a list the charge accepts; given one more, it either produces a list
+    /// the charge refuses or refuses the split itself. Both answer <c>too-many-in-candidates</c>, which is
+    /// why the extra element is free.
+    /// </para>
+    /// <para>
+    /// <b>Never below one, and that is a correctness guard rather than tidiness.</b> A charge that fails
+    /// still spends — <see cref="TryChargeCandidates"/> adds before it compares — so a request carrying a
+    /// second over-long list arrives here with the allowance already negative. A splitter is entitled to
+    /// refuse a maximum of zero, so passing one through would turn a caller's over-wide filter into a 500
+    /// instead of the 422 it earns. One is the smallest bound that still refuses.
+    /// </para>
+    /// </remarks>
+    internal int AffordableCandidates => Math.Max(1, AlvoFilter.MaxInCandidates - _candidates + 1);
+
+    /// <summary>
+    /// How many filter nodes this request may still spend, plus one — the largest group a splitter should
+    /// bother producing.
+    /// </summary>
+    /// <remarks>
+    /// The node counterpart of <see cref="AffordableCandidates"/>, and needed for the same reason: a group's
+    /// members are split before any of them is charged, so a request that has already spent its budget could
+    /// still make the splitter build a maximum-width group. The <c>+ 1</c> and the floor of one serve the
+    /// same purposes they serve there.
+    /// </remarks>
+    internal int AffordableNodes => Math.Max(1, AlvoFilter.MaxTerms - _nodes + 1);
 }

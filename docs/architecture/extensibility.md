@@ -123,8 +123,15 @@ extension method in its own package, never an edit to `AddAlvo`/`IAlvoBuilder`.
       `MapAlvoHealth()` + `MapAlvoDataApi()` and nothing else, and **both parts stay
       public** — a host may map only one of them, or mount them under different
       route groups, exactly as `MapControllers` coexists with the finer-grained
-      controller mappings. A fact asserts the umbrella and its parts produce the
-      same endpoint data sources, so the two cannot drift. Health maps **first**:
+      controller mappings. Calling the part is also the only way to get a
+      convention builder: **`MapAlvoDataApi()` returns `IEndpointConventionBuilder`**
+      (#182) so a host can attach `RequireRateLimiting`, an authorization policy or a
+      telemetry tag to Alvo's generated routes, while `MapAlvo()` returns the route
+      builder and `MapAlvoHealth()` is deliberately not chainable — one builder over
+      the probes *and* the Data API would let an authorization policy reach
+      `/health/live`, and a container probe presents no credential. A fact
+      asserts the umbrella and its parts produce the same endpoint data
+      sources, so the two cannot drift. Health maps **first**:
       `MapAlvoDataApi` refuses a host whose Data API services are absent, and an
       operator facing that refusal needs a container that can still be probed.
     - **Alvo never calls `UseRouting`/`UseEndpoints` on a host's behalf, and never

@@ -90,17 +90,25 @@ public sealed class LazyRouteMaterialisationTests
         {
             paths.ShouldContain($"/api/{entity}");
             paths.ShouldContain($"/api/{entity}/{{id}}");
+            paths.ShouldContain($"/api/{entity}/query");
         }
 
         paths.Count.ShouldBe(
             _entities.Length * PathsPerEntity,
-            $"the document must list a collection and an item path per declared entity: {string.Join(", ", paths)}");
+            "the document must list a collection, an item and a query path per declared entity: "
+            + string.Join(", ", paths));
     }
 
     /// <summary>
-    /// A collection path and an item path, which is what five routes collapse to once the verbs share a path.
+    /// A collection path, an item path, the query path and the batch path, which is what nine routes
+    /// collapse to once the verbs sharing a path are folded together.
     /// </summary>
-    private const int PathsPerEntity = 2;
+    /// <remarks>
+    /// The two arithmetics are deliberately different. The body-shaped read added one path and one route; the
+    /// batch added one path and <em>three</em> routes, because its three verbs share one path. A change that
+    /// moved these two numbers by the same amount would be describing something else.
+    /// </remarks>
+    private const int PathsPerEntity = 4;
 
     /// <summary>
     /// <c>WebApplicationBuilder</c> wires <c>UseRouting</c>/<c>UseEndpoints</c> only when

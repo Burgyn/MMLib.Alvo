@@ -1,0 +1,296 @@
+<title>{{TITLE}}</title>
+
+<!--
+  alvo-pr-report — FIXED TEMPLATE. Do not add, remove, rename or reorder
+  sections. Fill the {{...}} slots and the repeatable blocks marked REPEAT.
+  A section with nothing to say keeps its heading and states the empty case
+  in one sentence inside <p class="empty">.
+-->
+
+<style>
+  :root {
+    --bg: #fbfaf8;
+    --panel: #ffffff;
+    --ink: #17171a;
+    --ink-2: #55555f;
+    --ink-3: #85858f;
+    --line: #e5e3de;
+    --line-2: #d6d3cc;
+    --accent: #4338ca;
+    --proven: #10743f;
+    --proven-bg: #e7f4ec;
+    --assumed: #8a5a06;
+    --assumed-bg: #fbf1dd;
+    --risk: #a3231f;
+    --risk-bg: #fbeae9;
+    --code-bg: #f4f2ee;
+    --add: #10743f;
+    --del: #a3231f;
+    --radius: 10px;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: ui-sans-serif, -apple-system, "Segoe UI", Inter, system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #131316; --panel: #1a1a1e; --ink: #ecebe8; --ink-2: #a9a8a4;
+      --ink-3: #79787d; --line: #2b2b31; --line-2: #3a3a42; --accent: #a5a0f5;
+      --proven: #5cc98d; --proven-bg: #14301f; --assumed: #e0b25c; --assumed-bg: #322612;
+      --risk: #f08a83; --risk-bg: #331816; --code-bg: #212127;
+      --add: #5cc98d; --del: #f08a83;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #131316; --panel: #1a1a1e; --ink: #ecebe8; --ink-2: #a9a8a4;
+    --ink-3: #79787d; --line: #2b2b31; --line-2: #3a3a42; --accent: #a5a0f5;
+    --proven: #5cc98d; --proven-bg: #14301f; --assumed: #e0b25c; --assumed-bg: #322612;
+    --risk: #f08a83; --risk-bg: #331816; --code-bg: #212127;
+    --add: #5cc98d; --del: #f08a83;
+  }
+
+  body { background: var(--bg); color: var(--ink); font-family: var(--sans);
+         font-size: 15.5px; line-height: 1.6; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 40px 24px 96px; }
+
+  /* ---------- 0. header strip ---------- */
+  .hero { border-bottom: 1px solid var(--line); padding-bottom: 22px; margin-bottom: 8px; }
+  .kicker { font-family: var(--mono); font-size: 12px; letter-spacing: .06em;
+            text-transform: uppercase; color: var(--ink-3); }
+  .hero h1 { font-size: 30px; line-height: 1.22; letter-spacing: -.02em;
+             margin: 8px 0 14px; font-weight: 650; }
+  .facts { display: flex; flex-wrap: wrap; gap: 8px 10px; margin-bottom: 14px; }
+  .fact { font-family: var(--mono); font-size: 12px; color: var(--ink-2);
+          border: 1px solid var(--line-2); border-radius: 999px; padding: 3px 10px; }
+  .fact b { color: var(--ink); font-weight: 600; }
+  .gates { display: flex; flex-wrap: wrap; gap: 6px; }
+  .gate { font-family: var(--mono); font-size: 11.5px; padding: 3px 9px;
+          border-radius: 6px; border: 1px solid transparent; }
+  .g-ok   { color: var(--proven);  background: var(--proven-bg);  border-color: color-mix(in srgb, var(--proven) 25%, transparent); }
+  .g-warn { color: var(--assumed); background: var(--assumed-bg); border-color: color-mix(in srgb, var(--assumed) 25%, transparent); }
+  .g-bad  { color: var(--risk);    background: var(--risk-bg);    border-color: color-mix(in srgb, var(--risk) 25%, transparent); }
+  .g-na   { color: var(--ink-3);   border-color: var(--line-2); }
+
+  /* ---------- layout ---------- */
+  .cols { display: grid; grid-template-columns: 168px minmax(0,1fr); gap: 40px; margin-top: 28px; }
+  @media (max-width: 780px) { .cols { grid-template-columns: 1fr; gap: 0; } .toc { display: none; } }
+  .toc { position: sticky; top: 24px; align-self: start; font-size: 13px; }
+  .toc a { display: block; padding: 5px 0; color: var(--ink-3); text-decoration: none;
+           border-left: 2px solid transparent; padding-left: 10px; }
+  .toc a:hover { color: var(--ink); border-left-color: var(--accent); }
+  .toc .n { font-family: var(--mono); color: var(--line-2); margin-right: 7px; }
+
+  section { padding: 26px 0; border-top: 1px solid var(--line); }
+  section:first-child { border-top: none; padding-top: 4px; }
+  section > h2 { font-size: 13px; font-family: var(--mono); letter-spacing: .05em;
+                 text-transform: uppercase; color: var(--ink-3); font-weight: 500;
+                 margin-bottom: 16px; }
+  section > h2 .n { color: var(--accent); margin-right: 8px; }
+  p { margin: 0 0 12px; color: var(--ink-2); }
+  p.lead { color: var(--ink); font-size: 17px; line-height: 1.5; }
+  p.empty { color: var(--ink-3); font-style: italic; }
+  strong { color: var(--ink); font-weight: 620; }
+  a { color: var(--accent); }
+  code { font-family: var(--mono); font-size: .88em; background: var(--code-bg);
+         padding: 1px 5px; border-radius: 4px; }
+
+  /* ---------- 1. capability ---------- */
+  .caps { list-style: none; display: grid; gap: 12px; }
+  .caps li { background: var(--panel); border: 1px solid var(--line);
+             border-radius: var(--radius); padding: 14px 16px; }
+  .caps b { display: block; margin-bottom: 3px; color: var(--ink); }
+  .caps span { color: var(--ink-2); font-size: 14.5px; }
+
+  /* ---------- 2. see it ---------- */
+  .demo { margin-bottom: 22px; }
+  .demo .cap { font-size: 14px; color: var(--ink); margin-bottom: 8px; }
+  .demo .cap::before { content: "▸ "; color: var(--accent); }
+  pre { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+        padding: 13px 15px; overflow-x: auto; font-family: var(--mono);
+        font-size: 12.8px; line-height: 1.55; color: var(--ink); margin: 0; }
+  pre .c { color: var(--ink-3); }
+  pre .add { color: var(--add); }
+  pre .del { color: var(--del); }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 700px) { .pair { grid-template-columns: 1fr; } }
+  .pair .lbl { font-family: var(--mono); font-size: 11px; text-transform: uppercase;
+               letter-spacing: .05em; color: var(--ink-3); margin-bottom: 5px; }
+
+  /* ---------- 3. how it works ---------- */
+  .diagram { background: var(--panel); border: 1px solid var(--line);
+             border-radius: var(--radius); padding: 18px; overflow-x: auto; margin-bottom: 14px; }
+  .mermaid { background: transparent; }
+
+  /* ---------- 4. api delta ---------- */
+  .tablewrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; font-family: var(--mono); font-size: 11px; text-transform: uppercase;
+       letter-spacing: .05em; color: var(--ink-3); font-weight: 500;
+       padding: 0 12px 8px 0; border-bottom: 1px solid var(--line); }
+  td { padding: 10px 12px 10px 0; border-bottom: 1px solid var(--line); color: var(--ink-2);
+       vertical-align: top; }
+  td.sym { font-family: var(--mono); font-size: 12.5px; color: var(--ink); white-space: nowrap; }
+  .tag { font-family: var(--mono); font-size: 11px; padding: 2px 7px; border-radius: 5px; }
+  .t-add { color: var(--proven); background: var(--proven-bg); }
+  .t-chg { color: var(--assumed); background: var(--assumed-bg); }
+  .t-rem { color: var(--risk); background: var(--risk-bg); }
+
+  /* ---------- 5. decisions ---------- */
+  .decision { background: var(--panel); border: 1px solid var(--line);
+              border-radius: var(--radius); padding: 16px 18px; margin-bottom: 12px; }
+  .decision h3 { font-size: 15.5px; margin-bottom: 10px; font-weight: 620; }
+  .decision dl { display: grid; grid-template-columns: 88px minmax(0,1fr); gap: 6px 14px; font-size: 14.5px; }
+  .decision dt { font-family: var(--mono); font-size: 11px; text-transform: uppercase;
+                 letter-spacing: .04em; color: var(--ink-3); padding-top: 3px; }
+  .decision dd { color: var(--ink-2); margin: 0; }
+  .decision dd.fore { color: var(--ink-2); border-left: 2px solid var(--line-2); padding-left: 10px; }
+
+  /* ---------- 6. evidence ---------- */
+  .ev { list-style: none; display: grid; gap: 9px; }
+  .ev li { display: grid; grid-template-columns: 20px minmax(0,1fr); gap: 10px;
+           font-size: 14.5px; color: var(--ink-2); }
+  .ev .dot { width: 9px; height: 9px; border-radius: 50%; margin-top: 7px; }
+  .d-proven  { background: var(--proven); }
+  .d-assumed { background: var(--assumed); }
+  .d-risk    { background: var(--risk); }
+  .ev .src { display: block; font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); margin-top: 2px; }
+  .unverified { font-family: var(--mono); font-size: 10.5px; color: var(--assumed);
+                background: var(--assumed-bg); padding: 1px 6px; border-radius: 4px; margin-left: 6px; }
+
+  /* ---------- 7. risks ---------- */
+  .risk-item { border-left: 3px solid var(--line-2); padding: 2px 0 2px 14px; margin-bottom: 14px; }
+  .risk-item.high { border-left-color: var(--risk); }
+  .risk-item.med  { border-left-color: var(--assumed); }
+  .risk-item b { display: block; margin-bottom: 2px; }
+  .risk-item span { color: var(--ink-2); font-size: 14.5px; }
+
+  /* ---------- 8. direction ---------- */
+  .next { list-style: none; display: grid; gap: 10px; }
+  .next li { display: grid; grid-template-columns: 96px minmax(0,1fr); gap: 14px;
+             font-size: 14.5px; color: var(--ink-2); align-items: baseline; }
+  .next .when { font-family: var(--mono); font-size: 11px; text-transform: uppercase;
+                letter-spacing: .04em; color: var(--ink-3); }
+  .principles { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 16px; }
+  .principle { font-family: var(--mono); font-size: 11.5px; color: var(--ink-2);
+               border: 1px solid var(--line-2); border-radius: 6px; padding: 2px 8px; }
+
+  footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--line);
+           font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); }
+</style>
+
+<div class="wrap">
+
+  <header class="hero">
+    <div class="kicker">{{PHASE}} · PR #{{PR_NUMBER}} · {{DATE}}</div>
+    <h1>{{HEADLINE}}</h1>
+    <div class="facts">
+      <span class="fact">issue <b>#{{ISSUE}}</b></span>
+      <span class="fact">files <b>{{FILES}}</b></span>
+      <span class="fact">+<b>{{ADDED}}</b> / −<b>{{DELETED}}</b></span>
+      <span class="fact">public API <b>{{API_DELTA_COUNT}}</b></span>
+      <span class="fact">risk <b>{{RISK}}</b></span>
+    </div>
+    <!-- REPEAT gate: one chip per gate, class g-ok | g-warn | g-bad | g-na -->
+    <div class="gates">{{GATES}}</div>
+  </header>
+
+  <div class="cols">
+    <nav class="toc">
+      <a href="#capability"><span class="n">1</span>New ability</a>
+      <a href="#see-it"><span class="n">2</span>See it</a>
+      <a href="#how"><span class="n">3</span>How it works</a>
+      <a href="#api"><span class="n">4</span>Public API</a>
+      <a href="#decisions"><span class="n">5</span>Decisions</a>
+      <a href="#evidence"><span class="n">6</span>Evidence</a>
+      <a href="#risks"><span class="n">7</span>Risks</a>
+      <a href="#direction"><span class="n">8</span>Direction</a>
+    </nav>
+
+    <main>
+
+      <!-- 1 — max ~80 words. Capability language, not class names. -->
+      <section id="capability">
+        <h2><span class="n">1</span>What Alvo can now do that it could not</h2>
+        <ul class="caps">
+          <!-- REPEAT capability (1–3) -->
+          <li><b>{{CAP_TITLE}}</b><span>{{CAP_BODY}}</span></li>
+        </ul>
+      </section>
+
+      <!-- 2 — max ~250 words of prose; snippets do not count. 2–4 demos. -->
+      <section id="see-it">
+        <h2><span class="n">2</span>See it</h2>
+        <!-- REPEAT demo (2–4). Use .pair for before/after, single <pre> otherwise. -->
+        <div class="demo">
+          <div class="cap">{{DEMO_CAPTION}}</div>
+          <pre>{{DEMO_CODE}}</pre>
+        </div>
+      </section>
+
+      <!-- 3 — one diagram + max 5 sentences. The new mechanism only. -->
+      <section id="how">
+        <h2><span class="n">3</span>How it works</h2>
+        <div class="diagram"><pre class="mermaid">{{DIAGRAM}}</pre></div>
+        <p>{{HOW_PROSE}}</p>
+      </section>
+
+      <!-- 4 — sourced from the PublicApi.*.verified.txt diff, never from impression. -->
+      <section id="api">
+        <h2><span class="n">4</span>Public API delta</h2>
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>Symbol</th><th>Change</th><th>What it means for a consumer</th><th>Breaking</th></tr></thead>
+            <tbody>
+              <!-- REPEAT api row -->
+              <tr><td class="sym">{{SYMBOL}}</td><td><span class="tag t-add">added</span></td><td>{{MEANING}}</td><td>{{BREAKING}}</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 5 — max 3 cards, ~150 words. More than 3 decisions: link the spec. -->
+      <section id="decisions">
+        <h2><span class="n">5</span>Decisions</h2>
+        <!-- REPEAT decision (≤3) -->
+        <div class="decision">
+          <h3>{{DECISION_TITLE}}</h3>
+          <dl>
+            <dt>Chose</dt><dd>{{CHOSE}}</dd>
+            <dt>Rejected</dt><dd>{{REJECTED}}</dd>
+            <dt>Because</dt><dd>{{BECAUSE}}</dd>
+            <dt>Forecloses</dt><dd class="fore">{{FORECLOSES}}</dd>
+          </dl>
+        </div>
+      </section>
+
+      <!-- 6 — claim + source, every line. Never "all green". -->
+      <section id="evidence">
+        <h2><span class="n">6</span>Evidence</h2>
+        <ul class="ev">
+          <!-- REPEAT evidence: dot class d-proven | d-assumed | d-risk -->
+          <li><span class="dot d-proven"></span><span>{{CLAIM}}<span class="src">{{SOURCE}}</span></span></li>
+        </ul>
+      </section>
+
+      <!-- 7 — adversarial. At least one item, always. -->
+      <section id="risks">
+        <h2><span class="n">7</span>Risks, debts, open questions</h2>
+        <!-- REPEAT risk: class high | med | (none) -->
+        <div class="risk-item high"><b>{{RISK_TITLE}}</b><span>{{RISK_BODY}}</span></div>
+      </section>
+
+      <!-- 8 — direction first, next steps second. ~120 words. -->
+      <section id="direction">
+        <h2><span class="n">8</span>Where this puts us</h2>
+        <p class="lead">{{DIRECTION}}</p>
+        <div class="principles">{{PRINCIPLES}}</div>
+        <p><strong>YOU ARE HERE:</strong> {{PLAN_POSITION}}</p>
+        <ul class="next">
+          <!-- REPEAT next (2–4) -->
+          <li><span class="when">{{WHEN}}</span><span>{{NEXT_BODY}}</span></li>
+        </ul>
+      </section>
+
+    </main>
+  </div>
+
+  <footer>Generated by alvo-pr-report from {{SOURCES}} · head {{SHA}}</footer>
+</div>

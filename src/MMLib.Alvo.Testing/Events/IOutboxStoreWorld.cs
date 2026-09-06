@@ -9,9 +9,10 @@ namespace MMLib.Alvo.Testing.Events;
 /// <remarks>
 /// <para>
 /// The shape mirrors <see cref="Data.IAlvoDataOutboxWorld"/>: one port under test plus only what the facts
-/// cannot ask the port itself. <see cref="IOutboxStore"/> deliberately has no way to enqueue — the write path
-/// is what appends, and a store that could would be a second writer of a framework table — so seeding is the
-/// implementer's job.
+/// cannot ask the port itself. <see cref="IOutboxStore.AppendAsync"/> enqueues a <b>custom application
+/// event</b> and nothing else — a <em>data</em> event is appended by the driver's own writer, on the caller's
+/// own transaction, because that is what makes "no lost and no phantom event" true — so seeding a queue that
+/// looks like one a write produced is still the implementer's job, and the facts that claim from it say so.
 /// </para>
 /// <para>
 /// <b>Time is advanced through this world rather than through a clock this library defines.</b> A lease

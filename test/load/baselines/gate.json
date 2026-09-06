@@ -1,0 +1,122 @@
+{
+  "$comment": [
+    "The load gate's declared limits. Judged by scripts/assert-load-baseline; produced by",
+    "scripts/test-load. Design: docs/superpowers/specs/2026-09-02-f4-pr-e-load-test-foundations-design.md.",
+    "",
+    "EVERY NUMBER HERE IS MEASURED, NOT CHOSEN. `observed` records what real runs produced on the",
+    "rig in `measuredOn`; `max` is the worst of those with the headroom stated per row. A ceiling",
+    "invented at a desk is either so loose it gates nothing or so tight it fires on the first PR,",
+    "and there is no way to tell which without measuring. data-api.md sets the same precedent for",
+    "the filter budgets: 'The two term/candidate numbers are measured rather than chosen.'",
+    "",
+    "THE GATING STATISTIC IS `min`, NOT p95 -- AND THE FIRST CI RUN SHARPENED THE REASON. On the",
+    "maintainer's macOS + Docker Desktop rig every p95 landed within 8-9 ms of every other, so the",
+    "p95 ratios came out 0.97 to 1.03 across shapes that plainly do different work, while `min`",
+    "separated them cleanly. On GitHub's ubuntu-latest, p95 does NOT degenerate: its p95 ratios",
+    "track the min ratios within about 10% (count_exact 1.87 vs 1.90, sort_nullable 1.98 vs 2.03).",
+    "So the degeneracy is a property of THAT rig, not of the gate tier -- and that is exactly why",
+    "`min` is the right choice: it is the statistic that means the same thing on both rigs, where",
+    "p95 collapses on one of them. A gate whose statistic behaves differently on the maintainer's",
+    "machine than in CI is a gate nobody can debug locally. p95 stays measured, printed, and",
+    "published by the calibration tier, because it is the number F4's DoD asks for.",
+    "",
+    "THIS FILE IS A MOVED-GOALPOST SURFACE. A red gate can be made green by editing it, which is the",
+    "same hazard a *.verified.* snapshot carries -- so .claude/hooks/turn-review-gate treats it as a",
+    "judged baseline and dispatches alvo-snapshot-judge when it moves. Move a ceiling only in the",
+    "same PR as the change that caused it, and say in the PR why the feature is worth the number.",
+    "",
+    "THE SPREAD IS PART OF THE EVIDENCE, AND SO IS THE RIG. `observed` lists every run, not the",
+    "best one: the run-to-run spread at the gate tier is wide (count_exact 1.17 to 1.65 across four",
+    "identical laptop runs, row_policy 0.98 to 1.57), which is why every ceiling sits ~1.5x above the",
+    "WORST observation rather than snugly above the average -- a tighter one would fire on a quiet",
+    "afternoon and be muted by the following Monday.",
+    "",
+    "`observedOnTheRunner` is separate because it has to be: GitHub's ubuntu-latest produces ratios",
+    "15-30% HIGHER than the laptop, and the ceilings set from laptop numbers alone left count_exact",
+    "with 18% margin over the runner's own worst observation. The RUNNER is the rig that judges, so",
+    "it is the rig the ceiling is measured against; the laptop numbers stay because a maintainer",
+    "runs the harness there and needs to know what to expect."
+  ],
+  "ratios": {
+    "count_exact": {
+      "over": "list_indexed",
+      "max": 3.0,
+      "observed": [1.64, 1.65, 1.54, 1.17],
+      "observedOnTheRunner": [2.12, 1.90],
+      "measuredOn": "gate tier, 20k rows. Four runs on Apple M-series + Docker Desktop, then two interleaved reps on GitHub-hosted ubuntu-latest (PR #189's own Load run, 2026-09-02).",
+      "headroom": "1.5x over the worst observation ON THE RIG THE GATE ACTUALLY RUNS ON. The runner's ratios come out 15-30% HIGHER than the laptop's, so the first ceiling -- 2.5, set from laptop numbers alone -- left only 18% margin over the runner's 2.12 and would have flaked. That is the single strongest argument for measuring on the rig that judges.",
+      "why": "Prefer: count=exact is documented as one extra statement over the matching set (#110, #179). A breach means it stopped being one -- an N+1, or a count that no longer reuses the filter."
+    },
+    "page_deep": {
+      "over": "page_shallow",
+      "max": 2.2,
+      "observed": [1.18, 1.04, 0.84],
+      "observedOnTheRunner": [1.26, 1.33],
+      "measuredOn": "gate tier, 20k rows, cursor walked to the tenant's last page (depth ~10k), 2026-09-02",
+      "headroom": "roughly 2x over the worst observation, deliberately wider than the others because #100's growth is documented as sublinear but UNBOUNDED and the depth reached scales with the tier",
+      "why": "#100: on a multi-term sort the keyset predicate is a nested disjunction and per-page cost grows with cursor depth. This pins how much. The denominator is the same sort shape at depth zero, which is what isolates depth from sort width."
+    },
+    "sort_nullable": {
+      "over": "list_indexed",
+      "max": 3.0,
+      "observed": [1.85, 1.76, 1.62],
+      "observedOnTheRunner": [1.99, 2.03],
+      "measuredOn": "gate tier, 20k rows. Three runs on Apple M-series + Docker Desktop, two on GitHub-hosted ubuntu-latest.",
+      "headroom": "1.5x over the runner's worst observation",
+      "why": "#178: a nullable sort key renders a portable CASE rank that no index on the key can serve, where a required key renders no rank at all. When the per-dialect native NULLS FIRST/LAST fix lands this number should collapse toward 1.0, and the ceiling should follow it down in that same PR."
+    },
+    "row_policy": {
+      "over": "list_indexed",
+      "max": 2.4,
+      "observed": [1.36, 1.57, 1.56, 0.98],
+      "observedOnTheRunner": [1.56, 1.51],
+      "measuredOn": "gate tier, 20k rows, four laptop runs and two runner reps on 2026-09-02",
+      "headroom": "1.5x over the worst observation",
+      "why": "The same URL answered for a caller whose list rule carries `assigned_to == @user.id` (indexed), against one with no row predicate at all. One variable changes, so this is the rule engine's cost in the hot path -- and it is security-core surface, so it is the ratio to watch hardest.",
+      "movingThisCeilingNeedsDeepReview": "This row is the declared measure of the rule engine's hot path, so a PR that moves it carries the needs-deep-review label and a full alvo-security-core-review pass. Note also which direction is suspicious: a ratio that FALLS here is not automatically good news, because the cheapest possible row predicate is one that matches nothing. scripts/test-load guards that before k6 starts -- it asserts the technician's set is non-empty AND a strict subset of the dispatcher's -- and that assertion is what makes this number mean anything."
+    },
+    "select_projection": {
+      "over": "list_indexed",
+      "max": 1.3,
+      "observed": [0.98, 0.85, 0.66],
+      "observedOnTheRunner": [0.89, 0.90],
+      "measuredOn": "gate tier, 20k rows, three laptop runs and two runner reps on 2026-09-02",
+      "headroom": "a tripwire against the value going UP, not a claim that it is low",
+      "why": "RECORDED, NOT DEFENDED. `select` is applied to the response, not to the SELECT list, so ~1.0 is the correct value today and it proves nothing (#117). It is kept because it is the instrument that will DEMONSTRATE the fix: when the port gains a projection member the number drops below 1.0 and the improvement is measured rather than asserted."
+    }
+  },
+  "absolute": {
+    "defaults": {
+      "factor": 1.8,
+      "floorMs": 3.0,
+      "$comment": [
+        "A breach needs BOTH the factor AND the absolute floor, and both numbers come from measuring",
+        "the SAME code twice. Across two interleaved arms of identical images, min varied by up to",
+        "1.5x (read_by_id 0.71-1.07 ms, list_indexed 1.57-2.27 ms, openapi 2.44-3.97 ms). A factor of",
+        "1.4 would therefore have fired on noise; 1.8 sits above the observed spread and still catches",
+        "anything that doubles.",
+        "",
+        "STATED HONESTLY: at 20k rows every absolute latency is small, so the FLOOR is what usually",
+        "decides. That makes the absolute half a coarse tripwire for regressions larger than a few",
+        "milliseconds, and the ratios above the sensitive instrument. That division is the design's,",
+        "not an accident of these numbers."
+      ]
+    },
+    "read_by_id": {
+      "why": "The whole per-request floor: middleware, API-key auth, tenant resolution, policy resolve (#118), one keyed read. Measured 0.7-1.1 ms at the gate tier."
+    },
+    "list_indexed": {
+      "why": "The reference shape, and the analysis's own criterion (baas-analyza.md:142). Every ratio is anchored on it, so a regression here moves everything. Measured 1.6-2.3 ms at the gate tier."
+    },
+    "create": {
+      "factor": 1.8,
+      "floorMs": 4.0,
+      "why": "Validation, the unique check, the audit stamp and the outbox insert. A wider floor than a read because a write's variance is genuinely higher -- its p99 ran to 43 ms where its min was 2.3 ms."
+    },
+    "openapi": {
+      "factor": 2.0,
+      "floorMs": 5.0,
+      "why": "#126 was an O(N^2) name scan with 6N set allocations per request, fixed in PR-D; this guards its return. The widest factor of the four, because min for a large JSON document is dominated by serialization scheduling: identical images measured 2.44 ms and 3.97 ms in the same job."
+    }
+  }
+}

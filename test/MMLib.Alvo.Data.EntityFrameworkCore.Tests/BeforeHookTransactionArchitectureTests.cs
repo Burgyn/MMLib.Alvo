@@ -55,16 +55,31 @@ public class BeforeHookTransactionArchitectureTests
     }
 
     /// <summary>
-    /// The pipeline is called from exactly the four write bodies, and from no other — in particular not from
+    /// The pipeline is called from exactly the seven write bodies, and from no other — in particular not from
     /// the two on the idempotent path that would run a hook for a replay.
     /// </summary>
+    /// <remarks>
+    /// <b>Four became seven when the batch landed, and the three that were added are the batch's own judging
+    /// passes.</b> A batch judges every row before it writes any, so its hooks run in that pass and not beside
+    /// the insert — which is the whole reason a hook cannot patch a row past the check at batch scale. The
+    /// exclusion this fact protects is unchanged: the replay paths still have none, because a hook on a replay
+    /// would double a <c>mutate</c> over a value already stored.
+    /// </remarks>
     [Fact]
-    public void The_pipeline_is_called_from_the_four_write_bodies_and_nowhere_else()
+    public void The_pipeline_is_called_from_the_seven_write_bodies_and_nowhere_else()
         => CallSites().Select(site => site.Member).Distinct(StringComparer.Ordinal).ShouldBe(
-            ["CreatedAsync", "RecordedCreateAsync", "WriteAsync", "EraseAsync"],
+            [
+                "CreatedAsync",
+                "RecordedCreateAsync",
+                "WriteAsync",
+                "EraseAsync",
+                "CreatedRowsAsync",
+                "UpdatedRowsAsync",
+                "RemovedRowsAsync",
+            ],
             ignoreOrder: true,
-            "a fifth call site is either a write face that grew one twice or a replay path that must not have "
-            + "one at all");
+            "an eighth call site is either a write face that grew one twice or a replay path that must not "
+            + "have one at all");
 
     /// <summary>
     /// The non-vacuity control. The scan is a line-order comparison inside a member, so the way it fails
@@ -73,7 +88,7 @@ public class BeforeHookTransactionArchitectureTests
     /// </summary>
     [Fact]
     public void The_scan_finds_the_call_sites_it_is_written_about()
-        => CallSites().Count.ShouldBe(4, "one call per write body; a different number means the scan drifted");
+        => CallSites().Count.ShouldBe(7, "one call per write body; a different number means the scan drifted");
 
     /// <summary>
     /// The other half of the control: the scan can tell the two orderings apart. Handed a member whose

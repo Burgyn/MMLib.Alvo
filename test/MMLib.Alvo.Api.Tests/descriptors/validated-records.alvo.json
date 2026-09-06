@@ -76,6 +76,34 @@
         "update": "true",
         "delete": "true"
       }
+    },
+    "ledgers": {
+      "description": "A required field frozen for some callers and writable for others \u2014 the one shape an apply-time refusal cannot decide, so it is the only way to reach the 'read-only-required-field' violation.",
+      "fields": {
+        "memo": { "type": "string", "maxLength": 40 },
+        "posted_by": { "type": "string", "required": true, "maxLength": 40, "readOnly": "!('auditor' in @user.roles)" }
+      },
+      "rules": {
+        "list": "true",
+        "get": "true",
+        "create": "true",
+        "update": "true",
+        "delete": "true"
+      }
+    },
+    "meters": {
+      "description": "required + computed + an expression-valued readOnly on ONE field \u2014 the three-way shape where 'the caller cannot supply it' and 'the create is impossible' come apart, because the database fills the column in on the INSERT.",
+      "fields": {
+        "reading": { "type": "decimal", "precision": 18, "scale": 2, "required": true },
+        "doubled": { "type": "decimal", "precision": 18, "scale": 2, "required": true, "computed": "reading + reading", "readOnly": "!('auditor' in @user.roles)" }
+      },
+      "rules": {
+        "list": "true",
+        "get": "true",
+        "create": "true",
+        "update": "true",
+        "delete": "true"
+      }
     }
   }
 }

@@ -33,13 +33,13 @@ namespace MMLib.Alvo.Api.Internal;
 /// </remarks>
 internal static class DataApiParameters
 {
-    /// <summary>The parameters <paramref name="operation"/> reads on <paramref name="entity"/>.</summary>
-    /// <param name="operation">The operation the endpoint performs.</param>
+    /// <summary>The parameters <paramref name="kind"/> reads on <paramref name="entity"/>.</summary>
+    /// <param name="kind">The endpoint kind.</param>
     /// <param name="entity">The entity it serves.</param>
     /// <param name="hidden">Every field carrying a <c>hidden</c> flag, which contributes no filter parameter.</param>
     /// <param name="document">The document the shared parameter components are referenced from.</param>
     internal static List<IOpenApiParameter> For(
-        DataOperation operation, EntitySchema entity, IReadOnlySet<string> hidden, OpenApiDocument document)
+        DataApiEndpointKind kind, EntitySchema entity, IReadOnlySet<string> hidden, OpenApiDocument document)
     {
         ArgumentNullException.ThrowIfNull(entity);
         ArgumentNullException.ThrowIfNull(hidden);
@@ -47,8 +47,8 @@ internal static class DataApiParameters
 
         return
         [
-            .. Shared(Names(operation, entity), document),
-            .. operation == DataOperation.List
+            .. Shared(Names(kind, entity), document),
+            .. kind == DataApiEndpointKind.List
                 ? entity.Fields.Where(field => !hidden.Contains(field.Name)).Select(Filter)
                 : [],
         ];
@@ -60,28 +60,34 @@ internal static class DataApiParameters
     /// (the tenant header on a descriptor with no tenant-scoped entity, <c>ifNoneMatch</c> on one with no
     /// audited entity) is never an orphan component.
     /// </summary>
-    /// <param name="operations">Every generated endpoint's operation and the entity it serves.</param>
+    /// <param name="operations">Every generated endpoint's kind and the entity it serves.</param>
     internal static IReadOnlySet<string> UsedSharedIds(
-        IEnumerable<(DataOperation Operation, EntitySchema Entity)> operations)
+        IEnumerable<(DataApiEndpointKind Kind, EntitySchema Entity)> operations)
     {
         ArgumentNullException.ThrowIfNull(operations);
 
         var used = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var (operation, entity) in operations)
+        foreach (var (kind, entity) in operations)
         {
-            used.UnionWith(Names(operation, entity));
+            used.UnionWith(Names(kind, entity));
         }
 
         return used;
     }
 
     /// <summary>Which of the shared parameters this operation reads, in the order they are published.</summary>
-    private static IEnumerable<string> Names(DataOperation operation, EntitySchema entity) =>
+    /// <remarks>
+    /// The seven query parameters belong to <see cref="DataApiEndpointKind.List"/> alone. On
+    /// <see cref="DataApiEndpointKind.Query"/> they are the request body's members instead, which is the
+    /// whole of that endpoint — publishing them as query parameters there would advertise a second way to
+    /// send them that the delegate does not read.
+    /// </remarks>
+    private static IEnumerable<string> Names(DataApiEndpointKind kind, EntitySchema entity) =>
     [
-        .. AddressesOneRow(operation) ? new[] { RowIdId } : [],
+        .. AddressesOneRow(kind) ? new[] { RowIdId } : [],
         .. entity.Tenancy == TenancyMode.Scoped ? new[] { TenantId } : [],
-        .. HeaderNames(operation, entity),
-        .. operation == DataOperation.List
+        .. HeaderNames(kind, entity),
+        .. kind == DataApiEndpointKind.List
             ? new[] { SelectId, OrderId, LimitId, OffsetId, AfterId, OrId, AndId }
             : [],
     ];
@@ -118,6 +124,7 @@ internal static class DataApiParameters
             (IfMatchId, IfMatch),
             (IfNoneMatchId, IfNoneMatch),
             (IdempotencyKeyId, IdempotencyKey(options)),
+            (PreferId, Prefer),
             (SelectId, Select),
             (OrderId, Order),
             (LimitId, Limit(options)),
@@ -138,6 +145,8 @@ internal static class DataApiParameters
 
     private const string IdempotencyKeyId = "idempotencyKey";
 
+    private const string PreferId = "prefer";
+
     private const string SelectId = "select";
 
     private const string OrderId = "order";
@@ -152,8 +161,8 @@ internal static class DataApiParameters
 
     private const string AndId = "andGroup";
 
-    private static bool AddressesOneRow(DataOperation operation) =>
-        operation is DataOperation.Get or DataOperation.Update or DataOperation.Delete;
+    private static bool AddressesOneRow(DataApiEndpointKind kind) =>
+        kind is DataApiEndpointKind.Get or DataApiEndpointKind.Update or DataApiEndpointKind.Delete;
 
     /// <summary>
     /// The row key in the path. Re-declared rather than left to ApiExplorer's inference from the delegate's
@@ -196,9 +205,16 @@ internal static class DataApiParameters
     /// <remarks>
     /// <para>
     /// A header the operation <em>ignores</em> is deliberately not listed as a parameter, because a parameter is
-    /// an invitation to send it. The two gaps that matter — <c>If-Match</c> on a read, and
-    /// <c>Idempotency-Key</c> on an update or a delete — are stated in the operation's own description instead,
-    /// where the text can say that sending them has no effect.
+    /// an invitation to send it. The gaps that remain — <c>If-Match</c> on a read, and <c>Idempotency-Key</c>
+    /// on the body-shaped read — are stated in the operation's own description instead, where the text can say
+    /// that sending them has no effect. <c>Idempotency-Key</c> on an update or a delete used to be the other
+    /// one; it is honoured on every write now, so all six write kinds publish it.
+    /// </para>
+    /// <para>
+    /// <b>The batch kinds publish the key and not <c>If-Match</c>, which is the asymmetry to notice.</b> A
+    /// batch honours the key — one for the whole request — and refuses a precondition outright, because one
+    /// version cannot condition many rows. Falling through to the empty arm, which is what the first version
+    /// did, published neither and left a supported retry-control header undiscoverable.
     /// </para>
     /// <para>
     /// <b>A header the operation <em>refuses</em> is not listed either, which is why the write arm carries the
@@ -212,13 +228,17 @@ internal static class DataApiParameters
     /// asymmetry survived — the read arm was entity-conditional from the start.
     /// </para>
     /// </remarks>
-    private static IEnumerable<string> HeaderNames(DataOperation operation, EntitySchema entity) =>
-        operation switch
+    private static IEnumerable<string> HeaderNames(DataApiEndpointKind kind, EntitySchema entity) =>
+        kind switch
         {
-            DataOperation.Get when AlvoManagedColumns.VersionColumn(entity) is not null => [IfNoneMatchId],
-            DataOperation.Create => [IdempotencyKeyId],
-            DataOperation.Update or DataOperation.Delete
-                when AlvoManagedColumns.VersionColumn(entity) is not null => [IfMatchId],
+            DataApiEndpointKind.List or DataApiEndpointKind.Query => [PreferId],
+            DataApiEndpointKind.Get when AlvoManagedColumns.VersionColumn(entity) is not null => [IfNoneMatchId],
+            DataApiEndpointKind.Create => [IdempotencyKeyId],
+            DataApiEndpointKind.Update or DataApiEndpointKind.Delete
+                when AlvoManagedColumns.VersionColumn(entity) is not null => [IfMatchId, IdempotencyKeyId],
+            DataApiEndpointKind.Update or DataApiEndpointKind.Delete => [IdempotencyKeyId],
+            DataApiEndpointKind.BatchCreate or DataApiEndpointKind.BatchUpdate
+                or DataApiEndpointKind.BatchDelete => [IdempotencyKeyId],
             _ => [],
         };
 
@@ -253,10 +273,14 @@ internal static class DataApiParameters
         In = ParameterLocation.Header,
         Required = false,
         Description =
-            "Makes this create retry-safe. The result is recorded against the key and the caller's own scope: "
-            + "the same key with the same body replays the first result and writes no second row, and the same "
-            + "key with a different body is 409. An anonymous caller's key is refused, because every anonymous "
-            + "caller shares one identity and their keys would share one space. The bound below is a **byte** "
+            "Makes this write retry-safe. The result is recorded against the key and the caller's own scope, so "
+            + "the same key repeated replays the first result and writes nothing further: a retried create is "
+            + "the first row, a retried update is the row, and a retried delete is 204 rather than a 404 the "
+            + "caller cannot tell from somebody else's delete. The key covers **the whole request** — the "
+            + "method, the entity, the row it addresses, the `If-Match` it carries and the body — so the same "
+            + "key against another row, or with another `If-Match`, is 409 rather than a replay. An anonymous "
+            + "caller's key is refused, because every anonymous caller shares one identity and their keys would "
+            + "share one space. The bound below is a **byte** "
             + "bound — at most "
             + $"{options.MaxIdempotencyKeyBytes.ToString(CultureInfo.InvariantCulture)} bytes once UTF-8 "
             + "encoded — so a key of non-ASCII characters reaches it sooner than `maxLength` suggests; an "
@@ -275,15 +299,49 @@ internal static class DataApiParameters
         },
     };
 
+    /// <summary>
+    /// The RFC 7240 preference header, for the one preference a list honours.
+    /// </summary>
+    /// <remarks>
+    /// Published even though an unrecognised preference is <em>ignored</em> rather than refused: that is
+    /// RFC 7240's own rule, and a document that did not name the one preference this endpoint acts on would
+    /// leave an agent with no way to discover a count is available at all. What was applied comes back in
+    /// <c>Preference-Applied</c>, which is described with the 200 response.
+    /// </remarks>
+    private static OpenApiParameter Prefer => new()
+    {
+        Name = PreferHeader.Name,
+        In = ParameterLocation.Header,
+        Required = false,
+        Description =
+            "`count=exact` fills the page envelope's `count` with the number of rows the query matches in "
+            + "total. Opt-in, because it is a second scan of the matching set on every request; a request "
+            + "sending no recognised `count` preference gets `null` there.\n\n"
+            + "`count=planned` and `count=estimated` are accepted and **degrade to an exact count**, so they "
+            + "fill `count` too — a planner estimate exists on one supported engine and not the other, and "
+            + "this API answers identically on both. The response says which was applied in "
+            + "`Preference-Applied`, and it is always `count=exact`. Per RFC 7240 a preference this server "
+            + "does not recognise is ignored rather than refused, and its absence from `Preference-Applied` "
+            + "is how that is reported.",
+        Schema = new OpenApiSchema { Type = JsonSchemaType.String },
+        Example = JsonValue.Create("count=exact"),
+    };
+
     private static OpenApiParameter Select => new()
     {
         Name = ReservedQueryKeys.Select,
         In = ParameterLocation.Query,
         Description =
-            "Comma-separated field names to return, in the order named. It narrows the *response* only — the "
-            + "read still fetches the whole row — so it saves bandwidth to the caller and nothing at the "
-            + "database. A field the caller may not read is refused exactly as an undeclared one is.",
-        Schema = new OpenApiSchema { Type = JsonSchemaType.String },
+            "Comma-separated field names to return, in the order named, each optionally renamed as "
+            + "`alias:field`. It narrows the **read** as well as the response: a field the projection does "
+            + "not name is not read from the row. Two groups of columns are read regardless — the "
+            + "framework-managed ones, and any field named in `order`, because no engine can sort by a "
+            + "column it did not read — but neither appears in the response unless the projection named it. "
+            + "A field the caller may not read is refused exactly as an undeclared one is. An alias is lower "
+            + "snake_case, is not the name of a framework-managed column, and cannot be claimed twice; and a "
+            + "projection cannot name more distinct keys than there are fields this caller can read.",
+        Schema = SelectSchema,
+        Example = JsonValue.Create("label:make,model"),
     };
 
     private static OpenApiParameter Order => new()
@@ -293,10 +351,10 @@ internal static class DataApiParameters
         Description =
             "`<field>[.asc|.desc][.nullsfirst|.nullslast]`, comma-separated for several keys, outermost "
             + "first. The modifiers must appear in that order and each at most once, so one sort key has one "
-            + "spelling; an unrecognised modifier is refused rather than ignored. **A nullable field is "
-            + "refused as a sort key** — see the operation description for why, and for what that means for "
-            + "the two null-placement modifiers.",
-        Schema = new OpenApiSchema { Type = JsonSchemaType.String },
+            + "spelling; an unrecognised modifier is refused rather than ignored. A **nullable** field is a "
+            + "sort key like any other and defaults to `nullslast`; paging honours the same placement — see "
+            + "the operation description for what it costs.",
+        Schema = OrderSchema,
         Example = JsonValue.Create("id.desc"),
     };
 
@@ -308,14 +366,7 @@ internal static class DataApiParameters
             "How many rows this page carries. A value past the maximum is **refused, not clamped**: a client "
             + "that asked for more and silently received fewer computes its paging from a number no response "
             + "ever told it. Zero is refused too — it is a read that can never return a row.",
-        Schema = new OpenApiSchema
-        {
-            Type = JsonSchemaType.Integer,
-            Format = "int32",
-            Minimum = "1",
-            Maximum = Text(options.MaxPageSize),
-            Default = JsonValue.Create(options.DefaultPageSize),
-        },
+        Schema = LimitSchema(options),
     };
 
     private static OpenApiParameter Offset => new()
@@ -325,7 +376,7 @@ internal static class DataApiParameters
         Description =
             "How many rows to skip. Prefer `after`: an offset re-scans the skipped rows and shifts under "
             + "concurrent writes, where a keyset cursor does neither.",
-        Schema = new OpenApiSchema { Type = JsonSchemaType.Integer, Format = "int32", Minimum = "0" },
+        Schema = OffsetSchema,
     };
 
     private static OpenApiParameter After => new()
@@ -336,12 +387,7 @@ internal static class DataApiParameters
             "The keyset cursor a previous page returned as `next`, sent back verbatim. It is opaque and only "
             + "the provider that issued it may interpret it, so it must not be decoded or constructed. A "
             + "forged one yields an empty page rather than an error.",
-        Schema = new OpenApiSchema
-        {
-            Type = JsonSchemaType.String,
-            MinLength = 1,
-            MaxLength = QueryStringParser.MaxCursorLength,
-        },
+        Schema = AfterSchema,
     };
 
     /// <summary>One of the two explicit grouping keywords.</summary>
@@ -355,7 +401,126 @@ internal static class DataApiParameters
             $"A bracketed, comma-separated list of terms combined as a {meaning}: "
             + $"`{keyword}=(color.eq.red,make.in.(skoda,vw))`. Groups may nest, and either the keyword or any "
             + "member may carry the `not.` prefix. Repeating the parameter conjoins the groups.",
-        Schema = new OpenApiSchema { Type = JsonSchemaType.String },
+        Schema = TextSchema,
+    };
+
+    /// <summary>The value shape a parameter carrying plain text takes, on either surface.</summary>
+    /// <remarks>
+    /// The five settings and the filter parameters read their schema from these factories rather than
+    /// declaring one inline, because <see cref="QueryBody"/> publishes the <em>same</em> shapes as the
+    /// members of the query endpoint's request body. One source is what keeps the two surfaces from coming
+    /// to describe different parameters; the <em>prose</em> deliberately stays with the parameter, since a
+    /// body schema that repeated every filter's sentence would put the same paragraph in one document twice
+    /// per entity.
+    /// </remarks>
+    private static OpenApiSchema TextSchema => new() { Type = JsonSchemaType.String };
+
+    /// <summary>The projection's value shape.</summary>
+    private static OpenApiSchema SelectSchema => TextSchema;
+
+    /// <summary>The sort parameter's value shape.</summary>
+    private static OpenApiSchema OrderSchema => TextSchema;
+
+    /// <summary>The page size's value shape, carrying the host's configured bounds.</summary>
+    /// <param name="options">The API options the bounds are published from.</param>
+    private static OpenApiSchema LimitSchema(AlvoApiOptions options) => new()
+    {
+        Type = JsonSchemaType.Integer,
+        Format = "int32",
+        Minimum = "1",
+        Maximum = Text(options.MaxPageSize),
+        Default = JsonValue.Create(options.DefaultPageSize),
+    };
+
+    /// <summary>The row-skip parameter's value shape.</summary>
+    private static OpenApiSchema OffsetSchema =>
+        new() { Type = JsonSchemaType.Integer, Format = "int32", Minimum = "0" };
+
+    /// <summary>The cursor's value shape, carrying the bound the parser enforces.</summary>
+    private static OpenApiSchema AfterSchema => new()
+    {
+        Type = JsonSchemaType.String,
+        MinLength = 1,
+        MaxLength = QueryStringParser.MaxCursorLength,
+    };
+
+    /// <summary>The body the collection query accepts: the list's own query parameters, as an object.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Derived from the same parameters the collection <c>GET</c> publishes</b> — filtered to the ones
+    /// that live in the query string, since the tenant and <c>Prefer</c> are headers on both operations and
+    /// stay headers. One source, so the two surfaces cannot come to describe different parameters.
+    /// </para>
+    /// <para>
+    /// <b>A property carries the parameter's schema and not its description.</b> A filter's description is a
+    /// per-field sentence, and copying every one of them here would put the same prose in the document twice
+    /// per entity — the cost <see cref="DataApiHeaders"/> states its own "described once" rule against. The
+    /// grammar is on the operation, exactly as the <c>not.</c> prefix already is.
+    /// </para>
+    /// <para>
+    /// <b>Every property is one value or an array of them except the five settings</b>, because a repeated
+    /// <em>filter</em> conjoins while a repeated setting is refused — the same asymmetry the query string
+    /// has, published rather than restated. <c>not</c> is not a property: it is only ever a prefix on
+    /// another parameter's name, so there is no member for it to be.
+    /// </para>
+    /// <para>
+    /// <b><c>additionalProperties</c> is deliberately not <c>false</c></b>, even though the statement would
+    /// be true. No other Alvo body component closes itself — <c>{entity}Create</c> and <c>{entity}Patch</c>
+    /// refuse an unknown key and stay silent about it too — and the rule is stated once, in prose, on the
+    /// operation.
+    /// </para>
+    /// </remarks>
+    /// <param name="entity">The entity being queried.</param>
+    /// <param name="hidden">Every field carrying a <c>hidden</c> flag, which contributes no property.</param>
+    /// <param name="options">The API options the paging bounds are published from.</param>
+    internal static OpenApiSchema QueryBody(
+        EntitySchema entity, IReadOnlySet<string> hidden, AlvoApiOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        ArgumentNullException.ThrowIfNull(hidden);
+        ArgumentNullException.ThrowIfNull(options);
+
+        var properties = new Dictionary<string, IOpenApiSchema>(StringComparer.Ordinal);
+        foreach (var (name, schema, repeatable) in QueryProperties(options))
+        {
+            properties[name] = repeatable ? Repeatable(schema) : schema;
+        }
+
+        foreach (var field in entity.Fields.Where(field => !hidden.Contains(field.Name)))
+        {
+            properties[field.Name] = Repeatable(TextSchema);
+        }
+
+        return new OpenApiSchema
+        {
+            Type = JsonSchemaType.Object,
+            Description =
+                "The query parameters, as an object. A member's name is a parameter and its value is the "
+                + "text a query string would carry; an array repeats the parameter. See the operation "
+                + "description for the grammar and for what a field property accepts.",
+            Properties = properties,
+        };
+    }
+
+    /// <summary>The five settings and the two grouping keywords, as body properties.</summary>
+    /// <param name="options">The API options the paging bounds are published from.</param>
+    private static IEnumerable<(string Name, OpenApiSchema Schema, bool Repeatable)> QueryProperties(
+        AlvoApiOptions options) =>
+    [
+        (ReservedQueryKeys.Select, SelectSchema, false),
+        (ReservedQueryKeys.Order, OrderSchema, false),
+        (ReservedQueryKeys.Limit, LimitSchema(options), false),
+        (ReservedQueryKeys.Offset, OffsetSchema, false),
+        (ReservedQueryKeys.After, AfterSchema, false),
+        (ReservedQueryKeys.Or, TextSchema, true),
+        (ReservedQueryKeys.And, TextSchema, true),
+    ];
+
+    /// <summary>A property that accepts one value or several, which is how a repeated parameter is written.</summary>
+    /// <param name="single">The shape one value takes.</param>
+    private static OpenApiSchema Repeatable(OpenApiSchema single) => new()
+    {
+        OneOf = [single, new OpenApiSchema { Type = JsonSchemaType.Array, Items = single }],
     };
 
     /// <summary>The filter parameter one declared field contributes.</summary>

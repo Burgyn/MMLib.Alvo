@@ -180,16 +180,23 @@ public class AlvoHealthTests
     }
 
     /// <summary>
-    /// A host that registered Alvo twice has one readiness check, not two under one name.
+    /// A host that registered Alvo twice has <b>one of each</b> readiness check, not two under one name.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <c>AddCheck</c> is additive, and <c>DefaultHealthCheckService</c> refuses to be constructed at all when
-    /// two registrations share a name — so registering the schema check the obvious way would turn a second
+    /// two registrations share a name — so registering either check the obvious way would turn a second
     /// <c>AddAlvo</c>, which every other registration in <c>AddAlvo</c> tolerates, into a host that cannot
     /// answer either probe.
+    /// </para>
+    /// <para>
+    /// The expected set is written out rather than counted, so a <em>new</em> contributor has to be named here
+    /// deliberately: an assertion on the count alone, or a "contains", would let a second registration of one
+    /// check hide behind the arrival of another.
+    /// </para>
     /// </remarks>
     [Fact]
-    public async Task Registering_Alvo_twice_leaves_one_readiness_check()
+    public async Task Registering_Alvo_twice_leaves_one_of_each_readiness_check()
     {
         await using var world = await AlvoHealthWorld.StartAsync(
             new AlvoHealthWorldSetup(Register: services => services.AddAlvo()));
@@ -198,7 +205,8 @@ public class AlvoHealthTests
             registration => registration.Tags.Contains(AlvoHealth.ReadyTag),
             TestContext.Current.CancellationToken);
 
-        report.Entries.Keys.ShouldBe([AlvoHealth.SchemaCheckName]);
+        report.Entries.Keys.ShouldBe(
+            [AlvoHealth.DatabaseCheckName, AlvoHealth.SchemaCheckName], ignoreOrder: true);
     }
 
     /// <summary>
@@ -294,27 +302,6 @@ public class AlvoHealthTests
         entry.Exception?.ToString() ?? string.Empty,
         .. entry.Data.Select(item => $"{item.Key}={item.Value}"),
     ];
-
-    /// <summary>
-    /// An applied schema that never passed descriptor validation, declaring a field the query string reserves —
-    /// the substituted-registry shape the route-materialisation belt exists for.
-    /// </summary>
-    private sealed class RegistryShadowingAReservedKey : ISchemaRegistry
-    {
-        private readonly SchemaModel _schema = new([
-            new EntitySchema
-            {
-                Name = "widgets",
-                Fields =
-                [
-                    new FieldSchema { Name = "id", Type = FieldType.Uuid },
-                    new FieldSchema { Name = ReservedQueryKeys.Limit, Type = FieldType.Integer },
-                ],
-            },
-        ]);
-
-        public SchemaModel GetSchema() => _schema;
-    }
 
     /// <summary>
     /// A store that fails the way a driver whose exception message carries its connection string would.

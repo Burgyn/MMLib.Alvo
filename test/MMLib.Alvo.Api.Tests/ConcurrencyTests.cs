@@ -581,6 +581,7 @@ public sealed class ConcurrencyTests
     private static IEnumerable<Probe> Everything(SeededOwner owner) =>
     [
         new(HttpMethod.Get, "/api/owners", null, null, HttpStatusCode.OK),
+        new(HttpMethod.Post, "/api/owners/query", new JsonObject(), null, HttpStatusCode.OK),
         new(HttpMethod.Get, Owner(owner.Id), null, null, HttpStatusCode.OK),
         new(HttpMethod.Get, Owner(owner.Id), null, IfNoneMatch(owner.ETag), HttpStatusCode.NotModified),
         new(HttpMethod.Get, Owner(Guid.NewGuid()), null, null, HttpStatusCode.NotFound),

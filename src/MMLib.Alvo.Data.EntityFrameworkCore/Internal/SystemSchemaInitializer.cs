@@ -68,7 +68,8 @@ internal sealed partial class SystemSchemaInitializer
     /// <see cref="EfCoreSchemaIntrospector"/> reuses to exclude Alvo's own bookkeeping table from
     /// what it reports as the user's schema.
     /// </summary>
-    public static string DescriptorVersionsTableName(string schemaPrefix) => $"{schemaPrefix}_descriptor_versions";
+    public static string DescriptorVersionsTableName(string schemaPrefix) =>
+        schemaPrefix + AlvoFrameworkTables.DescriptorVersionsSuffix;
 
     /// <summary>
     /// Every table this initializer owns, for a given prefix — the set
@@ -79,9 +80,7 @@ internal sealed partial class SystemSchemaInitializer
     /// </summary>
     /// <param name="schemaPrefix">The validated <see cref="AlvoOptions.SchemaPrefix"/>.</param>
     public static IReadOnlyList<string> FrameworkTableNames(string schemaPrefix) =>
-        [DescriptorVersionsTableName(schemaPrefix),
-         IdempotencyTable.NameFor(schemaPrefix),
-         OutboxTable.NameFor(schemaPrefix)];
+        AlvoFrameworkTables.NamesFor(schemaPrefix);
 
     /// <summary>
     /// Creates the framework's bookkeeping tables if they do not already exist. Safe to call repeatedly —
@@ -199,6 +198,13 @@ internal sealed partial class SystemSchemaInitializer
         }
     }
 
-    [GeneratedRegex("^[a-z][a-z0-9_]{0,15}$")]
+    /// <remarks>
+    /// <c>\A…\z</c> rather than <c>^…$</c>: in .NET <c>$</c> also matches immediately before a trailing
+    /// <c>\n</c>, so <c>"alvo\n"</c> passed this check and reached the <b>interpolated</b> table name in the
+    /// DDL below. Benign as it stands — a newline is SQL whitespace, so it yields a syntax error rather than a
+    /// second statement, and the prefix comes from configuration rather than from a caller — but it is the
+    /// identical defect found in <c>AlvoEventName</c>'s guard in the same PR, and the fix is two characters.
+    /// </remarks>
+    [GeneratedRegex(@"\A[a-z][a-z0-9_]{0,15}\z")]
     private static partial Regex SchemaPrefixPattern();
 }

@@ -176,6 +176,66 @@ public sealed class EventSubscriptionsTests : IDisposable
         => Matching(CatalogWithAHookOnEveryPoint, OwnedBy(Bystander, actedBy: null))
             .ShouldHaveSingleItem().Path.ShouldContain("afterUpdate");
 
+    /// <summary>
+    /// <b>An event a host published selects no after-hook, and that is what the publish-time namespace guard
+    /// buys.</b>
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The guard refuses <c>entity.</c>, <c>auth.</c> and <c>storage.</c> so a host cannot mint an event
+    /// indistinguishable from a real data change. This is the half that says what "indistinguishable" means:
+    /// the arbiter is this matcher, and a real envelope built by the real publisher reaches it selecting
+    /// nothing — even against a catalog with a hook on every point of the entity it names.
+    /// </para>
+    /// <para>
+    /// The envelope comes from <c>AlvoEvents</c> rather than being hand-built, so the fact cannot pass because
+    /// the test wrote a type the publisher would never produce.
+    /// </para>
+    /// <para>
+    /// <b>The name is the nearest legal forgery, and that is load-bearing.</b> <c>crm.deals.updated</c> has
+    /// three segments, names an entity this catalog really has hooks on, and ends in a suffix this reader
+    /// really maps — everything a data event has except the reserved namespace. A shorter name such as
+    /// <c>deals.approved</c> would be turned away by the segment-count check before the prefix was ever
+    /// compared, so it would pin the wrong half: measured, by inverting the prefix comparison and watching the
+    /// two-segment version stay green.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task An_event_a_host_published_selects_no_after_hook()
+    {
+        var store = new CapturingOutboxStore();
+        await new AlvoEvents(store, TimeProvider.System).PublishAsync(
+            "crm.deals.updated", "deals/42", null, AlvoContext.Anonymous, TestContext.Current.CancellationToken);
+
+        Matching(CatalogWithAHookOnEveryPoint, store.Published.ShouldHaveSingleItem()).ShouldBeEmpty();
+    }
+
+    /// <summary>The queue, reduced to the one thing the fact above needs from it.</summary>
+    private sealed class CapturingOutboxStore : IOutboxStore
+    {
+        private readonly List<AlvoEvent> _published = [];
+
+        internal IReadOnlyList<AlvoEvent> Published => _published;
+
+        public Task AppendAsync(AlvoCustomEvent customEvent, CancellationToken cancellationToken = default)
+        {
+            _published.Add(customEvent.Envelope);
+            return Task.CompletedTask;
+        }
+
+        public Task EnsureAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task<IReadOnlyList<OutboxEntry>> ClaimAsync(
+            string claimant, int batchSize, int maxAttempts, TimeSpan lease, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<OutboxEntry>>([]);
+
+        public Task MarkDispatchedAsync(Guid id, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task ReleaseAsync(Guid id, TimeSpan retryAfter, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+    }
+
     private readonly CapturingLogger _logger = new();
 
     private const string Actor = "019000aa-0000-7000-8000-00000000a001";

@@ -135,15 +135,21 @@ public sealed class QueryStringInjectionTests
     [InlineData("order")]
     [InlineData("select")]
     [InlineData(FieldNamePosition)]
+    [InlineData(SelectAliasPosition)]
+    [InlineData(SelectSourcePosition)]
     public async Task Injection_through_an_identifier_position_is_refused_and_leaks_no_error(string parameter)
     {
         await using var world = await SeededAsync();
 
         foreach (var payload in _payloads)
         {
-            var query = parameter == FieldNamePosition
-                ? $"{Uri.EscapeDataString(payload)}=eq.1"
-                : $"{parameter}={Uri.EscapeDataString(payload)}";
+            var query = parameter switch
+            {
+                FieldNamePosition => $"{Uri.EscapeDataString(payload)}=eq.1",
+                SelectAliasPosition => $"select={Uri.EscapeDataString(payload)}:title",
+                SelectSourcePosition => $"select=label:{Uri.EscapeDataString(payload)}",
+                _ => $"{parameter}={Uri.EscapeDataString(payload)}",
+            };
             using var response = await world.SendAsync(HttpMethod.Get, $"/api/{Table}?{query}", _caller);
 
             var body = await response.ReadTextAsync();
@@ -160,6 +166,22 @@ public sealed class QueryStringInjectionTests
     /// non-reserved key in this grammar names a field.
     /// </summary>
     private const string FieldNamePosition = "<field>";
+
+    /// <summary>
+    /// The alias half of a projection entry — the one position in this grammar where a caller's bytes reach a
+    /// <b>response key</b> rather than an identifier.
+    /// </summary>
+    /// <remarks>
+    /// It never reaches SQL: only a projection's <em>source</em> crosses the port, so this row is not about
+    /// injection into a statement. It is here because the suite's own claim is "every position a caller's
+    /// text reaches", and an alias is a new such position — and because the interesting failure is the
+    /// reverse of the others: not an identifier escaping into a response, but caller bytes being accepted
+    /// <em>as</em> a response key. Every payload here is refused by the alias grammar, so nothing is echoed.
+    /// </remarks>
+    private const string SelectAliasPosition = "<select-alias>";
+
+    /// <summary>The source half of a projection entry — an identifier position like the others.</summary>
+    private const string SelectSourcePosition = "<select-source>";
 
     /// <summary>
     /// The discriminating case, spelled out on its own: the payload that would drop the table is answered as an
@@ -230,6 +252,31 @@ public sealed class QueryStringInjectionTests
         await using var world = await SeededAsync();
 
         using var response = await world.SendAsync(HttpMethod.Get, $"/api/{Table}?zqmarkerqz=eq.1", _caller);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
+        (await response.ReadTextAsync()).ShouldNotContain("zqmarkerqz", Case.Insensitive);
+    }
+
+    /// <summary>
+    /// The same screen on the body-shaped read: a refusal never echoes the parameter name the caller asked
+    /// about, whichever side of the request it arrived on.
+    /// </summary>
+    /// <remarks>
+    /// The unit facts assert the <em>pointer</em> a refusal carries; this asserts the whole response, which
+    /// is the only form that catches a name reaching some other member — a <c>detail</c>, a fix suggestion,
+    /// a header. The GET twin is <see cref="A_refusal_over_http_never_echoes_the_field_name_the_caller_asked_about"/>,
+    /// and a second route reaching one read is a second place the property has to hold.
+    /// </remarks>
+    [Fact]
+    public async Task A_refusal_over_the_query_body_never_echoes_the_field_name_the_caller_asked_about()
+    {
+        await using var world = await SeededAsync();
+
+        using var response = await world.SendAsync(
+            HttpMethod.Post,
+            $"/api/{Table}/query",
+            _caller,
+            body: new JsonObject { ["zqmarkerqz"] = "eq.1" });
 
         response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
         (await response.ReadTextAsync()).ShouldNotContain("zqmarkerqz", Case.Insensitive);

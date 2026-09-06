@@ -1,8 +1,6 @@
 ﻿using MMLib.Alvo.Events;
 using MMLib.Alvo.Schema;
 
-using System.Diagnostics;
-
 namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 
 /// <summary>
@@ -64,9 +62,9 @@ internal static class OutboxEventFactory
             Time = now,
             Subject = $"{entity.Name}/{rowId}",
             PartitionKey = PartitionKeyFor(entity.Name, rowId),
-            AuthType = AuthTypeOf(context),
-            AuthId = AuthIdOf(context),
-            CorrelationId = CorrelationIdOf(id),
+            AuthType = AlvoEventProvenance.AuthTypeOf(context),
+            AuthId = AlvoEventProvenance.AuthIdOf(context),
+            CorrelationId = AlvoEventProvenance.CorrelationIdOf(id),
             Data = new AlvoEventData
             {
                 Record = postImage,
@@ -125,36 +123,6 @@ internal static class OutboxEventFactory
         "Every write face has to name its own event type, or a rule could subscribe to a type nothing emits.";
 
     /// <summary>
-    /// How the caller authenticated. Authentication, never authorization — a role is not an answer here,
-    /// because an after-hook has to tell "the framework did this" from "the originator did this" and a role
-    /// says neither.
-    /// </summary>
-    private static string AuthTypeOf(AlvoContext context) =>
-        context.User == _anonymousUser ? AlvoEventAuthType.Anonymous
-        : context.User == _systemUser ? AlvoEventAuthType.System
-        : AlvoEventAuthType.ApiKey;
-
-    /// <summary>
-    /// Which credential acted, or <see langword="null"/> when none did. The anonymous caller's reserved
-    /// all-zero id means "no identity", so reporting it would assert that an identified caller wrote the row.
-    /// </summary>
-    private static string? AuthIdOf(AlvoContext context) =>
-        context.User == _anonymousUser ? null : context.User.Value.ToString();
-
-    /// <summary>
-    /// The id everything in one end-to-end flow shares: the ambient W3C trace id when there is one, and
-    /// otherwise this event's own id.
-    /// </summary>
-    /// <remarks>
-    /// <see cref="Activity"/> is in the BCL, so this needs no dependency, and the trace id is exactly what
-    /// the specification's end-to-end trace asks for. It falls back to the event's own id rather than to
-    /// <see langword="null"/> because the attribute is required — an event with no ambient trace still
-    /// belongs to a flow, namely its own. <see cref="AlvoEvent.CausationId"/> stays
-    /// <see langword="null"/> in this build: nothing yet runs a data action <em>because of</em> an event.
-    /// </remarks>
-    private static string CorrelationIdOf(Guid id) => Activity.Current?.TraceId.ToString() ?? id.ToString();
-
-    /// <summary>
     /// The row this event is about. Taken from whichever image the operation has, never from a second read.
     /// </summary>
     private static Guid RowIdOf(AlvoRecord? image) =>
@@ -164,17 +132,6 @@ internal static class OutboxEventFactory
                 "An event describes one row and neither image carried that row's id, so no subject and no "
                 + "partition key could be formed. The image a write emits from is always the row it just "
                 + "read back, so this is an invariant of this data path rather than a caller's mistake.");
-
-    /// <inheritdoc cref="AuthTypeOf"/>
-    private static readonly UserId _anonymousUser = AlvoContext.Anonymous.User;
-
-    /// <inheritdoc cref="AuthTypeOf"/>
-    /// <remarks>
-    /// Read off <see cref="AlvoContext.System"/> rather than restated, so the reserved id has one authority:
-    /// a second copy of that <see cref="Guid"/> would let the port move it and leave every system-made
-    /// change reported as an ordinary caller's.
-    /// </remarks>
-    private static readonly UserId _systemUser = AlvoContext.System(tenant: null).User;
 }
 
 /// <summary>Which of <c>IAlvoData</c>'s three write faces produced an event.</summary>

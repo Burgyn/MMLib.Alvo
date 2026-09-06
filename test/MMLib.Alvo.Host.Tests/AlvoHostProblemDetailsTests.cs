@@ -102,8 +102,9 @@ public class AlvoHostProblemDetailsTests
             "DUPLICATE", Case.Sensitive, "the caller's own value is not echoed back by a refusal");
 
         world.Logs.Entries.ShouldNotContain(
-            entry => entry.Level == Microsoft.Extensions.Logging.LogLevel.Error,
-            "a caller's ordinary mistake must not page whoever operates the instance");
+            entry => Paged(entry),
+            "a caller's ordinary mistake must not page whoever operates the instance. Errors logged: "
+                + Describe(world.Logs.Entries));
     }
 
     /// <summary>
@@ -122,4 +123,38 @@ public class AlvoHostProblemDetailsTests
         response.Content.Headers.ContentType!.MediaType.ShouldBe("application/problem+json");
         (await response.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.MalformedQuery);
     }
+
+    /// <summary>
+    /// One Error line that says a <em>request</em> woke somebody — the exception handler's own, and nothing
+    /// else in the host.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>"No Error anywhere" is a different claim, and asserting it made this fact fail on other people's
+    /// work.</b> A world is a whole standalone host, so it runs the outbox dispatcher, which polls the database
+    /// once a second for as long as the fact lives. That pump is <em>designed</em> to log exactly one Error and
+    /// stop when its queue cannot be reached — <c>A_queue_that_cannot_be_reached_stops_the_pump_loudly</c> is
+    /// the fact that pins it down — so a transient store failure on a loaded CI runner put an Error in these
+    /// logs and failed a fact about request handling. It did, on windows-latest, on a commit that changed no
+    /// code.
+    /// </para>
+    /// <para>
+    /// The narrowing costs nothing this fact was ever measuring: a 409 that regressed to a 500 reaches
+    /// <c>AlvoExceptionHandler</c>, whose line this matches, and the sibling fact above asserts the same line
+    /// from the other side.
+    /// </para>
+    /// </remarks>
+    /// <param name="entry">One captured record.</param>
+    private static bool Paged(LoggedRecord entry) =>
+        entry.Level == Microsoft.Extensions.Logging.LogLevel.Error
+        && entry.Message.Contains("failed to handle", StringComparison.Ordinal);
+
+    /// <summary>Every Error the host logged, so a failure names what tripped it instead of only its predicate.</summary>
+    /// <param name="entries">The world's captured records.</param>
+    private static string Describe(IReadOnlyList<LoggedRecord> entries) =>
+        string.Join(
+            " | ",
+            entries
+                .Where(entry => entry.Level >= Microsoft.Extensions.Logging.LogLevel.Error)
+                .Select(entry => $"{entry.Message} [{entry.Exception?.GetType().Name ?? "no exception"}]"));
 }

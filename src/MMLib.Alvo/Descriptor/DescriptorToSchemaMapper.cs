@@ -1,5 +1,6 @@
 ﻿using MMLib.Alvo.Api.Internal;
 using MMLib.Alvo.Descriptor.Internal;
+using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Schema;
 using System.Text.RegularExpressions;
 using SchemaFieldType = MMLib.Alvo.Schema.FieldType;
@@ -34,6 +35,7 @@ internal static class DescriptorToSchemaMapper
     {
         bool tenancyEnabled = d.Tenancy?.Enabled == true;
         var formats = DeclaredFormats(d);
+        EnsureNoWildcardSubscription(d);
 
         // Built once, from the WHOLE descriptor: resolving a rollup's foreign key needs the CHILD entity's
         // fields, which the per-entity pass below cannot see. See RollupResolver's own remarks for why the
@@ -44,6 +46,72 @@ internal static class DescriptorToSchemaMapper
             .Select(kvp => MapEntity(kvp.Key, kvp.Value, tenancyEnabled, formats, rollups))
             .ToList();
         return new SchemaModel(entities);
+    }
+
+    /// <summary>
+    /// Refuses, at apply, a wildcard in either slot the frozen schema types as <c>$defs/eventPattern</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A top-level walk, unlike every other refusal in this file</b>, because the two slots are top-level
+    /// blocks rather than parts of an entity. It sits in <see cref="Map"/> for the reason
+    /// <see cref="EnsureEveryDeclaredFeatureIsHonoured"/> does: this is the one apply path an embedded host
+    /// that never calls <c>IDescriptorValidator</c> still passes through. The validator reports the same thing
+    /// as a structured error from its own raw-JSON pass, which is the two-pass tie the table's remarks
+    /// describe.
+    /// </para>
+    /// <para>
+    /// The reason it is refused rather than warned about, and why the matcher is not simply built, is on
+    /// <see cref="UnhonouredFeatures.WildcardSubscription"/> — it is a ruling, not a mechanic.
+    /// </para>
+    /// <para>
+    /// <b>Every hop is null-tolerant, including the entry itself.</b> <c>AutomationRule.Trigger</c> is
+    /// <c>required</c>, but <c>System.Text.Json</c>'s <c>required</c> enforces <em>presence</em> and never
+    /// non-null on a reference type — so <c>"automation": { "r": { "trigger": null, … } }</c> and
+    /// <c>"automation": { "r": null }</c> both parse cleanly and would leave this walk throwing
+    /// <see cref="NullReferenceException"/> instead of the structured refusal. This is the apply path a host
+    /// that skips <c>IDescriptorValidator</c> still takes, so a crash here is the same availability bug the
+    /// validator's own <c>ValueKind</c> guard exists to prevent. Found by review.
+    /// </para>
+    /// </remarks>
+    /// <param name="d">The parsed descriptor.</param>
+    /// <exception cref="InvalidDataException">A trigger subscribes with a wildcard.</exception>
+    private static void EnsureNoWildcardSubscription(AlvoDescriptor d)
+    {
+        foreach (var (name, rule) in d.Automation ?? Empty<AutomationRule>.Map)
+        {
+            RefuseWildcard($"Automation rule '{name}'", rule?.Trigger?.Event);
+        }
+
+        foreach (var (name, function) in d.Functions ?? Empty<FunctionDescriptor>.Map)
+        {
+            RefuseWildcard($"Function '{name}'", function?.Trigger?.Event);
+        }
+    }
+
+    /// <summary>An absent descriptor block, as an empty map — so the walk above reads as one loop each.</summary>
+    /// <typeparam name="T">What the block holds.</typeparam>
+    private static class Empty<T>
+    {
+        /// <summary>The shared empty map; allocated once per block type rather than per apply.</summary>
+        internal static IReadOnlyDictionary<string, T> Map { get; } =
+            new Dictionary<string, T>(StringComparer.Ordinal);
+    }
+
+    /// <summary>Refuses one trigger's pattern, naming who declared it; an absent or exact pattern passes.</summary>
+    /// <param name="declarer">The rule or function, already spelled for the message.</param>
+    /// <param name="pattern">The declared pattern, or <see langword="null"/> for a trigger that is not an event.</param>
+    private static void RefuseWildcard(string declarer, string? pattern)
+    {
+        if (pattern is null || !EventPattern.HasWildcard(pattern))
+        {
+            return;
+        }
+
+        var refusal = UnhonouredFeatures.WildcardSubscription;
+        throw new InvalidDataException(
+            $"{declarer} subscribes to '{pattern}', a wildcard '{refusal.Feature}'. {refusal.Consequence} "
+            + refusal.Fix);
     }
 
     /// <summary>
