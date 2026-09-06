@@ -154,6 +154,8 @@ namespace MMLib.Alvo.Testing.Data
         protected AlvoDataBeforeHookTests() { }
         protected static System.DateTimeOffset Stamp { get; }
         public System.Threading.Tasks.Task A_batch_whose_mutates_the_create_rule_accepts_still_lands() { }
+        public System.Threading.Tasks.Task A_before_create_mutate_reaches_the_row_a_replacement_created() { }
+        public System.Threading.Tasks.Task A_before_create_rule_refuses_the_create_branch_of_a_replacement() { }
         public System.Threading.Tasks.Task A_delete_no_hook_refuses_still_removes_the_row() { }
         public System.Threading.Tasks.Task A_mutate_cannot_move_a_row_out_of_the_create_rule_inside_a_batch() { }
         public System.Threading.Tasks.Task A_mutate_may_write_a_field_the_caller_is_refused() { }
@@ -444,11 +446,15 @@ namespace MMLib.Alvo.Testing.Data
     public abstract class AlvoDataReplaceTests : MMLib.Alvo.Testing.Data.AlvoDataFixture
     {
         protected AlvoDataReplaceTests() { }
+        public System.Threading.Tasks.Task A_caller_who_may_update_but_not_create_cannot_reach_the_create_branch() { }
         public System.Threading.Tasks.Task A_nullable_field_the_replacement_omits_becomes_null() { }
+        public System.Threading.Tasks.Task A_read_only_field_the_replacement_names_is_still_refused() { }
+        public System.Threading.Tasks.Task A_read_only_field_the_replacement_omits_keeps_its_stored_value() { }
         public System.Threading.Tasks.Task A_replayed_replacement_answers_that_it_created_nothing() { }
         public System.Threading.Tasks.Task A_replayed_replacement_does_not_write_again() { }
         public System.Threading.Tasks.Task A_required_field_is_refused_on_the_create_branch_too() { }
         public System.Threading.Tasks.Task A_required_field_the_replacement_omits_is_refused() { }
+        public System.Threading.Tasks.Task An_explicit_null_for_a_required_field_is_refused_like_an_omission() { }
         public System.Threading.Tasks.Task An_if_match_carrying_the_stored_version_replaces_the_row() { }
         public System.Threading.Tasks.Task An_if_match_on_an_absent_row_fails_its_precondition() { }
         public System.Threading.Tasks.Task Creating_through_a_replace_lands_the_row_in_the_caller_s_own_tenant() { }

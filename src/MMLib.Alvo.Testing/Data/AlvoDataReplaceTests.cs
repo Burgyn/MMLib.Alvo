@@ -339,6 +339,89 @@ public abstract class AlvoDataReplaceTests : AlvoDataFixture
         replaced.Row["title"].ShouldBe("Second");
     }
 
+    /// <summary>A field the caller may not write keeps its stored value through a replacement.</summary>
+    /// <remarks>
+    /// <b>The hole a whole-row write opens, if the rule is written from the schema alone.</b> <c>readOnly</c>
+    /// is enforced by "did the payload name this field", so a frozen field is precisely one the caller
+    /// <em>cannot</em> name — and nulling every unnamed field would destroy the frozen value through the one
+    /// door the guard has to leave open. A frozen <c>owner_id</c> cleared this way changes which rows an
+    /// ownership predicate matches, which is why this is a security fact rather than a data-loss one.
+    /// </remarks>
+    [Fact]
+    public async Task A_read_only_field_the_replacement_omits_keeps_its_stored_value()
+    {
+        var world = await FrozenWorldAsync();
+
+        var replaced = await world.Data.ReplaceAsync(
+            Receipts, FrozenRowId, Payload("Replaced"), world.Caller, cancellationToken: Ct);
+
+        replaced.Row[FrozenField].ShouldBe(
+            FrozenValue, "a field the caller may not write is not a field a replacement may clear");
+    }
+
+    /// <summary>And naming it is still refused, so the exemption above is not a licence.</summary>
+    /// <remarks>
+    /// The control the fact above needs: an implementation that simply stopped enforcing <c>readOnly</c> on
+    /// this route would satisfy it while being far worse than the bug it replaced.
+    /// </remarks>
+    [Fact]
+    public async Task A_read_only_field_the_replacement_names_is_still_refused()
+    {
+        var world = await FrozenWorldAsync();
+
+        var refusal = await Should.ThrowAsync<AlvoAuthorizationException>(
+            () => world.Data.ReplaceAsync(
+                Receipts,
+                FrozenRowId,
+                new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["title"] = "Replaced",
+                    [FrozenField] = "rewritten",
+                },
+                world.Caller,
+                cancellationToken: Ct));
+
+        refusal.Message.ShouldContain(FrozenField);
+    }
+
+    /// <summary>An explicit null for a required field is refused, exactly as omitting it is.</summary>
+    /// <remarks>
+    /// The row <c>{"rank": null}</c> asks for is the row an omission asks for, and the store refuses both —
+    /// so testing only for the key would send the caller a 500 from the column's own <c>NOT NULL</c> where
+    /// they should have been told which field to supply.
+    /// </remarks>
+    [Fact]
+    public async Task An_explicit_null_for_a_required_field_is_refused_like_an_omission()
+    {
+        var world = await ExtraWorldAsync();
+
+        var refusal = await Should.ThrowAsync<ArgumentException>(
+            () => world.Data.ReplaceAsync(
+                Extras,
+                Guid.NewGuid(),
+                new Dictionary<string, object?>(StringComparer.Ordinal) { ["title"] = "x", [ExtraField] = null },
+                world.Caller,
+                cancellationToken: Ct));
+
+        refusal.Message.ShouldContain(ExtraField);
+    }
+
+    /// <summary>A caller who may update but not create cannot reach the create branch.</summary>
+    /// <remarks>
+    /// <b>The bypass requiring both operations exists to prevent.</b> Which branch runs depends on stored
+    /// data, so a route gated on the branch's own operation would let a caller permitted only to update
+    /// create rows by naming ids nothing holds.
+    /// </remarks>
+    [Fact]
+    public async Task A_caller_who_may_update_but_not_create_cannot_reach_the_create_branch()
+    {
+        var world = await UpdateOnlyWorldAsync();
+
+        await Should.ThrowAsync<AlvoAuthorizationException>(
+            () => world.Data.ReplaceAsync(
+                Drafts, Guid.NewGuid(), Payload("Snuck in"), world.Caller, cancellationToken: Ct));
+    }
+
     /// <summary><c>tenant_id</c> is refused on this route whether or not the row already exists.</summary>
     /// <remarks>
     /// <b><c>tenant_id</c> is caller-writable on a create and refused on an update</b>, so a route that

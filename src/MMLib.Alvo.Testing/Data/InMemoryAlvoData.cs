@@ -380,7 +380,8 @@ public sealed class InMemoryAlvoData : IAlvoData
         EnsureNoManagedColumnWrite(values, schema, isUpdate: true);
         EnsureNoReadOnlyWrite(values, create.ReadOnlyFields);
         EnsureNoReadOnlyWrite(values, update.ReadOnlyFields);
-        EnsureWholeRow(values, schema);
+        EnsureWholeRow(values, schema, create);
+        EnsureWholeRow(values, schema, update);
         AlvoPrecondition.EnsureSupported(precondition, schema);
 
         lock (_gate)
@@ -414,7 +415,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         AlvoPrecondition.EnsureMatches(precondition, StoredVersion(schema, stored));
 
         var stamped = AlvoAuditStamp.Applied(schema, values, context, _time, isUpdate: true);
-        var merged = Merge(stored, WholeRow(stamped, schema));
+        var merged = Merge(stored, WholeRow(stamped, schema, decision));
         EnsureWriteAllowed(decision, merged, stored, context);
 
         list[index] = merged;
@@ -451,7 +452,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         AlvoPrecondition.EnsureMatches(precondition, storedVersion: null);
 
         var stamped = AlvoAuditStamp.Applied(schema, values, context, _time, isUpdate: false);
-        var candidate = new Dictionary<string, object?>(WholeRow(stamped, schema), StringComparer.Ordinal)
+        var candidate = new Dictionary<string, object?>(WholeRow(stamped, schema, decision), StringComparer.Ordinal)
         {
             [IdField] = id,
         };
@@ -485,11 +486,12 @@ public sealed class InMemoryAlvoData : IAlvoData
     /// </remarks>
     /// <param name="values">The caller's payload, already stamped.</param>
     /// <param name="schema">The entity as the applied schema declares it.</param>
+    /// <param name="decision">The caller's verdict, for the fields it froze and the fields it masks.</param>
     private static Dictionary<string, object?> WholeRow(
-        IReadOnlyDictionary<string, object?> values, EntitySchema schema)
+        IReadOnlyDictionary<string, object?> values, EntitySchema schema, PolicyDecision decision)
     {
         var whole = new Dictionary<string, object?>(values, StringComparer.Ordinal);
-        foreach (var field in CallerOwnedFields(schema))
+        foreach (var field in CallerOwnedFields(schema, decision))
         {
             if (!whole.ContainsKey(field.Name))
             {
@@ -509,10 +511,13 @@ public sealed class InMemoryAlvoData : IAlvoData
     /// </remarks>
     /// <param name="values">The caller's payload.</param>
     /// <param name="schema">The entity as the applied schema declares it.</param>
-    private static void EnsureWholeRow(IReadOnlyDictionary<string, object?> values, EntitySchema schema)
+    /// <param name="decision">The caller's verdict, for the fields it froze and the fields it masks.</param>
+    private static void EnsureWholeRow(
+        IReadOnlyDictionary<string, object?> values, EntitySchema schema, PolicyDecision decision)
     {
-        var missing = CallerOwnedFields(schema)
-            .FirstOrDefault(field => field.Required && !values.ContainsKey(field.Name));
+        var missing = CallerOwnedFields(schema, decision)
+            .FirstOrDefault(field =>
+                field.Required && (!values.TryGetValue(field.Name, out var value) || value is null));
 
         if (missing is not null)
         {
@@ -527,11 +532,16 @@ public sealed class InMemoryAlvoData : IAlvoData
 
     /// <summary>The fields a replacement owns: declared, not framework-managed, not engine-computed.</summary>
     /// <param name="schema">The entity as the applied schema declares it.</param>
-    private static IEnumerable<FieldSchema> CallerOwnedFields(EntitySchema schema)
+    /// <param name="decision">The caller's verdict, for the fields it froze and the fields it masks.</param>
+    private static IEnumerable<FieldSchema> CallerOwnedFields(EntitySchema schema, PolicyDecision decision)
     {
         var managed = AlvoManagedColumns.For(schema);
         return schema.Fields.Where(field =>
-            !managed.Contains(field.Name) && field.ComputedExpression is null && field.Rollup is null);
+            !managed.Contains(field.Name)
+            && field.ComputedExpression is null
+            && field.Rollup is null
+            && !decision.ReadOnlyFields.Contains(field.Name)
+            && !decision.HiddenFields.Contains(field.Name));
     }
 
     /// <summary>Places a created row in the caller's own tenant, on an entity that is scoped at all.</summary>

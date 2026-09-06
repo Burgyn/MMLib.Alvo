@@ -7,6 +7,7 @@ using MMLib.Alvo.Auth;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
+using System.Collections.Frozen;
 using System.Text;
 using System.Text.Json.Nodes;
 
@@ -529,13 +530,14 @@ internal static class DataApiEndpoints
                 ProblemResultFactory.GuardAsync(async () =>
                 {
                     var context = Caller(caller);
-                    EnsureOperationIsAllowed(policies, entity.Name, DataOperation.Create, context);
+                    var creating = EnsureOperationIsAllowed(policies, entity.Name, DataOperation.Create, context);
                     var decision = EnsureOperationIsAllowed(policies, entity.Name, DataOperation.Update, context);
                     var precondition = Precondition(http.Request);
                     var key = IdempotencyKey(http.Request, context, options);
 
                     var (body, violations) = await ReadAndValidateAsync(
-                        http, entity, options, decision, isCreate: true, formats, data, context, ct)
+                        http, entity, options, decision, isCreate: true, formats, data, context, ct,
+                        alsoFrozenBy: creating)
                         .ConfigureAwait(false);
                     if (violations.Count > 0)
                     {
@@ -822,7 +824,8 @@ internal static class DataApiEndpoints
             FormatCatalog formats,
             IAlvoData data,
             AlvoContext context,
-            CancellationToken ct)
+            CancellationToken ct,
+            PolicyDecision? alsoFrozenBy = null)
     {
         var payload = await JsonPayloadReader
             .ReadAsync(http.Request, entity, options, ct).ConfigureAwait(false);
@@ -836,7 +839,7 @@ internal static class DataApiEndpoints
                 entity,
                 payload.Values,
                 isCreate,
-                decision.ReadOnlyFields,
+                FrozenByEither(decision, alsoFrozenBy),
                 RefusedFields(payload.Violations),
                 formats,
                 data,
@@ -1305,6 +1308,26 @@ internal static class DataApiEndpoints
     /// <see cref="DataApiJson"/> for why a row's field names are a contract and not presentation.
     /// </summary>
     private static IResult Json<T>(T value) => Results.Json(value, DataApiJson.Options);
+
+    /// <summary>
+    /// Every field frozen by <paramref name="decision"/>, and — where a route is gated by two operations —
+    /// by <paramref name="alsoFrozenBy"/> as well.
+    /// </summary>
+    /// <remarks>
+    /// <b>The create-or-replace route needs the union, and answering with one mask makes it lie.</b>
+    /// <c>readOnly</c> is resolved per operation, so a field frozen on <c>create</c> and writable on
+    /// <c>update</c> passes a validator that saw only the update mask — and the port, which refuses a field
+    /// frozen under <em>either</em>, then answers <c>403</c> where every other route answers <c>422</c>. That
+    /// also breaks this file's own invariant: nothing is admitted here that the port would refuse.
+    /// </remarks>
+    /// <param name="decision">The route's primary decision.</param>
+    /// <param name="alsoFrozenBy">The second decision a two-operation route is gated by, if any.</param>
+    private static IReadOnlySet<string> FrozenByEither(PolicyDecision decision, PolicyDecision? alsoFrozenBy) =>
+        alsoFrozenBy is { } second && second.ReadOnlyFields.Count > 0
+            ? decision.ReadOnlyFields
+                .Union(second.ReadOnlyFields, StringComparer.Ordinal)
+                .ToFrozenSet(StringComparer.Ordinal)
+            : decision.ReadOnlyFields;
 
     /// <summary>The <c>200</c> for one row: its values plus the entity tag a later <c>If-Match</c> can carry.</summary>
     /// <param name="record">The row the port returned.</param>

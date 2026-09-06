@@ -1072,12 +1072,22 @@ internal sealed class EfAlvoData : IAlvoData
         var branches = new ReplaceDecisions(
             Resolve(entity, DataOperation.Create, context), Resolve(entity, DataOperation.Update, context));
 
-        return idempotency is { } token
-            ? await ReplayableWriteAsync(
+        if (idempotency is not { } token)
+        {
+            return await ReplacedAsync(entity, id, values, branches, context, precondition, cancellationToken);
+        }
+
+        try
+        {
+            return await ReplayableWriteAsync(
                 () => ReplacedOrReplayedAsync(
                     entity, id, values, branches, context, precondition, token, cancellationToken),
-                cancellationToken)
-            : await ReplacedAsync(entity, id, values, branches, context, precondition, cancellationToken);
+                cancellationToken);
+        }
+        catch (AlvoConstraintViolationException collision) when (IsCallerKeyCollision(collision))
+        {
+            return await ReplayedAfterKeyRaceAsync(entity, context, token, collision, cancellationToken);
+        }
     }
 
     /// <summary>
@@ -1117,6 +1127,66 @@ internal sealed class EfAlvoData : IAlvoData
         await transaction.CommitAsync(cancellationToken);
         return result;
     }
+
+    /// <summary>
+    /// The record this key holds now, read in a transaction of its own — or the collision that sent us here.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Every other idempotent create is safe from this by accident, and create-or-replace is not.</b> A
+    /// create mints a fresh row id per attempt, so two concurrent requests carrying one key can only collide
+    /// on the <em>idempotency table's</em> primary key — a raw provider exception, which
+    /// <see cref="IsStorageWriteFailure"/> matches and <see cref="ReplayableWriteAsync{T}(Func{Task{T}}, CancellationToken)"/> retries into a
+    /// replay. Here the row id comes from the path and is the same on both requests, so the loser collides on
+    /// the <b>row's</b> key first, and that collision is now translated
+    /// (<see cref="ConstraintViolationTranslator"/>'s caller-keyed rule) into
+    /// <see cref="AlvoConstraintViolationException"/> — which is neither of the two spellings the retry
+    /// matches. Left alone, the one scenario an idempotency key exists to make safe would answer <c>409</c>.
+    /// </para>
+    /// <para>
+    /// <b>One extra look, not a retry, and that is the whole point.</b> Feeding the translated collision back
+    /// into the retry loop would make a <em>genuine</em> conflict — an id held by somebody else's row — burn
+    /// ten attempts before answering, which is the #138 shape this port already paid to remove. So the
+    /// collision is answered by exactly one more read: if the rival committed its record, this is our own
+    /// request arriving twice and the answer is that record's row; if not, the id really is taken and the
+    /// original refusal stands.
+    /// </para>
+    /// </remarks>
+    /// <param name="entity">The entity name.</param>
+    /// <param name="context">The caller performing the write.</param>
+    /// <param name="token">The caller's idempotency token.</param>
+    /// <param name="collision">The refusal that sent us here, rethrown when no record turns up.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    private async Task<AlvoReplaceResult> ReplayedAfterKeyRaceAsync(
+        string entity, AlvoContext context, AlvoIdempotency token, AlvoConstraintViolationException collision,
+        CancellationToken cancellationToken)
+    {
+        using var db = _contexts.Create();
+        var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
+        await EnsureIdempotencyTableAsync(db, cancellationToken);
+
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var records = new IdempotencyScope(
+            db.Database.GetDbConnection(), transaction.GetDbTransaction(), _idempotencyTable, token, context);
+
+        var recorded = await records.FindAsync(cancellationToken);
+        if (recorded is not { } record)
+        {
+            throw collision;
+        }
+
+        var replayed = await ReplayedAsync(db, schema, context, record, token, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        return AlvoReplaceResult.ReplacedRow(replayed);
+    }
+
+    /// <summary>Whether <paramref name="failure"/> is a collision on the row key the caller named.</summary>
+    /// <param name="failure">The refusal a write raised.</param>
+    private static bool IsCallerKeyCollision(AlvoConstraintViolationException failure) =>
+        failure.Kind == AlvoConstraintKind.Unique
+        && failure.Fields.Count == 1
+        && string.Equals(failure.Fields[0], AlvoManagedColumns.Id, StringComparison.Ordinal);
 
     /// <summary>The write, its event and the key's record — in that order and in one transaction.</summary>
     /// <remarks>
@@ -1197,7 +1267,8 @@ internal sealed class EfAlvoData : IAlvoData
     {
         var (preImage, postImage) = await WriteAsync(
             db, schema, decision, context, id,
-            WholeRowGuard.WholeRow(Stamped(schema, values, context, now, isUpdate: true), schema), precondition,
+            WholeRowGuard.WholeRow(Stamped(schema, values, context, now, isUpdate: true), schema, decision),
+            precondition,
             now, cancellationToken);
         await EmitAsync(
             db, transaction, schema, OutboxOperation.Updated, context, now, Unmasked(postImage), preImage,
@@ -1220,10 +1291,12 @@ internal sealed class EfAlvoData : IAlvoData
     {
         AlvoPrecondition.EnsureMatches(precondition, storedVersion: null);
 
-        var candidate = ReplaceCandidate(db, schema, context, id, values, now);
+        var candidate = ReplaceCandidate(db, schema, decision, context, id, values, now);
         EnsureWriteAllowed(decision, Unmasked(candidate), previous: null, context);
+        candidate = RunBeforeCreate(db, schema, decision, context, candidate, now);
 
         var stored = await InsertAsync(db, schema, decision, context, candidate, cancellationToken, callerKeyed: true);
+        await RecomputeRollupsAsync(db, schema, [stored!], cancellationToken);
         await EmitAsync(
             db, transaction, schema, OutboxOperation.Created, context, now, Unmasked(stored), preImage: null,
             cancellationToken);
@@ -1243,17 +1316,18 @@ internal sealed class EfAlvoData : IAlvoData
     /// </remarks>
     /// <param name="db">The write's own context.</param>
     /// <param name="schema">The entity being written.</param>
+    /// <param name="decision">The caller's verdict for the create branch.</param>
     /// <param name="context">The caller the write is performed as.</param>
     /// <param name="id">The id the caller named in the path.</param>
     /// <param name="values">The caller's own payload.</param>
     /// <param name="now">The write's own instant.</param>
     private static Dictionary<string, object> ReplaceCandidate(
-        AlvoDataContext db, EntitySchema schema, AlvoContext context, Guid id,
+        AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context, Guid id,
         IReadOnlyDictionary<string, object?> values, DateTimeOffset now)
     {
         var candidate = WritePropertyBag.For(
             db.Rows(schema.Name).EntityType,
-            WholeRowGuard.WholeRow(Stamped(schema, values, context, now, isUpdate: false), schema));
+            WholeRowGuard.WholeRow(Stamped(schema, values, context, now, isUpdate: false), schema, decision));
         candidate[AlvoDataContext.IdColumn] = id;
         StampTenant(candidate, schema, context);
 
@@ -1307,7 +1381,8 @@ internal sealed class EfAlvoData : IAlvoData
         var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
         WritePayloadGuard.EnsureWritable(values, schema, branches.Create, isUpdate: true);
         WritePayloadGuard.EnsureWritable(values, schema, branches.Update, isUpdate: true);
-        WholeRowGuard.EnsureWholeRow(values, schema);
+        WholeRowGuard.EnsureWholeRow(values, schema, branches.Create);
+        WholeRowGuard.EnsureWholeRow(values, schema, branches.Update);
         AlvoPrecondition.EnsureSupported(precondition, schema);
 
         return schema;

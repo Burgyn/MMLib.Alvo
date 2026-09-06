@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Schema;
+﻿using MMLib.Alvo.Rules;
+using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 
@@ -31,20 +32,33 @@ internal static class WholeRowGuard
     /// <see langword="null"/>.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <b>This is the one behaviour separating a replacement from a patch.</b> Keeping the stored value is
     /// what an update does by contract; doing it here would let two identical replacements applied to two
     /// differently-populated rows produce two different rows — and the caller could never clear a field.
+    /// </para>
+    /// <para>
+    /// <b>A field this caller may not write, or may not read, is exempt — and that is a security rule, not a
+    /// convenience.</b> <c>readOnly</c> is enforced by "did the payload name this field", so a field the
+    /// policy froze is one the caller <em>cannot</em> name; nulling it here would destroy a frozen value
+    /// through the one door the guard leaves open, and a frozen <c>owner_id</c> nulled this way changes which
+    /// rows an ownership predicate matches. <c>hidden</c> is the same argument from the other side: a caller
+    /// who cannot read a value cannot restate it, so treating its absence as a deletion punishes them for a
+    /// mask they did not choose.
+    /// </para>
     /// </remarks>
     /// <param name="values">The caller's payload, already stamped.</param>
     /// <param name="schema">The entity as the applied schema declares it.</param>
+    /// <param name="decision">The caller's verdict, for the fields it froze and the fields it masks.</param>
     internal static IReadOnlyDictionary<string, object?> WholeRow(
-        IReadOnlyDictionary<string, object?> values, EntitySchema schema)
+        IReadOnlyDictionary<string, object?> values, EntitySchema schema, PolicyDecision decision)
     {
         ArgumentNullException.ThrowIfNull(values);
         ArgumentNullException.ThrowIfNull(schema);
+        ArgumentNullException.ThrowIfNull(decision);
 
         var whole = new Dictionary<string, object?>(values, StringComparer.Ordinal);
-        foreach (var field in CallerOwnedFields(schema))
+        foreach (var field in CallerOwnedFields(schema, decision))
         {
             if (!whole.ContainsKey(field.Name))
             {
@@ -77,14 +91,17 @@ internal static class WholeRowGuard
     /// </remarks>
     /// <param name="values">The caller's payload.</param>
     /// <param name="schema">The entity as the applied schema declares it.</param>
+    /// <param name="decision">The caller's verdict, for the fields it froze and the fields it masks.</param>
     /// <exception cref="ArgumentException">A <c>required</c> field is missing from <paramref name="values"/>.</exception>
-    internal static void EnsureWholeRow(IReadOnlyDictionary<string, object?> values, EntitySchema schema)
+    internal static void EnsureWholeRow(
+        IReadOnlyDictionary<string, object?> values, EntitySchema schema, PolicyDecision decision)
     {
         ArgumentNullException.ThrowIfNull(values);
         ArgumentNullException.ThrowIfNull(schema);
+        ArgumentNullException.ThrowIfNull(decision);
 
-        var missing = CallerOwnedFields(schema)
-            .FirstOrDefault(field => field.Required && !values.ContainsKey(field.Name));
+        var missing = CallerOwnedFields(schema, decision)
+            .FirstOrDefault(field => field.Required && IsUnsupplied(values, field.Name));
 
         if (missing is not null)
         {
@@ -100,12 +117,36 @@ internal static class WholeRowGuard
         + "hidden cannot be supplied by a caller who cannot read it, which makes this entity replaceable "
         + "only through a partial update for them.";
 
-    /// <summary>The fields a replacement owns: declared, not framework-managed, not engine-computed.</summary>
+    /// <summary>
+    /// Whether the payload leaves <paramref name="field"/> unsaid — absent, or present as an explicit
+    /// <see langword="null"/>.
+    /// </summary>
+    /// <remarks>
+    /// <b>An explicit <c>null</c> counts as unsaid for a <c>required</c> field</b>, because the row it asks
+    /// for is the same row an omission asks for and the store refuses both. Testing only for the key would
+    /// let <c>{"rank": null}</c> through the port and die on the column's own <c>NOT NULL</c> — a 500 where
+    /// the caller should have been told which field to supply, and exactly the parity with the HTTP layer
+    /// this type exists to keep.
+    /// </remarks>
+    /// <param name="values">The caller's payload.</param>
+    /// <param name="field">The field's name.</param>
+    private static bool IsUnsupplied(IReadOnlyDictionary<string, object?> values, string field) =>
+        !values.TryGetValue(field, out var value) || value is null;
+
+    /// <summary>
+    /// The fields a replacement owns: declared, not framework-managed, not engine-computed, and neither
+    /// frozen nor masked for this caller.
+    /// </summary>
     /// <param name="schema">The entity as the applied schema declares it.</param>
-    private static IEnumerable<FieldSchema> CallerOwnedFields(EntitySchema schema)
+    /// <param name="decision">The caller's verdict.</param>
+    private static IEnumerable<FieldSchema> CallerOwnedFields(EntitySchema schema, PolicyDecision decision)
     {
         var managed = AlvoManagedColumns.For(schema);
         return schema.Fields.Where(field =>
-            !managed.Contains(field.Name) && field.ComputedExpression is null && field.Rollup is null);
+            !managed.Contains(field.Name)
+            && field.ComputedExpression is null
+            && field.Rollup is null
+            && !decision.ReadOnlyFields.Contains(field.Name)
+            && !decision.HiddenFields.Contains(field.Name));
     }
 }
