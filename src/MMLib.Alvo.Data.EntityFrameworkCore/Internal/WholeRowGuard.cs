@@ -46,6 +46,15 @@ internal static class WholeRowGuard
     /// who cannot read a value cannot restate it, so treating its absence as a deletion punishes them for a
     /// mask they did not choose.
     /// </para>
+    /// <para>
+    /// <b>One decision, not the union of both branches' — and that is safe rather than an oversight.</b>
+    /// Every other frozen-field check on this route takes both, because refusing under either is the
+    /// default-deny reading. Here the two cannot differ: <c>PolicyEngine</c> resolves <c>hidden</c> and
+    /// <c>readOnly</c> from entity-level masks over the caller's context, with no operation in scope, so a
+    /// create decision and an update decision carry the same two sets. If either mask ever becomes
+    /// per-operation, <b>this is the one site where divergence destroys a stored value rather than refusing a
+    /// request</b>, and it must take the union first.
+    /// </para>
     /// </remarks>
     /// <param name="values">The caller's payload, already stamped.</param>
     /// <param name="schema">The entity as the applied schema declares it.</param>
@@ -88,19 +97,26 @@ internal static class WholeRowGuard
     /// restated, so for them the entity is reachable only through a partial update. Saying so is the
     /// difference between an error they can act on and one that reads as a bug.
     /// </para>
+    /// <para>
+    /// <b>The mask exemptions <see cref="WholeRow"/> applies do <em>not</em> apply here, and that asymmetry is
+    /// the whole of this method.</b> The two ask different questions. "May this field's absence mean delete
+    /// it?" is answered <see langword="no"/> for a frozen or masked field, because the caller could not have
+    /// named it. "May this row be stored without it?" is answered by the column, which does not care who was
+    /// allowed to read it — so exempting them here would let the create branch insert a row missing a
+    /// <c>NOT NULL</c> column and hand an embedded caller the engine's own violation instead of this
+    /// sentence. It would also make the sentence unreachable, since the check that emits it would have
+    /// excluded exactly the fields it describes.
+    /// </para>
     /// </remarks>
     /// <param name="values">The caller's payload.</param>
     /// <param name="schema">The entity as the applied schema declares it.</param>
-    /// <param name="decision">The caller's verdict, for the fields it froze and the fields it masks.</param>
     /// <exception cref="ArgumentException">A <c>required</c> field is missing from <paramref name="values"/>.</exception>
-    internal static void EnsureWholeRow(
-        IReadOnlyDictionary<string, object?> values, EntitySchema schema, PolicyDecision decision)
+    internal static void EnsureWholeRow(IReadOnlyDictionary<string, object?> values, EntitySchema schema)
     {
         ArgumentNullException.ThrowIfNull(values);
         ArgumentNullException.ThrowIfNull(schema);
-        ArgumentNullException.ThrowIfNull(decision);
 
-        var missing = CallerOwnedFields(schema, decision)
+        var missing = DeclaredFields(schema)
             .FirstOrDefault(field => field.Required && IsUnsupplied(values, field.Name));
 
         if (missing is not null)
@@ -134,19 +150,28 @@ internal static class WholeRowGuard
         !values.TryGetValue(field, out var value) || value is null;
 
     /// <summary>
-    /// The fields a replacement owns: declared, not framework-managed, not engine-computed, and neither
-    /// frozen nor masked for this caller.
+    /// The fields a replacement <b>may clear</b>: declared, not framework-managed, not engine-computed, and
+    /// neither frozen nor masked for this caller.
     /// </summary>
     /// <param name="schema">The entity as the applied schema declares it.</param>
     /// <param name="decision">The caller's verdict.</param>
-    private static IEnumerable<FieldSchema> CallerOwnedFields(EntitySchema schema, PolicyDecision decision)
+    private static IEnumerable<FieldSchema> CallerOwnedFields(EntitySchema schema, PolicyDecision decision) =>
+        DeclaredFields(schema).Where(field =>
+            !decision.ReadOnlyFields.Contains(field.Name)
+            && !decision.HiddenFields.Contains(field.Name));
+
+    /// <summary>
+    /// The fields a row's own shape is made of: declared, not framework-managed, not engine-computed.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately blind to the caller's masks. Whether a row can be <em>stored</em> without a field is a
+    /// question for the column, and a caller's read or write permission does not change the answer.
+    /// </remarks>
+    /// <param name="schema">The entity as the applied schema declares it.</param>
+    private static IEnumerable<FieldSchema> DeclaredFields(EntitySchema schema)
     {
         var managed = AlvoManagedColumns.For(schema);
         return schema.Fields.Where(field =>
-            !managed.Contains(field.Name)
-            && field.ComputedExpression is null
-            && field.Rollup is null
-            && !decision.ReadOnlyFields.Contains(field.Name)
-            && !decision.HiddenFields.Contains(field.Name));
+            !managed.Contains(field.Name) && field.ComputedExpression is null && field.Rollup is null);
     }
 }

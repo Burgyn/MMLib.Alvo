@@ -353,7 +353,7 @@ public abstract class AlvoDataReplaceTests : AlvoDataFixture
         var world = await FrozenWorldAsync();
 
         var replaced = await world.Data.ReplaceAsync(
-            Receipts, FrozenRowId, Payload("Replaced"), world.Caller, cancellationToken: Ct);
+            Receipts, FrozenRowId, SecretPayload("Replaced"), world.Caller, cancellationToken: Ct);
 
         replaced.Row[FrozenField].ShouldBe(
             FrozenValue, "a field the caller may not write is not a field a replacement may clear");
@@ -376,12 +376,37 @@ public abstract class AlvoDataReplaceTests : AlvoDataFixture
                 new Dictionary<string, object?>(StringComparer.Ordinal)
                 {
                     ["title"] = "Replaced",
+                    [MandatorySecret] = "supplied-secret",
                     [FrozenField] = "rewritten",
                 },
                 world.Caller,
                 cancellationToken: Ct));
 
         refusal.Message.ShouldContain(FrozenField);
+    }
+
+    /// <summary>A field that is required and hidden is refused when omitted, on both branches.</summary>
+    /// <remarks>
+    /// <b>The third hole of the same shape, and the one the first two fixes opened.</b> Exempting masked
+    /// fields from the whole-row rule is right for <em>nulling</em> — a caller who cannot read a value cannot
+    /// restate it — and wrong for <em>requiring</em>: whether a row can be stored without a column is a
+    /// question for the column, which does not care who was allowed to read it. Exempting them here would
+    /// have let the create branch insert a row missing a <c>NOT NULL</c> column and hand an embedded caller
+    /// the engine's own violation, while the HTTP layer answered a clean 422 — the two disagreeing about the
+    /// same row.
+    /// </remarks>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_required_and_hidden_field_the_replacement_omits_is_refused(bool rowExists)
+    {
+        var world = await FrozenWorldAsync();
+        var id = rowExists ? FrozenRowId : Guid.NewGuid();
+
+        var refusal = await Should.ThrowAsync<ArgumentException>(
+            () => world.Data.ReplaceAsync(Receipts, id, Payload("No secret"), world.Caller, cancellationToken: Ct));
+
+        refusal.Message.ShouldContain(MandatorySecret);
     }
 
     /// <summary>An explicit null for a required field is refused, exactly as omitting it is.</summary>

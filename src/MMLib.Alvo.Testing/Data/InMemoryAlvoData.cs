@@ -380,8 +380,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         EnsureNoManagedColumnWrite(values, schema, isUpdate: true);
         EnsureNoReadOnlyWrite(values, create.ReadOnlyFields);
         EnsureNoReadOnlyWrite(values, update.ReadOnlyFields);
-        EnsureWholeRow(values, schema, create);
-        EnsureWholeRow(values, schema, update);
+        EnsureWholeRow(values, schema);
         AlvoPrecondition.EnsureSupported(precondition, schema);
 
         lock (_gate)
@@ -511,11 +510,9 @@ public sealed class InMemoryAlvoData : IAlvoData
     /// </remarks>
     /// <param name="values">The caller's payload.</param>
     /// <param name="schema">The entity as the applied schema declares it.</param>
-    /// <param name="decision">The caller's verdict, for the fields it froze and the fields it masks.</param>
-    private static void EnsureWholeRow(
-        IReadOnlyDictionary<string, object?> values, EntitySchema schema, PolicyDecision decision)
+    private static void EnsureWholeRow(IReadOnlyDictionary<string, object?> values, EntitySchema schema)
     {
-        var missing = CallerOwnedFields(schema, decision)
+        var missing = DeclaredFields(schema)
             .FirstOrDefault(field =>
                 field.Required && (!values.TryGetValue(field.Name, out var value) || value is null));
 
@@ -533,15 +530,21 @@ public sealed class InMemoryAlvoData : IAlvoData
     /// <summary>The fields a replacement owns: declared, not framework-managed, not engine-computed.</summary>
     /// <param name="schema">The entity as the applied schema declares it.</param>
     /// <param name="decision">The caller's verdict, for the fields it froze and the fields it masks.</param>
-    private static IEnumerable<FieldSchema> CallerOwnedFields(EntitySchema schema, PolicyDecision decision)
+    private static IEnumerable<FieldSchema> CallerOwnedFields(EntitySchema schema, PolicyDecision decision) =>
+        DeclaredFields(schema).Where(field =>
+            !decision.ReadOnlyFields.Contains(field.Name)
+            && !decision.HiddenFields.Contains(field.Name));
+
+    /// <summary>
+    /// The fields a row's own shape is made of, blind to the caller's masks: whether a row can be
+    /// <em>stored</em> without a field is a question for the column, not for who may read it.
+    /// </summary>
+    /// <param name="schema">The entity as the applied schema declares it.</param>
+    private static IEnumerable<FieldSchema> DeclaredFields(EntitySchema schema)
     {
         var managed = AlvoManagedColumns.For(schema);
         return schema.Fields.Where(field =>
-            !managed.Contains(field.Name)
-            && field.ComputedExpression is null
-            && field.Rollup is null
-            && !decision.ReadOnlyFields.Contains(field.Name)
-            && !decision.HiddenFields.Contains(field.Name));
+            !managed.Contains(field.Name) && field.ComputedExpression is null && field.Rollup is null);
     }
 
     /// <summary>Places a created row in the caller's own tenant, on an entity that is scoped at all.</summary>

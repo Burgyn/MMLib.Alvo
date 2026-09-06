@@ -452,6 +452,11 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task A_read_only_field_the_replacement_omits_keeps_its_stored_value() { }
         public System.Threading.Tasks.Task A_replayed_replacement_answers_that_it_created_nothing() { }
         public System.Threading.Tasks.Task A_replayed_replacement_does_not_write_again() { }
+        [Xunit.InlineData(new object[] {
+                false})]
+        [Xunit.InlineData(new object[] {
+                true})]
+        public System.Threading.Tasks.Task A_required_and_hidden_field_the_replacement_omits_is_refused(bool rowExists) { }
         public System.Threading.Tasks.Task A_required_field_is_refused_on_the_create_branch_too() { }
         public System.Threading.Tasks.Task A_required_field_the_replacement_omits_is_refused() { }
         public System.Threading.Tasks.Task An_explicit_null_for_a_required_field_is_refused_like_an_omission() { }

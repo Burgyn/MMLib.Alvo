@@ -96,6 +96,11 @@ public abstract class AlvoDataFixture
     private protected static Dictionary<string, object?> ExtraOnlyPayload(int rank) =>
         new(StringComparer.Ordinal) { [ExtraField] = rank };
 
+    /// <summary>A whole body for <see cref="FrozenWorldAsync"/>'s entity: the title and the mandatory secret.</summary>
+    /// <param name="title">The nullable field.</param>
+    private protected static Dictionary<string, object?> SecretPayload(string title) =>
+        new(StringComparer.Ordinal) { ["title"] = title, [MandatorySecret] = "supplied-secret" };
+
     private protected static Guid IdOf(AlvoRecord record) => (Guid)record[AlvoManagedColumns.Id]!;
 
     /// <summary>
@@ -188,6 +193,7 @@ public abstract class AlvoDataFixture
                     [AlvoManagedColumns.Id] = FrozenRowId,
                     ["title"] = "First",
                     [FrozenField] = FrozenValue,
+                    [MandatorySecret] = "seeded-secret",
                 }),
             ],
         },
@@ -195,6 +201,12 @@ public abstract class AlvoDataFixture
 
     /// <summary>The statically <c>readOnly</c> field <see cref="FrozenWorldAsync"/>'s entity declares.</summary>
     private protected const string FrozenField = "sealed_note";
+
+    /// <summary>
+    /// A field that is <c>required</c> <b>and</b> <c>hidden</c> — the shape a mandatory secret really has,
+    /// and the one that decides whether the port and the HTTP layer agree about a whole row.
+    /// </summary>
+    private protected const string MandatorySecret = "access_code";
 
     /// <summary>The value <see cref="FrozenWorldAsync"/> seeds into that field.</summary>
     private protected const string FrozenValue = "sealed";
@@ -320,6 +332,12 @@ public abstract class AlvoDataFixture
         if (entity.Frozen)
         {
             fields[FrozenField] = new FieldDescriptor { Type = DescField.String, ReadOnly = BoolOrCel.FromBoolean(true) };
+            fields[MandatorySecret] = new FieldDescriptor
+            {
+                Type = DescField.String,
+                Required = true,
+                Hidden = BoolOrCel.FromBoolean(true),
+            };
         }
 
         return fields;
@@ -364,6 +382,7 @@ public abstract class AlvoDataFixture
         if (entity.Frozen)
         {
             yield return new FieldSchema { Name = FrozenField, Type = SchemaField.String, Nullable = true };
+            yield return new FieldSchema { Name = MandatorySecret, Type = SchemaField.String, Required = true };
         }
     }
 

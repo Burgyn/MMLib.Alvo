@@ -1293,7 +1293,7 @@ internal sealed class EfAlvoData : IAlvoData
 
         var candidate = ReplaceCandidate(db, schema, decision, context, id, values, now);
         EnsureWriteAllowed(decision, Unmasked(candidate), previous: null, context);
-        candidate = RunBeforeCreate(db, schema, decision, context, candidate, now);
+        candidate = KeptAtTheNamedRow(RunBeforeCreate(db, schema, decision, context, candidate, now), id);
 
         var stored = await InsertAsync(db, schema, decision, context, candidate, cancellationToken, callerKeyed: true);
         await RecomputeRollupsAsync(db, schema, [stored!], cancellationToken);
@@ -1303,6 +1303,24 @@ internal sealed class EfAlvoData : IAlvoData
 
         return AlvoReplaceResult.CreatedRow(
             RecordMaterializer.ToRecord(stored, decision.HiddenFields, FrozenSet<string>.Empty));
+    }
+
+    /// <summary>The candidate, with the row key the path named — whatever a hook did to it.</summary>
+    /// <remarks>
+    /// <b>A before-hook's patch is not run past the payload guard, deliberately</b>, so a hook can write any
+    /// column including <c>id</c>. On every other create that is harmless: the key was minted for this write
+    /// and nobody promised it. Here the path named it, the <c>201</c>'s <c>Location</c> reports it and the
+    /// idempotency record stores it — so a hook moving the row would leave the header pointing at nothing and
+    /// a later replay looking up a row that never existed. The path wins, silently, because <c>PUT</c>'s
+    /// whole contract is the resource the path names.
+    /// </remarks>
+    /// <param name="candidate">The candidate, after the hooks.</param>
+    /// <param name="id">The id the caller named in the path.</param>
+    private static Dictionary<string, object> KeptAtTheNamedRow(Dictionary<string, object> candidate, Guid id)
+    {
+        candidate[AlvoDataContext.IdColumn] = id;
+
+        return candidate;
     }
 
     /// <summary>The candidate a create-or-replace inserts: the caller's payload under the caller's own id.</summary>
@@ -1381,8 +1399,7 @@ internal sealed class EfAlvoData : IAlvoData
         var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
         WritePayloadGuard.EnsureWritable(values, schema, branches.Create, isUpdate: true);
         WritePayloadGuard.EnsureWritable(values, schema, branches.Update, isUpdate: true);
-        WholeRowGuard.EnsureWholeRow(values, schema, branches.Create);
-        WholeRowGuard.EnsureWholeRow(values, schema, branches.Update);
+        WholeRowGuard.EnsureWholeRow(values, schema);
         AlvoPrecondition.EnsureSupported(precondition, schema);
 
         return schema;
