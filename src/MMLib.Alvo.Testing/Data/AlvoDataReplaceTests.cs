@@ -236,6 +236,109 @@ public abstract class AlvoDataReplaceTests : AlvoDataFixture
         replaced.Row[AlvoManagedColumns.CreatedBy].ShouldBe(existing[AlvoManagedColumns.CreatedBy]);
     }
 
+    /// <summary>The same replacement applied to two differently-populated rows leaves one row shape.</summary>
+    /// <remarks>
+    /// <b>The spec's own acceptance criterion, asserted the only way that proves anything</b> — from two
+    /// starting states. Read literally, "the same PUT twice leaves the same state" is satisfied by a merge
+    /// too, since a patch applied twice is also idempotent; what a merge cannot do is bring two different
+    /// rows to the same place.
+    /// </remarks>
+    [Fact]
+    public async Task The_same_replacement_from_two_starting_states_lands_on_one_row()
+    {
+        var world = await ExtraWorldAsync();
+        var sparse = await world.Data.CreateAsync(Extras, ExtraOnlyPayload(1), world.Caller, cancellationToken: Ct);
+        var full = await world.Data.CreateAsync(Extras, ExtraPayload("noisy", 1), world.Caller, cancellationToken: Ct);
+
+        var one = await world.Data.ReplaceAsync(
+            Extras, IdOf(sparse), ExtraOnlyPayload(2), world.Caller, cancellationToken: Ct);
+        var two = await world.Data.ReplaceAsync(
+            Extras, IdOf(full), ExtraOnlyPayload(2), world.Caller, cancellationToken: Ct);
+
+        one.Row["title"].ShouldBe(two.Row["title"]);
+        one.Row[ExtraField].ShouldBe(two.Row[ExtraField]);
+    }
+
+    /// <summary>A replay reports the state a previous request left, never an act of creation.</summary>
+    /// <remarks>
+    /// <b><c>201</c> reports that this request created the row, and a replay performs no act at all.</b> The
+    /// idempotency record carries row ids, not the branch that wrote them, and it deliberately gains nothing
+    /// to carry it: storing the branch grows the record for one header, and inferring it from
+    /// <c>created_at == updated_at</c> is a guess a row replaced in the instant it was created defeats.
+    /// </remarks>
+    [Fact]
+    public async Task A_replayed_replacement_answers_that_it_created_nothing()
+    {
+        var world = await AuditedWorldAsync();
+        var id = Guid.NewGuid();
+        var token = TokenFor(Orders);
+
+        var first = await world.Data.ReplaceAsync(
+            Orders, id, Payload("Once"), world.Caller, idempotency: token, cancellationToken: Ct);
+        var replay = await world.Data.ReplaceAsync(
+            Orders, id, Payload("Once"), world.Caller, idempotency: token, cancellationToken: Ct);
+
+        first.Created.ShouldBeTrue("the first request really did create the row");
+        replay.Created.ShouldBeFalse("a replay reports the state the first request left, not an act");
+        IdOf(replay.Row).ShouldBe(id);
+    }
+
+    /// <summary>And it writes nothing the second time.</summary>
+    /// <remarks>
+    /// The control the fact above needs: an implementation that simply replaced again would also answer
+    /// <c>Created: false</c> and look correct, while spending a write and moving the row's version.
+    /// </remarks>
+    [Fact]
+    public async Task A_replayed_replacement_does_not_write_again()
+    {
+        var world = await AuditedWorldAsync();
+        var id = Guid.NewGuid();
+        var token = TokenFor(Orders);
+
+        var first = await world.Data.ReplaceAsync(
+            Orders, id, Payload("Once"), world.Caller, idempotency: token, cancellationToken: Ct);
+        var replay = await world.Data.ReplaceAsync(
+            Orders, id, Payload("Once"), world.Caller, idempotency: token, cancellationToken: Ct);
+
+        VersionOf(replay.Row).ShouldBe(VersionOf(first.Row), "a replay performs no write, so nothing moved");
+    }
+
+    /// <summary>An <c>If-Match</c> on the create branch cannot match anything.</summary>
+    /// <remarks>
+    /// Naming a version is asserting the row exists, so a precondition supplied for an id nothing holds is
+    /// refused rather than quietly ignored — a caller guarding against a lost update must not have that
+    /// guard silently drop away on the branch where it matters most.
+    /// </remarks>
+    [Fact]
+    public async Task An_if_match_on_an_absent_row_fails_its_precondition()
+    {
+        var world = await AuditedWorldAsync();
+        var other = await world.Data.CreateAsync(Orders, Payload("Something else"), world.Caller, cancellationToken: Ct);
+
+        await Should.ThrowAsync<AlvoPreconditionFailedException>(
+            () => world.Data.ReplaceAsync(
+                Orders, Guid.NewGuid(), Payload("Nope"), world.Caller,
+                precondition: new AlvoPrecondition(VersionOf(other)), cancellationToken: Ct));
+    }
+
+    /// <summary>An <c>If-Match</c> carrying the row's own version replaces it.</summary>
+    /// <remarks>
+    /// The control the fact above needs, and the ordinary case: without it, a precondition that refused
+    /// everything would make the refusal pass while proving nothing.
+    /// </remarks>
+    [Fact]
+    public async Task An_if_match_carrying_the_stored_version_replaces_the_row()
+    {
+        var world = await AuditedWorldAsync();
+        var existing = await world.Data.CreateAsync(Orders, Payload("First"), world.Caller, cancellationToken: Ct);
+
+        var replaced = await world.Data.ReplaceAsync(
+            Orders, IdOf(existing), Payload("Second"), world.Caller,
+            precondition: new AlvoPrecondition(VersionOf(existing)), cancellationToken: Ct);
+
+        replaced.Row["title"].ShouldBe("Second");
+    }
+
     /// <summary><c>tenant_id</c> is refused on this route whether or not the row already exists.</summary>
     /// <remarks>
     /// <b><c>tenant_id</c> is caller-writable on a create and refused on an update</b>, so a route that

@@ -1072,7 +1072,68 @@ internal sealed class EfAlvoData : IAlvoData
         var branches = new ReplaceDecisions(
             Resolve(entity, DataOperation.Create, context), Resolve(entity, DataOperation.Update, context));
 
-        return await ReplacedAsync(entity, id, values, branches, context, precondition, cancellationToken);
+        return idempotency is { } token
+            ? await ReplayableWriteAsync(
+                () => ReplacedOrReplayedAsync(
+                    entity, id, values, branches, context, precondition, token, cancellationToken),
+                cancellationToken)
+            : await ReplacedAsync(entity, id, values, branches, context, precondition, cancellationToken);
+    }
+
+    /// <summary>
+    /// One attempt at an idempotent create-or-replace, inside one transaction: look the key up, then either
+    /// replay the recorded row or perform this write and record it against the key.
+    /// </summary>
+    /// <remarks>
+    /// <b>A replay answers <see cref="AlvoReplaceResult.ReplacedRow"/> whichever branch the first request
+    /// took.</b> <c>201</c> reports an act of creation and a replay performs none — it reports the state that
+    /// request left. The record carries row ids rather than the branch, and deliberately gains nothing to
+    /// carry it: storing the branch would grow every record for one header, and inferring it from
+    /// <c>created_at == updated_at</c> is a guess that a row replaced in the instant it was created defeats.
+    /// </remarks>
+    private async Task<AlvoReplaceResult> ReplacedOrReplayedAsync(
+        string entity, Guid id, IReadOnlyDictionary<string, object?> values, ReplaceDecisions branches,
+        AlvoContext context, AlvoPrecondition? precondition, AlvoIdempotency token,
+        CancellationToken cancellationToken)
+    {
+        using var db = _contexts.Create();
+        var schema = ReplaceableEntity(db, entity, values, branches, precondition);
+        var now = WriteInstantNow();
+        await EnsureIdempotencyTableAsync(db, cancellationToken);
+        await EnsureOutboxTableAsync(db, cancellationToken);
+
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var records = new IdempotencyScope(
+            db.Database.GetDbConnection(), transaction.GetDbTransaction(), _idempotencyTable, token, context);
+
+        var recorded = await records.FindAsync(cancellationToken);
+        var result = recorded is { } record
+            ? AlvoReplaceResult.ReplacedRow(
+                await ReplayedAsync(db, schema, context, record, token, cancellationToken))
+            : await RecordedReplaceAsync(
+                db, transaction, schema, branches, context, id, values, precondition, records, now,
+                cancellationToken);
+
+        await transaction.CommitAsync(cancellationToken);
+        return result;
+    }
+
+    /// <summary>The write, its event and the key's record — in that order and in one transaction.</summary>
+    /// <remarks>
+    /// The event precedes the record for the reason <see cref="RecordedCreateAsync"/> gives: the record's
+    /// primary key is the only write here a rival can make fail after the event exists, so the loser rolls
+    /// the pair back together and its retry answers as a replay.
+    /// </remarks>
+    private async Task<AlvoReplaceResult> RecordedReplaceAsync(
+        AlvoDataContext db, IDbContextTransaction transaction, EntitySchema schema, ReplaceDecisions branches,
+        AlvoContext context, Guid id, IReadOnlyDictionary<string, object?> values, AlvoPrecondition? precondition,
+        IdempotencyScope records, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var result = await ReplaceWrittenAsync(
+            db, transaction, schema, branches, context, id, values, precondition, now, cancellationToken);
+        await records.InsertAsync([id], now, cancellationToken);
+
+        return result;
     }
 
     /// <summary>One ordinary create-or-replace: the write and its event, inside one transaction.</summary>

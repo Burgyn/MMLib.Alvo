@@ -443,8 +443,12 @@ namespace MMLib.Alvo.Testing.Data
     {
         protected AlvoDataReplaceTests() { }
         public System.Threading.Tasks.Task A_nullable_field_the_replacement_omits_becomes_null() { }
+        public System.Threading.Tasks.Task A_replayed_replacement_answers_that_it_created_nothing() { }
+        public System.Threading.Tasks.Task A_replayed_replacement_does_not_write_again() { }
         public System.Threading.Tasks.Task A_required_field_is_refused_on_the_create_branch_too() { }
         public System.Threading.Tasks.Task A_required_field_the_replacement_omits_is_refused() { }
+        public System.Threading.Tasks.Task An_if_match_carrying_the_stored_version_replaces_the_row() { }
+        public System.Threading.Tasks.Task An_if_match_on_an_absent_row_fails_its_precondition() { }
         public System.Threading.Tasks.Task Creating_through_a_replace_lands_the_row_in_the_caller_s_own_tenant() { }
         public System.Threading.Tasks.Task Replacing_a_row_in_another_tenant_is_refused_and_leaves_it_untouched() { }
         public System.Threading.Tasks.Task Replacing_a_visible_row_replaces_it() { }
@@ -455,6 +459,7 @@ namespace MMLib.Alvo.Testing.Data
                 true})]
         public System.Threading.Tasks.Task Tenant_id_in_the_payload_is_refused_whether_or_not_the_row_exists(bool rowExists) { }
         public System.Threading.Tasks.Task The_creation_stamp_survives_a_replacement() { }
+        public System.Threading.Tasks.Task The_same_replacement_from_two_starting_states_lands_on_one_row() { }
         public System.Threading.Tasks.Task The_write_check_admits_a_candidate_that_satisfies_it_on_both_branches() { }
         public System.Threading.Tasks.Task The_write_check_refuses_the_candidate_on_the_create_branch() { }
         public System.Threading.Tasks.Task The_write_check_refuses_the_candidate_on_the_replace_branch() { }
