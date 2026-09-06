@@ -1,0 +1,79 @@
+### Create-or-replace (#105), against real PostgreSQL in the container.
+###
+### RUNS LAST, after 110-Batch, for the reason that suite gives: every suite pinned to 010-Seed's row
+### shape has already run, so the rows written here cannot change an answer somebody else is measured
+### against.
+###
+### The in-process suite proves what a replacement IS — the branch, the write check on both sides of it,
+### the whole-row semantics. Only the real stack can show the two things below: that the id a client
+### chose really becomes the row's primary key on PostgreSQL, and that `access_code` — declared
+### `required` AND `hidden` on work_orders — makes this entity genuinely un-replaceable for a caller who
+### cannot read it back. That field is the reason the case exists at all; a synthetic entity would prove
+### the code path and not the problem.
+
+### A PUT on an id nothing holds creates the row under that id
+# @name ReplaceCreates
+## TEST-EXPECT-STATUS: [201]
+PUT {{fsBaseUrl}}/api/work_orders/8f2a1c40-5d3e-4b91-9a77-2c6e0b4d1f01
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{
+  "reference": "WO-3001",
+  "title": "Replaced into being",
+  "description": "A description this row starts with",
+  "status": "scheduled",
+  "priority": 2,
+  "access_code": "ACME-3001",
+  "customer_id": "{{CustomerAcmeId}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+### The same PUT again, on the row it just created: replaced, not created
+# @name ReplaceReplaces
+## TEST-EXPECT-STATUS: [200]
+PUT {{fsBaseUrl}}/api/work_orders/8f2a1c40-5d3e-4b91-9a77-2c6e0b4d1f01
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{
+  "reference": "WO-3001",
+  "title": "Replaced again",
+  "status": "scheduled",
+  "priority": 2,
+  "access_code": "ACME-3001",
+  "customer_id": "{{CustomerAcmeId}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+### The row as it now stands, read back — the description the second body omitted must be gone
+# @name ReadReplaced
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders/8f2a1c40-5d3e-4b91-9a77-2c6e0b4d1f01
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### A body omitting `access_code`, which is required and hidden: refused, naming the field
+# @name ReplaceWithoutTheSecret
+## TEST-EXPECT-STATUS: [422]
+PUT {{fsBaseUrl}}/api/work_orders/8f2a1c40-5d3e-4b91-9a77-2c6e0b4d1f01
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{
+  "reference": "WO-3001",
+  "title": "No access code",
+  "status": "scheduled",
+  "priority": 2,
+  "customer_id": "{{CustomerAcmeId}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+### And PATCH on the same row with the same omission is fine, which is what makes the refusal above
+### a statement about PUT rather than about the field
+# @name PatchWithoutTheSecret
+## TEST-EXPECT-STATUS: [200]
+PATCH {{fsBaseUrl}}/api/work_orders/8f2a1c40-5d3e-4b91-9a77-2c6e0b4d1f01
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "title": "Patched without the secret" }
