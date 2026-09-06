@@ -80,6 +80,7 @@ internal static class DataApiEndpoints
         MapGet(endpoints, entity, item, filters, conventions);
         MapCreate(endpoints, entity, collection, options, filters, formats, conventions);
         MapUpdate(endpoints, entity, item, options, filters, formats, conventions);
+        MapReplace(endpoints, entity, item, collection, options, filters, formats, conventions);
         MapDelete(endpoints, entity, item, options, filters, conventions);
         MapBatch(endpoints, entity, batch, options, filters, formats, conventions);
     }
@@ -493,6 +494,65 @@ internal static class DataApiEndpoints
                     return Created(pattern, record, entity);
                 }))
             .Protect(entity, DataApiEndpointKind.Create, filters, conventions);
+
+    /// <summary>The create-or-replace: <c>PUT</c> on the item route, gated on <b>both</b> operations.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Both operations are checked here, not one</b>, because this file's own invariant is symmetric —
+    /// nothing is admitted that the port would refuse, and nothing is refused that the port would admit. The
+    /// port requires <c>create</c> and <c>update</c>, so a delegate checking only <c>update</c> would admit
+    /// an update-only caller the port then refuses, breaking the first half.
+    /// </para>
+    /// <para>
+    /// <b>The body is read in the create mode</b> (<c>isCreate: true</c>), which is what makes a missing
+    /// <c>required</c> field a violation. A replacement writes the row whole, so a body that cannot express
+    /// it is a caller error on either branch — the port refuses it too, and this is the earlier, better-worded
+    /// of the two answers.
+    /// </para>
+    /// </remarks>
+    private static void MapReplace(
+        IEndpointRouteBuilder endpoints,
+        EntitySchema entity,
+        string pattern,
+        string collection,
+        AlvoApiOptions options,
+        AlvoContextFilterFactory filters,
+        FormatCatalog formats,
+        AlvoDataApiConventions conventions) =>
+        endpoints.MapPut(pattern, (
+                    Guid id,
+                    HttpContext http,
+                    IAlvoData data,
+                    IPolicyEngine policies,
+                    IAlvoContextAccessor caller,
+                    CancellationToken ct) =>
+                ProblemResultFactory.GuardAsync(async () =>
+                {
+                    var context = Caller(caller);
+                    EnsureOperationIsAllowed(policies, entity.Name, DataOperation.Create, context);
+                    var decision = EnsureOperationIsAllowed(policies, entity.Name, DataOperation.Update, context);
+                    var precondition = Precondition(http.Request);
+                    var key = IdempotencyKey(http.Request, context, options);
+
+                    var (body, violations) = await ReadAndValidateAsync(
+                        http, entity, options, decision, isCreate: true, formats, data, context, ct)
+                        .ConfigureAwait(false);
+                    if (violations.Count > 0)
+                    {
+                        return ProblemResultFactory.Validation(violations);
+                    }
+
+                    var token = Idempotency(
+                        key, http.Request.Method, entity, id, precondition, body.Document);
+                    var result = await data
+                        .ReplaceAsync(entity.Name, id, body.Values, context, precondition, token, ct)
+                        .ConfigureAwait(false);
+
+                    return result.Created
+                        ? Created(collection, result.Row, entity)
+                        : Row(result.Row, entity);
+                }))
+            .Protect(entity, DataApiEndpointKind.Replace, filters, conventions);
 
     private static void MapUpdate(
         IEndpointRouteBuilder endpoints,

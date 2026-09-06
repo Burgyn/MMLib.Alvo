@@ -162,7 +162,8 @@ internal static class DataApiParameters
     private const string AndId = "andGroup";
 
     private static bool AddressesOneRow(DataApiEndpointKind kind) =>
-        kind is DataApiEndpointKind.Get or DataApiEndpointKind.Update or DataApiEndpointKind.Delete;
+        kind is DataApiEndpointKind.Get or DataApiEndpointKind.Update or DataApiEndpointKind.Delete
+            or DataApiEndpointKind.Replace;
 
     /// <summary>
     /// The row key in the path. Re-declared rather than left to ApiExplorer's inference from the delegate's
@@ -234,9 +235,10 @@ internal static class DataApiParameters
             DataApiEndpointKind.List or DataApiEndpointKind.Query => [PreferId],
             DataApiEndpointKind.Get when AlvoManagedColumns.VersionColumn(entity) is not null => [IfNoneMatchId],
             DataApiEndpointKind.Create => [IdempotencyKeyId],
-            DataApiEndpointKind.Update or DataApiEndpointKind.Delete
+            DataApiEndpointKind.Update or DataApiEndpointKind.Delete or DataApiEndpointKind.Replace
                 when AlvoManagedColumns.VersionColumn(entity) is not null => [IfMatchId, IdempotencyKeyId],
-            DataApiEndpointKind.Update or DataApiEndpointKind.Delete => [IdempotencyKeyId],
+            DataApiEndpointKind.Update or DataApiEndpointKind.Delete
+                or DataApiEndpointKind.Replace => [IdempotencyKeyId],
             DataApiEndpointKind.BatchCreate or DataApiEndpointKind.BatchUpdate
                 or DataApiEndpointKind.BatchDelete => [IdempotencyKeyId],
             _ => [],

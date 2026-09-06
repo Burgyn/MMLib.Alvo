@@ -534,6 +534,10 @@ internal sealed class AlvoDocumentTransformer(
     {
         DataApiEndpointKind.Create => SchemaComponentBuilder.CreateId(entity),
         DataApiEndpointKind.Update => SchemaComponentBuilder.PatchId(entity),
+
+        // The create body, not the patch one: a replacement writes the row whole, so its required fields are
+        // required. Publishing the patch body here would document a merge the route does not perform.
+        DataApiEndpointKind.Replace => SchemaComponentBuilder.CreateId(entity),
         DataApiEndpointKind.Query => SchemaComponentBuilder.QueryId(entity),
         DataApiEndpointKind.BatchCreate => SchemaComponentBuilder.BatchCreateId(entity),
         DataApiEndpointKind.BatchUpdate => SchemaComponentBuilder.BatchUpdateId(entity),
@@ -550,6 +554,9 @@ internal sealed class AlvoDocumentTransformer(
             or DataApiEndpointKind.BatchDelete =>
             "The rows to write, under a 'rows' array. A batch is one transaction: every row is written, or "
             + "none is.",
+        DataApiEndpointKind.Replace =>
+            "The whole row, as the entity's declared fields. A field this body omits is written null rather "
+            + "than left at its stored value, so every required field must be present.",
         _ => "The row to write, as the entity's declared fields.",
     };
 

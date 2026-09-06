@@ -55,11 +55,11 @@ public sealed class OpenApiDocumentTests
     /// <summary>A credential that was presented and cannot be resolved, so every operation is 401.</summary>
     private static readonly TestApiKey _ghost = new("ghost-key", ["admin"], ["*:read", "*:write"]);
 
-    /// <summary>The two entities the fixture descriptor declares, and the nine routes each of them gets.</summary>
+    /// <summary>The two entities the fixture descriptor declares, and the ten routes each of them gets.</summary>
     private static readonly string[] _entities = ["categories", "products"];
 
-    /// <summary>Six single-row routes plus the three the batch path answers.</summary>
-    private const int RoutesPerEntity = 9;
+    /// <summary>Seven single-row routes plus the three the batch path answers.</summary>
+    private const int RoutesPerEntity = 10;
 
     /// <summary>
     /// .NET 10 emits OpenAPI 3.1 over JSON Schema draft 2020-12 by default, and #75 requires keeping it —
@@ -148,12 +148,14 @@ public sealed class OpenApiDocumentTests
         }
 
         documented.Count.ShouldBe(
-            99,
+            113,
             "31 on the version-less entity and 32 on the audited one, whose read adds a 304 — pinned from "
             + "outside so the equality below cannot be satisfied by two empty sets. It went 51 -> 55 with "
             + "#138 (an update and a delete can each answer 409 when a database constraint refuses the "
-            + "write), and 55 -> 63 with #107: the body-shaped read answers the list's own four statuses, "
-            + "on both entities");
+            + "write), 55 -> 63 with #107 (the body-shaped read answers the list's own four statuses, on "
+            + "both entities), and 99 -> 113 with #105: create-or-replace answers seven on each entity — "
+            + "201 and 200 for its two branches, and 401, 403, 422, 412 and 409. It lists no 404, because "
+            + "an id nothing holds is the branch that creates rather than a row that is missing");
         observed.ShouldBe(documented, "a documented status no request reaches, or a status no document lists");
     }
 
@@ -352,10 +354,11 @@ public sealed class OpenApiDocumentTests
         var refusals = Refusals(document).ToList();
 
         refusals.Count.ShouldBe(
-            80,
-            "twenty-five per entity — three on each of the two collection reads and on the row read, five on "
-            + "a create, six on an update and five on a delete, the last two having each gained the 409 "
-            + "#138 made reachable and the first three being what #107's body-shaped read added");
+            90,
+            "forty-five for two entities — three on each of the two collection reads and on the row read, "
+            + "five on a create, six on an update, five on a delete and five on a create-or-replace. The "
+            + "last of those is #105's: 401, 403, 422, 412 and 409, and no 404, because an id nothing holds "
+            + "is the branch that creates rather than a row that is missing");
         foreach (var (route, status, response) in refusals)
         {
             var content = Resolve(document, response)["content"]!.AsObject();
@@ -1004,6 +1007,10 @@ public sealed class OpenApiDocumentTests
         var row = $"{collection}/{await CreateAsync(world, entity, Body(entity, categoryId))}";
         var doomed = $"{collection}/{await CreateAsync(world, entity, Body(entity, categoryId))}";
         var absent = $"{collection}/{Guid.NewGuid()}";
+
+        // Its own id, not `absent`: the replace probe below creates the row it names, and the delete and get
+        // probes are written against an id that stays unheld for the whole run.
+        var unheld = $"{collection}/{Guid.NewGuid()}";
         var spent = Header("Idempotency-Key", await SpendAnIdempotencyKeyAsync(world, entity, categoryId));
         var stale = Header("If-Match", StaleTag);
         var body = Body(entity, categoryId);
@@ -1038,6 +1045,14 @@ public sealed class OpenApiDocumentTests
             new("update", 422, HttpMethod.Patch, row, _admin, Overlong()),
             new("update", 412, HttpMethod.Patch, row, _admin, Rename(), stale),
             new("update", 409, HttpMethod.Patch, row, _admin, TakenUniqueValue(entity, taken)),
+
+            .. Gated(row, "replace", HttpMethod.Put, body),
+            new("replace", 201, HttpMethod.Put, unheld, _admin, Body(entity, categoryId)),
+            new("replace", 200, HttpMethod.Put, row, _admin, RenamedBody(entity, categoryId)),
+            new("replace", 422, HttpMethod.Put, row, _admin, RefusedBody(entity, categoryId)),
+            new("replace", 412, HttpMethod.Put, row, _admin, Body(entity, categoryId), stale),
+            new("replace", 409, HttpMethod.Put, row, _admin,
+                WholeBodyTakingAUniqueValue(entity, categoryId, taken)),
 
             .. Gated(row, "delete", HttpMethod.Delete),
             new("delete", 412, HttpMethod.Delete, row, _admin, null, stale),
@@ -1131,6 +1146,28 @@ public sealed class OpenApiDocumentTests
     /// </remarks>
     /// <param name="entity">The entity being patched.</param>
     /// <param name="value">A value some other row of it already holds.</param>
+    /// <summary>
+    /// A <b>whole</b> body carrying a value another row already holds on the entity's <c>unique</c> field.
+    /// </summary>
+    /// <remarks>
+    /// A replacement writes the row whole, so the partial <see cref="TakenUniqueValue"/> a patch collides
+    /// with would be refused for incompleteness before it ever reached the constraint — and the probe would
+    /// observe a 422 where it meant to observe a 409.
+    /// </remarks>
+    /// <param name="entity">The entity being written.</param>
+    /// <param name="categoryId">The category a product body references.</param>
+    /// <param name="value">The value another row already holds.</param>
+    private static JsonObject WholeBodyTakingAUniqueValue(string entity, Guid categoryId, string value)
+    {
+        var body = Body(entity, categoryId);
+        foreach (var (field, taken) in TakenUniqueValue(entity, value))
+        {
+            body[field] = taken?.DeepClone();
+        }
+
+        return body;
+    }
+
     private static JsonObject TakenUniqueValue(string entity, string value) =>
         string.Equals(entity, "categories", StringComparison.Ordinal)
             ? new JsonObject { ["code"] = value }
