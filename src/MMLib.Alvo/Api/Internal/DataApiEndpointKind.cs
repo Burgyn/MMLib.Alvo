@@ -38,6 +38,9 @@ internal enum DataApiEndpointKind
     /// <summary>The partial update.</summary>
     Update,
 
+    /// <summary>The create-or-replace, which writes the row the path names whole.</summary>
+    Replace,
+
     /// <summary>The delete.</summary>
     Delete,
 
@@ -68,7 +71,8 @@ internal static class DataApiEndpointKinds
         DataApiEndpointKind.List or DataApiEndpointKind.Query => DataOperation.List,
         DataApiEndpointKind.Get => DataOperation.Get,
         DataApiEndpointKind.Create or DataApiEndpointKind.BatchCreate => DataOperation.Create,
-        DataApiEndpointKind.Update or DataApiEndpointKind.BatchUpdate => DataOperation.Update,
+        DataApiEndpointKind.Update or DataApiEndpointKind.BatchUpdate
+            or DataApiEndpointKind.Replace => DataOperation.Update,
         DataApiEndpointKind.Delete or DataApiEndpointKind.BatchDelete => DataOperation.Delete,
         _ => throw new ArgumentOutOfRangeException(
             nameof(kind), kind, "Unmapped endpoint kind; state which operation gates it here."),
@@ -83,6 +87,11 @@ internal static class DataApiEndpointKinds
     /// spelled here rather than in <c>Abstractions</c>, where a transport's name has no business being.
     /// </para>
     /// <para>
+    /// <b><see cref="DataApiEndpointKind.Replace"/> needs one for the same reason the batch kinds do</b>: it
+    /// is gated as <c>update</c>, so the default arm would spell it <c>update</c> and collide with the
+    /// single-row <c>PATCH</c>.
+    /// </para>
+    /// <para>
     /// <b>Each batch kind needs an arm of its own, and the default arm is why.</b> Falling through to
     /// <see cref="ToDataOperation"/> would spell <see cref="DataApiEndpointKind.BatchCreate"/> as
     /// <c>create</c> — colliding with its single-row sibling, so two routes would mint one
@@ -94,6 +103,7 @@ internal static class DataApiEndpointKinds
     internal static string ToWireName(this DataApiEndpointKind kind) => kind switch
     {
         DataApiEndpointKind.Query => "query",
+        DataApiEndpointKind.Replace => "replace",
         DataApiEndpointKind.BatchCreate => "batchCreate",
         DataApiEndpointKind.BatchUpdate => "batchUpdate",
         DataApiEndpointKind.BatchDelete => "batchDelete",

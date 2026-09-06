@@ -7,6 +7,7 @@ using MMLib.Alvo.Auth;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
+using System.Collections.Frozen;
 using System.Text;
 using System.Text.Json.Nodes;
 
@@ -80,6 +81,7 @@ internal static class DataApiEndpoints
         MapGet(endpoints, entity, item, filters, conventions);
         MapCreate(endpoints, entity, collection, options, filters, formats, conventions);
         MapUpdate(endpoints, entity, item, options, filters, formats, conventions);
+        MapReplace(endpoints, entity, item, collection, options, filters, formats, conventions);
         MapDelete(endpoints, entity, item, options, filters, conventions);
         MapBatch(endpoints, entity, batch, options, filters, formats, conventions);
     }
@@ -494,6 +496,66 @@ internal static class DataApiEndpoints
                 }))
             .Protect(entity, DataApiEndpointKind.Create, filters, conventions);
 
+    /// <summary>The create-or-replace: <c>PUT</c> on the item route, gated on <b>both</b> operations.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Both operations are checked here, not one</b>, because this file's own invariant is symmetric —
+    /// nothing is admitted that the port would refuse, and nothing is refused that the port would admit. The
+    /// port requires <c>create</c> and <c>update</c>, so a delegate checking only <c>update</c> would admit
+    /// an update-only caller the port then refuses, breaking the first half.
+    /// </para>
+    /// <para>
+    /// <b>The body is read in the create mode</b> (<c>isCreate: true</c>), which is what makes a missing
+    /// <c>required</c> field a violation. A replacement writes the row whole, so a body that cannot express
+    /// it is a caller error on either branch — the port refuses it too, and this is the earlier, better-worded
+    /// of the two answers.
+    /// </para>
+    /// </remarks>
+    private static void MapReplace(
+        IEndpointRouteBuilder endpoints,
+        EntitySchema entity,
+        string pattern,
+        string collection,
+        AlvoApiOptions options,
+        AlvoContextFilterFactory filters,
+        FormatCatalog formats,
+        AlvoDataApiConventions conventions) =>
+        endpoints.MapPut(pattern, (
+                    Guid id,
+                    HttpContext http,
+                    IAlvoData data,
+                    IPolicyEngine policies,
+                    IAlvoContextAccessor caller,
+                    CancellationToken ct) =>
+                ProblemResultFactory.GuardAsync(async () =>
+                {
+                    var context = Caller(caller);
+                    var creating = EnsureOperationIsAllowed(policies, entity.Name, DataOperation.Create, context);
+                    var decision = EnsureOperationIsAllowed(policies, entity.Name, DataOperation.Update, context);
+                    var precondition = Precondition(http.Request);
+                    var key = IdempotencyKey(http.Request, context, options);
+
+                    var (body, violations) = await ReadAndValidateAsync(
+                        http, entity, options, decision, isCreate: true, formats, data, context, ct,
+                        alsoFrozenBy: creating)
+                        .ConfigureAwait(false);
+                    if (violations.Count > 0)
+                    {
+                        return ProblemResultFactory.Validation(violations);
+                    }
+
+                    var token = Idempotency(
+                        key, http.Request.Method, entity, id, precondition, body.Document);
+                    var result = await data
+                        .ReplaceAsync(entity.Name, id, body.Values, context, precondition, token, ct)
+                        .ConfigureAwait(false);
+
+                    return result.Created
+                        ? Created(collection, result.Row, entity)
+                        : Row(result.Row, entity);
+                }))
+            .Protect(entity, DataApiEndpointKind.Replace, filters, conventions);
+
     private static void MapUpdate(
         IEndpointRouteBuilder endpoints,
         EntitySchema entity,
@@ -762,7 +824,8 @@ internal static class DataApiEndpoints
             FormatCatalog formats,
             IAlvoData data,
             AlvoContext context,
-            CancellationToken ct)
+            CancellationToken ct,
+            PolicyDecision? alsoFrozenBy = null)
     {
         var payload = await JsonPayloadReader
             .ReadAsync(http.Request, entity, options, ct).ConfigureAwait(false);
@@ -776,7 +839,7 @@ internal static class DataApiEndpoints
                 entity,
                 payload.Values,
                 isCreate,
-                decision.ReadOnlyFields,
+                FrozenByEither(decision, alsoFrozenBy),
                 RefusedFields(payload.Violations),
                 formats,
                 data,
@@ -1246,6 +1309,26 @@ internal static class DataApiEndpoints
     /// </summary>
     private static IResult Json<T>(T value) => Results.Json(value, DataApiJson.Options);
 
+    /// <summary>
+    /// Every field frozen by <paramref name="decision"/>, and — where a route is gated by two operations —
+    /// by <paramref name="alsoFrozenBy"/> as well.
+    /// </summary>
+    /// <remarks>
+    /// <b>The create-or-replace route needs the union, and answering with one mask makes it lie.</b>
+    /// <c>readOnly</c> is resolved per operation, so a field frozen on <c>create</c> and writable on
+    /// <c>update</c> passes a validator that saw only the update mask — and the port, which refuses a field
+    /// frozen under <em>either</em>, then answers <c>403</c> where every other route answers <c>422</c>. That
+    /// also breaks this file's own invariant: nothing is admitted here that the port would refuse.
+    /// </remarks>
+    /// <param name="decision">The route's primary decision.</param>
+    /// <param name="alsoFrozenBy">The second decision a two-operation route is gated by, if any.</param>
+    private static IReadOnlySet<string> FrozenByEither(PolicyDecision decision, PolicyDecision? alsoFrozenBy) =>
+        alsoFrozenBy is { } second && second.ReadOnlyFields.Count > 0
+            ? decision.ReadOnlyFields
+                .Union(second.ReadOnlyFields, StringComparer.Ordinal)
+                .ToFrozenSet(StringComparer.Ordinal)
+            : decision.ReadOnlyFields;
+
     /// <summary>The <c>200</c> for one row: its values plus the entity tag a later <c>If-Match</c> can carry.</summary>
     /// <param name="record">The row the port returned.</param>
     /// <param name="entity">The entity as the applied schema declares it.</param>
@@ -1314,15 +1397,38 @@ internal static class DataApiEndpoints
         /// The matched endpoint's own collection path, or the mapped literal when there is no route endpoint.
         /// </summary>
         /// <remarks>
+        /// <para>
         /// A pattern with no leading <c>/</c> is normalized rather than trusted: <c>PathString</c> refuses one,
         /// and <c>MapGroup("backend")</c> is a spelling a host may well write.
+        /// </para>
+        /// <para>
+        /// <b>A trailing route parameter is dropped, because not every route that creates a row is a
+        /// collection route.</b> A create is matched on <c>{prefix}/{entity}</c> and the id is appended; a
+        /// create-or-replace is matched on <c>{prefix}/{entity}/{id:guid}</c>, and appending there would
+        /// produce <c>/api/orders/{id:guid}/&lt;guid&gt;</c> — a header naming a path that matches nothing.
+        /// Reading the matched endpoint is still what keeps a route group's prefix, so the segment is removed
+        /// rather than the lookup.
+        /// </para>
         /// </remarks>
         /// <param name="httpContext">The request that created the row.</param>
         private string Collection(HttpContext httpContext)
         {
             var matched = (httpContext.GetEndpoint() as RouteEndpoint)?.RoutePattern.RawText;
-            var collection = string.IsNullOrEmpty(matched) ? MappedPattern : matched;
+            var route = string.IsNullOrEmpty(matched) ? MappedPattern : matched;
+            var collection = WithoutTrailingParameter(route);
+
             return collection.StartsWith('/') ? collection : $"/{collection}";
+        }
+
+        /// <summary>The route without its final segment, when that segment is a route parameter.</summary>
+        /// <param name="route">The route the request matched.</param>
+        private static string WithoutTrailingParameter(string route)
+        {
+            var lastSegment = route.LastIndexOf('/');
+
+            return lastSegment > 0 && route.AsSpan(lastSegment + 1).StartsWith("{")
+                ? route[..lastSegment]
+                : route;
         }
     }
 
