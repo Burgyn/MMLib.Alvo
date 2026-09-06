@@ -130,7 +130,7 @@
         },
         "responses": {
           "201": {
-            "description": "The created row. 'Location' names it, and 'ETag' carries the version a later conditional write may send as 'If-Match' — so a first conditional write needs no read of its own.",
+            "description": "The created row. 'Location' names it. This entity's rows carry no version, so no 'ETag' is returned and no later write can be conditioned on one.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/Cache-Control"
@@ -367,7 +367,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/categoriesCreate"
+                "$ref": "#/components/schemas/categoriesReplace"
               }
             }
           },
@@ -375,7 +375,7 @@
         },
         "responses": {
           "201": {
-            "description": "The created row. 'Location' names it, and 'ETag' carries the version a later conditional write may send as 'If-Match' — so a first conditional write needs no read of its own.",
+            "description": "The created row. 'Location' names it. This entity's rows carry no version, so no 'ETag' is returned and no later write can be conditioned on one.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/Cache-Control"
@@ -1181,7 +1181,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/productsCreate"
+                "$ref": "#/components/schemas/productsReplace"
               }
             }
           },
@@ -1835,6 +1835,29 @@
           }
         },
         "description": "The query parameters, as an object. A member's name is a parameter and its value is the text a query string would carry; an array repeats the parameter. See the operation description for the grammar and for what a field property accepts."
+      },
+      "categoriesReplace": {
+        "title": "categoriesReplace",
+        "required": [
+          "name"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "maxLength": 60,
+            "type": "string",
+            "description": "The category's display name."
+          },
+          "code": {
+            "maxLength": 12,
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "An optional short code, unique across categories. Declared so a 409 on this entity's update is reachable — a duplicate on a field declared unique is the only way a PATCH reaches one, and every documented status has to be reachable."
+          }
+        },
+        "description": "The whole row. A field this object does not mention is written `null` rather than left at its stored value, so every field the descriptor declares `required` must be present. The row's `id` comes from the path, and the framework's own columns — `tenant_id` included — are refused if supplied: a created row lands in the caller's own tenant."
       },
       "problemDetails": {
         "title": "problemDetails",
@@ -2868,6 +2891,111 @@
           }
         },
         "description": "The query parameters, as an object. A member's name is a parameter and its value is the text a query string would carry; an array repeats the parameter. See the operation description for the grammar and for what a field property accepts."
+      },
+      "productsReplace": {
+        "title": "productsReplace",
+        "required": [
+          "name",
+          "status",
+          "activation_secret",
+          "category_id"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "maxLength": 120,
+            "type": "string",
+            "description": "The product's display name, as it appears on an invoice."
+          },
+          "sku": {
+            "maxLength": 40,
+            "pattern": "^(?:[A-Z]{3}-[0-9]{4})$",
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "The stock-keeping unit, unique across the catalogue."
+          },
+          "contact": {
+            "maxLength": 120,
+            "pattern": "^(?:[^@\\s]+@[^@\\s.]+(\\.[^@\\s.]+)+)$",
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "Who to ask about this product.",
+            "format": "email"
+          },
+          "status": {
+            "enum": [
+              "draft",
+              "active",
+              "retired"
+            ],
+            "type": "string",
+            "description": "Where the product is in its life cycle."
+          },
+          "price": {
+            "type": [
+              "null",
+              "number"
+            ],
+            "description": "The list price, excluding tax. At most 9 digits in total, 2 of them after the decimal point.",
+            "format": "decimal"
+          },
+          "released_on": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "The day the product went on sale.",
+            "format": "date"
+          },
+          "discontinued_at": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "When the product was withdrawn, if it has been.",
+            "format": "date-time"
+          },
+          "in_stock": {
+            "type": [
+              "null",
+              "boolean"
+            ],
+            "description": "Whether any unit is currently on hand."
+          },
+          "specs": {
+            "description": "Whatever the supplier publishes about the product. Accepts any JSON value on a write, and reads back as a string carrying that value's JSON text."
+          },
+          "notes": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "Free-form internal notes."
+          },
+          "activation_secret": {
+            "maxLength": 64,
+            "type": "string",
+            "description": "A one-time activation token the caller must supply on create and can never read back."
+          },
+          "category_id": {
+            "type": "string",
+            "description": "The category this product belongs to.",
+            "format": "uuid"
+          },
+          "parent_id": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "An optional parent product. A self-reference, and the cheapest way to make a 409 on THIS entity's delete reachable: 'categories' is already made conflict-on-delete by 'category_id' above, and a third entity would only move the problem to whatever nothing references.",
+            "format": "uuid"
+          }
+        },
+        "description": "The whole row. A field this object does not mention is written `null` rather than left at its stored value, so every field the descriptor declares `required` must be present. The row's `id` comes from the path, and the framework's own columns — `tenant_id` included — are refused if supplied: a created row lands in the caller's own tenant."
       }
     },
     "responses": {

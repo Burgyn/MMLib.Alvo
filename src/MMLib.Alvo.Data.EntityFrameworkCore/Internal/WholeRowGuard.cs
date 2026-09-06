@@ -117,7 +117,7 @@ internal static class WholeRowGuard
         ArgumentNullException.ThrowIfNull(schema);
 
         var missing = DeclaredFields(schema)
-            .FirstOrDefault(field => field.Required && IsUnsupplied(values, field.Name));
+            .FirstOrDefault(field => MustBeSupplied(field) && IsUnsupplied(values, field.Name));
 
         if (missing is not null)
         {
@@ -128,10 +128,20 @@ internal static class WholeRowGuard
     /// <summary>The refusal's wording, shared so both implementations of the port answer identically.</summary>
     /// <param name="field">The field the payload left out.</param>
     internal static string MissingFieldReason(string field) =>
-        $"Field '{field}' is required and this write replaces the whole row, so leaving it out would store "
+        $"Field '{field}' cannot be null and this write replaces the whole row, so leaving it out would store "
         + "no value for it. Supply it, or use a partial update instead. A field that is both required and "
         + "hidden cannot be supplied by a caller who cannot read it, which makes this entity replaceable "
         + "only through a partial update for them.";
+
+    /// <summary>Whether the store will refuse this field's absence.</summary>
+    /// <remarks>
+    /// <b><c>required</c> is not the only way a column says no.</b> A field declared neither <c>required</c>
+    /// nor <c>nullable</c> maps to a <c>NOT NULL</c> column all the same, so a replacement that omitted it
+    /// would write <see langword="null"/> and be refused by the engine — a 500 carrying the provider's own
+    /// wording where the caller should have been told which field to supply.
+    /// </remarks>
+    /// <param name="field">The field as the applied schema declares it.</param>
+    private static bool MustBeSupplied(FieldSchema field) => field.Required || !field.Nullable;
 
     /// <summary>
     /// Whether the payload leaves <paramref name="field"/> unsaid — absent, or present as an explicit

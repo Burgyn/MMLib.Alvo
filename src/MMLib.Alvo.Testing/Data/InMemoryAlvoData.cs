@@ -514,15 +514,16 @@ public sealed class InMemoryAlvoData : IAlvoData
     {
         var missing = DeclaredFields(schema)
             .FirstOrDefault(field =>
-                field.Required && (!values.TryGetValue(field.Name, out var value) || value is null));
+                (field.Required || !field.Nullable)
+                && (!values.TryGetValue(field.Name, out var value) || value is null));
 
         if (missing is not null)
         {
             throw new ArgumentException(
                 $"Field '{missing.Name}' is required and this write replaces the whole row, so leaving it out "
-                + "would store no value for it. Supply it, or use a partial update instead. A field that is "
-                + "both required and hidden cannot be supplied by a caller who cannot read it, which makes "
-                + "this entity replaceable only through a partial update for them.",
+                + "would store no value for it. Supply it, or use a partial update instead. A hidden field "
+                + "is still writable, so supplying it is the fix whenever you know the value — it is only a "
+                + "caller who cannot obtain one who has to reach for a partial update.",
                 nameof(values));
         }
     }

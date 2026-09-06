@@ -140,14 +140,14 @@ internal static class DataApiDocumentation
             DataApiEndpointKind.Get =>
                 [Ok(ResponseBody.Row, "The row."), .. NotModified(entity), .. Refusals(Absent)],
             DataApiEndpointKind.Create =>
-                [Created(), .. Refusals(Malformed, Precondition, Conflict)],
+                [Created(entity), .. Refusals(Malformed, Precondition, Conflict)],
             DataApiEndpointKind.Update =>
                 [Ok(ResponseBody.Row, "The row as it now stands."),
                  .. Refusals(Malformed, Absent, PreconditionOn(entity), Conflict)],
             DataApiEndpointKind.Delete =>
                 [NoContent(), .. Refusals(Absent, PreconditionOn(entity), Conflict)],
             DataApiEndpointKind.Replace =>
-                [Created(),
+                [Created(entity),
                  Ok(ResponseBody.Row, "The row as it now stands, when this request replaced an existing one "
                     + "or replayed an 'Idempotency-Key' a previous request spent."),
                  .. Refusals(Malformed, PreconditionOn(entity), Conflict)],
@@ -188,11 +188,22 @@ internal static class DataApiDocumentation
     private static Response Ok(ResponseBody body, string description) =>
         new(StatusCodes.Status200OK, body, description);
 
-    private static Response Created() => new(
+    /// <summary>The 201, promising an <c>ETag</c> only for an entity whose rows carry a version.</summary>
+    /// <remarks>
+    /// <b>The promise used to be unconditional, and on a version-less entity it was a lie</b> — the same lie
+    /// <see cref="NotModified"/> already refuses to tell about a 304. A client following the generated
+    /// contract would wait for a header this route can never send, and a conditional write built on it is
+    /// refused with 412 rather than merely unsupported.
+    /// </remarks>
+    /// <param name="entity">The entity as the applied schema declares it.</param>
+    private static Response Created(EntitySchema entity) => new(
         StatusCodes.Status201Created,
         ResponseBody.Row,
-        "The created row. 'Location' names it, and 'ETag' carries the version a later conditional write may "
-        + "send as 'If-Match' — so a first conditional write needs no read of its own.");
+        AlvoManagedColumns.VersionColumn(entity) is null
+            ? "The created row. 'Location' names it. This entity's rows carry no version, so no 'ETag' is "
+            + "returned and no later write can be conditioned on one."
+            : "The created row. 'Location' names it, and 'ETag' carries the version a later conditional write "
+            + "may send as 'If-Match' — so a first conditional write needs no read of its own.");
 
     private static Response NoContent() => new(
         StatusCodes.Status204NoContent, ResponseBody.None, "The row was deleted. No body.");

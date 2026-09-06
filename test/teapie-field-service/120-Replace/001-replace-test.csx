@@ -14,9 +14,10 @@ await tp.Test("A PUT on a free id creates the row under the id the client chose.
     Equal("8f2a1c40-5d3e-4b91-9a77-2c6e0b4d1f01", body.GetProperty("id").GetString());
     Equal("Replaced into being", body.GetProperty("title").GetString());
 
-    // The Location a 201 carries must name the same row, or a client that follows it reads something else.
+    // The WHOLE value, not a Contains: "/api/work_orders/{id:guid}/<guid>" contains the id too, and
+    // matches no route at all.
     var location = tp.Responses["ReplaceCreates"].Headers.Location?.ToString() ?? "";
-    Contains("8f2a1c40-5d3e-4b91-9a77-2c6e0b4d1f01", location);
+    Equal("/api/work_orders/8f2a1c40-5d3e-4b91-9a77-2c6e0b4d1f01", location);
 });
 
 await tp.Test("The same PUT again replaces that row rather than creating a second.", async () =>

@@ -535,9 +535,7 @@ internal sealed class AlvoDocumentTransformer(
         DataApiEndpointKind.Create => SchemaComponentBuilder.CreateId(entity),
         DataApiEndpointKind.Update => SchemaComponentBuilder.PatchId(entity),
 
-        // The create body, not the patch one: a replacement writes the row whole, so its required fields are
-        // required. Publishing the patch body here would document a merge the route does not perform.
-        DataApiEndpointKind.Replace => SchemaComponentBuilder.CreateId(entity),
+        DataApiEndpointKind.Replace => SchemaComponentBuilder.ReplaceId(entity),
         DataApiEndpointKind.Query => SchemaComponentBuilder.QueryId(entity),
         DataApiEndpointKind.BatchCreate => SchemaComponentBuilder.BatchCreateId(entity),
         DataApiEndpointKind.BatchUpdate => SchemaComponentBuilder.BatchUpdateId(entity),

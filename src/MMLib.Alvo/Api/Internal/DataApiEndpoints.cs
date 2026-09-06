@@ -1397,15 +1397,38 @@ internal static class DataApiEndpoints
         /// The matched endpoint's own collection path, or the mapped literal when there is no route endpoint.
         /// </summary>
         /// <remarks>
+        /// <para>
         /// A pattern with no leading <c>/</c> is normalized rather than trusted: <c>PathString</c> refuses one,
         /// and <c>MapGroup("backend")</c> is a spelling a host may well write.
+        /// </para>
+        /// <para>
+        /// <b>A trailing route parameter is dropped, because not every route that creates a row is a
+        /// collection route.</b> A create is matched on <c>{prefix}/{entity}</c> and the id is appended; a
+        /// create-or-replace is matched on <c>{prefix}/{entity}/{id:guid}</c>, and appending there would
+        /// produce <c>/api/orders/{id:guid}/&lt;guid&gt;</c> — a header naming a path that matches nothing.
+        /// Reading the matched endpoint is still what keeps a route group's prefix, so the segment is removed
+        /// rather than the lookup.
+        /// </para>
         /// </remarks>
         /// <param name="httpContext">The request that created the row.</param>
         private string Collection(HttpContext httpContext)
         {
             var matched = (httpContext.GetEndpoint() as RouteEndpoint)?.RoutePattern.RawText;
-            var collection = string.IsNullOrEmpty(matched) ? MappedPattern : matched;
+            var route = string.IsNullOrEmpty(matched) ? MappedPattern : matched;
+            var collection = WithoutTrailingParameter(route);
+
             return collection.StartsWith('/') ? collection : $"/{collection}";
+        }
+
+        /// <summary>The route without its final segment, when that segment is a route parameter.</summary>
+        /// <param name="route">The route the request matched.</param>
+        private static string WithoutTrailingParameter(string route)
+        {
+            var lastSegment = route.LastIndexOf('/');
+
+            return lastSegment > 0 && route.AsSpan(lastSegment + 1).StartsWith("{")
+                ? route[..lastSegment]
+                : route;
         }
     }
 

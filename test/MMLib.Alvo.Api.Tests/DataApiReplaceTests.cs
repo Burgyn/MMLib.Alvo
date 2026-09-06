@@ -37,7 +37,33 @@ public class DataApiReplaceTests
             HttpMethod.Put, $"/api/owners/{id}", _admin, body: Owner("New"));
 
         response.StatusCode.ShouldBe(HttpStatusCode.Created);
-        response.Headers.Location!.ToString().ShouldEndWith(id.ToString());
+
+        // The WHOLE value, not just its tail. `EndsWith(id)` is satisfied by
+        // "/api/owners/{id:guid}/<guid>" too — which is what this header was before the route template's
+        // trailing parameter was dropped, and a path that matches nothing.
+        response.Headers.Location!.ToString().ShouldBe($"/api/owners/{id}");
+    }
+
+    /// <summary>The Location a create-or-replace returns is a path a client can actually follow.</summary>
+    /// <remarks>
+    /// <b>The header is built from the matched endpoint's own route, which for this verb is the item
+    /// template.</b> Appending the id there yields <c>/api/owners/{id:guid}/&lt;guid&gt;</c> — well-formed,
+    /// containing the id, ending with it, and matching no route at all. So the fact follows it rather than
+    /// inspecting it: a GET on the returned path must answer the row that was just created.
+    /// </remarks>
+    [Fact]
+    public async Task The_location_a_put_returns_leads_to_the_row_it_created()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin]);
+        var id = Guid.NewGuid();
+
+        using var created = await world.SendAsync(
+            HttpMethod.Put, $"/api/owners/{id}", _admin, body: Owner("Followed"));
+        using var followed = await world.SendAsync(
+            HttpMethod.Get, created.Headers.Location!.ToString(), _admin);
+
+        followed.StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await followed.ReadJsonObjectAsync())["name"]!.GetValue<string>().ShouldBe("Followed");
     }
 
     /// <summary>A replace on an existing row answers 200 and no Location.</summary>

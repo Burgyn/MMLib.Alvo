@@ -1293,7 +1293,11 @@ internal sealed class EfAlvoData : IAlvoData
 
         var candidate = ReplaceCandidate(db, schema, decision, context, id, values, now);
         EnsureWriteAllowed(decision, Unmasked(candidate), previous: null, context);
-        candidate = KeptAtTheNamedRow(RunBeforeCreate(db, schema, decision, context, candidate, now), id);
+        candidate = RunBeforeCreate(db, schema, decision, context, candidate, now);
+        if (KeptAtTheNamedRow(candidate, id))
+        {
+            EnsureWriteAllowed(decision, Unmasked(candidate), previous: null, context);
+        }
 
         var stored = await InsertAsync(db, schema, decision, context, candidate, cancellationToken, callerKeyed: true);
         await RecomputeRollupsAsync(db, schema, [stored!], cancellationToken);
@@ -1305,22 +1309,38 @@ internal sealed class EfAlvoData : IAlvoData
             RecordMaterializer.ToRecord(stored, decision.HiddenFields, FrozenSet<string>.Empty));
     }
 
-    /// <summary>The candidate, with the row key the path named — whatever a hook did to it.</summary>
+    /// <summary>
+    /// Puts the row key the path named back, whatever a hook did to it — and reports whether it had to.
+    /// </summary>
     /// <remarks>
+    /// <para>
     /// <b>A before-hook's patch is not run past the payload guard, deliberately</b>, so a hook can write any
     /// column including <c>id</c>. On every other create that is harmless: the key was minted for this write
     /// and nobody promised it. Here the path named it, the <c>201</c>'s <c>Location</c> reports it and the
     /// idempotency record stores it — so a hook moving the row would leave the header pointing at nothing and
-    /// a later replay looking up a row that never existed. The path wins, silently, because <c>PUT</c>'s
-    /// whole contract is the resource the path names.
+    /// a later replay looking up a row that never existed. The path wins, because <c>PUT</c>'s whole contract
+    /// is the resource the path names.
+    /// </para>
+    /// <para>
+    /// <b>It reports the change because restoring the key <em>after</em> the check would be an authorization
+    /// gap.</b> <see cref="RunBeforeCreate"/> judges the candidate the hook produced; if this then moves the
+    /// row back, the row inserted is not the row judged, and a <c>WITH CHECK</c> predicate reading <c>id</c>
+    /// — or any field the hook changed alongside it — was evaluated against a candidate that never reached
+    /// the store. So the caller re-runs the check, and only when the key actually moved.
+    /// </para>
     /// </remarks>
     /// <param name="candidate">The candidate, after the hooks.</param>
     /// <param name="id">The id the caller named in the path.</param>
-    private static Dictionary<string, object> KeptAtTheNamedRow(Dictionary<string, object> candidate, Guid id)
+    private static bool KeptAtTheNamedRow(Dictionary<string, object> candidate, Guid id)
     {
+        if (candidate.TryGetValue(AlvoDataContext.IdColumn, out var written) && written is Guid already && already == id)
+        {
+            return false;
+        }
+
         candidate[AlvoDataContext.IdColumn] = id;
 
-        return candidate;
+        return true;
     }
 
     /// <summary>The candidate a create-or-replace inserts: the caller's payload under the caller's own id.</summary>
