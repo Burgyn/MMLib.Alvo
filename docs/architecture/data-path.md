@@ -1654,6 +1654,30 @@ hide genuine EF internal-API misuse in a package whose whole job is to use EF co
 *public* types there, and every type here is `internal`. Moving the three stragglers to the root would end the
 confusion and is a tidy-up nobody has spent a PR on.
 
+## Create-or-replace: one read, two branches (#105)
+
+`ReplaceAsync` is the only write whose branch is decided by stored data, so the order matters more here than
+anywhere else on this path:
+
+1. **Both decisions are resolved up front** — `create` and `update` — and the write is refused unless both
+   allow. Resolving only the branch that runs would make the permission a caller needs depend on whether the
+   row exists.
+2. **The payload guard runs before any row is read**, told `isUpdate: true` **unconditionally**. `tenant_id`
+   is caller-writable on a create and refused on an update, so a branch-dependent answer would report the
+   row's existence from the payload alone — and would have to run after the read, contradicting the guard's
+   whole position.
+3. **The pre-image is read under the *update* decision's `Using`**, with the same row lock an update takes.
+   Reading it under the `create` decision would return the row whoever owns it, with no predicate at all —
+   the bypass F3 PR3 shipped and then fixed.
+4. **Row found → replace.** The stamp is told `isUpdate: true`, so `created_at` and `created_by` survive.
+   `WITH CHECK` judges the merged post-image against the pre-image.
+5. **No row → create.** The stamp is told `isUpdate: false`, `tenant_id` is stamped from the caller's
+   context, and `WITH CHECK` judges the candidate with no previous image. A row the caller's `USING`
+   excluded lands here too, and its key collides.
+
+The two `isUpdate` values disagree on purpose, which is why this route cannot reuse `AuthorizedCandidate`:
+the guard is told whether the *caller* may write the column, the stamp whether the *row already exists*.
+
 ## What later work inherits
 
 Everything PR2 deliberately did not answer, in one place, so the phase that owns it does not have to

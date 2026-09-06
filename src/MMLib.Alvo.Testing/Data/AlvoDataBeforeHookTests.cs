@@ -301,9 +301,16 @@ public abstract class AlvoDataBeforeHookTests
     }
 
     /// <summary>
-    /// All three write faces consult the pipeline, so no face can silently stop running hooks while the other
-    /// two keep the suite green.
+    /// All four write faces consult the pipeline, so no face can silently stop running hooks while the others
+    /// keep the suite green.
     /// </summary>
+    /// <remarks>
+    /// <b>Create-or-replace is here because it shipped without one.</b> #105's create branch was written
+    /// beside the insert rather than through the create path, and a hook never ran on it — a caller refused
+    /// by a <c>beforeCreate</c> rule on <c>POST</c> could create the same row with <c>PUT</c>. Nothing failed:
+    /// the architecture fact that enumerates hook call sites is an allow-list, and a write body that calls
+    /// nothing is invisible to it. This fact is the one that would have failed.
+    /// </remarks>
     [Fact]
     public async Task Every_write_face_consults_the_hook_pipeline()
     {
@@ -311,8 +318,42 @@ public abstract class AlvoDataBeforeHookTests
         var created = await CreateDealAsync(world, title: "ordinary deal");
         await UpdateStageAsync(world, created, "offer");
         await world.Data.DeleteAsync(Deals, IdOf(created), Caller, cancellationToken: Ct);
+        await ReplaceDealAsync(world, Guid.NewGuid(), title: "replaced into being");
 
-        world.HookRuns.ShouldBe([DataOperation.Create, DataOperation.Update, DataOperation.Delete]);
+        world.HookRuns.ShouldBe(
+            [DataOperation.Create, DataOperation.Update, DataOperation.Delete, DataOperation.Create]);
+    }
+
+    /// <summary>A <c>beforeCreate</c> rule refuses the create branch of a replacement too.</summary>
+    /// <remarks>
+    /// The claim the fact above cannot make on its own: counting runs proves the pipeline was consulted, not
+    /// that its verdict was honoured. A caller who cannot create a blocked deal through <c>CreateAsync</c>
+    /// must not be able to create one by naming an unused id.
+    /// </remarks>
+    [Fact]
+    public async Task A_before_create_rule_refuses_the_create_branch_of_a_replacement()
+    {
+        var world = await DealsWorldAsync();
+
+        var refusal = await Should.ThrowAsync<AlvoAuthorizationException>(
+            () => ReplaceDealAsync(world, Guid.NewGuid(), title: "blocked deal", stage: Blocked));
+
+        refusal.Message.ShouldStartWith(BlockedCreateRefusal);
+    }
+
+    /// <summary>And a <c>mutate</c> rule reaches the row a replacement created.</summary>
+    /// <remarks>
+    /// The other half: a refused hook and an applied one fail differently, so a route that consulted the
+    /// pipeline and threw its patch away would pass the refusal fact and fail this one.
+    /// </remarks>
+    [Fact]
+    public async Task A_before_create_mutate_reaches_the_row_a_replacement_created()
+    {
+        var world = await DealsWorldAsync();
+
+        var created = await ReplaceDealAsync(world, Guid.NewGuid(), title: "mutated on the way in");
+
+        (await StoredAsync(world, created))["code"].ShouldBe(AssignedCode);
     }
 
     /// <summary>
@@ -501,6 +542,15 @@ public abstract class AlvoDataBeforeHookTests
             Caller,
             idempotency,
             Ct);
+
+    private static async Task<AlvoRecord> ReplaceDealAsync(
+        IAlvoDataBeforeHookWorld world, Guid id, string title, string stage = "lead") =>
+        (await world.Data.ReplaceAsync(
+            Deals,
+            id,
+            Payload(("title", title), ("stage", stage)),
+            Caller,
+            cancellationToken: Ct)).Row;
 
     private static Task<AlvoRecord> UpdateStageAsync(
         IAlvoDataBeforeHookWorld world, AlvoRecord deal, string stage) =>
