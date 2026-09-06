@@ -260,10 +260,18 @@ public class DescriptorToSchemaMapperTests
     {
         var descriptor = AlvoDescriptor.Parse(File.ReadAllText(descriptorPath));
 
-        Should.Throw<InvalidDataException>(
+        var refusal = Should.Throw<InvalidDataException>(
             () => DescriptorToSchemaMapper.Map(descriptor),
             $"'{Path.GetFileName(descriptorPath)}' carries {AlvoExamples.NotRunnableMarker} but now applies "
             + "cleanly — delete the marker, and the README paragraph that points readers away from it");
+
+        UnhonouredFeatures.EveryFixSuggestion
+            .Any(fix => refusal.Message.Contains(fix, StringComparison.Ordinal))
+            .ShouldBeTrue(
+                $"'{Path.GetFileName(descriptorPath)}' carries {AlvoExamples.NotRunnableMarker}, so it must be "
+                + "refused by an unhonoured FEATURE — a refusal naming what silently happens instead and how "
+                + "to fix it. It was refused by something else, which means the marker is now standing on a "
+                + $"defect in the example rather than on a feature this build does not honour: {refusal.Message}");
     }
 
     public static TheoryData<string> EveryRunnableExample()
@@ -300,15 +308,18 @@ public class DescriptorToSchemaMapperTests
     /// <c>complex-crm</c> is still refused by a <em>structured unhonoured-feature error</em> and not by a CEL
     /// syntax error — the reason simply moved to another entry in the same table: <c>owner_id</c> declares
     /// <c>default</c>, which is refused with its own fix suggestion. So the marker still means what it says.
-    /// Measured on this branch by applying the example, not inferred. <b>All five of deviation 76's defects,
-    /// accounted for:</b> one <em>was</em> fixed here because this PR's own rename forced it
-    /// (<c>lower(new.email)</c> became <c>lowerAscii(new.email)</c>, or the example would name a function no
-    /// profile has); one stopped being a defect without being touched, because <c>now()</c> compiles as a
-    /// side-effect of the <c>Mutate</c> profile landing; and three remain — two list literals in
-    /// <c>deals.beforeUpdate</c> conditions and the unresolvable <c>{{@user.email}}</c> template. Those three,
-    /// plus the strengthening of <see cref="Every_example_marked_not_runnable_really_is_refused"/> to assert
-    /// the <em>reason</em>, stay with PR5b-2 — see deviation 83, which records that deviation 76 asked for all
-    /// of them here and why only one is.
+    /// Measured on this branch by applying the example, not inferred.
+    /// </para>
+    /// <para>
+    /// <b>Deviation 76 is now discharged in full, and the guard against the hazard is no longer this fact
+    /// alone.</b> Of its five defects: <c>lower(new.email)</c> became <c>lowerAscii(new.email)</c> in PR5b-1
+    /// (that PR's own rename forced it); <c>now()</c> stopped being a defect untouched, because it compiles as
+    /// a side-effect of the <c>Mutate</c> profile landing; and PR5b-2 fixed the remaining three — the two list
+    /// literals in <c>deals.beforeUpdate</c> conditions and the unresolvable <c>{{@user.email}}</c> template.
+    /// PR5b-2 also strengthened <see cref="Every_example_marked_not_runnable_really_is_refused"/> to assert the
+    /// refusal's <em>reason</em>, which is what closes the substitution this fact could only warn about: a CEL
+    /// syntax error can no longer stand in for a feature refusal, because the assertion now demands a fix
+    /// suggestion from <see cref="UnhonouredFeatures"/> itself.
     /// </para>
     /// <para>
     /// Driven off the tree rather than off <c>complex-crm</c> by name, so a <em>new</em> example declaring an

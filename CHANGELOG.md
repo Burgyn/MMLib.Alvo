@@ -9,6 +9,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (breaking)
 
+- **`MapAlvoDataApi()` now returns `IEndpointConventionBuilder` instead of `IEndpointRouteBuilder`**
+  (#182), so a host can attach `RequireRateLimiting`, an authorization policy, output caching or a
+  telemetry tag to Alvo's generated routes and to nothing else — which is what every other ASP.NET
+  Core `Map*` over a *set* of endpoints returns. A caller that discarded the result (every in-repo
+  one, and the shape the docs show) is unaffected; one that chained a second `Map*` off it, or stored
+  it in an `IEndpointRouteBuilder`, is a source and binary break. Two things about the seam are
+  contract rather than implementation: conventions must be attached **before** the first request
+  materialises the route table, and one attached after **throws** — a deliberate deviation from the
+  framework, which ignores late conventions, because Alvo's table is frozen once built and a silently
+  dropped `RequireRateLimiting` is a rate limiter a host believes it has. `MapAlvo()` still returns
+  the route builder and `MapAlvoHealth()` is deliberately not chainable: one builder over the probes
+  *and* the Data API would let an authorization policy reach `/health/live`, which is a container
+  restart-looped by its own liveness gate.
+
+- **`AlvoQuery.EnsureSortKeysCanBePaged` is removed** (#116). It refused a paged read sorted by a
+  nullable field, because a keyset boundary could not express where nulls sort. That boundary now
+  can, so the guard has nothing left to refuse — and keeping it as a no-op would leave a member every
+  `IAlvoData` implementation goes on calling forever. Delete the call; nothing replaces it. The
+  API-layer refusal it produced, the `unpageable-sort-key` violation code, is gone with it: a request
+  that used to earn it is now answered.
+
+- **The list response envelope gained a third member, `count`** (#110). It is always present and is
+  `null` unless the request sent a recognised `Prefer: count` preference, exactly as `next` is always
+  present and null
+  on the last page — the envelope's members are a statement about the bytes. A client that rejects
+  unknown members, or that pins the published schema's `required` list, sees the change.
+
+- **A dev API key's `Secret` must now be at least 32 characters** (#125). `AlvoAuthOptionsValidator`
+  required only that it be non-empty, so `Secret = "password"` was accepted — and `ApiKeyHash` is a
+  single unsalted SHA-256 pass, which is only as strong as the assumption that the secret is random.
+  A host configured with a short dev secret now fails at startup, naming the key and both lengths,
+  rather than starting silently weak. Generate the secret rather than choosing it —
+  `openssl rand -hex 16`, the recipe this repository already publishes in `scripts/test-e2e`,
+  `playground/run` and the examples' READMEs, is 128 bits written as exactly 32 characters, which
+  is why the floor is set *at* that length rather than above it. Length is a proxy for entropy and
+  not a measure of it — which is why this remains a **dev** mechanism, and why the real issuance
+  path (#36) must not inherit this hash.
+
+- **An entity may no longer be named after one of Alvo's own tables** (#156). `alvo_descriptor_versions`,
+  `alvo_idempotency` and `alvo_outbox` — or the same three under a non-default `AlvoOptions.SchemaPrefix`
+  — were excluded from introspection but not *reserved*, so a descriptor could declare an entity that
+  mapped straight onto one and the framework and the entity would share a table. Such a descriptor is
+  now refused at apply, with the entity's JSON pointer and a fix. The names come from one internal
+  authority both the provider and the core read; no public surface changed.
+
+- **A field declared both `required` and unconditionally `readOnly` is now refused at apply** (#124).
+  The combination made every create of its entity unsatisfiable — supplying the field was refused as
+  read-only, omitting it as missing — while the published OpenAPI document described a create the API
+  would not accept. An expression-valued `readOnly` is unaffected: it is legal for one role and
+  impossible for another, and the request-time half below answers that caller.
+
 - **Alvo applies the descriptor on boot by default, and the host no longer applies anything itself.**
   The boot sequence runs as part of the host lifecycle, before the server binds: it loads and
   validates the descriptor, brings the schema up as far as the startup mode allows, primes the policy
@@ -131,6 +182,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Serving the OpenAPI document no longer costs `O(N²)` per request** (#126). The document is rebuilt on
+  every request to `/openapi/v1.json`, which needs no credential, and the transformer resolved each
+  entity's schema and field flags once per entity *and again per endpoint* — five endpoints per entity, so
+  `6N` resolutions. The schema lookup was a linear scan by name, making it `O(N²)` comparisons, and each
+  flag resolution allocated two fresh sets, so `12N` of them. The transformer now reads each source once
+  for the whole document and indexes it. Measured on a three-entity descriptor: schema reads `19 → 2`,
+  catalog reads `18 → 1`, and `OpenApiDocumentCostTests` pins both. The schema lands at two rather than
+  one because serving the document also reads it once through `EntityRouteCatalog` when ApiExplorer
+  enumerates the route table — a different concern, and one read regardless of entity count. The document
+  itself is byte-identical — no baseline moved — so this is a change in cost, not in contract.
+
+- **A create whose caller cannot satisfy it now answers `read-only-required-field`, not `required`**
+  (#124). When a field is `required` and this caller's own expression-valued `readOnly` mask froze it,
+  telling them to supply it sends them to fix something no value of theirs can be stored in. The new
+  violation says the create is impossible for these roles and names the two ways out. A caller who
+  *writes* the frozen field still gets `read-only-field` — the new code narrows the missing-value case
+  only.
+
+- **`maxLength` is counted in Unicode code points, not UTF-16 code units** (#123). Ten astral-plane
+  characters are twenty UTF-16 units, so a value well inside a `varchar(10)` was refused with a 422
+  telling the caller to shorten something already short enough. Code points is the unit PostgreSQL's
+  `varchar(n)` and JSON Schema's own `maxLength` keyword both use, so the validator, the column and the
+  published document now bound the same thing on both shipped drivers. Grapheme clusters were rejected
+  as the unit: they count *fewer* than the column does, which would have admitted values the engine
+  refuses. The agreement is a two-engine guarantee and is recorded as one — T-SQL's `nvarchar(n)`
+  bounds UTF-16 units, so a SQL Server dialect owes its own answer before it can honour this (#175).
+
 - **A format check that times out is now its own violation code, `format-not-evaluated`, and no
   longer reported as `format`.** A client branching on the `format` code will no longer see the
   pattern-timeout case. This is a fix for a fail-*wrong*, not a cosmetic split: the old behaviour told
@@ -149,10 +227,148 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   base, and the direction is that URLs which used to be wrong are now right: following the header
   works where it previously did not. No released version is affected — both the header and the fix
   land in this same unreleased cycle. A host with no path base is unaffected, byte for byte. The
-  **OpenAPI document** still declares no `servers` entry, so its paths remain root-relative behind
-  a path base (#130), and the Scalar UI's own behaviour there is unmeasured (#134).
+  **OpenAPI document** names the origin its paths are resolved against, path base included — see
+  #130 under *Fixed* — while the Scalar UI's own behaviour there is still unmeasured (#134).
 
 ### Added
+
+- **`?select=` now narrows the read, and gained aliases** (#117, #111). `AlvoQuery.Select` is a new
+  additive member on the port, honoured by both shipped drivers and the in-memory reference; the
+  guard `AlvoQuery.EnsureProjectionIsSane` refuses an empty projection the way the existing paging
+  guard refuses `after`+`offset`. **No existing request changes its answer**: a caller who sends no
+  `select` gets the statement and the body they got before, and `?select=make` returns exactly the
+  keys it returned before — what changed is that the database stops reading the columns it did not
+  name. Four things are worth knowing rather than rediscovering:
+
+  - **The `SELECT` list does not get shorter.** Reads run through `FromSqlRaw` over a property-bag
+    entity mapping every schema field, and EF fails when a mapped column is missing from the result
+    set, so an unselected column is rendered `NULL AS <col>` and its key is dropped when the record
+    is assembled — the mechanism `hidden` already used. The engine stops *reading* the column, which
+    is a real win for a wide or TOASTed value and near zero for a narrow int. It is not a
+    proportional speed-up and nothing here claims one.
+  - **Two groups of columns are read whatever the projection names**, and neither is shown unless
+    named: the framework-managed ones (`IAlvoData`'s returned-key-set contract is amended to say so,
+    and the keyset cursor is minted from the row key), and every field named in `order`. The second
+    is measured rather than cautious — on SQLite 3 *and* PostgreSQL 16, a bare identifier in
+    `ORDER BY` resolves against the output column names, so a NULLed sort key would have ordered the
+    page by the `NULL` while the keyset boundary still described the real sequence: a page that skips
+    or repeats a row rather than one that merely mis-sorts.
+  - **Aliases are `select=label:make`**, PostgREST's own spelling, and never reach the port — the
+    port is given source names, and the response's key list is rendered above it. New refusals, all
+    on `select`: `malformed-select-alias` (an alias must match the field-name grammar
+    `^[a-z][a-z0-9_]{0,62}$` and must not be a reserved name — a deliberate narrowing of PostgREST,
+    which admits any alias), `colliding-projection-key` (a key claimed twice, whether by two sources
+    or by an alias onto any framework-owned name — `AlvoManagedColumns.All` is new and answers that
+    question, because a global entity has no `tenant_id` and a response key called `tenant_id` would
+    still read as one), and `projection-too-wide`. An alias onto another *declared* field's name is
+    deliberately allowed, wrong type and all: PostgREST behaves the same way, the caller chose both
+    halves, and refusing it would defeat renaming.
+  - **`projection-too-wide` is a new bound aliases made necessary.** A projection may name at most as
+    many distinct keys as there are fields this caller can read, because an alias can otherwise name
+    one column under arbitrarily many keys with only the URL length in the way. It is charged per
+    newly claimed *distinct* key, so a repeated entry still dedupes exactly as it did. The bound
+    counts the caller's **readable** fields rather than the entity's declared ones on purpose: the
+    number appears in the refusal's fix suggestion, and the declared count would have told the caller
+    how many fields are hidden from them.
+
+  Internal: `DataApiPage.Project` is gone, replaced by `Render`, which renames and orders rather than
+  filtering — the filtering moved into the port.
+
+- **A load-test harness, with a per-PR regression gate and a per-release calibration run.** No
+  public API changes and no product code: `test/load/` (k6 scenarios, the bulk seed, the gate's
+  baseline), `scripts/test-load`, `scripts/assert-load-baseline` plus its own suite, and
+  `.github/workflows/load.yml`. This is what fills F4's *"p95 latencies measured and published"*
+  and it puts numbers on six filed-but-unquantified costs (#100, #117, #118, #126, #178, #179);
+  the published figures live in `docs/performance.md`. Three decisions worth knowing rather than
+  discovering:
+  - **k6, and NBomber is refused.** NBomber v5+ is closed source and needs a paid licence for any
+    organisational use. k6's AGPL-3.0 places no obligation on Alvo because it is invoked as a
+    separate process and never shipped — the general rule (a ban reaches a shipped dependency, not
+    a CI tool) is now recorded in the `alvo-dotnet-conventions` skill.
+  - **The gate is judged on `min`, not p95, and this was measured.** At gate volume every p95
+    landed within 8-9 ms of every other while `min` separated the shapes cleanly, so gating on p95
+    would gate on the runner. p95 is still measured, printed and published; the tail-only
+    regression that `min` cannot see is named in the guard's own header and pinned by its suite.
+  - **`test/load/baselines/*.json` is a judged baseline**, like a `*.verified.*` snapshot: raising
+    a ceiling is the one edit that turns the gate green with no product change, so the Stop hook
+    dispatches `alvo-snapshot-judge` when it moves.
+  - **A ceiling is only valid for the tier it was measured on, and this was measured too.** The
+    ratios grow with row count — `Prefer: count=exact` costs 1.6x the reference list at 20 000 rows
+    and 3.0x at 200 000 — because the fixed per-request overhead stops dominating as the database's
+    share grows. So the calibration tier reports rather than judges (`--report-only`); its validity
+    checks still bite, because a void run publishes garbage.
+
+  The gate ships **advisory**, not as a required check; promoting it wants a couple of weeks of
+  real PRs with no false positive.
+
+  Three reviews ran before the PR and found real defects rather than nits — most usefully that the
+  `row_policy` ratio (the rule engine's hot-path number) was **unfalsifiable**: a ratio can only
+  reward a cheaper policy path, and the cheapest row predicate is one that matches nothing, so a
+  default-deny bug would have published an improvement. The harness now asserts the row predicate
+  still returns a strict subset before k6 starts. Three fail-open paths in the guard were also
+  closed — a misspelled baseline key judged nothing and printed `ok`, an unmeasured row could not
+  fail, and a zero `min` read as the fastest thing in the run — and its suite grew 22 → 40 cases.
+
+  The gate's own first CI run then corrected the design twice. **p95 does not degenerate on
+  `ubuntu-latest`** — its ratios track `min` within ~10 % there, so the collapse the design
+  described is a property of macOS + Docker Desktop, not of the gate tier; the claim is now scoped
+  to its rig, and the case for `min` is the better one (it means the same thing on both rigs, where
+  p95 collapses on one). And **the runner's ratios run 15–30 % higher than a laptop's**, which left
+  `count_exact` with 18 % margin under a ceiling set from laptop numbers alone — raised to 3.0 from
+  the runner's own numbers, with `observed` and `observedOnTheRunner` kept separate so the
+  distinction cannot be lost. A ceiling is measured on the rig that judges.
+
+- **`/health/ready` now reports whether the database can *still* be reached** (#133), so a store that
+  goes away after boot drains the pod's traffic instead of being invisible. **This changes what an
+  orchestrator does with a running host:** readiness answered 200 for the life of the process once
+  the boot had primed the schema, and it can now answer 503 while the process keeps running and
+  `/health/live` keeps answering 200 — which is the point, and which a deployment whose readiness
+  probe gates traffic will notice. Liveness is unchanged and still evaluates no check at all.
+  - **No new public API.** The core opens no connection of its own — the probe is a port,
+    `IAlvoDataReachability` — but that port and its answer are `internal` to
+    `MMLib.Alvo.Abstractions`, reached by the four in-family assemblies through
+    `InternalsVisibleTo`. Nothing about it is a contract you can depend on or need to implement: the
+    shared EF path implements it once, so every EF-backed driver inherits a working probe, and the
+    statement it runs is a `const` in that implementation rather than a member on `IAlvoSqlDialect`.
+    `public` is one word away on the day a non-EF driver or a host substituting the probe needs it;
+    un-publishing an interface is the breaking direction, so the asymmetry decides it.
+  - A driver with nothing cheap to ask **opts out by not registering the port**, and readiness is then
+    exactly what it was before. That is fail-open on purpose: readiness is an availability gate, not
+    an authorization one.
+  - The probe is bounded by `HealthCheckRegistration.Timeout` (two seconds). It is a *cooperative*
+    bound — the framework cancels the token and awaits the check — so a probe that honours its token
+    becomes a 503 and one that ignores it holds the request; honouring it is the port's documented
+    obligation.
+  - **It costs a database round trip per request, on a route that carries no credential.** Readiness was
+    a pure in-memory read before; a caller who can reach the port now makes the process spend a connection
+    from the pool the Data API shares, at their chosen rate, and a saturated pool times the probe out and
+    has the pod drained. The assumed caller is a private orchestrator polling at an interval — which is
+    what every readiness probe assumes and nothing here enforces. Bounded, disposed per probe, and tracked
+    as **#183**, where caching the answer for a short window is the likely resolution.
+  - Cache and message-bus reachability remain owed; the readiness tag is what makes each additive.
+
+- **`?order=<nullable field>` works, and `nullsfirst`/`nullslast` finally do something** (#116).
+  Every list over HTTP is paged, and a paged read sorted by a nullable field used to be refused with
+  422 — so sorting by a `display_name` that may be null was impossible, and half the published sort
+  grammar could not be reached. The keyset boundary now compares the same *(where the null sorts,
+  then the value)* pair the `ORDER BY` ranks by, so a nullable key pages like any other and a cursor
+  walks the null-keyed rows too. `nullslast` is the default when a key does not say otherwise; where
+  a null sorts is never left to the database, because SQLite and PostgreSQL disagree on it.
+  **The cost is real and worth knowing:** the null placement is emitted as a `CASE` expression over
+  the key, which an index on that key cannot serve, so page by a required column where latency
+  matters. Per-dialect native `NULLS FIRST`/`NULLS LAST` is the follow-up (#178).
+
+- **`Prefer: count=exact` fills the page envelope's `count`** (#110), with the number of rows the
+  query matches in total — narrowed by your policy and your filter, and *not* by `limit`, `offset`
+  or `after`, so it does not shrink as you page. Opt-in, because an exact count is a second scan of
+  the matching set on every request; a request that sends no preference costs exactly what it did
+  before. `count=planned` and `count=estimated` are accepted and **degrade to an exact count** — a
+  planner estimate exists on one supported engine and not the other, and this API answers identically
+  on both — and `Preference-Applied: count=exact` (RFC 7240 §3) tells the caller what was done. Per
+  RFC 7240 a preference this server does not recognise is ignored rather than refused; its absence
+  from `Preference-Applied` is how that is reported. *Exact* means "not an estimate", not
+  "atomically consistent with `items`": the count is a second statement, so a write landing between
+  the two can make the number differ by one.
 
 - **A standalone host you can run without writing any code.** `docker compose up` brings up a
   working backend defined entirely by a JSON descriptor mounted at `/alvo/descriptor.json` — no
@@ -342,6 +558,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The OpenAPI document's advertised origin carries the request's path base** (#130) — and it always
+  did. `Microsoft.AspNetCore.OpenApi` builds `servers[0].url` from the request's scheme, host **and
+  `PathBase`**, per request rather than once per document name, so a client resolving a path key
+  against it reaches the endpoint under `app.UsePathBase("/alvo")` and behind a proxy that sets
+  `X-Forwarded-Prefix` for a host told to trust it. What was broken was the record: the defect was
+  documented as open in two architecture notes and in this changelog, and **nothing measured the
+  path-base half of that value** — the scheme and host halves were pinned, so deleting `PathBase`
+  from the framework's own server-URL construction would have left the whole suite green while every
+  path in the document became wrong by the prefix. Two facts now pin it, one per package. No
+  production code changed; a bump of `Microsoft.AspNetCore.OpenApi` is henceforth gated by them.
+
+- **A 500 from the standalone host carries `alvo.dev/errors/internal`** (#119) — closed by
+  verification rather than by a change. The slug, the opt-in `AddAlvoProblemDetails()` registration,
+  the handler that logs the exception with its stack trace *and* renders Alvo's document, and the
+  standalone-pipeline facts that hold all of it were delivered with the host itself. The one thing
+  left behind was a stale sentence in `docs/architecture/data-api.md` claiming nine problem-type
+  slugs over an eleven-row table; the prose now names `AlvoProblemTypes.All` instead of a number.
+
 - **A database constraint violation is now `409`, naming the field, instead of `500 internal`** (#138).
   A value another record already holds on a `unique` field, and a delete an `onDelete: "restrict"`
   reference refuses, both reached the host as the provider's own exception and rendered as
@@ -371,4 +605,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lost key race caught any storage write failure, so a duplicate was re-attempted ten times — about
   450 ms — before surfacing. It is no longer a `DbException`, so it leaves on the first attempt. The
   idempotency record's own primary key is deliberately still untranslated, because losing that race is
-  what the retry exists for. (Part of #127; the rest of #127 is still open.)
+  what the retry exists for. (#127. The attempt count is now asserted rather than described, since every
+  outcome assertion passes on a build that retries ten times and then throws the same exception. Two paths
+  still retry by design — that untranslated primary key, and a failure no dialect recognises, which must
+  keep retrying or a genuine insert race would escape as a 500. The count is pinned on SQLite; the
+  PostgreSQL leg is #139's.)

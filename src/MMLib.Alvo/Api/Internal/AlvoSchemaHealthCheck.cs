@@ -4,8 +4,11 @@ using MMLib.Alvo.Migrations;
 namespace MMLib.Alvo.Api.Internal;
 
 /// <summary>
-/// The one contributor to <see cref="AlvoHealth.ReadinessPath"/> that Alvo ships: has the boot decided the
-/// schema and primed the policy catalog this process would serve from.
+/// One of the two contributors to <see cref="AlvoHealth.ReadinessPath"/> that Alvo ships: has the boot decided
+/// the schema and primed the policy catalog this process would serve from. Whether the store can <em>still</em>
+/// be reached is <see cref="AlvoReachabilityHealthCheck"/>'s, deliberately separately — this one answers a
+/// question settled once, before the server bound, and answering both from one check would make a database
+/// outage indistinguishable from a descriptor that never applied.
 /// </summary>
 /// <remarks>
 /// <para>

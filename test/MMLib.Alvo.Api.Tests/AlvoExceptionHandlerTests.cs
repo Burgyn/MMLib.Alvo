@@ -179,7 +179,7 @@ public class AlvoExceptionHandlerTests
     /// <summary>One of Alvo's generated routes, identified the way the handler identifies one.</summary>
     private static readonly Endpoint _alvoEndpoint = new(
         requestDelegate: null,
-        new EndpointMetadataCollection(new DataApiOperationMetadata("owners", DataOperation.List)),
+        new EndpointMetadataCollection(new DataApiOperationMetadata("owners", DataApiEndpointKind.List)),
         "GET /api/owners");
 
     /// <summary>An endpoint the host mapped itself, which carries no marker of Alvo's.</summary>

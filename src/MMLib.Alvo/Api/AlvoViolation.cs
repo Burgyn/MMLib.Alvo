@@ -25,8 +25,14 @@ namespace MMLib.Alvo.Api;
 /// </para>
 /// </remarks>
 /// <param name="Pointer">
-/// A JSON Pointer (RFC 6901) into the request body, or the role of the query-string parameter the refusal
+/// A JSON Pointer (RFC 6901) into the request body, or the role of the query parameter the refusal
 /// concerns (<c>filter</c>, <c>order</c>, <c>limit</c>, <c>offset</c>, <c>after</c>, <c>select</c>).
+/// <para>
+/// <b>The rule that tells the two apart:</b> a value that is empty or begins with <c>/</c> is a JSON
+/// Pointer into the request body; any other value is a parameter role. One response can carry both — a
+/// body-shaped query refused for its shape <em>and</em> for one of its parameters — so a consumer
+/// branching on this field needs the rule stated rather than inferred.
+/// </para>
 /// </param>
 /// <param name="Code">A stable kebab-case code, e.g. <c>required</c>, <c>max-length</c>, <c>unavailable-field</c>.</param>
 /// <param name="Message">A human sentence, free of caller-supplied text.</param>

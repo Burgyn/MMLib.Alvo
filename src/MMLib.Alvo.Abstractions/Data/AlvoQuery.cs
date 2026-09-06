@@ -1,21 +1,22 @@
 ﻿using MMLib.Alvo.Schema;
+using System.Collections.Frozen;
 
 namespace MMLib.Alvo.Data;
 
 /// <summary>
 /// A request to list an entity's rows through <see cref="IAlvoData.QueryAsync"/>: which entity,
-/// an optional caller filter, sort order, and a page size/cursor. This models the whole PostgREST-
-/// style query surface F3 through F-final will expose, but only implements the F3 subset —
-/// filtering, sorting, and keyset paging. Projection (selecting a field subset), relation
-/// embedding, aggregates, and bulk operations are deliberately <b>not</b> modelled here yet; they
-/// land in PR3.
+/// an optional caller filter, sort order, a page size/cursor, and which fields to return. This
+/// models the whole PostgREST-style query surface F3 through F-final will expose, and implements
+/// filtering, sorting, keyset paging and projection. Relation embedding, aggregates and bulk
+/// operations are deliberately <b>not</b> modelled here yet.
 /// </summary>
 /// <remarks>
 /// Every member of <b>this record</b> beyond <see cref="Entity"/> is additive by construction — a
-/// new optional member (e.g. a future <c>Select</c> projection list) can be added here without
-/// breaking an existing caller or provider, because §2.1 of the domain analysis warns that a badly
-/// designed query language cannot be fixed later without a breaking change. Do not narrow or
-/// repurpose an existing member to smuggle in a PR3 feature; add a new one instead. This promise is
+/// new optional member can be added here without breaking an existing caller or provider, because
+/// §2.1 of the domain analysis warns that a badly designed query language cannot be fixed later
+/// without a breaking change. <see cref="Select"/> is that promise being kept: this remark named it
+/// by name as the example before it existed. Do not narrow or
+/// repurpose an existing member to smuggle in a later feature; add a new one instead. This promise is
 /// scoped to <see cref="AlvoQuery"/> itself — <see cref="AlvoSort"/> and <see cref="AlvoComparison"/>
 /// are positional records and do not carry the same guarantee; see their own remarks.
 /// </remarks>
@@ -50,80 +51,15 @@ public sealed record AlvoQuery
     /// rejects it.
     /// </summary>
     /// <remarks>
-    /// A key naming a <b>nullable</b> field is only usable on an <em>unpaged</em> read: a keyset cursor's
-    /// boundary is a chain of comparisons that cannot express where nulls sort, so an implementation refuses a
-    /// paged read (<see cref="Limit"/> or <see cref="After"/> set) sorted by one rather than silently losing
-    /// the null-keyed rows. <see cref="EnsureSortKeysCanBePaged"/> is that refusal, and every implementation
-    /// calls it rather than writing its own.
+    /// A key naming a <b>nullable</b> field is usable on a paged read like any other, and
+    /// <see cref="AlvoSort.Nulls"/> is what makes it so: the ordering over nulls is total and known, so a
+    /// keyset boundary can be expressed for it. That was not always true — until F4 a paged read over a
+    /// nullable key was refused outright, because the boundary was a chain of comparisons with no
+    /// <c>IS NULL</c> arm and answering would have silently lost rows. An implementation that cannot compare
+    /// the pair <em>(where the null sorts, then the value)</em> must still refuse rather than answer; losing
+    /// rows quietly is the one option this port has never allowed.
     /// </remarks>
     public IReadOnlyList<AlvoSort> Sort { get; init; } = [];
-
-    /// <summary>
-    /// Throws when <paramref name="query"/> is <b>paged</b> and sorts by a nullable field. Every
-    /// <see cref="IAlvoData"/> implementation must call this before composing a page.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// A keyset boundary is a chain of comparisons with no <c>IS NULL</c> arm, so a <see langword="null"/> on
-    /// either side makes the term <see langword="null"/> and a <c>WHERE</c> treats that as false: the page
-    /// stops early and <b>silently</b>, losing every null-keyed row under <c>nullslast</c> and every row but
-    /// the first under <c>nullsfirst</c>. The design's ruling is that a nullable sort column must declare its
-    /// null placement <em>or be rejected</em>; the third option — accept the query and lose rows — is what this
-    /// refuses.
-    /// </para>
-    /// <para>
-    /// <b>It lives here because it is a rule of the port, not of one backend</b>, and it was written twice —
-    /// verbatim, message included — in two shipped assemblies before it lived anywhere. This codebase's own
-    /// precedent is <see cref="AlvoFilter.EnsureWithinLimits"/>: a public static guard in the ports, called by
-    /// every implementation, so a third one (F7's dynamic driver) inherits the rule instead of making a third
-    /// copy of it. The reference implementation calls it too, although it compares rows in memory and could
-    /// page over a null key correctly — a reference that answered where the shipped backends refuse would give
-    /// this port two contracts.
-    /// </para>
-    /// <para>
-    /// Scoped to a paged read deliberately: an <b>unpaged</b> sorted read has no boundary, so its ordering over
-    /// nulls is already correct and refusing it would break whole-set reads for no gain.
-    /// </para>
-    /// </remarks>
-    /// <param name="query">The query about to be served.</param>
-    /// <param name="entity">
-    /// The entity as the implementation's own applied schema declares it, or <see langword="null"/> when it
-    /// declares none — in which case there is no nullability to read and the check does not apply. An entity
-    /// the implementation does not know is refused elsewhere, before any row is touched.
-    /// </param>
-    /// <exception cref="ArgumentException"><paramref name="query"/> is paged and a sort key names a nullable field.</exception>
-    public static void EnsureSortKeysCanBePaged(AlvoQuery query, EntitySchema? entity)
-    {
-        ArgumentNullException.ThrowIfNull(query);
-        if (entity is null || !query.IsPaged)
-        {
-            return;
-        }
-
-        foreach (var key in query.Sort.Where(key => IsNullable(entity, key.Field)))
-        {
-            throw new ArgumentException(
-                $"Sorting a paged read by '{key.Field}' is not supported, because that field is nullable and a "
-                + "keyset cursor cannot express where its null values sort. Page by a required field, or read the "
-                + "whole set without a limit or a cursor.",
-                nameof(query));
-        }
-    }
-
-    /// <summary>
-    /// Whether this query asks for a page rather than the whole visible set — any of the three paging
-    /// signals is enough, because each makes the boundary observable.
-    /// </summary>
-    private bool IsPaged => Limit is not null || After is not null || Offset is not null;
-
-    /// <summary>
-    /// Whether <paramref name="entity"/> declares <paramref name="field"/> nullable. A field the entity does
-    /// not declare is not this check's business: an undeclared filter or sort key is refused, by name, before
-    /// this runs.
-    /// </summary>
-    private static bool IsNullable(EntitySchema entity, string field) =>
-        entity.Fields.FirstOrDefault(candidate => string.Equals(candidate.Name, field, StringComparison.Ordinal))
-            is { Nullable: true };
 
     /// <summary>Gets the maximum number of rows to return, or <see langword="null"/> for no explicit limit.</summary>
     public int? Limit { get; init; }
@@ -149,6 +85,68 @@ public sealed record AlvoQuery
     public int? Offset { get; init; }
 
     /// <summary>
+    /// Gets whether this read also asks for <see cref="AlvoPage.TotalCount"/> — how many rows the query
+    /// matches in total, not how many this page carries. <see langword="false"/> by default, and that default
+    /// is the whole point.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Opt-in because an exact count is a second full scan of the filtered set, on every page.</b> §2.1
+    /// requires it to be opt-in and the domain analysis names <c>count(*)</c> over a large table as the
+    /// specific expense; as a default it would make every list roughly twice the work for a number most
+    /// callers never read. An implementation that is not asked for one must not compute one.
+    /// </para>
+    /// <para>
+    /// <b>The count is over the <em>policy-filtered</em> set, and over the caller's filter — never over the
+    /// table, and never over the page.</b> It ignores <see cref="Limit"/>, <see cref="Offset"/> and
+    /// <see cref="After"/> entirely: "how many rows are there" is a question about the set the caller can
+    /// see, which is the same set the page is a window onto. A count composed any other way is an oracle
+    /// about rows the caller cannot read.
+    /// </para>
+    /// <para>
+    /// <b>A boolean rather than an <c>exact | planned | estimated</c> mode, deliberately.</b> A planner
+    /// estimate is engine-specific — PostgreSQL has <c>EXPLAIN</c>, SQLite has no equivalent worth the name
+    /// — and §0 principle 3 says the behaviour is identical on every engine, so a mode that is real on one
+    /// driver and a lie on the other belongs on neither. The three RFC 7240 spellings are an HTTP
+    /// vocabulary; the layer that reads the header degrades them and says so in
+    /// <c>Preference-Applied</c>. When a driver can honestly estimate, this port grows a mode and
+    /// <see cref="AlvoPage"/> grows the applied one — additively, at the point the distinction becomes true.
+    /// </para>
+    /// </remarks>
+    public bool IncludeTotalCount { get; init; }
+
+    /// <summary>
+    /// Gets the declared field names to return, or <see langword="null"/> for every field this caller may
+    /// read. Never an empty list — see <see cref="EnsureProjectionIsSane"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>An implementation must narrow what it reads, not only what it returns.</b> A member both shipped
+    /// drivers ignored would be advisory, and an advisory port member is worse than none: a caller would ask
+    /// for two fields, receive every one, and nothing would be raised. <em>How</em> a driver narrows is its
+    /// own business — the shipped EF drivers render an unselected column as a typed SQL <c>NULL</c> rather
+    /// than dropping it from the <c>SELECT</c> list, because EF requires a <c>FromSql</c> result set to carry
+    /// every mapped property — but the observable rule is the same everywhere: the key is <em>absent</em>
+    /// from the returned record, never present and null.
+    /// </para>
+    /// <para>
+    /// <b>A name here is subject to the same confidentiality rule as <see cref="Filter"/> and
+    /// <see cref="Sort"/>.</b> A projection naming a field in <see cref="Rules.PolicyDecision.HiddenFields"/>
+    /// is rejected with the identical refusal an undeclared name earns, so the answer is not an oracle for
+    /// "this field exists but is hidden from you".
+    /// </para>
+    /// <para>
+    /// <b>Two groups of fields survive this, whatever it names.</b> Framework-managed columns do, because
+    /// <see cref="IAlvoData"/>'s returned-key-set contract says so and because a keyset cursor is minted from
+    /// the row key. And every field named in <see cref="Sort"/> does, because ordering is not expressible over
+    /// a column the statement did not read — a projected placeholder aliased to the column's own name is what
+    /// a bare <c>ORDER BY</c> identifier resolves to, on both shipped engines. Neither group appears in a
+    /// response that did not ask for it; the port's key set and a response's are two different lists.
+    /// </para>
+    /// </remarks>
+    public IReadOnlyList<string>? Select { get; init; }
+
+    /// <summary>
     /// Throws when <paramref name="query"/>'s paging window is self-contradictory or out of range —
     /// a negative <see cref="Limit"/> or <see cref="Offset"/>, or both <see cref="After"/> and
     /// <see cref="Offset"/> set at once.
@@ -156,8 +154,8 @@ public sealed record AlvoQuery
     /// <remarks>
     /// Every <see cref="IAlvoData"/> implementation calls this before composing a page, in place of the
     /// private negative-<see cref="Limit"/> check PR2 wrote twice, once per implementation. A rule of the
-    /// port belongs here, beside <see cref="EnsureSortKeysCanBePaged"/>, for the same reason that one
-    /// does — so a third implementation inherits the rule instead of writing a fourth copy of it.
+    /// port belongs here, on the same <see cref="AlvoFilter.EnsureWithinLimits"/> precedent — so a third
+    /// implementation inherits the rule instead of writing a fourth copy of it.
     /// </remarks>
     /// <param name="query">The query about to be served.</param>
     /// <exception cref="ArgumentException"><paramref name="query"/>'s paging window is malformed.</exception>
@@ -180,6 +178,83 @@ public sealed record AlvoQuery
                 + "ambiguous request rather than refuse it. Send only one.",
                 nameof(query));
         }
+    }
+
+    /// <summary>
+    /// Throws when <paramref name="query"/>'s <see cref="Select"/> names no field — a read that could
+    /// return none.
+    /// </summary>
+    /// <remarks>
+    /// The sibling of <see cref="EnsurePagingWindowIsSane"/>, and here for the same reason: a rule of the
+    /// port belongs on the port's own type, so a future implementation inherits it instead of writing
+    /// another copy. An empty projection is refused rather than read as "every field", on the same ground
+    /// the <see cref="After"/>/<see cref="Offset"/> pair is refused — silently resolving an ambiguous
+    /// request is the one thing this port does not do.
+    /// </remarks>
+    /// <param name="query">The query about to be served.</param>
+    /// <exception cref="ArgumentException"><paramref name="query"/>'s projection names no field.</exception>
+    public static void EnsureProjectionIsSane(AlvoQuery query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        if (query.Select is { Count: 0 })
+        {
+            throw new ArgumentException(
+                "A query's projection names no fields, so it could return none. Name at least one declared "
+                + "field, or leave the projection unset for every field this caller may read.",
+                nameof(query));
+        }
+    }
+
+    /// <summary>
+    /// The fields of <paramref name="entity"/> that <paramref name="query"/>'s projection excludes — every
+    /// declared field the caller did not select and that this port does not have to return anyway. Empty
+    /// when the query carries no projection.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Here rather than in each implementation, on the same ground as
+    /// <see cref="EnsurePagingWindowIsSane"/>: it is a rule of the port.</b> Which fields survive a
+    /// projection is what <see cref="IAlvoData"/>'s returned-key-set contract promises, so an implementation
+    /// that computed its own answer would be free to promise something else — and a second hand-kept copy of
+    /// "which columns must survive" is the exact defect <see cref="AlvoManagedColumns"/> exists to have
+    /// stopped. The first draft of this feature wrote the set twice, once per implementation, and they were
+    /// byte-identical by review discipline alone.
+    /// </para>
+    /// <para>
+    /// <b>Two groups survive, for two unrelated reasons.</b> The framework-managed columns, because the
+    /// contract says so and because a keyset cursor is minted from the row key. And every field named in
+    /// <see cref="Sort"/>, because no implementation can order by a column it did not read — the shipped
+    /// drivers render an excluded column as a <c>NULL</c> aliased to its own name, and a bare identifier in
+    /// <c>ORDER BY</c> resolves against the output names on both engines, so excluding a sort key would order
+    /// a page by the placeholder while its keyset boundary still described the real sequence.
+    /// </para>
+    /// <para>
+    /// <b>What an implementation does with this is its own business.</b> A relational driver stops reading
+    /// those columns; the in-memory reference simply drops their keys. The one observable rule this fixes is
+    /// which keys the returned record carries.
+    /// </para>
+    /// </remarks>
+    /// <param name="query">The query being served.</param>
+    /// <param name="entity">The entity being read, as the applied schema declares it.</param>
+    public static IReadOnlySet<string> UnselectedFields(AlvoQuery query, EntitySchema entity)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        ArgumentNullException.ThrowIfNull(entity);
+
+        if (query.Select is null)
+        {
+            return FrozenSet<string>.Empty;
+        }
+
+        var survivors = new HashSet<string>(query.Select, StringComparer.Ordinal);
+        survivors.UnionWith(AlvoManagedColumns.For(entity));
+        survivors.UnionWith(query.Sort.Select(sort => sort.Field));
+
+        return entity.Fields
+            .Select(field => field.Name)
+            .Where(name => !survivors.Contains(name))
+            .ToFrozenSet(StringComparer.Ordinal);
     }
 }
 

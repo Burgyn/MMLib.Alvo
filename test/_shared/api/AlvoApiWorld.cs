@@ -149,6 +149,8 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
             app.Use(ServerBodyLimit.Enforcing(serverLimit));
         }
 
+        setup.ConfigureApp?.Invoke(app);
+
         if (!setup.MapBeforePriming)
         {
             await ApplyDescriptorAsync(app);
@@ -157,14 +159,11 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
         // MapGroup, when a fact asks for one: the second supported way to mount the Data API, and the one
         // whose route-group prefix a created row's Location has to carry (#121). Mapped through the group
         // rather than onto the app, because IEndpointRouteBuilder is exactly the seam MapAlvoDataApi takes.
-        if (setup.RouteGroupPrefix is { } groupPrefix)
-        {
-            app.MapGroup(groupPrefix).MapAlvoDataApi();
-        }
-        else
-        {
-            app.MapAlvoDataApi();
-        }
+        var routes = setup.RouteGroupPrefix is { } groupPrefix
+            ? app.MapGroup(groupPrefix).MapAlvoDataApi()
+            : app.MapAlvoDataApi();
+
+        setup.ConfigureDataApiRoutes?.Invoke(routes);
 
         // Opt-in, because MapAlvoDataApi deliberately does not map it — serving a document is a hosting
         // decision (ApiSetup.AddAlvoApi says so) — and because every route-table fact in this suite counts
@@ -212,6 +211,7 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
         var builder = WebApplication.CreateSlimBuilder();
         builder.WebHost.UseTestServer();
         builder.Services.AddSingleton<IAlvoContextAccessor>(new RecordingContextAccessor(new AlvoContextAccessor()));
+        setup.ConfigureServices?.Invoke(builder.Services);
 
         if (setup.RevokedKeyId is not null)
         {
@@ -277,6 +277,11 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
         {
             builder.Services.AddAlvo();
         }
+
+        // After AddAlvo, deliberately: this is where a service Alvo registered can be decorated, which
+        // ConfigureServices above cannot do — it runs first, and TryAdd means a decorator registered there
+        // would leave nothing registered to wrap. See ServiceDecoration.
+        setup.ConfigureServicesAfterAlvo?.Invoke(builder.Services);
 
         return builder.Build();
     }
@@ -355,9 +360,17 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
     /// <see cref="AlvoApiWorldSetup.MapOpenApiDocument"/>, and says so rather than answering with a 404 body a
     /// fact would then assert over.
     /// </remarks>
-    internal async Task<string> OpenApiTextAsync()
+    internal Task<string> OpenApiTextAsync() => OpenApiTextAsync("/openapi/v1.json");
+
+    /// <summary>
+    /// The same document, fetched at a caller-chosen path — the seam a fact about a host under a
+    /// <see cref="AlvoApiWorldSetup.PathBase"/> needs, because the document's own <c>servers</c> entry is built
+    /// from the request's <c>PathBase</c> and the world answers both the prefixed and the unprefixed URL.
+    /// </summary>
+    /// <param name="path">Where to ask for the document.</param>
+    internal async Task<string> OpenApiTextAsync(string path)
     {
-        using var response = await SendAsync(HttpMethod.Get, "/openapi/v1.json");
+        using var response = await SendAsync(HttpMethod.Get, path);
         var text = await response.ReadTextAsync();
         return response.StatusCode == System.Net.HttpStatusCode.OK
             ? text
@@ -367,8 +380,12 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
     }
 
     /// <summary>The same document, parsed — for the facts that assert on its structure rather than its bytes.</summary>
-    internal async Task<JsonObject> OpenApiDocumentAsync() =>
-        JsonNode.Parse(await OpenApiTextAsync()) as JsonObject
+    internal Task<JsonObject> OpenApiDocumentAsync() => OpenApiDocumentAsync("/openapi/v1.json");
+
+    /// <summary>The same document, parsed, from a caller-chosen path.</summary>
+    /// <param name="path">Where to ask for the document.</param>
+    internal async Task<JsonObject> OpenApiDocumentAsync(string path) =>
+        JsonNode.Parse(await OpenApiTextAsync(path)) as JsonObject
         ?? throw new InvalidOperationException("The OpenAPI document is not a JSON object.");
 
     /// <summary>
@@ -699,6 +716,24 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
 /// once <c>AddDataApi</c> became configuration-only, a single <c>AddAlvo</c> registers the document transformer
 /// exactly once whether or not the registration deduplicates, so that fact would have passed vacuously.
 /// </param>
+/// <param name="ConfigureServices">
+/// Anything registered on the builder <em>before</em> <c>AddAlvo</c> — a rate limiter, an authorization
+/// policy. General-purpose rather than one fact's knob: it is the seam a host's own registrations occupy.
+/// </param>
+/// <param name="ConfigureServicesAfterAlvo">
+/// Anything that has to run <em>after</em> <c>AddAlvo</c> — in practice, decorating a service Alvo itself
+/// registered. <see cref="ConfigureServices"/> cannot do that: it runs first, and every Alvo registration is
+/// a <c>TryAdd</c>, so a decorator registered there wins the slot and the implementation it meant to wrap is
+/// never registered at all. Use <c>ServiceDecoration.Decorate</c> through this hook instead.
+/// </param>
+/// <param name="ConfigureApp">
+/// Middleware added before the Data API is mapped — <c>UseRateLimiter</c>, <c>UseOutputCache</c>. It runs
+/// after the path-base block, so it sits where a host would write it.
+/// </param>
+/// <param name="ConfigureDataApiRoutes">
+/// Conventions attached to the builder <c>MapAlvoDataApi()</c> returns — <c>RequireRateLimiting</c>, an
+/// authorization policy, a telemetry tag. The seam itself, which is what the convention facts measure.
+/// </param>
 internal sealed record AlvoApiWorldSetup(
     Action<AlvoApiOptions>? ConfigureApi = null,
     string? RevokedKeyId = null,
@@ -711,7 +746,11 @@ internal sealed record AlvoApiWorldSetup(
     int? ServerBodyLimitBytes = null,
     string? RouteGroupPrefix = null,
     bool MapBeforePriming = false,
-    bool RegisterAlvoTwice = false);
+    bool RegisterAlvoTwice = false,
+    Action<IServiceCollection>? ConfigureServices = null,
+    Action<IServiceCollection>? ConfigureServicesAfterAlvo = null,
+    Action<WebApplication>? ConfigureApp = null,
+    Action<IEndpointConventionBuilder>? ConfigureDataApiRoutes = null);
 
 /// <summary>One dev API key a world issues, in the shape a test reads best.</summary>
 /// <param name="KeyId">The key's public identifier.</param>
@@ -721,7 +760,17 @@ internal sealed record AlvoApiWorldSetup(
 internal sealed record TestApiKey(
     string KeyId, IReadOnlyList<string> Roles, IReadOnlyList<string> Scopes, Guid? Tenant = null)
 {
-    private const string Secret = "s3cret-value";
+    /// <summary>
+    /// The shared secret every test key presents, long enough to clear
+    /// <c>AlvoAuthOptionsValidator.MinimumSecretLength</c>.
+    /// </summary>
+    /// <remarks>
+    /// It was <c>"s3cret-value"</c> — twelve characters — until #125 put a 32-character floor under a dev
+    /// key's secret, at which point every world in this file failed to start. Lengthened rather than
+    /// exempted: a fixture that starts under a rule production cannot start under is a fixture measuring a
+    /// configuration nobody can deploy.
+    /// </remarks>
+    private const string Secret = "s3cret-value-long-enough-for-the-floor";
 
     /// <summary>The credential as a caller presents it: <c>&lt;keyId&gt;.&lt;secret&gt;</c>.</summary>
     internal string Presented => $"{KeyId}.{Secret}";

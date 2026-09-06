@@ -44,7 +44,7 @@ public sealed class QueryStringParserTests
         ],
     };
 
-    private static readonly IReadOnlySet<string> _masked = new HashSet<string>(StringComparer.Ordinal) { "secret" };
+    private static readonly HashSet<string> _masked = new(StringComparer.Ordinal) { "secret" };
 
     private static readonly AlvoApiOptions _options = new();
 
@@ -207,9 +207,20 @@ public sealed class QueryStringParserTests
     [InlineData("after=abc&offset=1", "conflicting-paging")]
     [InlineData("order=year.sideways", "malformed-order")]
     [InlineData("order=year,year", "repeated-sort-key")]
-    [InlineData("order=color", "unpageable-sort-key")]
     [InlineData("select=", "malformed-select")]
     [InlineData("select=nosuchfield", "unavailable-field")]
+    [InlineData("select=label:nosuchfield", "unavailable-field")]
+    [InlineData("select=label:secret", "unavailable-field")]
+    [InlineData("select=:make", "malformed-select-alias")]
+    [InlineData("select=make:", "malformed-select-alias")]
+    [InlineData("select=a:b:make", "malformed-select-alias")]
+    [InlineData("select=Label:make", "malformed-select-alias")]
+    [InlineData("select=1label:make", "malformed-select-alias")]
+    [InlineData("select=la-bel:make", "malformed-select-alias")]
+    [InlineData("select=limit:make", "malformed-select-alias")]
+    [InlineData("select=make,make:year", "colliding-projection-key")]
+    [InlineData("select=a:make,a:year", "colliding-projection-key")]
+    [InlineData("select=id:make", "colliding-projection-key")]
     [InlineData("limit=1&limit=2", "repeated-parameter")]
     [InlineData("year=like.2", "unsupported-operator-for-field")]
     [InlineData("owner_id=gt.00000000-0000-0000-0000-000000000001", "unsupported-operator-for-field")]
@@ -286,6 +297,9 @@ public sealed class QueryStringParserTests
     [InlineData("order=zqmarkerqz")]
     [InlineData("order=year.zqmarkerqz")]
     [InlineData("select=zqmarkerqz")]
+    [InlineData("select=zqmarkerqz:nosuchfield")]
+    [InlineData("select=make:zqmarkerqz")]
+    [InlineData("select=Zqmarkerqz:make")]
     [InlineData("limit=zqmarkerqz")]
     [InlineData("offset=zqmarkerqz")]
     [InlineData("or=(zqmarkerqz")]
@@ -327,7 +341,9 @@ public sealed class QueryStringParserTests
         "nosuchfield=eq.1", "secret=eq.1", "year=nosuchop.1", "year=eq", "year=gte.notanumber",
         "make=eq.a%00b", "notes=is.hello", "make=in.skoda", "or=(", "or=()", "year=like.2",
         "limit=0", "offset=-1", "after=", "after=abc&offset=1", "order=", "order=year.sideways",
-        "order=year,year", "order=color", "select=", "select=nosuchfield", "limit=1&limit=2",
+        "order=year,year", "select=", "select=nosuchfield", "select=Label:make", "select=id:make",
+        "select=a:make,b:make,c:make,d:make,e:make,f:make,g:make,h:make,i:make,j:make,k:make,l:make",
+        "limit=1&limit=2",
     ];
 
     /// <summary>
@@ -479,17 +495,19 @@ public sealed class QueryStringParserTests
         OnlyViolation(queryString).Code.ShouldBe("malformed-order");
 
     /// <summary>
-    /// Every list is paged — the default page size is always applied — so the port's rule that a paged read
-    /// cannot sort by a nullable field makes a nullable sort key unusable over HTTP. Asserted rather than
-    /// discovered: the required control is what turns this from a bug report into a stated contract.
+    /// Every list is paged — the default page size is always applied — and a <b>nullable</b> field is a sort
+    /// key like any other, which it was not before F4: the port refused a paged read over one, so half the
+    /// published order grammar (<c>nullsfirst</c>/<c>nullslast</c>) could not be reached over HTTP at all.
+    /// The required key is kept beside it as the control, so this cannot pass by admitting everything.
     /// </summary>
     [Fact]
-    public void A_sort_by_a_nullable_field_is_refused_because_every_list_is_paged()
+    public void A_sort_by_a_nullable_field_is_accepted_and_keeps_its_null_placement()
     {
-        TryParse("order=color", out _, out var refused).ShouldBeFalse();
+        TryParse("order=color.desc.nullsfirst", out var nullable, out var refusals).ShouldBeTrue(Because(refusals));
         TryParse("order=year", out var required, out var violations).ShouldBeTrue(Because(violations));
 
-        refused.Single().Code.ShouldBe("unpageable-sort-key");
+        nullable!.Query.Sort.Single().ShouldBe(new AlvoSort("color", Descending: true, Nulls: AlvoNullPlacement.First));
+        nullable.Query.Limit.ShouldNotBeNull("every list is paged, which is what used to make this unreachable");
         required!.Query.Sort.Single().Field.ShouldBe("year");
     }
 
@@ -498,8 +516,163 @@ public sealed class QueryStringParserTests
     {
         TryParse("select=year,make,year", out var parsed, out var violations).ShouldBeTrue(Because(violations));
 
-        parsed!.Select.ShouldBe(["year", "make"]);
+        Keys(parsed!).ShouldBe(["year", "make"]);
+        Sources(parsed!).ShouldBe(["year", "make"], "with no alias, a key is its own source");
     }
+
+    /// <summary>
+    /// PostgREST's own spelling, <c>alias:field</c>, adopted rather than invented — and the alias stays on
+    /// this side of the port: <see cref="AlvoQuery.Select"/> carries the source name.
+    /// </summary>
+    [Fact]
+    public void An_alias_renames_the_response_key_and_leaves_the_port_the_source()
+    {
+        TryParse("select=label:make", out var parsed, out var violations).ShouldBeTrue(Because(violations));
+
+        Keys(parsed!).ShouldBe(["label"]);
+        Sources(parsed!).ShouldBe(["make"]);
+        parsed!.Query.Select.ShouldBe(["make"]);
+    }
+
+    /// <summary>
+    /// Two keys over one column ask the port for that column once. The alias is a response concern, so the
+    /// read must not be told about it twice.
+    /// </summary>
+    [Fact]
+    public void Two_aliases_over_one_field_ask_the_port_for_that_field_once()
+    {
+        TryParse("select=short:make,full:make", out var parsed, out var violations).ShouldBeTrue(Because(violations));
+
+        Keys(parsed!).ShouldBe(["short", "full"]);
+        parsed!.Query.Select.ShouldBe(["make"]);
+    }
+
+    /// <summary>
+    /// The two key lists must not drift. <c>DataApiPage.Render</c> emits nothing for a source the row does
+    /// not carry, so a projection that asked the port for one set and rendered another would <em>hide</em>
+    /// the divergence rather than fail on it. This is what fails instead.
+    /// </summary>
+    [Theory]
+    [InlineData("select=make", "make")]
+    [InlineData("select=label:make,year", "make,year")]
+    [InlineData("select=a:make,b:make", "make")]
+    [InlineData("select=id,make,year", "id,make,year")]
+    [InlineData("select=year,make,year", "year,make")]
+    public void The_port_is_asked_for_exactly_the_fields_the_response_reads_from(
+        string queryString, string expected)
+    {
+        TryParse(queryString, out var parsed, out var violations).ShouldBeTrue(Because(violations));
+
+        parsed!.Query.Select.ShouldBe(expected.Split(','));
+    }
+
+    /// <summary>
+    /// The bound aliases make necessary — a projection cannot name more distinct keys than the entity has
+    /// fields, because a response with more keys than that is a duplication request rather than a read.
+    /// </summary>
+    [Fact]
+    public void A_projection_naming_more_keys_than_the_entity_has_fields_is_refused()
+    {
+        var tooMany = string.Join(',', Enumerable.Range(0, _vehicles.Fields.Count + 1)
+            .Select(index => $"k{index}:make"));
+
+        OnlyViolation($"select={tooMany}").Code.ShouldBe("projection-too-wide");
+    }
+
+    /// <summary>
+    /// The bound is charged on each newly claimed <em>distinct</em> key, not on the raw entry count — so a
+    /// repeat costs nothing and a request that dedupes to one key is answered however often it repeats.
+    /// Charging the entry count would have refused this, which is behaviour that works today.
+    /// </summary>
+    [Fact]
+    public void A_projection_repeating_one_field_past_the_field_count_still_dedupes()
+    {
+        var repeated = string.Join(',', Enumerable.Repeat("make", _vehicles.Fields.Count + 5));
+
+        TryParse($"select={repeated}", out var parsed, out var violations).ShouldBeTrue(Because(violations));
+
+        Keys(parsed!).ShouldBe(["make"]);
+    }
+
+    /// <summary>
+    /// A projection naming every field this caller can read sits <b>exactly</b> at the bound and must be
+    /// accepted — the off-by-one that would refuse it is the whole reason this fact sits beside the one
+    /// above, and it is only boundary-exact because the bound counts readable fields rather than declared
+    /// ones.
+    /// </summary>
+    [Fact]
+    public void A_projection_naming_every_declared_field_is_exactly_at_the_bound()
+    {
+        var readable = _vehicles.Fields
+            .Where(field => !_masked.Contains(field.Name))
+            .Select(field => field.Name)
+            .ToArray();
+
+        TryParse($"select={string.Join(',', readable)}", out var parsed, out var violations)
+            .ShouldBeTrue(Because(violations));
+
+        Keys(parsed!).ShouldBe(readable);
+    }
+
+    /// <summary>
+    /// An alias does not open a second channel for the field-existence question. The aliased refusals must
+    /// be byte-identical to each other for the same reason the unaliased pair is: a caller must not be able
+    /// to tell "this entity has a field called X, hidden from you" from "no such field".
+    /// </summary>
+    [Fact]
+    public void An_aliased_projection_refuses_a_hidden_source_and_an_undeclared_one_identically()
+    {
+        var hidden = OnlyViolation("select=label:secret");
+        var undeclared = OnlyViolation("select=label:nosuchfield");
+
+        hidden.Code.ShouldBe(undeclared.Code);
+        hidden.Pointer.ShouldBe(undeclared.Pointer);
+        hidden.Message.ShouldBe(undeclared.Message);
+        hidden.FixSuggestion.ShouldBe(undeclared.FixSuggestion);
+    }
+
+    /// <summary>
+    /// The width bound names how many fields this <em>caller</em> can read, never how many the entity
+    /// declares. The difference between the two numbers is exactly the count of fields hidden from them —
+    /// the one bit the byte-identical refusal above exists to withhold, and an alias makes it cheap to ask
+    /// for, because one readable field mints unlimited distinct keys.
+    /// </summary>
+    [Fact]
+    public void The_width_bound_does_not_disclose_how_many_fields_are_hidden_from_the_caller()
+    {
+        var readable = _vehicles.Fields.Count(declared => !_masked.Contains(declared.Name));
+        var tooMany = string.Join(',', Enumerable.Range(0, readable + 1).Select(index => $"k{index}:make"));
+
+        var violation = OnlyViolation($"select={tooMany}");
+
+        var fix = violation.FixSuggestion.ShouldNotBeNull();
+
+        violation.Code.ShouldBe("projection-too-wide");
+        fix.ShouldContain(readable.ToString(CultureInfo.InvariantCulture), Case.Sensitive);
+        fix.ShouldNotContain(
+            _vehicles.Fields.Count.ToString(CultureInfo.InvariantCulture),
+            Case.Sensitive,
+            "the declared count is the caller's mask size away from the readable one");
+    }
+
+    /// <summary>
+    /// A framework-owned name is refused as an alias whether or not <em>this</em> entity carries the column.
+    /// The fixture is a global, non-audited entity, so it has no <c>tenant_id</c> and no <c>created_at</c> —
+    /// and a response key called either would still read as a framework column to whoever receives it.
+    /// </summary>
+    [Theory]
+    [InlineData("select=tenant_id:make")]
+    [InlineData("select=created_at:make")]
+    [InlineData("select=updated_by:make")]
+    [InlineData("select=deleted_at:make")]
+    public void An_alias_cannot_mint_a_framework_owned_name_this_entity_does_not_carry(string queryString)
+        => OnlyViolation(queryString).Code.ShouldBe("colliding-projection-key");
+
+    private static IReadOnlyList<string> Keys(ParsedListQuery parsed) =>
+        [.. parsed.Select!.Select(field => field.Key)];
+
+    private static IReadOnlyList<string> Sources(ParsedListQuery parsed) =>
+        [.. parsed.Select!.Select(field => field.Source)];
 
     /// <summary>
     /// A projection is not a filter: naming a field in <c>select</c> must not change which rows come back.
@@ -528,6 +701,122 @@ public sealed class QueryStringParserTests
     }
 
     /// <summary>
+    /// A projection's <em>entry</em> count is bounded, and it has to be separately from the width bound: a
+    /// repeated entry claims no new key, so <c>projection-too-wide</c> can never fire on one. Until the
+    /// query body existed the only thing bounding it was the URL length, which is a property of the
+    /// transport rather than a decision this layer made.
+    /// </summary>
+    [Fact]
+    public void A_projection_naming_more_entries_than_the_parser_reads_is_refused()
+    {
+        var entries = string.Join(',', Enumerable.Repeat("id", QueryStringParser.MaxSelectEntries + 1));
+
+        TryParse($"select={entries}", out _, out var violations).ShouldBeFalse();
+
+        violations.Single().Code.ShouldBe("too-many-select-entries");
+    }
+
+    /// <summary>
+    /// The entry bound does not retire the deduplication the width bound was written around: a projection
+    /// naming one field right up to the entry bound is still one key and still a 200.
+    /// </summary>
+    [Fact]
+    public void A_repeated_projection_entry_still_deduplicates_under_the_entry_bound()
+    {
+        var entries = string.Join(',', Enumerable.Repeat("id", QueryStringParser.MaxSelectEntries));
+
+        TryParse($"select={entries}", out var parsed, out var violations).ShouldBeTrue(Because(violations));
+
+        Keys(parsed!).ShouldBe(["id"]);
+    }
+
+    /// <summary>
+    /// A group carrying more members than the node budget is refused as too wide — the code it already
+    /// earned. What changed is that it is reached before the member list is materialised, which no
+    /// assertion on the answer can see; <see cref="An_in_list_is_capped_at_the_ports_candidate_limit"/>
+    /// already pins the <c>in</c> side of the same boundary.
+    /// </summary>
+    [Fact]
+    public void A_group_past_the_node_budget_is_refused_as_too_wide()
+    {
+        var members = string.Join(',', Enumerable.Repeat("year.eq.1", AlvoFilter.MaxTerms + 1));
+
+        TryParse($"or=({members})", out _, out var violations).ShouldBeFalse();
+
+        violations.ShouldContain(violation => violation.Code == "filter-too-wide");
+    }
+
+    /// <summary>
+    /// A group carrying <b>exactly</b> the node budget splits cleanly, so the bound the splitter now takes
+    /// is the one the charge would have applied rather than one narrower.
+    /// </summary>
+    /// <remarks>
+    /// The refusing side is <see cref="A_group_past_the_node_budget_is_refused_as_too_wide"/>. Both sides are
+    /// needed: a splitter that refused at the bound rather than past it would answer <c>filter-too-wide</c>
+    /// for a filter the port accepts, and the refusing fact alone cannot see that.
+    /// </remarks>
+    [Fact]
+    public void A_group_carrying_exactly_the_node_budget_is_accepted()
+    {
+        var members = string.Join(',', Enumerable.Repeat("year.eq.1", AlvoFilter.MaxTerms - 1));
+
+        TryParse($"or=({members})", out var parsed, out var violations).ShouldBeTrue(Because(violations));
+
+        parsed!.Query.Filter.ShouldBeOfType<AlvoOr>().Filters.Count.ShouldBe(AlvoFilter.MaxTerms - 1);
+    }
+
+    /// <summary>
+    /// A second over-long <c>in</c> list, after the first has already exhausted the request's candidate
+    /// allowance, is still the ordinary 422 — never a 500.
+    /// </summary>
+    /// <remarks>
+    /// <b>This is the case the splitter's new bound made reachable.</b> The splitter is handed what the
+    /// request can still afford, and a charge that fails still spends — so by the second list the remaining
+    /// allowance is negative. A bound of zero or less is one a splitter is entitled to reject outright, so
+    /// without the floor on <c>FilterParseScope.AffordableCandidates</c> a caller's over-wide filter would
+    /// have become an <see cref="ArgumentOutOfRangeException"/> and a 500.
+    /// </remarks>
+    [Fact]
+    public void A_second_over_long_in_list_after_the_allowance_is_spent_is_still_refused_not_thrown()
+    {
+        var candidates = string.Join(',', Enumerable.Range(0, AlvoFilter.MaxInCandidates + 1));
+
+        TryParse($"year=in.({candidates})&price=in.({candidates})", out _, out var violations).ShouldBeFalse();
+
+        violations.ShouldContain(violation => violation.Code == "too-many-in-candidates");
+    }
+
+    /// <summary>
+    /// A <c>like</c> pattern is bounded and every other operand is not, because the two cost different
+    /// things: an <c>eq</c> operand is a bound value whose comparison is linear in its size and
+    /// short-circuits on the first differing byte, while a pattern is matched against every row and its
+    /// cost is not linear in its length. Under a URL both were capped by the request line; a body caps
+    /// neither.
+    /// </summary>
+    [Fact]
+    public void A_like_pattern_longer_than_the_parser_matches_is_refused()
+    {
+        var pattern = new string('%', QueryStringParser.MaxPatternLength + 1);
+
+        TryParse($"make=like.{pattern}", out _, out var violations).ShouldBeFalse();
+
+        violations.Single().Code.ShouldBe("pattern-too-long");
+    }
+
+    /// <summary>
+    /// And the bound reaches only the two pattern operators: an equality against a long value is a
+    /// comparison a caller may legitimately want, and refusing it would be a bound on data rather than on
+    /// cost.
+    /// </summary>
+    [Fact]
+    public void A_long_equality_operand_is_not_a_pattern_and_is_not_refused()
+    {
+        var value = new string('a', QueryStringParser.MaxPatternLength + 1);
+
+        TryParse($"make=eq.{value}", out _, out var violations).ShouldBeTrue(Because(violations));
+    }
+
+    /// <summary>
     /// A request that is wrong in three different ways reports <b>all three</b>, and reports each of them once.
     /// </summary>
     /// <remarks>
@@ -541,9 +830,9 @@ public sealed class QueryStringParserTests
     {
         var flooded = string.Join("&", Enumerable.Repeat("year=gte.1", 300));
 
-        TryParse($"{flooded}&limit=0&order=color", out _, out var violations).ShouldBeFalse();
+        TryParse($"{flooded}&limit=0&order=year.sideways", out _, out var violations).ShouldBeFalse();
 
-        Codes(violations).ShouldBe(["filter-too-wide", "invalid-page-size", "unpageable-sort-key"]);
+        Codes(violations).ShouldBe(["filter-too-wide", "invalid-page-size", "malformed-order"]);
     }
 
     /// <summary>

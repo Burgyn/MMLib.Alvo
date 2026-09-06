@@ -93,6 +93,34 @@ public sealed class EfCoreOutboxStore : IOutboxStore
     }
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// <para>
+    /// <b>The same INSERT a data event travels on, with no transaction under it.</b> The statement is
+    /// <see cref="OutboxTable.InsertAsync"/>'s, so the column list, the payload encoding and the initial
+    /// attempt count have one authority whichever path appended the entry; only the transaction differs, and
+    /// it differs because a custom application event has no data change to be atomic with.
+    /// </para>
+    /// <para>
+    /// <b>No name check here, deliberately.</b> The parameter type is what holds the reserved-namespace
+    /// guarantee (<see cref="AlvoCustomEvent"/>); a second check in this driver would be a second authority on
+    /// which namespaces are reserved, and the next driver would be free to omit it.
+    /// </para>
+    /// </remarks>
+    public async Task AppendAsync(AlvoCustomEvent customEvent, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(customEvent);
+
+        var connection = _connections.Create();
+        await using (connection.ConfigureAwait(false))
+        {
+            await RelationalSqlBatch.OpenAsync(connection, cancellationToken).ConfigureAwait(false);
+            await OutboxTable
+                .InsertAsync(connection, transaction: null, _tableName, customEvent.Envelope, cancellationToken)
+                .ConfigureAwait(false);
+        }
+    }
+
+    /// <inheritdoc/>
     public Task MarkDispatchedAsync(Guid id, CancellationToken cancellationToken = default) =>
         ExecuteAsync(
             OutboxTable.MarkDispatchedSql(_tableName),

@@ -1,0 +1,85 @@
+### The transactional batch (#106), against real PostgreSQL in the container.
+###
+### RUNS LAST, deliberately. This suite writes rows, and 010-Seed's own comment says the shape of its
+### seven work orders "is what every later assertion is measured against" — a batch inserted before the
+### query, paging and tenancy suites would change the answer they are pinned to. Numbered 110 so every
+### suite that pins a row set has already run.
+### The in-process suite proves what a batch IS — one transaction, per-row policy, every offending row
+### reported. Only a real engine can show that the transaction is a real one: that a batch whose last
+### row is refused leaves the WAL exactly as it found it, and that a row of another tenant is refused
+### by the predicate rather than by anything this suite arranged.
+
+### A batch of three, in one transaction
+# @name BatchCreateThree
+## TEST-EXPECT-STATUS: [200]
+POST {{fsBaseUrl}}/api/work_orders/batch
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{
+  "rows": [
+    { "tenant_id": "{{tenantNorth}}", "reference": "WO-2001", "title": "Batch one", "status": "scheduled", "priority": 2, "access_code": "ACME-2001", "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}" },
+    { "tenant_id": "{{tenantNorth}}", "reference": "WO-2002", "title": "Batch two", "status": "scheduled", "priority": 2, "access_code": "ACME-2002", "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}" },
+    { "tenant_id": "{{tenantNorth}}", "reference": "WO-2003", "title": "Batch three", "status": "scheduled", "priority": 2, "access_code": "ACME-2003", "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}" }
+  ]
+}
+
+### The count after the batch that succeeded, which is what the refused batch below is measured against
+# @name CountAfterSuccess
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=200&order=reference.asc
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### A batch whose LAST row is refused. The first two are perfectly good rows, which is the point:
+### a store that wrote as it judged would leave them behind.
+# @name BatchWithABadLastRow
+## TEST-EXPECT-STATUS: [422]
+POST {{fsBaseUrl}}/api/work_orders/batch
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{
+  "rows": [
+    { "tenant_id": "{{tenantNorth}}", "reference": "WO-2101", "title": "Would have landed", "status": "scheduled", "priority": 2, "access_code": "ACME-2101", "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}" },
+    { "tenant_id": "{{tenantNorth}}", "reference": "WO-2102", "title": "Would have landed too", "status": "scheduled", "priority": 2, "access_code": "ACME-2102", "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}" },
+    { "tenant_id": "{{tenantNorth}}", "reference": "WO-2103", "title": "Bad", "status": "not_a_declared_status", "priority": 2, "access_code": "ACME-2103", "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}" }
+  ]
+}
+
+### The count after the refusal — must equal the one above, byte for byte
+# @name CountAfterRefusal
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=200&order=reference.asc
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### A batch naming another tenant's row. SOUTH holds exactly NORTH's rights and differs only in tenant,
+### so this refusal is the tenant predicate and can be nothing else.
+###
+### 403, not 422: the PORT refused this row, and a policy refusal answers 403 carrying one violation per
+### refused row. A 422 is what the READER answers, for something the entity's declared shape refuses.
+# @name SouthBatchUpdatesNorthsRow
+## TEST-EXPECT-STATUS: [403]
+PATCH {{fsBaseUrl}}/api/work_orders/batch
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
+Content-Type: application/json
+
+{
+  "rows": [
+    { "id": "{{Wo1001Id}}", "title": "Renamed by the wrong tenant" }
+  ]
+}
+
+### NORTH's own read of that row, which is what makes the refusal above mean "unchanged"
+# @name NorthReadsWo1001
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders/{{Wo1001Id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### An empty batch on the DELETE — the shape an intermediary that stripped the body would produce
+# @name EmptyBatchDelete
+## TEST-EXPECT-STATUS: [422]
+DELETE {{fsBaseUrl}}/api/work_orders/batch
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "rows": [] }

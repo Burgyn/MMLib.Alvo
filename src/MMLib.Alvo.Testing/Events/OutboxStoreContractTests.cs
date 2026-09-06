@@ -216,6 +216,90 @@ public abstract class OutboxStoreContractTests
             .ShouldHaveSingleItem().Id.ShouldBe(earlier);
     }
 
+    /// <summary>
+    /// <b>An appended custom application event is claimable exactly like an emitted data event.</b>
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The one member of this port that <em>writes</em> a queue entry, and the only one a host calls directly.
+    /// Every other fact here seeds through the driver's own writer, so without this the append path — and, on
+    /// the shipped drivers, the newly-legal transaction-less route through it — would be product code that no
+    /// engine ever ran. It is a contract fact rather than a driver fact for this suite's founding reason: two
+    /// per-engine copies are two chances for the engines to stop being asked the same question.
+    /// </para>
+    /// <para>
+    /// It asserts the round trip and not merely that a row appeared. An implementation that stored the
+    /// envelope but lost its <c>partitionkey</c>, or that re-minted the id, would leave the entry claimable
+    /// and still break the two things the queue is for: dedup by <see cref="AlvoEvent.Id"/>, and F7's
+    /// partitioned claim.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task An_appended_custom_event_is_claimable_like_an_emitted_one()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        var published = CustomEvent();
+
+        await world.Store.AppendAsync(AlvoCustomEvent.Create(published), Ct);
+
+        var entry = (await world.Store.ClaimAsync(Claimant, batchSize: 4, MaxAttempts, _lease, Ct))
+            .ShouldHaveSingleItem();
+        entry.Id.ShouldBe(published.Id);
+        entry.Type.ShouldBe(published.Type);
+        entry.PartitionKey.ShouldBe(published.PartitionKey);
+        AlvoEventJson.Read(entry.Payload).ShouldBe(published);
+    }
+
+    /// <summary>
+    /// An appended entry is an ordinary queue entry: retiring it keeps it retired.
+    /// </summary>
+    /// <remarks>
+    /// The half that would still pass if <c>AppendAsync</c> wrote a row the rest of the state machine cannot
+    /// address — a wrong <c>attempts</c> seed, or a <c>dispatched_at</c> that is not null.
+    /// </remarks>
+    [Fact]
+    public async Task An_appended_custom_event_is_retired_like_an_emitted_one()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        var published = CustomEvent();
+        await world.Store.AppendAsync(AlvoCustomEvent.Create(published), Ct);
+        await world.Store.ClaimAsync(Claimant, batchSize: 1, MaxAttempts, _lease, Ct);
+
+        await world.Store.MarkDispatchedAsync(published.Id, Ct);
+        world.Advance(_lease + _lease);
+
+        (await world.Store.ClaimAsync(Claimant, batchSize: 1, MaxAttempts, _lease, Ct)).ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// One custom application event, shaped as <c>IAlvoEvents.PublishAsync</c> builds it.
+    /// </summary>
+    /// <remarks>
+    /// The type is deliberately outside the <c>entity.</c>/<c>auth.</c>/<c>storage.</c> namespaces a host is
+    /// refused, so this fact exercises the shape a host can really produce rather than one the publish guard
+    /// would have turned away.
+    /// </remarks>
+    private static AlvoEvent CustomEvent()
+    {
+        var now = new DateTimeOffset(2026, 8, 28, 9, 30, 0, TimeSpan.Zero);
+        var id = AlvoEventId.Create(now);
+
+        return new AlvoEvent
+        {
+            Id = id,
+            Source = AlvoEvent.DefaultSource,
+            Type = "crm.orders.approved",
+            Time = now,
+            Subject = "orders/42",
+            PartitionKey = "crm.orders.approved:orders/42",
+            AuthType = AlvoEventAuthType.Anonymous,
+            CorrelationId = id.ToString(),
+            Data = new AlvoEventData(),
+        };
+    }
+
     private const int MaxAttempts = 5;
     private const int UnsortedReturningBatchSize = 50;
     private const string Claimant = "worker-1";

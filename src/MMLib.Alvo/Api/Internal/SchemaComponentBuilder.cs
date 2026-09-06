@@ -5,7 +5,7 @@ using System.Text.Json.Nodes;
 namespace MMLib.Alvo.Api.Internal;
 
 /// <summary>
-/// Turns one entity of the applied schema into the five JSON Schema components the generated OpenAPI
+/// Turns one entity of the applied schema into the six JSON Schema components the generated OpenAPI
 /// document references: the row a single read, a create or an update returns; the page item a list's rows
 /// are (the same fields, without the row's <c>required</c> list); the body a create accepts; and the body a
 /// patch accepts.
@@ -92,25 +92,189 @@ internal sealed class SchemaComponentBuilder(
     /// <param name="entity">The entity name.</param>
     internal static string PatchId(string entity) => entity + "Patch";
 
+    /// <summary>The component id of the whole-row body a create-or-replace takes.</summary>
+    /// <remarks>
+    /// <b>Neither the create body nor the patch body would be true here.</b> The patch body makes every field
+    /// optional, which documents a merge this route does not perform. The create body is right about that and
+    /// wrong about <c>tenant_id</c>: it admits the column because a create legitimately places a row in a
+    /// tenant, while this route refuses it on both branches — so publishing it would document a request the
+    /// endpoint rejects, which is a generated client's bug rather than its author's.
+    /// </remarks>
+    /// <param name="entity">The entity name.</param>
+    internal static string ReplaceId(string entity) => entity + "Replace";
+
+    /// <summary>The component id of the body the collection query accepts.</summary>
+    /// <param name="entity">The entity name.</param>
+    internal static string QueryId(string entity) => entity + "Query";
+
     /// <summary>The component id of the page envelope a list returns.</summary>
     /// <param name="entity">The entity name.</param>
     internal static string PageId(string entity) => entity + "Page";
+
+    /// <summary>The component id of the envelope a batch returns.</summary>
+    /// <param name="entity">The entity name.</param>
+    internal static string BatchResultId(string entity) => entity + "BatchResult";
+
+    /// <summary>The component id of the body a batch create accepts.</summary>
+    /// <param name="entity">The entity name.</param>
+    internal static string BatchCreateId(string entity) => entity + "BatchCreate";
+
+    /// <summary>The component id of the body a batch update accepts.</summary>
+    /// <param name="entity">The entity name.</param>
+    internal static string BatchUpdateId(string entity) => entity + "BatchUpdate";
+
+    /// <summary>The component id of the body a batch delete accepts.</summary>
+    /// <param name="entity">The entity name.</param>
+    internal static string BatchDeleteId(string entity) => entity + "BatchDelete";
+
+    /// <summary>The component id of one row of a batch update — the patch, plus the row key.</summary>
+    /// <param name="entity">The entity name.</param>
+    internal static string BatchPatchId(string entity) => entity + "BatchPatch";
 
     /// <summary>The component id of one item inside a list's page — the same fields as <see cref="RowId"/>, with no <c>required</c> list.</summary>
     /// <param name="entity">The entity name.</param>
     internal static string PageItemId(string entity) => entity + "PageItem";
 
-    /// <summary>Registers this entity's five components on <paramref name="document"/>.</summary>
+    /// <summary>Registers this entity's five schema components on <paramref name="document"/>.</summary>
+    /// <remarks>
+    /// The sixth, <c>{entity}Query</c>, is registered by <c>AlvoDocumentTransformer</c> instead: its
+    /// <c>limit</c> property carries <see cref="AlvoApiOptions.MaxPageSize"/> and this builder is
+    /// constructed with a schema view and no options, so threading options in to serve one component would
+    /// be worse than building it where the options already are.
+    /// </remarks>
     /// <param name="document">The document being built.</param>
-    internal void AddTo(OpenApiDocument document)
+    /// <param name="maxRows">
+    /// <see cref="AlvoApiOptions.MaxBatchRows"/>, published as the batch arrays' <c>maxItems</c>. Threaded in
+    /// rather than read here for the reason the <c>Query</c> component is built elsewhere: this builder holds
+    /// a schema view and no options.
+    /// </param>
+    internal void AddTo(OpenApiDocument document, int maxRows)
     {
         ArgumentNullException.ThrowIfNull(document);
         document.AddComponent(RowId(entity.Name), Row());
         document.AddComponent(PageItemId(entity.Name), PageItem());
         document.AddComponent(CreateId(entity.Name), Body(isUpdate: false));
         document.AddComponent(PatchId(entity.Name), Body(isUpdate: true));
+        document.AddComponent(ReplaceId(entity.Name), ReplaceBody());
         document.AddComponent(PageId(entity.Name), Page(document));
+        document.AddComponent(BatchPatchId(entity.Name), BatchPatch(document));
+        document.AddComponent(BatchResultId(entity.Name), BatchResult(document));
+        document.AddComponent(BatchCreateId(entity.Name), Rows(CreateId(entity.Name), document, maxRows));
+        document.AddComponent(BatchUpdateId(entity.Name), Rows(BatchPatchId(entity.Name), document, maxRows));
+        document.AddComponent(BatchDeleteId(entity.Name), RowIds(maxRows));
     }
+
+    /// <summary>A batch body: the reserved <c>rows</c> array, whose elements are <paramref name="item"/>.</summary>
+    /// <remarks>
+    /// One shape for the create and the update, because the only thing that differs between them is what one
+    /// element is — and that is exactly what a <c>$ref</c> is for. The array's own bound is
+    /// <see cref="AlvoApiOptions.MaxBatchRows"/>, published as <c>maxItems</c> so a client generator refuses
+    /// an over-long batch before it is sent rather than after.
+    /// </remarks>
+    /// <param name="item">The component id one row references.</param>
+    /// <param name="document">The document the item component is referenced from.</param>
+    /// <param name="maxRows">The configured row bound, published so a generator refuses before sending.</param>
+    private static OpenApiSchema Rows(string item, OpenApiDocument document, int maxRows) => new()
+    {
+        Type = JsonSchemaType.Object,
+        Description = "The rows to write, in one transaction.",
+        Properties = new Dictionary<string, IOpenApiSchema>(StringComparer.Ordinal)
+        {
+            ["rows"] = new OpenApiSchema
+            {
+                Type = JsonSchemaType.Array,
+                MinItems = 1,
+                MaxItems = maxRows,
+                Description = "One element per row, in the order you want them reported.",
+                Items = new OpenApiSchemaReference(item, document),
+            },
+        },
+        Required = new HashSet<string>(StringComparer.Ordinal) { "rows" },
+    };
+
+    /// <summary>A batch delete's body: the reserved <c>rows</c> array of row ids.</summary>
+    /// <param name="maxRows">The configured row bound, published so a generator refuses before sending.</param>
+    private static OpenApiSchema RowIds(int maxRows) => new()
+    {
+        Type = JsonSchemaType.Object,
+        Description = "The rows to remove, in one transaction.",
+        Properties = new Dictionary<string, IOpenApiSchema>(StringComparer.Ordinal)
+        {
+            ["rows"] = new OpenApiSchema
+            {
+                Type = JsonSchemaType.Array,
+                MinItems = 1,
+                MaxItems = maxRows,
+                Description = "One row id per element.",
+                Items = new OpenApiSchema { Type = JsonSchemaType.String, Format = "uuid" },
+            },
+        },
+        Required = new HashSet<string>(StringComparer.Ordinal) { "rows" },
+    };
+
+    /// <summary>One row of a batch update: the row key, plus the fields to change on it.</summary>
+    /// <remarks>
+    /// The key travels <em>in</em> the row rather than in the path, because a batch addresses many rows and a
+    /// path can address one. It is the only place <c>id</c> is a caller-supplied member on a write.
+    /// </remarks>
+    /// <param name="document">The document the patch component is referenced from.</param>
+    private OpenApiSchema BatchPatch(OpenApiDocument document) => new()
+    {
+        Type = JsonSchemaType.Object,
+        Title = BatchPatchId(entity.Name),
+        Description = "One row of a batch update: which row, and the fields to change on it.",
+        AllOf =
+        [
+            new OpenApiSchema
+            {
+                Type = JsonSchemaType.Object,
+                Properties = new Dictionary<string, IOpenApiSchema>(StringComparer.Ordinal)
+                {
+                    ["id"] = new OpenApiSchema
+                    {
+                        Type = JsonSchemaType.String,
+                        Format = "uuid",
+                        Description = "The row to change, exactly as a previous response returned it.",
+                    },
+                },
+                Required = new HashSet<string>(StringComparer.Ordinal) { "id" },
+            },
+            new OpenApiSchemaReference(PatchId(entity.Name), document),
+        ],
+    };
+
+    /// <summary>What a batch returns: the rows it wrote, and how many it affected.</summary>
+    /// <remarks>
+    /// <c>affected</c> is required and is the member a delete is read from — it produces no rows, so
+    /// <c>items</c> is empty and a caller checking only that could not tell a five-row delete from a refusal.
+    /// A refusal is not this shape at all: it is an RFC 9457 problem document with a 4xx status.
+    /// </remarks>
+    /// <param name="document">The document the item component is referenced from.</param>
+    private OpenApiSchema BatchResult(OpenApiDocument document) => new()
+    {
+        Type = JsonSchemaType.Object,
+        Title = BatchResultId(entity.Name),
+        Description = "What the batch wrote. A batch is one transaction, so this is never a partial outcome.",
+        Properties = new Dictionary<string, IOpenApiSchema>(StringComparer.Ordinal)
+        {
+            ["items"] = new OpenApiSchema
+            {
+                Type = JsonSchemaType.Array,
+                Description =
+                    "The rows the batch wrote, in the order you sent them. Empty for a batch delete, which "
+                    + "produces no rows — read `affected` there.",
+                Items = new OpenApiSchemaReference(PageItemId(entity.Name), document),
+            },
+            ["affected"] = new OpenApiSchema
+            {
+                Type = JsonSchemaType.Integer,
+                Format = "int32",
+                Minimum = "0",
+                Description = "How many rows the batch wrote or removed.",
+            },
+        },
+        Required = new HashSet<string>(StringComparer.Ordinal) { "items", "affected" },
+    };
 
     /// <summary>
     /// The row a single read, a create or an update returns: every field the caller may see, with the
@@ -202,7 +366,32 @@ internal sealed class SchemaComponentBuilder(
         Title = isUpdate ? PatchId(entity.Name) : CreateId(entity.Name),
         Description = BodyDescription(isUpdate),
         Properties = Fields(readable: false, isUpdate),
-        Required = isUpdate ? null : Mandatory(),
+        Required = isUpdate ? null : Mandatory(isUpdate: false),
+    };
+
+    /// <summary>The whole-row body: the create body's mandatory fields, the update body's column rules.</summary>
+    /// <remarks>
+    /// The two halves come from the two things this route actually is. It writes the row whole, so a
+    /// <c>required</c> field is mandatory exactly as on a create; and it refuses <c>tenant_id</c> on both
+    /// branches, which is the update body's answer to the managed-column question.
+    /// <para>
+    /// <b>Both halves ask the same question, and that is the point.</b> The properties and the
+    /// <c>required</c> list are built with one <c>isUpdate</c> value, because a field that is
+    /// <c>required</c>, create-writable and update-refused — <c>tenant_id</c> being exactly that shape —
+    /// would otherwise be named as mandatory without appearing among the properties at all.
+    /// </para>
+    /// </remarks>
+    private OpenApiSchema ReplaceBody() => new()
+    {
+        Type = JsonSchemaType.Object,
+        Title = ReplaceId(entity.Name),
+        Description =
+            "The whole row. A field this object does not mention is written `null` rather than left at its "
+            + "stored value, so every field the descriptor declares `required` must be present. The row's "
+            + "`id` comes from the path, and the framework's own columns — `tenant_id` included — are "
+            + "refused if supplied: a created row lands in the caller's own tenant.",
+        Properties = Fields(readable: false, isUpdate: true),
+        Required = Mandatory(isUpdate: true),
     };
 
     private static string BodyDescription(bool isUpdate) => isUpdate
@@ -211,18 +400,24 @@ internal sealed class SchemaComponentBuilder(
         : "The row to create. A field declared `required` by the descriptor must be present; the row's `id` "
         + "and the framework's own columns are assigned by Alvo and are refused if supplied.";
 
-    /// <summary>The page envelope: the rows, and the cursor for the page after this one.</summary>
+    /// <summary>
+    /// The page envelope: the rows, the cursor for the page after this one, and the total the caller opted
+    /// into.
+    /// </summary>
     /// <remarks>
-    /// Both members are always present — <c>next</c> is written as <see langword="null"/> on the last page
-    /// rather than omitted (<c>DataApiJson</c> never ignores a null), so requiring them is a statement about
-    /// the bytes and not an aspiration.
+    /// All three members are always present — <c>next</c> is written as <see langword="null"/> on the last
+    /// page and <c>count</c> whenever no count was asked for (<c>DataApiJson</c> never ignores a null), so
+    /// requiring them is a statement about the bytes and not an aspiration. A member that appeared only
+    /// sometimes would be one a client has to probe for.
     /// </remarks>
     /// <param name="document">The document the row component is referenced from.</param>
     private OpenApiSchema Page(OpenApiDocument document) => new()
     {
         Type = JsonSchemaType.Object,
         Title = PageId(entity.Name),
-        Description = "One page of rows, plus the cursor that reads the page after it.",
+        Description =
+            "One page of rows, the cursor that reads the page after it, and — when the request opted in with "
+            + "a `Prefer: count` preference — how many rows the query matches in total.",
         Properties = new Dictionary<string, IOpenApiSchema>(StringComparer.Ordinal)
         {
             ["items"] = new OpenApiSchema
@@ -239,8 +434,24 @@ internal sealed class SchemaComponentBuilder(
                     "The opaque cursor for the next page, or null when this page is the last. Send it back "
                     + "verbatim as `after`; it is the provider's to interpret and must not be decoded.",
             },
+            ["count"] = new OpenApiSchema
+            {
+                Type = JsonSchemaType.Integer | JsonSchemaType.Null,
+                Format = "int64",
+                Minimum = "0",
+                Description =
+                    "How many rows the query matches in total — **not** the size of this page — or null "
+                    + "unless the request sent a recognised `Prefer: count` preference — `exact`, or "
+                    + "`planned`/`estimated`, which degrade to an exact count. It is narrowed by the "
+                    + "caller's policy "
+                    + "and by the filter, and not by `limit`, `offset` or `after`, so it does not shrink as "
+                    + "you page. Opt-in because an exact count is a second scan of the matching set on every "
+                    + "request. **Exact means \"not an estimate\", not \"consistent with `items`\"**: it is "
+                    + "taken in a second statement, so a write landing between the two can make it differ "
+                    + "from the rows by one.",
+            },
         },
-        Required = new HashSet<string>(StringComparer.Ordinal) { "items", "next" },
+        Required = new HashSet<string>(StringComparer.Ordinal) { "items", "next", "count" },
     };
 
     /// <summary>Every field of the entity that belongs in one of the four schemas, in the schema's own order.</summary>
@@ -327,10 +538,16 @@ internal sealed class SchemaComponentBuilder(
     /// field the caller may not write — <c>id</c>, or a required field marked <c>readOnly</c> — is the
     /// framework's to fill, and demanding it would document a create nobody can perform.
     /// </remarks>
-    private HashSet<string>? Mandatory()
+    /// <param name="isUpdate">
+    /// Which write rules decide membership. <b>It must match the properties the body actually carries</b>:
+    /// <c>required</c> is a claim about a member, so naming one the schema does not declare is a document a
+    /// generated client cannot satisfy — it would demand a field the endpoint refuses. The create body and
+    /// the replace body answer this differently, which is why it is a parameter rather than a constant.
+    /// </param>
+    private HashSet<string>? Mandatory(bool isUpdate)
     {
         var required = entity.Fields
-            .Where(field => field.Required && Belongs(field, readable: false, isUpdate: false))
+            .Where(field => field.Required && Belongs(field, readable: false, isUpdate))
             .Select(field => field.Name)
             .ToHashSet(StringComparer.Ordinal);
 

@@ -42,8 +42,10 @@ setup_repo() { # -> prints the repo path
   git -C "$repo" init -q
   git -C "$repo" config user.email test@example.com
   git -C "$repo" config user.name test
-  mkdir -p "$repo/test/Some.Tests" "$repo/src"
+  mkdir -p "$repo/test/Some.Tests" "$repo/test/load/baselines" "$repo/src"
   printf 'committed\n' >"$repo/test/Some.Tests/Thing.verified.txt"
+  printf 'namespace X\n{\n}\n' >"$repo/test/Some.Tests/PublicApi.X.verified.txt"
+  printf '{"ratios":{}}\n' >"$repo/test/load/baselines/gate.json"
   printf 'x\n' >"$repo/src/Thing.cs"
   git -C "$repo" add -A
   git -C "$repo" commit -qm init
@@ -95,6 +97,22 @@ printf '{"tool_name":"Edit","tool_input":{}}' \
   | CLAUDE_PROJECT_DIR="$repo" bash "$HOOKS_DIR/record-edited-paths"
 assert_empty "$(cat "$(ledger_path "$repo")" 2>/dev/null)" \
   "survives a payload with no file_path"
+
+# A load baseline is the ledger's second scope, and for the same reason as the
+# first: editing it can turn a red gate green with no product change.
+repo="$(setup_repo)"
+printf '{"tool_name":"Edit","tool_input":{"file_path":"%s/test/load/baselines/gate.json"}}' "$repo" \
+  | CLAUDE_PROJECT_DIR="$repo" bash "$HOOKS_DIR/record-edited-paths"
+assert_eq "test/load/baselines/gate.json" "$(cat "$(ledger_path "$repo")" 2>/dev/null)" \
+  "records a load baseline path"
+
+# The scope is the baselines DIRECTORY, not every json under test/load — the
+# scenarios and the seed are code, and code is reviewed, not judged.
+repo="$(setup_repo)"
+printf '{"tool_name":"Edit","tool_input":{"file_path":"%s/test/load/scenarios.js"}}' "$repo" \
+  | CLAUDE_PROJECT_DIR="$repo" bash "$HOOKS_DIR/record-edited-paths"
+assert_empty "$(cat "$(ledger_path "$repo")" 2>/dev/null)" \
+  "ignores the load scenarios themselves"
 
 # ======================================================================== gate
 
@@ -158,6 +176,79 @@ printf 'test/Some.Tests/Thing.verified.txt\ntest/Some.Tests/Fresh.verified.txt\n
   >"$(ledger_path "$repo")"
 assert_eq "1" "$(run_gate "$repo" | jq -s 'length')" \
   "emits exactly one block for two baselines"
+
+# A really-changed load baseline must block, and the reason must name the judge.
+repo="$(setup_repo)"
+printf '{"ratios":{"a":{"max":9}}}\n' >"$repo/test/load/baselines/gate.json"
+printf 'test/load/baselines/gate.json\n' >"$(ledger_path "$repo")"
+out="$(run_gate "$repo")"
+assert_contains '"decision":"block"' "$(printf '%s' "$out" | jq -c .)" \
+  "blocks on a changed load baseline"
+assert_contains 'alvo-snapshot-judge' "$out" \
+  "names the judge for a load baseline"
+assert_contains 'test/load/baselines/gate.json' "$out" \
+  "names the changed load baseline"
+
+# Same no-op rule as a Verify baseline: identical bytes are nothing to judge.
+repo="$(setup_repo)"
+printf 'test/load/baselines/gate.json\n' >"$(ledger_path "$repo")"
+assert_empty "$(run_gate "$repo")" "drops an unchanged load baseline"
+
+# A PublicApi baseline that GREW must send the agent to alvo-architecture-rules.
+# Fires alongside the snapshot judge on purpose: one asks whether the baseline is
+# justified, this asks whether the symbol should be public at all.
+repo="$(setup_repo)"
+printf 'namespace X\n{\n  public static string Added { get; }\n}\n' \
+  >"$repo/test/Some.Tests/PublicApi.X.verified.txt"
+printf 'test/Some.Tests/PublicApi.X.verified.txt\n' >"$(ledger_path "$repo")"
+out="$(run_gate "$repo")"
+assert_contains 'public surface GREW' "$out" \
+  "blocks when a PublicApi baseline gained a line"
+assert_contains 'alvo-architecture-rules' "$out" \
+  "names the skill that owns the public-is-the-contract rule"
+assert_contains 'InternalsVisibleTo' "$out" \
+  "names the alternative the rule points at"
+assert_eq "1" "$(printf '%s' "$out" | jq -s 'length')" \
+  "a grown PublicApi baseline still produces exactly one block"
+
+# A NARROWED surface is the direction the rule wants, so it must not block on
+# this check — that is the whole reason the check reads added lines, not any diff.
+repo="$(setup_repo)"
+printf 'namespace X\n' >"$repo/test/Some.Tests/PublicApi.X.verified.txt"
+printf 'test/Some.Tests/PublicApi.X.verified.txt\n' >"$(ledger_path "$repo")"
+out="$(run_gate "$repo")"
+assert_contains 'alvo-snapshot-judge' "$out" \
+  "a narrowed PublicApi baseline still reaches the snapshot judge"
+assert_empty "$(printf '%s' "$out" | grep -o 'public surface GREW' || true)" \
+  "a narrowed PublicApi baseline does not block on the widening check"
+
+# An unchanged PublicApi baseline is a no-op for both checks.
+repo="$(setup_repo)"
+printf 'test/Some.Tests/PublicApi.X.verified.txt\n' >"$(ledger_path "$repo")"
+assert_empty "$(run_gate "$repo")" "drops an unchanged PublicApi baseline"
+
+# A brand-new PublicApi baseline appears in no diff, so every line is an addition.
+repo="$(setup_repo)"
+printf 'namespace Y\n{\n  public static string New { get; }\n}\n' \
+  >"$repo/test/Some.Tests/PublicApi.Y.verified.txt"
+printf 'test/Some.Tests/PublicApi.Y.verified.txt\n' >"$(ledger_path "$repo")"
+assert_contains 'public surface GREW' "$(run_gate "$repo")" \
+  "blocks on an untracked PublicApi baseline"
+
+# Both kinds of baseline in one run still produce exactly ONE block — the checks
+# aggregate into one Stop decision rather than racing each other.
+repo="$(setup_repo)"
+printf 'changed\n' >"$repo/test/Some.Tests/Thing.verified.txt"
+printf '{"ratios":{"a":{"max":9}}}\n' >"$repo/test/load/baselines/gate.json"
+printf 'test/Some.Tests/Thing.verified.txt\ntest/load/baselines/gate.json\n' \
+  >"$(ledger_path "$repo")"
+out="$(run_gate "$repo")"
+assert_eq "1" "$(printf '%s' "$out" | jq -s 'length')" \
+  "emits exactly one block for a Verify and a load baseline together"
+assert_contains 'Load baselines changed' "$out" \
+  "…and that one block mentions the load half"
+assert_contains 'Verify baselines changed' "$out" \
+  "…and the Verify half"
 
 # The ledger has ONE owner: it is gone after a single read, so a block-induced
 # re-Stop finds nothing and cannot loop.

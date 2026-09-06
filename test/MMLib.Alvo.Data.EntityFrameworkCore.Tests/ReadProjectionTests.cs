@@ -72,22 +72,85 @@ public class ReadProjectionTests
         var declared = _entity with { Fields = [.. _entity.Fields, new FieldSchema { Name = "ghost", Type = FieldType.String }] };
 
         Should.Throw<AlvoAuthorizationException>(
-            () => ReadProjection.Compose(declared, Hidden("ghost"), _dialect, ReadModelFixture.Rows(_entity)));
+            () => ReadProjection.Compose(
+                declared, Hidden("ghost"), Unselected(), _dialect, ReadModelFixture.Rows(_entity)));
     }
+
+    /// <summary>
+    /// An <em>unselected</em> field the read model does not map is a different failure from a masked one,
+    /// and the exception type is the whole point: the caller's own projection must never produce a 403. This
+    /// state is unreachable in production — the set is derived from the applied schema's own fields — so
+    /// reaching it means the schema and the read model disagree, which is an Alvo defect.
+    /// </summary>
+    [Fact]
+    public void An_unselected_field_the_read_model_does_not_map_is_a_bug_rather_than_a_denial()
+    {
+        var declared = _entity with { Fields = [.. _entity.Fields, new FieldSchema { Name = "ghost", Type = FieldType.String }] };
+
+        Should.Throw<InvalidOperationException>(
+            () => ReadProjection.Compose(
+                declared, Hidden(), Unselected("ghost"), _dialect, ReadModelFixture.Rows(_entity)));
+    }
+
+    /// <summary>
+    /// The two sets overlap on every projected read of a masked entity — a hidden field is never selected,
+    /// never a sort key and never framework-managed — so a field in both must answer with the <em>mask's</em>
+    /// exception. Pinned because an implementation that tested the unselected set first would pass every
+    /// other fact here and silently downgrade a security condition to a bug report.
+    /// </summary>
+    [Fact]
+    public void A_field_in_both_sets_fails_as_a_mask_rather_than_as_a_projection()
+    {
+        var declared = _entity with { Fields = [.. _entity.Fields, new FieldSchema { Name = "ghost", Type = FieldType.String }] };
+
+        Should.Throw<AlvoAuthorizationException>(
+            () => ReadProjection.Compose(
+                declared, Hidden("ghost"), Unselected("ghost"), _dialect, ReadModelFixture.Rows(_entity)));
+    }
+
+    [Fact]
+    public void An_unselected_field_is_projected_as_a_typed_null_under_its_own_name()
+    {
+        var sql = Compose(Hidden(), Unselected("balance"));
+
+        sql.ShouldContain("AS \"balance\"", Case.Sensitive);
+        sql.ShouldContain("\"title\"", Case.Sensitive, "a selected field is still read from its column");
+    }
+
+    /// <summary>
+    /// The mask and the projection render identically — one <c>NULL</c> cast per excluded column — so a
+    /// reader cannot tell from the statement which of the two excluded a field. That is a property, not an
+    /// accident: the statement is not the place either decision is recorded.
+    /// </summary>
+    [Fact]
+    public void A_masked_field_and_an_unselected_field_render_the_same_way()
+        => Compose(Hidden("balance"), Unselected()).ShouldBe(Compose(Hidden(), Unselected("balance")));
 
     [Fact]
     public void Every_argument_is_required()
     {
         var rows = ReadModelFixture.Rows(_entity);
 
-        Should.Throw<ArgumentNullException>(() => ReadProjection.Compose(null!, Hidden(), _dialect, rows));
-        Should.Throw<ArgumentNullException>(() => ReadProjection.Compose(_entity, null!, _dialect, rows));
-        Should.Throw<ArgumentNullException>(() => ReadProjection.Compose(_entity, Hidden(), null!, rows));
-        Should.Throw<ArgumentNullException>(() => ReadProjection.Compose(_entity, Hidden(), _dialect, null!));
+        Should.Throw<ArgumentNullException>(
+            () => ReadProjection.Compose(null!, Hidden(), Unselected(), _dialect, rows));
+        Should.Throw<ArgumentNullException>(
+            () => ReadProjection.Compose(_entity, null!, Unselected(), _dialect, rows));
+        Should.Throw<ArgumentNullException>(
+            () => ReadProjection.Compose(_entity, Hidden(), null!, _dialect, rows));
+        Should.Throw<ArgumentNullException>(
+            () => ReadProjection.Compose(_entity, Hidden(), Unselected(), null!, rows));
+        Should.Throw<ArgumentNullException>(
+            () => ReadProjection.Compose(_entity, Hidden(), Unselected(), _dialect, null!));
     }
 
     private static string Compose(IReadOnlySet<string> hiddenFields) =>
-        ReadProjection.Compose(_entity, hiddenFields, _dialect, ReadModelFixture.Rows(_entity));
+        Compose(hiddenFields, Unselected());
+
+    private static string Compose(IReadOnlySet<string> hiddenFields, IReadOnlySet<string> unselectedFields) =>
+        ReadProjection.Compose(
+            _entity, hiddenFields, unselectedFields, _dialect, ReadModelFixture.Rows(_entity));
 
     private static HashSet<string> Hidden(params string[] fields) => fields.ToHashSet(StringComparer.Ordinal);
+
+    private static HashSet<string> Unselected(params string[] fields) => fields.ToHashSet(StringComparer.Ordinal);
 }

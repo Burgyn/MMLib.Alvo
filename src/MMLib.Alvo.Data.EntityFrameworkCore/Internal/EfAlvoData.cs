@@ -5,6 +5,7 @@ using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
+using System.Collections.Frozen;
 using System.Data.Common;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore;
@@ -112,25 +113,72 @@ internal sealed class EfAlvoData : IAlvoData
         var decision = Resolve(query.Entity, DataOperation.List, context);
         AlvoFilter.EnsureWithinLimits(query.Filter);
         AlvoQuery.EnsurePagingWindowIsSane(query);
+        AlvoQuery.EnsureProjectionIsSane(query);
 
         using var db = _contexts.Create();
         var entity = Entity(db, query.Entity);
         QueryFieldGuard.EnsureAvailable(QueryFields(query), entity, decision.HiddenFields);
-        AlvoQuery.EnsureSortKeysCanBePaged(query, entity);
 
         var anchor = await AnchorAsync(db, entity, decision, context, query, cancellationToken);
+        var options = ReadOptions(query, anchor, entity);
+        var total = await TotalCountAsync(db, entity, decision, context, query, options, cancellationToken);
+
+        // A cursor this provider never issued — stale, forged, or from another tenant — finds no anchor and
+        // is answered with an empty page rather than the first one. The count still comes back, because it is
+        // a property of the query's visible set and not of the window the cursor failed to open: answering
+        // null there would make the HTTP layer's `Preference-Applied: count=exact` a lie.
         if (query.After is not null && anchor is null)
         {
-            return AlvoPage.Empty;
+            return AlvoPage.Empty with { TotalCount = total };
         }
 
-        var fetched = await PageAsync(db, entity, decision, context, query, anchor, cancellationToken);
+        var fetched = await PageAsync(db, entity, decision, context, options, cancellationToken);
         var (kept, nextCursor) = Paginated(fetched, query.Limit);
         return new AlvoPage
         {
-            Items = [.. kept.Select(row => RecordMaterializer.ToRecord(row, decision.HiddenFields))],
+            Items = [.. kept.Select(row => RecordMaterializer.ToRecord(row, decision.HiddenFields, options.Unselected))],
             NextCursor = nextCursor,
+            TotalCount = total,
         };
+    }
+
+    /// <summary>
+    /// How many rows the query matches in total, or <see langword="null"/> when
+    /// <see cref="AlvoQuery.IncludeTotalCount"/> did not ask — in which case <b>no statement is composed and
+    /// none is executed</b>, which is what makes the count opt-in rather than merely optional.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Run through EF's own <c>SqlQueryRaw</c> rather than a raw command on the context's connection, so the
+    /// count binds its values through the same <see cref="PredicateParameterBinder"/> as the page, needs no
+    /// second execution path, and — the reason that decides it — is <b>visible to the same diagnostic
+    /// listener the statement suite observes</b>. "The count carries the policy predicate" is a claim no
+    /// returned number can carry, so it has to be assertable on the statement.
+    /// </para>
+    /// <para>
+    /// <c>ToListAsync</c> rather than <c>SingleAsync</c>: a <c>SqlQueryRaw</c> with nothing composed over it
+    /// is emitted verbatim, while composing a LINQ operator wraps it in a subquery whose output column EF
+    /// then requires to be named <c>Value</c> — an EF artifact in a statement that is otherwise Alvo's own.
+    /// The result set is one row by construction, so <c>Single</c> here is a fact about <c>COUNT(*)</c>, not
+    /// a bound imposed on the query.
+    /// </para>
+    /// </remarks>
+    private async Task<long?> TotalCountAsync(
+        AlvoDataContext db, EntitySchema? entity, PolicyDecision decision, AlvoContext context,
+        AlvoQuery query, ReadStatementComposer.ReadStatementOptions options, CancellationToken cancellationToken)
+    {
+        if (!query.IncludeTotalCount)
+        {
+            return null;
+        }
+
+        var schema = entity ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
+        var statement = _statements.ComposeCount(schema, decision, context, options);
+        var parameters = new PredicateParameterBinder(db).Bind(
+            db.Rows(schema.Name).EntityType, statement.Parameters);
+
+        var counted = await db.Database.SqlQueryRaw<long>(statement.Sql, parameters).ToListAsync(cancellationToken);
+        return counted.Single();
     }
 
     /// <summary>
@@ -170,7 +218,7 @@ internal sealed class EfAlvoData : IAlvoData
 
         using var db = _contexts.Create();
         var row = await SingleAsync(db, Entity(db, entity), decision, context, id, lockFor: null, cancellationToken);
-        return row is null ? null : RecordMaterializer.ToRecord(row, decision.HiddenFields);
+        return row is null ? null : RecordMaterializer.ToRecord(row, decision.HiddenFields, FrozenSet<string>.Empty);
     }
 
     /// <inheritdoc/>
@@ -211,7 +259,7 @@ internal sealed class EfAlvoData : IAlvoData
             cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
-        return RecordMaterializer.ToRecord(stored, decision.HiddenFields);
+        return RecordMaterializer.ToRecord(stored, decision.HiddenFields, FrozenSet<string>.Empty);
     }
 
     /// <summary>
@@ -354,24 +402,49 @@ internal sealed class EfAlvoData : IAlvoData
     /// implementation relies on, with the provider exception preserved as the inner one.
     /// </para>
     /// </remarks>
-    private async Task<AlvoRecord> ReplayableCreateAsync(
+    private Task<AlvoRecord> ReplayableCreateAsync(
         string entity, IReadOnlyDictionary<string, object?> values, PolicyDecision decision, AlvoContext context,
-        AlvoIdempotency token, CancellationToken cancellationToken)
+        AlvoIdempotency token, CancellationToken cancellationToken) =>
+        ReplayableWriteAsync(
+            () => CreatedOrReplayedAsync(entity, values, decision, context, token, cancellationToken),
+            cancellationToken);
+
+    /// <summary>
+    /// One idempotent write's attempt loop, over whichever verb <paramref name="attempt"/> performs.
+    /// </summary>
+    /// <remarks>
+    /// Generalised over a delegate rather than copied per verb: the record's primary key is the concurrency
+    /// control on all three, so a create, an update and a delete lose a race the same way and must wait the
+    /// same way. Two copies of a backoff policy is two places for it to drift, and the drift would only show
+    /// up as one verb hanging under contention the others survive.
+    /// </remarks>
+    /// <param name="attempt">One whole attempt, including its own transaction.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <typeparam name="T">What the attempt answers with.</typeparam>
+    private static Task<T> ReplayableWriteAsync<T>(Func<Task<T>> attempt, CancellationToken cancellationToken) =>
+        ReplayableWriteAsync(attempt, ContendedCreateAttempts, cancellationToken);
+
+    /// <inheritdoc cref="ReplayableWriteAsync{T}(Func{Task{T}}, CancellationToken)"/>
+    /// <param name="attempt">One whole attempt, including its own transaction.</param>
+    /// <param name="limit">How many attempts to make before surfacing the failure.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    private static async Task<T> ReplayableWriteAsync<T>(
+        Func<Task<T>> attempt, int limit, CancellationToken cancellationToken)
     {
-        for (var attempt = 1; ; attempt++)
+        for (var attempts = 1; ; attempts++)
         {
             try
             {
-                return await CreatedOrReplayedAsync(entity, values, decision, context, token, cancellationToken);
+                return await attempt();
             }
             catch (Exception failure) when (IsStorageWriteFailure(failure))
             {
-                if (attempt >= ContendedCreateAttempts)
+                if (attempts >= limit)
                 {
-                    throw ExhaustedAsRetryLimit(failure);
+                    throw ExhaustedAsRetryLimit(failure, limit);
                 }
 
-                await Task.Delay(_contentionBackoff * attempt, cancellationToken);
+                await Task.Delay(_contentionBackoff * attempts, cancellationToken);
             }
         }
     }
@@ -395,12 +468,13 @@ internal sealed class EfAlvoData : IAlvoData
     /// The exhausted retry, as this port's own failure contract rather than the provider's exception.
     /// </summary>
     /// <param name="failure">The last storage write failure, preserved as the inner exception.</param>
-    private static InvalidOperationException ExhaustedAsRetryLimit(Exception failure) =>
+    /// <param name="limit">How many attempts were made.</param>
+    private static InvalidOperationException ExhaustedAsRetryLimit(Exception failure, int limit) =>
         new(
-            $"An idempotent create was retried {ContendedCreateAttempts} times and storage refused the write "
-            + "every time. The write is guarded by the idempotency table's primary key "
+            $"An idempotent write was retried {limit} times and storage refused it every "
+            + "time. The write is guarded by the idempotency table's primary key "
             + "(idempotency_key, scope), so a refusal this persistent is either sustained contention on that "
-            + "one key or a constraint this create violates on its own — the inner exception says which.",
+            + "one key or a constraint this write violates on its own — the inner exception says which.",
             failure);
 
     /// <summary>
@@ -485,9 +559,9 @@ internal sealed class EfAlvoData : IAlvoData
         await EmitAsync(
             db, transaction, schema, OutboxOperation.Created, context, now, Unmasked(stored), preImage: null,
             cancellationToken);
-        await records.InsertAsync((Guid)candidate[AlvoDataContext.IdColumn], now, cancellationToken);
+        await records.InsertAsync([(Guid)candidate[AlvoDataContext.IdColumn]], now, cancellationToken);
 
-        return RecordMaterializer.ToRecord(stored, decision.HiddenFields);
+        return RecordMaterializer.ToRecord(stored, decision.HiddenFields, FrozenSet<string>.Empty);
     }
 
     /// <summary>
@@ -519,7 +593,7 @@ internal sealed class EfAlvoData : IAlvoData
     /// denied outright — no policy allows it at all, so <see cref="PolicyDecision.IsDenied"/> is
     /// <see langword="true"/> before any row is touched — the retry must not be worse than the create it
     /// replays: it answers with an <see cref="AlvoRecord"/> carrying only <see cref="AlvoManagedColumns.Id"/>,
-    /// taken from <paramref name="record"/>'s own <c>RowId</c>. The safety argument rests on
+    /// taken from <paramref name="record"/>'s own row list. The safety argument rests on
     /// <see cref="AlvoIdempotency.IdentityOf"/>: the record is keyed on the key, the tenant and the acting
     /// user, so a match <em>proves this caller created that row</em> — the id disclosed is exactly the id
     /// their own original 201 already gave them, in the body and in <c>Location</c>, and nothing more is
@@ -542,22 +616,52 @@ internal sealed class EfAlvoData : IAlvoData
         AlvoDataContext db, EntitySchema schema, AlvoContext context,
         IdempotencyTable.IdempotencyRecord record, AlvoIdempotency token, CancellationToken cancellationToken)
     {
-        if (!token.Matches(record.Fingerprint))
-        {
-            throw new AlvoIdempotencyConflictException();
-        }
+        EnsureSameRequest(record, token);
 
         var read = _policy.Resolve(schema.Name, DataOperation.Get, context);
         if (read.IsDenied)
         {
-            return IdOnly(record.RowId);
+            return IdOnly(RecordedRow(record));
         }
 
-        var row = await SingleAsync(db, schema, read, context, record.RowId, lockFor: null, cancellationToken)
+        var row = await SingleAsync(db, schema, read, context, RecordedRow(record), lockFor: null, cancellationToken)
             ?? throw new AlvoRecordNotFoundException();
 
-        return RecordMaterializer.ToRecord(row, read.HiddenFields);
+        return RecordMaterializer.ToRecord(row, read.HiddenFields, FrozenSet<string>.Empty);
     }
+
+    /// <summary>
+    /// Refuses a key reused for a different request, before anything is read or written.
+    /// </summary>
+    /// <remarks>
+    /// The first check on every replay path, and the reason is the same on all three verbs: a different
+    /// fingerprint is not a retry, so answering it with the first request's outcome would report success for
+    /// a write that never happened. On a delete that is the sharpest case — the replay reads nothing, so this
+    /// is the <em>only</em> thing standing between a reused key and a caller told their delete succeeded.
+    /// </remarks>
+    /// <param name="record">The record found under this key.</param>
+    /// <param name="token">The token this request carries.</param>
+    private static void EnsureSameRequest(IdempotencyTable.IdempotencyRecord record, AlvoIdempotency token)
+    {
+        if (!token.Matches(record.Fingerprint))
+        {
+            throw new AlvoIdempotencyConflictException();
+        }
+    }
+
+    /// <summary>The one row a single-row write's record names.</summary>
+    /// <remarks>
+    /// An empty list is a broken invariant of this file rather than a caller error — every write records at
+    /// least one row — so it is raised loudly (family 5, rendered 500) rather than answered as a miss, which
+    /// would silently re-execute a write the caller has already been told succeeded.
+    /// </remarks>
+    /// <param name="record">The record this replay matched.</param>
+    private static Guid RecordedRow(IdempotencyTable.IdempotencyRecord record) =>
+        record.RowIds.Count > 0
+            ? record.RowIds[0]
+            : throw new InvalidOperationException(
+                "An idempotency record names no row. Every write records at least one, so an empty list means "
+                + "the record was written by something other than this port's write paths.");
 
     /// <summary>
     /// The narrowest possible answer to a replay: <paramref name="rowId"/> and nothing else, from the
@@ -632,9 +736,10 @@ internal sealed class EfAlvoData : IAlvoData
         internal Task<IdempotencyTable.IdempotencyRecord?> FindAsync(CancellationToken cancellationToken) =>
             IdempotencyTable.FindAsync(connection, transaction, tableName, token.Key, Scope, cancellationToken);
 
-        internal Task InsertAsync(Guid rowId, DateTimeOffset createdAt, CancellationToken cancellationToken) =>
+        internal Task InsertAsync(
+            IReadOnlyList<Guid> rowIds, DateTimeOffset createdAt, CancellationToken cancellationToken) =>
             IdempotencyTable.InsertAsync(
-                connection, transaction, tableName, token, Scope, rowId, createdAt, cancellationToken);
+                connection, transaction, tableName, token, Scope, rowIds, createdAt, cancellationToken);
     }
 
     /// <summary>
@@ -664,16 +769,67 @@ internal sealed class EfAlvoData : IAlvoData
     /// </remarks>
     private async Task<Dictionary<string, object>> InsertAsync(
         AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context,
-        Dictionary<string, object> candidate, CancellationToken cancellationToken)
+        Dictionary<string, object> candidate, CancellationToken cancellationToken, bool callerKeyed = false)
     {
         db.Rows(schema.Name).Add(candidate);
         await ConstraintViolationTranslator.TranslatedAsync(
-            () => db.SaveChangesAsync(cancellationToken), _dialect, db.Rows(schema.Name).EntityType, schema);
+            () => db.SaveChangesAsync(cancellationToken), _dialect, db.Rows(schema.Name).EntityType, schema,
+            callerKeyed);
 
         var id = (Guid)candidate[AlvoDataContext.IdColumn];
         return await SingleAsync(db, schema, decision, context, id, lockFor: null, cancellationToken, unmasked: true)
             ?? throw new InvalidOperationException(
                 "The row this create just inserted could not be read back inside its own transaction.");
+    }
+
+    /// <summary>
+    /// Every judged candidate of a batch, inserted with <b>one</b> <c>SaveChanges</c> and then re-read.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>One save, not N, and that is a measured fix rather than a preference.</b> Calling the single-row
+    /// <see cref="InsertAsync"/> in a loop saves once per row, and EF's change tracker walks every tracked
+    /// entry on each save — so the work is quadratic in the batch size. Measured on SQLite over a policed
+    /// entity before the fix: 0.24 MB allocated per row at N = 100 and 1.85 MB per row at N = 5000, an
+    /// eight-fold rise in the per-row cost purely from the batch being larger.
+    /// </para>
+    /// <para>
+    /// The tracked copies are deliberately <b>not</b> cleared afterwards, though the first version of this
+    /// did. <c>AlvoDataContext</c> turns query tracking off globally, so the re-reads below are never fixed
+    /// up against them — clearing bought nothing, and <c>ChangeTrackerReachTests</c> is right that the one
+    /// legitimate place to touch the tracker is where that setting lives.
+    /// </para>
+    /// </remarks>
+    /// <param name="db">The store this attempt runs against.</param>
+    /// <param name="schema">The entity being written.</param>
+    /// <param name="decision">The verdict the policy engine returned for this caller.</param>
+    /// <param name="context">The caller performing the batch.</param>
+    /// <param name="candidates">The rows the judging pass approved.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    private async Task<List<Dictionary<string, object>>> InsertManyAsync(
+        AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context,
+        List<Dictionary<string, object>> candidates, CancellationToken cancellationToken)
+    {
+        foreach (var candidate in candidates)
+        {
+            db.Rows(schema.Name).Add(candidate);
+        }
+
+        await ConstraintViolationTranslator.TranslatedAsync(
+            () => db.SaveChangesAsync(cancellationToken), _dialect, db.Rows(schema.Name).EntityType, schema,
+            callerKeyed: false);
+
+        var stored = new List<Dictionary<string, object>>(candidates.Count);
+        foreach (var candidate in candidates)
+        {
+            var id = (Guid)candidate[AlvoDataContext.IdColumn];
+            stored.Add(
+                await SingleAsync(db, schema, decision, context, id, lockFor: null, cancellationToken, unmasked: true)
+                ?? throw new InvalidOperationException(
+                    "A row this batch just inserted could not be read back inside its own transaction."));
+        }
+
+        return stored;
     }
 
     /// <summary>
@@ -699,15 +855,35 @@ internal sealed class EfAlvoData : IAlvoData
     private void EnsureWriteAllowed(
         PolicyDecision decision, AlvoRecord postImage, AlvoRecord? previous, AlvoContext context)
     {
+        if (WriteRefusal(decision, postImage, previous, context) is { } reason)
+        {
+            throw new AlvoAuthorizationException(reason);
+        }
+    }
+
+    /// <summary>
+    /// Why this row may not be written, or <see langword="null"/> when it may.
+    /// </summary>
+    /// <remarks>
+    /// <b>The one evaluation of this rule, and <see cref="EnsureWriteAllowed"/> is a caller of it.</b> A batch
+    /// has to report every bad row rather than the first, so it needs this verdict without a throw. A second,
+    /// collecting variant beside the throwing one would be two expressions of one authorization rule — which
+    /// is how the two come to differ, and this rule is the <c>WITH CHECK</c> predicate. So the collecting form
+    /// is the implementation, and throwing is the single-row caller's choice.
+    /// </remarks>
+    /// <param name="decision">The verdict the policy engine returned for this caller.</param>
+    /// <param name="postImage">The complete row as it would be stored.</param>
+    /// <param name="previous">The stored row an update replaces, or <see langword="null"/> for a create.</param>
+    /// <param name="context">The caller performing the write.</param>
+    private string? WriteRefusal(
+        PolicyDecision decision, AlvoRecord postImage, AlvoRecord? previous, AlvoContext context)
+    {
         var passesCheck = decision.WithCheck is null
             || _evaluator.Evaluate(decision.WithCheck, postImage, previous, context);
         var passesTenantScope = decision.TenantScope is null
             || _evaluator.Evaluate(decision.TenantScope, postImage, previous, context);
 
-        if (!passesCheck || !passesTenantScope)
-        {
-            throw new AlvoAuthorizationException(AlvoAuthorizationException.WriteRejectedByPolicy);
-        }
+        return passesCheck && passesTenantScope ? null : AlvoAuthorizationException.WriteRejectedByPolicy;
     }
 
     /// <summary>
@@ -747,32 +923,119 @@ internal sealed class EfAlvoData : IAlvoData
     /// </remarks>
     public async Task<AlvoRecord> UpdateAsync(
         string entity, Guid id, IReadOnlyDictionary<string, object?> values, AlvoContext context,
-        AlvoPrecondition? precondition = null, CancellationToken cancellationToken = default)
+        AlvoPrecondition? precondition = null, AlvoIdempotency? idempotency = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentNullException.ThrowIfNull(values);
         ArgumentNullException.ThrowIfNull(context);
+        AlvoIdempotency.EnsureUsableToken(idempotency, context);
 
         var decision = Resolve(entity, DataOperation.Update, context);
 
-        using var db = _contexts.Create();
-        var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
-        WritePayloadGuard.EnsureWritable(values, schema, decision, isUpdate: true);
-        AlvoPrecondition.EnsureSupported(precondition, schema);
+        return idempotency is { } token
+            ? await ReplayableWriteAsync(
+                () => UpdatedOrReplayedAsync(entity, id, values, decision, context, precondition, token, cancellationToken),
+                cancellationToken)
+            : await UpdatedAsync(entity, id, values, decision, context, precondition, cancellationToken);
+    }
 
+    /// <summary>One ordinary update: the write and its event, inside one transaction.</summary>
+    private async Task<AlvoRecord> UpdatedAsync(
+        string entity, Guid id, IReadOnlyDictionary<string, object?> values, PolicyDecision decision,
+        AlvoContext context, AlvoPrecondition? precondition, CancellationToken cancellationToken)
+    {
+        using var db = _contexts.Create();
+        var schema = UpdatableEntity(db, entity, values, decision, precondition);
         var now = WriteInstantNow();
         await EnsureOutboxTableAsync(db, cancellationToken);
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var postImage = await WrittenAsync(
+            db, transaction, schema, decision, context, id, values, precondition, now, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        return RecordMaterializer.ToRecord(postImage, decision.HiddenFields, FrozenSet<string>.Empty);
+    }
+
+    /// <summary>
+    /// One attempt at an idempotent update, inside one transaction: look the key up, then either replay the
+    /// recorded row or perform this write and record it against the key.
+    /// </summary>
+    /// <remarks>
+    /// The shape <see cref="CreatedOrReplayedAsync"/> already has, for the same reason: the lookup, the write
+    /// and the record share one transaction, so "the row changed" and "the key is spent" are one fact.
+    /// </remarks>
+    private async Task<AlvoRecord> UpdatedOrReplayedAsync(
+        string entity, Guid id, IReadOnlyDictionary<string, object?> values, PolicyDecision decision,
+        AlvoContext context, AlvoPrecondition? precondition, AlvoIdempotency token,
+        CancellationToken cancellationToken)
+    {
+        using var db = _contexts.Create();
+        var schema = UpdatableEntity(db, entity, values, decision, precondition);
+        var now = WriteInstantNow();
+        await EnsureIdempotencyTableAsync(db, cancellationToken);
+        await EnsureOutboxTableAsync(db, cancellationToken);
+
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var records = new IdempotencyScope(
+            db.Database.GetDbConnection(), transaction.GetDbTransaction(), _idempotencyTable, token, context);
+
+        var recorded = await records.FindAsync(cancellationToken);
+        var result = recorded is { } record
+            ? await ReplayedAsync(db, schema, context, record, token, cancellationToken)
+            : await RecordedUpdateAsync(
+                db, transaction, schema, decision, context, id, values, precondition, records, now,
+                cancellationToken);
+
+        await transaction.CommitAsync(cancellationToken);
+        return result;
+    }
+
+    /// <summary>The write, its event and the key's record — in that order and in one transaction.</summary>
+    /// <remarks>
+    /// The event precedes the record for the reason <see cref="RecordedCreateAsync"/> gives: the record's
+    /// primary key is the only write here a rival can make fail after the event exists, so the loser rolls
+    /// the pair back together and its retry answers as a replay.
+    /// </remarks>
+    private async Task<AlvoRecord> RecordedUpdateAsync(
+        AlvoDataContext db, IDbContextTransaction transaction, EntitySchema schema, PolicyDecision decision,
+        AlvoContext context, Guid id, IReadOnlyDictionary<string, object?> values, AlvoPrecondition? precondition,
+        IdempotencyScope records, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var postImage = await WrittenAsync(
+            db, transaction, schema, decision, context, id, values, precondition, now, cancellationToken);
+        await records.InsertAsync([id], now, cancellationToken);
+
+        return RecordMaterializer.ToRecord(postImage, decision.HiddenFields, FrozenSet<string>.Empty);
+    }
+
+    /// <summary>The body of one update inside the caller's transaction: the write, then its event.</summary>
+    private async Task<Dictionary<string, object>> WrittenAsync(
+        AlvoDataContext db, IDbContextTransaction transaction, EntitySchema schema, PolicyDecision decision,
+        AlvoContext context, Guid id, IReadOnlyDictionary<string, object?> values, AlvoPrecondition? precondition,
+        DateTimeOffset now, CancellationToken cancellationToken)
+    {
         var (preImage, postImage) = await WriteAsync(
             db, schema, decision, context, id, Stamped(schema, values, context, now, isUpdate: true), precondition,
             now, cancellationToken);
         await EmitAsync(
             db, transaction, schema, OutboxOperation.Updated, context, now, Unmasked(postImage), preImage,
             cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
 
-        return RecordMaterializer.ToRecord(postImage, decision.HiddenFields);
+        return postImage;
+    }
+
+    /// <summary>The entity an update may write, with both of the update's own payload guards applied.</summary>
+    private static EntitySchema UpdatableEntity(
+        AlvoDataContext db, string entity, IReadOnlyDictionary<string, object?> values, PolicyDecision decision,
+        AlvoPrecondition? precondition)
+    {
+        var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
+        WritePayloadGuard.EnsureWritable(values, schema, decision, isUpdate: true);
+        AlvoPrecondition.EnsureSupported(precondition, schema);
+
+        return schema;
     }
 
     /// <summary>
@@ -794,6 +1057,384 @@ internal sealed class EfAlvoData : IAlvoData
         EntitySchema schema, IReadOnlyDictionary<string, object?> values, AlvoContext context, DateTimeOffset now,
         bool isUpdate) =>
         AlvoAuditStamp.Applied(schema, values, context, new WriteInstant(now), isUpdate);
+
+    /// <inheritdoc/>
+    public async Task<AlvoReplaceResult> ReplaceAsync(
+        string entity, Guid id, IReadOnlyDictionary<string, object?> values, AlvoContext context,
+        AlvoPrecondition? precondition = null, AlvoIdempotency? idempotency = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(entity);
+        ArgumentNullException.ThrowIfNull(values);
+        ArgumentNullException.ThrowIfNull(context);
+        AlvoIdempotency.EnsureUsableToken(idempotency, context);
+
+        var branches = new ReplaceDecisions(
+            Resolve(entity, DataOperation.Create, context), Resolve(entity, DataOperation.Update, context));
+
+        if (idempotency is not { } token)
+        {
+            return await ReplacedAsync(entity, id, values, branches, context, precondition, cancellationToken);
+        }
+
+        try
+        {
+            return await ReplayableWriteAsync(
+                () => ReplacedOrReplayedAsync(
+                    entity, id, values, branches, context, precondition, token, cancellationToken),
+                cancellationToken);
+        }
+        catch (AlvoConstraintViolationException collision) when (IsCallerKeyCollision(collision))
+        {
+            return await ReplayedAfterKeyRaceAsync(entity, context, token, collision, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// One attempt at an idempotent create-or-replace, inside one transaction: look the key up, then either
+    /// replay the recorded row or perform this write and record it against the key.
+    /// </summary>
+    /// <remarks>
+    /// <b>A replay answers <see cref="AlvoReplaceResult.ReplacedRow"/> whichever branch the first request
+    /// took.</b> <c>201</c> reports an act of creation and a replay performs none — it reports the state that
+    /// request left. The record carries row ids rather than the branch, and deliberately gains nothing to
+    /// carry it: storing the branch would grow every record for one header, and inferring it from
+    /// <c>created_at == updated_at</c> is a guess that a row replaced in the instant it was created defeats.
+    /// </remarks>
+    private async Task<AlvoReplaceResult> ReplacedOrReplayedAsync(
+        string entity, Guid id, IReadOnlyDictionary<string, object?> values, ReplaceDecisions branches,
+        AlvoContext context, AlvoPrecondition? precondition, AlvoIdempotency token,
+        CancellationToken cancellationToken)
+    {
+        using var db = _contexts.Create();
+        var schema = ReplaceableEntity(db, entity, values, branches, precondition);
+        var now = WriteInstantNow();
+        await EnsureIdempotencyTableAsync(db, cancellationToken);
+        await EnsureOutboxTableAsync(db, cancellationToken);
+
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var records = new IdempotencyScope(
+            db.Database.GetDbConnection(), transaction.GetDbTransaction(), _idempotencyTable, token, context);
+
+        var recorded = await records.FindAsync(cancellationToken);
+        var result = recorded is { } record
+            ? AlvoReplaceResult.ReplacedRow(
+                await ReplayedAsync(db, schema, context, record, token, cancellationToken))
+            : await RecordedReplaceAsync(
+                db, transaction, schema, branches, context, id, values, precondition, records, now,
+                cancellationToken);
+
+        await transaction.CommitAsync(cancellationToken);
+        return result;
+    }
+
+    /// <summary>
+    /// The record this key holds now, read in a transaction of its own — or the collision that sent us here.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Every other idempotent create is safe from this by accident, and create-or-replace is not.</b> A
+    /// create mints a fresh row id per attempt, so two concurrent requests carrying one key can only collide
+    /// on the <em>idempotency table's</em> primary key — a raw provider exception, which
+    /// <see cref="IsStorageWriteFailure"/> matches and <see cref="ReplayableWriteAsync{T}(Func{Task{T}}, CancellationToken)"/> retries into a
+    /// replay. Here the row id comes from the path and is the same on both requests, so the loser collides on
+    /// the <b>row's</b> key first, and that collision is now translated
+    /// (<see cref="ConstraintViolationTranslator"/>'s caller-keyed rule) into
+    /// <see cref="AlvoConstraintViolationException"/> — which is neither of the two spellings the retry
+    /// matches. Left alone, the one scenario an idempotency key exists to make safe would answer <c>409</c>.
+    /// </para>
+    /// <para>
+    /// <b>One extra look, not a retry, and that is the whole point.</b> Feeding the translated collision back
+    /// into the retry loop would make a <em>genuine</em> conflict — an id held by somebody else's row — burn
+    /// ten attempts before answering, which is the #138 shape this port already paid to remove. So the
+    /// collision is answered by exactly one more read: if the rival committed its record, this is our own
+    /// request arriving twice and the answer is that record's row; if not, the id really is taken and the
+    /// original refusal stands.
+    /// </para>
+    /// </remarks>
+    /// <param name="entity">The entity name.</param>
+    /// <param name="context">The caller performing the write.</param>
+    /// <param name="token">The caller's idempotency token.</param>
+    /// <param name="collision">The refusal that sent us here, rethrown when no record turns up.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    private async Task<AlvoReplaceResult> ReplayedAfterKeyRaceAsync(
+        string entity, AlvoContext context, AlvoIdempotency token, AlvoConstraintViolationException collision,
+        CancellationToken cancellationToken)
+    {
+        using var db = _contexts.Create();
+        var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
+        await EnsureIdempotencyTableAsync(db, cancellationToken);
+
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var records = new IdempotencyScope(
+            db.Database.GetDbConnection(), transaction.GetDbTransaction(), _idempotencyTable, token, context);
+
+        var recorded = await records.FindAsync(cancellationToken);
+        if (recorded is not { } record)
+        {
+            throw collision;
+        }
+
+        var replayed = await ReplayedAsync(db, schema, context, record, token, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        return AlvoReplaceResult.ReplacedRow(replayed);
+    }
+
+    /// <summary>Whether <paramref name="failure"/> is a collision on the row key the caller named.</summary>
+    /// <param name="failure">The refusal a write raised.</param>
+    private static bool IsCallerKeyCollision(AlvoConstraintViolationException failure) =>
+        failure.Kind == AlvoConstraintKind.Unique
+        && failure.Fields.Count == 1
+        && string.Equals(failure.Fields[0], AlvoManagedColumns.Id, StringComparison.Ordinal);
+
+    /// <summary>The write, its event and the key's record — in that order and in one transaction.</summary>
+    /// <remarks>
+    /// The event precedes the record for the reason <see cref="RecordedCreateAsync"/> gives: the record's
+    /// primary key is the only write here a rival can make fail after the event exists, so the loser rolls
+    /// the pair back together and its retry answers as a replay.
+    /// </remarks>
+    private async Task<AlvoReplaceResult> RecordedReplaceAsync(
+        AlvoDataContext db, IDbContextTransaction transaction, EntitySchema schema, ReplaceDecisions branches,
+        AlvoContext context, Guid id, IReadOnlyDictionary<string, object?> values, AlvoPrecondition? precondition,
+        IdempotencyScope records, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var result = await ReplaceWrittenAsync(
+            db, transaction, schema, branches, context, id, values, precondition, now, cancellationToken);
+        await records.InsertAsync([id], now, cancellationToken);
+
+        return result;
+    }
+
+    /// <summary>One ordinary create-or-replace: the write and its event, inside one transaction.</summary>
+    private async Task<AlvoReplaceResult> ReplacedAsync(
+        string entity, Guid id, IReadOnlyDictionary<string, object?> values, ReplaceDecisions branches,
+        AlvoContext context, AlvoPrecondition? precondition, CancellationToken cancellationToken)
+    {
+        using var db = _contexts.Create();
+        var schema = ReplaceableEntity(db, entity, values, branches, precondition);
+        var now = WriteInstantNow();
+        await EnsureOutboxTableAsync(db, cancellationToken);
+
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var result = await ReplaceWrittenAsync(
+            db, transaction, schema, branches, context, id, values, precondition, now, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        return result;
+    }
+
+    /// <summary>The body of one create-or-replace inside the caller's transaction: the branch, then its event.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The branch is chosen from the same policy-scoped, row-locking read an update performs</b>, so a row
+    /// this caller's <c>USING</c> excludes reads as absent and falls to the create branch — where its key
+    /// collides and the answer is a constraint violation rather than an overwrite. Reading it under a
+    /// predicate-free query to "know better" is the bypass this port exists to make impossible.
+    /// </para>
+    /// <para>
+    /// <b>The pre-image is read twice on the replace branch</b>, once here to pick the branch and once inside
+    /// <see cref="WriteAsync"/>, and that is deliberate: both reads take the same row lock inside the same
+    /// transaction, so the second cannot see anything different, and the alternative — driving control flow
+    /// by catching <see cref="AlvoRecordNotFoundException"/> — would also swallow the genuine not-found that
+    /// a lost race raises after the lock.
+    /// </para>
+    /// </remarks>
+    private async Task<AlvoReplaceResult> ReplaceWrittenAsync(
+        AlvoDataContext db, IDbContextTransaction transaction, EntitySchema schema, ReplaceDecisions branches,
+        AlvoContext context, Guid id, IReadOnlyDictionary<string, object?> values, AlvoPrecondition? precondition,
+        DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var visible = await SingleAsync(
+            db, schema, branches.Update, context, id, PreImageMutation.Update, cancellationToken, unmasked: true);
+
+        return visible is null
+            ? await CreatedByReplaceAsync(
+                db, transaction, schema, branches.Create, context, id, values, precondition, now, cancellationToken)
+            : await ReplacedRowAsync(
+                db, transaction, schema, branches.Update, context, id, values, precondition, now, cancellationToken);
+    }
+
+    /// <summary>The replace branch: the row is there and this caller can see it.</summary>
+    /// <remarks>
+    /// The stamp is told <c>isUpdate: true</c>, so <c>created_at</c> and <c>created_by</c> survive — a
+    /// replaced row is the same row, and the event it emits is an <c>updated</c> for the same reason.
+    /// </remarks>
+    private async Task<AlvoReplaceResult> ReplacedRowAsync(
+        AlvoDataContext db, IDbContextTransaction transaction, EntitySchema schema, PolicyDecision decision,
+        AlvoContext context, Guid id, IReadOnlyDictionary<string, object?> values, AlvoPrecondition? precondition,
+        DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var (preImage, postImage) = await WriteAsync(
+            db, schema, decision, context, id,
+            WholeRowGuard.WholeRow(Stamped(schema, values, context, now, isUpdate: true), schema, decision),
+            precondition,
+            now, cancellationToken);
+        await EmitAsync(
+            db, transaction, schema, OutboxOperation.Updated, context, now, Unmasked(postImage), preImage,
+            cancellationToken);
+
+        return AlvoReplaceResult.ReplacedRow(
+            RecordMaterializer.ToRecord(postImage, decision.HiddenFields, FrozenSet<string>.Empty));
+    }
+
+    /// <summary>The create branch: no row this caller can see holds this id.</summary>
+    /// <remarks>
+    /// <b>A precondition cannot match here</b>, and that is checked before anything is built: naming a
+    /// version is asserting the row exists, so <see cref="AlvoPrecondition.EnsureMatches"/> against nothing
+    /// refuses it — the same answer a caller would get for a version that had moved.
+    /// </remarks>
+    private async Task<AlvoReplaceResult> CreatedByReplaceAsync(
+        AlvoDataContext db, IDbContextTransaction transaction, EntitySchema schema, PolicyDecision decision,
+        AlvoContext context, Guid id, IReadOnlyDictionary<string, object?> values, AlvoPrecondition? precondition,
+        DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        AlvoPrecondition.EnsureMatches(precondition, storedVersion: null);
+
+        var candidate = ReplaceCandidate(db, schema, decision, context, id, values, now);
+        EnsureWriteAllowed(decision, Unmasked(candidate), previous: null, context);
+        candidate = RunBeforeCreate(db, schema, decision, context, candidate, now);
+        if (KeptAtTheNamedRow(candidate, id))
+        {
+            EnsureWriteAllowed(decision, Unmasked(candidate), previous: null, context);
+        }
+
+        var stored = await InsertAsync(db, schema, decision, context, candidate, cancellationToken, callerKeyed: true);
+        await RecomputeRollupsAsync(db, schema, [stored!], cancellationToken);
+        await EmitAsync(
+            db, transaction, schema, OutboxOperation.Created, context, now, Unmasked(stored), preImage: null,
+            cancellationToken);
+
+        return AlvoReplaceResult.CreatedRow(
+            RecordMaterializer.ToRecord(stored, decision.HiddenFields, FrozenSet<string>.Empty));
+    }
+
+    /// <summary>
+    /// Puts the row key the path named back, whatever a hook did to it — and reports whether it had to.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A before-hook's patch is not run past the payload guard, deliberately</b>, so a hook can write any
+    /// column including <c>id</c>. On every other create that is harmless: the key was minted for this write
+    /// and nobody promised it. Here the path named it, the <c>201</c>'s <c>Location</c> reports it and the
+    /// idempotency record stores it — so a hook moving the row would leave the header pointing at nothing and
+    /// a later replay looking up a row that never existed. The path wins, because <c>PUT</c>'s whole contract
+    /// is the resource the path names.
+    /// </para>
+    /// <para>
+    /// <b>It reports the change because restoring the key <em>after</em> the check would be an authorization
+    /// gap.</b> <see cref="RunBeforeCreate"/> judges the candidate the hook produced; if this then moves the
+    /// row back, the row inserted is not the row judged, and a <c>WITH CHECK</c> predicate reading <c>id</c>
+    /// — or any field the hook changed alongside it — was evaluated against a candidate that never reached
+    /// the store. So the caller re-runs the check, and only when the key actually moved.
+    /// </para>
+    /// </remarks>
+    /// <param name="candidate">The candidate, after the hooks.</param>
+    /// <param name="id">The id the caller named in the path.</param>
+    private static bool KeptAtTheNamedRow(Dictionary<string, object> candidate, Guid id)
+    {
+        if (candidate.TryGetValue(AlvoDataContext.IdColumn, out var written) && written is Guid already && already == id)
+        {
+            return false;
+        }
+
+        candidate[AlvoDataContext.IdColumn] = id;
+
+        return true;
+    }
+
+    /// <summary>The candidate a create-or-replace inserts: the caller's payload under the caller's own id.</summary>
+    /// <remarks>
+    /// <b>Deliberately not <see cref="AuthorizedCandidate"/>.</b> That helper passes one <c>isUpdate</c> to
+    /// both the payload guard and the audit stamp, and this route needs the two to disagree: the guard is
+    /// told <see langword="true"/>, because <c>tenant_id</c> must be refused on both branches or its refusal
+    /// reports whether the row exists; the stamp is told <see langword="false"/>, because this row really is
+    /// being created and wants its <c>created_at</c>. The guard runs in
+    /// <see cref="ReplaceableEntity"/>, before any row is read, exactly where it belongs.
+    /// </remarks>
+    /// <param name="db">The write's own context.</param>
+    /// <param name="schema">The entity being written.</param>
+    /// <param name="decision">The caller's verdict for the create branch.</param>
+    /// <param name="context">The caller the write is performed as.</param>
+    /// <param name="id">The id the caller named in the path.</param>
+    /// <param name="values">The caller's own payload.</param>
+    /// <param name="now">The write's own instant.</param>
+    private static Dictionary<string, object> ReplaceCandidate(
+        AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context, Guid id,
+        IReadOnlyDictionary<string, object?> values, DateTimeOffset now)
+    {
+        var candidate = WritePropertyBag.For(
+            db.Rows(schema.Name).EntityType,
+            WholeRowGuard.WholeRow(Stamped(schema, values, context, now, isUpdate: false), schema, decision));
+        candidate[AlvoDataContext.IdColumn] = id;
+        StampTenant(candidate, schema, context);
+
+        return candidate;
+    }
+
+    /// <summary>Places a created row in the caller's own tenant, on an entity that is scoped at all.</summary>
+    /// <remarks>
+    /// <b>The tenant scope checks a candidate's tenant; it never produces one</b>, and
+    /// <see cref="AlvoAuditStamp"/> deliberately never touches this column. With the payload guard refusing
+    /// <c>tenant_id</c> on both branches, nothing else would supply it — the candidate would carry no tenant
+    /// and its own scope would refuse it, so the route would not work on any scoped entity. A caller
+    /// creating into <em>another</em> tenant uses <see cref="CreateAsync"/>, which still takes the column.
+    /// </remarks>
+    /// <param name="candidate">The candidate row being built.</param>
+    /// <param name="schema">The entity being written.</param>
+    /// <param name="context">The caller the write is performed as.</param>
+    private static void StampTenant(
+        Dictionary<string, object> candidate, EntitySchema schema, AlvoContext context)
+    {
+        if (AlvoManagedColumns.For(schema).Contains(AlvoManagedColumns.TenantId) && context.Tenant is { } tenant)
+        {
+            candidate[AlvoManagedColumns.TenantId] = tenant.Value;
+        }
+    }
+
+    /// <summary>The entity a create-or-replace may write, with the guards both branches share applied.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The payload guard is told <c>isUpdate: true</c> unconditionally, and this is the whole of that
+    /// decision.</b> <c>tenant_id</c> is the one column caller-writable on a create and refused on an update,
+    /// so a guard following the branch would answer "does this row exist?" through "was my <c>tenant_id</c>
+    /// refused?" — an existence oracle decided from the payload alone, before any row is read, and one a
+    /// caller triggers deliberately by naming the column.
+    /// </para>
+    /// <para>
+    /// <b>Read-only fields are judged against both decisions</b>, refusing on the first that refuses. A field
+    /// the <c>create</c> rule freezes must not become writable because the row happened to already exist,
+    /// and default-deny makes the union the only defensible reading of two rules.
+    /// </para>
+    /// </remarks>
+    /// <param name="db">The write's own context.</param>
+    /// <param name="entity">The entity name.</param>
+    /// <param name="values">The caller's own payload.</param>
+    /// <param name="branches">The caller's decision for each branch.</param>
+    /// <param name="precondition">The caller's precondition, if any.</param>
+    private static EntitySchema ReplaceableEntity(
+        AlvoDataContext db, string entity, IReadOnlyDictionary<string, object?> values, ReplaceDecisions branches,
+        AlvoPrecondition? precondition)
+    {
+        var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
+        WritePayloadGuard.EnsureWritable(values, schema, branches.Create, isUpdate: true);
+        WritePayloadGuard.EnsureWritable(values, schema, branches.Update, isUpdate: true);
+        WholeRowGuard.EnsureWholeRow(values, schema);
+        AlvoPrecondition.EnsureSupported(precondition, schema);
+
+        return schema;
+    }
+
+    /// <summary>The caller's resolved decision for each branch of one create-or-replace.</summary>
+    /// <remarks>
+    /// <b>Both are resolved before either branch is chosen, and both must allow.</b> Resolving only the
+    /// branch that ran would make the permission a caller needs depend on stored data — so "which rule
+    /// refused me" would itself report whether the row exists — and would let a caller permitted only to
+    /// update reach the create branch by naming an unused id.
+    /// </remarks>
+    /// <param name="Create">The decision gating the create branch.</param>
+    /// <param name="Update">The decision gating the replace branch, and the pre-image read's own predicate.</param>
+    private readonly record struct ReplaceDecisions(PolicyDecision Create, PolicyDecision Update);
 
     /// <summary>
     /// The instant one write happens at: this store's clock, at the precision the row it is about to stamp
@@ -828,27 +1469,106 @@ internal sealed class EfAlvoData : IAlvoData
     /// <inheritdoc/>
     public async Task DeleteAsync(
         string entity, Guid id, AlvoContext context, AlvoPrecondition? precondition = null,
-        CancellationToken cancellationToken = default)
+        AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentNullException.ThrowIfNull(context);
+        AlvoIdempotency.EnsureUsableToken(idempotency, context);
 
         var decision = Resolve(entity, DataOperation.Delete, context);
 
-        using var db = _contexts.Create();
-        var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
-        EnsureNotSoftDeleted(schema);
-        AlvoPrecondition.EnsureSupported(precondition, schema);
+        if (idempotency is { } token)
+        {
+            _ = await ReplayableWriteAsync(
+                () => ErasedOrReplayedAsync(entity, id, decision, context, precondition, token, cancellationToken),
+                cancellationToken);
+            return;
+        }
 
+        await ErasedAsync(entity, id, decision, context, precondition, cancellationToken);
+    }
+
+    /// <summary>One ordinary delete: the erase and its event, inside one transaction.</summary>
+    private async Task ErasedAsync(
+        string entity, Guid id, PolicyDecision decision, AlvoContext context, AlvoPrecondition? precondition,
+        CancellationToken cancellationToken)
+    {
+        using var db = _contexts.Create();
+        var schema = ErasableEntity(db, entity, precondition);
         var now = WriteInstantNow();
         await EnsureOutboxTableAsync(db, cancellationToken);
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await ErasedAndEmittedAsync(
+            db, transaction, schema, decision, context, id, precondition, now, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// One attempt at an idempotent delete: look the key up, and either answer that the delete is already
+    /// done or erase the row and record the key against it.
+    /// </summary>
+    /// <remarks>
+    /// <b>A delete's replay reads nothing, and that is the point rather than an optimisation.</b> The row it
+    /// would read is gone by construction, so there is nothing left to re-read under a <c>get</c> decision the
+    /// way an update's replay does — the recorded key <em>is</em> the whole answer, and it says the same thing
+    /// the first call said. Without it the retry is an <see cref="AlvoRecordNotFoundException"/> the caller
+    /// cannot tell from somebody else having deleted the row, which is exactly what #102 exists to remove.
+    /// </remarks>
+    /// <returns>
+    /// Whether this call performed the delete, rather than answering one already recorded. Nothing reads it
+    /// today; the retry loop is generic over a result, and this is the honest one for a delete to give it.
+    /// </returns>
+    private async Task<bool> ErasedOrReplayedAsync(
+        string entity, Guid id, PolicyDecision decision, AlvoContext context, AlvoPrecondition? precondition,
+        AlvoIdempotency token, CancellationToken cancellationToken)
+    {
+        using var db = _contexts.Create();
+        var schema = ErasableEntity(db, entity, precondition);
+        var now = WriteInstantNow();
+        await EnsureIdempotencyTableAsync(db, cancellationToken);
+        await EnsureOutboxTableAsync(db, cancellationToken);
+
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var records = new IdempotencyScope(
+            db.Database.GetDbConnection(), transaction.GetDbTransaction(), _idempotencyTable, token, context);
+
+        var recorded = await records.FindAsync(cancellationToken);
+        if (recorded is { } record)
+        {
+            EnsureSameRequest(record, token);
+        }
+        else
+        {
+            await ErasedAndEmittedAsync(
+                db, transaction, schema, decision, context, id, precondition, now, cancellationToken);
+            await records.InsertAsync([id], now, cancellationToken);
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+        return recorded is null;
+    }
+
+    /// <summary>The body of one delete inside the caller's transaction: the erase, then its event.</summary>
+    private async Task ErasedAndEmittedAsync(
+        AlvoDataContext db, IDbContextTransaction transaction, EntitySchema schema, PolicyDecision decision,
+        AlvoContext context, Guid id, AlvoPrecondition? precondition, DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
         var preImage = await EraseAsync(db, schema, decision, context, id, precondition, now, cancellationToken);
         await EmitAsync(
             db, transaction, schema, OutboxOperation.Deleted, context, now, postImage: null, preImage,
             cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+    }
+
+    /// <summary>The entity a delete may erase, with the delete's own two guards applied.</summary>
+    private static EntitySchema ErasableEntity(AlvoDataContext db, string entity, AlvoPrecondition? precondition)
+    {
+        var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
+        EnsureNotSoftDeleted(schema);
+        AlvoPrecondition.EnsureSupported(precondition, schema);
+
+        return schema;
     }
 
     /// <summary>
@@ -893,7 +1613,8 @@ internal sealed class EfAlvoData : IAlvoData
             () => RowOf(PolicyRoot(db, schema, decision, context), id).ExecuteDeleteAsync(cancellationToken),
             _dialect,
             db.Rows(schema.Name).EntityType,
-            schema);
+            schema,
+            callerKeyed: false);
         if (affected == 0)
         {
             throw new AlvoRecordNotFoundException();
@@ -1068,7 +1789,8 @@ internal sealed class EfAlvoData : IAlvoData
                 .ExecuteUpdateAsync(UpdateSetterFactory.For(schema, values), cancellationToken),
             _dialect,
             db.Rows(schema.Name).EntityType,
-            schema);
+            schema,
+            callerKeyed: false);
 
     /// <summary>
     /// The queryable a write is composed over: a <c>FromSql</c> root whose <c>WHERE</c> already carries the
@@ -1126,8 +1848,21 @@ internal sealed class EfAlvoData : IAlvoData
             string.Equals(candidate.Name, entity, StringComparison.Ordinal)
             && candidate.Storage == EntityStorage.Physical);
 
+    /// <summary>
+    /// Every caller-supplied field name this read is about to reference — filter terms, sort keys and the
+    /// projection alike.
+    /// </summary>
+    /// <remarks>
+    /// <b>The projection is fed through the same guard rather than checked separately</b>, because it is
+    /// the same kind of string and earns the same refusal: naming a masked field in a projection is the
+    /// identical oracle as naming one in a filter, and one feeder is what keeps the two answers
+    /// byte-identical. This is also what makes <see cref="AlvoQuery.Select"/> non-advisory at the port —
+    /// a direct caller now either gets the projection or gets a refusal.
+    /// </remarks>
     private static IEnumerable<string> QueryFields(AlvoQuery query) =>
-        AlvoFilter.ReferencedFields(query.Filter).Concat(query.Sort.Select(sort => sort.Field));
+        AlvoFilter.ReferencedFields(query.Filter)
+            .Concat(query.Sort.Select(sort => sort.Field))
+            .Concat(query.Select ?? []);
 
     /// <summary>
     /// Reads the one row <paramref name="id"/> names, still under the policy predicate, so a row the caller
@@ -1184,25 +1919,60 @@ internal sealed class EfAlvoData : IAlvoData
     /// </remarks>
     private async Task<List<Dictionary<string, object>>> PageAsync(
         AlvoDataContext db, EntitySchema? entity, PolicyDecision decision, AlvoContext context,
-        AlvoQuery query, KeysetAnchor? anchor, CancellationToken cancellationToken)
+        ReadStatementComposer.ReadStatementOptions options, CancellationToken cancellationToken)
     {
         var schema = entity ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
         var statement = _statements.Compose(
-            schema,
-            decision,
-            context,
-            new ReadStatementComposer.ReadStatementOptions
-            {
-                Filter = query.Filter,
-                Anchor = anchor,
-                Sort = query.Sort,
-                Limit = OverFetched(query.Limit),
-                Offset = query.Offset,
-            },
-            db.Rows(schema.Name).EntityType);
+            schema, decision, context, options, db.Rows(schema.Name).EntityType);
 
         return await Materialize(db, schema, statement).ToListAsync(cancellationToken);
     }
+
+    /// <summary>
+    /// The <b>one</b> options record a list read composes from, built once and handed to both the page and
+    /// its count.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Two literals here would defeat the property <c>ComposeCount</c> is written around.</b> That method
+    /// takes the whole record and strips the cursor anchor itself, precisely so a term added to the read
+    /// cannot be silently missed by the count — and a second, independently maintained options literal for
+    /// the count would reintroduce exactly the drift it prevents. Today the two would agree (a list sets no
+    /// <c>RowId</c>, no <c>LockFor</c>, no <c>Unmasked</c>); the next term added to a read's <c>WHERE</c> —
+    /// a soft-delete predicate, an archive scope, F7's dynamic-entity discriminator — is where they would
+    /// stop agreeing, and the count would silently describe a wider set than the page.
+    /// </para>
+    /// <para>
+    /// <c>ReadStatementOptions.Limit</c> carries the over-fetch, not the caller's own limit, so the
+    /// page can tell "more rows exist" from "the set ended here". The count ignores it, as it ignores the
+    /// ordering and the anchor.
+    /// </para>
+    /// </remarks>
+    private static ReadStatementComposer.ReadStatementOptions ReadOptions(
+        AlvoQuery query, KeysetAnchor? anchor, EntitySchema? entity) =>
+        new()
+        {
+            Filter = query.Filter,
+            Anchor = anchor,
+            Sort = query.Sort,
+            Limit = OverFetched(query.Limit),
+            Offset = query.Offset,
+            Unselected = Unselected(query, entity),
+        };
+
+    /// <summary>
+    /// The declared fields this read will not fetch, from the port's own rule rather than a copy of it.
+    /// </summary>
+    /// <remarks>
+    /// <b>Delegated to <see cref="AlvoQuery.UnselectedFields"/> deliberately.</b> Which fields survive a
+    /// projection is a promise <see cref="IAlvoData"/>'s returned-key-set contract makes, not a decision
+    /// this driver gets to take — and the in-memory reference has to reach the same answer, or the
+    /// differential suite is comparing two features rather than two implementations of one. A local copy
+    /// here was the first draft, and it was a second hand-kept list of which columns the framework must
+    /// return: the defect <see cref="AlvoManagedColumns"/> exists to have stopped.
+    /// </remarks>
+    private static IReadOnlySet<string> Unselected(AlvoQuery query, EntitySchema? entity) =>
+        entity is null ? FrozenSet<string>.Empty : AlvoQuery.UnselectedFields(query, entity);
 
     /// <summary>
     /// One past <paramref name="limit"/>, so <see cref="Paginated"/> can tell a page that ends exactly at the
@@ -1309,7 +2079,7 @@ internal sealed class EfAlvoData : IAlvoData
     /// </remarks>
     /// <param name="row">The stored row, as the re-read returned it.</param>
     private static AlvoRecord Unmasked(Dictionary<string, object> row) =>
-        RecordMaterializer.ToRecord(row, _noMask);
+        RecordMaterializer.ToRecord(row, _noMask, FrozenSet<string>.Empty);
 
     /// <summary>
     /// The empty mask: a row a policy decision is <em>reached over</em> is never masked, only a row this data
@@ -1320,4 +2090,684 @@ internal sealed class EfAlvoData : IAlvoData
 
     /// <inheritdoc cref="AlvoDataContext.UnmappedEntityMessage"/>
     private const string UnknownEntityMessage = AlvoDataContext.UnmappedEntityMessage;
+
+    /// <inheritdoc/>
+    public Task<AlvoBatchResult> CreateManyAsync(
+        string entity, IReadOnlyList<IReadOnlyDictionary<string, object?>> rows, AlvoContext context,
+        AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        var decision = BatchDecision(entity, DataOperation.Create, rows.Count, context, idempotency);
+
+        return BatchAsync(
+            entity,
+            context,
+            idempotency,
+            (db, transaction, schema, now) =>
+                CreatedRowsAsync(db, transaction, schema, decision, context, rows, now, cancellationToken),
+            producesRows: true,
+            cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public Task<AlvoBatchResult> UpdateManyAsync(
+        string entity, IReadOnlyList<AlvoRowPatch> rows, AlvoContext context,
+        AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        var decision = BatchDecision(entity, DataOperation.Update, rows.Count, context, idempotency);
+
+        return BatchAsync(
+            entity,
+            context,
+            idempotency,
+            (db, transaction, schema, now) =>
+                UpdatedRowsAsync(db, transaction, schema, decision, context, rows, now, cancellationToken),
+            producesRows: true,
+            cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public Task<AlvoBatchResult> DeleteManyAsync(
+        string entity, IReadOnlyList<Guid> ids, AlvoContext context, AlvoIdempotency? idempotency = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(ids);
+        var decision = BatchDecision(entity, DataOperation.Delete, ids.Count, context, idempotency);
+
+        return BatchAsync(
+            entity,
+            context,
+            idempotency,
+            (db, transaction, schema, now) =>
+                RemovedRowsAsync(db, transaction, schema, decision, context, ids, now, cancellationToken),
+            producesRows: false,
+            cancellationToken);
+    }
+
+    /// <summary>The one decision a whole batch is gated by, plus the guards that precede every row of it.</summary>
+    /// <remarks>
+    /// Resolved once rather than per row, and that is a contract point rather than an optimisation: a policy
+    /// denial is decided before any row is looked at, so it throws rather than travelling on the result —
+    /// otherwise refusing a caller outright would be reported as a per-row fact and disclose how many of the
+    /// rows they sent were real.
+    /// </remarks>
+    /// <param name="entity">The entity name.</param>
+    /// <param name="operation">The operation the batch performs.</param>
+    /// <param name="rowCount">How many rows the caller supplied.</param>
+    /// <param name="context">The caller performing the batch.</param>
+    /// <param name="idempotency">The caller's token for the whole batch, or <see langword="null"/>.</param>
+    private PolicyDecision BatchDecision(
+        string entity, DataOperation operation, int rowCount, AlvoContext context, AlvoIdempotency? idempotency)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(entity);
+        ArgumentNullException.ThrowIfNull(context);
+        AlvoIdempotency.EnsureUsableToken(idempotency, context);
+        EnsureBatchIsNotEmpty(rowCount);
+
+        return Resolve(entity, operation, context);
+    }
+
+    /// <summary>Refuses an empty batch rather than reading it as a successful write of nothing.</summary>
+    /// <param name="rowCount">How many rows the caller supplied.</param>
+    private static void EnsureBatchIsNotEmpty(int rowCount)
+    {
+        if (rowCount == 0)
+        {
+            throw new ArgumentException(
+                "A batch must carry at least one row. An empty batch is refused rather than answered as a "
+                + "write of nothing, because an intermediary that stripped the body would otherwise look "
+                + "like a success.",
+                nameof(rowCount));
+        }
+    }
+
+    /// <summary>
+    /// One batch, inside one transaction: the key's record, then the verb's own two passes, then the commit.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>One instant covers the batch.</b> <see cref="WriteInstantNow"/> is read once here and threaded into
+    /// every row's audit stamp, every event's <c>time</c> and the record's <c>created_at</c> — so all N rows
+    /// share one <c>updated_at</c> and therefore one <c>ETag</c>, which is right: they were written together.
+    /// </para>
+    /// <para>
+    /// <b>The contended-write retry is narrowed to a batch that carries a token.</b> The retry exists for one
+    /// thing — a rival committing the same key first, which fails the record insert and nothing else. A batch
+    /// with no token performs no record insert, so there is no statement a rival can make fail, and retrying
+    /// it would re-run N inserts, N hooks and N outbox rows for a failure no retry can fix. Even with a token
+    /// the batch takes <see cref="ContendedBatchAttempts"/> rather than the single row's ten, because the
+    /// wasted work per attempt is N times larger.
+    /// </para>
+    /// </remarks>
+    /// <param name="entity">The entity name.</param>
+    /// <param name="context">The caller performing the batch.</param>
+    /// <param name="idempotency">The caller's token for the whole batch, or <see langword="null"/>.</param>
+    /// <param name="attempt">The verb's own judging and writing passes.</param>
+    /// <param name="producesRows">
+    /// Whether this verb's rows survive the write, so a replay has something to re-read. False for a delete,
+    /// whose rows are gone by construction.
+    /// </param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    private Task<AlvoBatchResult> BatchAsync(
+        string entity,
+        AlvoContext context,
+        AlvoIdempotency? idempotency,
+        Func<AlvoDataContext, IDbContextTransaction, EntitySchema, DateTimeOffset, Task<BatchOutcome>> attempt,
+        bool producesRows,
+        CancellationToken cancellationToken)
+    {
+        Task<AlvoBatchResult> Once() =>
+            OneBatchAsync(entity, context, idempotency, attempt, producesRows, cancellationToken);
+
+        return idempotency is null
+            ? Once()
+            : ReplayableWriteAsync(Once, ContendedBatchAttempts, cancellationToken);
+    }
+
+    /// <inheritdoc cref="ContendedCreateAttempts"/>
+    /// <remarks>
+    /// Fewer than a single row's ten, because each wasted attempt costs N inserts rather than one. Three
+    /// still absorbs an ordinary two-way race on one key — the first pause already outlasts a rival's own
+    /// transaction — and a queue of rivals contending one key on a five-hundred-row batch is a shape whose
+    /// right answer is a fresh key, not a longer retry.
+    /// </remarks>
+    private const int ContendedBatchAttempts = 3;
+
+    /// <inheritdoc cref="BatchAsync"/>
+    private async Task<AlvoBatchResult> OneBatchAsync(
+        string entity,
+        AlvoContext context,
+        AlvoIdempotency? idempotency,
+        Func<AlvoDataContext, IDbContextTransaction, EntitySchema, DateTimeOffset, Task<BatchOutcome>> attempt,
+        bool producesRows,
+        CancellationToken cancellationToken)
+    {
+        using var db = _contexts.Create();
+        var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
+        var now = WriteInstantNow();
+        if (idempotency is not null)
+        {
+            await EnsureIdempotencyTableAsync(db, cancellationToken);
+        }
+
+        await EnsureOutboxTableAsync(db, cancellationToken);
+
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var records = idempotency is { } token
+            ? new IdempotencyScope(
+                db.Database.GetDbConnection(), transaction.GetDbTransaction(), _idempotencyTable, token, context)
+            : (IdempotencyScope?)null;
+
+        if (records is { } scope && await scope.FindAsync(cancellationToken) is { } record)
+        {
+            EnsureSameRequest(record, idempotency!.Value);
+
+            return await ReplayedBatchAsync(db, schema, context, record, producesRows, cancellationToken);
+        }
+
+        var (result, rowIds) = await attempt(db, transaction, schema, now);
+        if (!result.Succeeded)
+        {
+            return result;
+        }
+
+        if (records is { } spent)
+        {
+            await spent.InsertAsync(rowIds, now, cancellationToken);
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+
+        return result;
+    }
+
+    /// <summary>What one verb's two passes produced: the caller's answer, and the rows to record.</summary>
+    /// <remarks>
+    /// The row ids travel beside the result rather than being read back out of it, because a delete's result
+    /// carries no rows at all — and a record naming none would make every later replay of that key throw
+    /// inside the write transaction, which the contended retry would then repeat before surfacing it as an
+    /// unattributable 500.
+    /// </remarks>
+    /// <param name="Result">The answer the caller receives.</param>
+    /// <param name="RowIds">Every row the batch touched, in the order the caller sent them.</param>
+    private readonly record struct BatchOutcome(AlvoBatchResult Result, IReadOnlyList<Guid> RowIds)
+    {
+        /// <summary>The outcome of a batch that wrote nothing, and every reason.</summary>
+        /// <param name="refusals">Every refused row, in request order.</param>
+        internal static BatchOutcome Refused(List<AlvoRowRefusal> refusals) =>
+            new(AlvoBatchResult.Refused(BatchWrite.InRequestOrder(refusals)), []);
+    }
+
+    /// <summary>
+    /// A batch create: every row judged, then — only if every one passed — every row written.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The two passes are forced, not chosen.</b> PostgreSQL aborts a transaction after any statement
+    /// error, so "insert, catch, keep going" is not available inside one transaction — and a batch has to be
+    /// one transaction. Judging first is therefore the only shape that can report every offending row.
+    /// </para>
+    /// <para>
+    /// <b>The hooks run in the judging pass, and the judged candidate is what lands.</b>
+    /// <see cref="RunBeforeCreate"/>'s own remark names the bypass this closes: a hook writing a field from
+    /// something the caller controls could place a row the create rule refuses, which is why the post-hook
+    /// re-verdict exists. Running the hooks in a later write pass would put a seam exactly there — the row
+    /// stored would be one no verdict had seen.
+    /// </para>
+    /// <para>
+    /// <b>Rollups are recomputed once</b>, with every stored image, because
+    /// <see cref="RecomputeRollupsAsync"/> already groups by parent: N children of one parent cost one
+    /// recompute rather than N.
+    /// </para>
+    /// </remarks>
+    /// <param name="db">The store this attempt runs against.</param>
+    /// <param name="transaction">The transaction every write of this batch rides.</param>
+    /// <param name="schema">The entity being written.</param>
+    /// <param name="decision">The verdict the policy engine returned for this caller.</param>
+    /// <param name="context">The caller performing the batch.</param>
+    /// <param name="rows">The payloads to create, in request order.</param>
+    /// <param name="now">The instant the whole batch is stamped with.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    private async Task<BatchOutcome> CreatedRowsAsync(
+        AlvoDataContext db, IDbContextTransaction transaction, EntitySchema schema, PolicyDecision decision,
+        AlvoContext context, IReadOnlyList<IReadOnlyDictionary<string, object?>> rows, DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var judged = new List<Dictionary<string, object>>(rows.Count);
+        var refusals = new List<AlvoRowRefusal>();
+        for (var index = 0; index < rows.Count; index++)
+        {
+            var (candidate, refusal) = JudgedCandidate(db, schema, decision, context, rows[index], now, index);
+            if (refusal is not null)
+            {
+                refusals.Add(refusal);
+                continue;
+            }
+
+            var (hooked, refusedAfterHook) = RunBeforeCreateOrRefuse(
+                db, schema, decision, context, candidate!, now, index);
+            if (refusedAfterHook is not null)
+            {
+                refusals.Add(refusedAfterHook);
+                continue;
+            }
+
+            judged.Add(hooked!);
+        }
+
+        if (refusals.Count > 0)
+        {
+            return BatchOutcome.Refused(refusals);
+        }
+
+        var stored = await InsertManyAsync(db, schema, decision, context, judged, cancellationToken);
+
+        await RecomputeRollupsAsync(db, schema, stored!, cancellationToken);
+        foreach (var row in stored)
+        {
+            await EmitAsync(
+                db, transaction, schema, OutboxOperation.Created, context, now, Unmasked(row), preImage: null,
+                cancellationToken);
+        }
+
+        return new BatchOutcome(
+            AlvoBatchResult.Wrote(
+                [.. stored.Select(row => RecordMaterializer.ToRecord(row, decision.HiddenFields, FrozenSet<string>.Empty))],
+                stored.Count),
+            [.. stored.Select(row => (Guid)row[AlvoDataContext.IdColumn])]);
+    }
+
+    /// <summary>
+    /// One row of a batch create, judged before any hook runs: the payload guards, then the <c>WITH CHECK</c>
+    /// verdict over the candidate — collected rather than thrown.
+    /// </summary>
+    /// <remarks>
+    /// The same two checks <see cref="AuthorizedCandidate"/> performs for a single row, in the same order,
+    /// reading the same <see cref="WritePayloadGuard.PayloadRefusal"/> and <see cref="WriteRefusal"/> that it
+    /// now throws on. One evaluation of the rule, two callers.
+    /// </remarks>
+    /// <param name="db">The store this attempt runs against.</param>
+    /// <param name="schema">The entity being written.</param>
+    /// <param name="decision">The verdict the policy engine returned for this caller.</param>
+    /// <param name="context">The caller performing the batch.</param>
+    /// <param name="values">The caller's payload for this row.</param>
+    /// <param name="now">The instant the whole batch is stamped with.</param>
+    /// <param name="index">The row's position in the list the caller supplied.</param>
+    private (Dictionary<string, object>? Candidate, AlvoRowRefusal? Refusal) JudgedCandidate(
+        AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context,
+        IReadOnlyDictionary<string, object?> values, DateTimeOffset now, int index)
+    {
+        if (WritePayloadGuard.PayloadRefusal(values, schema, decision, isUpdate: false) is { } unwritable)
+        {
+            return (null, Forbidden(index, unwritable));
+        }
+
+        var candidate = Candidate(
+            db.Rows(schema.Name).EntityType, Stamped(schema, values, context, now, isUpdate: false));
+
+        return WriteRefusal(decision, Unmasked(candidate), previous: null, context) is { } rejected
+            ? (null, Forbidden(index, rejected))
+            : (candidate, null);
+    }
+
+    /// <summary>
+    /// <see cref="RunBeforeCreate"/> for one row of a batch: the hooks, then the re-verdict over what they
+    /// produced — collected rather than thrown.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The re-verdict is the point, and it is why this call lives in the judging pass rather than beside
+    /// the insert.</b> <see cref="RunBeforeCreate"/>'s own remark names the bypass: a hook writing a field
+    /// from something the caller controls could place a row the create rule refuses, so the post-hook check
+    /// is what keeps a <c>mutate</c> from being an authorization hole. Running the hooks in a later write
+    /// pass would put a seam exactly there — the row stored would be one no verdict had seen.
+    /// </para>
+    /// <para>
+    /// <b>Called from the batch body rather than from <see cref="JudgedCandidate"/></b>, because
+    /// <c>BeforeHookTransactionArchitectureTests</c> proves a hook runs inside the transaction it guards by
+    /// reading the enclosing member — and only the batch body demonstrably holds one. A pipeline call in a
+    /// helper the scan cannot place is a call whose placement nothing checks, which is the situation that
+    /// fact exists to prevent.
+    /// </para>
+    /// </remarks>
+    /// <param name="db">The store this attempt runs against.</param>
+    /// <param name="schema">The entity being written.</param>
+    /// <param name="decision">The verdict the policy engine returned for this caller.</param>
+    /// <param name="context">The caller performing the batch.</param>
+    /// <param name="candidate">The row as the judging pass approved it, before any hook.</param>
+    /// <param name="now">The instant the whole batch is stamped with.</param>
+    /// <param name="index">The row's position in the list the caller supplied.</param>
+    private (Dictionary<string, object>? Candidate, AlvoRowRefusal? Refusal) RunBeforeCreateOrRefuse(
+        AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context,
+        Dictionary<string, object> candidate, DateTimeOffset now, int index)
+    {
+        IReadOnlyDictionary<string, object?> patch;
+        try
+        {
+            patch = _hooks.Run(schema.Name, DataOperation.Create, Unmasked(candidate), previous: null, context, now);
+        }
+        catch (AlvoAuthorizationException refusedByHook)
+        {
+            return (null, Forbidden(index, refusedByHook.Message));
+        }
+
+        if (patch.Count == 0)
+        {
+            return (candidate, null);
+        }
+
+        var patched = Patched(db.Rows(schema.Name).EntityType, candidate, patch);
+
+        return WriteRefusal(decision, Unmasked(patched), previous: null, context) is { } refused
+            ? (null, Forbidden(index, refused))
+            : (patched, null);
+    }
+
+    /// <summary>A batch update: every row's locked pre-image judged, then every approved row written.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>All N pre-images are taken before any row is written</b>, because each row's <c>WITH CHECK</c>
+    /// verdict is reached over <em>that</em> row's locked pre-image merged with <em>that</em> row's patch.
+    /// That is what makes a judging pass possible at all.
+    /// </para>
+    /// <para>
+    /// <b>The rows are visited in id order</b> — see <see cref="BatchWrite"/> for why — while every refusal
+    /// carries the caller's own request index.
+    /// </para>
+    /// <para>
+    /// <b>An absent row and an invisible one are one refusal.</b> <see cref="SingleAsync"/> applies the
+    /// caller's <c>USING</c> predicate, so both answer <see langword="null"/> here and both become
+    /// <see cref="AlvoAuthorizationException.RowUnavailable"/>. Telling them apart would let one request ask
+    /// as many existence questions as it carries rows.
+    /// </para>
+    /// </remarks>
+    /// <inheritdoc cref="CreatedRowsAsync"/>
+    /// <param name="db">The store this attempt runs against.</param>
+    /// <param name="transaction">The transaction every write of this batch rides.</param>
+    /// <param name="schema">The entity being written.</param>
+    /// <param name="decision">The verdict the policy engine returned for this caller.</param>
+    /// <param name="context">The caller performing the batch.</param>
+    /// <param name="rows">The patches to apply, in request order.</param>
+    /// <param name="now">The instant the whole batch is stamped with.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    private async Task<BatchOutcome> UpdatedRowsAsync(
+        AlvoDataContext db, IDbContextTransaction transaction, EntitySchema schema, PolicyDecision decision,
+        AlvoContext context, IReadOnlyList<AlvoRowPatch> rows, DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        if (BatchWrite.RepeatedRows(rows, row => row.Id, NamedTwice) is { Count: > 0 } repeats)
+        {
+            return BatchOutcome.Refused(repeats);
+        }
+
+        var judged = new List<(int Index, Guid Id, AlvoRecord PreImage, IReadOnlyDictionary<string, object?> Values)>(rows.Count);
+        var refusals = new List<AlvoRowRefusal>();
+
+        foreach (var (index, patch) in BatchWrite.InLockOrder(rows, row => row.Id))
+        {
+            if (WritePayloadGuard.PayloadRefusal(patch.Values, schema, decision, isUpdate: true) is { } unwritable)
+            {
+                refusals.Add(Forbidden(index, unwritable));
+                continue;
+            }
+
+            var locked = await SingleAsync(
+                db, schema, decision, context, patch.Id, PreImageMutation.Update, cancellationToken, unmasked: true);
+            if (locked is null)
+            {
+                refusals.Add(Unavailable(index));
+                continue;
+            }
+
+            var preImage = Unmasked(locked);
+            IReadOnlyDictionary<string, object?> vetted;
+            try
+            {
+                vetted = RunBeforeUpdate(schema, context, preImage, patch.Values, now);
+            }
+            catch (AlvoAuthorizationException refusedByHook)
+            {
+                refusals.Add(Forbidden(index, refusedByHook.Message));
+                continue;
+            }
+
+            if (WriteRefusal(decision, Merge(preImage, vetted), preImage, context) is { } rejected)
+            {
+                refusals.Add(Forbidden(index, rejected));
+                continue;
+            }
+
+            judged.Add((index, patch.Id, preImage, vetted));
+        }
+
+        if (refusals.Count > 0)
+        {
+            return BatchOutcome.Refused(refusals);
+        }
+
+        return await WrittenRowsAsync(db, transaction, schema, decision, context, judged, now, cancellationToken);
+    }
+
+    /// <summary>The write pass of a batch update: the approved patches, applied and emitted.</summary>
+    /// <param name="db">The store this attempt runs against.</param>
+    /// <param name="transaction">The transaction every write of this batch rides.</param>
+    /// <param name="schema">The entity being written.</param>
+    /// <param name="decision">The verdict the policy engine returned for this caller.</param>
+    /// <param name="context">The caller performing the batch.</param>
+    /// <param name="judged">The rows the judging pass approved, with their request positions.</param>
+    /// <param name="now">The instant the whole batch is stamped with.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    private async Task<BatchOutcome> WrittenRowsAsync(
+        AlvoDataContext db, IDbContextTransaction transaction, EntitySchema schema, PolicyDecision decision,
+        AlvoContext context,
+        List<(int Index, Guid Id, AlvoRecord PreImage, IReadOnlyDictionary<string, object?> Values)> judged,
+        DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var written = new List<(int Index, Guid Id, AlvoRecord PreImage, Dictionary<string, object> PostImage)>(judged.Count);
+        foreach (var (index, id, preImage, values) in judged)
+        {
+            if (await AffectedAsync(db, schema, decision, context, id, values, cancellationToken) == 0)
+            {
+                throw new AlvoRecordNotFoundException();
+            }
+
+            var postImage = await SingleAsync(
+                db, schema, decision, context, id, lockFor: null, cancellationToken, unmasked: true)
+                ?? throw new AlvoRecordNotFoundException();
+            written.Add((index, id, preImage, postImage));
+        }
+
+        await RecomputeRollupsAsync(
+            db,
+            schema,
+            [.. written.SelectMany(row => new IReadOnlyDictionary<string, object?>[] { row.PreImage.Values, row.PostImage! })],
+            cancellationToken);
+        foreach (var (_, _, preImage, postImage) in written)
+        {
+            await EmitAsync(
+                db, transaction, schema, OutboxOperation.Updated, context, now, Unmasked(postImage), preImage,
+                cancellationToken);
+        }
+
+        var inRequestOrder = written.OrderBy(row => row.Index).ToList();
+
+        return new BatchOutcome(
+            AlvoBatchResult.Wrote(
+                [.. inRequestOrder.Select(row =>
+                    RecordMaterializer.ToRecord(row.PostImage, decision.HiddenFields, FrozenSet<string>.Empty))],
+                inRequestOrder.Count),
+            [.. inRequestOrder.Select(row => row.Id)]);
+    }
+
+    /// <summary>A batch delete: every named row's locked pre-image judged, then every one removed.</summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="EnsureNotSoftDeleted"/> runs once for the batch rather than per row: an entity that cannot
+    /// be deleted at all is a broken caller rather than a refused row, so it throws. It runs inside the
+    /// transaction, which costs nothing — it consults the schema and no stored row, and the transaction is
+    /// rolled back on the way out.
+    /// </para>
+    /// <para>
+    /// <b>No precondition.</b> One version cannot condition many rows — see
+    /// <see cref="IAlvoData.DeleteManyAsync"/> for why accepting one would be worse than refusing it.
+    /// </para>
+    /// </remarks>
+    /// <param name="db">The store this attempt runs against.</param>
+    /// <param name="transaction">The transaction every write of this batch rides.</param>
+    /// <param name="schema">The entity being written.</param>
+    /// <param name="decision">The verdict the policy engine returned for this caller.</param>
+    /// <param name="context">The caller performing the batch.</param>
+    /// <param name="ids">The rows to remove, in request order.</param>
+    /// <param name="now">The instant the whole batch is stamped with.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    private async Task<BatchOutcome> RemovedRowsAsync(
+        AlvoDataContext db, IDbContextTransaction transaction, EntitySchema schema, PolicyDecision decision,
+        AlvoContext context, IReadOnlyList<Guid> ids, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        EnsureNotSoftDeleted(schema);
+
+        if (BatchWrite.RepeatedRows(ids, row => row, NamedTwice) is { Count: > 0 } repeats)
+        {
+            return BatchOutcome.Refused(repeats);
+        }
+
+        var judged = new List<(int Index, Guid Id, AlvoRecord PreImage)>(ids.Count);
+        var refusals = new List<AlvoRowRefusal>();
+
+        foreach (var (index, id) in BatchWrite.InLockOrder(ids, row => row))
+        {
+            var locked = await SingleAsync(
+                db, schema, decision, context, id, PreImageMutation.Delete, cancellationToken, unmasked: true);
+            if (locked is null)
+            {
+                refusals.Add(Unavailable(index));
+                continue;
+            }
+
+            try
+            {
+                RunBeforeDelete(schema, context, Unmasked(locked), now);
+            }
+            catch (AlvoAuthorizationException refusedByHook)
+            {
+                refusals.Add(Forbidden(index, refusedByHook.Message));
+                continue;
+            }
+
+            judged.Add((index, id, Unmasked(locked)));
+        }
+
+        if (refusals.Count > 0)
+        {
+            return BatchOutcome.Refused(refusals);
+        }
+
+        foreach (var (_, id, _) in judged)
+        {
+            var affected = await ConstraintViolationTranslator.TranslatedAsync(
+                () => RowOf(PolicyRoot(db, schema, decision, context), id).ExecuteDeleteAsync(cancellationToken),
+                _dialect,
+                db.Rows(schema.Name).EntityType,
+                schema,
+                callerKeyed: false);
+            if (affected == 0)
+            {
+                throw new AlvoRecordNotFoundException();
+            }
+        }
+
+        await RecomputeRollupsAsync(db, schema, [.. judged.Select(row => row.PreImage.Values)], cancellationToken);
+        foreach (var (_, _, preImage) in judged)
+        {
+            await EmitAsync(
+                db, transaction, schema, OutboxOperation.Deleted, context, now, postImage: null, preImage,
+                cancellationToken);
+        }
+
+        var inRequestOrder = judged.OrderBy(row => row.Index).ToList();
+
+        return new BatchOutcome(
+            AlvoBatchResult.Wrote([], inRequestOrder.Count), [.. inRequestOrder.Select(row => row.Id)]);
+    }
+
+    /// <summary>The narrowest refusal a policy can produce: an index and a server-owned sentence.</summary>
+    /// <param name="index">The row's position in the list the caller supplied.</param>
+    /// <param name="message">
+    /// The refusal. Built from constants, or — on the hook path — from a <c>reject</c>'s own text, which is
+    /// <b>descriptor-authored</b> and so the one kind of text this framework echoes. Never the caller's.
+    /// </param>
+    private static AlvoRowRefusal Forbidden(int index, string message) =>
+        new(index, ForbiddenCode, message, "Change the row so the entity's rules admit it, or drop it from the batch.");
+
+    /// <summary>A row the caller named more than once, refused by its own index.</summary>
+    /// <param name="index">The repeated row's position in the list the caller supplied.</param>
+    private static AlvoRowRefusal NamedTwice(int index) =>
+        new(
+            index,
+            "duplicate-row",
+            AlvoAuthorizationException.RowNamedTwice,
+            "Send each row once. Merge the changes you meant for it into a single entry.");
+
+    /// <summary>
+    /// The refusal for a row this caller cannot act on, whether because it does not exist or because their own
+    /// predicate excludes it — <b>one</b> answer, so a batch cannot be used to ask which.
+    /// </summary>
+    /// <param name="index">The row's position in the list the caller supplied.</param>
+    private static AlvoRowRefusal Unavailable(int index) =>
+        new(index, ForbiddenCode, AlvoAuthorizationException.RowUnavailable, "Check the row id, or drop it from the batch.");
+
+    /// <summary>
+    /// The one code this driver emits. Every refusal it can decide is a policy refusal — a shape refusal is
+    /// the request layer's, and it never reaches here.
+    /// </summary>
+    private const string ForbiddenCode = "forbidden";
+
+    /// <summary>
+    /// The answer to a replayed batch: every recorded row, re-read under a freshly resolved <c>get</c>
+    /// decision, exactly as a single write's replay is and for the same reason.
+    /// </summary>
+    /// <remarks>
+    /// <b>A replayed batch delete reads nothing, and the caller tells this method so.</b> Its rows are gone
+    /// by construction, so reading them is N round trips that find nothing — and the port's own contract
+    /// says a replayed delete performs no read, which reading anyway quietly contradicted. The verb is
+    /// passed in rather than recorded, because the <em>record</em> deliberately does not say which verb
+    /// wrote it: it names rows, and a second meaning inside it is a second thing to keep true.
+    /// </remarks>
+    /// <param name="db">The store this attempt runs against.</param>
+    /// <param name="schema">The entity being written.</param>
+    /// <param name="context">The replaying caller.</param>
+    /// <param name="record">The record this replay matched.</param>
+    /// <param name="producesRows">
+    /// Whether this verb's rows survive the write, so a replay has something to re-read. False for a delete,
+    /// whose rows are gone by construction.
+    /// </param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    private async Task<AlvoBatchResult> ReplayedBatchAsync(
+        AlvoDataContext db, EntitySchema schema, AlvoContext context,
+        IdempotencyTable.IdempotencyRecord record, bool producesRows, CancellationToken cancellationToken)
+    {
+        if (!producesRows)
+        {
+            return AlvoBatchResult.Wrote([], record.RowIds.Count);
+        }
+
+        var read = _policy.Resolve(schema.Name, DataOperation.Get, context);
+        if (read.IsDenied)
+        {
+            return AlvoBatchResult.Wrote([.. record.RowIds.Select(IdOnly)], record.RowIds.Count);
+        }
+
+        var rows = new List<AlvoRecord>(record.RowIds.Count);
+        foreach (var id in record.RowIds)
+        {
+            var row = await SingleAsync(db, schema, read, context, id, lockFor: null, cancellationToken);
+            if (row is not null)
+            {
+                rows.Add(RecordMaterializer.ToRecord(row, read.HiddenFields, FrozenSet<string>.Empty));
+            }
+        }
+
+        return AlvoBatchResult.Wrote(rows, record.RowIds.Count);
+    }
 }

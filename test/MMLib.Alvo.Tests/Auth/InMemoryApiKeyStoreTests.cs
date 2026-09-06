@@ -6,6 +6,12 @@ namespace MMLib.Alvo.Tests.Auth;
 
 public class InMemoryApiKeyStoreTests
 {
+    /// <summary>
+    /// A secret clearing <see cref="Auth.Internal.AlvoAuthOptionsValidator.MinimumSecretLength"/>, so a
+    /// fact about resolution or storage is not refused at options validation first (#125).
+    /// </summary>
+    private const string LongEnoughSecret = "s3cret-value-long-enough-for-the-floor";
+
     private static IApiKeyStore StoreWith(AlvoDevApiKey key)
     {
         var options = new AlvoAuthOptions();
@@ -22,7 +28,7 @@ public class InMemoryApiKeyStoreTests
         var store = StoreWith(new AlvoDevApiKey
         {
             KeyId = "dev",
-            Secret = "s3cret",
+            Secret = LongEnoughSecret,
             User = Guid.NewGuid(),
             Roles = { "authenticated" },
             Scopes = { "orders:read", "orders:reed", "invoices:write" },
@@ -39,7 +45,7 @@ public class InMemoryApiKeyStoreTests
         var store = StoreWith(new AlvoDevApiKey
         {
             KeyId = "dev",
-            Secret = "s3cret",
+            Secret = LongEnoughSecret,
             User = Guid.NewGuid(),
             Roles = { "authenticated" },
             Scopes = { "orders:read", "invoices:write" },
@@ -57,7 +63,7 @@ public class InMemoryApiKeyStoreTests
         var store = StoreWith(new AlvoDevApiKey
         {
             KeyId = "dev",
-            Secret = "s3cret",
+            Secret = LongEnoughSecret,
             User = Guid.NewGuid(),
             Roles = { "authenticated" },
             Scopes = { "orders:read" },

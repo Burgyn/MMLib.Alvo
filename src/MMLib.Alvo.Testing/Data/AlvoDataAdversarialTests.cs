@@ -189,6 +189,97 @@ public abstract class AlvoDataAdversarialTests
     }
 
     /// <summary>
+    /// <b>The count is an aggregate over rows, which is exactly what makes it a disclosure channel.</b> A
+    /// caller learns nothing from an empty page, but "there are 3 rows" over a set they can see one of tells
+    /// them two rows exist somewhere they cannot read. So the count is composed over the <em>same</em>
+    /// <c>WHERE</c> terms as the page — the resolved <c>USING</c> predicate and the synthesized tenant scope
+    /// included — and every tenant here counts exactly its own row over a store holding three.
+    /// </summary>
+    /// <remarks>
+    /// A count taken over the bare table would return 3 to all three callers while every row-level fact in
+    /// this suite kept passing: no row crosses a tenant boundary, only the number does. That is the shape of
+    /// leak an outcome-level suite cannot see, which is why this is a fact of its own rather than an
+    /// assertion bolted onto the paging suite's count facts, whose fixture is single-tenant.
+    /// </remarks>
+    [Fact]
+    public async Task A_count_is_taken_over_the_policy_filtered_set_and_never_over_the_table()
+    {
+        var fixture = await DocumentsFixtureAsync();
+        var counted = new List<long?>();
+
+        foreach (var tenant in new[] { fixture.Acme, fixture.Globex, fixture.Third })
+        {
+            var page = await fixture.Data.QueryAsync(
+                new AlvoQuery { Entity = "documents", IncludeTotalCount = true }, NewContext(tenant));
+            counted.Add(page.TotalCount);
+        }
+
+        counted.ShouldAllBe(total => total == 1);
+    }
+
+    /// <summary>
+    /// The row-rule half of the same claim, on a fixture whose visible subset is decided by a
+    /// <c>USING</c> predicate rather than by tenancy: Alice owns two of the three <c>notes</c> rows, so her
+    /// count is 2 and never 3.
+    /// </summary>
+    [Fact]
+    public async Task A_count_is_narrowed_by_the_row_rule_and_by_the_callers_own_filter()
+    {
+        var fixture = await NotesFixtureAsync();
+
+        var byRule = await fixture.Data.QueryAsync(
+            new AlvoQuery { Entity = "notes", IncludeTotalCount = true }, fixture.Alice);
+        var byFilter = await fixture.Data.QueryAsync(
+            new AlvoQuery
+            {
+                Entity = "notes",
+                Filter = new AlvoComparison("title", AlvoFilterOperator.Eq, "Alice-1"),
+                IncludeTotalCount = true,
+            },
+            fixture.Alice);
+
+        byRule.TotalCount.ShouldBe(2);
+        byFilter.TotalCount.ShouldBe(1);
+    }
+
+    /// <summary>
+    /// A count over a field the caller may not read is refused exactly as the read itself is — the count adds
+    /// no second path into the query, so a filter naming a hidden field cannot become a counting oracle that
+    /// answers where the page refuses.
+    /// </summary>
+    /// <remarks>
+    /// <b>Over a genuinely <c>hidden</c> field, and over an undeclared one, because they are two branches of
+    /// one guard and only the first is about confidentiality.</b> An earlier revision of this fact asked only
+    /// the undeclared name, which pins the wrong branch: it would still have passed had the masked branch
+    /// been broken for a counted read. The counting oracle is the sharper of the two — a caller who cannot
+    /// read <c>secret</c> but can learn how many rows carry a given value of it has the field one comparison
+    /// at a time, without a single row ever appearing in a response. The admin arm is the control: the field
+    /// is refused because it is hidden <em>from this caller</em>, not because counting over it is banned.
+    /// </remarks>
+    [Fact]
+    public async Task A_count_over_a_hidden_field_filter_is_refused_like_the_read_itself()
+    {
+        var fixture = await AccountsFixtureAsync();
+        var member = NewContext(tenant: null);
+        var admin = NewContext(tenant: null, Role.Admin);
+        var byNote = CountedQueryFilteredBy(new AlvoComparison("note", AlvoFilterOperator.Eq, "internal"));
+
+        await Should.ThrowAsync<AlvoAuthorizationException>(() => fixture.Data.QueryAsync(
+            CountedQueryFilteredBy(new AlvoComparison("secret", AlvoFilterOperator.Eq, "shh")), member));
+        await Should.ThrowAsync<AlvoAuthorizationException>(() => fixture.Data.QueryAsync(byNote, member));
+        await Should.ThrowAsync<AlvoAuthorizationException>(() => fixture.Data.QueryAsync(
+            CountedQueryFilteredBy(new AlvoComparison("nosuchfield", AlvoFilterOperator.Eq, "x")), member));
+
+        // `note` is hidden by an expression that admits an admin, so the same counted query answers for one
+        // — the refusal above is per-caller masking, not a ban on counting over that field.
+        (await fixture.Data.QueryAsync(byNote, admin)).TotalCount.ShouldBe(1);
+    }
+
+    /// <inheritdoc cref="QueryFilteredBy"/>
+    private static AlvoQuery CountedQueryFilteredBy(AlvoFilter filter) =>
+        QueryFilteredBy(filter) with { IncludeTotalCount = true };
+
+    /// <summary>
     /// The §4 acceptance criterion, made into a real, independently failing assertion: a tenantless
     /// caller's query throws with no rows ever assigned to the caller's variable (an implementation
     /// that throws only after materializing the rows would still fail this), <b>and</b> no
@@ -878,40 +969,63 @@ public abstract class AlvoDataAdversarialTests
         Enumerable.Range(0, candidates).Select(index => $"absent-{index}").ToList());
 
     /// <summary>
-    /// A keyset cursor's boundary is a chain of comparisons with no <c>IS NULL</c> arm, so a <see langword="null"/>
-    /// on either side makes the whole term <see langword="null"/> and a <c>WHERE</c> treats that as false —
-    /// paging over a nullable sort key stops at the first null-keyed row and <b>silently drops the rest</b>.
-    /// Measured under <c>nullslast</c> three visible rows walked out as two; under <c>nullsfirst</c>, as one.
+    /// A keyset cursor's boundary used to be a chain of comparisons with no <c>IS NULL</c> arm, so a
+    /// <see langword="null"/> on either side made the whole term <see langword="null"/> and a <c>WHERE</c>
+    /// treated that as false — paging over a nullable sort key stopped at the first null-keyed row and
+    /// <b>silently dropped the rest</b>. Measured under <c>nullslast</c>, three visible rows walked out as
+    /// two; under <c>nullsfirst</c>, as one. F3 refused such a read rather than answer it wrongly; F4 answers
+    /// it, because the boundary now compares the same <em>(rank, value)</em> pair the <c>ORDER BY</c> ranks by.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The design's ruling is that a nullable sort column must declare its null placement <b>or be rejected</b>,
-    /// and <see cref="AlvoSort.Nulls"/> cannot deliver the first half while only the <c>ORDER BY</c> honours it.
-    /// So a <em>paged</em> read over one is refused. This is the port's malformed-query channel, not an
-    /// authorization refusal: the field is one the caller may read, nothing is hidden, and a request layer above
-    /// turns it into a 422 with a fix suggestion.
+    /// This fact keeps the <b>adversarial</b> half of that history: a paged read over a nullable key answers,
+    /// and walking it to exhaustion loses nothing. It is here rather than only in the paging suite because
+    /// "the read is refused" and "the read silently drops rows" are the two failures an implementation can
+    /// choose between when it cannot express the boundary, and both are visible from this suite's own fixture.
+    /// The four-way <c>{asc,desc} × {nullsfirst,nullslast}</c> walk over a fixture that really contains nulls
+    /// lives in <c>AlvoDataPagingTests</c>, which builds its own.
     /// </para>
     /// <para>
-    /// It is a fact here, on the inherited suite, because it is a property of the <em>port</em> — every
-    /// implementation pages, and one that answered instead of refusing would drop rows exactly as the first one
-    /// did. An <b>unpaged</b> sorted read has no boundary, so it stays legal, and this fact asserts that too:
-    /// without it the refusal could be implemented as "reject a nullable sort key", which would break sorting.
+    /// An <b>unpaged</b> sorted read stays legal and is asserted alongside — without it, the fact could be
+    /// satisfied by an implementation that had stopped sorting by a nullable key at all.
     /// </para>
     /// </remarks>
     [Fact]
-    public async Task A_paged_read_sorted_by_a_nullable_field_is_refused_rather_than_dropping_rows()
+    public async Task A_paged_read_sorted_by_a_nullable_field_answers_and_loses_no_row()
     {
         var fixture = await NotesFixtureAsync();
         var sort = new[] { new AlvoSort("title") };
 
-        await Should.ThrowAsync<ArgumentException>(() => fixture.Data.QueryAsync(
-            new AlvoQuery { Entity = "notes", Sort = sort, Limit = 1 }, fixture.Alice));
-        await Should.ThrowAsync<ArgumentException>(() => fixture.Data.QueryAsync(
-            new AlvoQuery { Entity = "notes", Sort = sort, After = "any-cursor" }, fixture.Alice));
-
+        var first = await fixture.Data.QueryAsync(
+            new AlvoQuery { Entity = "notes", Sort = sort, Limit = 1 }, fixture.Alice);
+        var second = await fixture.Data.QueryAsync(
+            new AlvoQuery { Entity = "notes", Sort = sort, Limit = 1, After = first.NextCursor }, fixture.Alice);
         var unpaged = (await fixture.Data.QueryAsync(
             new AlvoQuery { Entity = "notes", Sort = sort }, fixture.Alice)).Items;
+
         unpaged.Count.ShouldBe(2);
+        first.NextCursor.ShouldNotBeNull();
+        second.NextCursor.ShouldBeNull();
+        first.Items.Concat(second.Items).Select(row => row["id"])
+            .ShouldBe(unpaged.Select(row => row["id"]));
+    }
+
+    /// <summary>
+    /// A cursor no page issued still finds no anchor and answers with an empty page — the property the
+    /// nullable-key boundary must not have broken, since a null-keyed anchor is now a shape the renderer
+    /// handles rather than one it refuses.
+    /// </summary>
+    [Fact]
+    public async Task A_forged_cursor_over_a_nullable_sort_key_is_still_an_empty_page()
+    {
+        var fixture = await NotesFixtureAsync();
+
+        var page = await fixture.Data.QueryAsync(
+            new AlvoQuery { Entity = "notes", Sort = [new AlvoSort("title")], Limit = 1, After = "any-cursor" },
+            fixture.Alice);
+
+        page.Items.ShouldBeEmpty();
+        page.NextCursor.ShouldBeNull();
     }
 
     /// <summary>

@@ -1,4 +1,5 @@
 ﻿using Microsoft.AspNetCore.Http;
+using MMLib.Alvo.Data;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
 
@@ -15,10 +16,11 @@ namespace MMLib.Alvo.Api.Internal;
 /// client-observable and unguessable, and every one of them was deferred to this task with a note saying so:
 /// <c>If-Match</c> is ignored on a read and neither precondition header is honoured on a list
 /// (<see cref="DataApiEndpoints"/>' <c>Representation</c>); a create carrying either one is refused with 412
-/// (<c>EnsureUnconditional</c>); <c>Idempotency-Key</c> is honoured on a create and ignored on an update and
-/// a delete (<c>IdempotencyKeyHeader</c>); and a nullable field cannot be a sort key on a paged read
-/// (<c>AlvoQuery.EnsureSortKeysCanBePaged</c>), which is every list over HTTP. An integrator reads none of
-/// those files. §0 principle 4 makes the published document the contract an agent reads, so this is where
+/// (<c>EnsureUnconditional</c>); <c>Idempotency-Key</c> is honoured on every write and accepted-and-ignored
+/// on the body-shaped read (<c>IdempotencyKeyHeader</c>); and where a <see langword="null"/> sorts on a
+/// nullable sort key,
+/// which is a choice the caller makes and the server never guesses (<c>SortSqlRenderer</c>,
+/// <c>KeysetSqlRenderer</c>). An integrator reads none of those files. §0 principle 4 makes the published document the contract an agent reads, so this is where
 /// they belong.
 /// </para>
 /// <para>
@@ -49,6 +51,9 @@ internal static class DataApiDocumentation
 
         /// <summary>The <c>{ items, next }</c> page envelope.</summary>
         Page,
+
+        /// <summary>The <c>{ items, affected }</c> batch envelope.</summary>
+        Batch,
 
         /// <summary>An RFC 9457 problem document.</summary>
         Problem,
@@ -89,7 +94,7 @@ internal static class DataApiDocumentation
         string? SharedNarrowing = null);
 
     /// <summary>
-    /// Every status <paramref name="operation"/> on <paramref name="entity"/> can actually answer with.
+    /// Every status <paramref name="kind"/> on <paramref name="entity"/> can actually answer with.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -123,25 +128,39 @@ internal static class DataApiDocumentation
     /// document listing it anyway would describe a behaviour that does not exist.
     /// </para>
     /// </remarks>
-    /// <param name="operation">The operation the endpoint performs.</param>
+    /// <param name="kind">The endpoint kind, which is what the document keys on.</param>
     /// <param name="entity">The entity it serves, consulted for whether a row of it can be versioned.</param>
-    internal static IReadOnlyList<Response> ResponsesFor(DataOperation operation, EntitySchema entity)
+    internal static IReadOnlyList<Response> ResponsesFor(DataApiEndpointKind kind, EntitySchema entity)
     {
         ArgumentNullException.ThrowIfNull(entity);
-        return operation switch
+        return kind switch
         {
-            DataOperation.List =>
+            DataApiEndpointKind.List or DataApiEndpointKind.Query =>
                 [Ok(ResponseBody.Page, "A page of rows the caller's policy admits."), .. Refusals(Malformed)],
-            DataOperation.Get =>
+            DataApiEndpointKind.Get =>
                 [Ok(ResponseBody.Row, "The row."), .. NotModified(entity), .. Refusals(Absent)],
-            DataOperation.Create =>
-                [Created(), .. Refusals(Malformed, Precondition, Conflict)],
-            DataOperation.Update =>
+            DataApiEndpointKind.Create =>
+                [Created(entity), .. Refusals(Malformed, Precondition, Conflict)],
+            DataApiEndpointKind.Update =>
                 [Ok(ResponseBody.Row, "The row as it now stands."),
                  .. Refusals(Malformed, Absent, PreconditionOn(entity), Conflict)],
-            DataOperation.Delete =>
+            DataApiEndpointKind.Delete =>
                 [NoContent(), .. Refusals(Absent, PreconditionOn(entity), Conflict)],
-            _ => throw new InvalidOperationException($"No response catalogue for operation '{operation}'."),
+            DataApiEndpointKind.Replace =>
+                [Created(entity),
+                 Ok(ResponseBody.Row, "The row as it now stands, when this request replaced an existing one "
+                    + "or replayed an 'Idempotency-Key' a previous request spent."),
+                 .. Refusals(Malformed, PreconditionOn(entity), Conflict)],
+            DataApiEndpointKind.BatchCreate or DataApiEndpointKind.BatchUpdate
+                or DataApiEndpointKind.BatchDelete =>
+                [Ok(ResponseBody.Batch, "Every row the batch wrote, in request order, and how many it "
+                    + "affected. A batch delete answers an empty 'items' with a non-zero 'affected'."),
+                 Unauthenticated,
+                 ForbiddenOnBatch,
+                 Malformed,
+                 Precondition,
+                 Conflict],
+            _ => throw new InvalidOperationException($"No response catalogue for endpoint kind '{kind}'."),
         };
     }
 
@@ -169,11 +188,22 @@ internal static class DataApiDocumentation
     private static Response Ok(ResponseBody body, string description) =>
         new(StatusCodes.Status200OK, body, description);
 
-    private static Response Created() => new(
+    /// <summary>The 201, promising an <c>ETag</c> only for an entity whose rows carry a version.</summary>
+    /// <remarks>
+    /// <b>The promise used to be unconditional, and on a version-less entity it was a lie</b> — the same lie
+    /// <see cref="NotModified"/> already refuses to tell about a 304. A client following the generated
+    /// contract would wait for a header this route can never send, and a conditional write built on it is
+    /// refused with 412 rather than merely unsupported.
+    /// </remarks>
+    /// <param name="entity">The entity as the applied schema declares it.</param>
+    private static Response Created(EntitySchema entity) => new(
         StatusCodes.Status201Created,
         ResponseBody.Row,
-        "The created row. 'Location' names it, and 'ETag' carries the version a later conditional write may "
-        + "send as 'If-Match' — so a first conditional write needs no read of its own.");
+        AlvoManagedColumns.VersionColumn(entity) is null
+            ? "The created row. 'Location' names it. This entity's rows carry no version, so no 'ETag' is "
+            + "returned and no later write can be conditioned on one."
+            : "The created row. 'Location' names it, and 'ETag' carries the version a later conditional write "
+            + "may send as 'If-Match' — so a first conditional write needs no read of its own.");
 
     private static Response NoContent() => new(
         StatusCodes.Status204NoContent, ResponseBody.None, "The row was deleted. No body.");
@@ -207,6 +237,32 @@ internal static class DataApiDocumentation
         + "descriptor, the caller has no tenant on a tenant-scoped entity, or the policy reads a caller value "
         + "this caller does not carry. It is never 'your rule excluded these rows'; see the 200.",
         SharedId: "forbidden");
+
+    /// <summary>
+    /// The <c>403</c> as a batch answers it, which is the one route where it <b>is</b> "your rule excluded
+    /// these rows".
+    /// </summary>
+    /// <remarks>
+    /// <b>Narrowed rather than reworded, so the five single-row operations keep the sentence they publish.</b>
+    /// <see cref="Forbidden"/> says a policy refusal is never per row — true everywhere else, and false here
+    /// the moment a batch began answering a refused row by name. A shared component that denied what one of
+    /// its referrers does is the defect this narrowing exists to prevent, and it is the shape
+    /// <see cref="PreconditionOn"/> already uses.
+    /// </remarks>
+    private static Response ForbiddenOnBatch => Forbidden with
+    {
+        SharedNarrowing =
+            "The operation is refused, or one or more rows are — and on this route a policy refusal CAN be "
+            + "per row, unlike every other operation. Each entry of 'violations' carries a '/rows/{index}' "
+            + "pointer naming a row policy refused: its 'WITH CHECK' predicate, the tenant scope, a row that "
+            + "is not yours or does not exist (one refusal for both, so a batch cannot be used to ask which), "
+            + "or a row the batch named twice. A batch is one transaction, so nothing was written — repair "
+            + "the rows the response names and resend the whole batch. A refusal the entity's declared SHAPE "
+            + "produced is a 422 instead, and carries the same pointers. The two operation-level kinds are "
+            + "unchanged and are still told apart by the problem 'type': 'out-of-scope' means the presented "
+            + "key's scopes do not cover this entity and operation (grant the key the scope), 'forbidden' "
+            + "means policy refused (change a rule, or a row).",
+    };
 
     private static Response Absent => new(
         StatusCodes.Status404NotFound,
@@ -264,9 +320,10 @@ internal static class DataApiDocumentation
         StatusCodes.Status409Conflict,
         ResponseBody.Problem,
         "The request conflicts with what is already stored. Two kinds, told apart by the problem 'type': "
-        + "'idempotency-conflict' means the 'Idempotency-Key' was already used by this caller for a request "
-        + "with a different body (retry with the same key and the same body to replay the first result, or "
-        + "send a fresh key); 'conflict' means a constraint the database enforces refused the write — a value "
+        + "'idempotency-conflict' means the 'Idempotency-Key' was already used by this caller for a different "
+        + "request — a different body, but also a different row or a different 'If-Match', because the key "
+        + "covers the whole request (retry the identical request to replay its result, or send a fresh key); "
+        + "'conflict' means a constraint the database enforces refused the write — a value "
         + "another record already holds on a field declared unique, or a delete another record still "
         + "references through a 'ref' declaring onDelete: restrict. The 'violations' array names the field "
         + "for the first of those and carries a fix suggestion for both.",
@@ -287,48 +344,108 @@ internal static class DataApiDocumentation
     /// (<c>owners</c>, <c>inspections</c>), and guessing a singular form would invent a word the descriptor
     /// does not contain — which is exactly what an agent then cannot map back to anything.
     /// </remarks>
-    /// <param name="operation">The operation.</param>
+    /// <param name="kind">The endpoint kind.</param>
     /// <param name="entity">The entity name, as the applied schema declares it.</param>
-    internal static string SummaryOf(DataOperation operation, string entity) => operation switch
+    internal static string SummaryOf(DataApiEndpointKind kind, string entity) => kind switch
     {
-        DataOperation.List => $"List '{entity}' rows",
-        DataOperation.Get => $"Read one '{entity}' row",
-        DataOperation.Create => $"Create one '{entity}' row",
-        DataOperation.Update => $"Update one '{entity}' row",
-        DataOperation.Delete => $"Delete one '{entity}' row",
-        _ => throw new InvalidOperationException($"No summary for operation '{operation}'."),
+        DataApiEndpointKind.List => $"List '{entity}' rows",
+        DataApiEndpointKind.Query => $"Query '{entity}' rows through a request body",
+        DataApiEndpointKind.Get => $"Read one '{entity}' row",
+        DataApiEndpointKind.Create => $"Create one '{entity}' row",
+        DataApiEndpointKind.Update => $"Update one '{entity}' row",
+        DataApiEndpointKind.Delete => $"Delete one '{entity}' row",
+        DataApiEndpointKind.Replace => $"Create or replace one '{entity}' row",
+        DataApiEndpointKind.BatchCreate => $"Create many '{entity}' rows in one transaction",
+        DataApiEndpointKind.BatchUpdate => $"Update many '{entity}' rows in one transaction",
+        DataApiEndpointKind.BatchDelete => $"Delete many '{entity}' rows in one transaction",
+        _ => throw new InvalidOperationException($"No summary for endpoint kind '{kind}'."),
     };
 
     /// <summary>
     /// The operation's own <c>description</c>: what it does, and every header behaviour a caller cannot infer.
     /// </summary>
-    /// <param name="operation">The operation.</param>
+    /// <param name="kind">The endpoint kind.</param>
     /// <param name="entity">The entity it serves, consulted for whether a row of it can be versioned.</param>
-    internal static string DescriptionOf(DataOperation operation, EntitySchema entity)
+    internal static string DescriptionOf(DataApiEndpointKind kind, EntitySchema entity)
     {
         ArgumentNullException.ThrowIfNull(entity);
-        return operation switch
+        return kind switch
         {
-            DataOperation.List => List,
-            DataOperation.Get => ReadOne(entity),
-            DataOperation.Create => Create,
-            DataOperation.Update => Update(entity),
-            DataOperation.Delete => Delete(entity),
-            _ => throw new InvalidOperationException($"No description for operation '{operation}'."),
+            DataApiEndpointKind.List => List,
+            DataApiEndpointKind.Query => QueryByBody,
+            DataApiEndpointKind.Get => ReadOne(entity),
+            DataApiEndpointKind.Create => Create,
+            DataApiEndpointKind.Update => Update(entity),
+            DataApiEndpointKind.Delete => Delete(entity),
+            DataApiEndpointKind.Replace => Replace(entity),
+            DataApiEndpointKind.BatchCreate => Batch(BatchCreateVerb),
+            DataApiEndpointKind.BatchUpdate => Batch(BatchUpdateVerb),
+            DataApiEndpointKind.BatchDelete => Batch(BatchDeleteVerb),
+            _ => throw new InvalidOperationException($"No description for endpoint kind '{kind}'."),
         };
     }
 
     /// <summary>
+    /// The three batch operations' shared prose: what a batch is, plus the verb's own opening sentence.
+    /// </summary>
+    /// <remarks>
+    /// One paragraph set for all three, because everything that makes a batch a batch — the transaction, the
+    /// per-row policy, the refusal list, the single key — is identical across them, and three copies is three
+    /// places for one of them to drift. Only the first sentence differs.
+    /// </remarks>
+    /// <param name="verb">The verb's own opening sentence.</param>
+    private static string Batch(string verb) =>
+        verb
+        + "\n\n**The batch is one transaction: every row is written, or none is.** A refusal on the last row "
+        + "leaves the first unwritten, so a caller repairs the rows the response names and resends the whole "
+        + "batch. There is no partial outcome to reconcile.\n\n"
+        + "**Every row is judged individually** against your own policy — the `WITH CHECK` predicate and, on a "
+        + "tenant-scoped entity, the tenant scope — exactly as the single-row route judges one. A batch is not "
+        + "a way to write rows a single call could not.\n\n"
+        + "**Every offending row is reported, not the first.** Each entry of `violations` carries a "
+        + "`/rows/{index}` pointer, so a five-hundred-row import is repaired in one round trip rather than "
+        + "five hundred. A row you cannot see and a row that does not exist are the *same* refusal, "
+        + "deliberately: telling them apart would let one request ask as many existence questions as it "
+        + "carries rows.\n\n"
+        + "**A `409` names the field and no row index.** A unique value is something you can guess, so an "
+        + "index would turn one collision probe into as many per request as the batch carries rows.\n\n"
+        + "**`Idempotency-Key` covers the whole batch**, because a batch is one request and a partial retry is "
+        + "not expressible. The same key with a different list of rows is a `409`, not a replay.";
+
+    /// <inheritdoc cref="Batch"/>
+    private const string BatchCreateVerb =
+        "Creates many rows in one transaction. Send `{\"rows\": [ … ]}`, each element the object the "
+        + "single-row create takes.";
+
+    /// <inheritdoc cref="Batch"/>
+    private const string BatchUpdateVerb =
+        "Updates many rows in one transaction. Send `{\"rows\": [ … ]}`, each element an object carrying the "
+        + "row's `id` plus the fields to change on it — partial, exactly as the single-row update is. There is "
+        + "no `If-Match` here: one version cannot condition many rows, and accepting one would check a single "
+        + "row while appearing to check all of them.";
+
+    /// <inheritdoc cref="Batch"/>
+    private const string BatchDeleteVerb =
+        "Deletes many rows in one transaction. Send `{\"rows\": [ … ]}`, each element a row `id`. The "
+        + "response is `200` with an empty `items` and a non-zero `affected`, not `204`, because it reports on "
+        + "many rows. **This `DELETE` carries a body**, which RFC 9110 §9.3.5 leaves undefined — an "
+        + "intermediary is permitted to strip it, so an empty batch is refused with `422` rather than read as "
+        + "\"no rows to delete\", which would be a silent success for a request that never arrived.";
+
+    /// <summary>
     /// The list operation's prose, carrying two of the four gaps this type exists for — preconditions on a
-    /// list, and a nullable sort key — plus the 200-not-403 behaviour a reader otherwise misreads.
+    /// list, and where nulls sort on a nullable key — plus the 200-not-403 behaviour a reader otherwise
+    /// misreads.
     /// </summary>
     private static string List =>
         "Reads a page of rows the caller's policy admits.\n\n"
         + Grammar + "\n\n"
-        + "The response is an envelope — `{ \"items\": [ … ], \"next\": <cursor or null> }` — and never a bare "
-        + "array. `next` is the cursor for the page after this one, and it is the *only* place that cursor "
-        + "appears: there is deliberately no `Link` or `Content-Range` header, so an agent reading the body "
-        + "never has to parse HTTP headers to keep paging.\n\n"
+        + "The response is an envelope — `{ \"items\": [ … ], \"next\": <cursor or null>, \"count\": "
+        + "<total or null> }` — and never a bare array. All three members are always present: `next` is the "
+        + "cursor for the page after this one and is null on the last, and `count` is null unless the request "
+        + "opted into it. `next` is the *only* place that cursor appears: there is deliberately no `Link` or "
+        + "`Content-Range` header, so an agent reading the body never has to parse HTTP headers to keep "
+        + "paging.\n\n"
         + "**A caller whose rule excludes every row is answered 200 with an empty page, not 403.** A rule "
         + "compiles to a row-level `USING` predicate, so a caller who fails it receives an *allow* carrying a "
         + "predicate that matches nothing. A 403 here means something else entirely: the operation is "
@@ -337,13 +454,65 @@ internal static class DataApiDocumentation
         + "**Neither precondition header is honoured on a list.** A page has no version of its own to compare, "
         + "so `If-Match` and `If-None-Match` are ignored here — not refused, as they would be on a write. "
         + "Condition a single row's read or write instead.\n\n"
-        + "**A nullable field cannot be a sort key**, and since every list over HTTP is paged (`limit` always "
-        + "resolves, to a configured default when the request names none), that is every list: `order` over a "
-        + "nullable field is refused with 422. A keyset cursor is a chain of comparisons with no `IS NULL` arm, "
-        + "so paging over a nullable key silently drops rows — which is why it is refused rather than answered. "
-        + "The consequence for the two null-placement modifiers is that `nullsfirst` and `nullslast` parse, and "
-        + "their effect is currently unobservable: the only reads that could show it are the unpaged ones this "
-        + "endpoint does not offer.";
+        + "**A nullable field is a sort key like any other, and `nullslast` is what it gets if you do not say "
+        + "otherwise.** Where a null sorts is never left to the database: SQLite and PostgreSQL disagree on "
+        + "the default for a given direction, so the placement is always explicit in the statement Alvo emits "
+        + "and `nullsfirst`/`nullslast` are how you change it. Paging honours the same placement, so a cursor "
+        + "walks the null-keyed rows too — which was not true before: such a read used to be refused with 422 "
+        + "rather than answered, because a keyset boundary that compared the value alone dropped rows "
+        + "silently.\n\n"
+        + "**Sorting by a nullable field costs more than sorting by a required one.** The null placement is "
+        + "emitted as a `CASE` expression over the key, which an index on that key cannot serve. Page by a "
+        + "required column where latency matters.\n\n"
+        + "**A `Prefer: count` preference is the only thing that fills the envelope's `count`.** It is the "
+        + "number of "
+        + "rows the query matches in total — narrowed by your policy and your filter, and *not* by `limit`, "
+        + "`offset` or `after` — so it does not shrink as you page. It is opt-in because it costs a second "
+        + "scan of the matching set on every request, and `count` is null on a request that did not ask. "
+        + "`count=planned` and `count=estimated` are accepted and degrade to an exact count: a planner "
+        + "estimate exists on one supported engine and not the other, and this API answers identically on "
+        + "both. What was applied comes back in `Preference-Applied`, and per RFC 7240 a preference this "
+        + "server does not recognise is ignored rather than refused — its absence from `Preference-Applied` "
+        + "is how that is reported.\n\n"
+        + "The count is taken in a second statement over the same filtered set, not in the page's own, "
+        + "because the page's statement carries the cursor boundary and a count composed into it would "
+        + "report the rows after the cursor. So *exact* means \"not an estimate\", not \"atomically "
+        + "consistent with `items`\": a write landing between the two can make the number differ by one.";
+
+    /// <summary>
+    /// The body-shaped collection read's prose: what it is for, what makes it the same read, and the two
+    /// things a caller can only learn here — that a value is not percent-encoded, and that a key is accepted
+    /// and does nothing.
+    /// </summary>
+    private static string QueryByBody =>
+        "Reads a page of rows the caller's policy admits, taking the same parameters in a JSON request "
+        + "body.\n\n"
+        + "**It exists for one reason: a filter a request line cannot carry.** Alvo's own budgets are "
+        + $"generous — {AlvoFilter.MaxTerms} filter terms and {AlvoFilter.MaxInCandidates} `in` candidates "
+        + "— and a proxy's URL limit is reached first, so `?id=in.(…400 ids…)` is refused by an "
+        + "intermediary with a 414 carrying no `violations` array at all. Sent as a body it is answered "
+        + "normally.\n\n"
+        + "**The body is a JSON object whose members are the query parameters**, and the grammar inside "
+        + "each value is exactly the one the query string carries: `{\"year\": \"gte.2020\", \"or\": "
+        + "[\"(color.eq.red,color.eq.blue)\"], \"select\": \"id,label:make\", \"limit\": 50}`. A "
+        + "repeated parameter is an array of strings; the same name twice in one object is refused, because "
+        + "JSON leaves the order of two such members undefined. `{}` is the empty query — every readable "
+        + "field, the default page.\n\n"
+        + "**Values are not percent-encoded here, and that is the point.** A query string carries the "
+        + "escaping of a value; a JSON string carries the value. So `{\"make\": \"like.100%\"}` is what "
+        + "`?make=like.100%25` means, and `+` is a plus rather than a space. Everything else is identical: "
+        + "the same parser, the same refusals, the same page envelope, the same `Prefer: count` "
+        + "preference.\n\n"
+        + "**This is a read and is gated as `list`.** A caller whose `list` is unconfigured is refused here "
+        + "exactly as on the collection `GET`, before the body is read at all — so a refusal never arrives "
+        + "dressed as a complaint about the body.\n\n"
+        + "**`Idempotency-Key` is accepted and ignored.** There is nothing to make idempotent: no row is "
+        + "written, so a retry costs a second read and nothing else. It is accepted rather than refused "
+        + "because several SDKs attach it to every `POST`.\n\n"
+        + "A refusal's `pointer` tells you where to look: an empty string or one beginning with `/` is a "
+        + "JSON Pointer into this body, and any other value is the *role* of a query parameter — `filter`, "
+        + "`order`, `limit`, `offset`, `after` or `select`.\n\n"
+        + Grammar;
 
     /// <summary>
     /// The filter, sort and paging grammar, stated once on the list operation rather than repeated on each of
@@ -427,22 +596,44 @@ internal static class DataApiDocumentation
     /// send one back as <c>If-Match</c> would be an instruction into a permanent 412.
     /// </summary>
     /// <param name="entity">The entity, consulted for whether a row of it can be versioned.</param>
+    private static string Replace(EntitySchema entity) =>
+        "Creates or replaces the row this path names, and returns it. A row that did not exist is created "
+        + "under the `id` in the path and answers 201 with a `Location`; one that did is replaced and answers "
+        + "200.\n\n"
+        + "**The row is written whole.** A field the body does not mention is written null rather than left at "
+        + "its stored value — that is the difference from `PATCH` on this same path, and it is why a body that "
+        + "omits a required field is refused with 422 naming the field rather than treated as a partial "
+        + "write. A field that is both required and hidden cannot be restated by a caller who cannot read it, "
+        + "which makes such an entity reachable only through `PATCH` for them.\n\n"
+        + "**The path is the only place `id` may appear.** A body naming `id` is refused exactly as it is "
+        + "everywhere else, and so is `tenant_id`: on a tenant-scoped entity a created row lands in the "
+        + "caller's own tenant, and a caller creating into another tenant uses `POST` on the collection.\n\n"
+        + "**The caller needs both `create` and `update`.** Which branch runs depends on stored data, so "
+        + "requiring only the branch's own operation would make the permission you need depend on whether the "
+        + "row happens to exist. An `id` already held by a row this caller cannot see answers 409: a primary "
+        + "key cannot collide silently, and the alternative would be writing over a row the caller's policy "
+        + "excludes.\n\n"
+        + UpdateConditioning(entity)
+        + "**`Idempotency-Key` makes the retry answer the row**, and a replay always answers 200 — never 201, "
+        + "and with no `Location`. A 201 reports that *this* request created the row, and a replay performs no "
+        + "act at all: it reports the state the first request left.";
+
     private static string Update(EntitySchema entity) =>
         "Partially updates one row and returns it. A field the body does not mention keeps its stored value — "
-        + "which is why this is a `PATCH` and there is no `PUT`: the underlying update is partial by contract, "
-        + "so a `PUT` would advertise whole-resource replacement that never happens.\n\n"
+        + "which is what separates this from `PUT` on the same path: that one replaces the row whole, and a "
+        + "field it omits is written null.\n\n"
         + "A write to a read-only field is refused with 422 rather than silently dropped, and so is a key the "
         + "entity does not declare. `id` and the framework-managed columns can never be rewritten, `tenant_id` "
         + "included: a row does not move between tenants.\n\n"
         + UpdateConditioning(entity)
-        + "**`Idempotency-Key` is accepted and ignored here — a known limitation, and this is what it costs.** "
-        + "The row's end state is unaffected: an update assigns *absolute* values to named fields, so applying "
-        + "it twice leaves exactly the state applying it once leaves, and there is no duplicate row to prevent. "
-        + "The *outcome you observe* is another matter. "
+        + "**`Idempotency-Key` makes the retry answer the row.** The row's end state never needed it — an "
+        + "update assigns *absolute* values to named fields, so applying it twice leaves what applying it once "
+        + "leaves — but the *outcome you observe* did. "
         + UpdateRetry(entity)
-        + " Refusing the header instead would break the widespread client habit of attaching it to every "
-        + "mutating request and would reject requests that are otherwise fine, so it is accepted — and declared "
-        + "here rather than left to be discovered.";
+        + " The key covers the whole request: the method, the entity, **the row it addresses** and the "
+        + "`If-Match` it carries, as well as the body. So the same key against another row, or against this "
+        + "row with a different `If-Match`, is 409 rather than a replay of the first — a key is a claim about "
+        + "one request, not a licence for the next one.";
 
     /// <summary>
     /// The delete's prose, conditional on the same trait <see cref="Update"/> is and for the same reason.
@@ -452,14 +643,14 @@ internal static class DataApiDocumentation
         "Deletes one row and returns no body. A row the caller's policy excludes is 404, exactly as an absent "
         + "one is.\n\n"
         + DeleteConditioning(entity)
-        + "**`Idempotency-Key` is accepted and ignored here — the same known limitation as on the update.** "
-        + "Removing one row twice leaves the same state as removing it once, so nothing is duplicated; but a "
-        + "retry after a lost `204` is a "
+        + "**`Idempotency-Key` makes the retry answer `204`.** Removing one row twice always left the same "
+        + "state, so nothing was ever duplicated; what a retry after a lost `204` could not tell you is "
+        + "whether the row was yours to have removed. Without a key that retry is a "
         + (AlvoManagedColumns.VersionColumn(entity) is null
-            ? "**404 you cannot tell apart from somebody else's delete**, "
-            : "**404 (or a 412) you cannot tell apart from somebody else's delete**, ")
-        + "which is precisely the question a key would have answered. Read the row back rather than treating the "
-        + "second answer as evidence the first attempt did not land.";
+            ? "**404 you cannot tell apart from somebody else's delete**"
+            : "**404 (or a 412) you cannot tell apart from somebody else's delete**")
+        + "; with one it is `204`, because the key records that this caller already performed exactly this "
+        + "delete. The key covers the row and the `If-Match` too, so reusing it against another row is 409.";
 
     /// <summary>
     /// How an update of this entity can be conditioned — or that it cannot be.
@@ -543,20 +734,17 @@ internal static class DataApiDocumentation
     /// <param name="entity">The entity, consulted for whether a row of it can be versioned.</param>
     private static string UpdateRetry(EntitySchema entity) =>
         AlvoManagedColumns.VersionColumn(entity) is null
-            ? "If the 200 is lost to a dropped connection and you retry the identical request, the retry "
-            + "assigns the same absolute values again and is answered 200 — so unlike an audited entity, there "
-            + "is no 412 to misread. What you cannot learn is whether anybody changed the row between your two "
-            + "attempts: this entity keeps no version, so the retry overwrites a concurrent change exactly as "
-            + "the first attempt would have, and silently. **Read the row back and compare it with what you "
-            + "sent** before treating the write as settled. That is the whole of retry safety on this verb "
-            + "here; `audit: true` on the entity is what buys the rest."
-            : "If you send `PATCH … If-Match: \"v1\"`, the 200 is lost to a dropped connection, and you retry "
-            + "the identical request, the write has landed and the row is at `v2` — so the retry is **412, and "
-            + "you cannot tell it apart from someone else having changed the row**. Resolving that 412 the "
-            + "usual way (re-read, re-merge, re-apply) would clobber a genuinely concurrent change if it *was* "
-            + "someone else. A key would have told you it was your own write. So retry safety on this verb is "
-            + "`If-Match` plus a re-read, not a key: after a lost response, **read the row back and compare it "
-            + "with what you sent** before deciding the write did not land.";
+            ? "Send a key and a retry of the identical request is answered with the row this caller already "
+            + "wrote, rather than performed a second time. Without one the retry still assigns the same "
+            + "absolute values and is answered 200, but this entity keeps no version, so it overwrites a "
+            + "concurrent change exactly as the first attempt would have — and silently. **Read the row back "
+            + "and compare it with what you sent** before treating an unkeyed write as settled."
+            : "Send `PATCH … If-Match: \"v1\"` with a key, lose the 200 to a dropped connection, and retry "
+            + "the identical request: the row is at `v2`, but the key records that `v2` is *your* write, so "
+            + "the retry is answered 200 with the row. Without a key the same retry is **412, and you cannot "
+            + "tell it apart from someone else having changed the row** — and resolving that 412 the usual way "
+            + "(re-read, re-merge, re-apply) would clobber a genuinely concurrent change if it *was* someone "
+            + "else.";
 
     /// <summary>The document-level prose: what this API is, and the invariants that hold on every route.</summary>
     /// <remarks>

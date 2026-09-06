@@ -179,7 +179,7 @@ namespace MMLib.Alvo.Data;
 /// <para>
 /// <b>A write's two concurrency channels, and where each one is decided.</b> An
 /// <see cref="AlvoPrecondition"/> is the caller's claim about the version they are changing, and an
-/// <see cref="AlvoIdempotency"/> token is their claim that a create may already have happened. Both are
+/// <see cref="AlvoIdempotency"/> token is their claim that this write may already have happened. Both are
 /// optional, and an implementation must honour three rules about them:
 /// </para>
 /// <list type="bullet">
@@ -206,8 +206,10 @@ namespace MMLib.Alvo.Data;
 ///   </item>
 /// </list>
 /// <para>
-/// <b>An idempotency record stores the created row id, and a replay re-reads that row under a freshly
-/// resolved <c>get</c> decision for the replaying caller</b> — reading <em>and</em> masking through it. Not
+/// <b>An idempotency record stores the ids of the rows the write touched, and a replay re-reads them under
+/// a freshly resolved <c>get</c> decision for the replaying caller</b> — reading <em>and</em> masking
+/// through it. A replayed delete is the one that reads nothing: its rows are gone by construction, so the
+/// answer is the same "it is gone" the first call gave, produced without a read. Not
 /// under the <c>create</c> decision the call arrived with, and the reason is the one a future implementer has
 /// to know rather than rediscover: a <c>create</c> decision has no <c>USING</c> predicate by contract
 /// (<see cref="PolicyDecision.Using"/> is <see langword="null"/> — there is no stored row to filter when the
@@ -234,7 +236,16 @@ namespace MMLib.Alvo.Data;
 /// A returned <see cref="AlvoRecord"/> carries every non-hidden field the schema declares for that
 /// entity, including framework-managed columns (<c>id</c>, and — on a tenant-scoped entity —
 /// <c>tenant_id</c>); masking removes only descriptor-declared <c>hidden</c> fields, never a
-/// framework column. Field values use the same CLR types <see cref="AlvoRecord"/>'s own remarks
+/// framework column.
+/// <b><see cref="AlvoQuery.Select"/> is the one other thing that narrows this key set, and it never
+/// narrows it below two groups.</b> A projected read returns the fields the projection named, plus
+/// every column <see cref="Schema.AlvoManagedColumns.For(Schema.EntitySchema)"/> reports for the
+/// entity — the row key alone is what a keyset cursor is minted from — plus every field named in
+/// <see cref="AlvoQuery.Sort"/>, because no implementation can order by a column it did not read. Both
+/// exemptions are contract, not courtesy: a caller reading "the fields I selected" and receiving
+/// those plus a sort key has not been surprised, and one that received *fewer* would have lost its
+/// paging. Masking remains the only thing that removes a field the caller did ask for.
+/// Field values use the same CLR types <see cref="AlvoRecord"/>'s own remarks
 /// describe the interpreter reading (<see cref="Guid"/> for a <c>uuid</c> field, never a
 /// <see cref="string"/> or a byte array; <see cref="DateTimeOffset"/> for a timestamp; <c>decimal</c>
 /// for a <c>decimal</c> field), so a caller of this port — and the adversarial suite itself — can
@@ -285,8 +296,10 @@ public interface IAlvoData
     /// <see cref="AlvoPage.NextCursor"/> is an opaque, provider-issued token — only the implementation that
     /// issued it may interpret a later <see cref="AlvoQuery.After"/> carrying it back, and it is
     /// <see langword="null"/> exactly when this page is the last one the query has. <see cref="AlvoPage.TotalCount"/>
-    /// is always <see langword="null"/> in F3: no implementation runs a <c>COUNT</c> query, because nothing
-    /// here has asked for one yet.
+    /// is <see langword="null"/> unless <see cref="AlvoQuery.IncludeTotalCount"/> asked for it, and when it did it
+    /// counts the <b>policy-filtered</b> set narrowed by the caller's filter — never the table, and never this
+    /// page: an implementation composes the count over the same <c>WHERE</c> terms as the page and drops the
+    /// ordering, the window and the cursor boundary.
     /// </returns>
     /// <exception cref="AlvoAuthorizationException">
     /// No policy allows <c>list</c> on this entity for <paramref name="context"/>, or
@@ -381,6 +394,13 @@ public interface IAlvoData
     /// Compared against the row-locked pre-image inside the write transaction — see the type remarks for the
     /// ordering rules, which are part of the contract.
     /// </param>
+    /// <param name="idempotency">
+    /// The caller's idempotency token, or <see langword="null"/> for an ordinary write. With a token, the
+    /// first write is recorded against it and a replay carrying the same
+    /// <see cref="AlvoIdempotency.Fingerprint"/> is answered without writing again — by re-reading the recorded row under a
+    /// freshly resolved <c>get</c> decision, exactly as a replayed create is.
+    /// The record is scoped to the caller's tenant and user, and a token from an anonymous caller is refused.
+    /// </param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>The updated row, with every <c>hidden</c> field stripped.</returns>
     /// <exception cref="AlvoRecordNotFoundException">
@@ -402,7 +422,93 @@ public interface IAlvoData
     /// <exception cref="AlvoConstraintViolationException">
     /// <paramref name="values"/> supplies a value another record already holds on a <c>unique</c> field.
     /// </exception>
-    Task<AlvoRecord> UpdateAsync(string entity, Guid id, IReadOnlyDictionary<string, object?> values, AlvoContext context, AlvoPrecondition? precondition = null, CancellationToken cancellationToken = default);
+    /// <exception cref="AlvoIdempotencyConflictException">
+    /// <paramref name="idempotency"/>'s key was already used for a request with a different fingerprint.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="idempotency"/> is supplied for an anonymous <paramref name="context"/> — see
+    /// <see cref="AlvoIdempotency.EnsureUsableKey"/>. Decided from the token and the context alone, before
+    /// any policy is resolved, so it discloses nothing about the entity.
+    /// </exception>
+    Task<AlvoRecord> UpdateAsync(string entity, Guid id, IReadOnlyDictionary<string, object?> values, AlvoContext context, AlvoPrecondition? precondition = null, AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default);
+
+    /// <summary>Creates or replaces the row <paramref name="id"/> names, writing it whole.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This is the one operation where the caller supplies the row's key, and only through
+    /// <paramref name="id"/>.</b> <c>id</c> inside <paramref name="values"/> is refused here exactly as it is
+    /// on every other route — the store still mints every key it is not handed one for, and
+    /// <see cref="CreateAsync"/> and the batch verbs are unchanged.
+    /// </para>
+    /// <para>
+    /// <b>It replaces; it does not merge.</b> A field <paramref name="values"/> does not mention is written
+    /// <see langword="null"/>, not left at its stored value — that is the whole difference from
+    /// <see cref="UpdateAsync"/>, which is partial by contract. A body that omits a <c>required</c> field
+    /// therefore cannot express the row and is refused with <see cref="ArgumentException"/> naming it; a
+    /// caller who wants to change one field wants <see cref="UpdateAsync"/>. Framework-managed columns are
+    /// exempt: <c>created_at</c> and <c>created_by</c> survive a replacement, because a replaced row is the
+    /// same row.
+    /// </para>
+    /// <para>
+    /// <b>Both branches are gated, and the caller needs both permissions.</b> An implementation resolves
+    /// <c>create</c> and <c>update</c> and refuses unless both allow, so neither branch is reachable by
+    /// naming an id that happens to fall the other way. The <c>WITH CHECK</c> predicate is evaluated on the
+    /// candidate row on <em>both</em> branches — an upsert that judges only the branch with a stored row to
+    /// compare against is a policy bypass on half its inputs.
+    /// </para>
+    /// <para>
+    /// <b>A row this caller's <c>USING</c> excludes is not replaced and not overwritten.</b> The pre-image
+    /// read finds nothing, so the create branch runs and its insert collides with the stored row's key:
+    /// the answer is <see cref="AlvoConstraintViolationException"/>. That the answer differs from a free
+    /// id's is a disclosure this operation cannot avoid — a primary key cannot collide silently — and it is
+    /// narrowed by requiring <c>create</c> as well as <c>update</c>, and by the caller having had to hold the
+    /// id already.
+    /// </para>
+    /// <para>
+    /// <b>On a tenant-scoped entity the create branch places the row in the caller's own tenant</b>, because
+    /// <c>tenant_id</c> is refused from <paramref name="values"/> on this route whichever branch runs — a
+    /// branch-dependent answer to "may I write this column" would report whether the row exists. A caller
+    /// creating into another tenant uses <see cref="CreateAsync"/>.
+    /// </para>
+    /// </remarks>
+    /// <param name="entity">The entity name.</param>
+    /// <param name="id">The row's identity: the row to replace, or the id to create it under.</param>
+    /// <param name="values">The whole row, minus the framework-managed columns and any <c>computed</c> field.</param>
+    /// <param name="context">The caller performing the write.</param>
+    /// <param name="precondition">
+    /// The version the caller believes the row holds, or <see langword="null"/> to write unconditionally.
+    /// Compared against the row-locked pre-image under the same ordering an update follows. On the create
+    /// branch there is no version to match, so a supplied precondition fails: naming a version is asserting
+    /// the row exists.
+    /// </param>
+    /// <param name="idempotency">
+    /// The caller's idempotency token, or <see langword="null"/> for an ordinary write. A replay answers
+    /// <see cref="AlvoReplaceResult.Created"/> <see langword="false"/> however the first request went,
+    /// because it reports the state that request left rather than performing an act of creation.
+    /// </param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <exception cref="AlvoAuthorizationException">
+    /// No policy allows <c>create</c> or no policy allows <c>update</c> on this entity for
+    /// <paramref name="context"/>; the candidate row fails the <c>WITH CHECK</c> predicate on whichever
+    /// branch ran; or <paramref name="values"/> names a column the caller may not write, <c>id</c> and
+    /// <c>tenant_id</c> included.
+    /// </exception>
+    /// <exception cref="AlvoConstraintViolationException">
+    /// A unique or reference constraint refused the row — including a collision on <paramref name="id"/>
+    /// itself, which is what a row excluded by this caller's <c>USING</c> answers.
+    /// </exception>
+    /// <exception cref="AlvoPreconditionFailedException">
+    /// <paramref name="precondition"/> does not match the stored row's version, the row does not exist, or
+    /// this entity keeps no version of a row at all.
+    /// </exception>
+    /// <exception cref="AlvoIdempotencyConflictException">
+    /// <paramref name="idempotency"/>'s key was already used for a request with a different fingerprint.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="values"/> omits a <c>required</c> field, so it cannot express the whole row; or
+    /// <paramref name="idempotency"/> is supplied for an anonymous <paramref name="context"/>.
+    /// </exception>
+    Task<AlvoReplaceResult> ReplaceAsync(string entity, Guid id, IReadOnlyDictionary<string, object?> values, AlvoContext context, AlvoPrecondition? precondition = null, AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default);
 
     /// <summary>Deletes a row by id.</summary>
     /// <param name="entity">The entity name.</param>
@@ -412,6 +518,13 @@ public interface IAlvoData
     /// The version the caller believes the row holds, or <see langword="null"/> to delete unconditionally.
     /// Compared against the row-locked pre-image inside the delete's own transaction, under the same ordering
     /// rules an update follows.
+    /// </param>
+    /// <param name="idempotency">
+    /// The caller's idempotency token, or <see langword="null"/> for an ordinary write. With a token, the
+    /// first write is recorded against it and a replay carrying the same
+    /// <see cref="AlvoIdempotency.Fingerprint"/> is answered without writing again — by answering that the row is gone
+    /// without reading anything, because there is nothing left to read.
+    /// The record is scoped to the caller's tenant and user, and a token from an anonymous caller is refused.
     /// </param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <exception cref="AlvoRecordNotFoundException">
@@ -426,5 +539,195 @@ public interface IAlvoData
     /// <exception cref="AlvoConstraintViolationException">
     /// Another record still references this one through a <c>ref</c> declaring <c>onDelete: "restrict"</c>.
     /// </exception>
-    Task DeleteAsync(string entity, Guid id, AlvoContext context, AlvoPrecondition? precondition = null, CancellationToken cancellationToken = default);
+    /// <exception cref="AlvoIdempotencyConflictException">
+    /// <paramref name="idempotency"/>'s key was already used for a request with a different fingerprint.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="idempotency"/> is supplied for an anonymous <paramref name="context"/> — see
+    /// <see cref="AlvoIdempotency.EnsureUsableKey"/>. Decided from the token and the context alone, before
+    /// any policy is resolved, so it discloses nothing about the entity.
+    /// </exception>
+    Task DeleteAsync(string entity, Guid id, AlvoContext context, AlvoPrecondition? precondition = null, AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default);
+    /// <summary>Creates many rows in one transaction.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>One transaction: either every row is written or none is.</b> A refusal on the last row undoes the
+    /// first, and no caller ever observes a half-applied batch — which is what makes the refusal list usable,
+    /// because a caller repairs the rows it names and resends the whole batch.
+    /// </para>
+    /// <para>
+    /// <b>Every row is judged individually</b>, against this caller's <c>WITH CHECK</c> predicate and the
+    /// synthesized tenant scope, exactly as its single-row sibling would be. "Checks the first row and lets
+    /// the rest through" is the failure this contract exists to forbid: a batch is not a licence to write
+    /// rows a single call could not.
+    /// </para>
+    /// <para>
+    /// <b>A row this caller cannot see and a row that does not exist are one refusal</b>, byte for byte.
+    /// Distinguishing them would make a batch answer as many existence questions per request as it carries
+    /// rows — the oracle the single-row <see cref="AlvoRecordNotFoundException"/> already closes, multiplied
+    /// by the batch size.
+    /// </para>
+    /// <para>
+    /// <b>One key for the whole batch.</b> A batch is one request, so a partial retry is not expressible and
+    /// a per-row key would promise one. The fingerprint covers every row, so the same key with a different
+    /// list is <see cref="AlvoIdempotencyConflictException"/> rather than a replay.
+    /// </para>
+    /// </remarks>
+    /// <param name="entity">The entity name.</param>
+    /// <param name="rows">The payloads to create, in the order the caller supplied them.</param>
+    /// <param name="context">The caller performing the writes.</param>
+    /// <param name="idempotency">
+    /// The caller's token for the whole batch, or <see langword="null"/> for an ordinary write. A replay
+    /// carrying the same <see cref="AlvoIdempotency.Fingerprint"/> answers the recorded rows, re-read under a
+    /// freshly resolved <c>get</c> decision, without writing again.
+    /// </param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The rows this batch wrote, or every reason it wrote none.</returns>
+    /// <exception cref="AlvoAuthorizationException">
+    /// No policy allows this operation on this entity for <paramref name="context"/> at all. A refusal that
+    /// concerns <em>rows</em> travels on <see cref="AlvoBatchResult.Refusals"/> instead: this exception is
+    /// for the decision that is made before any row is looked at, so it discloses nothing about them.
+    /// </exception>
+    /// <exception cref="AlvoConstraintViolationException">
+    /// A row collides with another record on a <c>unique</c> field. It carries <b>no row index</b>, and that
+    /// is deliberate: unique values are caller-guessable, so an index would turn one collision probe into as
+    /// many per request as the batch carries rows.
+    /// </exception>
+    /// <exception cref="AlvoIdempotencyConflictException">
+    /// <paramref name="idempotency"/>'s key was already used for a request with a different fingerprint.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// The row list is empty — never read as a successful write of nothing — or
+    /// <paramref name="idempotency"/> is supplied for an anonymous <paramref name="context"/>.
+    /// </exception>
+    Task<AlvoBatchResult> CreateManyAsync(string entity, IReadOnlyList<IReadOnlyDictionary<string, object?>> rows, AlvoContext context, AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default);
+
+    /// <summary>Updates many rows by id in one transaction, each with its own partial payload.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>One transaction: either every row is written or none is.</b> A refusal on the last row undoes the
+    /// first, and no caller ever observes a half-applied batch — which is what makes the refusal list usable,
+    /// because a caller repairs the rows it names and resends the whole batch.
+    /// </para>
+    /// <para>
+    /// <b>Every row is judged individually</b>, against this caller's <c>WITH CHECK</c> predicate and the
+    /// synthesized tenant scope, exactly as its single-row sibling would be. "Checks the first row and lets
+    /// the rest through" is the failure this contract exists to forbid: a batch is not a licence to write
+    /// rows a single call could not.
+    /// </para>
+    /// <para>
+    /// <b>A row this caller cannot see and a row that does not exist are one refusal</b>, byte for byte.
+    /// Distinguishing them would make a batch answer as many existence questions per request as it carries
+    /// rows — the oracle the single-row <see cref="AlvoRecordNotFoundException"/> already closes, multiplied
+    /// by the batch size.
+    /// </para>
+    /// <para>
+    /// <b>One key for the whole batch.</b> A batch is one request, so a partial retry is not expressible and
+    /// a per-row key would promise one. The fingerprint covers every row, so the same key with a different
+    /// list is <see cref="AlvoIdempotencyConflictException"/> rather than a replay.
+    /// </para>
+    /// <para>
+    /// <b>A batch that names one row more than once is refused, and an implementor must refuse it.</b> Every
+    /// row is judged against its own pre-image before any row is written, so two entries for one row are both
+    /// judged against the <em>original</em> and then both applied — leaving a composition no verdict ever saw,
+    /// which is a <c>WITH CHECK</c> bypass. See <see cref="AlvoAuthorizationException.RowNamedTwice"/> for the
+    /// worked example and for why folding the entries is not the answer.
+    /// </para>
+    /// </remarks>
+    /// <param name="entity">The entity name.</param>
+    /// <param name="rows">The rows to change, in the order the caller supplied them.</param>
+    /// <param name="context">The caller performing the writes.</param>
+    /// <param name="idempotency">
+    /// The caller's token for the whole batch, or <see langword="null"/>. See
+    /// <see cref="CreateManyAsync"/> for what a replay answers.
+    /// </param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The rows this batch wrote, or every reason it wrote none.</returns>
+    /// <exception cref="AlvoAuthorizationException">
+    /// No policy allows this operation on this entity for <paramref name="context"/> at all. A refusal that
+    /// concerns <em>rows</em> travels on <see cref="AlvoBatchResult.Refusals"/> instead: this exception is
+    /// for the decision that is made before any row is looked at, so it discloses nothing about them.
+    /// </exception>
+    /// <exception cref="AlvoConstraintViolationException">
+    /// A row collides with another record on a <c>unique</c> field. It carries <b>no row index</b>, and that
+    /// is deliberate: unique values are caller-guessable, so an index would turn one collision probe into as
+    /// many per request as the batch carries rows.
+    /// </exception>
+    /// <exception cref="AlvoIdempotencyConflictException">
+    /// <paramref name="idempotency"/>'s key was already used for a request with a different fingerprint.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// The row list is empty — never read as a successful write of nothing — or
+    /// <paramref name="idempotency"/> is supplied for an anonymous <paramref name="context"/>.
+    /// </exception>
+    Task<AlvoBatchResult> UpdateManyAsync(string entity, IReadOnlyList<AlvoRowPatch> rows, AlvoContext context, AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default);
+
+    /// <summary>Deletes many rows by id in one transaction.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>One transaction: either every row is written or none is.</b> A refusal on the last row undoes the
+    /// first, and no caller ever observes a half-applied batch — which is what makes the refusal list usable,
+    /// because a caller repairs the rows it names and resends the whole batch.
+    /// </para>
+    /// <para>
+    /// <b>Every row is judged individually</b>, against this caller's <c>WITH CHECK</c> predicate and the
+    /// synthesized tenant scope, exactly as its single-row sibling would be. "Checks the first row and lets
+    /// the rest through" is the failure this contract exists to forbid: a batch is not a licence to write
+    /// rows a single call could not.
+    /// </para>
+    /// <para>
+    /// <b>A row this caller cannot see and a row that does not exist are one refusal</b>, byte for byte.
+    /// Distinguishing them would make a batch answer as many existence questions per request as it carries
+    /// rows — the oracle the single-row <see cref="AlvoRecordNotFoundException"/> already closes, multiplied
+    /// by the batch size.
+    /// </para>
+    /// <para>
+    /// <b>One key for the whole batch.</b> A batch is one request, so a partial retry is not expressible and
+    /// a per-row key would promise one. The fingerprint covers every row, so the same key with a different
+    /// list is <see cref="AlvoIdempotencyConflictException"/> rather than a replay.
+    /// </para>
+    /// <para>
+    /// <b>No precondition, and that is a decision rather than an omission.</b> An <see cref="AlvoPrecondition"/>
+    /// is one version, and a batch addresses many rows — so the header a single-row delete honours has no
+    /// meaning here, and accepting one version for a list would either check one row or check none while
+    /// looking as though it checked all. A caller who needs per-row conditions performs per-row deletes.
+    /// </para>
+    /// <para>
+    /// <b>A batch that names one row more than once is refused, and an implementor must refuse it.</b> Every
+    /// row is judged against its own pre-image before any row is written, so two entries for one row are both
+    /// judged against the <em>original</em> and then both applied — leaving a composition no verdict ever saw,
+    /// which is a <c>WITH CHECK</c> bypass. See <see cref="AlvoAuthorizationException.RowNamedTwice"/> for the
+    /// worked example and for why folding the entries is not the answer.
+    /// </para>
+    /// </remarks>
+    /// <param name="entity">The entity name.</param>
+    /// <param name="ids">The rows to remove, in the order the caller supplied them.</param>
+    /// <param name="context">The caller performing the deletes.</param>
+    /// <param name="idempotency">
+    /// The caller's token for the whole batch, or <see langword="null"/>. A replayed delete reads nothing:
+    /// its rows are gone by construction, so the record itself is the whole answer.
+    /// </param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>
+    /// How many rows were removed, or every reason none were. <see cref="AlvoBatchResult.Rows"/> is always
+    /// empty — a delete produces none, which is why <see cref="AlvoBatchResult.Affected"/> exists.
+    /// </returns>
+    /// <exception cref="AlvoAuthorizationException">
+    /// No policy allows this operation on this entity for <paramref name="context"/> at all. A refusal that
+    /// concerns <em>rows</em> travels on <see cref="AlvoBatchResult.Refusals"/> instead: this exception is
+    /// for the decision that is made before any row is looked at, so it discloses nothing about them.
+    /// </exception>
+    /// <exception cref="AlvoConstraintViolationException">
+    /// A row collides with another record on a <c>unique</c> field. It carries <b>no row index</b>, and that
+    /// is deliberate: unique values are caller-guessable, so an index would turn one collision probe into as
+    /// many per request as the batch carries rows.
+    /// </exception>
+    /// <exception cref="AlvoIdempotencyConflictException">
+    /// <paramref name="idempotency"/>'s key was already used for a request with a different fingerprint.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// The row list is empty — never read as a successful write of nothing — or
+    /// <paramref name="idempotency"/> is supplied for an anonymous <paramref name="context"/>.
+    /// </exception>
+    Task<AlvoBatchResult> DeleteManyAsync(string entity, IReadOnlyList<Guid> ids, AlvoContext context, AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default);
 }

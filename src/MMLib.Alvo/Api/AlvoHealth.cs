@@ -22,9 +22,10 @@ public static class AlvoHealth
 
     /// <summary>The route a readiness probe calls: <em>may this process receive traffic</em>.</summary>
     /// <remarks>
-    /// 503 until Alvo's boot has primed the schema and the policy catalog, 200 once it has. A failing readiness
-    /// probe only removes the pod's address from the service's endpoints, which is precisely the right
-    /// consequence. The response body carries the boot phase and nothing else: the reason a boot refused can
+    /// 503 until Alvo's boot has primed the schema and the policy catalog, 200 once it has — and 503 again if
+    /// the store stops answering, which is the <em>continuing</em> half a boot that ran once cannot report. A
+    /// failing readiness probe only removes the pod's address from the service's endpoints, which is precisely
+    /// the right consequence. The response body carries the boot phase and nothing else: the reason a boot refused can
     /// hold a connection string, and this route is unauthenticated by design.
     /// </remarks>
     public const string ReadinessPath = "/health/ready";
@@ -39,4 +40,32 @@ public static class AlvoHealth
 
     /// <summary>The name Alvo's own schema-applied check is registered under.</summary>
     internal const string SchemaCheckName = "alvo-schema";
+
+    /// <summary>The name Alvo's own database-reachability check is registered under.</summary>
+    internal const string DatabaseCheckName = "alvo-database";
+
+    /// <summary>
+    /// How long <see cref="DatabaseCheckName"/> may take before the health-check service reports it as failed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Carried by <c>HealthCheckRegistration.Timeout</c> rather than by the check itself</b>, so the
+    /// framework's own linked cancellation source is what enforces it. It is a <em>cooperative</em> bound, and
+    /// that is worth stating precisely: the framework cancels the token it handed the check and then awaits it,
+    /// so a probe that <b>honours</b> its token turns into a 503 while one that ignores the token holds the
+    /// request. Honouring it is the obligation
+    /// <see cref="MMLib.Alvo.Data.IAlvoDataReachability.ProbeAsync"/> states and the reachability contract suite
+    /// asserts; for a probe that breaks it, the backstop is the orchestrator's own probe timeout, which is
+    /// outside this process either way.
+    /// </para>
+    /// <para>
+    /// <b>Two seconds, and a constant rather than configuration.</b> A refused connection fails in
+    /// milliseconds; the case a bound exists for is a <em>hanging</em> one — packet loss to a database whose
+    /// driver would otherwise wait out its own connect timeout, fifteen seconds on Npgsql — and a readiness
+    /// answer that arrives after the orchestrator's own probe timeout is a failure with extra steps. The value
+    /// that would actually need tuning is that orchestrator's timeout, which lives outside this process, so a
+    /// knob here would configure the wrong end.
+    /// </para>
+    /// </remarks>
+    internal static TimeSpan DatabaseProbeTimeout { get; } = TimeSpan.FromSeconds(2);
 }

@@ -27,7 +27,7 @@ namespace MMLib.Alvo.Host.Tests;
 internal sealed class AlvoHostWorld : IAsyncDisposable
 {
     internal const string AdminKeyId = "host-admin";
-    internal const string AdminSecret = "host-admin-secret";
+    internal const string AdminSecret = "host-admin-secret-long-enough-for-the-floor";
     internal const string ApiKeyHeader = "X-Alvo-Api-Key";
     internal const string DefaultDescriptorFileName = "host-boot.alvo.json";
 
