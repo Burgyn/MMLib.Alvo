@@ -303,6 +303,33 @@ public abstract class AlvoDataReplaceTests : AlvoDataFixture
         VersionOf(replay.Row).ShouldBe(VersionOf(first.Row), "a replay performs no write, so nothing moved");
     }
 
+    /// <summary>A keyed replace onto an id somebody else holds answers the conflict, not a retry storm.</summary>
+    /// <remarks>
+    /// <b>The half of the key-race fallback a test can pin.</b> A collision on the row key is translated, and
+    /// a translated refusal is not what the retry loop matches — so the idempotent path answers it by reading
+    /// the record once more. When no record turns up, as here, the conflict is the answer and it arrives
+    /// immediately. The other half — a record that <em>did</em> turn up, meaning our own request arrived
+    /// twice — needs two genuinely concurrent transactions and is covered by construction rather than by a
+    /// fact; §10a records that.
+    /// </remarks>
+    [Fact]
+    public async Task A_keyed_replace_onto_a_taken_id_answers_the_conflict_rather_than_exhausting_its_retries()
+    {
+        var world = await TenantedWorldAsync();
+        var theirs = await world.Data.CreateAsync(
+            Invoices, TenantPayload("Theirs", world.Globex), world.GlobexCaller, cancellationToken: Ct);
+
+        var refusal = await Should.ThrowAsync<AlvoConstraintViolationException>(
+            () => world.Data.ReplaceAsync(
+                Invoices, IdOf(theirs), Payload("Mine now"), world.AcmeCaller,
+                idempotency: TokenFor(Invoices), cancellationToken: Ct));
+
+        // Not the exhausted-retry InvalidOperationException: ten attempts on a conflict that can never clear
+        // is the #138 shape this port already paid to remove.
+        refusal.Kind.ShouldBe(AlvoConstraintKind.Unique);
+        refusal.Fields.ShouldBe([AlvoManagedColumns.Id]);
+    }
+
     /// <summary>An <c>If-Match</c> on the create branch cannot match anything.</summary>
     /// <remarks>
     /// Naming a version is asserting the row exists, so a precondition supplied for an id nothing holds is

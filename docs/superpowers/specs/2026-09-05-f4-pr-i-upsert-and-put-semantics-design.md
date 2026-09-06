@@ -516,17 +516,28 @@ The suite has to answer one question above all others: **does `WITH CHECK` run o
 both branches?** An upsert that checks the update branch and lets the create branch through is a policy
 bypass, and it is the failure this design is most likely to have.
 
-- **Inherited adversarial suite.** `ReplaceAsync` joins `AlvoDataAdversarialTests`, so `InMemoryAlvoData`,
+- **A new inherited suite, `AlvoDataReplaceTests`, rather than facts added to `AlvoDataAdversarialTests`** —
+  a deviation from what this section first said. The two use different fixtures (`AlvoDataAdversarialTests`
+  does not inherit `AlvoDataFixture` and carries its own entities), so joining it would have meant rebuilding
+  this route's tenant and owner worlds inside a class that had no use for them. The property that mattered
+  survives: the suite is `public abstract` and runs through one concrete leg per driver, so `InMemoryAlvoData`,
   SQLite and PostgreSQL are held to one contract. A rule that refuses the candidate refuses it on **both**
   branches; the pin fails if either branch skips the check.
 - **The oracle is pinned as designed behaviour**, not left to chance: a test asserts that a PUT on an id
   held by a row outside the caller's `USING` answers `409`, and one asserts that a caller lacking `create`
   gets `403` for that same id — i.e. that the narrowing in §3 actually narrows.
-- **The translator change is fenced on both sides.** A caller-keyed collision on `id` translates to
-  `AlvoConstraintKind.Unique` with `Fields: ["id"]` and renders `409`; a collision on a **framework-minted**
-  id — every other write path — still propagates untranslated, because it is still the broken invariant the
-  existing remark describes. A third test pins that the idempotent PUT does **not** burn ten retries on it,
-  which is the #138 shape the untranslated exception would otherwise re-enter.
+- **The translator change is fenced on one side by a fact and on the other by construction**, and the
+  asymmetry is worth stating rather than papering over. The caller-keyed collision is pinned: a replace onto
+  an id another tenant holds answers `AlvoConstraintKind.Unique` with `Fields: ["id"]`, and a keyed one
+  answers it **immediately** rather than exhausting its retries — the #138 shape the untranslated exception
+  would otherwise re-enter. The framework-minted side has **no fact**, because it cannot be provoked through
+  the port: the framework mints a fresh UUID per write, so a collision on one is unreachable without a seam
+  invented for the test. What guards it instead is that `TranslatedAsync` takes `callerKeyed` with **no
+  default** and every one of the five other call sites passes an explicit `false`.
+- **The concurrent half of the key race is covered by construction, not by a fact.** Two genuinely concurrent
+  transactions carrying one key and one path id is what `ReplayedAfterKeyRaceAsync` exists for, and a
+  deterministic test of it would need a scheduling seam this port does not have. The half that is reachable —
+  the collision with no record behind it — is pinned above.
 - **`tenant_id` is refused on both branches** (§5), with a test that would fail if the guard's `isUpdate`
   ever followed the branch.
 - **Replacement semantics**: a nullable omitted field becomes `null`; a `required` omitted field is `422`
@@ -583,6 +594,7 @@ on any `PublicApi.*.verified.txt` that grew, so this list is what that check wil
 | `IAlvoData.ReplaceAsync` | Abstractions | the port is the published contract; a provider implements it |
 | `AlvoReplaceResult` | Abstractions | it is that member's return type |
 | `AlvoReplaceResult.Row` / `.Created` | Abstractions | the caller cannot answer `201` vs `200` without `Created` |
+| `AlvoReplaceResult.CreatedRow` / `.ReplacedRow` | Abstractions | the two shapes, named — a provider building the result by constructor has to remember which `bool` means which, and a replay's answer is `ReplacedRow` at every call site that produces one |
 | the `record`'s synthesized members | Abstractions | `EqualityContract`, `PrintMembers`, `ToString`, `Equals`, `GetHashCode`, `op_Equality`/`op_Inequality`, the copy constructor — the cost of `record`, paid identically by `AlvoBatchResult` |
 | `InMemoryAlvoData.ReplaceAsync` | Testing | the reference implementation is `public sealed` and implements the port; a new interface member forces it |
 | each new `AlvoDataAdversarialTests` fact | Testing | the class is `public abstract` and every implementation's suite inherits it — that is how one contract is held across three drivers |

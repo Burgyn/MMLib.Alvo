@@ -447,6 +447,7 @@ namespace MMLib.Alvo.Testing.Data
     {
         protected AlvoDataReplaceTests() { }
         public System.Threading.Tasks.Task A_caller_who_may_update_but_not_create_cannot_reach_the_create_branch() { }
+        public System.Threading.Tasks.Task A_keyed_replace_onto_a_taken_id_answers_the_conflict_rather_than_exhausting_its_retries() { }
         public System.Threading.Tasks.Task A_nullable_field_the_replacement_omits_becomes_null() { }
         public System.Threading.Tasks.Task A_read_only_field_the_replacement_names_is_still_refused() { }
         public System.Threading.Tasks.Task A_read_only_field_the_replacement_omits_keeps_its_stored_value() { }
