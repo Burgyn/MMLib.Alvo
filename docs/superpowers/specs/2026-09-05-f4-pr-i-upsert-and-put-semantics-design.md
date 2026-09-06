@@ -543,6 +543,36 @@ bypass, and it is the failure this design is most likely to have.
 
 ---
 
+## 10a. What the review pass found, and what it changed
+
+Two reviewers read the finished branch against this document. Six findings survived, and two were live
+policy bypasses — recorded here because the design predicted neither, and because *why they were invisible*
+matters more than the fixes.
+
+| | The hole | Why nothing caught it |
+|---|---|---|
+| 1 | **`beforeCreate` hooks never ran on the create branch.** A caller a hook refused on `POST` could create the same row with `PUT`; a `mutate` hook simply did not apply. | The architecture fact that enumerates hook call sites is an **allow-list**. A write body that calls nothing is invisible to it. The fact that would have failed — *every write face consults the pipeline* — did not exist. |
+| 2 | **A `readOnly` field the payload omitted was written `NULL`.** `readOnly` is enforced by "did the payload name this field", so a frozen field is precisely one the caller *cannot* name. §6's table was written from the schema alone and never mentioned the decision. | No fixture had a frozen field, so no fact could have asked. |
+| 3 | **A concurrent idempotent `PUT` answered `409` instead of replaying.** Every other idempotent create mints a fresh row id per attempt, so rivals collide on the *idempotency table's* key — a raw provider exception the retry loop matches. Here the id comes from the path, so the loser collides on the *row's* key, and §3's own translation makes that an `AlvoConstraintViolationException`, which the retry does not match. | §3 reasoned about the collision between *different* callers and never about two arrivals of *one* request. |
+| 4 | Rollups were not recomputed on the create branch. | — |
+| 5 | The endpoint validated against the `update` decision alone while the port refuses a field frozen under **either**, answering `403` where every other route answers `422`. | §4's table said "both", and only the port implemented it. |
+| 6 | An explicit `null` for a `required` field reached the store and died on `NOT NULL`. | §6 said "omits", and the code tested for the key. |
+
+**The correction to §3 that matters.** The translated collision is answered by exactly **one more read of the
+idempotency record**, not by a retry. Feeding it back into the retry loop would make a *genuine* conflict —
+an id held by somebody else's row — burn ten attempts before answering, which is the #138 shape this port
+already paid to remove. One read distinguishes the two: a record that turned up means this is our own request
+arriving twice; no record means the id really is taken.
+
+**The correction to §6.** `WholeRow` consults the caller's decision, not the schema alone: a field frozen by
+`readOnly` or masked by `hidden` keeps its stored value through a replacement. Both for the same reason — a
+field the caller cannot name, or cannot read, is not a field whose absence can mean "delete this".
+
+**And one stale premise this change created.** `PreImageMutation.Update`'s documented reason was *"a
+caller-supplied `id` is rejected before the read"*. That is now false. The conclusion survives the premise —
+the weaker lock needs the key not to *move*, and no write path puts the row key in its setter list — so the
+doc was corrected rather than the lock mode.
+
 ## 11. Public API delta, and why each symbol
 
 `public` is the contract, so each addition is argued rather than assumed. The `turn-review-gate` hook fires
