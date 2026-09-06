@@ -77,6 +77,55 @@ are numbered independently of the plan's own bracketed `[N]` step numbers
   types at runtime without a table per entity (spec §2.1).
   ([milestone #8](https://github.com/Burgyn/MMLib.Alvo/milestone/8))
 
+## 3a. What actually closes F4
+
+*Audited against the code on 2026-09-06, not against issue titles — most of
+F4's demo layer had already landed as a by-product of other PRs and nobody
+had closed the issues.*
+
+F4's point is **proof of intent plus a testing surface**, not features. Read
+that way, most of it is done and the milestone's open count is misleading:
+of the twenty issues still open, only two are what the phase is actually
+about.
+
+**Done, and verifiable by running it:**
+
+| | |
+|---|---|
+| demo descriptors | five in `examples/` (`vehicle-registry`, `field-service`, `complex-crm`, `simple-tasks`) plus six in `examples/_negative/` that must be *refused*, all validated by `ExamplesTests` |
+| standalone run | `src/MMLib.Alvo.Host/Dockerfile`, two compose stacks (8080 vehicle-registry, 8081 field-service), no credential shipped in the image, `up --wait` gated on `/health/ready` |
+| playground | `playground/run` — glob-based projects, `--pg`, `--test`, `--down`; two projects with their own suites, deliberately in no ring |
+| E2E | `test/teapie-field-service/`, 12 collections, 404 assertions, a **required check on every PR** with a JUnit artifact |
+| the Data API itself | reads, writes, batch, idempotency, preconditions, projections, paging, create-or-replace |
+
+**What remains — two things, in this order:**
+
+1. **[#26] Vacuum + API invariant tests.** The one literal placeholder left:
+   `scripts/test-ring2:51` still prints `placeholder: API invariant + Vacuum`.
+   Two halves — a contract lint over the generated document, and N *generated*
+   descriptors asserting default-deny, idempotency and CRUD shape at runtime.
+   **This is the higher-value half of what is left**, because it is the only
+   thing that tests the claim a metadata-driven framework actually makes: that
+   the rules hold *across descriptors*, not for the one demo they were written
+   against. Every gate today measures one fixture.
+2. **[#24] An embedded-run sample.** Nothing in the repo demonstrates
+   `AddAlvo()` / `IAlvoBuilder`, though `docs/architecture/extensibility.md`
+   documents the seam and `AddAlvoIntegrationTests` exercises it. Embedded is
+   one of the two declared distribution modes and it has no readable example.
+
+**What is deliberately *not* F4's problem**, though the milestone still
+carries it: the feature backlog (`#108` relation embedding, `#109`
+aggregations, `#112` rate limiting, `#113` `field.default`, `#140` tenant
+resolution) and the F3 follow-up debt (`#118`, `#122`, `#131`, `#139`, `#183`,
+`#184`, `#191`, `#95`, `#134`). Those are real, and none of them is *demo from
+the start*. F4 drifted into "finish the Data API"; the two items above are what
+the phase was for.
+
+**One of the debts should not wait for its turn: [#191]** — the Data API
+requires no `Content-Type`, which is a CSRF vector in an embedded host that
+authenticates by cookie. It is a security issue, and the embedded sample above
+is exactly the shape that would ship it.
+
 ## 4. Key invariants that must not break
 
 - **Interface-first** — contracts and tests against them before
