@@ -16,7 +16,7 @@
 /// <para>
 /// xUnit parallelises across classes and never inside one, so one shared collection name is the whole fix —
 /// and it is a narrower instrument than
-/// <c>[assembly: CollectionBehavior(DisableTestParallelization = true)]</c>, which
+/// <c>[assembly: Parallelization(Mode = ParallelMode.None)]</c>, which
 /// <c>MMLib.Alvo.Api.Tests.Integration</c> needs for a different reason (a latency budget measured under
 /// contention it does not control) and which would serialise every unrelated fact in these two assemblies.
 /// </para>

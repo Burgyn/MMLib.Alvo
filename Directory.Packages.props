@@ -13,7 +13,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageVersion Include="xunit.v3" Version="3.2.2" />
+    <PackageVersion Include="xunit.v3" Version="4.0.0" />
     <!-- The full xunit.v3 package requires OutputType=Exe (it carries the
          in-process runner); MMLib.Alvo.Testing is a class library that only
          declares [Fact] test methods for downstream Exe test projects to

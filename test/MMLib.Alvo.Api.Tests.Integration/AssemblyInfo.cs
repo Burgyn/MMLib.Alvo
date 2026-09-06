@@ -11,4 +11,8 @@
 // It also means one container exists at a time rather than three: each class owns a PostgresApiEngine, and
 // three concurrent postgres:16-alpine containers cost more than the parallelism buys — the classes here are
 // container-bound, not CPU-bound.
-[assembly: CollectionBehavior(DisableTestParallelization = true)]
+//
+// Spelled as Parallelization(Mode = None) rather than CollectionBehavior(DisableTestParallelization),
+// which xunit.v3 4.0 obsoleted and will remove in the next major. ParallelMode.None is the new spelling of
+// the same thing: no parallelism at all, neither across collections nor within one.
+[assembly: Xunit.v3.Parallelization(Mode = Xunit.Sdk.ParallelMode.None)]
