@@ -32,6 +32,33 @@ internal static class PayloadViolations
     /// </summary>
     internal const string BodyPointer = "";
 
+    /// <summary>The write path's wording for a body one of the shared bounds refused.</summary>
+    /// <remarks>
+    /// <b>The stable <em>code</em> comes from <see cref="BoundedJsonBody.CodeOf"/> and the <em>prose</em>
+    /// stays here.</b> The bounds are the same on both surfaces and the fix suggestions cannot be: three of
+    /// the six below talk about fields to write, about the fields you are changing, and about a <c>json</c>
+    /// field's own value — every one of which is advice about an operation a read does not perform. A code
+    /// keys on the kind of refusal; the sentence belongs to the surface.
+    /// </remarks>
+    /// <param name="refusal">The bound that stopped the body.</param>
+    /// <param name="options">The options the bounds are published from.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="refusal"/> is not one of the named cases.</exception>
+    internal static AlvoViolation Body(BodyRefusal refusal, AlvoApiOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return refusal switch
+        {
+            BodyRefusal.NotAnObject => NotAnObject(),
+            BodyRefusal.MalformedJson => MalformedJson(),
+            BodyRefusal.TooLarge => TooLarge(options.MaxRequestBodyBytes),
+            BodyRefusal.TooDeep => TooDeep(options.MaxPayloadDepth),
+            BodyRefusal.TooManyKeys => TooManyKeys(options.MaxPayloadKeys),
+            BodyRefusal.DuplicateName => DuplicateField(),
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(refusal), refusal, "Unmapped body refusal; give it the write path's wording here."),
+        };
+    }
+
     /// <summary>The JSON Pointer (RFC 6901) to one top-level field of the request body.</summary>
     /// <remarks>
     /// The escaping is RFC 6901 §3's, and it is not decorative: a field named <c>a/b</c> would otherwise
@@ -62,14 +89,14 @@ internal static class PayloadViolations
     /// <summary>The refusal for a body that is not a JSON object of field names to values.</summary>
     internal static AlvoViolation NotAnObject() => new(
         BodyPointer,
-        "not-an-object",
+        BoundedJsonBody.CodeOf(BodyRefusal.NotAnObject),
         "The request body must be a JSON object mapping field names to values.",
         "Send {\"field\":value,…}. An array, a scalar or an absent body names no field to write.");
 
     /// <summary>The refusal for a body that is not well-formed JSON at all.</summary>
     internal static AlvoViolation MalformedJson() => new(
         BodyPointer,
-        "malformed-json",
+        BoundedJsonBody.CodeOf(BodyRefusal.MalformedJson),
         "The request body is not well-formed JSON.",
         "Check for an unterminated string, a trailing comma, or a truncated body.");
 
@@ -77,7 +104,7 @@ internal static class PayloadViolations
     /// <param name="maxBytes">The configured maximum.</param>
     internal static AlvoViolation TooLarge(int maxBytes) => new(
         BodyPointer,
-        "body-too-large",
+        BoundedJsonBody.CodeOf(BodyRefusal.TooLarge),
         string.Create(
             CultureInfo.InvariantCulture,
             $"The request body is larger than {maxBytes} bytes, the configured maximum."),
@@ -87,7 +114,7 @@ internal static class PayloadViolations
     /// <param name="maxDepth">The configured maximum.</param>
     internal static AlvoViolation TooDeep(int maxDepth) => new(
         BodyPointer,
-        "body-too-deep",
+        BoundedJsonBody.CodeOf(BodyRefusal.TooDeep),
         string.Create(
             CultureInfo.InvariantCulture,
             $"The request body nests deeper than {maxDepth} levels, the configured maximum."),
@@ -97,7 +124,7 @@ internal static class PayloadViolations
     /// <param name="maxKeys">The configured maximum.</param>
     internal static AlvoViolation TooManyKeys(int maxKeys) => new(
         BodyPointer,
-        "body-too-many-fields",
+        BoundedJsonBody.CodeOf(BodyRefusal.TooManyKeys),
         string.Create(
             CultureInfo.InvariantCulture,
             $"The request body carries more than {maxKeys} fields, the configured maximum."),
@@ -129,7 +156,7 @@ internal static class PayloadViolations
     /// </remarks>
     internal static AlvoViolation DuplicateField() => new(
         BodyPointer,
-        "duplicate-field",
+        BoundedJsonBody.CodeOf(BodyRefusal.DuplicateName),
         "The request body uses the same property name twice inside one object.",
         "Send each property once. A repeated name has no defined meaning, so it is refused rather than "
         + "resolved to the first or the last value — at every depth, not only the top level.");
@@ -201,7 +228,22 @@ internal static class PayloadViolations
             $"A value is longer than the {field.MaxLength} characters the field declares."),
         string.Create(
             CultureInfo.InvariantCulture,
-            $"Shorten it to at most {field.MaxLength} characters. The bound is the column's own width, so a longer value cannot be stored."));
+            $"Shorten it to at most {field.MaxLength} characters. {MaxLengthUnitNote}"));
+
+    /// <summary>
+    /// The unit <c>maxLength</c> is measured in, said in the refusal itself.
+    /// </summary>
+    /// <remarks>
+    /// "Characters" is the word the descriptor uses and it is ambiguous enough to have produced a bug
+    /// (#123), so the message that asks a caller to shorten a value says which unit it is counting. Code
+    /// points is the unit PostgreSQL's <c>varchar(n)</c> and JSON Schema's own <c>maxLength</c> keyword
+    /// both use, so on the shipped drivers the refusal, the column and the published document all mean the
+    /// same number; a dialect whose column counts otherwise owes its own answer (#175).
+    /// </remarks>
+    private const string MaxLengthUnitNote =
+        "Length is counted in Unicode code points rather than UTF-16 units, so a character outside the "
+        + "Basic Multilingual Plane counts once and not twice. The bound is the column's own width, so a "
+        + "longer value cannot be stored.";
 
     /// <summary>The refusal for a decimal carrying more fractional digits than the field's <c>scale</c>.</summary>
     /// <param name="field">The declared field, whose own scale the message names.</param>
@@ -319,6 +361,40 @@ internal static class PayloadViolations
         "The request writes a field this caller may read but not change.",
         "Remove the field from the request body. It is read-only for your roles, so no value you send can "
         + "be stored — which is why this is refused rather than ignored.");
+
+    /// <summary>
+    /// The refusal for a <b>create</b> whose caller cannot satisfy it: the entity declares the field
+    /// required, and this caller's own <c>readOnly</c> mask froze it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A third answer, because the other two are both dishonest here.</b> Telling this caller
+    /// <c>required</c> sends them to supply a field no value of theirs can be stored in; telling them
+    /// <c>read-only-field</c> names a write they did not attempt. The create is impossible <em>for them</em>,
+    /// and that is the only sentence that is true of the request.
+    /// </para>
+    /// <para>
+    /// <b>Reachable only through an expression-valued <c>readOnly</c>.</b> A field declaring the static pair
+    /// <c>required: true</c> + <c>readOnly: true</c> is refused when the descriptor is applied
+    /// (<c>DescriptorValidator</c>), because then <em>no</em> caller could ever create the row and the author
+    /// can still fix it. What survives to here is the per-caller case: satisfiable for one role, impossible
+    /// for another, which no apply-time check can decide.
+    /// </para>
+    /// <para>
+    /// <b>Refused rather than let through with the field absent</b>, which is the shape #124 first proposed.
+    /// A required field is a <c>NOT NULL</c> column, so omitting it moves the failure into the engine and
+    /// turns an actionable 422 into a 500 — a worse answer to the same impossible request.
+    /// </para>
+    /// </remarks>
+    /// <param name="field">The declared field this caller's policy froze on a create.</param>
+    internal static AlvoViolation ReadOnlyRequired(FieldSchema field) => new(
+        PointerTo(field.Name),
+        "read-only-required-field",
+        "The entity declares this field required, and it is read-only for this caller — so no create of "
+        + "this entity can succeed with these roles.",
+        "Ask for a role that may write the field, or have the descriptor give it a value the caller does "
+        + "not supply — a 'computed' expression, or a 'default'. Omitting it is not an option: the field "
+        + "is NOT NULL.");
 
     /// <summary>
     /// The refusal for a reference naming a row the caller cannot resolve — because it does not exist,

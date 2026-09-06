@@ -68,7 +68,8 @@ internal sealed partial class SystemSchemaInitializer
     /// <see cref="EfCoreSchemaIntrospector"/> reuses to exclude Alvo's own bookkeeping table from
     /// what it reports as the user's schema.
     /// </summary>
-    public static string DescriptorVersionsTableName(string schemaPrefix) => $"{schemaPrefix}_descriptor_versions";
+    public static string DescriptorVersionsTableName(string schemaPrefix) =>
+        schemaPrefix + AlvoFrameworkTables.DescriptorVersionsSuffix;
 
     /// <summary>
     /// Every table this initializer owns, for a given prefix — the set
@@ -79,9 +80,7 @@ internal sealed partial class SystemSchemaInitializer
     /// </summary>
     /// <param name="schemaPrefix">The validated <see cref="AlvoOptions.SchemaPrefix"/>.</param>
     public static IReadOnlyList<string> FrameworkTableNames(string schemaPrefix) =>
-        [DescriptorVersionsTableName(schemaPrefix),
-         IdempotencyTable.NameFor(schemaPrefix),
-         OutboxTable.NameFor(schemaPrefix)];
+        AlvoFrameworkTables.NamesFor(schemaPrefix);
 
     /// <summary>
     /// Creates the framework's bookkeeping tables if they do not already exist. Safe to call repeatedly —

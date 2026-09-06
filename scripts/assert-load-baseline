@@ -1,0 +1,347 @@
+#!/usr/bin/env bash
+# assert-load-baseline — the load gate's ONE authority on pass/fail.
+#
+# A pure function from JSON to an exit code: it touches neither Docker nor k6, which is precisely
+# what makes it testable, and scripts/test-assert-load-baseline tests it. That is not ceremony.
+# scripts/assert-mutation-run exists for the same reason, and its own first review found it
+# failing open in five places — a guard nothing tests is the defect it exists to prevent.
+#
+# TWO KINDS OF JUDGEMENT, and they are not interchangeable:
+#
+#   RATIOS, within one run. Every ratio compares two scenarios measured on the same machine
+#   minutes apart, so machine speed, runner generation and container overhead divide out. A ratio
+#   needs no baseline arm and no absolute number in git — only a declared ceiling, which is a
+#   statement about the feature rather than about the hardware. This is the sensitive half.
+#
+#   ABSOLUTE, across two arms. Four shapes have no meaningful denominator; they are the floor. A
+#   regression fires only when the HEAD arm is BOTH a factor slower AND slower by more than an
+#   absolute floor. Both conditions, because a factor alone on a 2 ms endpoint is noise, and a
+#   gate that fires on noise is muted within a month.
+#
+# THE GATING STATISTIC IS `min`, AND p95 IS REPORTED BUT NEVER GATED. This was measured, not
+# assumed. On the first real gate run every p95 landed within 8-9 ms of every other — the ratios
+# came out 0.97 to 1.03 across shapes that plainly do different amounts of work — while `min`
+# separated them cleanly (list 2.18 ms, count=exact 3.57 ms, nullable sort 4.04 ms). At this
+# volume the p95 is dominated by scheduling and container-network jitter, not by the query, so
+# gating on it would gate on the runner.
+#
+# `min` is the right statistic for the question the GATE asks, which is "how much work does this
+# shape do" — the minimum is service time with queueing and interference removed. p95 answers a
+# different question, "what does a caller experience under this load", and that is the number
+# F4's definition of done asks to have published (baas-analyza.md:142). So it is measured and
+# printed on every row, and the calibration tier publishes it.
+#
+# THE GAP THIS LEAVES, NAMED RATHER THAN HIDDEN: a regression that leaves the fast path alone and
+# makes a small fraction of requests much slower — a new lock, a cache-miss branch — is not caught
+# here. On a rig whose p95 noise is larger than the tail effect we could resolve, pretending
+# otherwise would be worse than saying so.
+#
+# WHY THE MINIMUM ACROSS REPETITIONS, TOO. Interference is one-sided: a noisy neighbour, a
+# background job or a co-resident load generator can only ever make a request slower, never
+# faster. So the smallest observation across repetitions is the best available estimate, and
+# averaging repetitions would fold the interference into the answer instead of rejecting it.
+#
+# A CEILING IS ONLY VALID FOR THE TIER IT WAS MEASURED ON, and `--report-only` exists because of
+# it. The ratios turn out to GROW with volume: at 20 000 rows `count=exact` costs 1.6x the
+# reference list, at 200 000 rows it costs 3.0x, and `sort_nullable` goes 1.8x -> 3.6x. That is
+# not a regression, it is arithmetic — as the database's share of a request grows, the relative
+# cost of extra database work grows with it, because the fixed per-request overhead stops
+# dominating. So `baselines/gate.json` says `measuredOn: gate tier` in every row and means it, and
+# enforcing those ceilings against a calibration run would fail a healthy release for a reason
+# that is a property of the row count. The calibration tier therefore REPORTS (`--report-only`)
+# rather than judges, exactly as its design says: it publishes a number, it never fails on one.
+#
+# VALIDITY IS STILL ENFORCED UNDER --report-only. A void run publishes garbage, and garbage in
+# docs/performance.md is worse than no row at all.
+#
+# Usage:
+#   assert-load-baseline --baseline FILE --head FILE [--head FILE …] [--base FILE …]
+#                        [--strict] [--report-only] [--verdict FILE]
+#
+# --strict means "every row the baseline declares must have been measured". A full gate run passes
+# it; a deliberately partial local run (`--scenarios a,b`) does not.
+#
+# With no --base the absolute half is skipped and only ratios are judged; that is a local
+# ratio-only run's shape.
+
+set -euo pipefail
+
+BASELINE=""
+VERDICT=""
+REPORT_ONLY=0
+STRICT=0
+HEAD_FILES=()
+BASE_FILES=()
+
+# Exit code 2 is reserved for "the guard could not judge" — a missing file, malformed JSON, a void
+# run — and `die` is its only route. Exit 1 means "judged, and it failed". Conflating them would
+# let a broken harness read as a clean bill of health, which is the failure mode the mutation gate
+# was built to stop.
+die() {
+    printf 'assert-load-baseline: %s\n' "$1" >&2
+    exit 2
+}
+
+# `needs_value` before every `shift 2`: without it, a truncated flag assigns "" and then shifts
+# past the end, `shift` returns non-zero, and `set -e` kills the script with EXIT 1 AND NO OUTPUT.
+# Exit 1 is the documented "judged, and it failed", so a typo would read to CI as a real
+# performance regression — the exact confusion the die/exit-2 split exists to prevent.
+needs_value() {
+    [ "$2" -ge 2 ] || die "$1 needs a value"
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --baseline) needs_value "$1" $#; BASELINE="$2"; shift 2 ;;
+        --head) needs_value "$1" $#; HEAD_FILES+=("$2"); shift 2 ;;
+        --base) needs_value "$1" $#; BASE_FILES+=("$2"); shift 2 ;;
+        --verdict) needs_value "$1" $#; VERDICT="$2"; shift 2 ;;
+        --report-only) REPORT_ONLY=1; shift ;;
+        --strict) STRICT=1; shift ;;
+        -h|--help) sed -n '2,72p' "$0"; exit 0 ;;
+        *) die "unknown argument '$1'" ;;
+    esac
+done
+
+command -v jq >/dev/null || die "jq is required"
+[ -n "$BASELINE" ] || die "--baseline is required"
+[ -f "$BASELINE" ] || die "baseline '$BASELINE' does not exist"
+[ ${#HEAD_FILES[@]} -gt 0 ] || die "at least one --head summary is required"
+
+jq -e . "$BASELINE" >/dev/null 2>&1 || die "baseline '$BASELINE' is not valid JSON"
+
+# VALIDATING THE BASELINE'S SHAPE, NOT ONLY THAT IT PARSES. Both judgement loops are fed by
+# `done < <(jq …)`, and `set -e`/`pipefail` cannot see a failure inside a process substitution —
+# so a baseline with `.ratios` missing or misspelled made jq write an error to stderr, the loop
+# body never ran, FAILED stayed 0, and the guard printed "ok". Measured: a one-letter typo
+# (`.ratio`) passed a 30x breach. Pointing --baseline at any other valid JSON in the same tree
+# (artifacts/load/head-1.json is a plausible slip) did the same.
+jq -e '.ratios | type == "object"' "$BASELINE" >/dev/null 2>&1 \
+    || die "baseline '$BASELINE' has no '.ratios' object — nothing would be judged, and the run would read as ok"
+jq -e '.absolute | type == "object"' "$BASELINE" >/dev/null 2>&1 \
+    || die "baseline '$BASELINE' has no '.absolute' object"
+jq -e '.absolute.defaults.factor and .absolute.defaults.floorMs' "$BASELINE" >/dev/null 2>&1 \
+    || die "baseline '$BASELINE' has no .absolute.defaults.factor/.floorMs — every per-scenario override falls back to them"
+BASELINE_RATIO_ROWS=$(jq -r '.ratios | length' "$BASELINE")
+[ "$BASELINE_RATIO_ROWS" -gt 0 ] || die "baseline '$BASELINE' declares no ratios — a guard that judges nothing is worse than no guard"
+
+GATING_STAT=min
+REPORTED_STAT='p(95)'
+
+FAILED=0
+NOT_MEASURED=0
+ROWS_JSON="[]"
+
+# One place turns "over the ceiling" into a verdict, so report-only cannot diverge from the gate
+# on anything but the consequence.
+#
+# It sets a GLOBAL rather than printing a value, and that is not a style choice: `v="$(f)"` runs
+# `f` in a SUBSHELL, so an assignment to FAILED inside it is discarded and the guard exits 0 on a
+# real breach. Fail-open, in the one script whose entire job is not to. Caught by
+# scripts/test-assert-load-baseline, which is the reason that suite exists.
+BREACH_LABEL=""
+mark_breach() {
+    if [ "$REPORT_ONLY" -eq 1 ]; then
+        BREACH_LABEL=over
+    else
+        BREACH_LABEL=BREACH
+        FAILED=1
+    fi
+}
+
+record() {
+    ROWS_JSON=$(jq -c --argjson row "$1" '. + [$row]' <<<"$ROWS_JSON")
+}
+
+# ---------------------------------------------------------------------------------------------
+# Validity. A run that dropped iterations or saw a non-2xx measured the wrong thing: the
+# generator was the bottleneck, or the server was answering 500 quickly. Either way the numbers
+# describe something other than the service, so the run is VOID rather than slow.
+# ---------------------------------------------------------------------------------------------
+assert_run_is_valid() {
+    local file="$1"
+    [ -f "$file" ] || die "summary '$file' does not exist"
+    jq -e . "$file" >/dev/null 2>&1 || die "summary '$file' is not valid JSON"
+
+    local dropped failed scenarios
+    dropped=$(jq -r '.dropped_iterations.count // 0' "$file")
+    failed=$(jq -r '.http_req_failed.rate // 0' "$file")
+    scenarios=$(jq -r '.scenarios | length' "$file")
+
+    [ "$scenarios" -gt 0 ] || die "summary '$file' recorded no scenarios — the run measured nothing"
+
+    if [ "$(jq -rn --argjson d "$dropped" '$d > 0')" = "true" ]; then
+        die "summary '$file' dropped $dropped iterations: the generator could not sustain the offered rate, so this run is void, not slow"
+    fi
+    if [ "$(jq -rn --argjson f "$failed" '$f > 0')" = "true" ]; then
+        die "summary '$file' has http_req_failed=$failed: a run with failing requests reports a flattering latency for a broken server"
+    fi
+}
+
+# `${a[@]+"${a[@]}"}` and not `"${a[@]}"`: under `set -u` bash treats an EMPTY array expansion as
+# an unbound variable, so a ratio-only run (no --base) would abort here with "unbound variable"
+# instead of doing its job.
+for file in "${HEAD_FILES[@]}"; do assert_run_is_valid "$file"; done
+for file in ${BASE_FILES[@]+"${BASE_FILES[@]}"}; do assert_run_is_valid "$file"; done
+
+# The best (smallest) value of one statistic for one scenario across a set of summaries. Empty
+# output when the scenario is absent from every file, which callers treat as "not measured here".
+best() {
+    local scenario="$1" stat="$2"; shift 2
+    jq -s -r --arg s "$scenario" --arg k "$stat" '
+        [ .[] | .scenarios[$s][$k]? | select(. != null) ] | if length == 0 then "" else min end
+    ' "$@"
+}
+
+fmt() { printf '%.2f' "$1"; }
+
+# ---------------------------------------------------------------------------------------------
+# The ratios — the sensitive half. Gated on `min`; p95 printed for context only.
+# ---------------------------------------------------------------------------------------------
+if [ "$REPORT_ONLY" -eq 1 ]; then
+    echo "REPORT ONLY — the ceilings below were measured on the gate tier and are NOT enforced here."
+    echo "A ratio marked 'over' is context, not a regression: these ratios grow with row count."
+    echo
+fi
+
+echo "Ratios within one run (min = service time; p95 shown, never gated)"
+printf '  %-20s %-16s %8s %8s %9s %9s   %s\n' \
+    SCENARIO OVER RATIO CEILING MINMS P95MS VERDICT
+
+while IFS=$'\t' read -r name over ceiling; do
+    [ -n "$name" ] || continue
+
+    numerator=$(best "$name" "$GATING_STAT" "${HEAD_FILES[@]}")
+    denominator=$(best "$over" "$GATING_STAT" "${HEAD_FILES[@]}")
+    reported=$(best "$name" "$REPORTED_STAT" "${HEAD_FILES[@]}")
+
+    if [ -z "$numerator" ] || [ -z "$denominator" ]; then
+        printf '  %-20s %-16s %8s %8s %9s %9s   %s\n' \
+            "$name" "$over" - "$ceiling" - - "not measured"
+        record "$(jq -nc --arg n "$name" '{kind:"ratio",scenario:$n,verdict:"not-measured"}')"
+        NOT_MEASURED=$((NOT_MEASURED + 1))
+        continue
+    fi
+
+    # NEITHER side may be zero, not only the denominator. A `min` of exactly 0 ms is physically
+    # impossible for an HTTP request; it is what a declared-but-unrun k6 trend looks like if the
+    # summary carries one. Left unchecked, a 0 numerator printed `0.00 ... ok` — a scenario that
+    # stopped producing samples reading as the fastest thing in the run.
+    if [ "$(jq -rn --argjson d "$denominator" '$d <= 0')" = "true" ]; then
+        die "scenario '$over' has a $GATING_STAT of $denominator — a ratio over zero is not a measurement"
+    fi
+    if [ "$(jq -rn --argjson n "$numerator" '$n <= 0')" = "true" ]; then
+        die "scenario '$name' has a $GATING_STAT of $numerator — an HTTP request cannot take zero time, so this trend recorded no samples"
+    fi
+
+    ratio=$(jq -rn --argjson a "$numerator" --argjson b "$denominator" '$a / $b')
+    verdict=ok
+    if [ "$(jq -rn --argjson r "$ratio" --argjson c "$ceiling" '$r > $c')" = "true" ]; then
+        mark_breach
+        verdict="$BREACH_LABEL"
+    fi
+
+    printf '  %-20s %-16s %8s %8s %9s %9s   %s\n' \
+        "$name" "$over" "$(fmt "$ratio")" "$ceiling" \
+        "$(fmt "$numerator")" "$(fmt "${reported:-0}")" "$verdict"
+    record "$(jq -nc --arg n "$name" --arg o "$over" --argjson r "$ratio" \
+        --argjson c "$ceiling" --argjson m "$numerator" --argjson p "${reported:-0}" \
+        --arg v "$verdict" \
+        '{kind:"ratio",scenario:$n,over:$o,ratio:$r,ceiling:$c,minMs:$m,p95Ms:$p,verdict:$v}')"
+done < <(jq -r '.ratios | to_entries[] | [.key, .value.over, (.value.max|tostring)] | @tsv' "$BASELINE")
+
+# ---------------------------------------------------------------------------------------------
+# The absolute half.
+# ---------------------------------------------------------------------------------------------
+echo
+if [ ${#BASE_FILES[@]} -eq 0 ]; then
+    echo "Absolute A/B: skipped (no --base arm given)"
+else
+    echo "Absolute A/B on min (a breach needs BOTH the factor and the floor)"
+    printf '  %-20s %9s %9s %8s %8s %9s %9s   %s\n' \
+        SCENARIO BASEMIN HEADMIN FACTOR LIMIT FLOORMS HEADP95 VERDICT
+
+    default_factor=$(jq -r '.absolute.defaults.factor' "$BASELINE")
+    default_floor=$(jq -r '.absolute.defaults.floorMs' "$BASELINE")
+
+    while IFS=$'\t' read -r name factor floor; do
+        [ -n "$name" ] || continue
+        [ "$factor" = "null" ] && factor="$default_factor"
+        [ "$floor" = "null" ] && floor="$default_floor"
+
+        head_min=$(best "$name" "$GATING_STAT" "${HEAD_FILES[@]}")
+        base_min=$(best "$name" "$GATING_STAT" "${BASE_FILES[@]}")
+        head_p95=$(best "$name" "$REPORTED_STAT" "${HEAD_FILES[@]}")
+
+        if [ -z "$head_min" ] || [ -z "$base_min" ]; then
+            printf '  %-20s %9s %9s %8s %8s %9s %9s   %s\n' \
+                "$name" - - - "$factor" "$floor" - "not measured"
+            record "$(jq -nc --arg n "$name" '{kind:"absolute",scenario:$n,verdict:"not-measured"}')"
+            NOT_MEASURED=$((NOT_MEASURED + 1))
+            continue
+        fi
+
+        if [ "$(jq -rn --argjson h "$head_min" --argjson b "$base_min" '$h <= 0 or $b <= 0')" = "true" ]; then
+            die "scenario '$name' has a $GATING_STAT of $base_min (base) / $head_min (head) — a zero means the trend recorded no samples"
+        fi
+
+        observed=$(jq -rn --argjson h "$head_min" --argjson b "$base_min" \
+            'if $b > 0 then $h / $b else 0 end')
+        delta=$(jq -rn --argjson h "$head_min" --argjson b "$base_min" '$h - $b')
+        verdict=ok
+        if [ "$(jq -rn --argjson o "$observed" --argjson f "$factor" \
+                --argjson d "$delta" --argjson fl "$floor" '$o > $f and $d > $fl')" = "true" ]; then
+            mark_breach
+            verdict="$BREACH_LABEL"
+        fi
+
+        printf '  %-20s %9s %9s %8s %8s %9s %9s   %s\n' \
+            "$name" "$(fmt "$base_min")" "$(fmt "$head_min")" "$(fmt "$observed")" \
+            "$factor" "$floor" "$(fmt "${head_p95:-0}")" "$verdict"
+        record "$(jq -nc --arg n "$name" --argjson b "$base_min" --argjson h "$head_min" \
+            --argjson o "$observed" --argjson f "$factor" --argjson d "$delta" \
+            --argjson p "${head_p95:-0}" --arg v "$verdict" \
+            '{kind:"absolute",scenario:$n,baseMinMs:$b,headMinMs:$h,factor:$o,limit:$f,deltaMs:$d,headP95Ms:$p,verdict:$v}')"
+    done < <(jq -r '
+        .absolute | del(.defaults) | to_entries[]
+        | [.key, (.value.factor // null | tostring), (.value.floorMs // null | tostring)] | @tsv
+    ' "$BASELINE")
+fi
+
+# STRICT: every declared row must have resolved to a number. Without this, a scenario that
+# silently stopped producing samples — an exec function throwing before its first record(), a
+# renamed catalogue entry, a `--scenarios` typo, `needsCursor` filtering page_deep out — prints
+# "not measured" and turns the gate GREEN. That is the class the guard exists to stop, so a full
+# gate run asserts it. A deliberately partial local run (`--scenarios a,b`) and the report-only
+# tier do not pass --strict, which is why "not measured" stays a legal outcome there.
+if [ "$STRICT" -eq 1 ] && [ "$NOT_MEASURED" -gt 0 ]; then
+    die "$NOT_MEASURED declared row(s) resolved to 'not measured' under --strict: the run did not measure what the baseline judges"
+fi
+
+if [ -n "$VERDICT" ]; then
+    mkdir -p "$(dirname "$VERDICT")"
+    jq -n --argjson rows "$ROWS_JSON" --argjson failed "$FAILED" \
+        --arg gating "$GATING_STAT" --arg reported "$REPORTED_STAT" \
+        --argjson reportOnly "$REPORT_ONLY" --argjson strict "$STRICT" \
+        --argjson notMeasured "$NOT_MEASURED" \
+        '{failed: ($failed == 1), reportOnly: ($reportOnly == 1), strict: ($strict == 1),
+          notMeasured: $notMeasured,
+          gatingStat: $gating, reportedStat: $reported, checks: $rows}' \
+        > "$VERDICT"
+fi
+
+echo
+if [ "$REPORT_ONLY" -eq 1 ]; then
+    echo "assert-load-baseline: reported (ceilings not enforced on this tier)"
+    exit 0
+fi
+
+if [ "$FAILED" -eq 1 ]; then
+    echo "assert-load-baseline: FAILED — see the BREACH rows above."
+    echo "If the new cost is intended, move the ceiling in the baseline file IN THE SAME PR as the"
+    echo "change that caused it, and say in the PR why the feature is worth the number."
+    exit 1
+fi
+
+echo "assert-load-baseline: ok"
+exit 0

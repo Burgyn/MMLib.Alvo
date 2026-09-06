@@ -13,9 +13,13 @@ namespace MMLib.Alvo.Data;
 /// answering with the first result would silently discard the second one.
 /// <para>
 /// <b>It must cover the entity being written.</b> The layer that computes it hashes the whole request — for
-/// HTTP, the method, the path and the body, and the path names the entity — so a matched fingerprint proves a
-/// replay is for the same entity the original wrote, which is why an implementation stores no entity beside
-/// the record. The same key against a different entity is therefore a conflict, like any other different
+/// HTTP, the method, the entity, the row the write addresses, the precondition it carries and the body — so a
+/// matched fingerprint proves a replay is for the same entity the original wrote, which is why an
+/// implementation stores no entity beside the record. <b>The route template is deliberately not in it</b>, and
+/// this sentence used to say "the path" as though it were: including the template embedded the API's own route
+/// prefix, so moving the prefix invalidated every stored fingerprint and a retry that straddled the redeploy
+/// became a conflict. The row id restores the part of the path that identified the row, which is the part that
+/// mattered. The same key against a different entity is therefore a conflict, like any other different
 /// request. A caller whose fingerprint does <em>not</em> distinguish the entity is still never answered with a
 /// wrong row: the replay re-reads the recorded row id under the entity of the request being served, finds
 /// nothing there, and raises <see cref="AlvoRecordNotFoundException"/> — fail-closed, never cross-entity.

@@ -57,27 +57,8 @@ namespace MMLib.Alvo.Testing.Data;
 ///   </item>
 /// </list>
 /// </remarks>
-public abstract class AlvoDataConcurrencyTests
+public abstract class AlvoDataConcurrencyTests : AlvoDataFixture
 {
-    /// <summary>
-    /// Builds a fresh <see cref="IAlvoData"/> over <paramref name="descriptor"/>/<paramref name="schema"/>,
-    /// seeded out of band with <paramref name="seed"/>'s rows — the same seam
-    /// <see cref="AlvoDataAdversarialTests.CreateAsync"/> defines, so an engine's subclass is the fixture it
-    /// already has plus nothing.
-    /// </summary>
-    /// <remarks>
-    /// Every fact here seeds nothing and writes its rows through the port. That is not incidental: a version
-    /// is only meaningful if the framework's own audit stamp wrote it, and a row inserted out of band carries
-    /// whatever instant the seeding seam chose. Per-fact isolation is still required, exactly as the
-    /// adversarial suite requires it — several facts assert an exact row count over an entity with no
-    /// row-scoping predicate.
-    /// </remarks>
-    /// <param name="schema">The schema every entity in <paramref name="descriptor"/> maps to.</param>
-    /// <param name="descriptor">The project descriptor whose rules apply.</param>
-    /// <param name="seed">The initial rows to insert, keyed by entity name.</param>
-    protected abstract Task<IAlvoData> CreateAsync(
-        SchemaModel schema, AlvoDescriptor descriptor, IReadOnlyDictionary<string, IReadOnlyList<AlvoRecord>> seed);
-
     /// <summary>
     /// The happy path, and the counterweight every refusal below needs: a precondition carrying the version
     /// the row actually holds is accepted, so none of the refusals can be satisfied by refusing every
@@ -90,7 +71,7 @@ public abstract class AlvoDataConcurrencyTests
         var created = await world.Data.CreateAsync(Orders, Payload("first"), world.Caller, cancellationToken: Ct);
 
         var updated = await world.Data.UpdateAsync(
-            Orders, IdOf(created), Payload("second"), world.Caller, new AlvoPrecondition(VersionOf(created)), Ct);
+            Orders, IdOf(created), Payload("second"), world.Caller, new AlvoPrecondition(VersionOf(created)), cancellationToken: Ct);
 
         updated["title"].ShouldBe("second");
     }
@@ -112,7 +93,7 @@ public abstract class AlvoDataConcurrencyTests
         VersionOf(advanced).ShouldNotBe(stale, "a write must advance the version, or nothing below discriminates");
 
         await Should.ThrowAsync<AlvoPreconditionFailedException>(() => world.Data.UpdateAsync(
-            Orders, IdOf(created), Payload("third"), world.Caller, new AlvoPrecondition(stale), Ct));
+            Orders, IdOf(created), Payload("third"), world.Caller, new AlvoPrecondition(stale), cancellationToken: Ct));
 
         var stored = await world.Data.GetAsync(Orders, IdOf(created), world.Caller, Ct);
         stored.ShouldNotBeNull();
@@ -135,11 +116,11 @@ public abstract class AlvoDataConcurrencyTests
         VersionOf(advanced).ShouldNotBe(stale, "a write must advance the version, or nothing below discriminates");
 
         await Should.ThrowAsync<AlvoPreconditionFailedException>(() => world.Data.DeleteAsync(
-            Orders, IdOf(created), world.Caller, new AlvoPrecondition(stale), Ct));
+            Orders, IdOf(created), world.Caller, new AlvoPrecondition(stale), cancellationToken: Ct));
         (await world.Data.GetAsync(Orders, IdOf(created), world.Caller, Ct)).ShouldNotBeNull();
 
         await world.Data.DeleteAsync(
-            Orders, IdOf(created), world.Caller, new AlvoPrecondition(VersionOf(advanced)), Ct);
+            Orders, IdOf(created), world.Caller, new AlvoPrecondition(VersionOf(advanced)), cancellationToken: Ct);
         (await world.Data.GetAsync(Orders, IdOf(created), world.Caller, Ct)).ShouldBeNull();
     }
 
@@ -162,7 +143,7 @@ public abstract class AlvoDataConcurrencyTests
             Payload("second"),
             world.Caller,
             new AlvoPrecondition(DateTimeOffset.UnixEpoch),
-            Ct));
+            cancellationToken: Ct));
         refusal.Message.ShouldContain("audit");
 
         var stored = await world.Data.GetAsync(Drafts, IdOf(created), world.Caller, Ct);
@@ -189,9 +170,9 @@ public abstract class AlvoDataConcurrencyTests
         var created = await world.Data.CreateAsync(Orders, Payload("first"), world.Caller, cancellationToken: Ct);
 
         var updated = await world.Data.UpdateAsync(
-            Orders, IdOf(created), Payload("second"), world.Caller, new AlvoPrecondition(VersionOf(created)), Ct);
+            Orders, IdOf(created), Payload("second"), world.Caller, new AlvoPrecondition(VersionOf(created)), cancellationToken: Ct);
         var again = await world.Data.UpdateAsync(
-            Orders, IdOf(created), Payload("third"), world.Caller, new AlvoPrecondition(VersionOf(updated)), Ct);
+            Orders, IdOf(created), Payload("third"), world.Caller, new AlvoPrecondition(VersionOf(updated)), cancellationToken: Ct);
 
         again["title"].ShouldBe("third");
     }
@@ -218,12 +199,12 @@ public abstract class AlvoDataConcurrencyTests
         VersionOf(advanced).ShouldNotBe(stale, "a write must advance the version, or nothing below discriminates");
 
         await Should.ThrowAsync<AlvoPreconditionFailedException>(() => world.Data.UpdateAsync(
-            Tickets, IdOf(hers), Payload("x"), world.Alice, new AlvoPrecondition(stale), Ct));
+            Tickets, IdOf(hers), Payload("x"), world.Alice, new AlvoPrecondition(stale), cancellationToken: Ct));
 
         await Should.ThrowAsync<AlvoRecordNotFoundException>(() => world.Data.UpdateAsync(
-            Tickets, IdOf(his), Payload("x"), world.Alice, new AlvoPrecondition(stale), Ct));
+            Tickets, IdOf(his), Payload("x"), world.Alice, new AlvoPrecondition(stale), cancellationToken: Ct));
         await Should.ThrowAsync<AlvoRecordNotFoundException>(() => world.Data.DeleteAsync(
-            Tickets, IdOf(his), world.Alice, new AlvoPrecondition(stale), Ct));
+            Tickets, IdOf(his), world.Alice, new AlvoPrecondition(stale), cancellationToken: Ct));
     }
 
     /// <summary>
@@ -262,6 +243,109 @@ public abstract class AlvoDataConcurrencyTests
 
         var all = await world.Data.QueryAsync(new AlvoQuery { Entity = Orders }, world.Caller, Ct);
         all.Items.Count.ShouldBe(1);
+    }
+
+    /// <summary>
+    /// A retried update is answered with the row rather than refused, which is the whole of #102: without a
+    /// key the retry is a precondition failure the caller cannot tell from someone else having changed the
+    /// row underneath them.
+    /// </summary>
+    /// <remarks>
+    /// The version is what makes this non-vacuous. A second write would advance it again, so asserting that
+    /// it did <b>not</b> move is what proves the replay wrote nothing — a returned row alone could not, since
+    /// a second write returns a row too.
+    /// </remarks>
+    [Fact]
+    public async Task A_retried_update_answers_the_row_and_writes_nothing()
+    {
+        var world = await AuditedWorldAsync();
+        var created = await world.Data.CreateAsync(Orders, Payload("first"), world.Caller, cancellationToken: Ct);
+        var token = TokenFor(Orders);
+
+        var first = await world.Data.UpdateAsync(
+            Orders, IdOf(created), Payload("second"), world.Caller, idempotency: token, cancellationToken: Ct);
+        var replay = await world.Data.UpdateAsync(
+            Orders, IdOf(created), Payload("second"), world.Caller, idempotency: token, cancellationToken: Ct);
+
+        IdOf(replay).ShouldBe(IdOf(first));
+        VersionOf(replay).ShouldBe(
+            VersionOf(first), "a replay must not write again — a second write would advance the version");
+    }
+
+    /// <summary>
+    /// A retried delete answers that the row is gone rather than that it was never there. Without the key the
+    /// retry is an <see cref="AlvoRecordNotFoundException"/> the caller cannot tell from somebody else's
+    /// delete, which is the ambiguity #102 exists to remove.
+    /// </summary>
+    /// <remarks>
+    /// The control is the delete itself: the row must actually be gone afterwards, or "did not throw" would
+    /// also be satisfied by a delete that quietly did nothing at all.
+    /// </remarks>
+    [Fact]
+    public async Task A_retried_delete_answers_as_done_rather_than_as_absent()
+    {
+        var world = await AuditedWorldAsync();
+        var created = await world.Data.CreateAsync(Orders, Payload("first"), world.Caller, cancellationToken: Ct);
+        var token = TokenFor(Orders);
+
+        await world.Data.DeleteAsync(Orders, IdOf(created), world.Caller, idempotency: token, cancellationToken: Ct);
+        (await world.Data.GetAsync(Orders, IdOf(created), world.Caller, Ct)).ShouldBeNull();
+
+        await Should.NotThrowAsync(() => world.Data.DeleteAsync(
+            Orders, IdOf(created), world.Caller, idempotency: token, cancellationToken: Ct));
+    }
+
+    /// <summary>
+    /// A key reused for a different update is refused, and the second payload is not written. A delete's
+    /// replay reads nothing, so on that verb this check is the <em>only</em> thing between a reused key and a
+    /// caller told a write succeeded that never happened.
+    /// </summary>
+    [Fact]
+    public async Task One_key_reused_for_a_different_update_is_a_conflict()
+    {
+        var world = await AuditedWorldAsync();
+        var created = await world.Data.CreateAsync(Orders, Payload("first"), world.Caller, cancellationToken: Ct);
+        var key = NewKey();
+
+        await world.Data.UpdateAsync(
+            Orders, IdOf(created), Payload("second"), world.Caller,
+            idempotency: new AlvoIdempotency(key, "fingerprint-of-the-first"), cancellationToken: Ct);
+
+        await Should.ThrowAsync<AlvoIdempotencyConflictException>(() => world.Data.UpdateAsync(
+            Orders, IdOf(created), Payload("third"), world.Caller,
+            idempotency: new AlvoIdempotency(key, "fingerprint-of-the-second"), cancellationToken: Ct));
+
+        var stored = await world.Data.GetAsync(Orders, IdOf(created), world.Caller, Ct);
+        stored.ShouldNotBeNull()["title"].ShouldBe("second", "the refused request must not have written");
+    }
+
+    /// <summary>
+    /// The 412 #102 exists to remove: a conditional update retried with the same key is not refused by its
+    /// own first write. Without the key the retry carries a version the first attempt already advanced past,
+    /// and the caller is told they lost a race with themselves.
+    /// </summary>
+    /// <remarks>
+    /// The precondition is minted before either call, so the second one genuinely carries the stale version.
+    /// An implementation that ignores the token therefore fails this with an
+    /// <see cref="AlvoPreconditionFailedException"/> out of the second call, which is the failure this fact
+    /// is named for — no <c>NotThrow</c> wrapper is needed to see it.
+    /// </remarks>
+    [Fact]
+    public async Task A_retried_conditional_update_is_not_refused_by_its_own_first_write()
+    {
+        var world = await AuditedWorldAsync();
+        var created = await world.Data.CreateAsync(Orders, Payload("first"), world.Caller, cancellationToken: Ct);
+        var precondition = new AlvoPrecondition(VersionOf(created));
+        var token = TokenFor(Orders);
+
+        var first = await world.Data.UpdateAsync(
+            Orders, IdOf(created), Payload("second"), world.Caller, precondition, token, Ct);
+
+        var replay = await world.Data.UpdateAsync(
+            Orders, IdOf(created), Payload("second"), world.Caller, precondition, token, Ct);
+
+        VersionOf(replay).ShouldBe(
+            VersionOf(first), "the retry was answered as a replay rather than refused by its own first write");
     }
 
     /// <summary>
@@ -440,7 +524,7 @@ public abstract class AlvoDataConcurrencyTests
     /// for the wrong reason.
     /// </para>
     /// <para>
-    /// <b>The structural proof: the row is hard-deleted before the replay.</b> <see cref="Dropbox"/> is given a
+    /// <b>The structural proof: the row is hard-deleted before the replay.</b> The <c>dropbox</c> fixture is given a
     /// <c>delete</c> rule for exactly this — the caller removes their own row outright once created. With the
     /// row physically gone, <em>any</em> read of <c>record.RowId</c> fails with
     /// <see cref="AlvoRecordNotFoundException"/>, whichever decision or predicate it is read under — a
@@ -634,293 +718,5 @@ public abstract class AlvoDataConcurrencyTests
                 Orders, Payload("second"), world.Caller, new AlvoIdempotency(oversized, "a-digest"), Ct));
             refusal.Message.ShouldContain("bytes when encoded as UTF-8");
         }
-    }
-
-    private const string Orders = "orders";
-    private const string Receipts = "receipts";
-    private const string Tickets = "tickets";
-    private const string Drafts = "drafts";
-    private const string Invoices = "invoices";
-    private const string Vaults = "vaults";
-    private const string Dropbox = "dropbox";
-
-    private static CancellationToken Ct => TestContext.Current.CancellationToken;
-
-    /// <summary>A key no other fact can collide with, so facts stay independent even on a shared store.</summary>
-    private static string NewKey() => $"key-{Guid.NewGuid():N}";
-
-    /// <summary>
-    /// A fresh token whose fingerprint covers <paramref name="entity"/>, as
-    /// <see cref="AlvoIdempotency.Fingerprint"/> requires of whoever computes one.
-    /// </summary>
-    /// <param name="entity">The entity the fingerprinted request writes.</param>
-    private static AlvoIdempotency TokenFor(string entity) => new(NewKey(), $"{entity}:a-request-digest");
-
-    private static Dictionary<string, object?> Payload(string title) =>
-        new(StringComparer.Ordinal) { ["title"] = title };
-
-    private static Dictionary<string, object?> OwnedPayload(string title, AlvoContext owner) =>
-        new(StringComparer.Ordinal) { ["title"] = title, ["owner_id"] = owner.User.Value };
-
-    private static Dictionary<string, object?> TenantPayload(string title, TenantId tenant) =>
-        new(StringComparer.Ordinal) { ["title"] = title, ["tenant_id"] = tenant.Value };
-
-    private static Guid IdOf(AlvoRecord record) => (Guid)record[AlvoManagedColumns.Id]!;
-
-    /// <summary>
-    /// The row's version as this port returned it, read from the record rather than reconstructed — which is
-    /// the point of every round-trip assertion above.
-    /// </summary>
-    private static DateTimeOffset VersionOf(AlvoRecord record) =>
-        (DateTimeOffset)record[AlvoManagedColumns.UpdatedAt]!;
-
-    /// <summary>An audited, global <c>orders</c> entity every operation is permitted on.</summary>
-    private Task<World> AuditedWorldAsync() => WorldAsync(EntityFixture.Permissive(Orders, audit: true));
-
-    /// <summary>
-    /// An audited <c>orders</c> entity whose rules admit the anonymous caller, so the token refusal is reached
-    /// on a create the policy would otherwise allow — and the tokenless create in the same fact really lands.
-    /// </summary>
-    private Task<World> AnonymousWorldAsync() => WorldAsync(
-        EntityFixture.Permissive(Orders, audit: true) with
-        {
-            Rules = new AccessRules { List = "true", Get = "true", Create = "true" },
-        });
-
-    /// <summary>A non-audited <c>drafts</c> entity — the one with no version column at all.</summary>
-    private Task<World> UnauditedWorldAsync() => WorldAsync(EntityFixture.Permissive(Drafts, audit: false));
-
-    /// <summary>
-    /// An audited <c>tickets</c> entity row-scoped by owner, so one caller's row is genuinely invisible to
-    /// the other — which is what lets the check-order and cross-user facts tell their answers apart.
-    /// </summary>
-    private Task<World> OwnedWorldAsync() => WorldAsync(
-        EntityFixture.Permissive(Tickets, audit: true) with
-        {
-            Rules = OwnerRules,
-            Extra = ("owner_id", DescField.Uuid),
-        });
-
-    /// <summary>An audited, tenant-scoped <c>invoices</c> entity, plus a caller in each of two tenants.</summary>
-    private Task<World> TenantedWorldAsync() => WorldAsync(
-        EntityFixture.Permissive(Invoices, audit: true) with { Tenancy = EntityTenancy.Scoped });
-
-    /// <summary>
-    /// An audited <c>vaults</c> entity with a field whose <c>hidden</c> expression covers a non-admin caller,
-    /// so a replay's projection is comparable against what a <c>get</c> by that caller returns.
-    /// </summary>
-    private Task<World> MaskedWorldAsync() => WorldAsync(
-        EntityFixture.Permissive(Vaults, audit: true) with { Hidden = ("secret", "!('admin' in @user.roles)") });
-
-    /// <summary>
-    /// An audited <c>dropbox</c> entity a caller may write and not read — no <c>get</c> or <c>list</c> rule at
-    /// all, so the replay's own read has nothing to resolve. <c>delete</c> is granted too, deliberately: it is
-    /// still a write, and it is what lets <see cref="A_replay_on_an_entity_the_caller_cannot_read_performs_no_row_read"/>
-    /// remove the row out from under a replay to prove structurally that nothing reads it.
-    /// </summary>
-    private Task<World> WriteOnlyWorldAsync() => WorldAsync(
-        EntityFixture.Permissive(Dropbox, audit: true) with
-        {
-            Rules = new AccessRules { Create = "true", Delete = "true" },
-        });
-
-    /// <summary>Two audited, permissive entities in one store, for the one-key-two-entities fact.</summary>
-    private Task<World> TwoEntityWorldAsync() => WorldAsync(
-        EntityFixture.Permissive(Orders, audit: true),
-        EntityFixture.Permissive(Receipts, audit: true));
-
-    private const string OwnerRule = "owner_id == @user.id";
-
-    private static AccessRules OwnerRules => new()
-    {
-        List = OwnerRule,
-        Get = OwnerRule,
-        Create = OwnerRule,
-        Update = OwnerRule,
-        Delete = OwnerRule,
-    };
-
-    /// <summary>
-    /// One entity of a fixture: the traits the descriptor and the schema have to agree on, in one place so the
-    /// pair cannot drift.
-    /// </summary>
-    /// <param name="Name">The entity name.</param>
-    /// <param name="Audit">Whether it declares <c>audit</c>, and therefore has a version column.</param>
-    /// <param name="Tenancy">Its tenancy.</param>
-    /// <param name="Rules">The access rules to compile.</param>
-    /// <param name="Extra">An additional required field, for the owner-scoped fixture.</param>
-    /// <param name="Hidden">A field and the <c>hidden</c> expression that masks it, for the masking fixture.</param>
-    private sealed record EntityFixture(
-        string Name,
-        bool Audit,
-        EntityTenancy Tenancy,
-        AccessRules Rules,
-        (string Name, DescField Type)? Extra = null,
-        (string Field, string Expression)? Hidden = null)
-    {
-        internal static EntityFixture Permissive(string name, bool audit) => new(
-            name,
-            audit,
-            EntityTenancy.Global,
-            new AccessRules { List = "true", Get = "true", Create = "true", Update = "true", Delete = "true" });
-    }
-
-    /// <summary>
-    /// A store over <paramref name="entities"/>, its descriptor and its schema paired by hand — the schema
-    /// mapper that injects the managed columns is <see langword="internal"/> to the core, so this suite pairs
-    /// them exactly as the adversarial suite does.
-    /// </summary>
-    /// <param name="entities">The entities the fixture declares.</param>
-    private async Task<World> WorldAsync(params EntityFixture[] entities)
-    {
-        var descriptor = new AlvoDescriptor
-        {
-            ApiVersion = "alvo.dev/v1",
-            Name = "concurrency-fixture",
-            Entities = entities.ToDictionary(entity => entity.Name, DescriptorOf, StringComparer.Ordinal),
-        };
-
-        var data = await CreateAsync(
-            new SchemaModel([.. entities.Select(SchemaOf)]),
-            descriptor,
-            new Dictionary<string, IReadOnlyList<AlvoRecord>>(StringComparer.Ordinal));
-
-        return new World(data);
-    }
-
-    private static EntityDescriptor DescriptorOf(EntityFixture entity) => new()
-    {
-        Tenancy = entity.Tenancy,
-        Audit = entity.Audit,
-        Fields = DescriptorFieldsOf(entity),
-        Rules = entity.Rules,
-    };
-
-    private static Dictionary<string, FieldDescriptor> DescriptorFieldsOf(EntityFixture entity)
-    {
-        var fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
-        {
-            ["title"] = new() { Type = DescField.String },
-        };
-        if (entity.Extra is { } extra)
-        {
-            fields[extra.Name] = new FieldDescriptor { Type = extra.Type, Required = true };
-        }
-
-        if (entity.Hidden is { } hidden)
-        {
-            fields[hidden.Field] = new FieldDescriptor
-            {
-                Type = DescField.String,
-                Hidden = BoolOrCel.FromExpression(hidden.Expression),
-            };
-        }
-
-        return fields;
-    }
-
-    /// <summary>
-    /// The schema half of one fixture entity: the row key, the declared fields, and whichever framework
-    /// columns the traits ask for.
-    /// </summary>
-    private static EntitySchema SchemaOf(EntityFixture entity) => new()
-    {
-        Name = entity.Name,
-        Tenancy = entity.Tenancy == EntityTenancy.Scoped ? TenancyMode.Scoped : TenancyMode.Global,
-        Audit = entity.Audit,
-        Fields = [.. SchemaFieldsOf(entity)],
-    };
-
-    /// <summary>The row key and whatever the fixture declares, then whatever its traits inject.</summary>
-    private static IEnumerable<FieldSchema> SchemaFieldsOf(EntityFixture entity) =>
-        [.. DeclaredFieldsOf(entity), .. ManagedFieldsOf(entity)];
-
-    private static IEnumerable<FieldSchema> DeclaredFieldsOf(EntityFixture entity)
-    {
-        yield return new FieldSchema { Name = AlvoManagedColumns.Id, Type = SchemaField.Uuid, Required = true };
-        yield return new FieldSchema { Name = "title", Type = SchemaField.String, Nullable = true };
-
-        if (entity.Extra is { } extra)
-        {
-            yield return new FieldSchema
-            {
-                Name = extra.Name,
-                Type = Enum.Parse<SchemaField>(extra.Type.ToString()),
-                Required = true,
-            };
-        }
-
-        if (entity.Hidden is { } hidden)
-        {
-            yield return new FieldSchema { Name = hidden.Field, Type = SchemaField.String, Nullable = true };
-        }
-    }
-
-    /// <summary>The columns the framework injects for these traits, in the mapper's own order.</summary>
-    private static IEnumerable<FieldSchema> ManagedFieldsOf(EntityFixture entity) =>
-    [
-        .. entity.Tenancy == EntityTenancy.Scoped ? TenantField : [],
-        .. entity.Audit ? AuditFields : [],
-    ];
-
-    private static IEnumerable<FieldSchema> TenantField =>
-    [
-        new FieldSchema
-        {
-            Name = AlvoManagedColumns.TenantId,
-            Type = SchemaField.Uuid,
-            Required = true,
-            Indexed = true,
-        },
-    ];
-
-    /// <summary>
-    /// The audit quartet as the schema mapper injects it. <c>updated_at</c> is <c>required</c> — the version
-    /// column a precondition compares can never be absent on a row the framework wrote.
-    /// </summary>
-    private static IEnumerable<FieldSchema> AuditFields =>
-    [
-        new FieldSchema { Name = AlvoManagedColumns.CreatedAt, Type = SchemaField.DateTime, Required = true },
-        new FieldSchema { Name = AlvoManagedColumns.CreatedBy, Type = SchemaField.Uuid, Nullable = true },
-        new FieldSchema { Name = AlvoManagedColumns.UpdatedAt, Type = SchemaField.DateTime, Required = true },
-        new FieldSchema { Name = AlvoManagedColumns.UpdatedBy, Type = SchemaField.Uuid, Nullable = true },
-    ];
-
-    /// <summary>One fixture database plus the callers and tenants the facts above write as.</summary>
-    private sealed class World(IAlvoData data)
-    {
-        internal IAlvoData Data { get; } = data;
-
-        /// <summary>The single caller the global fixtures write as.</summary>
-        internal AlvoContext Caller { get; } = NewCaller(tenant: null);
-
-        internal TenantId Acme { get; } = TenantId.New();
-
-        internal TenantId Globex { get; } = TenantId.New();
-
-        /// <summary>
-        /// Two callers <b>in one tenant</b>, which is what the cross-user replay fact needs: with a record
-        /// identity scoped to the tenant alone, these two would share one key space.
-        /// </summary>
-        internal AlvoContext Alice => _alice ??= NewCaller(Acme);
-
-        /// <inheritdoc cref="Alice"/>
-        internal AlvoContext Bob => _bob ??= NewCaller(Acme);
-
-        internal AlvoContext AcmeCaller => _acmeCaller ??= NewCaller(Acme);
-
-        internal AlvoContext GlobexCaller => _globexCaller ??= NewCaller(Globex);
-
-        private AlvoContext? _alice;
-        private AlvoContext? _bob;
-        private AlvoContext? _acmeCaller;
-        private AlvoContext? _globexCaller;
-
-        private static AlvoContext NewCaller(TenantId? tenant) => new()
-        {
-            User = UserId.New(),
-            Roles = new HashSet<Role> { Role.Authenticated },
-            Tenant = tenant,
-        };
     }
 }

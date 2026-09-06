@@ -1,8 +1,8 @@
 # The HTTP Data API
 
-> What a host gets when it calls `MapAlvoDataApi()`: five generated minimal-API routes per declared
-> entity, a PostgREST-shaped query string, RFC 9457 problem documents, `ETag`/`If-Match` optimistic
-> concurrency and `Idempotency-Key` on create. This file records the decisions that outlive PR3's
+> What a host gets when it calls `MapAlvoDataApi()`: nine generated minimal-API routes per declared
+> entity, a PostgREST-shaped query string (in the URL or in a request body), RFC 9457 problem documents, `ETag`/`If-Match` optimistic
+> concurrency, `Idempotency-Key` on every write, and a transactional batch. This file records the decisions that outlive PR3's
 > plan — the URL grammar and its allow-lists, the cursor's contract, what the framework treats as
 > confidential and what it publishes, and the surprises a reader will otherwise rediscover. Spec §2.1
 > (Data API), §0 principle 8 (minimal API, not MVC), §0 principle 5 (secure-by-default / default-deny).
@@ -134,6 +134,7 @@ PostgREST's syntax is adopted deliberately, so an agent recognises it from train
 
 ```
 GET    {prefix}/{entity}
+POST   {prefix}/{entity}/query
 GET    {prefix}/{entity}/{id:guid}
 POST   {prefix}/{entity}
 PATCH  {prefix}/{entity}/{id:guid}
@@ -152,10 +153,151 @@ own semantics and the only reading in which adding a term narrows the set.
   (`or=(a.eq.1,and=(b.eq.2))`), where PostgREST writes `and(b.eq.2)`. One grammar in one place beat a
   parser that quietly accepts two dialects; widening to PostgREST's exact nested form later is additive.
 - Negation: a single leading `not.` on a key or a group member. `not.not.` is not in the grammar.
-- `order=<field>[.asc|.desc][.nullsfirst|.nullslast][,…]`, `select=a,b`, `limit`, `offset`, `after`.
+- `order=<field>[.asc|.desc][.nullsfirst|.nullslast][,…]`, `select=a,b` or `select=alias:a`,
+  `limit`, `offset`, `after`.
 
-`select` is applied to the **response**, not to the `SELECT` list — the port has no projection member yet,
-so `?select=id` costs the database exactly what a full read costs (**#117**).
+### Sorting over nulls
+
+Where a `NULL` sorts is **never** left to the database: SQLite and PostgreSQL disagree on the default for a
+given direction, so the placement is always explicit in the emitted statement — `nullslast` unless the key
+says otherwise — and it is emitted as the portable `CASE WHEN <key> IS NULL THEN 0/1 ELSE 1/0 END` rank
+(spike `Q3c`), always ascending, ahead of the value term the direction applies to.
+
+**The keyset boundary compares that same pair**, which is what makes a nullable key pageable. It is not the
+value comparison plus a special case: expanding `(rank, value) > (rank₀, value₀)` and folding away the arms
+that are constant leaves four shapes, two of which are identical to the non-nullable form. The full
+derivation is in `docs/architecture/data-path.md`; the property that matters here is that order and boundary
+are two renderings of one fact, and the inherited paging walk — page a null-bearing set one row at a time and
+compare with the unpaged read — is what holds them together.
+
+**The cost is real and it is a reason to sort by a required column.** The `CASE` rank cannot be served by an
+index on the sort key, so a paged sort over a nullable field is slower than one over a required field, which
+emits no rank at all. The index-friendly fix is per-dialect native `NULLS FIRST`/`NULLS LAST` behind
+`IAlvoSqlDialect` — both shipped engines support it — and it is **#178**, deliberately not bundled with
+the change that made the read legal.
+
+### `select` — the projection, and what it costs
+
+`select` reaches the `SELECT` list, so `?select=id` stops the engine reading the columns it did not name
+(**#117**, closed). It does **not** shorten the column list: reads run through `FromSqlRaw` over a
+property-bag entity mapping every schema field, and EF fails if a mapped column is missing from the result
+set — so an unselected column is rendered `NULL AS <col>` and its key is dropped when the record is
+assembled. That is the mechanism `hidden` already used, proven on both engines, and it keeps
+`IAlvoSqlDialect` out of the change entirely.
+
+**The honest scope of the win:** the engine stops *reading* the column, which is real for a wide or
+TOASTed value and near zero for a narrow int. It is not a proportional speed-up, and
+`AlvoDataStatementTests` therefore asserts only what a statement can carry — that the column is not
+fetched.
+
+**Two groups of columns are read whatever the projection names**, and neither appears in the response
+unless it was named:
+
+- The framework-managed columns, through `AlvoManagedColumns.For(entity)`. `IAlvoData`'s returned-key-set
+  contract requires it, and the keyset cursor is minted from the fetched row's `id` — a NULLed row key
+  would not mis-sort a page, it would break paging.
+- Every field named in `order`. **Measured on SQLite 3 and PostgreSQL 16 alike:** a bare identifier in
+  `ORDER BY` resolves against the *output* column names first, so a NULLed sort key would order the page
+  by the `NULL` while the keyset boundary in `WHERE` still described the real sequence — a page that skips
+  or repeats a row. A filter term, the cursor anchor and the policy predicates need no such exemption,
+  because both engines resolve the table column in `WHERE` and ignore the alias. That measurement is what
+  makes the feature safe at all: a compiled `USING` predicate's field references are not enumerable, so
+  had `WHERE` behaved like `ORDER BY`, `!has(owner_id)` over a NULLed column would have rendered
+  `NOT("owner_id" IS NOT NULL)` → true and admitted every row.
+
+**Aliases** (`select=label:make`, PostgREST's own spelling, **#111**) are a response concern and never
+reach the port: `AlvoQuery.Select` carries source names, and the API renders the response's key list.
+The source is resolved through the same resolver every other field name goes through, so an alias cannot
+reach a field the caller may not read. Four refusals, all pointing at `select`: a malformed pair or an
+alias outside the field-name grammar (`malformed-select-alias` — a deliberate narrowing of PostgREST,
+which admits an arbitrary alias, because an alias is a field name *in the response*); a reserved name as
+an alias (consistency with what a descriptor may declare, not necessity); a key claimed twice, whether by
+two different sources or by an alias onto **any** framework-owned name — `AlvoManagedColumns.All`, not this
+entity's own subset, because the caller is minting a name rather than resolving one
+(`colliding-projection-key`); and more distinct keys than the caller has readable fields
+(`projection-too-wide`).
+
+**What the alias deliberately does not refuse:** a rename onto another declared field's name.
+`?select=year:make` answers `{"year": "skoda"}` where the published schema declares `year` an integer.
+PostgREST behaves the same way, the caller chose both halves, and the value is one they may read; refusing
+it would make the alias useless for the renaming it exists for.
+
+That last bound exists **because** of aliases. Before them the projection was self-bounding — every entry
+resolved through `QueryFieldResolver` to a declared field and duplicates collapsed — so a response could
+never carry more keys than the entity has fields. An alias can name one column under arbitrarily many keys,
+leaving only the transport's URL limit in the way. It is charged per newly claimed *distinct* key rather
+than on the entry count, which is what keeps `?select=id,id,id` deduping as it always has, and follows the
+precedent `FilterParseScope.TryChargeNode` set: a budget spent after the parse does not bound the parse.
+
+**The number is the caller's readable field count, not the entity's declared one**, and that is a
+confidentiality decision rather than a tightening: the count is published in the refusal's fix suggestion,
+and an unprojected list already tells the caller how many fields they can read — so publishing the declared
+count would hand them the size of their own mask, the one bit the byte-identical `unavailable-field`
+refusal exists to withhold.
+
+### `POST {prefix}/{entity}/query` — the same parameters, on the other side of the request (#107)
+
+A filter is bounded by what proxies accept in a request line, commonly ~8 KB and not something Alvo
+controls. Alvo's own budgets are deliberately more generous — 256 terms, 1000 `in` candidates — so
+`?id=in.(…400 uuids…)` is about 37 KB and dies at an intermediary with a **414 carrying no `violations`
+array**, for a request Alvo would have served. "Fetch these 400 rows by id" is the ordinary shape of that.
+
+**The body is a JSON object whose members are the query parameters.** A member's name is a parameter, its
+value is the same `<operator>.<operand>` text, and an array is a repeated parameter. It is transposed into
+an `IQueryCollection` and handed to the **one** `QueryStringParser` — there is no second grammar, no second
+refusal catalogue and no second set of budgets.
+
+```http
+POST /api/vehicles/query
+Content-Type: application/json
+
+{ "id": "in.(…)", "year": "gte.2020", "or": ["(color.eq.red,color.eq.blue)"], "limit": 100 }
+```
+
+**Equality is on values, not on bytes, and that is the point.** The body carries decoded values; a query
+string carries their percent-encoding. So `{"make":"like.100%"}` is what `?make=like.100%25` means, and `+`
+is a plus here and a space there. Hand-escaping a 400-element list is most of what goes wrong with the URL
+form, and the body removes it. Keys compare `OrdinalIgnoreCase`, as `QueryCollection`'s do, so
+`{"limit":1,"LIMIT":2}` earns the same `repeated-parameter` the query string earns rather than a different
+refusal. A **duplicate JSON name** is refused, not collapsed (RFC 8259 §4 leaves it undefined); the array is
+the spelling that repeats a parameter. `{}` is the empty query; a body is required.
+
+**It is a read**, gated as `list` and resolved *before* a byte of the body is read — so a denied caller is
+told they are denied rather than that their body is malformed, and never pays for the parse. Ignored:
+`If-Match`, `If-None-Match` (a page has no version) and `Idempotency-Key` (nothing is written). Honoured:
+`Prefer: count`. `Cache-Control: no-store`, as everywhere.
+
+**No endpoint requires a `Content-Type`, and that is worth recording here rather than only in the code.**
+`POST …/query` reads its body unconditionally, so it is reachable as a CORS *simple* request — no preflight.
+That is harmless while Alvo's credential is a request header, because a cross-site form POST arrives with no
+credential at all. It stops being harmless in **embedded mode inside a host whose own auth is cookie-based
+and which populates `IAlvoContextAccessor`**: a POST-that-reads is then a live, read-only CSRF vector.
+Requiring `application/json` would force a preflight and cost nothing. The gap is pre-existing — the create
+and the update have it too, and worse — so it is not this route's to close; the query route is simply the
+first *read* to acquire it, which is why it is written down. Tracked as **#191**, which also carries the
+three things that need deciding rather than committing: which media types are accepted, whether a body with
+no `Content-Type` at all is refused, and whether an embedded host may opt out.
+
+**Two consequences, recorded rather than discovered.** `GET`/`PATCH`/`DELETE` on `{entity}/query` are now
+**405 from routing** rather than 404 — no problem document and no `no-store`, the same class of answer as
+the routing 404 for an undeclared entity. And a host convention keyed on the **verb** — "POST means a
+write", a common shape for rate limiting or audit logging — now shapes a read, while a GET-keyed one misses
+this route; a host that shapes by verb should key on the operation marker instead, which is what it is for.
+
+**Deviation from OData 4.01 §11.2.6.1, stated.** That is the published standard for this exact problem:
+`POST <resource>/$query`, `Content-Type: text/plain`, the body being the query options verbatim. Alvo sends
+a JSON object instead, because the source asks for one (`baas-analyza` §2.1) and because a `text/plain`
+body keeps the caller's percent-encoding burden — the thing this endpoint exists to remove — and cannot be
+described by a schema, so the document could offer a client generator nothing but "a string". The segment
+is `query`, not `$query`: `$` is OData's own escaping convention and means nothing to a caller who knows
+PostgREST.
+
+**Refused: `application/x-www-form-urlencoded`.** Literally the same octets as a query string and needing no
+transposition — but reading it means `HttpRequest.Form` and its own separate bounds
+(`ValueCountLimit`, `KeyLengthLimit`, `ValueLengthLimit`), a second set of limits Alvo neither owns nor
+publishes, refusing with a framework message rather than a `violations` array. That is the 414 problem one
+layer in. **Refused: a JSON query DSL** (Elasticsearch's `POST _search` shape) — the second grammar #107
+forbids. **Refused: `X-HTTP-Method-Override`** — it moves nothing.
 
 ### Allow-list 1: the ten operators, derived and not written out
 
@@ -212,15 +354,62 @@ in the grammar distinguishes them.
 | Filter terms, per request | 256 (`AlvoFilter.MaxTerms`) | port |
 | `in` candidates, per list **and** per request in total | 1000 (`AlvoFilter.MaxInCandidates`) | port |
 | Cursor length | 512 chars (`QueryStringParser.MaxCursorLength`) | API |
+| `select` entries, per parameter | 256 (`QueryStringParser.MaxSelectEntries`) | API |
+| Query-body parameter **values** | `MaxPayloadKeys` (512) | API options |
+| `like`/`ilike` pattern length | 512 chars (`QueryStringParser.MaxPatternLength`) | API |
 | Page size | `limit` ≤ `MaxPageSize` (200); absent ⇒ `DefaultPageSize` (50) | API options |
-| Request body | 1 MiB, depth 32, 512 keys | API options |
+| Request body | 1 MiB, depth 32, 512 keys — a **write payload or a query body** | API options |
 | `Idempotency-Key` | ≤ 255 UTF-8 **bytes**, and a host may only narrow that | port + options |
+| Batch rows, per request | 1000 (`AlvoApiOptions.MaxBatchRows`), counted as each row opens | API options |
+| Property names, on a batch | `MaxPayloadKeys` **per row**, not across the body | API options |
+
+**The value row exists because a JSON array's elements are not property names.** `BoundedJsonBody`'s key
+bound counts property names at every depth, so `{"or": […500 000 strings…]}` is **one key**: it satisfies
+every shape bound and fits inside `MaxRequestBodyBytes`. The parser would have refused the 257th filter
+term — after the transposition had built all half a million values, one `StringValues.Concat` at a time,
+which copies. Counting values while reading them is what bounds it, and building each parameter's values
+once is what makes the bounded work linear. Found by CodeRabbit on #107's own PR. **The write path has the
+same shape and is untouched here:** a `json` field's array value is bounded only by the body's bytes, which
+is a smaller amplification (the array is stored, not interpreted) and not this route's to close.
+
+**The other bound rows exist because `POST …/query` removed the transport bound they had been relying on.**
+Three comma-splitting readers — a group's members, an `in` list's candidates, a projection's entries — used
+to materialise the whole list and refuse it afterwards, and one channel never splits at all: a `like`
+pattern had no length bound whatsoever. Under an ~8 KB request line that was a few hundred entries; under a
+1 MiB body it is hundreds of thousands. The three splits now spend their bound *while* splitting, which
+reaches the refusal they already earned (`filter-too-wide`, `too-many-in-candidates`) rather than adding
+one; only `select` needed a new code, because a repeated entry claims no key and can therefore never trip
+the *width* bound that keeps `?select=id,id,id` deduplicating. `MaxSelectEntries` is `AlvoFilter.MaxTerms`
+rather than a second number, and the coupling is deliberate. **A splitter is handed what the request can
+still *afford*, not the per-list maximum** (`FilterParseScope.AffordableCandidates`/`AffordableNodes`): the
+`in`-candidate budget is a running total across the whole query, so a splitter using the per-list bound
+alone would let 256 terms each build a full 1000-element list — 256 000 substrings — before the total
+refused, which is the very number that bound was introduced to keep out of a statement. The remaining
+allowance is floored at one, because a charge that fails still spends and a splitter given a maximum of zero
+would turn a caller's over-wide filter into a 500. **`MaxPatternLength` is chosen, not measured**,
+and only the two pattern operators are bounded: every other operand is a value the engine *compares* —
+linear in its length, short-circuiting on the first differing byte, and already capped in total by the body
+bound — while a pattern is *matched*, per row, at a cost that is not linear in its length. Both bounds apply
+to the URL surface too; no query string a proxy would carry can reach either.
 
 The two term/candidate numbers are measured rather than chosen: 900 filter terms answered in 14 ms and
 1000 threw a raw `SqliteException`; 40 000 `in` candidates threw `too many SQL variables` on SQLite after
 3.5 s where PostgreSQL answered in 0.27 s. The per-request candidate *total* exists because 256 terms each
 carrying a maximum list is 256 000 bind parameters in one statement, past the 32 766 ceiling the per-list
 bound was measured against.
+
+**The six body-shape codes are now reachable under `malformed-query` too**, not only under `validation`:
+`not-an-object`, `malformed-json`, `body-too-large`, `body-too-deep`, `body-too-many-fields` and
+`duplicate-field`. The *code* is shared with the write path and the *fix suggestion* is not — a read
+endpoint answering "send only the fields you are changing" hands an agent advice about another operation.
+Four codes are new: `unrepresentable-query-value` (a member whose JSON value is not a string, a number, a
+boolean or a non-empty array of those), `too-many-query-values`, `too-many-select-entries` and
+`pattern-too-long`.
+
+**A `pointer` carries one of two conventions and the rule that tells them apart is published on
+`AlvoViolation`:** empty or beginning with `/` is an RFC 6901 pointer into the request body; anything else
+is the *role* of a query parameter (`filter`, `order`, `limit`, `offset`, `after`, `select`). `POST …/query`
+is the first endpoint whose one response can carry both.
 
 Every parser refusal is a **422** with slug `malformed-query` and a `violations` array; refusals are
 de-duplicated on `(code, pointer)` rather than capped at a count, so one repeated `filter-too-wide` can no
@@ -239,20 +428,23 @@ means no explicit limit; the EF driver returns the whole visible set with no cur
 calling `IAlvoData` directly may still read a whole set. Both halves are stated here so that neither is
 "fixed": the port keeps the capability, the HTTP surface deliberately does not expose it.
 
-One consequence worth knowing: a nullable field cannot be a sort key on a *paged* read, and every HTTP
-list is paged — so `?order=<any nullable field>` is refused outright, and `nullsfirst`/`nullslast` parse
-but are currently **unobservable**. Both are issue **#116**, and it will be hit on day one.
+One consequence used to follow and no longer does: because every HTTP list is paged and a paged read over
+a nullable sort key was refused, `?order=<any nullable field>` was a 422 and `nullsfirst`/`nullslast` were
+unobservable — half the published sort grammar, unreachable. **#116** closed that: the keyset boundary now
+compares the same *(where the null sorts, then the value)* pair the `ORDER BY` ranks by, so a nullable key
+pages like any other. See *Sorting over nulls* below for what it costs.
 
 ## Paging: keyset over an opaque cursor, and its real cost
 
-The response is a JSON envelope, always both members:
+The response is a JSON envelope, always all three members:
 
 ```json
-{ "items": [ … ], "next": "3q2-796tvE-cKTMlvKYbGw" }
+{ "items": [ … ], "next": "3q2-796tvE-cKTMlvKYbGw", "count": null }
 ```
 
-`next` is `null` on the last page rather than omitted, which is why the published schema marks both
-`required` — a statement about the bytes, not an aspiration.
+`next` is `null` on the last page rather than omitted, which is why the published schema marks all three
+`required` — a statement about the bytes, not an aspiration. `count` follows the same rule and is `null`
+unless the request opted in; see *The count is opt-in* below.
 
 ### The cursor's contract, and why the API layer cannot mint one
 
@@ -293,6 +485,58 @@ The fix is a row-constructor comparison (`(a, b) > (@a, @b)`) where the engine s
 `offset` is the opt-in second mode. A request may not combine `after` and `offset` — they anchor the same
 window two different ways, and answering with one would silently resolve an ambiguous request
 (`AlvoQuery.EnsurePagingWindowIsSane`).
+
+### The count is opt-in: `Prefer: count=exact` (#110)
+
+`Prefer: count=exact` fills the envelope's `count` with **how many rows the query matches**, not how many
+this page holds. `Preference-Applied: count=exact` reports what was done (RFC 7240 §3).
+
+- **Opt-in, and the default is no count.** An exact count is a second full scan of the matching set on every
+  page; as a default it would make every list roughly twice the work for a number most callers never read.
+  §2.1 requires it to be opt-in and the analysis names `count(*)` over a large table as the expense. A
+  request that sends no preference composes and executes no count statement at all.
+- **`planned` and `estimated` are accepted and degrade to `exact`.** A planner estimate is engine-specific —
+  PostgreSQL has `EXPLAIN`, SQLite has no equivalent worth the name — and §0 principle 3 makes identical
+  behaviour the contract, so a mode real on one driver and fictional on the other belongs on neither.
+  `Preference-Applied` is where the caller who asked for an estimate learns they received the real count.
+- **The port models the capability, not the preference.** `AlvoQuery.IncludeTotalCount` is a `bool`. The
+  three RFC 7240 spellings are HTTP vocabulary and the degradation is an HTTP decision, taken where the
+  header is read. When a driver can honestly estimate, the port grows a mode and `AlvoPage` grows the applied
+  one — additively, at the point the distinction becomes true.
+- **The count is over the policy-filtered set.** It is composed by `ReadStatementComposer.ComposeCount` from
+  the *same* `WHERE` terms as the page — the resolved `USING` predicate, the synthesized tenant scope, the
+  caller's filter — with the projection, the ordering, the row window and the **cursor boundary** all
+  dropped. A count over the bare table returns a plausible integer and passes every row-level test while
+  telling a caller how many rows exist outside what they may read; `AlvoDataStatementTests` asserts the
+  second statement carries the policy prefixes in its own `WHERE`.
+
+**One deviation, stated.** PostgREST computes its count in the same statement, with `COUNT(*) OVER ()`. Alvo
+cannot: that window is evaluated after `WHERE`, and Alvo's `WHERE` carries the keyset boundary, so on any
+page but the first it would count the rows *after* the cursor rather than the set. (It would work for offset
+paging, which is exactly how you end up with two shapes and one of them wrong.) So it is a second statement,
+on the same connection, in no transaction — and a write interleaving the two can make the number disagree
+with the rows by one. **`exact` means "not an estimate", not "atomically consistent with `items`"**; read
+committed would not deliver the latter anyway without escalating every counted list to `REPEATABLE READ`.
+
+**Unrecognised preferences are ignored, not refused** — the one deliberate departure from this API's own
+"refuse, never ignore" rule. RFC 7240 §2 makes `Prefer` advisory and requires a server to ignore a preference
+it does not recognise or cannot satisfy, and §3 gives `Preference-Applied` as the channel for saying so. So
+`Prefer: count=exakt` yields no count and no `Preference-Applied`, which is precisely how the standard says
+that is reported. Adopting a known spec and then tightening it into a variant is a defect, not a shortcut;
+the detection the house rule protects is present, in the standard's place rather than ours.
+
+**No `Vary: Prefer`.** RFC 7240 suggests it where a response varies by the header, and this one does — but
+every generated response already carries `Cache-Control: no-store`, so no cache may store the representation
+and a `Vary` has no addressee.
+
+**A gap worth naming: the count is the client's opt-in, and the operator has no say (#179).** `MaxPageSize`
+is the operator's control over the sibling concern — "an unbounded `limit` is a denial of service one query
+long" — and it bounds the *rows* a request returns, not the work a `COUNT(*)` does. So any caller authorized
+to `list` can roughly double the cost of every list request, and keep doing it on every page of a deep walk.
+This is availability only: the count is composed over the caller's own policy-filtered set, so nothing
+crosses a boundary. It is stated rather than fixed because the answer is a host-facing option (refuse the
+preference, or degrade past a row threshold), and inventing one before an operator has asked for a shape
+would be guessing at the shape.
 
 ## Optimistic concurrency: a strong `ETag` over the row version
 
@@ -343,9 +587,107 @@ honest reason for the asymmetry is not cost — honouring it would be about thre
 they were sent. An unhonoured header on a read costs a body the caller said they already had; on a write it
 costs somebody their change.
 
+## The batch: one path, three verbs, one transaction (#106)
+
+`{prefix}/{entity}/batch` answers `POST`, `PATCH` and `DELETE`, each taking `{"rows": [ … ]}`.
+
+**Three routes rather than one route with a mode in its body, and the reason is authorization.** A mode is
+gated once — as whichever operation the route was declared to be — so a caller permitted to create could
+reach the delete through it. Three verbs are gated as three operations by the filters that already gate the
+single-row routes: no new policy vocabulary, and nothing a descriptor has to opt into.
+
+**Every row is judged before any row is written.** The shape is forced rather than chosen: the single-row
+helpers throw on the first failure, and PostgreSQL aborts a transaction after any statement error — so
+"insert, catch, keep going" is not available inside one transaction, and a batch has to be one transaction.
+Judging first is the only shape that can report every offending row.
+
+**The failure this design exists to forbid is "checks the first row and lets the rest through."** It is the
+one place in the framework where a plausible implementation — resolve once, check once, write many — is a
+bulk authorization bypass. Every row is evaluated against its own post-image, and the contract suite proves
+it on all three implementations; the facts were verified by *injecting* the bypass rather than by watching
+them pass.
+
+**A row you cannot see and a row that does not exist are one refusal**, byte for byte, from
+`AlvoAuthorizationException.RowUnavailable`. A single write already conflates them into one 404; a batch
+answers one refusal per row, so distinguishing them would let one request ask as many existence questions as
+it carries rows. That is the same oracle, multiplied by the batch size.
+
+**A `409` names the field and no row index.** A `unique` value is caller-guessable where a framework-assigned
+row id is not, so an index would turn one collision probe into as many per request as the batch carries rows.
+An intra-batch collision — two rows of one batch carrying the same unique value — is invisible to the judging
+pass and surfaces the same way; recorded rather than fixed, because catching it would mean re-implementing
+every `unique` constraint in the judging pass.
+
+**Rows are locked in id order.** Each row's verdict is reached over that row's *locked* pre-image, so two
+concurrent batches whose id sets overlap would otherwise take the same locks in the order their callers wrote
+them — a deadlock on PostgreSQL rather than a slowdown. The request order is carried separately, because a
+caller's row 3 must be reported as row 3; reporting the sorted position would be worse than reporting
+nothing, since it looks like an index.
+
+**One instant covers the batch**, so all N rows share one `updated_at` and therefore one `ETag`. They were
+written together.
+
+**`DELETE` carries a body, which RFC 9110 §9.3.5 leaves undefined**, so an intermediary is permitted to strip
+it. An empty batch is therefore refused with 422 rather than read as "no rows to delete" — which would be a
+silent success for a request that never arrived. The response is `200` with an empty `items` and a non-zero
+`affected`, not `204`: it reports on many rows, and `affected` is what tells a five-row delete from a
+refusal.
+
+**A batch's refusals answer the status their channel answers.** The reader refuses what the entity's
+declared shape refuses — a type, a length, a missing `required` — and that is a `422`, exactly as on the
+single-row routes. The **port** refuses what policy refuses — `WITH CHECK`, the tenant scope, a row that is
+not yours, a row named twice — and that is a `403` carrying a `violations` array, one entry per refused row.
+A 403 with violations is new: the single-row 403 carries only a message, and a refusal that names no row is
+what makes a five-hundred-row import unfixable. The one refusal that stays 422 where you might expect 403 is
+a write to a `readOnly` field, because `RecordValidator` catches it in the reader and answers 422 on every
+write route — matching the single-row routes was judged to matter more than matching the batch's own table.
+
+**No precondition on the batch delete.** One version cannot condition many rows, and accepting one would
+either check a single row or check none while looking as though it checked all of them.
+
+**One row named twice is refused**, and that is a `WITH CHECK` bypass rather than untidiness. Every row is
+judged against its own *locked* pre-image before any row is written, so two patches for one row are both
+judged against the original — and then both applied, leaving a composition no verdict ever saw. With a rule
+`a != b` over `{a:1, b:2}`: `{a:5}` passes as `{a:5, b:2}`, `{b:5}` passes as `{a:1, b:5}`, and `{a:5, b:5}`
+lands. Folding the patches instead would need an answer to "which one wins", and a partial order over one row
+inside one transaction is not something this API promised. Found by review, not by the suite — the facts that
+pin it were written afterwards.
+
+**The key bound is spent per row and the row bound while reading.** `BoundedJsonBody`'s shape scan resets the
+property-name counter as each element of `rows` opens, and counts the elements as it goes. Sharing one key
+budget across the batch — which is what the first implementation did — capped a five-field entity near a
+hundred rows and refused it as "too many fields", making `MaxBatchRows` unreachable over HTTP.
+
+**An idempotency record now holds a batch's whole id list.** `IdempotencyTable.Encode` writes a JSON array
+into the `row_id` column, so a record for a 1000-row batch is ~38 KB rather than the 36 bytes a single write
+stores. Nothing expires records (**#115**), and the growth is still bounded by the writes the caller may
+already perform — but the per-record size is no longer a constant, which is what that issue's argument
+assumed.
+
+**A known, bounded channel: a batch's refusal list tells "this row is refused" from "this row is not yours".**
+A row that exists and fails `WITH CHECK` answers `WriteRejectedByPolicy`; a row that is absent *or* invisible
+answers `RowUnavailable`. Because a refused batch writes nothing, a caller can send up to `MaxBatchRows`
+candidate ids and read the partition off the refusal list without changing anything. For a caller who may
+also read, this discloses nothing new. For the **write-but-no-read** configuration the framework supports, it
+is a real enumeration channel — and an amplification by `MaxBatchRows` of the single-row 403-vs-404
+distinction that already exists.
+
+Collapsing the two was considered and **rejected**: *absent* and *invisible* were collapsed because both mean
+"check the id", so the caller loses nothing. *Check-refused* and *unavailable* mean different repairs, and
+collapsing them would leave every batch refusal unactionable — which is the entire reason the refusal list
+exists. Tracked as **#194** so the trade is revisited rather than forgotten.
+
+**The cost, stated: one event per row.** A 500-row import fans out to 500 outbox rows and 500 deliveries.
+`baas-analyza` §3 asks for the opposite — *"import 10k riadkov nesmie znamenať 10k webhookov"*, with the
+acceptance criterion *"Bulk insert 10k riadkov s batch pravidlom = 1 batch event"* — and this PR does not
+deliver it, because coalescing is a **descriptor** feature: a rule has to declare batch delivery, which is a
+schema change, a compiler change and a new event shape. Building it inside a data-path PR would make the
+descriptor change invisible. Tracked as **#193**.
+
 ## `Idempotency-Key`: what is stored, and where it is honoured
 
-Sent on **create**. The record's shape:
+Honoured on **every write** — create, update, delete, and all three batch verbs (#102, #106). The record's
+shape:
 
 ```sql
 CREATE TABLE IF NOT EXISTS alvo_idempotency (
@@ -442,7 +784,7 @@ the mapped literal does not carry, and all three used to be lost:
   rather than to the request. A grouped endpoint's `RoutePattern.RawText` is the combined pattern, so reading
   the collection path off `HttpContext.GetEndpoint()` is reading it from the router — there is no second
   place for the literal and the route to disagree. Not `LinkGenerator`: generating by name would mean naming
-  all five routes per entity, and route names are process-global, so two `MapAlvoDataApi()` calls under two
+  every route per entity, and route names are process-global, so two `MapAlvoDataApi()` calls under two
   groups — the very shape this fixes — would collide at startup.
 - **Encoding.** The header is `ToUriComponent()`, not `PathString.Value`. `Value` is decoded, and over
   Kestrel a non-ASCII path base (`/účty`) then throws while the response header is encoded as Latin-1 — a
@@ -456,16 +798,32 @@ than by prefix, and `AlvoHostPathBaseTests` follows the forwarded-prefix case th
 that produced it. A **route group** is the harder failure and needs none of that care: it only lengthens the
 route, so the unprefixed URL is mapped by nothing and a wrong header 404s in-process.
 
-The **OpenAPI document's path keys still have the original shape** — a document served under a path base
-declares no `servers` entry, so a client resolving its paths against `/` is wrong by the same prefix. That is
-deliberately not fixed here: `OpenApiDocumentTransformerContext` carries no `HttpContext` and the document is
-cached per document name, so a request-derived `servers` entry is a decision about whether Alvo's document is
-per-request at all. Filed as **#130**.
+The **OpenAPI document's path keys keep their mapped shape, and the document names the origin they are
+resolved against.** `Microsoft.AspNetCore.OpenApi` builds `servers[0].url` from the request's `Scheme`, `Host`
+and **`PathBase`**, per request — measured, including the part that made #130 look unfixable: asking for the
+document with a path base and then without it, in either order, returns the right origin each time, so nothing
+is frozen by a first request. Alvo's transformer never touches `Servers`. Under `app.UsePathBase("/alvo")` the
+origin is `http://localhost/alvo` and the keys stay `/api/owners`; under
+`app.MapGroup("/backend").MapAlvoDataApi()` the origin stays bare and the prefix is in the key, because a group
+prefix belongs to the *route*. `OpenApiServersTests` pins both, and `AlvoHostPathBaseTests` pins the
+forwarded-prefix leg through a model of the proxy — which is where the 404 an unprefixed origin produces
+actually happens.
+
+**#130 closed with no production change.** What it was missing was any fact at all: the origin's scheme and
+host halves were pinned by `AlvoHostForwardedOriginTests`, its path-base half by nothing, so removing `PathBase`
+from the framework's own server-URL construction would have left the suite green while every path in the
+document became wrong by the prefix. Those facts now also gate a bump of `Microsoft.AspNetCore.OpenApi`, which
+is a virtue worth stating rather than a surprise worth discovering.
+
+The docs UI's own document fetch under a path base is a separate question and stays **#134**.
 
 ## The status and `type`-slug catalogue
 
 Problem documents are RFC 9457, media type `application/problem+json`, with an Alvo `violations` array.
-Every `type` is `https://alvo.dev/errors/<slug>`; the nine slugs are `AlvoProblemTypes.All`.
+Every `type` is `https://alvo.dev/errors/<slug>`; the slugs are exactly `AlvoProblemTypes.All`, and the
+table below is that list. Two of them — `unreadable-request` and `internal` — are emitted only by
+`AlvoExceptionHandler`, so only a host that called `AddAlvoProblemDetails()` can produce one, which is
+why neither is documented on any operation.
 
 | Status | Slug | Means |
 |---|---|---|
@@ -481,7 +839,7 @@ Every `type` is `https://alvo.dev/errors/<slug>`; the nine slugs are `AlvoProble
 | 409 | `conflict` | a constraint the database enforces refused the write — a `unique` value another record holds, or a `restrict`-ed reference |
 | 412 | `precondition-failed` | a precondition this API cannot evaluate, or a version that does not match |
 | 422 | `validation` | schema-derived validation refused the body |
-| 422 | `malformed-query` | the query string or the body is malformed — the shape is wrong, nothing is hidden |
+| 422 | `malformed-query` | the query string or the query body is malformed — the shape is wrong, nothing is hidden |
 | 413, 408, 400 | `unreadable-request` | the **web server** refused the request before Alvo read it (a body over `MaxRequestBodySize`, one arriving too slowly, one whose framing broke) — same opt-in as `internal`, and likewise documented on no operation |
 | 500 | `internal` | an invariant Alvo relies on is broken — **only** in a host that called `AddAlvoProblemDetails()`; no endpoint produces it and no operation documents it |
 
@@ -504,7 +862,7 @@ references advertises a 409 on delete it cannot reach.
 
 Which operation can answer what is one table, `DataApiDocumentation.ResponsesFor`, read both by the
 endpoint metadata and by the OpenAPI transformer — so the document cannot advertise a status no delegate
-produces. **401 and 403 are unconditional on every route**, because the same gate is attached to all five.
+produces. **401 and 403 are unconditional on every route**, because the same gate is attached to every one of them.
 
 ### How a database constraint violation reaches the caller (#138, fixed)
 
@@ -553,7 +911,8 @@ invariant it is.
 write failure, so a duplicate in an idempotent create used to be re-attempted ten times before surfacing.
 `AlvoConstraintViolationException` is not a `DbException`, so it leaves on the first attempt; the idempotency
 record's own primary key is deliberately **not** translated, because losing that race is what the retry
-exists to converge on. That is the part of **#127** this happens to close; the rest of #127 is still open.
+exists to converge on. That closed **#127**'s stated defect; the attempt count is now asserted rather than
+described, and the paths that legitimately still retry are set out under *the five failure families* below.
 
 ### A `unique` field on a tenant-scoped entity was a cross-tenant existence oracle (#137, fixed)
 
@@ -641,14 +1000,68 @@ produces, and no delegate produces this one. The slug is in the published `probl
 enum, because that enum is the catalogue a client branches on and `internal` is a value an Alvo pipeline can
 really send.
 
-**One 500 *is* caller-reachable, and it costs ten write transactions to get there.** A **keyed** create
-whose row violates one of the *caller's own* unique constraints is retried by
-`EfAlvoData.ReplayableCreateAsync` — it cannot distinguish that violation from the idempotency table's own
-insert race, which is exactly what the retry exists to absorb — so ten full write transactions run with a
-linear backoff (~450 ms total) before the exception surfaces as the family-5 500 above. Not a regression:
-an *unkeyed* create with the same violation also answers 500, just immediately. Worth knowing because it is
-a caller-triggerable amplification of a caller's own mistake, and because the fix (asking the dialect
-whether a constraint name is Alvo's own) belongs with the retry logic rather than here. Tracked in **#127**.
+**What an idempotent create still retries, now that the caller's own duplicate does not (#127).** A
+**keyed** create whose row violates one of the *caller's own* unique constraints used to be
+indistinguishable from the idempotency table's own insert race — which is what the retry exists to absorb —
+so it burned ten full write transactions with a linear backoff (~450 ms) before surfacing. It no longer
+does: the entity's insert goes through `ConstraintViolationTranslator`, the refusal is
+`AlvoConstraintViolationException`, that is not a `DbException`, and `IsStorageWriteFailure` therefore does
+not match it, so it leaves on the **first** attempt as a `409` naming the field. `SqliteIdempotentCreateFailureTests`
+asserts the attempt *count*, not only the outcome — a build that retried ten times and then threw the same
+exception passes every outcome assertion.
+
+Two paths legitimately still cost up to ten attempts, and neither is a defect to be "fixed":
+
+- The **idempotency record's own** primary-key failure is deliberately left untranslated. Losing that race
+  is the entire reason the loop exists, and translating it would turn a converging race into a `409`.
+- An **unrecognised** `DbException`/`DbUpdateException`. The dialect answers `null` when it does not
+  recognise the code, when the constraint name matches no model index, or when the surviving columns are all
+  framework-managed. That is the fail-safe direction: narrowing the catch far enough to stop this would let
+  a genuine insert race escape as a 500.
+
+So the amplification is a **per-dialect** property rather than something fixed once for every engine — a
+dialect that honestly recognises nothing, as `TSqlSqlDialect` does, still burns all ten. The count is pinned
+on SQLite; the PostgreSQL leg belongs to **#139**, which exists to demand constraint behaviour be verified
+per engine.
+
+## What a host may attach to the generated routes (#182)
+
+`MapAlvoDataApi()` returns an **`IEndpointConventionBuilder`**, so a host attaches
+`RequireRateLimiting`, an authorization policy, output caching or a telemetry tag to Alvo's generated
+endpoints and to nothing else — the return type every other ASP.NET Core `Map*` over a *set* of endpoints
+has. The conventions are applied in `DataApiEndpoints.Protect`, the same call that attaches the
+authorization filter and the operation marker, so no generated route can be mapped without them, and they
+are applied **last**, so a host's convention observes Alvo's own metadata.
+
+Three properties of that seam are contract rather than implementation:
+
+- **Conventions must be attached before the first request**, which is when the route table materialises.
+  One attached after **throws**, naming the call to move. That is a deliberate deviation from the
+  framework — which silently ignores late conventions — because Alvo's table is frozen once built and a
+  dropped `RequireRateLimiting` is a rate limiter a host believes it has.
+- **A convention that throws is its own diagnosis.** Conventions run while the endpoints are built, inside
+  the data source's materialisation, where an `InvalidOperationException` already means "this applied
+  schema cannot be routed". The consequence is identical and has to be — an exception escaping an
+  `EndpointDataSource` enumeration takes down the composite every probe is matched through, liveness
+  included — so a host's broken convention also ends in an empty table and readiness `Failed`, but its log
+  record names `MapAlvoDataApi()` instead of blaming the descriptor.
+- **`MapAlvo()` still returns the route builder, and `MapAlvoHealth()` is not chainable.** One convention
+  builder over the probes *and* the Data API would let a host attach an authorization policy to
+  `/health/live`, and a container probe presents no credential — that is a container killed and
+  restart-looped by its own liveness gate. A host that wants conventions calls the parts.
+
+What this does **not** claim is an authorization guarantee against host code. A convention receives the
+`EndpointBuilder` and could clear its filter factories; so could `app.MapGroup("").MapAlvoDataApi()` plus
+conventions on the group, which worked before this seam existed and is how the capability was measured, and
+so could substituting `IPolicyEngine` in the host's own container. "A marked endpoint is a gated endpoint"
+is a statement about *this framework's* construction. An embedded host owns its pipeline; treating its code
+as an attacker is not this project's threat model.
+
+It could nevertheless be made a *construction* guarantee again — an Alvo `Finally` convention that runs after
+the host's and verifies its own filter factory survived — which would catch an *accidental* dismantling (a
+convention that rebuilds `FilterFactories` rather than appending to it) without changing the threat model.
+Whether that is worth the cost is **#184**, filed so the prose-only invariant is a recorded decision rather
+than a caveat nobody weighed.
 
 ## Route generation happens at *enumeration* time — half of #103 is delivered
 
@@ -801,21 +1214,108 @@ answer it per caller.
    Issue **#95**, and the expiry note above. #95 also covers `like`/`ilike` refused on a `json` field, for
    the same underlying reason.
 
+## Create-or-replace: `PUT {prefix}/{entity}/{id}` (#105)
+
+`PATCH` on this path merges; `PUT` replaces. A field the body does not mention is written `null` rather than
+left at its stored value, which is why a body omitting a `required` field is **422 naming the field** rather
+than a partial write. A field that is both `required` and `hidden` cannot be restated by a caller who cannot
+read it, so for that caller the entity is reachable only through `PATCH` — the refusal says so, because the
+fix is different from "add the field".
+
+A row that did not exist is created under the path's `id` and answers **201** with a `Location`; one that did
+is replaced and answers **200**. A replay of an `Idempotency-Key` always answers 200 and emits no `Location`:
+201 reports that *this* request created the row, and a replay performs no act at all.
+
+**The caller needs both `create` and `update`.** Which branch runs depends on stored data, so requiring only
+the branch's own operation would make the permission a caller needs depend on whether the row happens to
+exist — and would let a caller permitted only to update reach the create branch by naming an unused id. The
+`WITH CHECK` predicate is evaluated on the candidate row on **both** branches; an upsert that judges only the
+branch with a stored row to compare against is a policy bypass on half its inputs.
+
+**`id` may appear in the path and nowhere else.** A body naming it is refused exactly as on every other
+route, so the rule that the store mints every key it is not handed one for survives intact for `POST` and the
+three batch verbs.
+
+### `tenant_id` is refused on both branches, and the create branch stamps it
+
+`tenant_id` is the one column caller-writable on a create and refused on an update. If this route asked that
+question per branch, *"is my `tenant_id` refused?"* would answer *"does this row exist?"* — an existence
+oracle decided from the payload alone, before any row is read, and one a caller triggers deliberately by
+naming the column. So the payload guard is told `isUpdate: true` unconditionally.
+
+The framework then has to supply the value, because the tenant scope *checks* a candidate's tenant and never
+produces one: a created row lands in the caller's own tenant. A caller creating into another tenant uses
+`POST`, which still takes the column and still judges it against the same scope.
+
+### What a replace discloses, and why it cannot disclose less
+
+A row that exists but which the caller's `USING` excludes reads as absent, so the create branch runs and its
+insert collides with the stored row's key — **409**. A caller who holds a UUID and may create therefore
+learns whether that id is taken.
+
+This is inherent to an id-addressed create-or-replace: a primary key cannot collide silently, and answering
+404 instead would relabel the disclosure rather than remove it, since 404-versus-201 distinguishes the same
+two states. What it must never do is either of the other outcomes — writing over a row the policy excludes,
+or reporting success — and it does neither.
+
+**It is a knowing deviation from #137**, recorded rather than argued away. That fix put the tenant column
+into every unique index because a cross-tenant existence oracle "contradicts the premise that Alvo's app-side
+rules are as safe as native row-level security", and said in as many words that a clean 409 does not close
+it. The cases differ in what the oracle is *worth*: #137 leaks a **guessable** natural key, so the oracle
+turns a guess into knowledge; here the caller must already hold the UUID to ask, and v4/v7 UUID space is not
+sweepable. Structurally the same one bit; in risk, not the same bit. The composite key that would close it
+is under *Alternatives rejected*.
+
+A collision on a **framework-minted** id is still an unhandled 500, and still should be: that is a broken
+invariant rather than a conflict, and only a write whose key the caller chose translates it.
+
 ## Alternatives rejected
 
 - **A `Link: rel="next"` header duplicating `next`.** A cursor would have two homes, and an agent reading a
   JSON body would have to parse HTTP headers to keep paging. Deliberately not shipped so `next` has exactly
   one home; if a consumer asks, **#104**.
 - **A bare array plus `Content-Range`** (PostgREST's own shape), for the same reason.
+- **A `text/plain` body carrying the query string** (OData `$query`), **`application/x-www-form-urlencoded`**,
+  **a JSON query DSL**, **`X-HTTP-Method-Override`**, and **`POST {entity}/{id}/query`** — the first four for
+  the reasons under *`POST {prefix}/{entity}/query`* above; the last because a single-row read addresses its
+  row in the path and has no filter to overflow.
 - **A `{entity}` catch-all route.** It would map a route for an entity the descriptor does not declare and
   answer it from the store — turning a routing question into a port question, and leaving the OpenAPI
   document unable to list real paths. With literals, "this entity does not exist" is a 404 routing produces
   before anything is resolved.
-- **`PUT`, and PUT-as-upsert.** `UpdateAsync` is partial by contract — a field the dictionary does not
-  mention keeps its stored value — so `PUT` would advertise whole-resource replacement the port does not
-  perform, and upsert needs a port that can create-or-replace. `PATCH` only; upsert is **#105**.
+- **`If-None-Match: *` on `PUT`** (RFC 9110 §13.1.2 — "create only if absent"). The standard way to make a
+  replacement safe against creating what somebody else just created, and genuinely useful here. Deferred
+  because it is a second precondition family — `AlvoPrecondition` models a version match, not an existence
+  assertion — and #105's risk budget was spent on evaluating the policy on both branches, which is the part
+  that is catastrophic if wrong.
+- **A batch or mixed upsert.** The shape this document deferred to #105 so the identity decision could be
+  made first. It has been made; the mixed batch is a separate shape built on top of it, so the single-row
+  semantics can be reviewed on their own.
+- **Upsert on a natural unique key** (PostgREST's `on_conflict=` / `Prefer: resolution=merge-duplicates`).
+  Still the better answer for a caller who owns an external key (`order_no: "SO-1234"`) and has no UUID, and
+  the descriptor already supports `unique: true` on a field, so nothing here forecloses it.
+- **Requiring `id` in the body as well as the path**, which is what PostgREST's `PUT` does ("All the columns
+  must be specified in the request body, including the primary key columns"). Its own documentation does not
+  say what happens when the two disagree — a real gap in the prior art. Alvo removes the disagreement by
+  construction: `id` lives in the path, and in the body it is refused with the message it is refused with
+  everywhere else.
+- **A composite `(tenant_id, id)` primary key.** It would close the residual disclosure under
+  *Create-or-replace* below, and it is the right eventual answer — but it rewrites the physical key of every
+  scoped entity, with the migrations, foreign keys and read path that implies, and that does not belong
+  inside a change whose subject is a route.
 - **Storing the response body in the idempotency record.** See above: a stored body would replay a
   representation the caller's policy would no longer produce.
+- **A mixed batch** — one body carrying creates, updates and deletes together. That is upsert's shape, and
+  upsert is **#105**; building it here would foreclose the decision that issue exists to make.
+- **A bare array as the batch body** (`POST {entity}/batch` taking `[ … ]` rather than `{"rows": [ … ]}`).
+  A top-level array leaves nowhere to add a member later without a breaking change, and the reserved `rows`
+  member is what lets a violation carry an RFC 6901 pointer — `/rows/3/quoted_price` resolves; `/3/quoted_price`
+  is a pointer into a document whose root is an array, which is legal but reads as an accident.
+- **A filter-based bulk update** (`PATCH {entity}?status=eq.draft`). It writes rows the caller never named
+  and cannot count in advance, so a mistyped filter is unbounded damage with no confirmation step — and the
+  refusal report has nothing to point at, because there are no rows the caller sent. Explicit ids only.
+- **Reporting a batch's `409` with the offending row index.** See above: unique values are guessable, so the
+  index re-attaches the value by position and turns one probe into `MaxBatchRows` of them.
 - **A slug for the 500**, and **a slug encoding why policy refused**. Both above.
 - **Refusing a write to a `hidden` field**, and **refusing `required` + `hidden` at apply.** A mandatory
   secret — a password, an API token the caller supplies and can never read back — is exactly

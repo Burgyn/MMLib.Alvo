@@ -191,9 +191,12 @@ internal static class FilterGroupParser
             return false;
         }
 
-        if (!ParenthesisedList.TrySplit(list, out var members))
+        var split = ParenthesisedList.Split(list, scope.AffordableNodes, out var members);
+        if (split != ListSplit.Ok)
         {
-            violation = QueryViolations.MalformedGroup();
+            violation = split == ListSplit.TooMany
+                ? QueryViolations.FilterTooWide()
+                : QueryViolations.MalformedGroup();
             return false;
         }
 

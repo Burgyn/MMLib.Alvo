@@ -15,8 +15,15 @@
 public enum PreImageMutation
 {
     /// <summary>
-    /// An update. Its pre-image read provably never precedes a key change — the row id is framework-owned
-    /// and a caller-supplied <c>id</c> is rejected before the read — so the weaker lock mode applies.
+    /// An update, or the replace branch of a create-or-replace. Its pre-image read provably never precedes a
+    /// key change — no write path ever puts the row key in its setter list, so the row this read locks keeps
+    /// the id it was found by — and the weaker lock mode therefore applies.
+    /// <para>
+    /// <b>The reason used to be "a caller-supplied <c>id</c> is rejected before the read", and #105 made that
+    /// false</b>: create-or-replace takes the row's id straight from the path. The conclusion survives the
+    /// premise, because what the weaker mode needs is that the key does not <em>move</em>, not that the caller
+    /// never named it.
+    /// </para>
     /// </summary>
     Update,
 

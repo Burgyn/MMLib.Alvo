@@ -695,6 +695,113 @@ public class DescriptorValidatorTests
             "an agent must see every fix it needs in one round trip");
     }
 
+    /// <summary>
+    /// <c>required</c> + an unconditional <c>readOnly</c> makes every create of the entity unsatisfiable, so
+    /// it is refused where the author can still fix it (#124).
+    /// </summary>
+    /// <remarks>
+    /// The pointer is asserted, not just the count: a refusal an author cannot locate is a refusal they
+    /// cannot act on, and the whole point of the semantic pass over the mapper's exception is that it carries
+    /// one.
+    /// </remarks>
+    [Fact]
+    public void A_required_and_unconditionally_read_only_field_is_refused_at_apply()
+    {
+        var json = """
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "orders": { "fields": {
+            "code": { "type": "string", "required": true, "readOnly": true } } } } }
+        """;
+
+        var refusal = Validate(json).Errors.ShouldHaveSingleItem();
+
+        refusal.Path.ShouldBe("/entities/orders/fields/code");
+        refusal.Message.ShouldContain("no create");
+        refusal.FixSuggestion.ShouldNotBeNullOrEmpty();
+    }
+
+    /// <summary>
+    /// The three shapes that look like the refused pair and are <b>not</b> it. Without these the check above
+    /// passes just as well while refusing something that works.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>An expression-valued <c>readOnly</c> is the reason the request-time half exists.</b> It is legal for
+    /// one role and impossible for another, which no apply-time check can decide — <c>RecordValidator</c>
+    /// answers that caller with <c>read-only-required-field</c> instead.
+    /// </para>
+    /// <para>
+    /// <b><c>computed</c> makes a field read-only too, and is accepted.</b> The database computes it on the
+    /// INSERT itself, so <c>NOT NULL</c> is satisfied without the caller ever writing it; refusing it would
+    /// refuse a shape that works.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData("""{ "type": "string", "required": true, "readOnly": "'admin' in @user.roles" }""")]
+    [InlineData("""{ "type": "string", "required": true, "readOnly": false }""")]
+    [InlineData("""{ "type": "decimal", "precision": 18, "scale": 2, "required": true, "computed": "1 + 1" }""")]
+    public void A_required_field_that_is_not_unconditionally_read_only_is_accepted(string field)
+    {
+        var json = $$"""
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "auth": { "roles": ["admin"] },
+          "entities": { "orders": { "fields": { "code": {{field}} } } } }
+        """;
+
+        Validate(json).Errors.ShouldNotContain(error => error.Message.Contains("no create"));
+    }
+
+    /// <summary>
+    /// An entity whose table name is one Alvo already owns is refused, because
+    /// <c>DescriptorModelBuilder</c> maps an entity onto its own name verbatim and the two would share one
+    /// table (#156).
+    /// </summary>
+    [Theory]
+    [InlineData("alvo_outbox")]
+    [InlineData("alvo_idempotency")]
+    [InlineData("alvo_descriptor_versions")]
+    public void An_entity_named_after_a_framework_table_is_refused(string name)
+    {
+        var json = $$"""
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "{{name}}": { "fields": { "title": { "type": "string" } } } } }
+        """;
+
+        var refusal = Validate(json).Errors.ShouldHaveSingleItem();
+
+        refusal.Path.ShouldBe($"/entities/{name}");
+        refusal.Message.ShouldContain(name);
+        refusal.FixSuggestion.ShouldNotBeNull().ShouldContain("SchemaPrefix");
+    }
+
+    /// <summary>
+    /// The reserved set follows <see cref="AlvoOptions.SchemaPrefix"/>, which is what makes it one authority
+    /// rather than a hard-coded list that happens to agree with the default.
+    /// </summary>
+    /// <remarks>
+    /// Both directions are asserted from the same descriptor: under a non-default prefix the <c>alvo_*</c>
+    /// name becomes an ordinary entity and the <c>acme_*</c> one becomes the collision. A test that only
+    /// checked the second half would pass for a validator that reserved every name matching
+    /// <c>*_outbox</c>.
+    /// </remarks>
+    [Fact]
+    public void The_reserved_names_follow_the_configured_schema_prefix()
+    {
+        var validator = new DescriptorValidator(
+            new MMLib.Alvo.Expressions.Internal.CelCompiler(),
+            Microsoft.Extensions.Options.Options.Create(new AlvoOptions { SchemaPrefix = "acme" }));
+        var json = """
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": {
+            "alvo_outbox": { "fields": { "title": { "type": "string" } } },
+            "acme_outbox": { "fields": { "title": { "type": "string" } } } } }
+        """;
+
+        var refusal = validator.Validate(json).Errors.ShouldHaveSingleItem();
+
+        refusal.Path.ShouldBe("/entities/acme_outbox");
+    }
+
     private static DescriptorValidationResult Validate(string json) => _validator.Validate(json);
 
     private static string DescriptorWithRule(string operation, string expression) => $$"""

@@ -157,8 +157,10 @@ refused with the field named, never stringified through `ToString()`.
 
 One table, `{prefix}_outbox` (`alvo_outbox` by default), created by `SystemSchemaInitializer` alongside
 the descriptor-versions and idempotency tables — a framework bookkeeping table, not a product of the
-declarative diff engine. Its name is in `SystemSchemaInitializer.FrameworkTableNames`, so the
-introspector does not plan a `DROP` for it and a second apply produces an empty plan.
+declarative diff engine. Its name comes from `AlvoFrameworkTables.NamesFor` (in
+`MMLib.Alvo.Abstractions`, so the core can see it without referencing a provider), which is why the
+introspector does not plan a `DROP` for it *and* why `DescriptorValidator` refuses an entity that would map
+onto it (#156).
 
 ```sql
 CREATE TABLE IF NOT EXISTS alvo_outbox (
@@ -1040,6 +1042,7 @@ Each line with the issue or the PR that owns it.
 | **`function`**, **`http.call`** | frozen in the schema, out of scope for all of PR5 |
 | **`entity.update`** | PR5b's automation half — still open |
 | ~~**Before-hooks**, the `CelProfile.Mutate` profile~~ | **done** — PR5b (#114); see *Before-hooks* above |
+| **Batch event coalescing** — one event for a batch rather than one per row | **#193** (see below) |
 | **The budget-overrun rollback** | **not built, and not scheduled**: there is no wall-clock budget to overrun — the bound is the grammar (deviation 81, and *What bounds a hook's execution time* above) |
 | **Before-hooks in `InMemoryAlvoData`** | **not built** — the public in-memory reference runs the policy engine but no hook pipeline, so a host testing against the double sees a `reject` not refuse and a `mutate` not apply. Deliberate (the contract suite is inherited by the two relational drivers, which have a transaction to run a hook in), and recorded as an **owed obligation** rather than a mere absence: deviation 85 |
 | **Automation** (`event` + `schedule` triggers), cron, and cron's distributed lock | PR5b's automation half — still open (the lock: deviation 74) |
@@ -1052,11 +1055,33 @@ Each line with the issue or the PR that owns it.
 | **`dataref`** for an envelope over 64 KB | **#151** |
 | **Retention / pruning of `alvo_outbox`** — rows are never deleted, and the payload holds every entity's and tenant's unmasked images forever | **#154** |
 | **Validation of a rendered `email.to`** — the recipient is caller-controlled row text, unchecked; inert only because the shipped sender delivers nowhere | **#155** |
-| **Reserving the framework's own table names** against an entity declaration (they are excluded from introspection, not reserved) | **#156** |
 | **`email.data`** — refused at apply, because nothing rendered it | the PR that gives `email` a `data.*` placeholder root |
 | **Bulk coalescing** (`entity.orders.created.batch`) | unscheduled; the base design places it with automation, and `baas-analyza.md:682` is its criterion. Every write emits its own event today |
 
 **This PR does not close #22.** It closes PR5a's half; #22 closes when PR5b merges.
+
+## A batch emits one event per row, and the source asks for one per batch
+
+**What #106 ships:** a transactional batch writes N rows and emits **N events**, one per row, all inside the
+same transaction and all carrying the same instant. A 500-row import therefore fans out to 500 outbox rows
+and 500 deliveries.
+
+**What the source asks for**, in as many words — `baas-analyza` §3: *"import 10k riadkov nesmie znamenať 10k
+webhookov"*, with the acceptance criterion *"Bulk insert 10k riadkov s batch pravidlom = 1 batch event"*.
+
+**Why it is not in #106.** Coalescing is a **descriptor** feature, not a write-path one. A rule has to
+*declare* batch delivery — which is a schema change (`$defs/rule` gains a delivery mode), a compiler change
+(the catalogue has to carry it), and a new event shape (an envelope whose `data` is many rows rather than
+one, with its own `type` slug so a subscriber can tell them apart). Building that inside a data-path PR would
+land the descriptor change invisibly, as a side effect of a batch write, in a PR nobody would review for
+schema evolution.
+
+**What it costs until then**, stated so nobody discovers it: an import at the row bound produces 1000 outbox
+rows in one transaction and 1000 dispatcher deliveries after it, against endpoints that may rate-limit. A
+host importing at scale today should either import below the fan-out its subscribers tolerate, or disable the
+rule for the duration.
+
+Tracked as **#193**.
 
 ## What PR5b and F7 inherit
 
@@ -1138,9 +1163,11 @@ these live.
   - **`AlvoMailMessage.To` is unvalidated rendered row text** reaching a host's SMTP implementation: CRLF
     header injection in any sender that concatenates it into a header. One paragraph on the port's own
     remarks, written while the port is new; filed with the `To: ""` half as **#155**.
-  - **Framework table names are excluded from introspection but not *reserved* against an entity
-    declaration.** Nothing stops a descriptor declaring an entity that maps onto `alvo_outbox`. Filed as
-    **#156**.
+  - ~~**Framework table names are excluded from introspection but not *reserved* against an entity
+    declaration.**~~ **Closed by #156.** The names now come from `AlvoFrameworkTables.NamesFor` in
+    `MMLib.Alvo.Abstractions` — one authority the provider names its tables from *and* the core reserves
+    against — and `DescriptorValidator` refuses an entity that maps onto one, with its pointer and a fix
+    naming `AlvoOptions.SchemaPrefix`.
   - **Conditions are type-checked against CLR types at apply and evaluated against the JSON view at
     delivery.** The recommended pin is **one fact per scalar family** (number, boolean, timestamp, uuid,
     string) driven end to end through a real engine, so a family whose JSON round trip changes shape fails by
@@ -1198,6 +1225,16 @@ adapter implements the queue, not the dispatcher.
 
 Only `AlvoEventOptions`, the three ports and the four envelope types are public; everything else in the
 core is `internal`.
+
+## A replacement emits its branch's own event (#105)
+
+`PUT {prefix}/{entity}/{id}` emits `entity.{entity}.created` when it created the row and
+`entity.{entity}.updated` when it replaced one — the same two types every other write emits, carrying the
+same images.
+
+**There is deliberately no `entity.{entity}.replaced`.** A third type would make every existing `updated`
+subscriber silently incomplete: it would stop seeing a whole class of write without any of them changing a
+line, and the failure would surface as missing downstream state rather than as an error.
 
 ## What is proved, and where
 

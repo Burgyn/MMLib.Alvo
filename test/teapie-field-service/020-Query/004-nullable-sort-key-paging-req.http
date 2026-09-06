@@ -1,0 +1,66 @@
+### Keyset paging over a NULLABLE sort key, which was refused outright before F4 — and refused for a
+### reason: the boundary was a chain of comparisons with no `IS NULL` arm, so paging over such a key
+### silently dropped rows. `scheduled_for` is set on two of the seven seeded work orders and null on
+### five, so both a null-keyed anchor and a valued one occur in every walk below.
+###
+### `nullslast` first: the null-keyed tail is what used to be unreachable, because every comparison
+### against a NULL is NULL and a WHERE treats that as false.
+# @name LastPage1
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=2&order=scheduled_for.asc.nullslast
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+###
+# @name LastPage2
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=2&order=scheduled_for.asc.nullslast&after={{LastPage1.response.body.$.next}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+###
+# @name LastPage3
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=2&order=scheduled_for.asc.nullslast&after={{LastPage2.response.body.$.next}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+###
+# @name LastPage4
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=2&order=scheduled_for.asc.nullslast&after={{LastPage3.response.body.$.next}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### The whole set in one request, so the walk is compared with the truth rather than with itself
+# @name LastWholeSet
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=100&order=scheduled_for.asc.nullslast
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### `nullsfirst` is the sharper case: page one's anchor is itself a null-keyed row, which is the shape
+### that used to make page two come back empty.
+# @name FirstPage1
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=2&order=scheduled_for.asc.nullsfirst
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+###
+# @name FirstPage2
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=2&order=scheduled_for.asc.nullsfirst&after={{FirstPage1.response.body.$.next}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+###
+# @name FirstPage3
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=2&order=scheduled_for.asc.nullsfirst&after={{FirstPage2.response.body.$.next}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+###
+# @name FirstPage4
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=2&order=scheduled_for.asc.nullsfirst&after={{FirstPage3.response.body.$.next}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+###
+# @name FirstWholeSet
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?limit=100&order=scheduled_for.asc.nullsfirst
+X-Alvo-Api-Key: {{keyDispatcherNorth}}

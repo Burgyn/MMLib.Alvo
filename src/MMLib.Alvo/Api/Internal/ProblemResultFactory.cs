@@ -169,6 +169,27 @@ internal static class ProblemResultFactory
         Problem(StatusCodes.Status422UnprocessableEntity, AlvoProblemTypes.Validation, violations);
 
     /// <summary>
+    /// The <c>403</c> a batch answers when its rows were refused by <b>policy</b> rather than by the entity's
+    /// declared shape — carrying the same <c>violations</c> array, one entry per refused row.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The status has to match what a single-row write answers for the same refusal.</b> A caller refused
+    /// by <c>WITH CHECK</c> on one row gets a 403; getting a 422 for the same refusal on a batch would tell
+    /// them to fix a field's shape when nothing about the shape is wrong. The slug is
+    /// <see cref="AlvoProblemTypes.Forbidden"/> for the same reason — <c>data-api.md</c> publishes it as the
+    /// one slug every policy refusal carries.
+    /// </para>
+    /// <para>
+    /// It carries violations where the single-row 403 carries only a message, and that is the whole point of
+    /// the batch: a refusal that names no row leaves a five-hundred-row import unfixable.
+    /// </para>
+    /// </remarks>
+    /// <param name="violations">Every refused row, one entry each.</param>
+    internal static IResult RowsForbidden(IReadOnlyList<AlvoViolation> violations) =>
+        Problem(StatusCodes.Status403Forbidden, AlvoProblemTypes.Forbidden, violations);
+
+    /// <summary>
     /// The 409 for a request that collides with stored state a database constraint guards — the one refusal
     /// whose reason the framework could not check itself before the write reached the engine.
     /// </summary>

@@ -7,13 +7,14 @@ using MMLib.Alvo.Auth;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
+using System.Collections.Frozen;
 using System.Text;
 using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Api.Internal;
 
 /// <summary>
-/// Maps the five minimal-API delegates one entity gets, onto the five <c>IAlvoData</c> members.
+/// Maps the six minimal-API delegates one entity gets, onto the five <c>IAlvoData</c> members.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -21,6 +22,13 @@ namespace MMLib.Alvo.Api.Internal;
 /// route for an entity the descriptor does not declare and answer it from the store — turning a routing
 /// question into a port question, and making the OpenAPI document unable to list real paths. With
 /// literals, "this entity does not exist" is a 404 that routing produces before anything is resolved.
+/// </para>
+/// <para>
+/// <b>Six delegates, five port members: the two collection reads are one read.</b>
+/// <c>POST {prefix}/{entity}/query</c> takes the same parameters in a JSON body, for a filter a request
+/// line cannot carry (#107), and reaches <c>QueryStringParser</c> through the same
+/// <see cref="PageAsync"/> tail — so there is exactly one place the projection, the count preference and
+/// the page envelope are assembled, and no second grammar for the two to disagree over.
 /// </para>
 /// <para>
 /// <b>PATCH, not PUT.</b> <c>UpdateAsync</c> is partial by contract — "a field this dictionary does not
@@ -33,50 +41,231 @@ namespace MMLib.Alvo.Api.Internal;
 /// <see cref="AlvoContext"/> as a parameter on purpose.
 /// </para>
 /// <para>
-/// <b>Four of the five delegates resolve the operation's decision before doing any work, and none of them
+/// <b>Five of the six delegates resolve the operation's decision before doing any work, and none of them
 /// is the authority for it.</b> The distinction is the whole of this layer's relationship with
 /// authorization, and it is worth stating precisely rather than as "this layer never re-checks a decision",
 /// which the code contradicts at four call sites. What each delegate does is refuse, up front, exactly what
 /// the port would refuse anyway — same engine, same catalog, same context — and then call the port, which
 /// resolves again and remains the authority. So nothing is admitted here that the port would refuse, and
-/// nothing is refused here that the port would admit. The fifth, <c>GET {id}</c>, has no such call because
+/// nothing is refused here that the port would admit. The one exception, <c>GET {id}</c>, has no such call because
 /// there it would be observationally inert; <see cref="EnsureOperationIsAllowed"/> carries both the reason
 /// and the trigger for adding it.
 /// </para>
 /// </remarks>
 internal static class DataApiEndpoints
 {
-    /// <summary>Maps one entity's five routes under <paramref name="prefix"/>.</summary>
+    /// <summary>Maps one entity's six routes under <paramref name="prefix"/>.</summary>
     /// <param name="endpoints">The route builder to map onto.</param>
     /// <param name="entity">The entity as the applied schema declares it.</param>
     /// <param name="prefix">The normalized route prefix, with no trailing slash.</param>
     /// <param name="options">The API options the delegates read paging defaults from.</param>
     /// <param name="filters">Builds the authorization filter each endpoint carries.</param>
     /// <param name="formats">The applied descriptor's compiled field formats, shared by every endpoint.</param>
+    /// <param name="conventions">The conventions the host attached to <c>MapAlvoDataApi()</c>.</param>
     internal static void Map(
         IEndpointRouteBuilder endpoints,
         EntitySchema entity,
         string prefix,
         AlvoApiOptions options,
         AlvoContextFilterFactory filters,
-        FormatCatalog formats)
+        FormatCatalog formats,
+        AlvoDataApiConventions conventions)
     {
         var collection = $"{prefix}/{entity.Name}";
         var item = $"{collection}/{{id:guid}}";
+        var query = $"{collection}/query";
+        var batch = $"{collection}/batch";
 
-        MapList(endpoints, entity, collection, options, filters);
-        MapGet(endpoints, entity, item, filters);
-        MapCreate(endpoints, entity, collection, options, filters, formats);
-        MapUpdate(endpoints, entity, item, options, filters, formats);
-        MapDelete(endpoints, entity, item, filters);
+        MapList(endpoints, entity, collection, options, filters, conventions);
+        MapQuery(endpoints, entity, query, options, filters, conventions);
+        MapGet(endpoints, entity, item, filters, conventions);
+        MapCreate(endpoints, entity, collection, options, filters, formats, conventions);
+        MapUpdate(endpoints, entity, item, options, filters, formats, conventions);
+        MapReplace(endpoints, entity, item, collection, options, filters, formats, conventions);
+        MapDelete(endpoints, entity, item, options, filters, conventions);
+        MapBatch(endpoints, entity, batch, options, filters, formats, conventions);
     }
+
+    /// <summary>The three batch routes: one path, three verbs, three endpoint kinds.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Three routes rather than one route with a mode in its body.</b> A mode would be gated once, as
+    /// whichever operation the route was declared to be, so a caller permitted to create could reach the
+    /// delete through it. Three verbs are gated as three operations by the filters that already gate their
+    /// single-row siblings — no new policy vocabulary, and nothing a descriptor opts into.
+    /// </para>
+    /// <para>
+    /// <b>The <c>DELETE</c> carries a body, which RFC 9110 §9.3.5 leaves undefined.</b> An intermediary may
+    /// strip it, so the empty-batch refusal is load-bearing rather than pedantry: it turns a stripped body
+    /// into a 422 instead of a silent success for a request that never arrived.
+    /// </para>
+    /// </remarks>
+    /// <param name="endpoints">The builder to map onto.</param>
+    /// <param name="entity">The entity these routes serve.</param>
+    /// <param name="pattern">The batch path.</param>
+    /// <param name="options">The API options the delegates read their bounds from.</param>
+    /// <param name="filters">Builds the authorization filter each endpoint carries.</param>
+    /// <param name="formats">The applied descriptor's compiled field formats.</param>
+    /// <param name="conventions">The conventions the host attached to <c>MapAlvoDataApi()</c>.</param>
+    private static void MapBatch(
+        IEndpointRouteBuilder endpoints,
+        EntitySchema entity,
+        string pattern,
+        AlvoApiOptions options,
+        AlvoContextFilterFactory filters,
+        FormatCatalog formats,
+        AlvoDataApiConventions conventions)
+    {
+        Map(endpoints.MapPost, DataApiEndpointKind.BatchCreate);
+        Map(endpoints.MapPatch, DataApiEndpointKind.BatchUpdate);
+        Map(endpoints.MapDelete, DataApiEndpointKind.BatchDelete);
+
+        void Map(
+            Func<string, Delegate, RouteHandlerBuilder> map, DataApiEndpointKind kind) =>
+            map(pattern, (
+                        HttpContext http,
+                        IAlvoData data,
+                        IPolicyEngine policies,
+                        IAlvoContextAccessor caller,
+                        CancellationToken ct) =>
+                    ProblemResultFactory.GuardAsync(() =>
+                        BatchAsync(http, entity, kind, options, formats, data, policies, caller, ct)))
+                .Protect(entity, kind, filters, conventions);
+    }
+
+    /// <summary>One batch request: the decision, the body, then the port.</summary>
+    /// <remarks>
+    /// <para>
+    /// The decision is resolved <b>before a byte of the body is read</b>, for the reason every other write
+    /// does it: a caller this entity does not admit must not be answered with advice about a field.
+    /// </para>
+    /// <para>
+    /// <b>The two refusal channels answer different statuses, and which one fired decides it.</b> The reader
+    /// refuses what the entity's declared shape refuses — a type, a length, a missing required field — and
+    /// that is a <c>422</c>, exactly as it is on the single-row routes. The <em>port</em> refuses what policy
+    /// refuses, and that is a <c>403</c>: a caller refused by <c>WITH CHECK</c> on one row gets a 403, and
+    /// getting a 422 for the same refusal on a batch would tell them to fix a shape that is not wrong.
+    /// </para>
+    /// </remarks>
+    /// <param name="http">The request.</param>
+    /// <param name="entity">The entity being written.</param>
+    /// <param name="kind">Which batch verb this is.</param>
+    /// <param name="options">The API options the bounds come from.</param>
+    /// <param name="formats">The applied descriptor's compiled field formats.</param>
+    /// <param name="data">The store.</param>
+    /// <param name="policies">The policy engine.</param>
+    /// <param name="caller">The caller accessor.</param>
+    /// <param name="ct">A token to cancel the operation.</param>
+    private static async Task<IResult> BatchAsync(
+        HttpContext http,
+        EntitySchema entity,
+        DataApiEndpointKind kind,
+        AlvoApiOptions options,
+        FormatCatalog formats,
+        IAlvoData data,
+        IPolicyEngine policies,
+        IAlvoContextAccessor caller,
+        CancellationToken ct)
+    {
+        var context = Caller(caller);
+        var decision = EnsureOperationIsAllowed(policies, entity.Name, kind.ToDataOperation(), context);
+        EnsureUnconditional(http.Request);
+        var key = IdempotencyKey(http.Request, context, options);
+
+        var batch = await BatchBodyReader
+            .ReadAsync(http.Request, entity, options, kind, decision, formats, data, context, ct)
+            .ConfigureAwait(false);
+        if (batch.Violations.Count > 0)
+        {
+            return ProblemResultFactory.Validation(batch.Violations);
+        }
+
+        var token = Idempotency(key, http.Request.Method, entity, id: null, precondition: null, BatchDigest(batch));
+        var result = await PerformAsync(data, entity, kind, batch, context, token, ct).ConfigureAwait(false);
+
+        return result.Succeeded
+            ? Rows(result)
+            : ProblemResultFactory.RowsForbidden([.. result.Refusals.Select(BatchViolations.FromPort)]);
+    }
+
+    /// <summary>The port call this batch verb makes.</summary>
+    /// <param name="data">The store.</param>
+    /// <param name="entity">The entity being written.</param>
+    /// <param name="kind">Which batch verb this is.</param>
+    /// <param name="batch">The bound rows.</param>
+    /// <param name="context">The caller performing the batch.</param>
+    /// <param name="token">The caller's idempotency token, or <see langword="null"/>.</param>
+    /// <param name="ct">A token to cancel the operation.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="kind"/> is not a batch kind.</exception>
+    private static Task<AlvoBatchResult> PerformAsync(
+        IAlvoData data,
+        EntitySchema entity,
+        DataApiEndpointKind kind,
+        BatchBodyReader.Batch batch,
+        AlvoContext context,
+        AlvoIdempotency? token,
+        CancellationToken ct) => kind switch
+        {
+            DataApiEndpointKind.BatchCreate =>
+                data.CreateManyAsync(entity.Name, [.. batch.Rows], context, token, ct),
+            DataApiEndpointKind.BatchUpdate => data.UpdateManyAsync(
+                entity.Name,
+                [.. batch.Ids.Select((id, index) => new AlvoRowPatch(id, batch.Rows[index]))],
+                context,
+                token,
+                ct),
+            DataApiEndpointKind.BatchDelete => data.DeleteManyAsync(entity.Name, batch.Ids, context, token, ct),
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(kind), kind, "Not a batch kind; name the port call it makes here."),
+        };
+
+    /// <summary>
+    /// The body the batch's fingerprint digests: the rows as they were sent, under the reserved member.
+    /// </summary>
+    /// <remarks>
+    /// <b>One key for the whole batch</b>, so the fingerprint has to cover every row — the same key with a
+    /// different list is a different request and must be a 409 rather than a replay. The ids of an update or
+    /// a delete are part of it for the same reason a single write's row id is.
+    /// </remarks>
+    /// <param name="batch">The bound rows.</param>
+    private static JsonObject BatchDigest(BatchBodyReader.Batch batch) => new()
+    {
+        [BatchMarker] = true,
+        [BatchViolations.RowsMember] = new JsonArray(
+            [.. batch.Ids.Select(id => (JsonNode)JsonValue.Create(id))]),
+        ["values"] = System.Text.Json.JsonSerializer.SerializeToNode(batch.Rows),
+    };
+
+    /// <summary>
+    /// The member that keeps a batch's digest out of a caller body's namespace.
+    /// </summary>
+    /// <remarks>
+    /// <b><see cref="IdempotencyFingerprint"/> claims no two different requests share a digest input, and
+    /// without this they could.</b> The route is deliberately out of the digest, and a create carries
+    /// neither a row id nor a precondition — so <c>POST {entity}</c> and <c>POST {entity}/batch</c> differ
+    /// only by body. An entity declaring <c>json</c> fields named <c>rows</c> and <c>values</c> could send a
+    /// single-row body whose canonical form equalled a batch's, and the single write's replay would then
+    /// answer from a batch record. A leading <c>$</c> cannot appear in a descriptor field name, so this
+    /// member cannot collide with one.
+    /// </remarks>
+    private const string BatchMarker = "$batch";
+
+    /// <summary>The batch's success body: the rows it wrote, under the same envelope key a page uses.</summary>
+    /// <remarks>
+    /// <c>200</c> with an <c>items</c> array on every verb, including the delete — which answers an empty
+    /// array rather than <c>204</c>, because it is reporting on many rows and a caller correlating them with
+    /// what they sent needs a body to read.
+    /// </remarks>
+    /// <param name="result">What the port produced.</param>
+    private static IResult Rows(AlvoBatchResult result) => Json(DataApiBatch.From(result));
 
     private static void MapList(
         IEndpointRouteBuilder endpoints,
         EntitySchema entity,
         string pattern,
         AlvoApiOptions options,
-        AlvoContextFilterFactory filters) =>
+        AlvoContextFilterFactory filters,
+        AlvoDataApiConventions conventions) =>
         endpoints.MapGet(pattern, (
                     HttpContext http,
                     IAlvoData data,
@@ -86,28 +275,157 @@ internal static class DataApiEndpoints
                 ProblemResultFactory.GuardAsync(async () =>
                 {
                     var context = Caller(caller);
-                    var decision = EnsureOperationIsAllowed(policies, entity.Name, DataOperation.List, context);
+                    var decision = EnsureOperationIsAllowed(
+                        policies, entity.Name, DataApiEndpointKind.List.ToDataOperation(), context);
 
-                    // The parser needs this caller's mask so a filter over a hidden field is refused exactly
-                    // as one over an undeclared field is; the decision resolved above is that mask, which is
-                    // why the refusal has to come first. See EnsureOperationIsAllowed for the oracle it closes.
-                    if (!QueryStringParser.TryParse(
-                            http.Request.Query, entity, decision.HiddenFields, options,
-                            out var request, out var violations))
+                    return await PageAsync(
+                        http, data, entity, options, decision, http.Request.Query, context, ct)
+                        .ConfigureAwait(false);
+                }))
+            .Protect(entity, DataApiEndpointKind.List, filters, conventions);
+
+    /// <summary>
+    /// Maps the body-shaped collection read: the same parameters, the same parser and the same page, for a
+    /// filter a request line cannot carry.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Gated as <c>list</c>, and it resolves that decision before reading a byte of the body</b> — the
+    /// precedence a create keeps, for the same three reasons <see cref="EnsureOperationIsAllowed"/> gives:
+    /// a denied caller must be told they are denied rather than that their body is malformed; parsing up to
+    /// <see cref="AlvoApiOptions.MaxRequestBodyBytes"/> for a caller who cannot succeed is the amplifier the
+    /// payload bounds exist against; and the allow decision's <see cref="PolicyDecision.HiddenFields"/> is
+    /// the mask the parser needs, so the resolve replaces the one the mask already required.
+    /// </para>
+    /// <para>
+    /// The operation it gates as is read from the kind rather than named a second time here. Two encodings
+    /// of one mapping is how a route comes to be filtered as one operation and refused as another.
+    /// </para>
+    /// <para>
+    /// <b>A POST that reads is not a cross-site vector here</b>, and the reason is worth stating so the
+    /// absence of a token reads as a decision: a credential is presented in an explicit request header
+    /// (<see cref="Auth.AlvoAuthOptions.HeaderName"/>) and never in a cookie, so a cross-site form POST
+    /// carries none and is judged anonymous — which default-deny answers exactly as it answers any other
+    /// credential-less caller.
+    /// </para>
+    /// <para>
+    /// <c>Idempotency-Key</c> is accepted and ignored here. It is a read: no second row exists to prevent
+    /// and nothing could be replayed. It is declared in the operation's own prose rather than left to be
+    /// discovered, because <c>POST</c> is the verb that triggers the blanket-attach habit several SDKs have.
+    /// </para>
+    /// </remarks>
+    private static void MapQuery(
+        IEndpointRouteBuilder endpoints,
+        EntitySchema entity,
+        string pattern,
+        AlvoApiOptions options,
+        AlvoContextFilterFactory filters,
+        AlvoDataApiConventions conventions) =>
+        endpoints.MapPost(pattern, (
+                    HttpContext http,
+                    IAlvoData data,
+                    IPolicyEngine policies,
+                    IAlvoContextAccessor caller,
+                    CancellationToken ct) =>
+                ProblemResultFactory.GuardAsync(async () =>
+                {
+                    var context = Caller(caller);
+                    var decision = EnsureOperationIsAllowed(
+                        policies, entity.Name, DataApiEndpointKind.Query.ToDataOperation(), context);
+
+                    var body = await QueryBodyReader.ReadAsync(http.Request, options, ct).ConfigureAwait(false);
+                    if (body.Parameters is not { } parameters)
                     {
-                        return ProblemResultFactory.MalformedQuery(violations);
+                        return ProblemResultFactory.MalformedQuery(body.Violations);
                     }
 
-                    var page = await data.QueryAsync(request!.Query, context, ct).ConfigureAwait(false);
-                    return Json(DataApiPage.From(page, request.Select));
+                    return await PageAsync(http, data, entity, options, decision, parameters, context, ct)
+                        .ConfigureAwait(false);
                 }))
-            .Protect(entity, DataOperation.List, filters);
+            .Protect(entity, DataApiEndpointKind.Query, filters, conventions);
+
+    /// <summary>
+    /// Parses one set of list parameters and answers the page they describe — the whole of what the two
+    /// collection reads have in common, which is everything after the parameters have been obtained.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>One method rather than two, and that is the design rather than an economy.</b> #107's binding
+    /// constraint is that the body must not become a second grammar; a second copy of this tail would be a
+    /// second place for the projection, the count preference and the envelope to be assembled, which is
+    /// where the two surfaces would begin to differ without any fact noticing.
+    /// </para>
+    /// <para>
+    /// <b>The parser is handed the caller's mask, which is why the decision is resolved by the caller and
+    /// passed in.</b> A filter over a hidden field must be refused exactly as one over an undeclared field
+    /// is, and a denied decision carries an <em>empty</em> mask — see
+    /// <see cref="EnsureOperationIsAllowed"/> for the oracle that closes and why the refusal has to come
+    /// first.
+    /// </para>
+    /// </remarks>
+    /// <param name="http">The request, read for its <c>Prefer</c> header and written for the applied one.</param>
+    /// <param name="data">The port the page is read through.</param>
+    /// <param name="entity">The entity being listed, as the applied schema declares it.</param>
+    /// <param name="options">The API options the paging defaults and bounds come from.</param>
+    /// <param name="decision">The caller's allow decision, whose mask the parser is handed.</param>
+    /// <param name="parameters">The list parameters, from the query string or from the body.</param>
+    /// <param name="context">The caller the read is performed as.</param>
+    /// <param name="ct">A token to cancel the read.</param>
+    private static async Task<IResult> PageAsync(
+        HttpContext http,
+        IAlvoData data,
+        EntitySchema entity,
+        AlvoApiOptions options,
+        PolicyDecision decision,
+        IQueryCollection parameters,
+        AlvoContext context,
+        CancellationToken ct)
+    {
+        if (!QueryStringParser.TryParse(
+                parameters, entity, decision.HiddenFields, options, out var request, out var violations))
+        {
+            return ProblemResultFactory.MalformedQuery(violations);
+        }
+
+        var counted = PreferHeader.Count(http.Request.Headers[PreferHeader.Name]);
+        var query = request!.Query with { IncludeTotalCount = counted is not null };
+        var page = await data.QueryAsync(query, context, ct).ConfigureAwait(false);
+        ApplyCountPreference(http.Response, counted);
+        return Json(DataApiPage.From(page, request.Select));
+    }
+
+    /// <summary>
+    /// Reports what was done with the caller's <c>count</c> preference, per RFC 7240 §3 — and always
+    /// <c>count=exact</c>, because <c>planned</c> and <c>estimated</c> degrade to a real count.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The degradation is the reason this header is sent at all.</b> A caller who asked for an estimate
+    /// and silently received an exact count would have no way to know their preference was not honoured, and
+    /// RFC 7240 gives exactly this channel for saying so. A preference this server does not recognise sets no
+    /// header, which is how the standard says "ignored" is reported.
+    /// </para>
+    /// <para>
+    /// <b>No <c>Vary: Prefer</c>.</b> RFC 7240 suggests it where a response varies by the header, and this
+    /// one does — but every generated response already carries <c>Cache-Control: no-store</c> from
+    /// <see cref="NoStoreResponseFilter"/>, so no cache may store the representation and a <c>Vary</c> has no
+    /// addressee. Stated so its absence does not read as an oversight.
+    /// </para>
+    /// </remarks>
+    private static void ApplyCountPreference(HttpResponse response, CountPreference? counted)
+    {
+        if (counted is not null)
+        {
+            response.Headers[PreferHeader.AppliedName] = "count=exact";
+        }
+    }
 
     private static void MapGet(
         IEndpointRouteBuilder endpoints,
         EntitySchema entity,
         string pattern,
-        AlvoContextFilterFactory filters) =>
+        AlvoContextFilterFactory filters,
+        AlvoDataApiConventions conventions) =>
         endpoints.MapGet(pattern, (
                     Guid id,
                     HttpContext http,
@@ -138,7 +456,7 @@ internal static class DataApiEndpoints
                         ? ProblemResultFactory.NotFound()
                         : Representation(http.Request, record, entity);
                 }))
-            .Protect(entity, DataOperation.Get, filters);
+            .Protect(entity, DataApiEndpointKind.Get, filters, conventions);
 
     private static void MapCreate(
         IEndpointRouteBuilder endpoints,
@@ -146,7 +464,8 @@ internal static class DataApiEndpoints
         string pattern,
         AlvoApiOptions options,
         AlvoContextFilterFactory filters,
-        FormatCatalog formats) =>
+        FormatCatalog formats,
+        AlvoDataApiConventions conventions) =>
         endpoints.MapPost(pattern, (
                     HttpContext http,
                     IAlvoData data,
@@ -156,7 +475,8 @@ internal static class DataApiEndpoints
                 ProblemResultFactory.GuardAsync(async () =>
                 {
                     var context = Caller(caller);
-                    var decision = EnsureOperationIsAllowed(policies, entity.Name, DataOperation.Create, context);
+                    var decision = EnsureOperationIsAllowed(
+                        policies, entity.Name, DataApiEndpointKind.Create.ToDataOperation(), context);
                     EnsureUnconditional(http.Request);
                     var key = IdempotencyKey(http.Request, context, options);
 
@@ -168,12 +488,73 @@ internal static class DataApiEndpoints
                         return ProblemResultFactory.Validation(violations);
                     }
 
-                    var token = Idempotency(key, http.Request.Method, entity, body.Document);
+                    var token = Idempotency(
+                        key, http.Request.Method, entity, id: null, precondition: null, body.Document);
                     var record = await data.CreateAsync(entity.Name, body.Values, context, token, ct)
                         .ConfigureAwait(false);
                     return Created(pattern, record, entity);
                 }))
-            .Protect(entity, DataOperation.Create, filters);
+            .Protect(entity, DataApiEndpointKind.Create, filters, conventions);
+
+    /// <summary>The create-or-replace: <c>PUT</c> on the item route, gated on <b>both</b> operations.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Both operations are checked here, not one</b>, because this file's own invariant is symmetric —
+    /// nothing is admitted that the port would refuse, and nothing is refused that the port would admit. The
+    /// port requires <c>create</c> and <c>update</c>, so a delegate checking only <c>update</c> would admit
+    /// an update-only caller the port then refuses, breaking the first half.
+    /// </para>
+    /// <para>
+    /// <b>The body is read in the create mode</b> (<c>isCreate: true</c>), which is what makes a missing
+    /// <c>required</c> field a violation. A replacement writes the row whole, so a body that cannot express
+    /// it is a caller error on either branch — the port refuses it too, and this is the earlier, better-worded
+    /// of the two answers.
+    /// </para>
+    /// </remarks>
+    private static void MapReplace(
+        IEndpointRouteBuilder endpoints,
+        EntitySchema entity,
+        string pattern,
+        string collection,
+        AlvoApiOptions options,
+        AlvoContextFilterFactory filters,
+        FormatCatalog formats,
+        AlvoDataApiConventions conventions) =>
+        endpoints.MapPut(pattern, (
+                    Guid id,
+                    HttpContext http,
+                    IAlvoData data,
+                    IPolicyEngine policies,
+                    IAlvoContextAccessor caller,
+                    CancellationToken ct) =>
+                ProblemResultFactory.GuardAsync(async () =>
+                {
+                    var context = Caller(caller);
+                    var creating = EnsureOperationIsAllowed(policies, entity.Name, DataOperation.Create, context);
+                    var decision = EnsureOperationIsAllowed(policies, entity.Name, DataOperation.Update, context);
+                    var precondition = Precondition(http.Request);
+                    var key = IdempotencyKey(http.Request, context, options);
+
+                    var (body, violations) = await ReadAndValidateAsync(
+                        http, entity, options, decision, isCreate: true, formats, data, context, ct,
+                        alsoFrozenBy: creating)
+                        .ConfigureAwait(false);
+                    if (violations.Count > 0)
+                    {
+                        return ProblemResultFactory.Validation(violations);
+                    }
+
+                    var token = Idempotency(
+                        key, http.Request.Method, entity, id, precondition, body.Document);
+                    var result = await data
+                        .ReplaceAsync(entity.Name, id, body.Values, context, precondition, token, ct)
+                        .ConfigureAwait(false);
+
+                    return result.Created
+                        ? Created(collection, result.Row, entity)
+                        : Row(result.Row, entity);
+                }))
+            .Protect(entity, DataApiEndpointKind.Replace, filters, conventions);
 
     private static void MapUpdate(
         IEndpointRouteBuilder endpoints,
@@ -181,7 +562,8 @@ internal static class DataApiEndpoints
         string pattern,
         AlvoApiOptions options,
         AlvoContextFilterFactory filters,
-        FormatCatalog formats) =>
+        FormatCatalog formats,
+        AlvoDataApiConventions conventions) =>
         endpoints.MapPatch(pattern, (
                     Guid id,
                     HttpContext http,
@@ -192,8 +574,10 @@ internal static class DataApiEndpoints
                 ProblemResultFactory.GuardAsync(async () =>
                 {
                     var context = Caller(caller);
-                    var decision = EnsureOperationIsAllowed(policies, entity.Name, DataOperation.Update, context);
+                    var decision = EnsureOperationIsAllowed(
+                        policies, entity.Name, DataApiEndpointKind.Update.ToDataOperation(), context);
                     var precondition = Precondition(http.Request);
+                    var key = IdempotencyKey(http.Request, context, options);
 
                     var (body, violations) = await ReadAndValidateAsync(
                         http, entity, options, decision, isCreate: false, formats, data, context, ct)
@@ -203,17 +587,22 @@ internal static class DataApiEndpoints
                         return ProblemResultFactory.Validation(violations);
                     }
 
+                    var token = Idempotency(
+                        key, http.Request.Method, entity, id, precondition, body.Document);
                     var record = await data
-                        .UpdateAsync(entity.Name, id, body.Values, context, precondition, ct).ConfigureAwait(false);
+                        .UpdateAsync(entity.Name, id, body.Values, context, precondition, token, ct)
+                        .ConfigureAwait(false);
                     return Row(record, entity);
                 }))
-            .Protect(entity, DataOperation.Update, filters);
+            .Protect(entity, DataApiEndpointKind.Update, filters, conventions);
 
     private static void MapDelete(
         IEndpointRouteBuilder endpoints,
         EntitySchema entity,
         string pattern,
-        AlvoContextFilterFactory filters) =>
+        AlvoApiOptions options,
+        AlvoContextFilterFactory filters,
+        AlvoDataApiConventions conventions) =>
         endpoints.MapDelete(pattern, (
                     Guid id,
                     HttpContext http,
@@ -224,13 +613,19 @@ internal static class DataApiEndpoints
                 ProblemResultFactory.GuardAsync(async () =>
                 {
                     var context = Caller(caller);
-                    _ = EnsureOperationIsAllowed(policies, entity.Name, DataOperation.Delete, context);
+                    _ = EnsureOperationIsAllowed(
+                        policies, entity.Name, DataApiEndpointKind.Delete.ToDataOperation(), context);
 
                     var precondition = Precondition(http.Request);
-                    await data.DeleteAsync(entity.Name, id, context, precondition, ct).ConfigureAwait(false);
+                    var key = IdempotencyKey(http.Request, context, options);
+
+                    var token = Idempotency(
+                        key, http.Request.Method, entity, id, precondition, document: null);
+                    await data.DeleteAsync(entity.Name, id, context, precondition, token, ct)
+                        .ConfigureAwait(false);
                     return Results.NoContent();
                 }))
-            .Protect(entity, DataOperation.Delete, filters);
+            .Protect(entity, DataApiEndpointKind.Delete, filters, conventions);
 
     /// <summary>
     /// Attaches the authorization filter <b>and</b> the operation marker in one call, so an endpoint
@@ -245,21 +640,39 @@ internal static class DataApiEndpoints
     /// </remarks>
     /// <param name="builder">The route just mapped.</param>
     /// <param name="entity">The entity the endpoint serves.</param>
-    /// <param name="operation">The operation the endpoint performs, and the one to gate it as.</param>
+    /// <param name="kind">
+    /// Which endpoint this is. The operation it is gated as comes from
+    /// <see cref="DataApiEndpointKinds.ToDataOperation"/> rather than from a second parameter, so a route
+    /// cannot be marked one kind and gated as another operation's.
+    /// </param>
     /// <param name="filters">Builds the filter for that entity and operation.</param>
+    /// <param name="conventions">
+    /// The host's own conventions, applied <b>last</b> and in this same call. A route that is gated therefore
+    /// also carries whatever the host attached to <c>MapAlvoDataApi()</c>, so "some endpoints were
+    /// rate-limited and some were not" is unrepresentable — the same construction argument the authorization
+    /// filter and the operation marker already rest on. Last, so a host's convention observes Alvo's own
+    /// metadata and can override what it means to.
+    /// </param>
     private static RouteHandlerBuilder Protect(
         this RouteHandlerBuilder builder,
         EntitySchema entity,
-        DataOperation operation,
-        AlvoContextFilterFactory filters) =>
-        builder
+        DataApiEndpointKind kind,
+        AlvoContextFilterFactory filters,
+        AlvoDataApiConventions conventions)
+    {
+        var route = builder
             // First, so it wraps the authorization filter and stamps the 401 and 403 that filter answers
             // with too — see NoStoreResponseFilter for why an uncacheable response is what pays for a
             // strong entity tag minted over a row version rather than over the response bytes.
             .AddEndpointFilter(NoStoreResponseFilter.Instance)
-            .AddEndpointFilter(filters.For(entity.Name, operation))
-            .WithMetadata(new DataApiOperationMetadata(entity.Name, operation))
-            .Documenting(entity, operation);
+            .AddEndpointFilter(filters.For(entity.Name, kind.ToDataOperation()))
+            .WithMetadata(new DataApiOperationMetadata(entity.Name, kind))
+            .Documenting(entity, kind);
+
+        conventions.ApplyTo(route);
+
+        return route;
+    }
 
     /// <summary>
     /// Declares, as endpoint metadata, exactly the statuses this endpoint can answer with — so ApiExplorer, and
@@ -287,12 +700,12 @@ internal static class DataApiEndpoints
     /// </remarks>
     /// <param name="builder">The route just mapped.</param>
     /// <param name="entity">The entity the endpoint serves, which decides whether a 304 is reachable.</param>
-    /// <param name="operation">The operation the endpoint performs.</param>
+    /// <param name="kind">Which endpoint this is.</param>
     private static RouteHandlerBuilder Documenting(
-        this RouteHandlerBuilder builder, EntitySchema entity, DataOperation operation)
+        this RouteHandlerBuilder builder, EntitySchema entity, DataApiEndpointKind kind)
     {
         builder.WithTags(entity.Name);
-        foreach (var response in DataApiDocumentation.ResponsesFor(operation, entity))
+        foreach (var response in DataApiDocumentation.ResponsesFor(kind, entity))
         {
             builder.Produces(response.Status, contentType: MediaTypeOf(response.Body));
         }
@@ -314,7 +727,7 @@ internal static class DataApiEndpoints
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>Called on all five verbs, and the uniformity is load-bearing rather than tidiness.</b> It started
+    /// <b>Called on every generated route but one, and the uniformity is load-bearing rather than tidiness.</b> It started
     /// on the two write verbs, for two reasons that only applied there. First, resource cost: parsing up to
     /// <see cref="AlvoApiOptions.MaxRequestBodyBytes"/> on behalf of a caller who cannot succeed is a
     /// denial-of-service amplifier, and it is the same reasoning the payload bounds exist for. Second,
@@ -339,7 +752,7 @@ internal static class DataApiEndpoints
     /// get to use.
     /// </para>
     /// <para>
-    /// <b>Called on four of the five, not all five — <c>MapGet</c> deliberately has no such call.</b> There it
+    /// <b>Called on five of the six, not all six — <c>MapGet</c> deliberately has no such call.</b> There it
     /// would be indistinguishable: <c>GetAsync</c> resolves the same decision and raises the same exception, so
     /// a denied reader sees the same 403 either way and deleting the call fails nothing. It was added for
     /// uniformity and removed again for a better reason than symmetry — <b>a control no test can distinguish is
@@ -411,7 +824,8 @@ internal static class DataApiEndpoints
             FormatCatalog formats,
             IAlvoData data,
             AlvoContext context,
-            CancellationToken ct)
+            CancellationToken ct,
+            PolicyDecision? alsoFrozenBy = null)
     {
         var payload = await JsonPayloadReader
             .ReadAsync(http.Request, entity, options, ct).ConfigureAwait(false);
@@ -425,7 +839,7 @@ internal static class DataApiEndpoints
                 entity,
                 payload.Values,
                 isCreate,
-                decision.ReadOnlyFields,
+                FrozenByEither(decision, alsoFrozenBy),
                 RefusedFields(payload.Violations),
                 formats,
                 data,
@@ -754,33 +1168,64 @@ internal static class DataApiEndpoints
     }
 
     /// <summary>
-    /// The token the create is performed under: the caller's key plus the fingerprint of the request it
+    /// The token this write is performed under: the caller's key plus the fingerprint of the request it
     /// belongs to.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Built <b>after</b> validation, because the fingerprint covers the body and a body that was refused
     /// never reaches the port at all — so a fingerprint over it would digest a request that was never
     /// performed and reserve the key against it.
+    /// </para>
+    /// <para>
+    /// <b>A create's <paramref name="document"/> is non-null by construction and a delete's is null by
+    /// contract</b>, so the invariant this used to assert — "a write reached the port with no parsed body" —
+    /// now holds only for a create, and is asserted only there.
+    /// </para>
     /// </remarks>
     /// <param name="key">The caller's key, or <see langword="null"/> when they sent none.</param>
     /// <param name="method">The request method, for the digest.</param>
     /// <param name="entity">The entity being written.</param>
-    /// <param name="document">The body as it was parsed.</param>
+    /// <param name="id">The row the write addresses, or <see langword="null"/> for a create.</param>
+    /// <param name="precondition">The version the write is conditional on, or <see langword="null"/>.</param>
+    /// <param name="document">The body as it was parsed, or <see langword="null"/> for a delete.</param>
     private static AlvoIdempotency? Idempotency(
-        string? key, string method, EntitySchema entity, JsonObject? document)
+        string? key,
+        string method,
+        EntitySchema entity,
+        Guid? id,
+        AlvoPrecondition? precondition,
+        JsonObject? document)
     {
         if (key is null)
         {
             return null;
         }
 
-        // A create with no violations bound as an object by construction, so this is an invariant of this
-        // file rather than a caller error (family 5, rendered 500) — the same reasoning as AssignedId.
-        var body = document ?? throw new InvalidOperationException(
-            "A create reached the port with no parsed body. JsonPayloadReader reports a body that is not an "
-            + "object as a violation, and a violation is answered before this point.");
+        EnsureACreateParsedItsBody(id, document);
 
-        return new AlvoIdempotency(key, IdempotencyFingerprint.Of(method, entity.Name, body));
+        return new AlvoIdempotency(
+            key, IdempotencyFingerprint.Of(method, entity.Name, id, precondition, document));
+    }
+
+    /// <summary>
+    /// Asserts the invariant that a create with no violations bound as an object — family 5, rendered 500,
+    /// the same reasoning as <see cref="AssignedId"/>.
+    /// </summary>
+    /// <remarks>
+    /// Scoped to a create, because it is only a create's invariant: a delete legitimately carries no body,
+    /// and an update's is reported through the same violation path a create's is.
+    /// </remarks>
+    /// <param name="id">The row the write addresses, or <see langword="null"/> for a create.</param>
+    /// <param name="document">The body as it was parsed.</param>
+    private static void EnsureACreateParsedItsBody(Guid? id, JsonObject? document)
+    {
+        if (id is null && document is null)
+        {
+            throw new InvalidOperationException(
+                "A create reached the port with no parsed body. JsonPayloadReader reports a body that is not "
+                + "an object as a violation, and a violation is answered before this point.");
+        }
     }
 
     /// <summary>The refusal for a request carrying the idempotency header more than once.</summary>
@@ -864,6 +1309,26 @@ internal static class DataApiEndpoints
     /// </summary>
     private static IResult Json<T>(T value) => Results.Json(value, DataApiJson.Options);
 
+    /// <summary>
+    /// Every field frozen by <paramref name="decision"/>, and — where a route is gated by two operations —
+    /// by <paramref name="alsoFrozenBy"/> as well.
+    /// </summary>
+    /// <remarks>
+    /// <b>The create-or-replace route needs the union, and answering with one mask makes it lie.</b>
+    /// <c>readOnly</c> is resolved per operation, so a field frozen on <c>create</c> and writable on
+    /// <c>update</c> passes a validator that saw only the update mask — and the port, which refuses a field
+    /// frozen under <em>either</em>, then answers <c>403</c> where every other route answers <c>422</c>. That
+    /// also breaks this file's own invariant: nothing is admitted here that the port would refuse.
+    /// </remarks>
+    /// <param name="decision">The route's primary decision.</param>
+    /// <param name="alsoFrozenBy">The second decision a two-operation route is gated by, if any.</param>
+    private static IReadOnlySet<string> FrozenByEither(PolicyDecision decision, PolicyDecision? alsoFrozenBy) =>
+        alsoFrozenBy is { } second && second.ReadOnlyFields.Count > 0
+            ? decision.ReadOnlyFields
+                .Union(second.ReadOnlyFields, StringComparer.Ordinal)
+                .ToFrozenSet(StringComparer.Ordinal)
+            : decision.ReadOnlyFields;
+
     /// <summary>The <c>200</c> for one row: its values plus the entity tag a later <c>If-Match</c> can carry.</summary>
     /// <param name="record">The row the port returned.</param>
     /// <param name="entity">The entity as the applied schema declares it.</param>
@@ -907,7 +1372,7 @@ internal static class DataApiEndpoints
     /// the router — there is no second place for the two to disagree.
     /// </para>
     /// <para>
-    /// <b>Not <c>LinkGenerator</c>, deliberately.</b> Generating by route name would mean naming all five of
+    /// <b>Not <c>LinkGenerator</c>, deliberately.</b> Generating by route name would mean naming every one of
     /// every entity's routes, and route names are process-global: two <c>MapAlvoDataApi()</c> calls under two
     /// groups — the very shape this fixes — would then collide at startup. The create endpoint's pattern
     /// <em>is</em> the collection path and carries no parameter to substitute, so appending the id needs no
@@ -932,15 +1397,38 @@ internal static class DataApiEndpoints
         /// The matched endpoint's own collection path, or the mapped literal when there is no route endpoint.
         /// </summary>
         /// <remarks>
+        /// <para>
         /// A pattern with no leading <c>/</c> is normalized rather than trusted: <c>PathString</c> refuses one,
         /// and <c>MapGroup("backend")</c> is a spelling a host may well write.
+        /// </para>
+        /// <para>
+        /// <b>A trailing route parameter is dropped, because not every route that creates a row is a
+        /// collection route.</b> A create is matched on <c>{prefix}/{entity}</c> and the id is appended; a
+        /// create-or-replace is matched on <c>{prefix}/{entity}/{id:guid}</c>, and appending there would
+        /// produce <c>/api/orders/{id:guid}/&lt;guid&gt;</c> — a header naming a path that matches nothing.
+        /// Reading the matched endpoint is still what keeps a route group's prefix, so the segment is removed
+        /// rather than the lookup.
+        /// </para>
         /// </remarks>
         /// <param name="httpContext">The request that created the row.</param>
         private string Collection(HttpContext httpContext)
         {
             var matched = (httpContext.GetEndpoint() as RouteEndpoint)?.RoutePattern.RawText;
-            var collection = string.IsNullOrEmpty(matched) ? MappedPattern : matched;
+            var route = string.IsNullOrEmpty(matched) ? MappedPattern : matched;
+            var collection = WithoutTrailingParameter(route);
+
             return collection.StartsWith('/') ? collection : $"/{collection}";
+        }
+
+        /// <summary>The route without its final segment, when that segment is a route parameter.</summary>
+        /// <param name="route">The route the request matched.</param>
+        private static string WithoutTrailingParameter(string route)
+        {
+            var lastSegment = route.LastIndexOf('/');
+
+            return lastSegment > 0 && route.AsSpan(lastSegment + 1).StartsWith("{")
+                ? route[..lastSegment]
+                : route;
         }
     }
 

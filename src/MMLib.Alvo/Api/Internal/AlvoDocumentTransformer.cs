@@ -69,24 +69,159 @@ internal sealed class AlvoDocumentTransformer(
             return Task.CompletedTask;
         }
 
-        var entities = Entities(generated);
+        var views = Views(generated);
+        var entities = (IReadOnlyList<EntitySchema>)[.. views.Select(view => view.Schema)];
         var operations = Operations(generated, entities);
 
         Overview(document);
         ProblemComponents.AddTo(document);
         document.AddComponent(CredentialScheme, Credential());
         Reusable(document, operations);
-        foreach (var entity in entities)
+        foreach (var view in views)
         {
-            Describe(document, entity);
+            Describe(document, view);
         }
 
         foreach (var endpoint in generated)
         {
-            Enrich(document, endpoint);
+            Enrich(document, views[endpoint.Marker.Entity], endpoint);
         }
 
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// One entity's declared shape and its field flags, resolved once for the whole document.
+    /// </summary>
+    /// <param name="Schema">The entity as the applied schema declares it.</param>
+    /// <param name="Hidden">Every field carrying a <c>hidden</c> flag, as the union across roles.</param>
+    /// <param name="ReadOnly">Every field carrying a <c>readOnly</c> flag, as the union across roles.</param>
+    private readonly record struct EntityView(
+        EntitySchema Schema, IReadOnlySet<string> Hidden, IReadOnlySet<string> ReadOnly);
+
+    /// <summary>
+    /// Every entity the mapped endpoints serve, in first-seen order, each resolved exactly once (#126).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Both sources are read once for the whole document, not once per endpoint.</b> The Data API maps
+    /// five endpoints per entity, and resolving each entity's schema and flags inside the per-endpoint walk
+    /// meant <c>6N</c> resolutions: <c>N</c> from this list plus <c>5N</c> from the enrichment. The schema
+    /// lookup was a linear scan by name, so that was <c>O(N²)</c> comparisons, and each flag resolution
+    /// allocated <b>two</b> fresh sets — <c>12N</c> of them. The document is rebuilt per request on an
+    /// endpoint that needs no credential, so all of it was per-request work.
+    /// </para>
+    /// <para>
+    /// <b>The schema is indexed by name once, rather than scanned per entity.</b> Reading it once and still
+    /// calling <c>FirstOrDefault</c> per entity would leave <c>O(N²)</c> comparisons behind a smaller
+    /// constant — a sixth of the work and the same complexity — which is not what this is for.
+    /// </para>
+    /// <para>
+    /// <b>One behavioural edge the index does change.</b> Two entities of the same name in one
+    /// <see cref="SchemaModel"/> used to resolve to whichever came first; indexing them throws instead. That
+    /// state is unreachable through a descriptor — <c>entities</c> is a JSON object keyed by name, so the
+    /// parser cannot produce it — and throwing is the better answer for a schema that cannot say which
+    /// entity it means, but it is a difference rather than a pure hoist and is recorded rather than left to
+    /// be discovered.
+    /// </para>
+    /// <para>
+    /// <b>An absent entity or policy still throws, and that is the point of resolving here.</b> Both are
+    /// primed by the same descriptor apply that produced the route literals, so either one missing means the
+    /// endpoint table and the applied state disagree — a broken framework invariant rather than a
+    /// configuration a host can reach. Doing the lookups here rather than lazily keeps that failure loud and
+    /// keeps it at one place; a <c>TryGetValue</c> that skipped the entity would answer with a document
+    /// quietly missing it.
+    /// </para>
+    /// </remarks>
+    /// <param name="generated">The mapped Data API endpoints.</param>
+    private EntityViews Views(IEnumerable<Endpoint> generated)
+    {
+        // The schema is read BEFORE the catalog, and that order is the fail-closed one. By default both are
+        // reads of the SAME holder — Rules/Setup.cs registers ISchemaRegistry as a factory resolving
+        // IPolicyCatalogProvider — which is republished monotonically, so the catalog is always the
+        // same-or-newer half of the pair: an older field list judged by a newer, possibly stricter mask.
+        // Swapping these two lines flips it to the disclosing direction, where a newer field list is judged
+        // by an older mask and can publish the name of a field the current policy hides. A host that
+        // registers its own ISchemaRegistry (which that registration's remarks allow) makes these two
+        // independent holders, and the monotonic argument no longer applies — the ordering is then merely
+        // the better guess rather than a guarantee.
+        var declared = schema.GetSchema().Entities.ToDictionary(entity => entity.Name, StringComparer.Ordinal);
+        var catalog = policies.Current;
+        var views = new EntityViews();
+
+        foreach (var name in generated.Select(endpoint => endpoint.Marker.Entity))
+        {
+            views.Resolve(name, declared, catalog);
+        }
+
+        return views;
+    }
+
+    /// <summary>
+    /// The entities of one document: resolved once each, addressable by name, and enumerable in the order the
+    /// endpoints first named them.
+    /// </summary>
+    /// <remarks>
+    /// <b>The order is held explicitly rather than taken from the dictionary.</b> The walk this replaced used
+    /// <c>Distinct</c>, whose first-seen order is contractual, and the order reaches the published document —
+    /// it is the order components are registered in, and the document has a Verify baseline. <c>Dictionary</c>
+    /// enumeration order is not part of its contract, so relying on it would make a byte-stable document an
+    /// accident of the runtime's current bucket layout rather than a property of this code.
+    /// </remarks>
+    private sealed class EntityViews : IEnumerable<EntityView>
+    {
+        private readonly Dictionary<string, EntityView> _byName = new(StringComparer.Ordinal);
+        private readonly List<EntityView> _inOrder = [];
+
+        internal EntityView this[string entity] => _byName[entity];
+
+        /// <summary>Resolves <paramref name="entity"/> unless it has already been resolved.</summary>
+        /// <param name="entity">The entity name an endpoint was mapped for.</param>
+        /// <param name="declared">Every entity the applied schema declares, by name.</param>
+        /// <param name="catalog">The compiled catalog, read once for the whole document.</param>
+        internal void Resolve(
+            string entity, IReadOnlyDictionary<string, EntitySchema> declared, PolicyCatalog? catalog)
+        {
+            if (_byName.ContainsKey(entity))
+            {
+                return;
+            }
+
+            var view = ViewOf(entity, declared, catalog);
+            _byName.Add(entity, view);
+            _inOrder.Add(view);
+        }
+
+        public IEnumerator<EntityView> GetEnumerator() => _inOrder.GetEnumerator();
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    /// <summary>Resolves one entity against the applied schema and the compiled catalog.</summary>
+    /// <param name="entity">The entity name an endpoint was mapped for.</param>
+    /// <param name="declared">Every entity the applied schema declares, by name — indexed once per document.</param>
+    /// <param name="catalog">The compiled catalog, read once for the whole document.</param>
+    private static EntityView ViewOf(
+        string entity, IReadOnlyDictionary<string, EntitySchema> declared, PolicyCatalog? catalog)
+    {
+        if (!declared.TryGetValue(entity, out var found))
+        {
+            throw new InvalidOperationException(
+                $"Entity '{entity}' has generated endpoints but is absent from the applied schema. The routes were "
+                + "mapped from that schema, so this is a framework invariant rather than a configuration error.");
+        }
+
+        if (catalog is null || !catalog.TryGetEntity(entity, out var policy))
+        {
+            throw new InvalidOperationException(
+                $"Entity '{entity}' has generated endpoints but no compiled policy. Both are primed by one "
+                + "descriptor apply, so this is a framework invariant rather than a configuration error.");
+        }
+
+        return new EntityView(
+            found,
+            policy.Hidden.Keys.ToHashSet(StringComparer.Ordinal),
+            policy.ReadOnly.Keys.ToHashSet(StringComparer.Ordinal));
     }
 
     /// <summary>One mapped Data API endpoint: its API description and the marker that identified it.</summary>
@@ -105,22 +240,20 @@ internal sealed class AlvoDocumentTransformer(
     private static DataApiOperationMetadata? Marker(ApiDescription description) =>
         description.ActionDescriptor.EndpointMetadata.OfType<DataApiOperationMetadata>().FirstOrDefault();
 
-    /// <summary>The distinct entities the mapped endpoints serve, in first-seen order.</summary>
-    private IReadOnlyList<EntitySchema> Entities(IEnumerable<Endpoint> generated) =>
-        [.. generated
-            .Select(endpoint => endpoint.Marker.Entity)
-            .Distinct(StringComparer.Ordinal)
-            .Select(EntityOf)];
-
     /// <summary>
-    /// Every generated endpoint's operation, paired with the entity it serves — the exact scope
+    /// Every generated endpoint's kind, paired with the entity it serves — the exact scope
     /// <see cref="Reusable"/> reads to decide which shared components are really referenced by something.
     /// </summary>
-    private static IReadOnlyList<(DataOperation Operation, EntitySchema Entity)> Operations(
+    /// <remarks>
+    /// The <em>kind</em> and not the operation, because two kinds resolve to one operation: collapsing them
+    /// here would make a component referenced only by the query endpoint look like an orphan, and would make
+    /// one referenced only by the list endpoint look as though both used it.
+    /// </remarks>
+    private static IReadOnlyList<(DataApiEndpointKind Kind, EntitySchema Entity)> Operations(
         IEnumerable<Endpoint> generated, IReadOnlyList<EntitySchema> entities)
     {
         var byName = entities.ToDictionary(entity => entity.Name, StringComparer.Ordinal);
-        return [.. generated.Select(endpoint => (endpoint.Marker.Operation, byName[endpoint.Marker.Entity]))];
+        return [.. generated.Select(endpoint => (endpoint.Marker.Kind, byName[endpoint.Marker.Entity]))];
     }
 
     /// <summary>
@@ -164,9 +297,9 @@ internal sealed class AlvoDocumentTransformer(
     /// </para>
     /// </remarks>
     /// <param name="document">The document being built.</param>
-    /// <param name="operations">Every generated endpoint's operation and the entity it serves.</param>
+    /// <param name="operations">Every generated endpoint's kind and the entity it serves.</param>
     private void Reusable(
-        OpenApiDocument document, IReadOnlyList<(DataOperation Operation, EntitySchema Entity)> operations)
+        OpenApiDocument document, IReadOnlyList<(DataApiEndpointKind Kind, EntitySchema Entity)> operations)
     {
         DataApiHeaders.AddTo(document, operations);
         foreach (var refusal in DataApiDocumentation.SharedRefusals)
@@ -187,6 +320,12 @@ internal sealed class AlvoDocumentTransformer(
     /// <summary>Registers one entity's schema components and the tag its operations are grouped under.</summary>
     /// <remarks>
     /// <para>
+    /// <b>An instance method because of one component.</b> The query body's <c>limit</c> property carries
+    /// <see cref="AlvoApiOptions.MaxPageSize"/>, and <see cref="SchemaComponentBuilder"/> is constructed
+    /// with a schema view and no options — so the component is built here, where the options already are,
+    /// rather than threading them through a builder to serve one member.
+    /// </para>
+    /// <para>
     /// The tag <em>name</em> comes from <c>DataApiEndpoints</c>' own <c>WithTags</c>, because ApiExplorer's
     /// default for a minimal API is the <em>host assembly's</em> name — which would group Alvo's endpoints
     /// under whatever executable happens to be running and make the document's content depend on it.
@@ -199,11 +338,14 @@ internal sealed class AlvoDocumentTransformer(
     /// way had no tag descriptions at all while the descriptor described every entity.
     /// </para>
     /// </remarks>
-    private void Describe(OpenApiDocument document, EntitySchema entity)
+    private void Describe(OpenApiDocument document, EntityView view)
     {
-        var flags = FlagsOf(entity.Name);
-        new SchemaComponentBuilder(entity, flags.Hidden, flags.ReadOnly).AddTo(document);
-        Tag(document, entity.Name).Description = entity.Description;
+        new SchemaComponentBuilder(view.Schema, view.Hidden, view.ReadOnly)
+            .AddTo(document, options.Value.MaxBatchRows);
+        document.AddComponent(
+            SchemaComponentBuilder.QueryId(view.Schema.Name),
+            DataApiParameters.QueryBody(view.Schema, view.Hidden, options.Value));
+        Tag(document, view.Schema.Name).Description = view.Schema.Description;
     }
 
     /// <summary>The document-level tag <c>DataApiEndpoints.Documenting</c>'s own <c>WithTags</c> already created.</summary>
@@ -213,7 +355,7 @@ internal sealed class AlvoDocumentTransformer(
     /// ApiExplorer built this document — which is what seeds <see cref="OpenApiDocument.Tags"/> before any
     /// transformer runs. A fallback that created a fresh tag here was accordingly a branch nothing could
     /// reach: a real absence would mean the endpoint table and this document disagree about what was mapped,
-    /// which is the same framework invariant <see cref="Find"/> and <see cref="EntityOf"/> already fail loudly
+    /// which is the same framework invariant <see cref="Find"/> and <see cref="ViewOf"/> already fail loudly
     /// on rather than paper over.
     /// </remarks>
     private static OpenApiTag Tag(OpenApiDocument document, string entity) =>
@@ -222,47 +364,19 @@ internal sealed class AlvoDocumentTransformer(
             $"The OpenAPI document carries no tag named '{entity}', although its endpoints were mapped with "
             + "WithTags(entity.Name). The document and the endpoint table disagree about what was mapped.");
 
-    /// <summary>Every field of one entity carrying a <c>hidden</c> or a <c>readOnly</c> flag.</summary>
-    /// <remarks>
-    /// <b>Read from the compiled catalog rather than resolved for a caller.</b> A document has no caller, and a
-    /// per-role <c>hidden</c> expression masks the field for some callers and not others — so the union is the
-    /// only answer that keeps a hidden field's name out of a document every caller can read. That is
-    /// fail-closed in the same direction <see cref="FieldMask"/> itself fails.
-    /// </remarks>
-    /// <param name="entity">The entity name.</param>
-    private (IReadOnlySet<string> Hidden, IReadOnlySet<string> ReadOnly) FlagsOf(string entity)
-    {
-        if (policies.Current is not { } catalog || !catalog.TryGetEntity(entity, out var policy))
-        {
-            throw new InvalidOperationException(
-                $"Entity '{entity}' has generated endpoints but no compiled policy. Both are primed by one "
-                + "descriptor apply, so this is a framework invariant rather than a configuration error.");
-        }
-
-        return (policy.Hidden.Keys.ToHashSet(StringComparer.Ordinal),
-            policy.ReadOnly.Keys.ToHashSet(StringComparer.Ordinal));
-    }
-
-    private EntitySchema EntityOf(string entity) =>
-        schema.GetSchema().Entities.FirstOrDefault(
-            candidate => string.Equals(candidate.Name, entity, StringComparison.Ordinal))
-        ?? throw new InvalidOperationException(
-            $"Entity '{entity}' has generated endpoints but is absent from the applied schema. The routes were "
-            + "mapped from that schema, so this is a framework invariant rather than a configuration error.");
-
     /// <summary>Rewrites one operation into the contract its endpoint actually implements.</summary>
-    private void Enrich(OpenApiDocument document, Endpoint endpoint)
+    private static void Enrich(OpenApiDocument document, EntityView view, Endpoint endpoint)
     {
-        var entity = EntityOf(endpoint.Marker.Entity);
+        var entity = view.Schema;
         var operation = Find(document, endpoint);
-        var flags = FlagsOf(entity.Name);
+        var flags = (view.Hidden, view.ReadOnly);
 
-        operation.Summary = DataApiDocumentation.SummaryOf(endpoint.Marker.Operation, entity.Name);
-        operation.Description = DataApiDocumentation.DescriptionOf(endpoint.Marker.Operation, entity);
+        operation.Summary = DataApiDocumentation.SummaryOf(endpoint.Marker.Kind, entity.Name);
+        operation.Description = DataApiDocumentation.DescriptionOf(endpoint.Marker.Kind, entity);
         operation.OperationId = OperationId(endpoint.Marker);
         operation.Tags = new HashSet<OpenApiTagReference> { new(entity.Name, document) };
         operation.Parameters = DataApiParameters.For(
-            endpoint.Marker.Operation, entity, flags.Hidden, document);
+            endpoint.Marker.Kind, entity, flags.Hidden, document);
         operation.RequestBody = RequestBody(endpoint.Marker, entity, document);
         operation.Responses = Responses(endpoint.Marker, entity, document);
         operation.Security = Security(document);
@@ -402,25 +516,46 @@ internal sealed class AlvoDocumentTransformer(
     /// named endpoint at startup.
     /// </remarks>
     private static string OperationId(DataApiOperationMetadata marker) =>
-        $"{marker.Entity}.{marker.Operation.ToWireName()}";
+        $"{marker.Entity}.{marker.Kind.ToWireName()}";
 
     /// <summary>The body a write accepts, or <see langword="null"/> for the three operations that take none.</summary>
     private static OpenApiRequestBody? RequestBody(
         DataApiOperationMetadata marker, EntitySchema entity, OpenApiDocument document) =>
-        BodyComponent(marker.Operation, entity.Name) is not { } component
+        BodyComponent(marker.Kind, entity.Name) is not { } component
             ? null
             : new OpenApiRequestBody
             {
                 Required = true,
-                Description = "The row to write, as the entity's declared fields.",
+                Description = BodyDescription(marker.Kind),
                 Content = Json(new OpenApiSchemaReference(component, document)),
             };
 
-    private static string? BodyComponent(DataOperation operation, string entity) => operation switch
+    private static string? BodyComponent(DataApiEndpointKind kind, string entity) => kind switch
     {
-        DataOperation.Create => SchemaComponentBuilder.CreateId(entity),
-        DataOperation.Update => SchemaComponentBuilder.PatchId(entity),
+        DataApiEndpointKind.Create => SchemaComponentBuilder.CreateId(entity),
+        DataApiEndpointKind.Update => SchemaComponentBuilder.PatchId(entity),
+
+        DataApiEndpointKind.Replace => SchemaComponentBuilder.ReplaceId(entity),
+        DataApiEndpointKind.Query => SchemaComponentBuilder.QueryId(entity),
+        DataApiEndpointKind.BatchCreate => SchemaComponentBuilder.BatchCreateId(entity),
+        DataApiEndpointKind.BatchUpdate => SchemaComponentBuilder.BatchUpdateId(entity),
+        DataApiEndpointKind.BatchDelete => SchemaComponentBuilder.BatchDeleteId(entity),
         _ => null,
+    };
+
+    /// <summary>What the body carries, which is a row on a write and the query parameters on a read.</summary>
+    private static string BodyDescription(DataApiEndpointKind kind) => kind switch
+    {
+        DataApiEndpointKind.Query =>
+            "The query parameters, as an object. An empty object reads the first page with no filter.",
+        DataApiEndpointKind.BatchCreate or DataApiEndpointKind.BatchUpdate
+            or DataApiEndpointKind.BatchDelete =>
+            "The rows to write, under a 'rows' array. A batch is one transaction: every row is written, or "
+            + "none is.",
+        DataApiEndpointKind.Replace =>
+            "The whole row, as the entity's declared fields. A field this body omits is written null rather "
+            + "than left at its stored value, so every required field must be present.",
+        _ => "The row to write, as the entity's declared fields.",
     };
 
     /// <summary>
@@ -437,7 +572,7 @@ internal sealed class AlvoDocumentTransformer(
         DataApiOperationMetadata marker, EntitySchema entity, OpenApiDocument document)
     {
         var responses = new OpenApiResponses();
-        foreach (var response in DataApiDocumentation.ResponsesFor(marker.Operation, entity))
+        foreach (var response in DataApiDocumentation.ResponsesFor(marker.Kind, entity))
         {
             responses[Text(response.Status)] = response.SharedId is { } shared
                 ? Referenced(response, shared, document)
@@ -499,6 +634,9 @@ internal sealed class AlvoDocumentTransformer(
                 Json(new OpenApiSchemaReference(SchemaComponentBuilder.RowId(Named(entity).Name), document)),
             DataApiDocumentation.ResponseBody.Page =>
                 Json(new OpenApiSchemaReference(SchemaComponentBuilder.PageId(Named(entity).Name), document)),
+            DataApiDocumentation.ResponseBody.Batch =>
+                Json(new OpenApiSchemaReference(
+                    SchemaComponentBuilder.BatchResultId(Named(entity).Name), document)),
             DataApiDocumentation.ResponseBody.Problem =>
                 Media(ProblemMediaType, new OpenApiSchemaReference(ProblemComponents.DocumentId, document)),
             _ => null,

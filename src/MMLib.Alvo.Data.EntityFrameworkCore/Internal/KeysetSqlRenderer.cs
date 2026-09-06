@@ -17,6 +17,20 @@ internal sealed record KeysetAnchor(IReadOnlyList<AlvoSort> Sort, IReadOnlyList<
 /// </summary>
 /// <remarks>
 /// <para>
+/// <b>A nullable key is compared as the pair <c>(rank, value)</c>, because that is what
+/// <see cref="SortSqlRenderer"/> orders by.</b> That renderer emits a nullable key as two terms — an always
+/// ascending <c>CASE WHEN col IS NULL THEN …</c> rank, then the value with the caller's direction — so a
+/// boundary comparing the value alone describes a different sequence than the <c>ORDER BY</c> does, which is
+/// how a page comes to skip or repeat a row rather than merely mis-sort one. Expanding
+/// <c>(rank, value) &gt; (rank₀, value₀)</c> and folding away the constant arms leaves four shapes, two of
+/// which add nothing to the non-nullable form; <see cref="PastAValuedKey"/> and <see cref="PastANullKey"/>
+/// carry them and each records its own derivation. <b>Whether a key gets that treatment is read from
+/// <c>FieldSchema.Nullable</c> — the same condition <see cref="SortSqlRenderer"/> emits its rank term on</b>,
+/// so the two cannot disagree about which keys have a rank at all. That they agree about *where* nulls go is
+/// not provable from either file and is pinned behaviourally instead, by the inherited paging fact that walks
+/// a nullable-keyed set one row per page and compares the concatenation with the unpaged sorted read.
+/// </para>
+/// <para>
 /// The nested-OR form rather than SQL's <c>(a, b) &gt; (x, y)</c> row constructor. The blocker is T-SQL /
 /// Azure SQL, which has no row-value constructor in a comparison predicate at all (only in <c>VALUES</c>) —
 /// the one dialect this form has to run on unmodified, and the divergence §0 principle 3 asks an engine seam
@@ -84,15 +98,73 @@ internal static class KeysetSqlRenderer
 
         var key = anchor.Sort[index];
         var declared = QueryFieldGuard.DeclaredField(entity, key.Field);
+        var rawColumn = fields.RenderField(entity, declared.Name);
+
+        return declared.Nullable && anchor.Values[index] is null
+            ? PastANullKey(rawColumn, key, Level(index + 1, anchor, entity, fields, prefix, parameters))
+            : PastAValuedKey(index, anchor, entity, fields, prefix, parameters, key, declared, rawColumn);
+    }
+
+    /// <summary>
+    /// The boundary for one key whose anchor row <em>has</em> a value: today's nested-OR expansion, plus —
+    /// where the key is nullable and its nulls sort <b>last</b> — the arm that lets the null-keyed tail
+    /// through.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Under <c>nullsfirst</c> nothing is added, and that is derived rather than overlooked.</b> The nulls
+    /// sort <em>before</em> this anchor, so they are already excluded — <c>col &gt; @v</c> is
+    /// <see langword="null"/> for them and a <c>WHERE</c> treats that as false. Under <c>nullslast</c> they
+    /// sort after every value, so every null-keyed row is past this boundary whatever the direction, which is
+    /// why the added arm carries no comparison and is not flipped by <see cref="AlvoSort.Descending"/>: the
+    /// rank term <see cref="SortSqlRenderer"/> orders by is always ascending, and only the value term is
+    /// reversed.
+    /// </para>
+    /// <para>
+    /// The <c>IS NULL</c> test reads the <b>raw</b> column, not the repaired one, exactly as
+    /// <see cref="SortSqlRenderer"/>'s rank does: a cast <see langword="null"/> is still
+    /// <see langword="null"/>, and the raw column is the form an index can serve. Every comparison still runs
+    /// on the repaired pair.
+    /// </para>
+    /// </remarks>
+    private static string PastAValuedKey(
+        int index, KeysetAnchor anchor, EntitySchema entity, IFieldSqlRenderer fields, string prefix,
+        Dictionary<string, BoundValue> parameters, AlvoSort key, FieldSchema declared, string rawColumn)
+    {
         var (column, parameter) = fields.RenderComparableOperands(
-            fields.RenderField(entity, declared.Name),
+            rawColumn,
             Bind(anchor.Values[index], declared.Name, fields, prefix, parameters),
             CelFieldType.Of(declared));
         var strict = key.Descending ? "<" : ">";
         var tail = Level(index + 1, anchor, entity, fields, prefix, parameters);
+        var compared = $"{column} {strict} {parameter} OR ({column} = {parameter} AND {tail})";
 
-        return $"({column} {strict} {parameter} OR ({column} = {parameter} AND {tail}))";
+        return declared.Nullable && key.Nulls == AlvoNullPlacement.Last
+            ? $"({rawColumn} IS NULL OR {compared})"
+            : $"({compared})";
     }
+
+    /// <summary>
+    /// The boundary for one key whose anchor row's value is <see langword="null"/> — reachable only for a
+    /// nullable key, and the case F3's renderer could not express at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The anchor sits in the null bucket, so every row still in that bucket ties with it on this key and the
+    /// answer is whatever the <em>tail</em> says — never <c>col = @v</c>, which against a
+    /// <see langword="null"/> anchor is the three-valued trap that made a page stop silently. The non-null
+    /// rows are then wholly before the anchor (<c>nullsfirst</c>: excluded) or wholly after it
+    /// (<c>nullslast</c>: admitted unconditionally), because a bucket is compared before a value is.
+    /// </para>
+    /// <para>
+    /// No parameter is bound here: there is no value to compare against, and binding an unreferenced one
+    /// would put a name in the statement's bag that its text never mentions.
+    /// </para>
+    /// </remarks>
+    private static string PastANullKey(string rawColumn, AlvoSort key, string tail) =>
+        key.Nulls == AlvoNullPlacement.First
+            ? $"({rawColumn} IS NOT NULL OR {tail})"
+            : $"({rawColumn} IS NULL AND {tail})";
 
     private static string TieBreaker(
         KeysetAnchor anchor, EntitySchema entity, IFieldSqlRenderer fields,

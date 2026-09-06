@@ -1,5 +1,9 @@
-﻿using System.Globalization;
+﻿using MMLib.Alvo.Api.Internal;
+using MMLib.Alvo.Data;
+using System.Globalization;
 using System.Net;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Api.Tests;
@@ -595,6 +599,119 @@ public sealed class IdempotencyTests
     }
 
     /// <summary>
+    /// The scenario #102 was filed for: the 200 is lost, the caller retries the identical conditional
+    /// request, and the answer is the row rather than the precondition failure they cannot attribute.
+    /// </summary>
+    /// <remarks>
+    /// The <c>If-Match</c> is what makes it sharp. The first write advances the version, so without the key
+    /// the retry carries a tag the row no longer holds and is answered 412 — a status that means "somebody
+    /// changed this underneath you", which is exactly what did <em>not</em> happen.
+    /// </remarks>
+    [Fact]
+    public async Task A_retried_conditional_patch_is_answered_with_the_row_not_a_precondition_failure()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin]);
+        using var created = await PostAsync(world, "owners", new JsonObject { ["name"] = "Acme Ltd" }, "seed-1");
+        created.StatusCode.ShouldBe(HttpStatusCode.Created, await created.ReadTextAsync());
+        var id = await IdOfAsync(created);
+        var body = new JsonObject { ["name"] = "Renamed" };
+        var headers = new[] { Pair("retry-1"), IfMatch(created) };
+
+        using var first = await world.SendAsync(
+            HttpMethod.Patch, $"/api/owners/{id}", _admin, body: body, headers: headers);
+        using var retry = await world.SendAsync(
+            HttpMethod.Patch, $"/api/owners/{id}", _admin, body: body, headers: headers);
+
+        first.StatusCode.ShouldBe(HttpStatusCode.OK, await first.ReadTextAsync());
+        retry.StatusCode.ShouldBe(
+            HttpStatusCode.OK, $"the retry is the caller's own write: {await retry.ReadTextAsync()}");
+        (await retry.ReadJsonObjectAsync())["name"]!.GetValue<string>().ShouldBe("Renamed");
+    }
+
+    /// <summary>
+    /// A retried delete is answered as done rather than as absent. Without a key the second call is a 404,
+    /// which reads as "somebody else deleted this" — an answer the caller cannot act on.
+    /// </summary>
+    /// <remarks>
+    /// The unkeyed control is what makes the claim about the key rather than about deletes: the same second
+    /// call without a key is the 404 this fact exists to replace.
+    /// </remarks>
+    [Fact]
+    public async Task A_retried_delete_is_answered_as_done()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin]);
+        var keyed = await IdOfAsync(await PostAsync(world, "owners", Owner("Keyed"), "seed-keyed"));
+        var unkeyed = await IdOfAsync(await PostAsync(world, "owners", Owner("Unkeyed"), "seed-unkeyed"));
+
+        using var first = await world.SendAsync(HttpMethod.Delete, $"/api/owners/{keyed}", _admin, headers: Key("gone-1"));
+        using var retry = await world.SendAsync(HttpMethod.Delete, $"/api/owners/{keyed}", _admin, headers: Key("gone-1"));
+
+        using var once = await world.SendAsync(HttpMethod.Delete, $"/api/owners/{unkeyed}", _admin);
+        using var again = await world.SendAsync(HttpMethod.Delete, $"/api/owners/{unkeyed}", _admin);
+
+        first.StatusCode.ShouldBe(HttpStatusCode.NoContent, await first.ReadTextAsync());
+        retry.StatusCode.ShouldBe(
+            HttpStatusCode.NoContent, $"a keyed retry is the caller's own delete: {await retry.ReadTextAsync()}");
+        once.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        again.StatusCode.ShouldBe(
+            HttpStatusCode.NotFound, "the unkeyed retry is the ambiguity the key exists to remove");
+    }
+
+    /// <summary>
+    /// One key against two different rows is a conflict, not a replay. The fingerprint covers the row id
+    /// precisely so this cannot silently answer the second request with the first row's outcome — and on an
+    /// update, unlike a create, "the wrong row" is a row the caller can name.
+    /// </summary>
+    [Fact]
+    public async Task One_key_against_two_rows_is_a_conflict_over_http()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin]);
+        var first = await IdOfAsync(await PostAsync(world, "owners", Owner("First"), "seed-first"));
+        var second = await IdOfAsync(await PostAsync(world, "owners", Owner("Second"), "seed-second"));
+
+        using var renamed = await world.SendAsync(
+            HttpMethod.Patch, $"/api/owners/{first}", _admin, body: Owner("Renamed"), headers: Key("one-key"));
+        using var wrongRow = await world.SendAsync(
+            HttpMethod.Patch, $"/api/owners/{second}", _admin, body: Owner("Renamed"), headers: Key("one-key"));
+
+        renamed.StatusCode.ShouldBe(HttpStatusCode.OK, await renamed.ReadTextAsync());
+        wrongRow.StatusCode.ShouldBe(HttpStatusCode.Conflict, await wrongRow.ReadTextAsync());
+
+        using var stored = await world.SendAsync(HttpMethod.Get, $"/api/owners/{second}", _admin);
+        (await stored.ReadJsonObjectAsync())["name"]!.GetValue<string>().ShouldBe(
+            "Second", "the refused request must not have written");
+    }
+
+    /// <summary>
+    /// A key buys an anonymous caller nothing on an update either. Their keys would share one space — every
+    /// anonymous caller carries the same reserved all-zero user — so one caller's replay could reach
+    /// another's record.
+    /// </summary>
+    /// <remarks>
+    /// Either refusal is correct and the fact accepts both: policy may deny this caller the update before
+    /// the key is read at all, which is the right precedence — the key is never the reason a caller who may
+    /// not write is allowed to.
+    /// </remarks>
+    [Fact]
+    public async Task An_anonymous_callers_key_is_refused_on_an_update_too()
+    {
+        await using var world = await AlvoApiWorld.FromDescriptorAsync("masked-notes.alvo.json");
+        using var created = await world.SendAsync(
+            HttpMethod.Post, "/api/notes", body: new JsonObject { ["title"] = "Anonymous" });
+        created.StatusCode.ShouldBe(HttpStatusCode.Created, await created.ReadTextAsync());
+        var id = await IdOfAsync(created);
+
+        using var withKey = await world.SendAsync(
+            HttpMethod.Patch, $"/api/notes/{id}", body: new JsonObject { ["title"] = "Renamed" },
+            headers: Key("anonymous-update"));
+
+        HttpStatusCode[] refusals = [HttpStatusCode.UnprocessableEntity, HttpStatusCode.Forbidden];
+        refusals.ShouldContain(
+            withKey.StatusCode,
+            $"a key must never be what lets an anonymous caller write: {await withKey.ReadTextAsync()}");
+    }
+
+    /// <summary>
     /// Requires that the same body twice under one key is a replay — the control that keeps
     /// <see cref="Two_creates_differing_only_in_a_field_the_fingerprint_must_cover_are_a_conflict"/> from
     /// passing on a fingerprint that differs per request.
@@ -722,6 +839,99 @@ public sealed class IdempotencyTests
     };
 
     /// <summary>Posts <paramref name="body"/> to one entity, presenting <paramref name="key"/>.</summary>
+    /// <summary>
+    /// A create's digest is byte-identical to the one this API has always produced, so no request in
+    /// flight across the deploy that widened the fingerprint becomes a conflict.
+    /// </summary>
+    /// <remarks>
+    /// The obvious widening — always joining an id segment — digests a create as
+    /// <c>POST\nowners\n\n{…}</c>, which is a different digest. Each optional part is appended only when
+    /// it is present, and this is what holds that rather than a remark claiming it.
+    /// </remarks>
+    [Fact]
+    public void A_creates_fingerprint_is_unchanged_by_the_parameters_a_create_does_not_carry()
+    {
+        var body = new JsonObject { ["name"] = "Acme" };
+
+        var widened = IdempotencyFingerprint.Of("POST", "owners", id: null, precondition: null, body);
+
+        widened.ShouldBe(
+            Digest("POST\nowners\n{\"name\":\"Acme\"}"), "widening the digest must not move a create's");
+    }
+
+    /// <summary>
+    /// The same key and the same body against two different rows is two different requests. Without the
+    /// id in the digest the second is answered as a replay of the first — the row is never written and
+    /// the caller is told it was, which is the silent wrong answer this digest exists to prevent.
+    /// </summary>
+    [Fact]
+    public void Two_updates_of_different_rows_with_one_body_have_different_fingerprints()
+    {
+        var body = new JsonObject { ["name"] = "Renamed" };
+
+        var first = IdempotencyFingerprint.Of("PATCH", "owners", Guid.NewGuid(), precondition: null, body);
+        var second = IdempotencyFingerprint.Of("PATCH", "owners", Guid.NewGuid(), precondition: null, body);
+
+        first.ShouldNotBe(second);
+    }
+
+    /// <summary>A delete carries no body at all, so the digest has to accept its absence.</summary>
+    [Fact]
+    public void A_delete_has_a_fingerprint_and_it_is_not_a_patch_of_an_empty_body()
+    {
+        var id = Guid.NewGuid();
+
+        var deleted = IdempotencyFingerprint.Of("DELETE", "owners", id, precondition: null, body: null);
+        var patched = IdempotencyFingerprint.Of("PATCH", "owners", id, precondition: null, new JsonObject());
+
+        deleted.ShouldNotBeNullOrWhiteSpace();
+        deleted.ShouldNotBe(patched, "the method alone must keep these apart");
+    }
+
+    /// <summary>
+    /// "Write only if the row is at this version" and "write unconditionally" are two requests, so one key
+    /// cannot stand for both — a caller who retried with a corrected precondition would otherwise be
+    /// answered with the result of a write that never checked one.
+    /// </summary>
+    [Fact]
+    public void A_precondition_is_part_of_the_request_the_key_stands_for()
+    {
+        var id = Guid.NewGuid();
+        var body = new JsonObject { ["name"] = "Renamed" };
+        var version = new AlvoPrecondition(DateTimeOffset.UtcNow);
+
+        var conditional = IdempotencyFingerprint.Of("PATCH", "owners", id, version, body);
+        var unconditional = IdempotencyFingerprint.Of("PATCH", "owners", id, precondition: null, body);
+
+        conditional.ShouldNotBe(unconditional);
+    }
+
+    /// <summary>
+    /// The precondition is digested as an instant rather than as a formatted timestamp: the port compares
+    /// instants, so two offsets of one instant are one precondition and must not become two records.
+    /// </summary>
+    [Fact]
+    public void One_instant_at_two_offsets_is_one_precondition_to_the_digest()
+    {
+        var id = Guid.NewGuid();
+        var utc = new DateTimeOffset(2026, 9, 4, 12, 0, 0, TimeSpan.Zero);
+
+        var asUtc = IdempotencyFingerprint.Of("PATCH", "owners", id, new AlvoPrecondition(utc), body: null);
+        var asShifted = IdempotencyFingerprint.Of(
+            "PATCH", "owners", id, new AlvoPrecondition(utc.ToOffset(TimeSpan.FromHours(2))), body: null);
+
+        asShifted.ShouldBe(asUtc);
+    }
+
+    /// <summary>
+    /// The digest this API produced before the row and the precondition joined it — spelled out here
+    /// rather than read from the implementation, so the stability fact above compares against something
+    /// independent of the code it is holding.
+    /// </summary>
+    /// <param name="input">The digest input, exactly as the old implementation composed it.</param>
+    private static string Digest(string input) =>
+        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(input)));
+
     private static Task<HttpResponseMessage> PostAsync(
         AlvoApiWorld world, string entity, JsonObject body, string key) =>
         world.SendAsync(HttpMethod.Post, $"/api/{entity}", _admin, body: body, headers: Key(key));
@@ -729,6 +939,12 @@ public sealed class IdempotencyTests
     private static KeyValuePair<string, string>[] Key(string key) => [Pair(key)];
 
     private static KeyValuePair<string, string> Pair(string key) => new("Idempotency-Key", key);
+
+    /// <summary>The conditional-write header carrying the tag <paramref name="response"/> came back with.</summary>
+    private static KeyValuePair<string, string> IfMatch(HttpResponseMessage response) =>
+        new("If-Match", response.Headers.ETag!.ToString());
+
+    private static JsonObject Owner(string name) => new() { ["name"] = name };
 
     private static async Task<Guid> IdOfAsync(HttpResponseMessage response) =>
         (await response.ReadJsonObjectAsync())["id"]!.GetValue<Guid>();

@@ -27,14 +27,22 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// the form an index can serve.
 /// </para>
 /// <para>
-/// <b>It is emitted only where the key is actually nullable.</b> The emulation is known to defeat an index on
-/// the sort key, and it used to be emitted on <em>every</em> key — including every <b>paged</b> read, where
-/// <c>EnsureSortKeysCanBePaged</c> has already refused a nullable key three frames earlier, so the rank
-/// expression was a compile-time constant <c>0</c> that could not change a single row of the answer. That made
-/// the one index-defeating construct in this data path unavoidable in exactly the case §2.1's
-/// <em>p95 &lt; 50 ms on an indexed column</em> criterion is about. Where the key really is nullable — an
-/// unpaged sorted read — it is load-bearing and stays: <see cref="AlvoSort.Nulls"/> is a promise about where
-/// nulls sort, and the two engines disagree on the default.
+/// <b>It is emitted only where the key is actually nullable</b>, and <see cref="KeysetSqlRenderer"/> reads
+/// the same <c>FieldSchema.Nullable</c> to decide whether its boundary compares the pair
+/// <em>(rank, value)</em> or the value alone. The two must agree about that or a page skips or repeats a row
+/// rather than merely mis-sorting one, so they are written to read one condition rather than two.
+/// </para>
+/// <para>
+/// The emulation is known to defeat an index on the sort key, which is why it is not emitted where it cannot
+/// matter — it used to be on <em>every</em> key, including a required one where the rank expression was a
+/// compile-time constant that could not change a single row of the answer, making the one index-defeating
+/// construct in this data path unavoidable in exactly the case §2.1's <em>p95 &lt; 50 ms on an indexed
+/// column</em> criterion is about. <b>On a paged read over a nullable key it is now load-bearing</b>, where
+/// F3 could argue it was inert: a paged read over a nullable key was refused three frames earlier, and F4
+/// answers it instead. So that cost is real and it is the price of the query being answerable at all; the
+/// index-friendly fix is per-dialect native <c>NULLS FIRST</c>/<c>NULLS LAST</c> behind
+/// <see cref="IAlvoSqlDialect"/>, which both shipped engines support, and it is a follow-up rather than part
+/// of the change that made the read legal.
 /// </para>
 /// <para>
 /// The row-key tie-breaker is always ascending and always present: it exists to make the order total, not to

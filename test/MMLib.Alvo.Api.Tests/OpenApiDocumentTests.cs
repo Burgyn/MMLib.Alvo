@@ -55,10 +55,11 @@ public sealed class OpenApiDocumentTests
     /// <summary>A credential that was presented and cannot be resolved, so every operation is 401.</summary>
     private static readonly TestApiKey _ghost = new("ghost-key", ["admin"], ["*:read", "*:write"]);
 
-    /// <summary>The two entities the fixture descriptor declares, and the five routes each of them gets.</summary>
+    /// <summary>The two entities the fixture descriptor declares, and the ten routes each of them gets.</summary>
     private static readonly string[] _entities = ["categories", "products"];
 
-    private const int RoutesPerEntity = 5;
+    /// <summary>Seven single-row routes plus the three the batch path answers.</summary>
+    private const int RoutesPerEntity = 10;
 
     /// <summary>
     /// .NET 10 emits OpenAPI 3.1 over JSON Schema draft 2020-12 by default, and #75 requires keeping it —
@@ -147,11 +148,14 @@ public sealed class OpenApiDocumentTests
         }
 
         documented.Count.ShouldBe(
-            55,
-            "27 on the version-less entity and 28 on the audited one, whose read adds a 304 — pinned from "
+            113,
+            "31 on the version-less entity and 32 on the audited one, whose read adds a 304 — pinned from "
             + "outside so the equality below cannot be satisfied by two empty sets. It went 51 -> 55 with "
-            + "#138: an update and a delete can each now answer 409 when a database constraint refuses the "
-            + "write, on both entities");
+            + "#138 (an update and a delete can each answer 409 when a database constraint refuses the "
+            + "write), 55 -> 63 with #107 (the body-shaped read answers the list's own four statuses, on "
+            + "both entities), and 99 -> 113 with #105: create-or-replace answers seven on each entity — "
+            + "201 and 200 for its two branches, and 401, 403, 422, 412 and 409. It lists no 404, because "
+            + "an id nothing holds is the branch that creates rather than a row that is missing");
         observed.ShouldBe(documented, "a documented status no request reaches, or a status no document lists");
     }
 
@@ -292,6 +296,46 @@ public sealed class OpenApiDocumentTests
     }
 
     /// <summary>
+    /// The query body's field properties are <b>exactly</b> the filter parameters the collection <c>GET</c>
+    /// publishes — no more, so a <c>hidden</c> field cannot appear on one surface and not the other, and no
+    /// fewer, so the body cannot silently refuse a filter the URL accepts.
+    /// </summary>
+    /// <remarks>
+    /// The two are built from one source, and this is what holds that: a second list assembled by hand is
+    /// precisely how the document would come to describe two grammars for one parser. The settings
+    /// (<c>select</c>, <c>order</c>, <c>limit</c>, <c>offset</c>, <c>after</c>, <c>or</c>, <c>and</c>) are
+    /// the difference between the two sets and are asserted as such rather than skipped — <c>not</c> is in
+    /// neither, because it is only ever a prefix on another parameter's name.
+    /// </remarks>
+    [Fact]
+    public async Task The_query_bodys_field_properties_are_the_lists_filter_parameters()
+    {
+        await using var world = await StoreAsync();
+        var document = await world.OpenApiDocumentAsync();
+
+        foreach (var entity in _entities)
+        {
+            var body = Component(document, "schemas", entity + "Query")["properties"]!.AsObject()
+                .Select(property => property.Key)
+                .ToHashSet(StringComparer.Ordinal);
+            var filters = document["paths"]![$"/api/{entity}"]!["get"]!["parameters"]!.AsArray()
+                .Where(parameter => parameter!["name"] is not null)
+                .Select(parameter => (string)parameter!["name"]!)
+                .ToHashSet(StringComparer.Ordinal);
+
+            IReadOnlyList<string> settings = ["after", "and", "limit", "offset", "or", "order", "select"];
+            IReadOnlyList<string> beyondTheFilters =
+                [.. body.Except(filters).Order(StringComparer.Ordinal)];
+
+            beyondTheFilters.ShouldBe(
+                settings,
+                $"'{entity}' body properties that are not filter parameters must be exactly the settings");
+            filters.Except(body).ShouldBeEmpty(
+                $"'{entity}' publishes a filter parameter the query body does not accept");
+        }
+    }
+
+    /// <summary>
     /// The problem document is one component, and every refusal response resolves to it.
     /// </summary>
     /// <remarks>
@@ -310,9 +354,11 @@ public sealed class OpenApiDocumentTests
         var refusals = Refusals(document).ToList();
 
         refusals.Count.ShouldBe(
-            44,
-            "twenty-two per entity — three on a list and a read, five on a create, six on an update and five "
-            + "on a delete, the last two having each gained the 409 #138 made reachable");
+            90,
+            "forty-five for two entities — three on each of the two collection reads and on the row read, "
+            + "five on a create, six on an update, five on a delete and five on a create-or-replace. The "
+            + "last of those is #105's: 401, 403, 422, 412 and 409, and no 404, because an id nothing holds "
+            + "is the branch that creates rather than a row that is missing");
         foreach (var (route, status, response) in refusals)
         {
             var content = Resolve(document, response)["content"]!.AsObject();
@@ -368,6 +414,47 @@ public sealed class OpenApiDocumentTests
     }
 
     /// <summary>
+    /// The list is the one operation that reads <c>Prefer</c>, and the one whose 200 can answer with
+    /// <c>Preference-Applied</c>. Both are published, because an opt-in nothing announces is one no agent
+    /// finds — and neither appears on an operation that would ignore them.
+    /// </summary>
+    [Fact]
+    public async Task The_count_preference_is_documented_on_the_list_and_nowhere_else()
+    {
+        await using var world = await StoreAsync();
+        var document = await world.OpenApiDocumentAsync();
+
+        ListParameter(document, "products", PreferHeader.Name)["in"]!.GetValue<string>().ShouldBe("header");
+        ResponseHeaders(document, "/api/products", "get", "200").ShouldContain(PreferHeader.AppliedName);
+
+        ResponseHeaders(document, "/api/products", "post", "201").ShouldNotContain(PreferHeader.AppliedName);
+        Parameters(document, "/api/products", "post").ShouldNotContain(PreferHeader.Name);
+    }
+
+    /// <summary>The envelope publishes the count as a required, nullable member, exactly like <c>next</c>.</summary>
+    [Fact]
+    public async Task The_page_envelope_publishes_the_count_as_a_required_nullable_member()
+    {
+        await using var world = await StoreAsync();
+        var document = await world.OpenApiDocumentAsync();
+        var page = Component(document, "schemas", "productsPage");
+
+        page["required"]!.AsArray().Select(name => name!.GetValue<string>())
+            .ShouldBe(["items", "next", "count"], ignoreOrder: true);
+        page["properties"]!["count"]!["type"]!.AsArray().Select(type => type!.GetValue<string>())
+            .ShouldBe(["integer", "null"], ignoreOrder: true);
+    }
+
+    private static IEnumerable<string> ResponseHeaders(
+        JsonObject document, string path, string verb, string status) =>
+        (document["paths"]![path]![verb]!["responses"]![status]!["headers"]?.AsObject()
+            ?? new JsonObject()).Select(header => header.Key);
+
+    private static IEnumerable<string> Parameters(JsonObject document, string path, string verb) =>
+        (document["paths"]![path]![verb]!["parameters"]?.AsArray() ?? [])
+        .Select(parameter => Dereference(document, parameter!.AsObject())["name"]!.GetValue<string>());
+
+    /// <summary>
     /// A shared parameter or header no mapped operation could ever reference is not published — an orphan
     /// component is the same defect the <c>ProducesProblem</c> deviation avoids for a schema.
     /// </summary>
@@ -419,6 +506,41 @@ public sealed class OpenApiDocumentTests
             "'notes' carries no version, so the shared 'ifNoneMatch' parameter must not be an orphan");
         HasComponent(document, "headers", "ETag").ShouldBeFalse(
             "'notes' carries no version, so the shared 'ETag' header must not be an orphan");
+    }
+
+    /// <summary>
+    /// Every schema's <c>required</c> list names a property that schema actually declares.
+    /// </summary>
+    /// <remarks>
+    /// <b>Over the tenant-scoped fixture, because that is the only place the two can disagree.</b>
+    /// <c>tenant_id</c> is mapped <c>Required</c> and is caller-writable on a create and refused on an
+    /// update, so a body that draws its properties by one rule and its <c>required</c> list by the other
+    /// names a member it does not declare — a document a generated client cannot satisfy, since it would
+    /// demand the one field the endpoint refuses. The create-or-replace body is where the two rules meet.
+    /// The main fixture is global, so it cannot fail this and the snapshot cannot show it.
+    /// </remarks>
+    [Fact]
+    public async Task No_schema_requires_a_property_it_does_not_declare()
+    {
+        await using var world = await AlvoApiWorld.FromDescriptorAsync(
+            "tenant-notes.alvo.json", [], new AlvoApiWorldSetup(MapOpenApiDocument: true));
+        var document = await world.OpenApiDocumentAsync();
+
+        var schemas = document["components"]!["schemas"]!.AsObject();
+        schemas.Count.ShouldBeGreaterThan(0, "or this fact is asserting over nothing");
+
+        foreach (var (name, schema) in schemas)
+        {
+            var required = schema!["required"]?.AsArray().Select(x => (string)x!) ?? [];
+            var declared = schema["properties"]?.AsObject().Select(p => p.Key).ToHashSet(StringComparer.Ordinal)
+                ?? [];
+
+            foreach (var member in required)
+            {
+                declared.ShouldContain(
+                    member, $"'{name}' requires '{member}' and does not declare it");
+            }
+        }
     }
 
     /// <summary>
@@ -769,9 +891,15 @@ public sealed class OpenApiDocumentTests
                 .Select(parameter => parameter!.AsObject())
                 .Where(parameter => parameter["$ref"] is null));
 
-    /// <summary>One list route's parameter names, with every <c>$ref</c> followed.</summary>
+    /// <summary>
+    /// One list route's <b>query</b> parameter names, with every <c>$ref</c> followed. Scoped to the query
+    /// string on purpose: a list also carries a <c>Prefer</c> header parameter, and the fact this feeds is
+    /// that the filter/sort/paging grammar is published in full, not that a list takes no headers.
+    /// </summary>
     private static IEnumerable<string> ListParameterNames(JsonObject document, string entity) =>
-        ListParameters(document, entity).Select(parameter => parameter["name"]!.GetValue<string>());
+        ListParameters(document, entity)
+            .Where(parameter => string.Equals(parameter["in"]!.GetValue<string>(), "query", StringComparison.Ordinal))
+            .Select(parameter => parameter["name"]!.GetValue<string>());
 
     private static JsonObject ListParameter(JsonObject document, string entity, string name) =>
         ListParameters(document, entity).FirstOrDefault(
@@ -868,7 +996,7 @@ public sealed class OpenApiDocumentTests
     }
 
     /// <summary>
-    /// Drives one request per status this entity's five operations can answer with, asserting each got what it
+    /// Drives one request per status this entity's six operations can answer with, asserting each got what it
     /// went for, and returns the <c>&lt;operationId&gt; &lt;status&gt;</c> pairs observed.
     /// </summary>
     private static async Task<IReadOnlyList<string>> ProvokeEveryStatusAsync(
@@ -914,17 +1042,26 @@ public sealed class OpenApiDocumentTests
         var row = $"{collection}/{await CreateAsync(world, entity, Body(entity, categoryId))}";
         var doomed = $"{collection}/{await CreateAsync(world, entity, Body(entity, categoryId))}";
         var absent = $"{collection}/{Guid.NewGuid()}";
+
+        // Its own id, not `absent`: the replace probe below creates the row it names, and the delete and get
+        // probes are written against an id that stays unheld for the whole run.
+        var unheld = $"{collection}/{Guid.NewGuid()}";
         var spent = Header("Idempotency-Key", await SpendAnIdempotencyKeyAsync(world, entity, categoryId));
         var stale = Header("If-Match", StaleTag);
         var body = Body(entity, categoryId);
         var taken = await TakeAUniqueValueAsync(world, entity, categoryId);
         var referenced = await ReferencedRowAsync(world, entity, categoryId);
+        var condemned = await CreateAsync(world, entity, Body(entity, categoryId));
 
         return
         [
             .. Gated(collection, "list", HttpMethod.Get),
             new("list", 200, HttpMethod.Get, collection, _admin, null),
             new("list", 422, HttpMethod.Get, $"{collection}?limit=0", _admin, null),
+
+            .. Gated($"{collection}/query", "query", HttpMethod.Post, new JsonObject()),
+            new("query", 200, HttpMethod.Post, $"{collection}/query", _admin, new JsonObject()),
+            new("query", 422, HttpMethod.Post, $"{collection}/query", _admin, UnreadableFilter()),
 
             .. Gated(row, "get", HttpMethod.Get),
             new("get", 200, HttpMethod.Get, row, _admin, null),
@@ -944,12 +1081,93 @@ public sealed class OpenApiDocumentTests
             new("update", 412, HttpMethod.Patch, row, _admin, Rename(), stale),
             new("update", 409, HttpMethod.Patch, row, _admin, TakenUniqueValue(entity, taken)),
 
+            .. Gated(row, "replace", HttpMethod.Put, body),
+            new("replace", 201, HttpMethod.Put, unheld, _admin, Body(entity, categoryId)),
+            new("replace", 200, HttpMethod.Put, row, _admin, RenamedBody(entity, categoryId)),
+            new("replace", 422, HttpMethod.Put, row, _admin, RefusedBody(entity, categoryId)),
+            new("replace", 412, HttpMethod.Put, row, _admin, Body(entity, categoryId), stale),
+            new("replace", 409, HttpMethod.Put, row, _admin,
+                WholeBodyTakingAUniqueValue(entity, categoryId, taken)),
+
             .. Gated(row, "delete", HttpMethod.Delete),
             new("delete", 412, HttpMethod.Delete, row, _admin, null, stale),
             new("delete", 404, HttpMethod.Delete, absent, _admin, null),
             new("delete", 409, HttpMethod.Delete, referenced, _admin, null),
             new("delete", 204, HttpMethod.Delete, doomed, _admin, null),
+
+            .. BatchProbes(collection, entity, categoryId, stale, spent, condemned),
         ];
+    }
+
+    /// <summary>Every status each of the three batch routes can answer, on one path.</summary>
+    /// <remarks>
+    /// <para>
+    /// The three share a path and differ only in verb, so they are built together — and the shapes they take
+    /// differ enough that writing them inline beside the single-row probes buried what each one is for.
+    /// </para>
+    /// <para>
+    /// The <c>409</c> is a <b>reused key</b> rather than a unique collision, deliberately. A batch's
+    /// constraint conflict carries no row index by design, so the two 409s a batch can answer are the same
+    /// status from different causes — and the key one is the cause this PR added, so it is the one probed.
+    /// </para>
+    /// </remarks>
+    /// <param name="collection">The entity's collection path.</param>
+    /// <param name="entity">The entity being written.</param>
+    /// <param name="categoryId">The category a product must belong to.</param>
+    /// <param name="stale">An <c>If-Match</c> header no batch route accepts.</param>
+    /// <param name="spent">An <c>Idempotency-Key</c> already used for a different request.</param>
+    /// <param name="condemned">A row the batch delete may remove.</param>
+    private static IEnumerable<Probe> BatchProbes(
+        string collection,
+        string entity,
+        Guid categoryId,
+        IReadOnlyDictionary<string, string> stale,
+        IReadOnlyDictionary<string, string> spent,
+        Guid condemned)
+    {
+        var batch = $"{collection}/batch";
+        var rows = Rows(Body(entity, categoryId));
+        var refused = Rows(RefusedBody(entity, categoryId));
+        var empty = new JsonObject { ["rows"] = new JsonArray() };
+
+        return
+        [
+            .. Gated(batch, "batchCreate", HttpMethod.Post, rows),
+            new("batchCreate", 200, HttpMethod.Post, batch, _admin, rows),
+            new("batchCreate", 422, HttpMethod.Post, batch, _admin, refused),
+            new("batchCreate", 412, HttpMethod.Post, batch, _admin, rows, stale),
+            new("batchCreate", 409, HttpMethod.Post, batch, _admin, Rows(RenamedBody(entity, categoryId)), spent),
+
+            .. Gated(batch, "batchUpdate", HttpMethod.Patch, empty),
+            new("batchUpdate", 200, HttpMethod.Patch, batch, _admin, Rows(WithId(Rename(), condemned))),
+            new("batchUpdate", 422, HttpMethod.Patch, batch, _admin, empty),
+            new("batchUpdate", 412, HttpMethod.Patch, batch, _admin, empty, stale),
+            new("batchUpdate", 409, HttpMethod.Patch, batch, _admin, Rows(WithId(Rename(), condemned)), spent),
+
+            .. Gated(batch, "batchDelete", HttpMethod.Delete, empty),
+            new("batchDelete", 422, HttpMethod.Delete, batch, _admin, empty),
+            new("batchDelete", 412, HttpMethod.Delete, batch, _admin, empty, stale),
+            new("batchDelete", 409, HttpMethod.Delete, batch, _admin, RowIds(condemned), spent),
+            new("batchDelete", 200, HttpMethod.Delete, batch, _admin, RowIds(condemned)),
+        ];
+    }
+
+    /// <summary>One batch body carrying <paramref name="row"/> as its only row.</summary>
+    /// <param name="row">The row to send.</param>
+    private static JsonObject Rows(JsonObject row) => new() { ["rows"] = new JsonArray(row) };
+
+    /// <summary>One batch delete body naming <paramref name="id"/> as its only row.</summary>
+    /// <param name="id">The row to remove.</param>
+    private static JsonObject RowIds(Guid id) => new() { ["rows"] = new JsonArray(JsonValue.Create(id)) };
+
+    /// <summary>A batch update row: the patch, plus the row key it addresses.</summary>
+    /// <param name="patch">The fields to change.</param>
+    /// <param name="id">The row to change.</param>
+    private static JsonObject WithId(JsonObject patch, Guid id)
+    {
+        patch["id"] = JsonValue.Create(id);
+
+        return patch;
     }
 
     /// <summary>
@@ -963,6 +1181,28 @@ public sealed class OpenApiDocumentTests
     /// </remarks>
     /// <param name="entity">The entity being patched.</param>
     /// <param name="value">A value some other row of it already holds.</param>
+    /// <summary>
+    /// A <b>whole</b> body carrying a value another row already holds on the entity's <c>unique</c> field.
+    /// </summary>
+    /// <remarks>
+    /// A replacement writes the row whole, so the partial <see cref="TakenUniqueValue"/> a patch collides
+    /// with would be refused for incompleteness before it ever reached the constraint — and the probe would
+    /// observe a 422 where it meant to observe a 409.
+    /// </remarks>
+    /// <param name="entity">The entity being written.</param>
+    /// <param name="categoryId">The category a product body references.</param>
+    /// <param name="value">The value another row already holds.</param>
+    private static JsonObject WholeBodyTakingAUniqueValue(string entity, Guid categoryId, string value)
+    {
+        var body = Body(entity, categoryId);
+        foreach (var (field, taken) in TakenUniqueValue(entity, value))
+        {
+            body[field] = taken?.DeepClone();
+        }
+
+        return body;
+    }
+
     private static JsonObject TakenUniqueValue(string entity, string value) =>
         string.Equals(entity, "categories", StringComparison.Ordinal)
             ? new JsonObject { ["code"] = value }
@@ -1016,12 +1256,18 @@ public sealed class OpenApiDocumentTests
     }
 
     /// <summary>
+    /// A query body naming a field the entity does not declare, which is the body-shaped read's 422 — the
+    /// counterpart of <c>?limit=0</c> on the collection <c>GET</c>.
+    /// </summary>
+    private static JsonObject UnreadableFilter() => new() { ["nosuchfield"] = "eq.1" };
+
+    /// <summary>
     /// The two refusals the gate answers on every operation: a credential that cannot be resolved, and a key
     /// whose scopes do not cover the entity.
     /// </summary>
     /// <remarks>
     /// Both are provoked per operation rather than once, because the document lists them per operation — a
-    /// single probe would leave four of the five unevidenced, which is exactly the shape of coverage
+    /// single probe would leave the rest unevidenced, which is exactly the shape of coverage
     /// <c>DataApiRoutingTests</c>' own marker fact exists to avoid.
     /// </remarks>
     private static IEnumerable<Probe> Gated(string path, string operation, HttpMethod method, JsonObject? body = null) =>

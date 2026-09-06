@@ -1,4 +1,5 @@
-﻿using System.Buffers;
+﻿using MMLib.Alvo.Data;
+using System.Buffers;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -54,10 +55,18 @@ namespace MMLib.Alvo.Api.Internal;
 /// </remarks>
 internal static class IdempotencyFingerprint
 {
-    /// <summary>The fingerprint of one create: its method, its entity and its body.</summary>
+    /// <summary>
+    /// The fingerprint of one write: its method, its entity, the row it addresses, the precondition it
+    /// carries and its body.
+    /// </summary>
     /// <param name="method">The request method, e.g. <c>POST</c>.</param>
     /// <param name="entity">The entity being written, as the applied schema names it.</param>
-    /// <param name="body">The request body, as the payload reader parsed it.</param>
+    /// <param name="id">The row the write addresses, or <see langword="null"/> for a create.</param>
+    /// <param name="precondition">The version the write is conditional on, or <see langword="null"/>.</param>
+    /// <param name="body">
+    /// The request body as the payload reader parsed it, or <see langword="null"/> for a delete, which
+    /// carries none.
+    /// </param>
     /// <returns>A lower-case hex SHA-256 digest.</returns>
     /// <remarks>
     /// <para>
@@ -71,12 +80,34 @@ internal static class IdempotencyFingerprint
     /// covered.
     /// </para>
     /// <para>
-    /// The three parts are joined by a newline, which cannot be mistaken for part of a neighbour, and the
+    /// The parts are joined by a newline, which cannot be mistaken for part of a neighbour, and the
     /// operative reason is the <b>schema's</b> rather than the API's: an entity name is constrained by
     /// <c>project.schema.json</c> to <c>^[a-z][a-z0-9_]{0,62}$</c>, so it can hold no separator; the method is
-    /// one token from HTTP's own closed set; and the caller-controlled part is last <em>and</em> carries no raw
-    /// newline, because a JSON writer escapes every control character inside a string. So no two different
-    /// (method, entity, body) triples share a digest input.
+    /// one token from HTTP's own closed set; a <see cref="Guid"/>'s <c>D</c> form is hex and hyphens; the
+    /// precondition is <c>v</c> followed by digits; and the caller-controlled part is last <em>and</em> carries
+    /// no raw newline, because a JSON writer escapes every control character inside a string. So no two
+    /// different requests share a digest input.
+    /// </para>
+    /// <para>
+    /// <b>The row id is in the digest and it has to be.</b> Without it, <c>PATCH /vehicles/A</c> and
+    /// <c>PATCH /vehicles/B</c> carrying one key and one body share a fingerprint — so the second is answered
+    /// as a <em>replay</em> of the first, row B is never written, and the caller is told it was. That is the
+    /// "silently wrong" direction the bullet list above describes, one level up: the caller holds an id for a
+    /// row that does not contain what they sent.
+    /// </para>
+    /// <para>
+    /// <b>Each optional part is appended only when it is present, which is what keeps a create's digest where
+    /// it was.</b> Always joining an empty segment would digest a create as <c>POST\nowners\n\n{…}</c> — a
+    /// different value, so every create in flight across the deploy that widened this would become a 409.
+    /// <c>A_creates_fingerprint_is_unchanged_by_the_parameters_a_create_does_not_carry</c> holds it, and the
+    /// <c>v</c> prefix is what keeps a precondition from ever being read as an id.
+    /// </para>
+    /// <para>
+    /// <b>The precondition is digested as an instant</b> (<see cref="DateTimeOffset.UtcTicks"/>), because
+    /// <see cref="AlvoPrecondition.EnsureMatches"/> compares instants: two offsets of one instant are one
+    /// precondition to the port, and a formatted timestamp would make them two digests and two records.
+    /// <see cref="RowVersionETag"/> already encodes the ticks, so this is the existing spelling rather than a
+    /// new one.
     /// </para>
     /// <para>
     /// SHA-256 rather than a fast non-cryptographic hash: the consequence of a collision is one caller's create
@@ -85,11 +116,23 @@ internal static class IdempotencyFingerprint
     /// only ever meets a value the same caller's earlier request produced.
     /// </para>
     /// </remarks>
-    internal static string Of(string method, string entity, JsonObject body)
+    internal static string Of(
+        string method, string entity, Guid? id, AlvoPrecondition? precondition, JsonObject? body)
     {
-        ArgumentNullException.ThrowIfNull(body);
-        var input = $"{method}\n{entity}\n{Canonical(body)}";
-        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(input)));
+        var input = new StringBuilder(method).Append('\n').Append(entity);
+        if (id is { } row)
+        {
+            input.Append('\n').Append(row);
+        }
+
+        if (precondition is { } version)
+        {
+            input.Append("\nv").Append(version.Version.UtcTicks);
+        }
+
+        input.Append('\n').Append(body is null ? string.Empty : Canonical(body));
+
+        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(input.ToString())));
     }
 
     /// <summary>The body re-serialized with every object's property names in ordinal order.</summary>
