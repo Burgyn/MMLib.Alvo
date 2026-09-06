@@ -293,7 +293,6 @@ namespace MMLib.Alvo.Data
     }
     public sealed class AlvoReplaceResult : System.IEquatable<MMLib.Alvo.Data.AlvoReplaceResult>
     {
-        public AlvoReplaceResult(MMLib.Alvo.Data.AlvoRecord Row, bool Created) { }
         public bool Created { get; }
         public MMLib.Alvo.Data.AlvoRecord Row { get; }
         public static MMLib.Alvo.Data.AlvoReplaceResult CreatedRow(MMLib.Alvo.Data.AlvoRecord row) { }

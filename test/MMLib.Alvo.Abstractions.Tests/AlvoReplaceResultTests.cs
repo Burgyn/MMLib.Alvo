@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Data;
+using System.Reflection;
 
 namespace MMLib.Alvo.Abstractions.Tests;
 
@@ -15,8 +16,25 @@ public sealed class AlvoReplaceResultTests
 
     /// <summary>There is no result without a row: both branches produce one.</summary>
     [Fact]
-    public void A_result_must_carry_a_row() =>
-        Should.Throw<ArgumentNullException>(() => new AlvoReplaceResult(null!, Created: true));
+    public void A_result_must_carry_a_row()
+    {
+        Should.Throw<ArgumentNullException>(() => AlvoReplaceResult.CreatedRow(null!));
+        Should.Throw<ArgumentNullException>(() => AlvoReplaceResult.ReplacedRow(null!));
+    }
+
+    /// <summary>The two factories are the only way in, so the branch cannot be set by a positional bool.</summary>
+    /// <remarks>
+    /// <b>A narrowing, asserted rather than assumed.</b> <see cref="AlvoReplaceResult.Created"/> is a
+    /// <see langword="bool"/>, so the two factories are the whole domain — a public constructor beside them
+    /// would add nothing a caller needs and one argument they can get wrong silently.
+    /// </remarks>
+    [Fact]
+    public void The_type_publishes_no_constructor()
+    {
+        typeof(AlvoReplaceResult)
+            .GetConstructors(BindingFlags.Public | BindingFlags.Instance)
+            .ShouldBeEmpty("the two named factories are the whole domain of a bool");
+    }
 
     /// <summary>The two shapes are built, so the refusal above is not simply refusing everything.</summary>
     [Fact]

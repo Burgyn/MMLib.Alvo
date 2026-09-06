@@ -19,10 +19,17 @@
 public sealed record AlvoReplaceResult
 {
     /// <summary>Initializes a new instance of the <see cref="AlvoReplaceResult"/> class.</summary>
+    /// <remarks>
+    /// <b>Private, because the two factories cover this type exhaustively.</b> <see cref="Created"/> is a
+    /// <see langword="bool"/>, so <see cref="CreatedRow"/> and <see cref="ReplacedRow"/> are not a convenience
+    /// over the constructor — they are the whole domain, named. Publishing the constructor as well would add
+    /// a positional <see langword="bool"/> to the contract, which is the argument a caller gets wrong
+    /// silently, and would widen the public surface by a member no caller needs.
+    /// </remarks>
     /// <param name="Row">The row as it now stands.</param>
     /// <param name="Created">Whether the row did not exist and this write created it.</param>
     /// <exception cref="ArgumentNullException"><paramref name="Row"/> is <see langword="null"/>.</exception>
-    public AlvoReplaceResult(AlvoRecord Row, bool Created)
+    private AlvoReplaceResult(AlvoRecord Row, bool Created)
     {
         ArgumentNullException.ThrowIfNull(Row);
 

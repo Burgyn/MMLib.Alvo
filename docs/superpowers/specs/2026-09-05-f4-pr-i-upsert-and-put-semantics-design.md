@@ -594,7 +594,7 @@ on any `PublicApi.*.verified.txt` that grew, so this list is what that check wil
 | `IAlvoData.ReplaceAsync` | Abstractions | the port is the published contract; a provider implements it |
 | `AlvoReplaceResult` | Abstractions | it is that member's return type |
 | `AlvoReplaceResult.Row` / `.Created` | Abstractions | the caller cannot answer `201` vs `200` without `Created` |
-| `AlvoReplaceResult.CreatedRow` / `.ReplacedRow` | Abstractions | the two shapes, named — a provider building the result by constructor has to remember which `bool` means which, and a replay's answer is `ReplacedRow` at every call site that produces one |
+| `AlvoReplaceResult.CreatedRow` / `.ReplacedRow` | Abstractions | the two shapes, named — and the **only** way in: the constructor is `private`, because `Created` is a `bool` and these two are its whole domain. Publishing both would add a positional `bool` to the contract, which is the argument a caller gets wrong silently |
 | the `record`'s synthesized members | Abstractions | `EqualityContract`, `PrintMembers`, `ToString`, `Equals`, `GetHashCode`, `op_Equality`/`op_Inequality`, the copy constructor — the cost of `record`, paid identically by `AlvoBatchResult` |
 | `InMemoryAlvoData.ReplaceAsync` | Testing | the reference implementation is `public sealed` and implements the port; a new interface member forces it |
 | each new `AlvoDataAdversarialTests` fact | Testing | the class is `public abstract` and every implementation's suite inherits it — that is how one contract is held across three drivers |
