@@ -113,18 +113,43 @@ about.
    documents the seam and `AddAlvoIntegrationTests` exercises it. Embedded is
    one of the two declared distribution modes and it has no readable example.
 
-**What is deliberately *not* F4's problem**, though the milestone still
-carries it: the feature backlog (`#108` relation embedding, `#109`
-aggregations, `#112` rate limiting, `#113` `field.default`, `#140` tenant
-resolution) and the F3 follow-up debt (`#118`, `#122`, `#131`, `#139`, `#183`,
-`#184`, `#191`, `#95`, `#134`). Those are real, and none of them is *demo from
-the start*. F4 drifted into "finish the Data API"; the two items above are what
-the phase was for.
-
-**One of the debts should not wait for its turn: [#191]** — the Data API
+**One debt stays in F4 and should not wait its turn: [#191]** — the Data API
 requires no `Content-Type`, which is a CSRF vector in an embedded host that
 authenticates by cookie. It is a security issue, and the embedded sample above
-is exactly the shape that would ship it.
+is exactly the shape that would ship it. Everything else that was parked in F4
+has moved; the rule is below.
+
+### The triage rule, and where the backlog went
+
+F4 had drifted into "finish the Data API", and **45 further issues carried no
+milestone at all** — filed as follow-ups during a PR and never placed. All of
+it is now sorted by one question, applied on 2026-09-06:
+
+> *Is this a debt on something already shipped, or a capability not yet
+> earned?*
+
+- **Debt on shipped code, plus the health of the gates → F6 (v0.1).** You do
+  not release with a known hole, a lying gate, or a public API whose prose has
+  four authorities. This is the whole F3 follow-up set (`#79`–`#93`, `#101`),
+  the per-engine data-layer gaps (`#87`, `#88`, `#92`, `#161`, `#162`, `#175`,
+  `#178`), the correctness and disclosure items (`#100`, `#118`, `#122`,
+  `#131`, `#134`, `#139`, `#145`, `#146`, `#154`, `#155`, `#183`, `#184`), and
+  the mutation/CI gate health (`#98`, `#99`, `#129`, `#142`, `#143`, `#181`).
+- **A capability that has to be earned → F7.** Relation embedding, aggregations,
+  rate limiting, `field.default`, tenant-resolution strategies, the outbox
+  extensions, JSONata, and the create-or-replace follow-ups (`#198`–`#201`).
+
+**Two in F6 deserve naming**, because a milestone label makes them look
+ordinary and they are not. **`#142`** — Stryker reports `Killed` for mutants
+that survive the suite, so *every 100% score is suspect*: a gate that lies is
+worse than no gate. **`#161`** — a scoped `ref` may name a row in another
+tenant, because the foreign key does not span `(tenant_id, id)`. That is the
+same shape as `#198`, and both are the tenant-isolation seam the composite key
+would close.
+
+Counts after the triage: **F4 = 5** (four real, plus `#105` closing with its
+PR), F5 = 3, F6 = 45, F7 = 37. Nothing is unfiled. A milestone is one
+`gh issue edit` to change and none of this is a commitment to an order.
 
 ## 4. Key invariants that must not break
 
