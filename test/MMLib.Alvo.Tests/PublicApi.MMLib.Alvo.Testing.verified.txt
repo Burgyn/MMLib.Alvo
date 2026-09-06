@@ -339,6 +339,8 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task A_create_emits_exactly_one_event() { }
         public System.Threading.Tasks.Task A_delete_emits_exactly_one_event_carrying_the_pre_image() { }
         public System.Threading.Tasks.Task A_denied_write_emits_nothing() { }
+        public System.Threading.Tasks.Task A_replacement_that_created_the_row_emits_a_created_event() { }
+        public System.Threading.Tasks.Task A_replacement_that_replaced_a_row_emits_an_updated_event_carrying_both_images() { }
         public System.Threading.Tasks.Task A_replayed_idempotent_create_emits_no_second_event() { }
         public System.Threading.Tasks.Task A_write_the_engine_refuses_leaves_no_outbox_row() { }
         public System.Threading.Tasks.Task A_write_whose_clock_lands_mid_microsecond_still_records_one_instant() { }
