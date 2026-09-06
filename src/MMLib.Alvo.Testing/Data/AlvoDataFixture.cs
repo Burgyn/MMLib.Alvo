@@ -58,6 +58,7 @@ public abstract class AlvoDataFixture
     private protected const string Invoices = "invoices";
     private protected const string Vaults = "vaults";
     private protected const string Dropbox = "dropbox";
+    private protected const string Extras = "extras";
 
     private protected static CancellationToken Ct => TestContext.Current.CancellationToken;
 
@@ -79,6 +80,26 @@ public abstract class AlvoDataFixture
 
     private protected static Dictionary<string, object?> TenantPayload(string title, TenantId tenant) =>
         new(StringComparer.Ordinal) { ["title"] = title, ["tenant_id"] = tenant.Value };
+
+    /// <summary>
+    /// A payload for <see cref="ExtraWorldAsync"/>'s entity, which declares a <b>required</b> field beside
+    /// the nullable <c>title</c> — the pair a create-or-replace needs, since one shows what a replacement
+    /// nulls and the other shows what it may not omit.
+    /// </summary>
+    /// <param name="title">The nullable field.</param>
+    /// <param name="rank">The required field.</param>
+    private protected static Dictionary<string, object?> ExtraPayload(string title, int rank) =>
+        new(StringComparer.Ordinal) { ["title"] = title, [ExtraField] = rank };
+
+    /// <summary>The same payload with the nullable field left out, so a replacement has one to drop.</summary>
+    /// <param name="rank">The required field.</param>
+    private protected static Dictionary<string, object?> ExtraOnlyPayload(int rank) =>
+        new(StringComparer.Ordinal) { [ExtraField] = rank };
+
+    /// <summary>A whole body for <see cref="FrozenWorldAsync"/>'s entity: the title and the mandatory secret.</summary>
+    /// <param name="title">The nullable field.</param>
+    private protected static Dictionary<string, object?> SecretPayload(string title) =>
+        new(StringComparer.Ordinal) { ["title"] = title, [MandatorySecret] = "supplied-secret" };
 
     private protected static Guid IdOf(AlvoRecord record) => (Guid)record[AlvoManagedColumns.Id]!;
 
@@ -138,6 +159,71 @@ public abstract class AlvoDataFixture
             Rules = new AccessRules { Create = "true", Delete = "true" },
         });
 
+    /// <summary>
+    /// An audited, permissive <c>receipts</c> entity carrying a <b>required</b> field beside the nullable
+    /// <c>title</c>.
+    /// </summary>
+    /// <remarks>
+    /// The fixture a replacement's semantics need, and the reason it needs two fields rather than one: a
+    /// nullable field shows what a replacement <em>drops</em>, and a required one shows what it may not
+    /// omit. With a single field there is nothing to distinguish replacing from merging.
+    /// </remarks>
+    private protected Task<World> ExtraWorldAsync() => WorldAsync(
+        EntityFixture.Permissive(Extras, audit: true) with { Extra = (ExtraField, DescField.Integer) });
+
+    /// <summary>The required field <see cref="ExtraWorldAsync"/>'s entity declares.</summary>
+    private protected const string ExtraField = "rank";
+
+    /// <summary>
+    /// An audited <c>receipts</c> entity carrying a statically <c>readOnly</c> field beside the nullable
+    /// <c>title</c>, so a replacement has something it may not write.
+    /// </summary>
+    /// <remarks>
+    /// <b>The fixture a whole-row write needs in order not to be a hole.</b> <c>readOnly</c> is enforced by
+    /// "did the payload name this field", so a frozen field is one the caller cannot name — and a rule that
+    /// nulls every unnamed field would destroy the frozen value through the one door the guard leaves open.
+    /// </remarks>
+    private protected Task<World> FrozenWorldAsync() => SeededWorldAsync(
+        new Dictionary<string, IReadOnlyList<AlvoRecord>>(StringComparer.Ordinal)
+        {
+            [Receipts] =
+            [
+                new AlvoRecord(new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    [AlvoManagedColumns.Id] = FrozenRowId,
+                    ["title"] = "First",
+                    [FrozenField] = FrozenValue,
+                    [MandatorySecret] = "seeded-secret",
+                }),
+            ],
+        },
+        EntityFixture.Permissive(Receipts, audit: false) with { Frozen = true });
+
+    /// <summary>The statically <c>readOnly</c> field <see cref="FrozenWorldAsync"/>'s entity declares.</summary>
+    private protected const string FrozenField = "sealed_note";
+
+    /// <summary>
+    /// A field that is <c>required</c> <b>and</b> <c>hidden</c> — the shape a mandatory secret really has,
+    /// and the one that decides whether the port and the HTTP layer agree about a whole row.
+    /// </summary>
+    private protected const string MandatorySecret = "access_code";
+
+    /// <summary>The value <see cref="FrozenWorldAsync"/> seeds into that field.</summary>
+    private protected const string FrozenValue = "sealed";
+
+    /// <summary>The id of the row <see cref="FrozenWorldAsync"/> seeds.</summary>
+    private protected static Guid FrozenRowId { get; } = Guid.NewGuid();
+
+    /// <summary>
+    /// An audited <c>drafts</c> entity a caller may read and update but <b>not</b> create, so the create
+    /// branch of a replacement has an operation to be refused by on its own.
+    /// </summary>
+    private protected Task<World> UpdateOnlyWorldAsync() => WorldAsync(
+        EntityFixture.Permissive(Drafts, audit: false) with
+        {
+            Rules = new AccessRules { List = "true", Get = "true", Update = "true", Delete = "true" },
+        });
+
     /// <summary>Two audited, permissive entities in one store, for the one-key-two-entities fact.</summary>
     private protected Task<World> TwoEntityWorldAsync() => WorldAsync(
         EntityFixture.Permissive(Orders, audit: true),
@@ -164,6 +250,7 @@ public abstract class AlvoDataFixture
     /// <param name="Rules">The access rules to compile.</param>
     /// <param name="Extra">An additional required field, for the owner-scoped fixture.</param>
     /// <param name="Hidden">A field and the <c>hidden</c> expression that masks it, for the masking fixture.</param>
+    /// <param name="Frozen">Whether it declares a statically <c>readOnly</c> field, for the frozen fixture.</param>
     /// <param name="Hooks">The before-hooks to compile, for the rejecting fixture.</param>
     private protected sealed record EntityFixture(
         string Name,
@@ -172,6 +259,7 @@ public abstract class AlvoDataFixture
         AccessRules Rules,
         (string Name, DescField Type)? Extra = null,
         (string Field, string Expression)? Hidden = null,
+        bool Frozen = false,
         EntityHooks? Hooks = null)
     {
         internal static EntityFixture Permissive(string name, bool audit) => new(
@@ -187,7 +275,18 @@ public abstract class AlvoDataFixture
     /// them exactly as the adversarial suite does.
     /// </summary>
     /// <param name="entities">The entities the fixture declares.</param>
-    private protected async Task<World> WorldAsync(params EntityFixture[] entities)
+    private protected Task<World> WorldAsync(params EntityFixture[] entities) =>
+        SeededWorldAsync(
+            new Dictionary<string, IReadOnlyList<AlvoRecord>>(StringComparer.Ordinal), entities);
+
+    /// <summary>
+    /// The same store, with rows already in it — the only way to put a value in a field the port refuses to
+    /// write, which is what a <c>readOnly</c> fact needs before it can ask what a write does to one.
+    /// </summary>
+    /// <param name="seed">The rows to place, by entity.</param>
+    /// <param name="entities">The entities the fixture declares.</param>
+    private protected async Task<World> SeededWorldAsync(
+        IReadOnlyDictionary<string, IReadOnlyList<AlvoRecord>> seed, params EntityFixture[] entities)
     {
         var descriptor = new AlvoDescriptor
         {
@@ -196,10 +295,7 @@ public abstract class AlvoDataFixture
             Entities = entities.ToDictionary(entity => entity.Name, DescriptorOf, StringComparer.Ordinal),
         };
 
-        var data = await CreateAsync(
-            new SchemaModel([.. entities.Select(SchemaOf)]),
-            descriptor,
-            new Dictionary<string, IReadOnlyList<AlvoRecord>>(StringComparer.Ordinal));
+        var data = await CreateAsync(new SchemaModel([.. entities.Select(SchemaOf)]), descriptor, seed);
 
         return new World(data);
     }
@@ -230,6 +326,17 @@ public abstract class AlvoDataFixture
             {
                 Type = DescField.String,
                 Hidden = BoolOrCel.FromExpression(hidden.Expression),
+            };
+        }
+
+        if (entity.Frozen)
+        {
+            fields[FrozenField] = new FieldDescriptor { Type = DescField.String, ReadOnly = BoolOrCel.FromBoolean(true) };
+            fields[MandatorySecret] = new FieldDescriptor
+            {
+                Type = DescField.String,
+                Required = true,
+                Hidden = BoolOrCel.FromBoolean(true),
             };
         }
 
@@ -270,6 +377,12 @@ public abstract class AlvoDataFixture
         if (entity.Hidden is { } hidden)
         {
             yield return new FieldSchema { Name = hidden.Field, Type = SchemaField.String, Nullable = true };
+        }
+
+        if (entity.Frozen)
+        {
+            yield return new FieldSchema { Name = FrozenField, Type = SchemaField.String, Nullable = true };
+            yield return new FieldSchema { Name = MandatorySecret, Type = SchemaField.String, Required = true };
         }
     }
 

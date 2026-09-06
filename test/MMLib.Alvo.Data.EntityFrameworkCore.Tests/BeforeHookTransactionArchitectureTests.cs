@@ -55,18 +55,28 @@ public class BeforeHookTransactionArchitectureTests
     }
 
     /// <summary>
-    /// The pipeline is called from exactly the seven write bodies, and from no other — in particular not from
+    /// The pipeline is called from exactly the eight write bodies, and from no other — in particular not from
     /// the two on the idempotent path that would run a hook for a replay.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <b>Four became seven when the batch landed, and the three that were added are the batch's own judging
     /// passes.</b> A batch judges every row before it writes any, so its hooks run in that pass and not beside
     /// the insert — which is the whole reason a hook cannot patch a row past the check at batch scale. The
     /// exclusion this fact protects is unchanged: the replay paths still have none, because a hook on a replay
     /// would double a <c>mutate</c> over a value already stored.
+    /// </para>
+    /// <para>
+    /// <b>Seven became eight with create-or-replace, and this list is an allow-list rather than a floor —
+    /// which is exactly how it failed to help.</b> #105's create branch shipped with no hook call at all, and
+    /// this fact stayed green, because a write body that never calls the pipeline is invisible to a list of
+    /// bodies that do. It was found by review, not here. A new write face therefore has to be added to this
+    /// list <em>and</em> reasoned about: appearing here proves the ordering is right, never that the call
+    /// should exist.
+    /// </para>
     /// </remarks>
     [Fact]
-    public void The_pipeline_is_called_from_the_seven_write_bodies_and_nowhere_else()
+    public void The_pipeline_is_called_from_the_eight_write_bodies_and_nowhere_else()
         => CallSites().Select(site => site.Member).Distinct(StringComparer.Ordinal).ShouldBe(
             [
                 "CreatedAsync",
@@ -76,9 +86,10 @@ public class BeforeHookTransactionArchitectureTests
                 "CreatedRowsAsync",
                 "UpdatedRowsAsync",
                 "RemovedRowsAsync",
+                "CreatedByReplaceAsync",
             ],
             ignoreOrder: true,
-            "an eighth call site is either a write face that grew one twice or a replay path that must not "
+            "a ninth call site is either a write face that grew one twice or a replay path that must not "
             + "have one at all");
 
     /// <summary>
@@ -88,7 +99,7 @@ public class BeforeHookTransactionArchitectureTests
     /// </summary>
     [Fact]
     public void The_scan_finds_the_call_sites_it_is_written_about()
-        => CallSites().Count.ShouldBe(7, "one call per write body; a different number means the scan drifted");
+        => CallSites().Count.ShouldBe(8, "one call per write body; a different number means the scan drifted");
 
     /// <summary>
     /// The other half of the control: the scan can tell the two orderings apart. Handed a member whose

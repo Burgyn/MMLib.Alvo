@@ -432,6 +432,84 @@ public interface IAlvoData
     /// </exception>
     Task<AlvoRecord> UpdateAsync(string entity, Guid id, IReadOnlyDictionary<string, object?> values, AlvoContext context, AlvoPrecondition? precondition = null, AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default);
 
+    /// <summary>Creates or replaces the row <paramref name="id"/> names, writing it whole.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This is the one operation where the caller supplies the row's key, and only through
+    /// <paramref name="id"/>.</b> <c>id</c> inside <paramref name="values"/> is refused here exactly as it is
+    /// on every other route — the store still mints every key it is not handed one for, and
+    /// <see cref="CreateAsync"/> and the batch verbs are unchanged.
+    /// </para>
+    /// <para>
+    /// <b>It replaces; it does not merge.</b> A field <paramref name="values"/> does not mention is written
+    /// <see langword="null"/>, not left at its stored value — that is the whole difference from
+    /// <see cref="UpdateAsync"/>, which is partial by contract. A body that omits a <c>required</c> field
+    /// therefore cannot express the row and is refused with <see cref="ArgumentException"/> naming it; a
+    /// caller who wants to change one field wants <see cref="UpdateAsync"/>. Framework-managed columns are
+    /// exempt: <c>created_at</c> and <c>created_by</c> survive a replacement, because a replaced row is the
+    /// same row.
+    /// </para>
+    /// <para>
+    /// <b>Both branches are gated, and the caller needs both permissions.</b> An implementation resolves
+    /// <c>create</c> and <c>update</c> and refuses unless both allow, so neither branch is reachable by
+    /// naming an id that happens to fall the other way. The <c>WITH CHECK</c> predicate is evaluated on the
+    /// candidate row on <em>both</em> branches — an upsert that judges only the branch with a stored row to
+    /// compare against is a policy bypass on half its inputs.
+    /// </para>
+    /// <para>
+    /// <b>A row this caller's <c>USING</c> excludes is not replaced and not overwritten.</b> The pre-image
+    /// read finds nothing, so the create branch runs and its insert collides with the stored row's key:
+    /// the answer is <see cref="AlvoConstraintViolationException"/>. That the answer differs from a free
+    /// id's is a disclosure this operation cannot avoid — a primary key cannot collide silently — and it is
+    /// narrowed by requiring <c>create</c> as well as <c>update</c>, and by the caller having had to hold the
+    /// id already.
+    /// </para>
+    /// <para>
+    /// <b>On a tenant-scoped entity the create branch places the row in the caller's own tenant</b>, because
+    /// <c>tenant_id</c> is refused from <paramref name="values"/> on this route whichever branch runs — a
+    /// branch-dependent answer to "may I write this column" would report whether the row exists. A caller
+    /// creating into another tenant uses <see cref="CreateAsync"/>.
+    /// </para>
+    /// </remarks>
+    /// <param name="entity">The entity name.</param>
+    /// <param name="id">The row's identity: the row to replace, or the id to create it under.</param>
+    /// <param name="values">The whole row, minus the framework-managed columns and any <c>computed</c> field.</param>
+    /// <param name="context">The caller performing the write.</param>
+    /// <param name="precondition">
+    /// The version the caller believes the row holds, or <see langword="null"/> to write unconditionally.
+    /// Compared against the row-locked pre-image under the same ordering an update follows. On the create
+    /// branch there is no version to match, so a supplied precondition fails: naming a version is asserting
+    /// the row exists.
+    /// </param>
+    /// <param name="idempotency">
+    /// The caller's idempotency token, or <see langword="null"/> for an ordinary write. A replay answers
+    /// <see cref="AlvoReplaceResult.Created"/> <see langword="false"/> however the first request went,
+    /// because it reports the state that request left rather than performing an act of creation.
+    /// </param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <exception cref="AlvoAuthorizationException">
+    /// No policy allows <c>create</c> or no policy allows <c>update</c> on this entity for
+    /// <paramref name="context"/>; the candidate row fails the <c>WITH CHECK</c> predicate on whichever
+    /// branch ran; or <paramref name="values"/> names a column the caller may not write, <c>id</c> and
+    /// <c>tenant_id</c> included.
+    /// </exception>
+    /// <exception cref="AlvoConstraintViolationException">
+    /// A unique or reference constraint refused the row — including a collision on <paramref name="id"/>
+    /// itself, which is what a row excluded by this caller's <c>USING</c> answers.
+    /// </exception>
+    /// <exception cref="AlvoPreconditionFailedException">
+    /// <paramref name="precondition"/> does not match the stored row's version, the row does not exist, or
+    /// this entity keeps no version of a row at all.
+    /// </exception>
+    /// <exception cref="AlvoIdempotencyConflictException">
+    /// <paramref name="idempotency"/>'s key was already used for a request with a different fingerprint.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="values"/> omits a <c>required</c> field, so it cannot express the whole row; or
+    /// <paramref name="idempotency"/> is supplied for an anonymous <paramref name="context"/>.
+    /// </exception>
+    Task<AlvoReplaceResult> ReplaceAsync(string entity, Guid id, IReadOnlyDictionary<string, object?> values, AlvoContext context, AlvoPrecondition? precondition = null, AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default);
+
     /// <summary>Deletes a row by id.</summary>
     /// <param name="entity">The entity name.</param>
     /// <param name="id">The row id.</param>

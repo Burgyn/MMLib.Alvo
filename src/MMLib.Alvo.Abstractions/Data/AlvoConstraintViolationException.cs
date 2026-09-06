@@ -33,6 +33,16 @@
 /// rather than a conflict, and an implementation must let that keep propagating as one.
 /// </para>
 /// <para>
+/// <b>The one exception is the row key on a write whose key the caller chose</b>, which today means the
+/// create-or-replace: the path supplies <c>id</c>, so the "a caller cannot change one" premise expires for
+/// that column on that write, and a collision on it is an ordinary conflict the caller fixes by naming a
+/// different row. It is reported as <see cref="AlvoConstraintKind.Unique"/> with <c>id</c> in
+/// <see cref="Fields"/> — a name the caller themselves sent, so the rule above is satisfied rather than
+/// bent. Every other write mints its own key, and there a collision on <c>id</c> still propagates
+/// untranslated. Nothing here relaxes for <c>tenant_id</c> or the audit columns: no route lets a caller
+/// choose one, so a collision confined to them is still the broken invariant it always was.
+/// </para>
+/// <para>
 /// <b><see cref="AlvoConstraintKind.Referenced"/> names nothing at all, and that is deliberate.</b> The
 /// referencing entity is knowable from the published schema, but <em>which</em> of the entities that may
 /// reference this row actually holds one is a fact about data the caller may have no read access to.

@@ -1226,6 +1226,16 @@ adapter implements the queue, not the dispatcher.
 Only `AlvoEventOptions`, the three ports and the four envelope types are public; everything else in the
 core is `internal`.
 
+## A replacement emits its branch's own event (#105)
+
+`PUT {prefix}/{entity}/{id}` emits `entity.{entity}.created` when it created the row and
+`entity.{entity}.updated` when it replaced one — the same two types every other write emits, carrying the
+same images.
+
+**There is deliberately no `entity.{entity}.replaced`.** A third type would make every existing `updated`
+subscriber silently incomplete: it would stop seeing a whole class of write without any of them changing a
+line, and the failure would surface as missing downstream state rather than as an error.
+
 ## What is proved, and where
 
 | Claim | Fact |
