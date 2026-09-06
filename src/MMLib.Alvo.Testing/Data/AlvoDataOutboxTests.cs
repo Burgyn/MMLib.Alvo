@@ -390,6 +390,40 @@ public abstract class AlvoDataOutboxTests
         queued.CorrelationId.ShouldNotBeNullOrWhiteSpace();
     }
 
+    /// <summary>A replacement that created the row emits a <c>created</c>, like any other create.</summary>
+    /// <remarks>
+    /// <b>The branch emits its own type; there is no third one to subscribe to.</b> An
+    /// <c>entity.x.replaced</c> would make every existing <c>entity.x.updated</c> subscriber silently
+    /// incomplete — it would stop seeing a whole class of write without any of them changing a line.
+    /// </remarks>
+    [Fact]
+    public async Task A_replacement_that_created_the_row_emits_a_created_event()
+    {
+        var world = await VehiclesWorldAsync();
+
+        await world.Data.ReplaceAsync(
+            Vehicles, Guid.NewGuid(), Payload("vw", vin: null), Caller, cancellationToken: Ct);
+
+        (await world.EventsAsync()).ShouldHaveSingleItem().Type.ShouldBe(Created);
+    }
+
+    /// <summary>And one that replaced an existing row emits an <c>updated</c>, carrying both images.</summary>
+    [Fact]
+    public async Task A_replacement_that_replaced_a_row_emits_an_updated_event_carrying_both_images()
+    {
+        var world = await VehiclesWorldAsync();
+        var created = await CreateVehicleAsync(world, make: "vw");
+
+        await world.Data.ReplaceAsync(
+            Vehicles, IdOf(created), Payload("audi", vin: null), Caller, cancellationToken: Ct);
+
+        var events = await world.EventsAsync();
+        events.Select(queued => queued.Type).ShouldBe([Created, Updated]);
+        var updated = events[^1];
+        updated.Data.OldRecord!["make"].ShouldBe("vw");
+        updated.Data.Record!["make"].ShouldBe("audi");
+    }
+
     private const string Vehicles = "vehicles";
 
     private const string Created = $"entity.{Vehicles}.created";

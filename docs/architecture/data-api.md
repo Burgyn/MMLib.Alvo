@@ -1214,6 +1214,61 @@ answer it per caller.
    Issue **#95**, and the expiry note above. #95 also covers `like`/`ilike` refused on a `json` field, for
    the same underlying reason.
 
+## Create-or-replace: `PUT {prefix}/{entity}/{id}` (#105)
+
+`PATCH` on this path merges; `PUT` replaces. A field the body does not mention is written `null` rather than
+left at its stored value, which is why a body omitting a `required` field is **422 naming the field** rather
+than a partial write. A field that is both `required` and `hidden` cannot be restated by a caller who cannot
+read it, so for that caller the entity is reachable only through `PATCH` — the refusal says so, because the
+fix is different from "add the field".
+
+A row that did not exist is created under the path's `id` and answers **201** with a `Location`; one that did
+is replaced and answers **200**. A replay of an `Idempotency-Key` always answers 200 and emits no `Location`:
+201 reports that *this* request created the row, and a replay performs no act at all.
+
+**The caller needs both `create` and `update`.** Which branch runs depends on stored data, so requiring only
+the branch's own operation would make the permission a caller needs depend on whether the row happens to
+exist — and would let a caller permitted only to update reach the create branch by naming an unused id. The
+`WITH CHECK` predicate is evaluated on the candidate row on **both** branches; an upsert that judges only the
+branch with a stored row to compare against is a policy bypass on half its inputs.
+
+**`id` may appear in the path and nowhere else.** A body naming it is refused exactly as on every other
+route, so the rule that the store mints every key it is not handed one for survives intact for `POST` and the
+three batch verbs.
+
+### `tenant_id` is refused on both branches, and the create branch stamps it
+
+`tenant_id` is the one column caller-writable on a create and refused on an update. If this route asked that
+question per branch, *"is my `tenant_id` refused?"* would answer *"does this row exist?"* — an existence
+oracle decided from the payload alone, before any row is read, and one a caller triggers deliberately by
+naming the column. So the payload guard is told `isUpdate: true` unconditionally.
+
+The framework then has to supply the value, because the tenant scope *checks* a candidate's tenant and never
+produces one: a created row lands in the caller's own tenant. A caller creating into another tenant uses
+`POST`, which still takes the column and still judges it against the same scope.
+
+### What a replace discloses, and why it cannot disclose less
+
+A row that exists but which the caller's `USING` excludes reads as absent, so the create branch runs and its
+insert collides with the stored row's key — **409**. A caller who holds a UUID and may create therefore
+learns whether that id is taken.
+
+This is inherent to an id-addressed create-or-replace: a primary key cannot collide silently, and answering
+404 instead would relabel the disclosure rather than remove it, since 404-versus-201 distinguishes the same
+two states. What it must never do is either of the other outcomes — writing over a row the policy excludes,
+or reporting success — and it does neither.
+
+**It is a knowing deviation from #137**, recorded rather than argued away. That fix put the tenant column
+into every unique index because a cross-tenant existence oracle "contradicts the premise that Alvo's app-side
+rules are as safe as native row-level security", and said in as many words that a clean 409 does not close
+it. The cases differ in what the oracle is *worth*: #137 leaks a **guessable** natural key, so the oracle
+turns a guess into knowledge; here the caller must already hold the UUID to ask, and v4/v7 UUID space is not
+sweepable. Structurally the same one bit; in risk, not the same bit. The composite key that would close it
+is under *Alternatives rejected*.
+
+A collision on a **framework-minted** id is still an unhandled 500, and still should be: that is a broken
+invariant rather than a conflict, and only a write whose key the caller chose translates it.
+
 ## Alternatives rejected
 
 - **A `Link: rel="next"` header duplicating `next`.** A cursor would have two homes, and an agent reading a
@@ -1228,9 +1283,26 @@ answer it per caller.
   answer it from the store — turning a routing question into a port question, and leaving the OpenAPI
   document unable to list real paths. With literals, "this entity does not exist" is a 404 routing produces
   before anything is resolved.
-- **`PUT`, and PUT-as-upsert.** `UpdateAsync` is partial by contract — a field the dictionary does not
-  mention keeps its stored value — so `PUT` would advertise whole-resource replacement the port does not
-  perform, and upsert needs a port that can create-or-replace. `PATCH` only; upsert is **#105**.
+- **`If-None-Match: *` on `PUT`** (RFC 9110 §13.1.2 — "create only if absent"). The standard way to make a
+  replacement safe against creating what somebody else just created, and genuinely useful here. Deferred
+  because it is a second precondition family — `AlvoPrecondition` models a version match, not an existence
+  assertion — and #105's risk budget was spent on evaluating the policy on both branches, which is the part
+  that is catastrophic if wrong.
+- **A batch or mixed upsert.** The shape this document deferred to #105 so the identity decision could be
+  made first. It has been made; the mixed batch is a separate shape built on top of it, so the single-row
+  semantics can be reviewed on their own.
+- **Upsert on a natural unique key** (PostgREST's `on_conflict=` / `Prefer: resolution=merge-duplicates`).
+  Still the better answer for a caller who owns an external key (`order_no: "SO-1234"`) and has no UUID, and
+  the descriptor already supports `unique: true` on a field, so nothing here forecloses it.
+- **Requiring `id` in the body as well as the path**, which is what PostgREST's `PUT` does ("All the columns
+  must be specified in the request body, including the primary key columns"). Its own documentation does not
+  say what happens when the two disagree — a real gap in the prior art. Alvo removes the disagreement by
+  construction: `id` lives in the path, and in the body it is refused with the message it is refused with
+  everywhere else.
+- **A composite `(tenant_id, id)` primary key.** It would close the residual disclosure under
+  *Create-or-replace* below, and it is the right eventual answer — but it rewrites the physical key of every
+  scoped entity, with the migrations, foreign keys and read path that implies, and that does not belong
+  inside a change whose subject is a route.
 - **Storing the response body in the idempotency record.** See above: a stored body would replay a
   representation the caller's policy would no longer produce.
 - **A mixed batch** — one body carrying creates, updates and deletes together. That is upsert's shape, and

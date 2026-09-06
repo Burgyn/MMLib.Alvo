@@ -140,12 +140,17 @@ internal static class DataApiDocumentation
             DataApiEndpointKind.Get =>
                 [Ok(ResponseBody.Row, "The row."), .. NotModified(entity), .. Refusals(Absent)],
             DataApiEndpointKind.Create =>
-                [Created(), .. Refusals(Malformed, Precondition, Conflict)],
+                [Created(entity), .. Refusals(Malformed, Precondition, Conflict)],
             DataApiEndpointKind.Update =>
                 [Ok(ResponseBody.Row, "The row as it now stands."),
                  .. Refusals(Malformed, Absent, PreconditionOn(entity), Conflict)],
             DataApiEndpointKind.Delete =>
                 [NoContent(), .. Refusals(Absent, PreconditionOn(entity), Conflict)],
+            DataApiEndpointKind.Replace =>
+                [Created(entity),
+                 Ok(ResponseBody.Row, "The row as it now stands, when this request replaced an existing one "
+                    + "or replayed an 'Idempotency-Key' a previous request spent."),
+                 .. Refusals(Malformed, PreconditionOn(entity), Conflict)],
             DataApiEndpointKind.BatchCreate or DataApiEndpointKind.BatchUpdate
                 or DataApiEndpointKind.BatchDelete =>
                 [Ok(ResponseBody.Batch, "Every row the batch wrote, in request order, and how many it "
@@ -183,11 +188,22 @@ internal static class DataApiDocumentation
     private static Response Ok(ResponseBody body, string description) =>
         new(StatusCodes.Status200OK, body, description);
 
-    private static Response Created() => new(
+    /// <summary>The 201, promising an <c>ETag</c> only for an entity whose rows carry a version.</summary>
+    /// <remarks>
+    /// <b>The promise used to be unconditional, and on a version-less entity it was a lie</b> — the same lie
+    /// <see cref="NotModified"/> already refuses to tell about a 304. A client following the generated
+    /// contract would wait for a header this route can never send, and a conditional write built on it is
+    /// refused with 412 rather than merely unsupported.
+    /// </remarks>
+    /// <param name="entity">The entity as the applied schema declares it.</param>
+    private static Response Created(EntitySchema entity) => new(
         StatusCodes.Status201Created,
         ResponseBody.Row,
-        "The created row. 'Location' names it, and 'ETag' carries the version a later conditional write may "
-        + "send as 'If-Match' — so a first conditional write needs no read of its own.");
+        AlvoManagedColumns.VersionColumn(entity) is null
+            ? "The created row. 'Location' names it. This entity's rows carry no version, so no 'ETag' is "
+            + "returned and no later write can be conditioned on one."
+            : "The created row. 'Location' names it, and 'ETag' carries the version a later conditional write "
+            + "may send as 'If-Match' — so a first conditional write needs no read of its own.");
 
     private static Response NoContent() => new(
         StatusCodes.Status204NoContent, ResponseBody.None, "The row was deleted. No body.");
@@ -338,6 +354,7 @@ internal static class DataApiDocumentation
         DataApiEndpointKind.Create => $"Create one '{entity}' row",
         DataApiEndpointKind.Update => $"Update one '{entity}' row",
         DataApiEndpointKind.Delete => $"Delete one '{entity}' row",
+        DataApiEndpointKind.Replace => $"Create or replace one '{entity}' row",
         DataApiEndpointKind.BatchCreate => $"Create many '{entity}' rows in one transaction",
         DataApiEndpointKind.BatchUpdate => $"Update many '{entity}' rows in one transaction",
         DataApiEndpointKind.BatchDelete => $"Delete many '{entity}' rows in one transaction",
@@ -360,6 +377,7 @@ internal static class DataApiDocumentation
             DataApiEndpointKind.Create => Create,
             DataApiEndpointKind.Update => Update(entity),
             DataApiEndpointKind.Delete => Delete(entity),
+            DataApiEndpointKind.Replace => Replace(entity),
             DataApiEndpointKind.BatchCreate => Batch(BatchCreateVerb),
             DataApiEndpointKind.BatchUpdate => Batch(BatchUpdateVerb),
             DataApiEndpointKind.BatchDelete => Batch(BatchDeleteVerb),
@@ -578,10 +596,32 @@ internal static class DataApiDocumentation
     /// send one back as <c>If-Match</c> would be an instruction into a permanent 412.
     /// </summary>
     /// <param name="entity">The entity, consulted for whether a row of it can be versioned.</param>
+    private static string Replace(EntitySchema entity) =>
+        "Creates or replaces the row this path names, and returns it. A row that did not exist is created "
+        + "under the `id` in the path and answers 201 with a `Location`; one that did is replaced and answers "
+        + "200.\n\n"
+        + "**The row is written whole.** A field the body does not mention is written null rather than left at "
+        + "its stored value — that is the difference from `PATCH` on this same path, and it is why a body that "
+        + "omits a required field is refused with 422 naming the field rather than treated as a partial "
+        + "write. A field that is both required and hidden cannot be restated by a caller who cannot read it, "
+        + "which makes such an entity reachable only through `PATCH` for them.\n\n"
+        + "**The path is the only place `id` may appear.** A body naming `id` is refused exactly as it is "
+        + "everywhere else, and so is `tenant_id`: on a tenant-scoped entity a created row lands in the "
+        + "caller's own tenant, and a caller creating into another tenant uses `POST` on the collection.\n\n"
+        + "**The caller needs both `create` and `update`.** Which branch runs depends on stored data, so "
+        + "requiring only the branch's own operation would make the permission you need depend on whether the "
+        + "row happens to exist. An `id` already held by a row this caller cannot see answers 409: a primary "
+        + "key cannot collide silently, and the alternative would be writing over a row the caller's policy "
+        + "excludes.\n\n"
+        + UpdateConditioning(entity)
+        + "**`Idempotency-Key` makes the retry answer the row**, and a replay always answers 200 — never 201, "
+        + "and with no `Location`. A 201 reports that *this* request created the row, and a replay performs no "
+        + "act at all: it reports the state the first request left.";
+
     private static string Update(EntitySchema entity) =>
         "Partially updates one row and returns it. A field the body does not mention keeps its stored value — "
-        + "which is why this is a `PATCH` and there is no `PUT`: the underlying update is partial by contract, "
-        + "so a `PUT` would advertise whole-resource replacement that never happens.\n\n"
+        + "which is what separates this from `PUT` on the same path: that one replaces the row whole, and a "
+        + "field it omits is written null.\n\n"
         + "A write to a read-only field is refused with 422 rather than silently dropped, and so is a key the "
         + "entity does not declare. `id` and the framework-managed columns can never be rewritten, `tenant_id` "
         + "included: a row does not move between tenants.\n\n"

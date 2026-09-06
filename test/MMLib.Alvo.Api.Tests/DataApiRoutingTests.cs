@@ -20,10 +20,10 @@ public sealed class DataApiRoutingTests
 
     /// <summary>
     /// The whole route table, spelled out rather than derived from the code that builds it. The count is
-    /// asserted too: a tenth route per entity, or a stray catch-all, has to fail something.
+    /// asserted too: an eleventh route per entity, or a stray catch-all, has to fail something.
     /// </summary>
     [Fact]
-    public async Task Every_entity_in_the_applied_schema_gets_nine_routes()
+    public async Task Every_entity_in_the_applied_schema_gets_ten_routes()
     {
         await using var world = await AlvoApiWorld.VehicleRegistryAsync();
 
@@ -35,6 +35,7 @@ public sealed class DataApiRoutingTests
             routes.ShouldContain($"GET /api/{entity}/{{id:guid}}");
             routes.ShouldContain($"POST /api/{entity}");
             routes.ShouldContain($"POST /api/{entity}/query");
+            routes.ShouldContain($"PUT /api/{entity}/{{id:guid}}");
             routes.ShouldContain($"PATCH /api/{entity}/{{id:guid}}");
             routes.ShouldContain($"DELETE /api/{entity}/{{id:guid}}");
             routes.ShouldContain($"POST /api/{entity}/batch");
@@ -43,8 +44,8 @@ public sealed class DataApiRoutingTests
         }
 
         routes.Count.ShouldBe(
-            _entities.Length * 9,
-            $"exactly nine routes per declared entity and nothing else: {string.Join(", ", routes)}");
+            _entities.Length * 10,
+            $"exactly ten routes per declared entity and nothing else: {string.Join(", ", routes)}");
     }
 
     /// <summary>
@@ -70,17 +71,26 @@ public sealed class DataApiRoutingTests
     }
 
     /// <summary>
-    /// PUT is deliberately absent: <c>UpdateAsync</c> is partial by contract, so a PUT would advertise
-    /// whole-resource replacement the port does not perform. Asserted as its own fact because the
-    /// route-table fact above would also pass if PUT were mapped <em>instead of</em> PATCH on a future
-    /// edit that swapped them.
+    /// PUT and PATCH both sit on the item path and mean different things, so each entity has exactly one of
+    /// each. Asserted as its own fact because the route-table fact above would also pass if a future edit
+    /// mapped PUT <em>instead of</em> PATCH, or mapped one of them twice.
     /// </summary>
+    /// <remarks>
+    /// PUT was deliberately absent until #105, on the grounds that <c>UpdateAsync</c> is partial by contract
+    /// and a PUT would advertise whole-resource replacement the port could not perform. It performs it now,
+    /// through <c>ReplaceAsync</c> — which is why the verb arrived with a port operation rather than as a
+    /// second spelling of PATCH.
+    /// </remarks>
     [Fact]
-    public async Task No_entity_gets_a_put_route()
+    public async Task Each_entity_gets_exactly_one_put_and_one_patch_on_its_item_path()
     {
         await using var world = await AlvoApiWorld.VehicleRegistryAsync();
 
-        world.Routes.ShouldNotContain(route => route.StartsWith("PUT ", StringComparison.Ordinal));
+        foreach (var entity in _entities)
+        {
+            world.Routes.Count(route => route == $"PUT /api/{entity}/{{id:guid}}").ShouldBe(1);
+            world.Routes.Count(route => route == $"PATCH /api/{entity}/{{id:guid}}").ShouldBe(1);
+        }
     }
 
     /// <summary>
@@ -315,7 +325,7 @@ public sealed class DataApiRoutingTests
 
         var endpoints = world.Endpoints;
 
-        endpoints.Count.ShouldBe(_entities.Length * 9, "or this fact is asserting over the wrong set");
+        endpoints.Count.ShouldBe(_entities.Length * 10, "or this fact is asserting over the wrong set");
         foreach (var endpoint in endpoints)
         {
             var marker = endpoint.Metadata.GetMetadata<DataApiOperationMetadata>();
@@ -339,6 +349,7 @@ public sealed class DataApiRoutingTests
         DataApiEndpointKind.Create.ToDataOperation().ShouldBe(DataOperation.Create);
         DataApiEndpointKind.Update.ToDataOperation().ShouldBe(DataOperation.Update);
         DataApiEndpointKind.Delete.ToDataOperation().ShouldBe(DataOperation.Delete);
+        DataApiEndpointKind.Replace.ToDataOperation().ShouldBe(DataOperation.Update);
         DataApiEndpointKind.BatchCreate.ToDataOperation().ShouldBe(DataOperation.Create);
         DataApiEndpointKind.BatchUpdate.ToDataOperation().ShouldBe(DataOperation.Update);
         DataApiEndpointKind.BatchDelete.ToDataOperation().ShouldBe(DataOperation.Delete);
@@ -360,6 +371,7 @@ public sealed class DataApiRoutingTests
         DataApiEndpointKind.BatchCreate.ToWireName().ShouldBe("batchCreate");
         DataApiEndpointKind.BatchUpdate.ToWireName().ShouldBe("batchUpdate");
         DataApiEndpointKind.BatchDelete.ToWireName().ShouldBe("batchDelete");
+        DataApiEndpointKind.Replace.ToWireName().ShouldBe("replace");
 
         var kinds = Enum.GetValues<DataApiEndpointKind>();
         kinds.Select(kind => kind.ToWireName()).Distinct(StringComparer.Ordinal).Count().ShouldBe(kinds.Length);
@@ -383,6 +395,7 @@ public sealed class DataApiRoutingTests
             "GET" => DataOperation.List,
             "POST" when isQueryByBody => DataOperation.List,
             "POST" => DataOperation.Create,
+            "PUT" => DataOperation.Update,
             "PATCH" => DataOperation.Update,
             "DELETE" => DataOperation.Delete,
             _ => throw new InvalidOperationException($"Unexpected generated route: {method} {pattern}"),
