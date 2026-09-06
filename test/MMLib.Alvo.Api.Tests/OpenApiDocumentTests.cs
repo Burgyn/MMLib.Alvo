@@ -509,6 +509,41 @@ public sealed class OpenApiDocumentTests
     }
 
     /// <summary>
+    /// Every schema's <c>required</c> list names a property that schema actually declares.
+    /// </summary>
+    /// <remarks>
+    /// <b>Over the tenant-scoped fixture, because that is the only place the two can disagree.</b>
+    /// <c>tenant_id</c> is mapped <c>Required</c> and is caller-writable on a create and refused on an
+    /// update, so a body that draws its properties by one rule and its <c>required</c> list by the other
+    /// names a member it does not declare — a document a generated client cannot satisfy, since it would
+    /// demand the one field the endpoint refuses. The create-or-replace body is where the two rules meet.
+    /// The main fixture is global, so it cannot fail this and the snapshot cannot show it.
+    /// </remarks>
+    [Fact]
+    public async Task No_schema_requires_a_property_it_does_not_declare()
+    {
+        await using var world = await AlvoApiWorld.FromDescriptorAsync(
+            "tenant-notes.alvo.json", [], new AlvoApiWorldSetup(MapOpenApiDocument: true));
+        var document = await world.OpenApiDocumentAsync();
+
+        var schemas = document["components"]!["schemas"]!.AsObject();
+        schemas.Count.ShouldBeGreaterThan(0, "or this fact is asserting over nothing");
+
+        foreach (var (name, schema) in schemas)
+        {
+            var required = schema!["required"]?.AsArray().Select(x => (string)x!) ?? [];
+            var declared = schema["properties"]?.AsObject().Select(p => p.Key).ToHashSet(StringComparer.Ordinal)
+                ?? [];
+
+            foreach (var member in required)
+            {
+                declared.ShouldContain(
+                    member, $"'{name}' requires '{member}' and does not declare it");
+            }
+        }
+    }
+
+    /// <summary>
     /// <b>A write is offered <c>If-Match</c> only on an entity that can issue an <c>ETag</c></b> — and is
     /// offered it on one that can.
     /// </summary>

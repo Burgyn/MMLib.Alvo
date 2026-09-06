@@ -366,7 +366,7 @@ internal sealed class SchemaComponentBuilder(
         Title = isUpdate ? PatchId(entity.Name) : CreateId(entity.Name),
         Description = BodyDescription(isUpdate),
         Properties = Fields(readable: false, isUpdate),
-        Required = isUpdate ? null : Mandatory(),
+        Required = isUpdate ? null : Mandatory(isUpdate: false),
     };
 
     /// <summary>The whole-row body: the create body's mandatory fields, the update body's column rules.</summary>
@@ -374,6 +374,12 @@ internal sealed class SchemaComponentBuilder(
     /// The two halves come from the two things this route actually is. It writes the row whole, so a
     /// <c>required</c> field is mandatory exactly as on a create; and it refuses <c>tenant_id</c> on both
     /// branches, which is the update body's answer to the managed-column question.
+    /// <para>
+    /// <b>Both halves ask the same question, and that is the point.</b> The properties and the
+    /// <c>required</c> list are built with one <c>isUpdate</c> value, because a field that is
+    /// <c>required</c>, create-writable and update-refused — <c>tenant_id</c> being exactly that shape —
+    /// would otherwise be named as mandatory without appearing among the properties at all.
+    /// </para>
     /// </remarks>
     private OpenApiSchema ReplaceBody() => new()
     {
@@ -385,7 +391,7 @@ internal sealed class SchemaComponentBuilder(
             + "`id` comes from the path, and the framework's own columns — `tenant_id` included — are "
             + "refused if supplied: a created row lands in the caller's own tenant.",
         Properties = Fields(readable: false, isUpdate: true),
-        Required = Mandatory(),
+        Required = Mandatory(isUpdate: true),
     };
 
     private static string BodyDescription(bool isUpdate) => isUpdate
@@ -532,10 +538,16 @@ internal sealed class SchemaComponentBuilder(
     /// field the caller may not write — <c>id</c>, or a required field marked <c>readOnly</c> — is the
     /// framework's to fill, and demanding it would document a create nobody can perform.
     /// </remarks>
-    private HashSet<string>? Mandatory()
+    /// <param name="isUpdate">
+    /// Which write rules decide membership. <b>It must match the properties the body actually carries</b>:
+    /// <c>required</c> is a claim about a member, so naming one the schema does not declare is a document a
+    /// generated client cannot satisfy — it would demand a field the endpoint refuses. The create body and
+    /// the replace body answer this differently, which is why it is a parameter rather than a constant.
+    /// </param>
+    private HashSet<string>? Mandatory(bool isUpdate)
     {
         var required = entity.Fields
-            .Where(field => field.Required && Belongs(field, readable: false, isUpdate: false))
+            .Where(field => field.Required && Belongs(field, readable: false, isUpdate))
             .Select(field => field.Name)
             .ToHashSet(StringComparer.Ordinal);
 

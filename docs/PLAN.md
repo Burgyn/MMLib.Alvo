@@ -92,7 +92,7 @@ about.
 
 | | |
 |---|---|
-| demo descriptors | five in `examples/` (`vehicle-registry`, `field-service`, `complex-crm`, `simple-tasks`) plus six in `examples/_negative/` that must be *refused*, all validated by `ExamplesTests` |
+| demo descriptors | four in `examples/` (`vehicle-registry`, `field-service`, `complex-crm`, `simple-tasks`) plus six in `examples/_negative/` that must be *refused*, all validated by `ExamplesTests` |
 | standalone run | `src/MMLib.Alvo.Host/Dockerfile`, two compose stacks (8080 vehicle-registry, 8081 field-service), no credential shipped in the image, `up --wait` gated on `/health/ready` |
 | playground | `playground/run` — glob-based projects, `--pg`, `--test`, `--down`; two projects with their own suites, deliberately in no ring |
 | E2E | `test/teapie-field-service/`, 12 collections, 404 assertions, a **required check on every PR** with a JUnit artifact |
