@@ -43,14 +43,20 @@ internal static class ConstraintViolationTranslator
     /// <param name="dialect">The driver's dialect, which owns the engine-specific decoding.</param>
     /// <param name="rows">The entity type being written, resolved against for field names.</param>
     /// <param name="schema">The entity as the applied schema declares it, for its managed-column set.</param>
+    /// <param name="callerKeyed">
+    /// Whether the caller chose this row's key. The managed-column exclusion below reads "a caller cannot
+    /// change one"; on a create-or-replace the caller supplies <c>id</c>, so for that write the premise
+    /// expires and a collision on it is an ordinary conflict the caller can fix by choosing another id.
+    /// Every other write mints its own key, passes <see langword="false"/>, and keeps the old answer.
+    /// </param>
     internal static async Task<T> TranslatedAsync<T>(
-        Func<Task<T>> write, IAlvoSqlDialect dialect, IEntityType rows, EntitySchema schema)
+        Func<Task<T>> write, IAlvoSqlDialect dialect, IEntityType rows, EntitySchema schema, bool callerKeyed)
     {
         try
         {
             return await write();
         }
-        catch (Exception failure) when (Translate(failure, dialect, rows, schema) is { } violation)
+        catch (Exception failure) when (Translate(failure, dialect, rows, schema, callerKeyed) is { } violation)
         {
             throw violation;
         }
@@ -58,13 +64,13 @@ internal static class ConstraintViolationTranslator
 
     /// <inheritdoc cref="TranslatedAsync{T}"/>
     internal static async Task TranslatedAsync(
-        Func<Task> write, IAlvoSqlDialect dialect, IEntityType rows, EntitySchema schema)
+        Func<Task> write, IAlvoSqlDialect dialect, IEntityType rows, EntitySchema schema, bool callerKeyed)
     {
         try
         {
             await write();
         }
-        catch (Exception failure) when (Translate(failure, dialect, rows, schema) is { } violation)
+        catch (Exception failure) when (Translate(failure, dialect, rows, schema, callerKeyed) is { } violation)
         {
             throw violation;
         }
@@ -80,7 +86,7 @@ internal static class ConstraintViolationTranslator
     /// where it was raised, rather than one rethrown from here.
     /// </remarks>
     private static AlvoConstraintViolationException? Translate(
-        Exception failure, IAlvoSqlDialect dialect, IEntityType rows, EntitySchema schema)
+        Exception failure, IAlvoSqlDialect dialect, IEntityType rows, EntitySchema schema, bool callerKeyed)
     {
         if (ProviderException(failure) is not { } provider)
         {
@@ -99,7 +105,7 @@ internal static class ConstraintViolationTranslator
             return new AlvoConstraintViolationException(AlvoConstraintKind.Referenced, [], failure);
         }
 
-        var fields = CallerFields(violation, rows, schema);
+        var fields = CallerFields(violation, rows, schema, callerKeyed);
         return fields.Count == 0
             ? null
             : new AlvoConstraintViolationException(AlvoConstraintKind.Unique, fields, failure);
@@ -142,16 +148,28 @@ internal static class ConstraintViolationTranslator
     /// <param name="violation">What the dialect decoded.</param>
     /// <param name="rows">The entity type being written.</param>
     /// <param name="schema">The entity as the applied schema declares it.</param>
+    /// <param name="callerKeyed">Whether the caller chose this row's key, so <c>id</c> survives the removal.</param>
     private static IReadOnlyList<string> CallerFields(
-        SqlConstraintViolation violation, IEntityType rows, EntitySchema schema)
+        SqlConstraintViolation violation, IEntityType rows, EntitySchema schema, bool callerKeyed)
     {
         var columns = violation.Columns.Count > 0
             ? violation.Columns.Where(column => rows.FindProperty(column) is not null)
             : IndexColumns(violation.ConstraintName, rows);
 
         var managed = AlvoManagedColumns.For(schema);
-        return [.. columns.Where(column => !managed.Contains(column))];
+        return [.. columns.Where(column => !managed.Contains(column) || IsTheCallersOwnKey(column, callerKeyed))];
     }
+
+    /// <summary>Whether <paramref name="column"/> is the row key on a write whose key the caller chose.</summary>
+    /// <remarks>
+    /// <b>The row key only, never another managed column.</b> <paramref name="callerKeyed"/> says the caller
+    /// supplied <c>id</c>; it says nothing about <c>tenant_id</c> or the audit columns, which no route lets a
+    /// caller choose and whose collision is still the broken invariant it always was.
+    /// </remarks>
+    /// <param name="column">The colliding column.</param>
+    /// <param name="callerKeyed">Whether the caller chose this row's key.</param>
+    private static bool IsTheCallersOwnKey(string column, bool callerKeyed) =>
+        callerKeyed && string.Equals(column, AlvoManagedColumns.Id, StringComparison.Ordinal);
 
     /// <summary>The properties of the index the engine named, or nothing when this model has no such index.</summary>
     /// <param name="constraintName">The engine's own constraint name, or <see langword="null"/>.</param>
@@ -162,5 +180,24 @@ internal static class ConstraintViolationTranslator
             : rows.GetIndexes()
                 .Where(index => string.Equals(index.GetDatabaseName(), constraintName, StringComparison.Ordinal))
                 .SelectMany(index => index.Properties)
-                .Select(property => property.Name);
+                .Select(property => property.Name)
+                .Concat(PrimaryKeyColumns(constraintName, rows));
+
+    /// <summary>The row key's properties, when the constraint the engine named is the primary key.</summary>
+    /// <remarks>
+    /// <b>A primary key is a constraint but not an index</b>, so <see cref="IEntityType.GetIndexes"/> does not
+    /// carry it and the lookup above finds nothing for a key collision. That was harmless while every key was
+    /// framework-minted — such a collision is a broken invariant and is meant to propagate untranslated — and
+    /// stopped being harmless the moment a route let the caller choose the key: the collision it must answer
+    /// as a conflict was resolving to no columns and falling through to the raw provider exception.
+    /// PostgreSQL is where this surfaces, because its unique violation reports a constraint name and no
+    /// columns at all.
+    /// </remarks>
+    /// <param name="constraintName">The engine's own constraint name.</param>
+    /// <param name="rows">The entity type being written.</param>
+    private static IEnumerable<string> PrimaryKeyColumns(string constraintName, IEntityType rows) =>
+        rows.FindPrimaryKey() is { } key
+        && string.Equals(key.GetName(), constraintName, StringComparison.Ordinal)
+            ? key.Properties.Select(property => property.Name)
+            : [];
 }
