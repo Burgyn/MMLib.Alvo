@@ -128,31 +128,37 @@ internal static class VacuumRunner
             ];
     }
 
-    /// <summary>Asks <c>scripts/ensure-vacuum</c> for the pinned binary's path.</summary>
+    /// <summary>Locates the binary <c>scripts/ensure-vacuum</c> has already put in place.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>It looks the file up rather than running the script, and that is a Windows decision.</b> Invoking
+    /// <c>bash scripts/ensure-vacuum</c> and taking the path it prints works on Linux and macOS and fails on
+    /// the Windows CI leg: Git Bash prints an MSYS path (<c>/d/a/MMLib.Alvo/…</c>) that .NET on Windows
+    /// cannot open, so the suite would look for a binary that is sitting right there. Reading the one
+    /// location the script writes to needs no shell, no path translation and no process launch, and keeps
+    /// the script the single authority on <em>acquiring</em> it.
+    /// </para>
+    /// <para>
+    /// <c>scripts/test-ring2</c> runs <c>ensure-vacuum</c> before the integration loop, so by the time this
+    /// runs the file exists. A run that skipped that step fails here with the instruction — deliberately,
+    /// because a suite that self-skipped would report success on a machine where nothing was linted.
+    /// </para>
+    /// <para>
+    /// A <c>vacuum</c> already on <c>PATH</c> is <b>not</b> used, unlike in the script: every document this
+    /// suite lints is linted by the pinned build, whatever a developer happens to have installed.
+    /// </para>
+    /// </remarks>
     private static string Resolve()
     {
-        var script = Path.Combine(RepositoryRoot.Find(), "scripts", "ensure-vacuum");
-        using var process = Process.Start(new ProcessStartInfo("bash")
-        {
-            ArgumentList = { script },
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        }) ?? throw new InvalidOperationException($"could not start {script}");
+        var binary = OperatingSystem.IsWindows() ? "vacuum.exe" : "vacuum";
+        var path = Path.Combine(RepositoryRoot.Find(), "artifacts", "tools", "vacuum", binary);
 
-        var output = process.StandardOutput.ReadToEnd();
-        var error = process.StandardError.ReadToEnd();
-        process.WaitForExit();
-
-        var path = output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .LastOrDefault();
-
-        if (process.ExitCode != 0 || string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        if (!File.Exists(path))
         {
             throw new InvalidOperationException(
-                $"scripts/ensure-vacuum did not resolve the pinned Vacuum binary (exit {process.ExitCode}). "
-                + "Run it by hand to see why; this suite deliberately fails rather than skipping, because a "
-                + $"skipped lint is a lint nobody ran.{Environment.NewLine}stdout: {output}"
-                + $"{Environment.NewLine}stderr: {error}");
+                $"the pinned Vacuum binary is not at '{path}'. Run scripts/ensure-vacuum (scripts/test-ring2 "
+                + "does it for you) — this suite fails rather than skipping, because a skipped lint is a lint "
+                + "nobody ran.");
         }
 
         return path;

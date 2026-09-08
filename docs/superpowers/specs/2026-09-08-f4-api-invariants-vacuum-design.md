@@ -46,6 +46,8 @@ OpenAPI 3.1.1 JSON document on disk) before any of this was written. Five findin
 
 ## 3. The three findings, and what each one does to the design
 
+*Found before implementation. Three more arrived during it — §8a.*
+
 ### 3.1 `servers[0].url` has a trailing slash — fix it
 
 With no path base the document advertises `http://localhost/`. OpenAPI 3.1.1 §Server Object is explicit that
@@ -127,7 +129,9 @@ A new `test/_shared/api/OpenApiDocumentFacts.cs` asserts, generically over `(doc
 - every list operation documents `prefer`, `select`, `order`, `limit`, `offset`, `after`;
 - every list 200 is a page envelope with `items`, `next` and `count` all present;
 - every operation's error responses resolve to `problemDetails`, and `type` is under `https://alvo.dev/errors/`;
-- the DELETE-with-body exemption of §3.3 holds for the batch route and nothing else.
+- the DELETE-with-body exemption of §3.3 holds for the batch route and nothing else;
+- the component schema key set is exactly `entities × 12 shapes` plus the framework's two — the claim that
+  replaced the dropped casing rule, and one a linter cannot make because it needs the entity list.
 
 These are written fresh rather than extracted from `OpenApiDocumentTests` — that file's 1346 lines are
 *fixture-specific* pins with hand-counted expectations, and rewriting it generically inside this PR would put a
@@ -219,6 +223,36 @@ demo-side lint of spec §415 is satisfied for descriptors the compose stack actu
 - **Licensing:** Vacuum is MIT and is named in `alvo-dotnet-conventions`'s carve-out for a dev/CI tool invoked
   as a separate process. Nothing ships, nothing is linked.
 
+## 8a. What building it found
+
+Three defects and two gaps, none of them known when this design was written. That the corpus produced them
+on its first run is the argument the issue makes, so they are recorded here and not only in commits.
+
+**Fixed in this PR, because each is a defect in the artifact #26 is about:**
+
+1. **`servers[0].url` had a trailing slash** — §3.1, found before implementation started.
+2. **A nullable enum published a self-contradicting schema.** `type` was widened to `["null","string"]`
+   while `enum` kept only the declared values; the two keywords are conjunctive, so the document admitted
+   null and forbade it at once — a generated client rejected a row the API legitimately returns, and no
+   request could send the value the type promised. `simple-tasks` and `complex-crm` both published it.
+   Vacuum's `nullable-enum-contains-null` reported it; the fix appends a real JSON `null` to the value set,
+   and `A_nullable_enums_value_set_contains_null_and_a_required_ones_does_not` pins both directions over its
+   own descriptor.
+3. **Two lint rules were written against a single-word entity** — §4.
+
+**Filed, not fixed, because each is a product decision or a change outside this issue:**
+
+4. **`examples/complex-crm` cannot be applied at all** (`field.default` is refused). The real gap is that
+   `ExamplesTests` validates each example against the *schema* and never against appliability, so a shipped
+   descriptor can be both valid and un-bootable. **#208.** This suite pins the refusal explicitly rather
+   than excluding the example silently, so the exclusion fails the moment it becomes appliable.
+5. **The batch `DELETE` body (#206)** and **the absent examples in generated schemas (#207)** — §3.3, §3.4.
+
+**And three things the generated corpus taught the suite about its own fixtures**, each now written where it
+was wrong: `softDelete` is refused at apply in this build, so it is never generated; a create on a
+tenant-scoped entity must *echo* `tenant_id` while a replace refuses the same member; and a decimal has to
+fit its declared precision and scale.
+
 ## 9. Definition of Done, mapped
 
 | DoD clause | Where it is satisfied |
@@ -230,8 +264,8 @@ demo-side lint of spec §415 is satisfied for descriptors the compose stack actu
 
 ## 10. Risks
 
-- **Ring2 cost.** 16 hosts × ~12 requests plus ~20 vacuum invocations. Target under ~60s; if the measured
-  number lands materially over, it gets reported rather than quietly trimmed.
+- **Ring2 cost — measured, not projected.** The invariant project is **82 tests in 9.6 s** (20 hosts, 29
+  vacuum invocations), against a stated target of 60 s. It stays well inside the tier it was placed in.
 - **The snapshot moves.** §3.1 changes `servers[0].url`, so
   `OpenApiDocumentTests.The_document_is_stable.verified.txt` and one `OpenApiServersTests` expectation change
   with it. That is a reviewed event by design — the Stop-hook gate will ask the snapshot judge to justify it.

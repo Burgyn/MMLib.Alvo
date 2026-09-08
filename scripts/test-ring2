@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # ring2 — run before opening a PR (ring1 + integration (affected) + API
-# invariant + Vacuum). None of those exist yet — add them here when they land.
+# invariant + Vacuum). All of it exists now: #26 landed the API invariant suite
+# (test/MMLib.Alvo.Api.Invariants.Tests.Integration, picked up by the affected loop
+# below like any other integration project) and the Vacuum contract lint.
 # Full run (+ e2e) stays in CI on the PR; mutation runs post-merge on `main`.
 # Do not run either locally.
 # The compose + TeaPie e2e is NOT here: see scripts/test-e2e for why (it needs an image build and a
@@ -9,6 +11,12 @@ set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$DIR/.." && pwd)"
 "$DIR/test-ring1"
+
+# MMLib.Alvo.Api.Invariants.Tests.Integration shells out to vacuum once per generated
+# document, so the pinned binary is resolved here rather than lazily inside test cases that
+# run in parallel. It is a no-op once the binary is in artifacts/tools/vacuum.
+echo "[ring2] resolving the pinned Vacuum binary"
+"$DIR/ensure-vacuum" >/dev/null
 
 integration="$(find "$ROOT" -name '*.Tests.Integration.csproj' -not -path '*/bin/*' -not -path '*/obj/*' 2>/dev/null || true)"
 if [ -z "$integration" ]; then
@@ -48,5 +56,10 @@ else
   done <<< "$integration"
 fi
 
-echo "[ring2] placeholder: API invariant + Vacuum — land in a later F1 PR"
+# The static half of #26's gate: the committed OpenAPI document snapshot against
+# schema/openapi-ruleset.yaml. It needs no build and no host, so it runs last and costs a
+# second — the invariant project above already linted the four examples/ descriptors and
+# sixteen generated ones through the same ruleset file.
+"$DIR/lint-api"
+
 echo "[ring2] OK"

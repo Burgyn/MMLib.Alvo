@@ -57,7 +57,8 @@ jobs:
       # incl. both Testcontainers/PostgreSQL integration projects — the
       # port-level one and MMLib.Alvo.Api.Tests.Integration, which carries the
       # HTTP suite's PostgreSQL leg and §2.1's two numeric paging criteria —
-      # plus the API-invariant/Vacuum placeholders) runs on both OSes. Windows
+      # plus MMLib.Alvo.Api.Invariants.Tests.Integration, #26's generated-descriptor
+      # corpus, and the Vacuum contract lint) runs on both OSes. Windows
       # GitHub runners run Docker in Windows-container mode and cannot run the
       # Linux postgres:16-alpine image — the PostgreSQL Testcontainers
       # integration tests self-skip there (see PostgresFixture /

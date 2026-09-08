@@ -97,21 +97,25 @@ about.
 | playground | `playground/run` — glob-based projects, `--pg`, `--test`, `--down`; two projects with their own suites, deliberately in no ring |
 | E2E | `test/teapie-field-service/`, 12 collections, 404 assertions, a **required check on every PR** with a JUnit artifact |
 | the Data API itself | reads, writes, batch, idempotency, preconditions, projections, paging, create-or-replace |
+| API contract lint + invariants | `schema/openapi-ruleset.yaml` through Vacuum (pinned, checksum-verified, no Node and no Docker), plus 16 generated descriptors and 3 shipped examples holding default-deny, CRUD shape, replace idempotence and a replayed `Idempotency-Key` — **both halves proven able to fail**, one mutation per lint rule and a sabotaged host per behaviour |
 
-**What remains — two things, in this order:**
+**What remains — one thing:**
 
-1. **[#26] Vacuum + API invariant tests.** The one literal placeholder left:
-   `scripts/test-ring2:51` still prints `placeholder: API invariant + Vacuum`.
-   Two halves — a contract lint over the generated document, and N *generated*
-   descriptors asserting default-deny, idempotency and CRUD shape at runtime.
-   **This is the higher-value half of what is left**, because it is the only
-   thing that tests the claim a metadata-driven framework actually makes: that
-   the rules hold *across descriptors*, not for the one demo they were written
-   against. Every gate today measures one fixture.
-2. **[#24] An embedded-run sample.** Nothing in the repo demonstrates
+1. **[#24] An embedded-run sample.** Nothing in the repo demonstrates
    `AddAlvo()` / `IAlvoBuilder`, though `docs/architecture/extensibility.md`
    documents the seam and `AddAlvoIntegrationTests` exercises it. Embedded is
    one of the two declared distribution modes and it has no readable example.
+
+**[#26] closed the last placeholder**, and it did what the issue said it would:
+measuring the rules across descriptors instead of against one fixture found
+three real defects on the corpus's first run. A nullable enum published a
+self-contradicting schema (`type` admitted null, `enum` forbade it — two shipped
+examples carried it); two of the lint rules had been written against a
+single-word entity and rejected every multi-word one; and
+`examples/complex-crm` cannot be applied at all, because `ExamplesTests`
+validates the schema and never appliability (**[#208]**). Two further findings
+were filed rather than bent around: the request body on batch `DELETE`
+(**[#206]**) and the absent examples in generated schemas (**[#207]**).
 
 **One debt stays in F4 and should not wait its turn: [#191]** — the Data API
 requires no `Content-Type`, which is a CSRF vector in an embedded host that
