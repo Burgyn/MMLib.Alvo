@@ -621,10 +621,34 @@ internal sealed class SchemaComponentBuilder(
     private static JsonSchemaType? Nullable(JsonSchemaType? type, FieldSchema field) =>
         type is { } declared && field.Nullable ? declared | JsonSchemaType.Null : type;
 
+    /// <summary>
+    /// The declared values — and <c>null</c> among them where the column admits one.
+    /// </summary>
+    /// <remarks>
+    /// <b><c>type</c> and <c>enum</c> are conjunctive, so widening only the type published a contradiction.</b>
+    /// A nullable enum came out as <c>"type": ["null", "string"]</c> beside
+    /// <c>"enum": ["low", "normal", "high"]</c>: the type admits null and the enum forbids it, and a validator
+    /// applies both — so a generated client rejected the null this API legitimately returns, and the document
+    /// described a value no request could ever send. Two shipped examples published exactly that
+    /// (<c>simple-tasks</c>'s <c>priority</c> and <c>complex-crm</c>'s <c>stage</c>) until #26's Vacuum lint
+    /// reported it as <c>nullable-enum-contains-null</c>. The null is a real JSON <c>null</c> in the array and
+    /// never the string <c>"null"</c>, which would be a fourth allowed value rather than the absence of one.
+    /// </remarks>
     private static List<JsonNode>? EnumOf(FieldSchema field) =>
         field.EnumValues is { Count: > 0 } values
-            ? [.. values.Select(value => (JsonNode)JsonValue.Create(value))]
+            ? [.. values.Select(value => (JsonNode)JsonValue.Create(value)!), .. field.Nullable ? _nullValue : []]
             : null;
+
+    /// <summary>
+    /// The single <c>null</c> a nullable enum's value set has to carry.
+    /// </summary>
+    /// <remarks>
+    /// <c>OpenApiSchema.Enum</c> is typed <c>IList&lt;JsonNode&gt;</c> — non-nullable elements — but a JSON
+    /// Schema <c>enum</c> array is a list of <em>values</em>, and <c>null</c> is one of them. The suppression
+    /// is on the model's annotation, not on the specification: the serializer writes a null element as the
+    /// JSON literal <c>null</c>, which is what a validator has to see.
+    /// </remarks>
+    private static readonly JsonNode[] _nullValue = [null!];
 
     /// <summary>
     /// The field's own description, plus the enforced facets JSON Schema draft 2020-12 cannot express.

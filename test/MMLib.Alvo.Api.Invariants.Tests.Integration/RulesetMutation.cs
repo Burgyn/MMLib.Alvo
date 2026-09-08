@@ -35,8 +35,6 @@ internal sealed record RulesetMutation(string RuleId, Action<JsonObject> Apply)
         new("alvo-operation-id-shape", document =>
             document["paths"]!["/api/owners"]!["get"]!.AsObject()["operationId"] = "OwnersList"),
 
-        new("alvo-schema-key-casing", document => Rekey(document, "schemas", "ownersPage", "owners_page")),
-
         new("alvo-parameter-key-casing", document => Rekey(document, "parameters", "ifMatch", "if_match")),
 
         new("alvo-response-key-casing", document => Rekey(document, "responses", "forbidden", "not_allowed")),

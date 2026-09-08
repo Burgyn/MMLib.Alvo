@@ -47,6 +47,16 @@ internal static class OpenApiDocumentFacts
     /// </remarks>
     private static readonly string[] _pagingParameters = ["Prefer", "select", "order", "limit", "offset", "after"];
 
+    /// <summary>The twelve schemas an entity publishes: the row, the four write shapes, the page, the batch set.</summary>
+    private static readonly string[] _schemaShapes =
+    [
+        "", "Create", "Patch", "Replace", "Query", "Page", "PageItem",
+        "BatchCreate", "BatchUpdate", "BatchPatch", "BatchDelete", "BatchResult",
+    ];
+
+    /// <summary>The two schemas that belong to the framework rather than to an entity.</summary>
+    private static readonly string[] _frameworkSchemas = ["problemDetails", "problemViolation"];
+
     /// <summary>Asserts every generic claim, throwing on the first one the document breaks.</summary>
     /// <param name="document">The served OpenAPI document.</param>
     /// <param name="entities">The entities the applied descriptor declares — the set the counts are pinned against.</param>
@@ -69,6 +79,7 @@ internal static class OpenApiDocumentFacts
         EveryListResponseIsAPageEnvelope(document, paths, entities, prefix);
         EveryRefusalIsAProblemDocument(document, paths);
         OnlyTheBatchRouteCarriesADeleteBody(paths);
+        TheSchemaKeysAreTheEntitySchemasAndTheFrameworksOwn(document, entities);
     }
 
     /// <summary>The document describes each entity's four path keys, and no path nobody generated.</summary>
@@ -215,6 +226,41 @@ internal static class OpenApiDocumentFacts
         withBody.ShouldAllBe(
             path => path.EndsWith("/batch", StringComparison.Ordinal),
             $"only the batch route may carry a DELETE body (#206); these do: {string.Join(", ", withBody)}");
+    }
+
+    /// <summary>
+    /// The component schema map holds exactly one schema per entity per shape, plus the framework's two.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This is the claim the Vacuum ruleset cannot make.</b> A casing rule over
+    /// <c>components.schemas</c> can only judge a whole key, and an entity schema's key carries the entity's
+    /// own identifier — <c>work_ordersPage</c> is neither camel nor snake, and requiring camel there rejected
+    /// every multi-word entity in <c>examples/</c>. What is actually worth asserting needs the declared
+    /// entity list: the key set is <em>exactly</em> the twelve shapes per entity plus
+    /// <c>problemDetails</c>/<c>problemViolation</c>, and nothing else.
+    /// </para>
+    /// <para>
+    /// Stronger than the casing rule it replaces, and in the direction this repository cares about: it is
+    /// pinned from outside the document, so a renamed, duplicated or vanished schema fails here, while a
+    /// casing rule would have passed all three.
+    /// </para>
+    /// </remarks>
+    private static void TheSchemaKeysAreTheEntitySchemasAndTheFrameworksOwn(
+        JsonObject document, IReadOnlyCollection<string> entities)
+    {
+        var expected = entities
+            .SelectMany(entity => _schemaShapes.Select(shape => $"{entity}{shape}"))
+            .Concat(_frameworkSchemas)
+            .ToHashSet(StringComparer.Ordinal);
+
+        expected.Count.ShouldBe(
+            (entities.Count * _schemaShapes.Length) + _frameworkSchemas.Length,
+            "or the expected set collapsed and proves nothing");
+        document["components"]!["schemas"]!.AsObject()
+            .Select(schema => schema.Key)
+            .ToHashSet(StringComparer.Ordinal)
+            .ShouldBe(expected, ignoreOrder: true, "the document must publish one schema per entity shape, and no other");
     }
 
     /// <summary>Every operation in the document, with the path and method that name it.</summary>

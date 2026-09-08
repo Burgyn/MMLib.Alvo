@@ -46,6 +46,7 @@ public class OpenApiDocumentFactsMutationTests
     [InlineData("page-envelope", "page has no next cursor")]
     [InlineData("problem-document", "must reference the one problem schema")]
     [InlineData("delete-body", "only the batch route may carry a DELETE body")]
+    [InlineData("schema-keys", "one schema per entity shape")]
     public async Task Each_generic_claim_fails_on_its_own_mutation(string mutation, string expected)
     {
         await using var world = await AlvoApiWorld.FromDescriptorAsync(
@@ -101,6 +102,9 @@ public class OpenApiDocumentFactsMutationTests
             case "problem-document":
                 document["components"]!["responses"]!["forbidden"]!["content"]!["application/problem+json"]!
                     ["schema"]!.AsObject()["$ref"] = "#/components/schemas/categories";
+                break;
+            case "schema-keys":
+                document["components"]!["schemas"]!.AsObject().Remove("categoriesPageItem");
                 break;
             case "delete-body":
                 paths["/api/categories/{id}"]!["delete"]!.AsObject()["requestBody"] =

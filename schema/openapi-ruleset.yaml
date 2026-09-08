@@ -69,6 +69,11 @@ rules:
 
   # --- Alvo's own rules ----------------------------------------------------------------------------
 
+  # <entity> is snake_case because it IS the descriptor's identifier (^[a-z][a-z0-9_]{0,62}$), the same
+  # verbatim spelling the path segment carries; <operation> is Alvo's own name and is camelCase
+  # (`batchCreate`). The first version of this rule required camelCase on both halves, which passed the
+  # single-word fixture and failed every multi-word entity in examples/ — the exact "works for the demo"
+  # defect #26 exists to catch, caught by #26's own generated corpus on its first run.
   alvo-operation-id-shape:
     description: "operationId is <entity>.<operation>"
     given: $.paths[*][*].operationId
@@ -76,18 +81,14 @@ rules:
     then:
       function: pattern
       functionOptions:
-        match: "^[a-z][a-zA-Z0-9]*\\.[a-z][a-zA-Z0-9]*$"
+        match: "^[a-z][a-z0-9_]*\\.[a-z][a-zA-Z0-9]*$"
 
-  alvo-schema-key-casing:
-    description: "framework-minted component schema keys are camelCase"
-    given: $.components.schemas
-    severity: error
-    then:
-      field: "@key"
-      function: casing
-      functionOptions:
-        type: camel
-
+  # There is deliberately NO casing rule over `components.schemas`. An entity schema's key carries the
+  # entity's own identifier (`work_ordersPage`), which is neither camel nor snake, and a casing rule can only
+  # judge the whole key — so the claim that matters ("every schema key is an entity's schema or one of the
+  # two framework ones") needs the declared entity list and lives in
+  # test/_shared/api/OpenApiDocumentFacts.cs, where it pins the key set from outside the document. The two
+  # rules below stay here because those component maps are minted entirely by Alvo.
   alvo-parameter-key-casing:
     description: "framework-minted component parameter keys are camelCase"
     given: $.components.parameters
