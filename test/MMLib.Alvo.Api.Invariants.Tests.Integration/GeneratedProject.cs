@@ -14,6 +14,12 @@ namespace MMLib.Alvo.Api.Tests.Invariants;
 /// <param name="DeniedEntities">The entities that declare no rules at all, and so are refused to everyone.</param>
 /// <param name="Fields">Each entity's declared fields, so a payload can be built from what it actually has.</param>
 /// <param name="Tenant">The tenant every request is made in, or <see langword="null"/> where tenancy is off.</param>
+/// <param name="ScopedEntities">
+/// The entities whose rows carry a tenant. A create on one of these has to <em>echo</em> the caller's
+/// <c>tenant_id</c> in the body — the server verifies it rather than filling it in, which is what the create
+/// schema publishes and what <c>DataApiAuthTests</c> already relies on — while a replace refuses the member
+/// outright. Nothing else in this suite needs to know, and both halves of that asymmetry are load-bearing.
+/// </param>
 internal sealed record GeneratedProject(
     int Seed,
     string Name,
@@ -22,7 +28,8 @@ internal sealed record GeneratedProject(
     IReadOnlyList<string> PermissiveEntities,
     IReadOnlyList<string> DeniedEntities,
     IReadOnlyDictionary<string, JsonObject> Fields,
-    Guid? Tenant)
+    Guid? Tenant,
+    IReadOnlySet<string> ScopedEntities)
 {
     /// <summary>
     /// The sixteen committed seeds — the corpus every invariant runs over.
@@ -61,6 +68,7 @@ internal sealed record GeneratedProject(
         var fields = new Dictionary<string, JsonObject>(StringComparer.Ordinal);
         var permissive = new List<string>();
         var denied = new List<string>();
+        var scoped = new HashSet<string>(StringComparer.Ordinal);
 
         for (var index = 0; index < names.Length; index++)
         {
@@ -69,9 +77,14 @@ internal sealed record GeneratedProject(
             var admits = index switch { 0 => true, 1 => false, _ => Draw(Gen.Bool, pcg) };
             var declared = DeclaredFields(names, index, pcg);
 
-            entities[names[index]] = Entity(declared, admits, tenancy, pcg);
+            var entity = Entity(declared, admits, tenancy, pcg);
+            entities[names[index]] = entity;
             fields[names[index]] = declared;
             (admits ? permissive : denied).Add(names[index]);
+            if (entity["tenancy"]?.GetValue<string>() == "scoped")
+            {
+                scoped.Add(names[index]);
+            }
         }
 
         var tenant = tenancy ? Guid.Parse($"00000000-0000-0000-0000-{seed:D12}") : (Guid?)null;
@@ -84,7 +97,8 @@ internal sealed record GeneratedProject(
             permissive,
             denied,
             fields,
-            tenant);
+            tenant,
+            scoped);
     }
 
     /// <summary>Writes the descriptor to a temp file and starts a world over it.</summary>
