@@ -150,10 +150,48 @@ internal sealed record GeneratedProject(
         IReadOnlyList<TestApiKey> keys, AlvoApiWorldSetup? setup = null)
     {
         var directory = Directory.CreateTempSubdirectory("alvo-invariants-");
+        _written.Add(directory.FullName);
         var path = Path.Combine(directory.FullName, $"{Name}.alvo.json");
         await File.WriteAllTextAsync(path, Json);
 
         return await AlvoApiWorld.FromDescriptorPathAsync(path, keys, setup);
+    }
+
+    /// <summary>Every descriptor directory this process wrote, removed when it exits.</summary>
+    /// <remarks>
+    /// <b>At process exit rather than after the host starts.</b> The descriptor's source is a
+    /// <c>FileDescriptorSource</c> that lives as long as the host does, so a runtime schema refresh would
+    /// re-read the file — deleting it once boot finished would work today and break the moment this suite
+    /// exercised a reload. Nothing here can hook the world's own disposal without changing the shared
+    /// world's contract for one caller, so the directories are tracked and dropped together at the end,
+    /// which is the same scope the run itself has.
+    /// </remarks>
+    private static readonly System.Collections.Concurrent.ConcurrentBag<string> _written = Cleaned();
+
+    /// <summary>Registers the exit hook once, and hands back the bag it drains.</summary>
+    private static System.Collections.Concurrent.ConcurrentBag<string> Cleaned()
+    {
+        var written = new System.Collections.Concurrent.ConcurrentBag<string>();
+        AppDomain.CurrentDomain.ProcessExit += (_, _) =>
+        {
+            foreach (var directory in written)
+            {
+                try
+                {
+                    Directory.Delete(directory, recursive: true);
+                }
+                catch (IOException)
+                {
+                    // A leftover temp directory is litter, never a failure: the run has already
+                    // reported its verdict by the time this hook runs, and the OS clears the directory.
+                }
+                catch (UnauthorizedAccessException)
+                {
+                }
+            }
+        };
+
+        return written;
     }
 
     /// <summary>A key that carries every scope, and this project's tenant where it has one.</summary>

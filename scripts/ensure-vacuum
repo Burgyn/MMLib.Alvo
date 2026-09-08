@@ -76,12 +76,15 @@ case "${1:-}" in
 esac
 
 asset="$(asset_name)"
+stage="$(mktemp -d)"
+trap 'rm -rf "$stage"' EXIT
 
-# The expected digest. From the table above for the real origin; from the release's own manifest ONLY
-# when ALVO_VACUUM_BASE_URL points somewhere else, which is scripts/test-ensure-vacuum serving a fake
-# release over file:// — a committed digest cannot describe an asset the suite builds at run time. That
-# fallback is loud, and it is the weaker of the two paths: anyone who can set this variable where ring2
-# runs can already edit the workflow.
+# The expected asset digest, established ONCE and then used by both the cache check and the download.
+# From the reviewed table for the real origin — no network, and the authority is a value a human read.
+# From the served manifest only when ALVO_VACUUM_BASE_URL points elsewhere, which is
+# scripts/test-ensure-vacuum serving a fake release over file://: a committed digest cannot describe an
+# asset the suite builds at run time. That fallback is loud, and it is the weaker of the two paths —
+# anyone who can set the variable where ring2 runs can already edit the workflow.
 if [ "$BASE_URL" = "$DEFAULT_BASE_URL" ]; then
   expected="$(digest_for "$asset")" || {
     echo "ensure-vacuum: no reviewed digest for '$asset' — add one above before using this platform" >&2
@@ -90,36 +93,40 @@ if [ "$BASE_URL" = "$DEFAULT_BASE_URL" ]; then
 else
   echo "ensure-vacuum: WARNING ALVO_VACUUM_BASE_URL is set, so the digest comes from the served" >&2
   echo "ensure-vacuum:         checksums.txt rather than from a reviewed value. Test use only." >&2
-  expected=""
-fi
-
-# Already resolved: verified by DIGEST rather than by asking the file what version it is. Executing a
-# candidate to decide whether to trust it is backwards — a wrapper that printed the right version and
-# forwarded to the real binary would be trusted forever, and artifacts/ is gitignored so nothing would
-# show it.
-resolved="$HOME_DIR/$(binary_name)"
-resolved_digest="$HOME_DIR/$(binary_name).sha256"
-if [ -x "$resolved" ] && [ -f "$resolved_digest" ] \
-   && [ "$(cat "$resolved_digest")" = "$(sha256_of "$resolved")" ]; then
-  echo "$resolved"
-  exit 0
-fi
-
-stage="$(mktemp -d)"
-trap 'rm -rf "$stage"' EXIT
-echo "ensure-vacuum: fetching $asset" >&2
-curl -sSLf -o "$stage/$asset" "$BASE_URL/v$VERSION/$asset"
-
-if [ -z "$expected" ]; then
   curl -sSLf -o "$stage/checksums.txt" "$BASE_URL/v$VERSION/checksums.txt"
-  # The manifest is the authority only on this path, and an asset it does not list is refused rather
-  # than trusted: a release whose naming changed must fail loudly, never install something unverified.
+  # An asset the manifest does not list is refused rather than trusted: a release whose naming changed
+  # must fail loudly, never install something unverified.
   expected="$(awk -v a="$asset" '$2 == a || $2 == "*"a {print $1; exit}' "$stage/checksums.txt")"
   if [ -z "$expected" ]; then
     echo "ensure-vacuum: $asset is not listed in checksums.txt — refusing an unverified binary" >&2
     exit 1
   fi
 fi
+
+# Already resolved: verified by DIGEST rather than by asking the file what version it is. Executing a
+# candidate to decide whether to trust it is backwards — a wrapper that printed the right version and
+# forwarded to the real binary would be trusted forever, and artifacts/ is gitignored so nothing would
+# show it.
+#
+# The sidecar records TWO digests, and each closes a different hole. The binary's own digest binds the
+# cache to these bytes, so a substituted file is re-fetched. The ASSET digest binds it to the
+# expectation above: without that, an older binary and its own older sidecar are perfectly
+# self-consistent, so a VERSION or digest bump would silently keep linting with the previous release's
+# rule semantics while the pin declared the new ones — a gate whose authority differs from what it says
+# it is, which is the exact defect this suite exists to refuse.
+resolved="$HOME_DIR/$(binary_name)"
+resolved_digest="$HOME_DIR/$(binary_name).sha256"
+if [ -x "$resolved" ] && [ -f "$resolved_digest" ]; then
+  cached_asset="$(awk '{print $1}' "$resolved_digest")"
+  cached_binary="$(awk '{print $2}' "$resolved_digest")"
+  if [ "$cached_asset" = "$expected" ] && [ "$cached_binary" = "$(sha256_of "$resolved")" ]; then
+    echo "$resolved"
+    exit 0
+  fi
+fi
+
+echo "ensure-vacuum: fetching $asset" >&2
+curl -sSLf -o "$stage/$asset" "$BASE_URL/v$VERSION/$asset"
 
 actual="$(sha256_of "$stage/$asset")"
 if [ "$expected" != "$actual" ]; then
@@ -136,5 +143,5 @@ tar xzf "$stage/$asset" -C "$stage" "$(binary_name)"
 mkdir -p "$HOME_DIR"
 mv "$stage/$(binary_name)" "$resolved"
 chmod +x "$resolved"
-sha256_of "$resolved" > "$resolved_digest"
+printf '%s %s\n' "$actual" "$(sha256_of "$resolved")" > "$resolved_digest"
 echo "$resolved"

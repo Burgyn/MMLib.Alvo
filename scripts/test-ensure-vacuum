@@ -105,7 +105,10 @@ fi
 #    substituted binary is re-fetched rather than trusted on its own self-report
 work5="$(mktemp -d)"; fake_release "$work5/release"
 attempt "$work5" >/dev/null 2>&1
-rm -rf "$work5/release"
+# Only the ASSET goes, not the manifest: on this path ensure-vacuum has to read checksums.txt to know
+# what to expect at all (the reviewed table cannot describe an asset this suite builds at run time), so
+# deleting the whole release would prove the manifest is fetched rather than that the asset is not.
+rm -f "$work5/release/v$VERSION/$ASSET"
 if attempt "$work5" >/dev/null 2>&1; then
   ok "a resolved binary is reused without downloading"
 else
@@ -122,6 +125,22 @@ else
   bad "a substituted binary that reports the pinned version was trusted; it said: $out"
 fi
 
-rm -rf "$work" "$work2" "$work3" "$work4" "$work5"
+# 7. a cache left over from a DIFFERENT pin is re-fetched, not reused. This is the hole the sidecar's
+#    second field closes: an old binary and its own old sidecar agree with each other perfectly, so
+#    without binding the cache to the reviewed ASSET digest a version bump would keep linting with the
+#    previous release's rules while the pin claimed the new ones.
+work6="$(mktemp -d)"; fake_release "$work6/release"
+attempt "$work6" >/dev/null 2>&1
+binary_digest="$(sha256_of "$work6/home/$BINARY")"
+printf '%s %s\n' "0000000000000000000000000000000000000000000000000000000000000000" "$binary_digest" \
+  > "$work6/home/$BINARY.sha256"
+out="$(attempt "$work6" 2>&1 || true)"
+if grep -q 'fetching' <<< "$out"; then
+  ok "a cache from a different pin is re-fetched, not reused"
+else
+  bad "a cache recorded against another asset digest was reused; it said: $out"
+fi
+
+rm -rf "$work" "$work2" "$work3" "$work4" "$work5" "$work6"
 echo "[test-ensure-vacuum] $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
