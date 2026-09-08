@@ -1,0 +1,64 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    #26's API invariant suite: the claim that Alvo's rules hold ACROSS descriptors rather than for the one
+    demo they were written against — "works for the demo, breaks on another combination of fields" being the
+    typical hole in a metadata-driven framework. It boots sixteen generated descriptors plus the four in
+    examples/, and lints each of their documents with the pinned Vacuum binary.
+
+    ".Tests.Integration" because that suffix is this repository's ONLY tier discriminator:
+    scripts/test-ring0 runs `*.Tests.dll` and excludes this by naming, which is what keeps ring0 seconds
+    long. ring2 runs it, affected-scoped, and CI runs ring2 on both OSes.
+
+    NOT folded into MMLib.Alvo.Api.Tests.Integration, which would have been the smaller change: that project
+    is the PostgreSQL leg and skips itself where Docker cannot run a Linux image — exactly the invisibility
+    this suite must not inherit, because CI sets TESTINGPLATFORM_EXITCODE_IGNORE=8 on Windows and an assembly
+    that ran zero tests would report success there. This one needs no container at all.
+
+    It opts out of the shared architecture + public-API approval gate for the same two reasons
+    MMLib.Alvo.Api.Tests does: there is no sibling "MMLib.Alvo.Api" assembly for TestTarget.Resolve() to
+    load, and MMLib.Alvo.Tests already owns the core's public-API baseline.
+  -->
+  <PropertyGroup>
+    <AlvoSharedArchTests>false</AlvoSharedArchTests>
+    <!-- Same reason as MMLib.Alvo.Api.Tests: it compiles the same test/_shared/api/AlvoApiWorld.cs, whose
+         own AddOpenApi call needs the generated interceptor namespace enabled in this compilation too. -->
+    <InterceptorsNamespaces>$(InterceptorsNamespaces);Microsoft.AspNetCore.OpenApi.Generated</InterceptorsNamespaces>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The API endpoints are hosted in a real WebApplication here, exactly as in MMLib.Alvo.Api.Tests. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/MMLib.Alvo/MMLib.Alvo.csproj" />
+    <!-- SQLite is the engine every generated descriptor is applied to: the axis under test here is
+         DESCRIPTOR variation, and engine variation for the demo descriptor is already proven on both engines
+         by MMLib.Alvo.Api.Tests.Integration running the same world. -->
+    <ProjectReference Include="../../src/MMLib.Alvo.Data.Sqlite/MMLib.Alvo.Data.Sqlite.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" />
+    <!-- The descriptor generator. CsCheck is used as a deterministic case generator rather than as a
+         shrinking property runner — see GeneratedProject's own remarks for why. -->
+    <PackageReference Include="CsCheck" />
+  </ItemGroup>
+
+  <!-- The statement recorder, linked exactly as every other project that links the API world does:
+       "default-deny refused before the port composed a statement" is a claim about the SQL that ran, and a
+       second copy of the recorder is how two suites come to disagree about what they are watching. -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/SqlCapture.cs" Link="_shared/SqlCapture.cs" />
+  </ItemGroup>
+
+  <!-- The API test world, its response readers, its engine seam, and OpenApiDocumentFacts — the same sources
+       MMLib.Alvo.Api.Tests compiles. That is the whole mechanism by which "the fixture and sixteen generated
+       documents hold the same contract" is a statement about one implementation rather than about two that
+       have drifted apart. -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/api/*.cs" Link="_shared/%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>
