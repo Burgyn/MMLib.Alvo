@@ -742,6 +742,26 @@ public sealed class OpenApiDocumentTests
         await Verify(await world.OpenApiTextAsync());
     }
 
+    /// <summary>
+    /// The document satisfies the <em>generic</em> shape claims — the ones every Alvo document must satisfy,
+    /// whatever its descriptor said.
+    /// </summary>
+    /// <remarks>
+    /// The claims live in <see cref="OpenApiDocumentFacts"/> because
+    /// <c>MMLib.Alvo.Api.Invariants.Tests.Integration</c> applies the same ones to the four
+    /// <c>examples/</c> descriptors and to sixteen generated ones (#26) — the point of that issue being
+    /// that the rules hold <em>across</em> descriptors and not only for the one they were written against.
+    /// Running them here as well is what keeps the fixture and the generated documents judged by a single
+    /// notion of "well shaped"; the rest of this file stays what it is, the fixture's own detailed pins.
+    /// </remarks>
+    [Fact]
+    public async Task The_document_satisfies_the_generic_shape_facts()
+    {
+        await using var world = await StoreAsync();
+
+        OpenApiDocumentFacts.AssertShape(await world.OpenApiDocumentAsync(), _entities);
+    }
+
     /// <summary>The fixture: one audited entity and one that is not, and the document served over HTTP.</summary>
     private static Task<AlvoApiWorld> StoreAsync() =>
         AlvoApiWorld.FromDescriptorAsync(
