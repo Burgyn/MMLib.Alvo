@@ -3,8 +3,8 @@
 #
 # The cheap half of #26's static gate: no build, no .NET, no running host, so it fires the moment
 # someone edits the snapshot and it costs a second. The other caller of the same ruleset is
-# MMLib.Alvo.Api.Invariants.Tests.Integration, which lints the four examples/ descriptors and sixteen
-# generated ones over a running host. One ruleset file, two callers — never two authorities.
+# MMLib.Alvo.Api.Invariants.Tests.Integration, which lints the three appliable examples/ descriptors
+# and sixteen generated ones over a running host. One ruleset file, two callers — never two authorities.
 #
 # --fail-severity warn rather than the default `error`: after the mutes the ruleset declares, the
 # document is clean at EVERY severity, so a new warning is a regression and not noise to accumulate.

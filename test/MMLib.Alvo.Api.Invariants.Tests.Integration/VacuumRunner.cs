@@ -87,9 +87,17 @@ internal static class VacuumRunner
             RedirectStandardError = true,
         }) ?? throw new InvalidOperationException($"vacuum did not start for '{name}'");
 
-        var output = process.StandardOutput.ReadToEnd();
-        var error = process.StandardError.ReadToEnd();
+        // Both streams at once, deliberately. Reading stdout to the end and *then* stderr is the classic
+        // Process deadlock: enough output on the stream nobody is reading fills its pipe buffer, the child
+        // blocks writing and the parent blocks reading. The path where that matters is exactly the one this
+        // method exists to report — a vacuum crash, which is chatty on stderr — and a hung run costs the
+        // whole CI job rather than one red test.
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stderr = process.StandardError.ReadToEndAsync();
+        Task.WaitAll(stdout, stderr);
         process.WaitForExit();
+        var output = stdout.Result;
+        var error = stderr.Result;
 
         if (process.ExitCode is not (0 or 1))
         {
@@ -167,7 +175,7 @@ internal static class VacuumRunner
     /// <summary>The rule ids the ruleset declares as Alvo's own.</summary>
     /// <remarks>
     /// Read out of the YAML with a line match rather than with a YAML parser: the ids are the only lines
-    /// shaped <c>  alvo-…:</c> in the file, and taking a dependency to read seven lines would be the more
+    /// shaped <c>  alvo-…:</c> in the file, and taking a dependency to read six lines would be the more
     /// surprising choice. What matters is that the set comes from the ruleset and not from a list restated in
     /// a test — a rule added there must not be able to arrive with no mutation proving it fires.
     /// </remarks>

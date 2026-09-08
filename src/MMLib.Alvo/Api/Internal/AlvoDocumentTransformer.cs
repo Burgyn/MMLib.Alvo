@@ -300,9 +300,12 @@ internal sealed class AlvoDocumentTransformer(
 
         foreach (var server in document.Servers)
         {
-            if (server.Url is { Length: > 1 } url && url.EndsWith('/'))
+            // One slash, not every trailing slash — `TrimEnd('/')` would turn a hypothetical "//" into the
+            // empty string, which is a worse document than the one it fixed. The remark above says "a bare
+            // trailing slash"; this is that, exactly.
+            if (server.Url is { Length: > 1 } url && url[^1] == '/')
             {
-                server.Url = url.TrimEnd('/');
+                server.Url = url[..^1];
             }
         }
     }

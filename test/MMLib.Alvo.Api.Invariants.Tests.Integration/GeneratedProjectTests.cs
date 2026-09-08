@@ -51,8 +51,8 @@ public class GeneratedProjectTests
             GeneratedProject.Generate(seed).Json, $"seed {seed} must be reproducible");
 
     /// <summary>
-    /// The corpus covers every field type the frozen schema declares, both tenancy settings, and entities
-    /// with and without rules.
+    /// The corpus covers every field type the frozen schema declares, both tenancy settings, a nullable
+    /// field, and all three rule roles.
     /// </summary>
     /// <remarks>
     /// <b>The expected set is read out of <c>schema/project.schema.json</c></b>, not restated here, so
@@ -61,7 +61,7 @@ public class GeneratedProjectTests
     /// draws it.
     /// </remarks>
     [Fact]
-    public void The_corpus_covers_every_field_type_and_both_tenancy_settings()
+    public void The_corpus_covers_every_field_type_both_tenancy_settings_and_all_three_rule_roles()
     {
         var projects = GeneratedProject.Seeds.Select(GeneratedProject.Generate).ToList();
 
@@ -74,8 +74,17 @@ public class GeneratedProjectTests
         projects.ShouldContain(project => project.Tenant != null, "no generated project enables tenancy");
         projects.ShouldContain(project => project.Tenant == null, "every generated project enables tenancy");
         projects.ShouldAllBe(
-            project => project.PermissiveEntities.Count > 0 && project.DeniedEntities.Count > 0,
-            "every case must reach both the CRUD invariants and the default-deny one");
+            project => project.PermissiveEntities.Count > 0
+                && project.DeniedEntities.Count > 0
+                && project.PartialEntities.Count > 0,
+            "every case must reach all three rule roles: CRUD, default-deny and per-operation default-deny");
+
+        // `nullable` is the facet this PR's own document fix is about, so a corpus that never drew one
+        // could not have hardened it — asserted rather than assumed.
+        projects
+            .SelectMany(project => project.Fields.Values)
+            .SelectMany(fields => fields.Select(field => field.Value!.AsObject()))
+            .ShouldContain(field => field.ContainsKey("nullable"), "no generated field is nullable");
     }
 
     /// <summary>No generated field name shadows a reserved query parameter or a managed column.</summary>

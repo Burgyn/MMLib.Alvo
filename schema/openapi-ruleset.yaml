@@ -1,8 +1,9 @@
 # Alvo's OpenAPI contract ruleset — the one authority on the generated document's static shape.
 #
 # Two callers, never two authorities: scripts/lint-api (the committed document snapshot, no build) and
-# MMLib.Alvo.Api.Invariants.Tests.Integration (the four examples/ descriptors and sixteen generated
-# ones, over a running host). Spec §308/§415 ask for exactly this — a Spectral-compatible ruleset in
+# MMLib.Alvo.Api.Invariants.Tests.Integration (the three appliable examples/ descriptors and sixteen
+# generated ones, over a running host — complex-crm is the fourth and cannot be applied at all, #208).
+# Spec §308/§415 ask for exactly this — a Spectral-compatible ruleset in
 # the repo, a Go binary, no Node.
 #
 # It lives in schema/ beside project.schema.json because both are contracts this repo publishes about

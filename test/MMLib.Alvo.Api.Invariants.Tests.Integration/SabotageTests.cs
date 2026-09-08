@@ -35,6 +35,15 @@ public class SabotageTests
         failure.ShouldNotBeNull(
             "an engine that never denies must make the default-deny invariant fail; it passed, so that "
             + "invariant would not notice the framework's most important guarantee breaking");
+
+        // The per-operation half is a different claim over a different entity, so it gets its own proof:
+        // an engine that admits everything must break it too.
+        var perOperation = await Record.ExceptionAsync(
+            () => BehaviourInvariants.PerOperationDefaultDenyAsync(world, project));
+
+        perOperation.ShouldNotBeNull(
+            "an engine that never denies must also break per-operation default-deny, which is the shape a "
+            + "real descriptor has");
     }
 
     /// <summary>The idempotency invariant goes red when the token stops reaching the store.</summary>
@@ -67,6 +76,7 @@ public class SabotageTests
         await using var world = await project.StartAsync([project.Admin()]);
 
         await BehaviourInvariants.DefaultDenyAsync(world, project);
+        await BehaviourInvariants.PerOperationDefaultDenyAsync(world, project);
         await BehaviourInvariants.IdempotencyKeyWritesOneRowAsync(world, project);
     }
 }

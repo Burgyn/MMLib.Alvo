@@ -58,8 +58,8 @@ fi
 
 # The static half of #26's gate: the committed OpenAPI document snapshot against
 # schema/openapi-ruleset.yaml. It needs no build and no host, so it runs last and costs a
-# second — the invariant project above already linted the four examples/ descriptors and
-# sixteen generated ones through the same ruleset file.
+# second — the invariant project above already linted the three appliable examples/ descriptors
+# and sixteen generated ones through the same ruleset file.
 "$DIR/lint-api"
 
 echo "[ring2] OK"

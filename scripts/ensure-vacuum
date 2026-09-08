@@ -10,23 +10,39 @@
 # daemon runs Windows containers and cannot run a Linux image. A vacuum that existed only in a Linux
 # container would make the invariant suite self-skip there — and CI sets
 # TESTINGPLATFORM_EXITCODE_IGNORE=8 on Windows, so an assembly that ran zero tests would report
-# success. A pinned, checksum-verified release asset exists for every platform in the matrix
-# (verified against the release), so this is the only shape that keeps the gate honest on both.
+# success. A pinned, checksum-verified release asset exists for every platform in the matrix, so this
+# is the only shape that keeps the gate honest on both.
 #
-# WHY THE VERSION IS PINNED. A linter's ruleset semantics are part of the gate: a minor release that
-# adds a rule to `recommended` would turn a green PR red for a reason nobody in that PR changed, and
-# one that drops a rule would turn a red PR green. Bump it deliberately and re-run scripts/test-ring2.
+# WHY THE DIGESTS ARE COMMITTED HERE rather than taken from the release's own checksums.txt. A manifest
+# fetched from the same origin as the asset is trust-on-first-use with no anchor: GitHub allows an asset
+# to be deleted and re-uploaded under an existing tag, so a compromised origin serves a malicious binary
+# AND a matching manifest and the verification passes green. The digests below are the artifacts a human
+# reviewed, so a version bump is a reviewable diff — the hash changes in the PR — and a redirected
+# origin cannot satisfy it at all. Bump VERSION and all five digests together, then re-run
+# scripts/test-ring2.
 #
-# Two environment overrides, both for scripts/test-ensure-vacuum's benefit — it builds a fake release
-# in a temp directory and serves it over file://, so the suite needs no network:
-#   ALVO_VACUUM_BASE_URL   where releases are fetched from
-#   ALVO_VACUUM_HOME       where the resolved binary is kept
+# WHY THE VERSION IS PINNED AT ALL. A linter's ruleset semantics are part of the gate: a minor release
+# adding a rule to `recommended` would turn a green PR red for a reason nobody in that PR changed, and
+# one dropping a rule would turn a red PR green.
 set -euo pipefail
 VERSION="0.30.3"
 DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$DIR/.." && pwd)"
-BASE_URL="${ALVO_VACUUM_BASE_URL:-https://github.com/daveshanley/vacuum/releases/download}"
+DEFAULT_BASE_URL="https://github.com/daveshanley/vacuum/releases/download"
+BASE_URL="${ALVO_VACUUM_BASE_URL:-$DEFAULT_BASE_URL}"
 HOME_DIR="${ALVO_VACUUM_HOME:-$ROOT/artifacts/tools/vacuum}"
+
+# The reviewed artifacts, one per platform the CI matrix and the maintainers' machines use.
+digest_for() {
+  case "$1" in
+    vacuum_${VERSION}_darwin_arm64.tar.gz)  echo "a77337d8fa5e8e430a0b766f410228f46e6f050899e43be0c7b228105e05e9b4" ;;
+    vacuum_${VERSION}_darwin_x86_64.tar.gz) echo "af1af99c2a13cb4db2640068932d8f48993ae1038c096212f29a301fdf587175" ;;
+    vacuum_${VERSION}_linux_arm64.tar.gz)   echo "04b604df0b1b570d5abd58b577c816122da162eb8ba12a7f70c3060aec12b3a9" ;;
+    vacuum_${VERSION}_linux_x86_64.tar.gz)  echo "973b8ed30cd36533da4cdb76729e833324a3043bad48c74f61b6a1cc3df40b78" ;;
+    vacuum_${VERSION}_windows_x86_64.tar.gz) echo "65ed783fe58a628d954b7d5f8fa3b95381268e32c0210eba26acebafc7d014f1" ;;
+    *) return 1 ;;
+  esac
+}
 
 asset_name() {
   local os arch
@@ -56,44 +72,55 @@ sha256_of() {
 case "${1:-}" in
   --print-asset)   asset_name; exit 0 ;;
   --print-version) echo "$VERSION"; exit 0 ;;
+  --print-digest)  digest_for "$(asset_name)"; exit 0 ;;
 esac
 
-# Already resolved at the pinned version — the common path, and the reason ring2 can call this before
-# every run without paying for it twice.
+asset="$(asset_name)"
+
+# The expected digest. From the table above for the real origin; from the release's own manifest ONLY
+# when ALVO_VACUUM_BASE_URL points somewhere else, which is scripts/test-ensure-vacuum serving a fake
+# release over file:// — a committed digest cannot describe an asset the suite builds at run time. That
+# fallback is loud, and it is the weaker of the two paths: anyone who can set this variable where ring2
+# runs can already edit the workflow.
+if [ "$BASE_URL" = "$DEFAULT_BASE_URL" ]; then
+  expected="$(digest_for "$asset")" || {
+    echo "ensure-vacuum: no reviewed digest for '$asset' — add one above before using this platform" >&2
+    exit 1
+  }
+else
+  echo "ensure-vacuum: WARNING ALVO_VACUUM_BASE_URL is set, so the digest comes from the served" >&2
+  echo "ensure-vacuum:         checksums.txt rather than from a reviewed value. Test use only." >&2
+  expected=""
+fi
+
+# Already resolved: verified by DIGEST rather than by asking the file what version it is. Executing a
+# candidate to decide whether to trust it is backwards — a wrapper that printed the right version and
+# forwarded to the real binary would be trusted forever, and artifacts/ is gitignored so nothing would
+# show it.
 resolved="$HOME_DIR/$(binary_name)"
-if [ -x "$resolved" ] && [ "$("$resolved" version 2>/dev/null | tr -d '\r' || true)" = "$VERSION" ]; then
+resolved_digest="$HOME_DIR/$(binary_name).sha256"
+if [ -x "$resolved" ] && [ -f "$resolved_digest" ] \
+   && [ "$(cat "$resolved_digest")" = "$(sha256_of "$resolved")" ]; then
   echo "$resolved"
   exit 0
 fi
 
-# A local vacuum at the pinned version is used as-is — the same courtesy scripts/test-load extends to
-# a local k6. A different version warns rather than being silently trusted: the ruleset is written
-# against this one, and two of its rules are only non-vacuous on a version whose `casing` function
-# still honours `field: "@key"`.
-if command -v vacuum >/dev/null 2>&1; then
-  local_version="$(vacuum version 2>/dev/null | tr -d '\r' || true)"
-  if [ "$local_version" = "$VERSION" ]; then
-    command -v vacuum
-    exit 0
-  fi
-  echo "ensure-vacuum: WARNING local vacuum is '$local_version', not $VERSION — fetching the pinned one" >&2
-fi
-
-asset="$(asset_name)"
 stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
 echo "ensure-vacuum: fetching $asset" >&2
 curl -sSLf -o "$stage/$asset" "$BASE_URL/v$VERSION/$asset"
-curl -sSLf -o "$stage/checksums.txt" "$BASE_URL/v$VERSION/checksums.txt"
 
-# checksums.txt is the authority, not the asset's presence: an asset the manifest does not list is
-# refused rather than trusted, so a release whose naming changed fails loudly instead of quietly
-# installing something unverified.
-expected="$(awk -v a="$asset" '$2 == a || $2 == "*"a {print $1}' "$stage/checksums.txt" | head -1)"
 if [ -z "$expected" ]; then
-  echo "ensure-vacuum: $asset is not listed in checksums.txt — refusing an unverified binary" >&2
-  exit 1
+  curl -sSLf -o "$stage/checksums.txt" "$BASE_URL/v$VERSION/checksums.txt"
+  # The manifest is the authority only on this path, and an asset it does not list is refused rather
+  # than trusted: a release whose naming changed must fail loudly, never install something unverified.
+  expected="$(awk -v a="$asset" '$2 == a || $2 == "*"a {print $1; exit}' "$stage/checksums.txt")"
+  if [ -z "$expected" ]; then
+    echo "ensure-vacuum: $asset is not listed in checksums.txt — refusing an unverified binary" >&2
+    exit 1
+  fi
 fi
+
 actual="$(sha256_of "$stage/$asset")"
 if [ "$expected" != "$actual" ]; then
   echo "ensure-vacuum: checksum mismatch for $asset" >&2
@@ -102,8 +129,12 @@ if [ "$expected" != "$actual" ]; then
   exit 1
 fi
 
-tar xzf "$stage/$asset" -C "$stage"
+# Only the one member, and only after the digest matched: an archive is a hostile origin's chance to
+# write outside the staging directory through a `..` member or a symlink, and the two tars this repo
+# runs on differ in what they refuse.
+tar xzf "$stage/$asset" -C "$stage" "$(binary_name)"
 mkdir -p "$HOME_DIR"
 mv "$stage/$(binary_name)" "$resolved"
 chmod +x "$resolved"
+sha256_of "$resolved" > "$resolved_digest"
 echo "$resolved"

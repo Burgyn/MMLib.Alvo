@@ -28,6 +28,8 @@ public class BehaviourInvariantTests
         await using var world = await project.StartAsync([project.Admin()]);
 
         await BehaviourInvariants.DefaultDenyAsync(world, project);
+        await BehaviourInvariants.PerOperationDefaultDenyAsync(world, project);
+        await BehaviourInvariants.TheStatementRecorderRecordsAsync(world, project);
         await BehaviourInvariants.CrudShapeAsync(world, project);
         await BehaviourInvariants.ReplaceIsIdempotentAsync(world, project);
         await BehaviourInvariants.IdempotencyKeyWritesOneRowAsync(world, project);

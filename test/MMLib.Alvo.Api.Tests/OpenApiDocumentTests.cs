@@ -748,7 +748,7 @@ public sealed class OpenApiDocumentTests
     /// </summary>
     /// <remarks>
     /// The claims live in <see cref="OpenApiDocumentFacts"/> because
-    /// <c>MMLib.Alvo.Api.Invariants.Tests.Integration</c> applies the same ones to the four
+    /// <c>MMLib.Alvo.Api.Invariants.Tests.Integration</c> applies the same ones to three
     /// <c>examples/</c> descriptors and to sixteen generated ones (#26) — the point of that issue being
     /// that the rules hold <em>across</em> descriptors and not only for the one they were written against.
     /// Running them here as well is what keeps the fixture and the generated documents judged by a single

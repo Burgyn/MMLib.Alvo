@@ -54,6 +54,11 @@ internal static class BehaviourInvariants
     /// </remarks>
     internal static async Task DefaultDenyAsync(AlvoApiWorld world, GeneratedProject project)
     {
+        // Or the count below is satisfied by 0 == 0 and this claim walks nothing. It is pinned in
+        // GeneratedProjectTests too; pinned here as well because this method is what the sabotage battery
+        // asserts can fail, and a vacuous version of it could not.
+        project.DeniedEntities.ShouldNotBeEmpty("every generated project must declare an unconfigured entity");
+
         var reached = 0;
         foreach (var entity in project.DeniedEntities)
         {
@@ -77,6 +82,99 @@ internal static class BehaviourInvariants
             project.DeniedEntities.Count * _routes.Length,
             "or this claim did not reach every route of every unconfigured entity");
     }
+
+    /// <summary>
+    /// An entity with rules for <em>some</em> operations is refused on exactly the others.
+    /// </summary>
+    /// <param name="world">The running API.</param>
+    /// <param name="project">The generated project.</param>
+    /// <remarks>
+    /// <para>
+    /// <b>This is the half of default-deny that "no rules at all" does not reach.</b> §0.5 is a per-operation
+    /// guarantee — a rule for <c>list</c> does not admit a <c>delete</c> — and it is the shape a real
+    /// descriptor has, where an author grants reads and forgets writes. An all-or-nothing corpus proves the
+    /// easy direction only.
+    /// </para>
+    /// <para>
+    /// Asserted over the five unambiguous single-row routes. A configured operation is asserted <b>not</b>
+    /// 403 rather than asserted successful: a create may still answer 422 for a payload this method does not
+    /// build carefully, and what is under test is reachability, not the write.
+    /// </para>
+    /// </remarks>
+    internal static async Task PerOperationDefaultDenyAsync(AlvoApiWorld world, GeneratedProject project)
+    {
+        project.PartialEntities.ShouldNotBeEmpty("every generated project must declare a partially-ruled entity");
+
+        var reached = 0;
+        foreach (var (entity, configured) in project.PartialEntities)
+        {
+            configured.Count.ShouldBeInRange(1, 4, $"'{entity}' is not partially configured at all");
+
+            foreach (var (operation, method, suffix) in _singleRowRoutes)
+            {
+                var path = $"/api/{entity}{suffix.Replace("{id}", Guid.NewGuid().ToString(), StringComparison.Ordinal)}";
+                // `forCreate` only on the POST: a create on a tenant-scoped entity has to echo `tenant_id`,
+                // and a patch that sent the same member would be refused for naming a column it may not
+                // write — a 403 that looks exactly like the per-operation refusal under test.
+                using var response = await world.SendAsync(
+                    method, path, project.Admin(), body: method == HttpMethod.Get || method == HttpMethod.Delete
+                        ? null
+                        : Body(project, entity, salt: 500, everyField: false, forCreate: method == HttpMethod.Post));
+
+                if (configured.Contains(operation))
+                {
+                    response.StatusCode.ShouldNotBe(
+                        HttpStatusCode.Forbidden,
+                        $"'{entity}' configures '{operation}', so {method} {path} must be reachable");
+                }
+                else
+                {
+                    response.StatusCode.ShouldBe(
+                        HttpStatusCode.Forbidden,
+                        $"'{entity}' configures no '{operation}' rule, so {method} {path} must be refused");
+                }
+
+                reached++;
+            }
+        }
+
+        reached.ShouldBe(
+            project.PartialEntities.Count * _singleRowRoutes.Length,
+            "or this claim did not reach every operation of every partially-configured entity");
+    }
+
+    /// <summary>
+    /// A permitted request <em>does</em> compose SQL — so the recorder the claim above reads is alive.
+    /// </summary>
+    /// <param name="world">The running API.</param>
+    /// <param name="project">The generated project.</param>
+    /// <remarks>
+    /// <see cref="DefaultDenyAsync"/>'s strongest assertion is that <c>world.Statements</c> is <em>empty</em>
+    /// after a refusal, and a recorder that had quietly stopped recording would satisfy it forever. This is
+    /// the other direction, and it is why the pair means something: the same recorder, on the same world,
+    /// reports statements for a request that was allowed through.
+    /// </remarks>
+    internal static async Task TheStatementRecorderRecordsAsync(AlvoApiWorld world, GeneratedProject project)
+    {
+        var entity = project.PermissiveEntities[0];
+        world.ClearStatements();
+
+        using var response = await world.SendAsync(HttpMethod.Get, $"/api/{entity}", project.Admin());
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        world.Statements.ShouldNotBeEmpty(
+            "a permitted read must compose SQL, or the emptiness DefaultDenyAsync asserts proves nothing");
+    }
+
+    /// <summary>The five single-row routes, each named by the rule slot that admits it.</summary>
+    private static readonly (string Operation, HttpMethod Method, string Suffix)[] _singleRowRoutes =
+    [
+        ("list", HttpMethod.Get, ""),
+        ("get", HttpMethod.Get, "/{id}"),
+        ("create", HttpMethod.Post, ""),
+        ("update", HttpMethod.Patch, "/{id}"),
+        ("delete", HttpMethod.Delete, "/{id}"),
+    ];
 
     /// <summary>Create, read, list, patch and delete answer the same shapes for every entity.</summary>
     /// <param name="world">The running API.</param>

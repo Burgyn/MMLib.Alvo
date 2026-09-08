@@ -18,8 +18,8 @@ namespace MMLib.Alvo.Api.Tests;
 /// </para>
 /// <para>
 /// <b>One implementation, every caller.</b> <c>OpenApiDocumentTests</c> runs these over the fixture
-/// document and <c>MMLib.Alvo.Api.Invariants.Tests.Integration</c> runs them over the four
-/// <c>examples/</c> descriptors and sixteen generated ones (#26). A second copy is how the fixture and the
+/// document and <c>MMLib.Alvo.Api.Invariants.Tests.Integration</c> runs them over three
+/// <c>examples/</c> descriptors and sixteen generated ones (#26) — twenty documents in all. A second copy is how the fixture and the
 /// generated documents would come to be judged by two different notions of "well shaped".
 /// </para>
 /// <para>
@@ -57,6 +57,33 @@ internal static class OpenApiDocumentFacts
     /// <summary>The two schemas that belong to the framework rather than to an entity.</summary>
     private static readonly string[] _frameworkSchemas = ["problemDetails", "problemViolation"];
 
+    /// <summary>
+    /// The per-entity schemas whose <em>properties</em> Alvo mints rather than the descriptor.
+    /// </summary>
+    /// <remarks>
+    /// A page envelope's members are <c>items</c>/<c>next</c>/<c>count</c> and a batch result's are Alvo's
+    /// own, so every one of them must declare a type. The row and write shapes are excluded because their
+    /// properties ARE the descriptor's fields, one of which may legitimately be a type-free <c>json</c>.
+    /// </remarks>
+    private static readonly string[] _mintedShapes = ["Page", "BatchResult", "BatchDelete"];
+
+    /// <summary>
+    /// Every claim <see cref="AssertShape"/> makes, by name.
+    /// </summary>
+    /// <remarks>
+    /// <b>So the mutation battery's completeness is pinned from outside, not hand-maintained.</b>
+    /// <c>OpenApiDocumentFactsMutationTests</c> asserts its cases cover exactly this list, which is the
+    /// arrangement <c>RulesetTests</c> already has for the Vacuum rules (it reads their ids out of the YAML).
+    /// A claim added below without a mutation would otherwise arrive unproven — and an unproven claim over
+    /// twenty documents is the failure mode #26 exists to close.
+    /// </remarks>
+    internal static IReadOnlyList<string> ClaimNames { get; } =
+    [
+        "numeric-segment", "path-set", "operation-count", "paging-parameters", "page-envelope",
+        "problem-document", "delete-body", "schema-keys", "response-headers", "component-content",
+        "minted-type",
+    ];
+
     /// <summary>Asserts every generic claim, throwing on the first one the document breaks.</summary>
     /// <param name="document">The served OpenAPI document.</param>
     /// <param name="entities">The entities the applied descriptor declares — the set the counts are pinned against.</param>
@@ -77,9 +104,14 @@ internal static class OpenApiDocumentFacts
         TheOperationCountIsTenPerEntity(paths, entities);
         EveryListOperationDocumentsThePagingParameters(document, paths, entities, prefix);
         EveryListResponseIsAPageEnvelope(document, paths, entities, prefix);
+        // Before the refusal claim, for the same reason NoPathSegmentIsNumeric runs first: a component
+        // response with no `content` breaks both, and the dedicated claim is the one whose message says so.
+        EveryComponentResponseCarriesContent(document);
         EveryRefusalIsAProblemDocument(document, paths);
-        OnlyTheBatchRouteCarriesADeleteBody(paths);
+        OnlyTheBatchRouteCarriesADeleteBody(paths, entities);
         TheSchemaKeysAreTheEntitySchemasAndTheFrameworksOwn(document, entities);
+        EveryResponseCarriesTheHeadersTheLintReadsThrough(document, paths);
+        EveryFrameworkMintedPropertyDeclaresAType(document, entities);
     }
 
     /// <summary>The document describes each entity's four path keys, and no path nobody generated.</summary>
@@ -195,7 +227,10 @@ internal static class OpenApiDocumentFacts
             refusals.ShouldNotBeEmpty($"{method.ToUpperInvariant()} {path} documents no refusal at all");
             foreach (var refusal in refusals)
             {
-                var content = Resolve(document, refusal.Value!.AsObject())["content"]!.AsObject();
+                var content = Resolve(document, refusal.Value!.AsObject())["content"]
+                    .ShouldNotBeNull(
+                        $"{method.ToUpperInvariant()} {path}'s {refusal.Key} declares no content at all")
+                    .AsObject();
                 content.ContainsKey("application/problem+json").ShouldBeTrue(
                     $"{method.ToUpperInvariant()} {path} answers {refusal.Key} with something other than a problem document");
                 content["application/problem+json"]!["schema"]!["$ref"]!.GetValue<string>().ShouldBe(
@@ -216,16 +251,23 @@ internal static class OpenApiDocumentFacts
     /// bounded here instead: a body on a single-row delete would fail this claim even though the linter
     /// would not notice it.
     /// </remarks>
-    private static void OnlyTheBatchRouteCarriesADeleteBody(JsonObject paths)
+    private static void OnlyTheBatchRouteCarriesADeleteBody(
+        JsonObject paths, IReadOnlyCollection<string> entities)
     {
         var withBody = Operations(paths)
             .Where(operation => operation.Method == "delete" && operation.Operation.ContainsKey("requestBody"))
             .Select(operation => operation.Path)
             .ToList();
 
+        // Both halves, negative first. `ShouldAllBe` catches a body somewhere it does not belong; it is also
+        // trivially true over an empty list, so a regression that dropped the body from EVERY delete —
+        // including the batch route, which cannot name its rows without one — would satisfy it alone. The
+        // count closes that, pinned from outside at one per entity.
         withBody.ShouldAllBe(
             path => path.EndsWith("/batch", StringComparison.Ordinal),
             $"only the batch route may carry a DELETE body (#206); these do: {string.Join(", ", withBody)}");
+        withBody.Count.ShouldBe(
+            entities.Count, "each entity's batch route carries a DELETE body, and it is how a batch delete names its rows");
     }
 
     /// <summary>
@@ -261,6 +303,83 @@ internal static class OpenApiDocumentFacts
             .Select(schema => schema.Key)
             .ToHashSet(StringComparer.Ordinal)
             .ShouldBe(expected, ignoreOrder: true, "the document must publish one schema per entity shape, and no other");
+    }
+
+    /// <summary>
+    /// Every response carries a <c>headers</c> object with <c>Cache-Control</c> in it.
+    /// </summary>
+    /// <remarks>
+    /// <b>This exists because the Vacuum rule that makes the same claim can be evaded.</b>
+    /// <c>alvo-response-no-store</c> is <c>given: $.paths[*][*].responses[*].headers</c> — the very object
+    /// that carries the claim — so deleting <c>headers</c> wholesale matches nothing and the rule reports
+    /// zero violations. A rule that tests nothing looks exactly like a rule that passes, which the ruleset's
+    /// own header warns about; the mutation battery mutates the child and could not have caught it. Asserted
+    /// here instead, where the parent's absence is the failure.
+    /// </remarks>
+    private static void EveryResponseCarriesTheHeadersTheLintReadsThrough(JsonObject document, JsonObject paths)
+    {
+        foreach (var (path, method, operation) in Operations(paths))
+        {
+            foreach (var response in operation["responses"]!.AsObject())
+            {
+                var headers = Resolve(document, response.Value!.AsObject())["headers"]
+                    .ShouldNotBeNull($"{method.ToUpperInvariant()} {path}'s {response.Key} declares no headers at all")
+                    .AsObject();
+
+                headers.ContainsKey("Cache-Control").ShouldBeTrue(
+                    $"{method.ToUpperInvariant()} {path}'s {response.Key} does not document Cache-Control");
+            }
+        }
+    }
+
+    /// <summary>Every declared component response carries a <c>content</c> object.</summary>
+    /// <remarks>
+    /// The same evasion as above, one component map over: <c>alvo-problem-media-type</c> is
+    /// <c>given: $.components.responses[*].content</c>, so a response with no <c>content</c> is invisible to
+    /// it. The media type inside is the rule's business; that there is something for it to read is this
+    /// claim's.
+    /// </remarks>
+    private static void EveryComponentResponseCarriesContent(JsonObject document)
+    {
+        var responses = document["components"]!["responses"]!.AsObject();
+
+        responses.Count.ShouldBeGreaterThan(0, "a document with no component responses proves nothing here");
+        foreach (var response in responses)
+        {
+            response.Value!.AsObject().ContainsKey("content").ShouldBeTrue(
+                $"the '{response.Key}' response declares no content, so nothing constrains its media type");
+        }
+    }
+
+    /// <summary>
+    /// Every property of a framework-minted schema declares a <c>type</c>.
+    /// </summary>
+    /// <remarks>
+    /// <b>The bound on a muted rule.</b> <c>oas-missing-type</c> is off because a <c>json</c>-typed field is
+    /// deliberately type-free — in draft 2020-12 an absent <c>type</c> means "any", which is what the
+    /// descriptor said. That reason covers a field the descriptor declared and nothing else, so the
+    /// exemption is bounded to the entity schemas here: a type-less property in a page envelope, a batch
+    /// result or a problem document is Alvo's own bug and no longer goes unreported. The two consequential
+    /// mutes each get a bound like this — <c>no-request-body</c> gets
+    /// <see cref="OnlyTheBatchRouteCarriesADeleteBody"/>, <c>camel-case-properties</c> gets
+    /// <see cref="TheSchemaKeysAreTheEntitySchemasAndTheFrameworksOwn"/>.
+    /// </remarks>
+    private static void EveryFrameworkMintedPropertyDeclaresAType(
+        JsonObject document, IReadOnlyCollection<string> entities)
+    {
+        var minted = _frameworkSchemas
+            .Concat(entities.SelectMany(entity => _mintedShapes.Select(shape => $"{entity}{shape}")))
+            .ToList();
+
+        foreach (var name in minted)
+        {
+            var properties = document["components"]!["schemas"]![name]?["properties"]?.AsObject();
+            foreach (var property in properties ?? [])
+            {
+                property.Value!.AsObject().ContainsKey("type").ShouldBeTrue(
+                    $"'{name}.{property.Key}' declares no type, and only a descriptor's json field may (#26)");
+            }
+        }
     }
 
     /// <summary>Every operation in the document, with the path and method that name it.</summary>

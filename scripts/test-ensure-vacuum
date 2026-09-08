@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 # test-ensure-vacuum — the suite for scripts/ensure-vacuum.
 #
-# Hermetic: no network. A fake release directory is built in a temp dir and served over file://,
-# which is what ALVO_VACUUM_BASE_URL exists for. The checksum check is a security control, so the
-# case that matters most is the REFUSAL — a verification that silently passes is the whole reason
-# this suite exists.
+# Hermetic: no network. A fake release is built in a temp dir and served over file://, which is what
+# ALVO_VACUUM_BASE_URL exists for. The checksum check is a security control, so the cases that matter
+# most are the REFUSALS — a verification that silently passes is the whole reason this suite exists.
+#
+# Each refusal asserts the REASON and not merely a non-zero exit. Two of these cases refuse for more
+# than one reason if you let them: appending bytes to a .tar.gz corrupts the archive as well as the
+# digest (GNU tar rejects trailing garbage outright, bsdtar does not), and an empty manifest also
+# produces a mismatch. Matching the message is what keeps each case pinned to the guard it is named
+# after, rather than passing because something, anything, went wrong.
 set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
 PASS=0; FAIL=0
@@ -21,62 +26,102 @@ ASSET="$("$DIR/ensure-vacuum" --print-asset)"
 [ -n "$VERSION" ] && [ -n "$ASSET" ] || { echo "cannot read the pin from ensure-vacuum" >&2; exit 1; }
 echo "[test-ensure-vacuum] pinned $VERSION, asset $ASSET"
 
-# Builds a release directory holding an "asset" whose only content is a stub that reports the pinned
-# version — enough for ensure-vacuum's own reuse check, and it never touches the network.
+case "$ASSET" in *windows*) BINARY="vacuum.exe" ;; *) BINARY="vacuum" ;; esac
+
+# Builds a release directory holding an "asset" whose only content is a stub reporting the pinned
+# version. $2, when given, replaces the digest the manifest claims.
 fake_release() {
-  local dir="$1" stage binary
-  case "$ASSET" in *windows*) binary="vacuum.exe" ;; *) binary="vacuum" ;; esac
+  local dir="$1" claimed="${2:-}" stage
   stage="$(mktemp -d)"
-  printf '#!/usr/bin/env bash\necho %s\n' "$VERSION" > "$stage/$binary"
-  chmod +x "$stage/$binary"
+  printf '#!/usr/bin/env bash\necho %s\n' "$VERSION" > "$stage/$BINARY"
+  chmod +x "$stage/$BINARY"
   mkdir -p "$dir/v$VERSION"
-  tar czf "$dir/v$VERSION/$ASSET" -C "$stage" "$binary"
-  ( cd "$dir/v$VERSION" && sha256_of "$ASSET" | awk -v a="$ASSET" '{print $1"  "a}' > checksums.txt )
+  tar czf "$dir/v$VERSION/$ASSET" -C "$stage" "$BINARY"
+  if [ -z "$claimed" ]; then
+    claimed="$(sha256_of "$dir/v$VERSION/$ASSET")"
+  fi
+  printf '%s  %s\n' "$claimed" "$ASSET" > "$dir/v$VERSION/checksums.txt"
   rm -rf "$stage"
 }
 
-# 1. a good release resolves to a runnable binary at the pinned version
+# Runs ensure-vacuum against a fake release and reports its combined output.
+attempt() {
+  ALVO_VACUUM_BASE_URL="file://$1/release" ALVO_VACUUM_HOME="$1/home" "$DIR/ensure-vacuum" 2>&1
+}
+
+# 1. the reviewed digests are present for every platform this repo builds on, and are 64 hex chars
+missing=0
+for platform in darwin_arm64 darwin_x86_64 linux_arm64 linux_x86_64 windows_x86_64; do
+  line="$(grep -c "vacuum_\${VERSION}_$platform.tar.gz)" "$DIR/ensure-vacuum" || true)"
+  [ "$line" -ge 1 ] || { bad "no reviewed digest for $platform"; missing=1; }
+done
+[ "$missing" -eq 0 ] && ok "every platform has a reviewed digest"
+if [ "$("$DIR/ensure-vacuum" --print-digest | tr -d '\n' | wc -c | tr -d ' ')" = "64" ]; then
+  ok "this platform's reviewed digest is a sha256"
+else
+  bad "this platform's reviewed digest is not 64 hex characters"
+fi
+
+# 2. a good release resolves to a runnable binary at the pinned version
 work="$(mktemp -d)"; fake_release "$work/release"
-if path="$(ALVO_VACUUM_BASE_URL="file://$work/release" ALVO_VACUUM_HOME="$work/home" "$DIR/ensure-vacuum" 2>/dev/null)" \
-   && [ -x "$path" ] && [ "$("$path" version)" = "$VERSION" ]; then
+if path="$(attempt "$work" | tail -1)" && [ -x "$path" ] && [ "$("$path" version)" = "$VERSION" ]; then
   ok "resolves a pinned binary"
 else
   bad "did not resolve a runnable binary (got '${path:-}')"
 fi
 
-# 2. a tampered asset is REFUSED, and nothing is left behind
-work2="$(mktemp -d)"; fake_release "$work2/release"
-printf 'tampered' >> "$work2/release/v$VERSION/$ASSET"
-if ALVO_VACUUM_BASE_URL="file://$work2/release" ALVO_VACUUM_HOME="$work2/home" "$DIR/ensure-vacuum" >/dev/null 2>&1; then
-  bad "a checksum mismatch was accepted"
+# 3. a VALID archive whose manifest claims the wrong digest is refused — the cleanest isolation of the
+#    comparison itself, because the archive is intact and only the digest disagrees
+work2="$(mktemp -d)"
+fake_release "$work2/release" "0000000000000000000000000000000000000000000000000000000000000000"
+out="$(attempt "$work2" || true)"
+if grep -q 'checksum mismatch' <<< "$out"; then
+  ok "a wrong digest in the manifest is refused, by the digest comparison"
 else
-  ok "a checksum mismatch is refused"
+  bad "a wrong digest was not refused by the comparison; it said: $out"
 fi
-if [ -e "$work2/home/vacuum" ] || [ -e "$work2/home/vacuum.exe" ]; then
-  bad "a refused download was left in place"
+if [ -e "$work2/home/$BINARY" ]; then bad "a refused download was left in place"; else ok "a refused download leaves nothing behind"; fi
+
+# 4. a tampered asset is refused too — the same guard, reached through corrupted bytes
+work3="$(mktemp -d)"; fake_release "$work3/release"
+printf 'tampered' >> "$work3/release/v$VERSION/$ASSET"
+if ! attempt "$work3" >/dev/null 2>&1; then
+  ok "a tampered asset is refused"
 else
-  ok "a refused download leaves nothing behind"
+  bad "a tampered asset was accepted"
 fi
 
-# 3. an already-resolved binary is reused, with the release directory GONE
-work3="$(mktemp -d)"; fake_release "$work3/release"
-ALVO_VACUUM_BASE_URL="file://$work3/release" ALVO_VACUUM_HOME="$work3/home" "$DIR/ensure-vacuum" >/dev/null 2>&1
-rm -rf "$work3/release"
-if ALVO_VACUUM_BASE_URL="file://$work3/release" ALVO_VACUUM_HOME="$work3/home" "$DIR/ensure-vacuum" >/dev/null 2>&1; then
+# 5. an asset the manifest does not list is refused rather than trusted
+work4="$(mktemp -d)"; fake_release "$work4/release"
+: > "$work4/release/v$VERSION/checksums.txt"
+out="$(attempt "$work4" || true)"
+if grep -q 'not listed in checksums.txt' <<< "$out"; then
+  ok "an asset missing from the manifest is refused, by the listing guard"
+else
+  bad "an unlisted asset was not refused by the listing guard; it said: $out"
+fi
+
+# 6. a resolved binary is reused without downloading — and it is the DIGEST that says so, so a
+#    substituted binary is re-fetched rather than trusted on its own self-report
+work5="$(mktemp -d)"; fake_release "$work5/release"
+attempt "$work5" >/dev/null 2>&1
+rm -rf "$work5/release"
+if attempt "$work5" >/dev/null 2>&1; then
   ok "a resolved binary is reused without downloading"
 else
   bad "re-resolution tried to download again"
 fi
-
-# 4. an unlisted asset is refused rather than trusted — checksums.txt is the authority, not the file's presence
-work4="$(mktemp -d)"; fake_release "$work4/release"
-: > "$work4/release/v$VERSION/checksums.txt"
-if ALVO_VACUUM_BASE_URL="file://$work4/release" ALVO_VACUUM_HOME="$work4/home" "$DIR/ensure-vacuum" >/dev/null 2>&1; then
-  bad "an asset missing from checksums.txt was accepted"
+# A DIFFERENT binary that reports the same version — the wrapper M2 is about. Byte-identical content
+# would legitimately match the recorded digest and prove nothing.
+printf '#!/usr/bin/env bash\n# substituted\necho %s\n' "$VERSION" > "$work5/home/$BINARY"
+chmod +x "$work5/home/$BINARY"
+out="$(attempt "$work5" 2>&1 || true)"
+if grep -q 'fetching' <<< "$out"; then
+  ok "a substituted binary is re-fetched, not trusted for reporting the right version"
 else
-  ok "an asset missing from checksums.txt is refused"
+  bad "a substituted binary that reports the pinned version was trusted; it said: $out"
 fi
 
-rm -rf "$work" "$work2" "$work3" "$work4"
+rm -rf "$work" "$work2" "$work3" "$work4" "$work5"
 echo "[test-ensure-vacuum] $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

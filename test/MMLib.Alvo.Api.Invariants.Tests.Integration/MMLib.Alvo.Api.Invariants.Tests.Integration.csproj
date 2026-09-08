@@ -3,8 +3,9 @@
   <!--
     #26's API invariant suite: the claim that Alvo's rules hold ACROSS descriptors rather than for the one
     demo they were written against — "works for the demo, breaks on another combination of fields" being the
-    typical hole in a metadata-driven framework. It boots sixteen generated descriptors plus the four in
-    examples/, and lints each of their documents with the pinned Vacuum binary.
+    typical hole in a metadata-driven framework. It boots sixteen generated descriptors plus the three
+    appliable ones in examples/ (complex-crm is the fourth and cannot be applied, #208), and lints each of
+    their documents with the pinned Vacuum binary.
 
     ".Tests.Integration" because that suffix is this repository's ONLY tier discriminator:
     scripts/test-ring0 runs `*.Tests.dll` and excludes this by naming, which is what keeps ring0 seconds

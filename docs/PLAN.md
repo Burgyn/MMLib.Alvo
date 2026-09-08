@@ -85,14 +85,14 @@ had closed the issues.*
 
 F4's point is **proof of intent plus a testing surface**, not features. Read
 that way, most of it is done and the milestone's open count is misleading:
-of the twenty issues still open, only two are what the phase is actually
-about.
+of the issues still open, only one is what the phase is actually about —
+#26 closed the other.
 
 **Done, and verifiable by running it:**
 
 | | |
 |---|---|
-| demo descriptors | four in `examples/` (`vehicle-registry`, `field-service`, `complex-crm`, `simple-tasks`) plus six in `examples/_negative/` that must be *refused*, all validated by `ExamplesTests` |
+| demo descriptors | four in `examples/` (`vehicle-registry`, `field-service`, `complex-crm`, `simple-tasks`) plus six in `examples/_negative/` that must be *refused*, all validated by `ExamplesTests` — though only three of the four can actually be *applied*, which is [#208] |
 | standalone run | `src/MMLib.Alvo.Host/Dockerfile`, two compose stacks (8080 vehicle-registry, 8081 field-service), no credential shipped in the image, `up --wait` gated on `/health/ready` |
 | playground | `playground/run` — glob-based projects, `--pg`, `--test`, `--down`; two projects with their own suites, deliberately in no ring |
 | E2E | `test/teapie-field-service/`, 12 collections, 404 assertions, a **required check on every PR** with a JUnit artifact |

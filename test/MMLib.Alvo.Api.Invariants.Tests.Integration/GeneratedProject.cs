@@ -14,6 +14,12 @@ namespace MMLib.Alvo.Api.Tests.Invariants;
 /// <param name="DeniedEntities">The entities that declare no rules at all, and so are refused to everyone.</param>
 /// <param name="Fields">Each entity's declared fields, so a payload can be built from what it actually has.</param>
 /// <param name="Tenant">The tenant every request is made in, or <see langword="null"/> where tenancy is off.</param>
+/// <param name="PartialEntities">
+/// The entities that configure rules for SOME operations and not others, with the operation names they
+/// configure — the shape a real descriptor actually has, and the one an all-or-nothing corpus never
+/// reaches. Default-deny is a per-OPERATION guarantee (spec §0.5), so "no rules at all ⇒ 403 everywhere"
+/// is the easy half of it.
+/// </param>
 /// <param name="ScopedEntities">
 /// The entities whose rows carry a tenant. A create on one of these has to <em>echo</em> the caller's
 /// <c>tenant_id</c> in the body — the server verifies it rather than filling it in, which is what the create
@@ -28,6 +34,7 @@ internal sealed record GeneratedProject(
     IReadOnlyList<string> PermissiveEntities,
     IReadOnlyList<string> DeniedEntities,
     IReadOnlyDictionary<string, JsonObject> Fields,
+    IReadOnlyDictionary<string, IReadOnlySet<string>> PartialEntities,
     Guid? Tenant,
     IReadOnlySet<string> ScopedEntities)
 {
@@ -63,24 +70,48 @@ internal sealed record GeneratedProject(
         var pcg = new PCG(1, (uint)seed);
 
         var tenancy = Draw(Gen.Bool, pcg);
-        var names = Draw(Gen.OneOfConst(_entityNames).ArrayUnique[Draw(Gen.Int[2, 3], pcg)], pcg);
+        // Three at minimum, because each of the three rule roles below has to be present for every
+        // invariant to be reachable in every case: permissive (CRUD), unconfigured (default-deny) and
+        // partial (per-operation default-deny). The fourth varies the count, which is what the path-set and
+        // operation-count claims are measured against.
+        var names = Draw(Gen.OneOfConst(_entityNames).ArrayUnique[Draw(Gen.Int[3, 4], pcg)], pcg);
         var entities = new JsonObject();
         var fields = new Dictionary<string, JsonObject>(StringComparer.Ordinal);
         var permissive = new List<string>();
         var denied = new List<string>();
+        var partial = new Dictionary<string, IReadOnlySet<string>>(StringComparer.Ordinal);
         var scoped = new HashSet<string>(StringComparer.Ordinal);
 
         for (var index = 0; index < names.Length; index++)
         {
-            // The first entity is always permissive and the second always unconfigured, so both the CRUD
-            // invariants and the default-deny one are reachable in every single case rather than in most.
-            var admits = index switch { 0 => true, 1 => false, _ => Draw(Gen.Bool, pcg) };
+            // Fixed roles for the first three, drawn for any fourth — so every case reaches all three
+            // invariants and the corpus still varies which entity plays which part.
+            var role = index switch
+            {
+                0 => Role.Permissive,
+                1 => Role.Unconfigured,
+                2 => Role.Partial,
+                _ => Draw(Gen.OneOfConst([Role.Permissive, Role.Unconfigured, Role.Partial]), pcg),
+            };
             var declared = DeclaredFields(names, index, pcg);
+            HashSet<string> configured = role switch
+            {
+                Role.Permissive => _operations.ToHashSet(StringComparer.Ordinal),
+                Role.Unconfigured => [],
+                _ => Draw(Gen.OneOfConst(_operations).ArrayUnique[Draw(Gen.Int[1, 3], pcg)], pcg)
+                    .ToHashSet(StringComparer.Ordinal),
+            };
 
-            var entity = Entity(declared, admits, tenancy, pcg);
+            var entity = Entity(declared, configured, tenancy, pcg);
             entities[names[index]] = entity;
             fields[names[index]] = declared;
-            (admits ? permissive : denied).Add(names[index]);
+            switch (role)
+            {
+                case Role.Permissive: permissive.Add(names[index]); break;
+                case Role.Unconfigured: denied.Add(names[index]); break;
+                default: partial[names[index]] = configured; break;
+            }
+
             if (entity["tenancy"]?.GetValue<string>() == "scoped")
             {
                 scoped.Add(names[index]);
@@ -97,6 +128,7 @@ internal sealed record GeneratedProject(
             permissive,
             denied,
             fields,
+            partial,
             tenant,
             scoped);
     }
@@ -104,12 +136,21 @@ internal sealed record GeneratedProject(
     /// <summary>Writes the descriptor to a temp file and starts a world over it.</summary>
     /// <param name="keys">The dev API keys the world issues.</param>
     /// <param name="setup">Anything the world's host is configured differently from the default.</param>
+    /// <remarks>
+    /// <b>A private temp directory per call, not a shared one named after the seed.</b> The first version
+    /// wrote <c>%TEMP%/alvo-invariants/generated-01.alvo.json</c> — a path that is a pure function of the
+    /// seed — and this project deliberately runs its classes in parallel, so the three that use seed 1
+    /// could write the same file at the same time: an <see cref="IOException"/> on Windows, where a
+    /// concurrent open is not permitted, and a reader seeing a truncated file anywhere. It was also a fixed
+    /// name in a world-writable directory, which a local user can pre-create as a symlink.
+    /// <see cref="Directory.CreateTempSubdirectory(string)"/> is unique per call and 0700, and it is the
+    /// pattern <c>VacuumRunner.Lint</c> already uses forty lines away.
+    /// </remarks>
     internal async Task<AlvoApiWorld> StartAsync(
         IReadOnlyList<TestApiKey> keys, AlvoApiWorldSetup? setup = null)
     {
-        var directory = Path.Combine(Path.GetTempPath(), "alvo-invariants");
-        Directory.CreateDirectory(directory);
-        var path = Path.Combine(directory, $"{Name}.alvo.json");
+        var directory = Directory.CreateTempSubdirectory("alvo-invariants-");
+        var path = Path.Combine(directory.FullName, $"{Name}.alvo.json");
         await File.WriteAllTextAsync(path, Json);
 
         return await AlvoApiWorld.FromDescriptorPathAsync(path, keys, setup);
@@ -152,6 +193,22 @@ internal sealed record GeneratedProject(
         "name", "code", "note", "amount", "quantity", "colour", "status", "started_on", "finished_at",
         "reference", "payload", "is_active", "external_id", "weight", "priority",
     ];
+
+    /// <summary>The five per-operation rule slots the frozen schema declares, in its own order.</summary>
+    private static readonly string[] _operations = ["list", "get", "create", "update", "delete"];
+
+    /// <summary>What an entity's rules say: everything, nothing, or some operations.</summary>
+    private enum Role
+    {
+        /// <summary>Rules for all five operations.</summary>
+        Permissive,
+
+        /// <summary>No rules at all — refused to everyone, on every route.</summary>
+        Unconfigured,
+
+        /// <summary>Rules for one to three operations, and none for the rest.</summary>
+        Partial,
+    }
 
     /// <summary>Every field type the frozen schema declares.</summary>
     private static readonly string[] _fieldTypes =
@@ -204,7 +261,8 @@ internal sealed record GeneratedProject(
     /// <c>A_generated_descriptor_is_one_the_framework_accepts</c> is what said so, which is the whole reason
     /// that fact runs before any invariant does.
     /// </remarks>
-    private static JsonObject Entity(JsonObject fields, bool admits, bool tenancy, PCG pcg)
+    private static JsonObject Entity(
+        JsonObject fields, HashSet<string> configured, bool tenancy, PCG pcg)
     {
         var entity = new JsonObject
         {
@@ -218,19 +276,21 @@ internal sealed record GeneratedProject(
             entity["tenancy"] = Draw(Gen.Bool, pcg) ? "scoped" : "global";
         }
 
-        if (admits)
+        // A `rules` key at all only where at least one operation is configured: an entity with an empty
+        // rules object and one with no rules object are the same thing to the policy engine, and the
+        // schema's own description says a missing operation denies.
+        if (configured.Count > 0)
         {
             // Literally "true" rather than a role expression, and that is load-bearing: Sabotage
             // substitutes one entity's decision for another's, and a predicate naming a column the other
             // entity does not have would fail for a reason that is not the sabotage.
-            entity["rules"] = new JsonObject
+            var rules = new JsonObject();
+            foreach (var operation in _operations.Where(configured.Contains))
             {
-                ["list"] = "true",
-                ["get"] = "true",
-                ["create"] = "true",
-                ["update"] = "true",
-                ["delete"] = "true",
-            };
+                rules[operation] = "true";
+            }
+
+            entity["rules"] = rules;
         }
 
         return entity;
@@ -262,7 +322,17 @@ internal sealed record GeneratedProject(
     /// <summary>One field, with the members its type requires and none it forbids.</summary>
     private static JsonObject Field(string type, string refTarget, PCG pcg)
     {
-        var field = new JsonObject { ["type"] = type, ["required"] = Draw(Gen.Bool, pcg) };
+        var required = Draw(Gen.Bool, pcg);
+        var field = new JsonObject { ["type"] = type, ["required"] = required };
+
+        // `nullable` is drawn on an optional field only — the schema derives it from `required` otherwise,
+        // and a required-and-nullable column is a contradiction the validator would refuse. It matters that
+        // the corpus reaches it at all: a nullable enum is exactly the facet whose document shape this PR
+        // fixes, so a corpus that never drew one could not have hardened it.
+        if (!required && Draw(Gen.Bool, pcg))
+        {
+            field["nullable"] = true;
+        }
 
         switch (type)
         {

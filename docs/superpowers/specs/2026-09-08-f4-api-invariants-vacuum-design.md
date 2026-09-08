@@ -95,18 +95,28 @@ the build instead of accumulating.
 
 ## 4. The ruleset — `schema/openapi-ruleset.yaml`
 
-`extends: [[vacuum:oas, recommended]]`, the six mutes of §3, and seven Alvo rules, all `severity: error`.
+`extends: [[vacuum:oas, recommended]]`, the six mutes of §3, and six Alvo rules, all `severity: error`.
 Every one of them was proven to fire (§6):
 
 | Rule | Claim |
 |---|---|
-| `alvo-operation-id-shape` | `operationId` matches `^[a-z][a-zA-Z0-9]*\.[a-z][a-zA-Z0-9]*$` — the `categories.list` spelling |
-| `alvo-schema-key-casing` | `components.schemas` keys are camelCase |
+| `alvo-operation-id-shape` | `operationId` matches `^[a-z][a-z0-9_]*\.[a-z][a-zA-Z0-9]*$` — a snake_case entity, then a camelCase operation |
 | `alvo-parameter-key-casing` | `components.parameters` keys are camelCase |
 | `alvo-response-key-casing` | `components.responses` keys are camelCase |
 | `alvo-response-described` | every response carries a description |
 | `alvo-response-no-store` | every response documents `Cache-Control` |
 | `alvo-problem-media-type` | every declared error response is an `application/problem+json` document |
+
+**Two of these changed during implementation, and the reason is the whole point of the issue.** The first
+version required camelCase on *both* halves of an `operationId` and camelCase on every `components.schemas`
+key. Both passed the single-word fixture (`categories`, `products`) and both rejected every multi-word
+entity — `line_items.list`, `work_ordersPage` — so they would have rejected `examples/field-service` and
+`examples/complex-crm`. The document is right: the entity identifier appears verbatim there, exactly as in
+the path segment, which is the PostgREST parity §3.2 records. So the pattern now admits snake_case, and the
+schema-key casing rule is **gone** — replaced by the C# claim in §5 that the schema key set is *exactly*
+twelve shapes per entity plus `problemDetails`/`problemViolation`. That replacement is strictly stronger in
+the direction this repo cares about: a renamed, duplicated or vanished schema fails it, where a casing rule
+passed all three.
 
 **Two recorded deviations from the spec's wording.** §308 says "camelCase" — enforced on framework-minted keys
 only, per §3.2/§3.4. §308 says "RFC 7807" — the implementation answers RFC **9457**, its successor, which is
@@ -131,7 +141,16 @@ A new `test/_shared/api/OpenApiDocumentFacts.cs` asserts, generically over `(doc
 - every operation's error responses resolve to `problemDetails`, and `type` is under `https://alvo.dev/errors/`;
 - the DELETE-with-body exemption of §3.3 holds for the batch route and nothing else;
 - the component schema key set is exactly `entities × 12 shapes` plus the framework's two — the claim that
-  replaced the dropped casing rule, and one a linter cannot make because it needs the entity list.
+  replaced the dropped casing rule, and one a linter cannot make because it needs the entity list;
+- every response carries a `headers` object with `Cache-Control` in it, and every component response carries
+  `content`. **These two exist because the Vacuum rules that make the same claims can be evaded**:
+  `alvo-response-no-store` is `given` `…responses[*].headers` and `alvo-problem-media-type` is `given`
+  `…responses[*].content` — the very objects that carry the claim — so deleting the *parent* matches nothing
+  and the rule reports zero violations. Mutating the child, which is what the lint battery does, could not
+  have caught it;
+- every property of a framework-minted schema (a page envelope, a batch result) declares a `type` — the
+  bound on the muted `oas-missing-type`, whose reason ("a `json` field is deliberately type-free") covers a
+  descriptor's own fields and nothing else.
 
 These are written fresh rather than extracted from `OpenApiDocumentTests` — that file's 1346 lines are
 *fixture-specific* pins with hand-counted expectations, and rewriting it generically inside this PR would put a
@@ -148,7 +167,7 @@ it, and vacuum answers that with `unable to build unresolved model` — or, in o
 mutation would have been measuring the resolver rather than the rule. Both were hit while validating this design.
 
 - **Lint battery**, in the invariant project (the one place that already resolves the binary). One mutation
-  per rule id — 8 today, including one that violates a `recommended` rule to prove the extended set is still
+  per rule id — 7 today, including one that violates a `recommended` rule to prove the extended set is still
   live. Each asserts vacuum reports **that** `code`. A test reads the Alvo rule ids out of the YAML and fails if
   any of them has no mutation, so a rule added later cannot arrive unproven — the "pin the set from outside"
   discipline, applied to the ruleset itself.
@@ -172,9 +191,13 @@ also needs an `InternalsVisibleTo` entry in `src/MMLib.Alvo/Properties/AssemblyI
 descriptor is already proven on both engines by `MMLib.Alvo.Api.Tests.Integration` running the same world.
 Stated as a deviation rather than left implicit.
 
-**The generator.** CsCheck `Gen` composes a descriptor — 1–3 entities, 1–6 fields drawn from all 11 field
-types, `required`/`unique`/`nullable`/`default`, a `ref` between entities, `softDelete`/`audit`, `tenancy` on
-and off, and entities deliberately **with and without** `rules`. Reserved field names come from the core's own
+**The generator.** CsCheck `Gen` composes a descriptor — **3–4 entities**, 1–5 fields drawn from all 11
+field types, `required`/`unique`/`nullable`, a `ref` between entities, `audit`, `tenancy` on and off, and
+entities in each of **three rule roles**: all five operations, none at all, and — the shape a real descriptor
+actually has — **rules for some operations and not others**. Three entities is the floor because each role
+has to be present for every invariant to be reachable in every case; the fourth varies the count the
+path-set and operation-count claims are measured against. `softDelete` and `field.default` are never drawn
+(§8a). Reserved field names come from the core's own
 `ReservedQueryKeys`, not from a copied list. Every descriptor is validated against
 `schema/project.schema.json` before it boots, so a generator bug fails as a generator bug.
 
@@ -188,7 +211,11 @@ random-seeded suite on a required PR check is a flake generator.
 
 1. the document is clean under the ruleset (§4) and satisfies the generic facts (§5);
 2. an entity with no `rules` answers 403 on all ten operations to a fully-scoped authenticated key, and **no SQL
-   statement is composed** — default-deny refuses before the port is reached;
+   statement is composed** — default-deny refuses before the port is reached. A permitted read on the same
+   world **does** record statements, because otherwise a recorder that had quietly stopped recording would
+   satisfy the emptiness claim forever;
+2b. an entity with rules for *some* operations is refused on exactly the others — default-deny is a
+   per-operation guarantee, and "no rules at all" only proves the easy direction of it;
 3. an entity with rules completes the CRUD shape: 201 + `Location`, 200, the `{items,next,count}` envelope,
    204, then 404;
 4. `PUT` twice is the same whole row, **from two different starting states** — the assertion a merge cannot
