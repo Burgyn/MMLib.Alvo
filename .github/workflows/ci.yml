@@ -226,6 +226,14 @@ jobs:
       - name: Load-baseline guard suite
         run: bash scripts/test-assert-load-baseline
 
+      # scripts/ensure-vacuum verifies the pinned Vacuum download against the release's own
+      # checksums.txt, and that verification is a security control: one whose refusal path is
+      # untested is a control nobody can claim. The suite is hermetic — it builds a fake release
+      # in a temp directory and serves it over file:// — so it needs no network and belongs here
+      # with the other guard suites rather than in the job that actually lints.
+      - name: Vacuum resolver suite
+        run: bash scripts/test-ensure-vacuum
+
   # Stable required status check: the branch ruleset requires "Build & test",
   # which must not change when matrix legs are added/removed. This gate passes
   # only if every matrix leg AND the e2e job succeeded — folding e2e in here

@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# test-ensure-vacuum — the suite for scripts/ensure-vacuum.
+#
+# Hermetic: no network. A fake release directory is built in a temp dir and served over file://,
+# which is what ALVO_VACUUM_BASE_URL exists for. The checksum check is a security control, so the
+# case that matters most is the REFUSAL — a verification that silently passes is the whole reason
+# this suite exists.
+set -euo pipefail
+DIR="$(cd "$(dirname "$0")" && pwd)"
+PASS=0; FAIL=0
+ok()  { PASS=$((PASS+1)); echo "  ok: $1"; }
+bad() { FAIL=$((FAIL+1)); echo "  FAIL: $1" >&2; }
+
+sha256_of() {
+  if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | awk '{print $1}';
+  else sha256sum "$1" | awk '{print $1}'; fi
+}
+
+VERSION="$("$DIR/ensure-vacuum" --print-version)"
+ASSET="$("$DIR/ensure-vacuum" --print-asset)"
+[ -n "$VERSION" ] && [ -n "$ASSET" ] || { echo "cannot read the pin from ensure-vacuum" >&2; exit 1; }
+echo "[test-ensure-vacuum] pinned $VERSION, asset $ASSET"
+
+# Builds a release directory holding an "asset" whose only content is a stub that reports the pinned
+# version — enough for ensure-vacuum's own reuse check, and it never touches the network.
+fake_release() {
+  local dir="$1" stage binary
+  case "$ASSET" in *windows*) binary="vacuum.exe" ;; *) binary="vacuum" ;; esac
+  stage="$(mktemp -d)"
+  printf '#!/usr/bin/env bash\necho %s\n' "$VERSION" > "$stage/$binary"
+  chmod +x "$stage/$binary"
+  mkdir -p "$dir/v$VERSION"
+  tar czf "$dir/v$VERSION/$ASSET" -C "$stage" "$binary"
+  ( cd "$dir/v$VERSION" && sha256_of "$ASSET" | awk -v a="$ASSET" '{print $1"  "a}' > checksums.txt )
+  rm -rf "$stage"
+}
+
+# 1. a good release resolves to a runnable binary at the pinned version
+work="$(mktemp -d)"; fake_release "$work/release"
+if path="$(ALVO_VACUUM_BASE_URL="file://$work/release" ALVO_VACUUM_HOME="$work/home" "$DIR/ensure-vacuum" 2>/dev/null)" \
+   && [ -x "$path" ] && [ "$("$path" version)" = "$VERSION" ]; then
+  ok "resolves a pinned binary"
+else
+  bad "did not resolve a runnable binary (got '${path:-}')"
+fi
+
+# 2. a tampered asset is REFUSED, and nothing is left behind
+work2="$(mktemp -d)"; fake_release "$work2/release"
+printf 'tampered' >> "$work2/release/v$VERSION/$ASSET"
+if ALVO_VACUUM_BASE_URL="file://$work2/release" ALVO_VACUUM_HOME="$work2/home" "$DIR/ensure-vacuum" >/dev/null 2>&1; then
+  bad "a checksum mismatch was accepted"
+else
+  ok "a checksum mismatch is refused"
+fi
+if [ -e "$work2/home/vacuum" ] || [ -e "$work2/home/vacuum.exe" ]; then
+  bad "a refused download was left in place"
+else
+  ok "a refused download leaves nothing behind"
+fi
+
+# 3. an already-resolved binary is reused, with the release directory GONE
+work3="$(mktemp -d)"; fake_release "$work3/release"
+ALVO_VACUUM_BASE_URL="file://$work3/release" ALVO_VACUUM_HOME="$work3/home" "$DIR/ensure-vacuum" >/dev/null 2>&1
+rm -rf "$work3/release"
+if ALVO_VACUUM_BASE_URL="file://$work3/release" ALVO_VACUUM_HOME="$work3/home" "$DIR/ensure-vacuum" >/dev/null 2>&1; then
+  ok "a resolved binary is reused without downloading"
+else
+  bad "re-resolution tried to download again"
+fi
+
+# 4. an unlisted asset is refused rather than trusted — checksums.txt is the authority, not the file's presence
+work4="$(mktemp -d)"; fake_release "$work4/release"
+: > "$work4/release/v$VERSION/checksums.txt"
+if ALVO_VACUUM_BASE_URL="file://$work4/release" ALVO_VACUUM_HOME="$work4/home" "$DIR/ensure-vacuum" >/dev/null 2>&1; then
+  bad "an asset missing from checksums.txt was accepted"
+else
+  ok "an asset missing from checksums.txt is refused"
+fi
+
+rm -rf "$work" "$work2" "$work3" "$work4"
+echo "[test-ensure-vacuum] $PASS passed, $FAIL failed"
+[ "$FAIL" -eq 0 ]
