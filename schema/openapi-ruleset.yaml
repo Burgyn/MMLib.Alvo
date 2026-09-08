@@ -1,0 +1,133 @@
+# Alvo's OpenAPI contract ruleset — the one authority on the generated document's static shape.
+#
+# Two callers, never two authorities: scripts/lint-api (the committed document snapshot, no build) and
+# MMLib.Alvo.Api.Invariants.Tests.Integration (the four examples/ descriptors and sixteen generated
+# ones, over a running host). Spec §308/§415 ask for exactly this — a Spectral-compatible ruleset in
+# the repo, a Go binary, no Node.
+#
+# It lives in schema/ beside project.schema.json because both are contracts this repo publishes about
+# a generated artifact. Neither is test-only.
+#
+# THREE THINGS MEASURED ABOUT VACUUM 0.30.3, each of which shaped what is written here:
+#
+#   * Rules see the RESOLVED document. A rule asserting `$.paths[*][*].responses.403.$ref` is truthy
+#     fires on EVERY operation, because by evaluation time the node is the resolved response object
+#     rather than the reference. So "every 4xx is a $ref into components.responses" is not expressible
+#     and is not attempted; the $ref spelling is pinned by the document snapshot instead, and only
+#     resolved shape is asserted below.
+#
+#   * `field: "@key"` works with `casing` and is SILENTLY VACUOUS with `pattern` — a deliberately
+#     impossible `match: "^ZZZ"` over $.paths reported zero violations. Hence casing rules here, never
+#     an @key pattern. A rule that tests nothing looks exactly like a rule that passes, which is why
+#     RulesetTests mutates the document once per rule id and reads the ids out of THIS file.
+#
+#   * JSONPath filter expressions do not parse ("Spectral compatibility mode"), and one unparseable
+#     `given` aborts the whole run. Anything conditional or cross-referential is therefore a C# fact
+#     in test/_shared/api/OpenApiDocumentFacts.cs — including "no integers in URLs", which no built-in
+#     rule covers (measured) and which the vacuous @key+pattern form cannot express.
+#
+# The gate runs at --fail-severity warn, not the default `error`: after the mutes below the document is
+# clean at EVERY severity, so a new warning is a regression rather than noise to accumulate.
+extends: [[vacuum:oas, recommended]]
+documentationUrl: https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/superpowers/specs/2026-09-08-f4-api-invariants-vacuum-design.md
+
+rules:
+  # --- muted built-ins, each with its reason -------------------------------------------------------
+
+  # A schema property name IS the descriptor's field name — snake_case by schema
+  # (^[a-z][a-z0-9_]{0,62}$) — so renaming it in the document would misdescribe the wire. Casing is
+  # enforced below on the keys Alvo itself mints. Recorded deviation from spec §308's "camelCase"
+  # shorthand. Measured: 45 violations on the fixture document, every one a declared field.
+  camel-case-properties: "off"
+
+  # A path segment is the entity identifier verbatim — PostgREST's spelling, which Alvo adopts on
+  # purpose (§0: adopt known specs so an agent recognises them). Measured: `work_orders` in
+  # examples/field-service and `invoice_items` in examples/complex-crm raise four violations each.
+  # Rewriting them to kebab-case would be a wire-breaking change to the one convention the framework
+  # copied deliberately.
+  paths-kebab-case: "off"
+
+  # Alvo emits no examples. Per-field-type examples synthesised from the descriptor are a real
+  # agent-first improvement AND a change to the generated document — product work, tracked in #207
+  # rather than bent around here.
+  oas3-missing-example: "off"
+
+  # One generator serves N entities, so identical prose across operations is a property of a
+  # metadata-driven document rather than a defect. Measured: 118 informs, all of them generated prose.
+  description-duplication: "off"
+
+  # A `json`-typed field is deliberately type-free: in draft 2020-12 an absent `type` means "any",
+  # which is exactly what the descriptor said.
+  oas-missing-type: "off"
+
+  # DELETE /{entity}/batch carries {"ids":[…]}. RFC 9110 §9.3.5 gives content on a DELETE no defined
+  # semantics, and the mirror-image argument is why POST /{entity}/query exists at all — so this is a
+  # real question about the verb, tracked in #206. It is NOT loosened silently: OpenApiDocumentFacts
+  # pins that a DELETE carries a body on the batch route and on no other, so the exemption cannot
+  # spread to the single-row delete while this rule is off.
+  no-request-body: "off"
+
+  # --- Alvo's own rules ----------------------------------------------------------------------------
+
+  alvo-operation-id-shape:
+    description: "operationId is <entity>.<operation>"
+    given: $.paths[*][*].operationId
+    severity: error
+    then:
+      function: pattern
+      functionOptions:
+        match: "^[a-z][a-zA-Z0-9]*\\.[a-z][a-zA-Z0-9]*$"
+
+  alvo-schema-key-casing:
+    description: "framework-minted component schema keys are camelCase"
+    given: $.components.schemas
+    severity: error
+    then:
+      field: "@key"
+      function: casing
+      functionOptions:
+        type: camel
+
+  alvo-parameter-key-casing:
+    description: "framework-minted component parameter keys are camelCase"
+    given: $.components.parameters
+    severity: error
+    then:
+      field: "@key"
+      function: casing
+      functionOptions:
+        type: camel
+
+  alvo-response-key-casing:
+    description: "framework-minted component response keys are camelCase"
+    given: $.components.responses
+    severity: error
+    then:
+      field: "@key"
+      function: casing
+      functionOptions:
+        type: camel
+
+  alvo-response-described:
+    description: "every response carries a description"
+    given: $.paths[*][*].responses[*]
+    severity: error
+    then:
+      field: description
+      function: truthy
+
+  alvo-response-no-store:
+    description: "every response documents Cache-Control"
+    given: $.paths[*][*].responses[*].headers
+    severity: error
+    then:
+      field: Cache-Control
+      function: truthy
+
+  alvo-problem-media-type:
+    description: "every declared error response is a problem+json document"
+    given: $.components.responses[*].content
+    severity: error
+    then:
+      field: application/problem+json
+      function: truthy

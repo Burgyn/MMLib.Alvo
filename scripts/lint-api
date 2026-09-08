@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# lint-api — lint the committed OpenAPI document snapshot against schema/openapi-ruleset.yaml.
+#
+# The cheap half of #26's static gate: no build, no .NET, no running host, so it fires the moment
+# someone edits the snapshot and it costs a second. The other caller of the same ruleset is
+# MMLib.Alvo.Api.Invariants.Tests.Integration, which lints the four examples/ descriptors and sixteen
+# generated ones over a running host. One ruleset file, two callers — never two authorities.
+#
+# --fail-severity warn rather than the default `error`: after the mutes the ruleset declares, the
+# document is clean at EVERY severity, so a new warning is a regression and not noise to accumulate.
+#
+# vacuum sniffs content rather than the file extension (measured), so the `.verified.txt` snapshot is
+# linted where it lies rather than copied to a `.json` first.
+set -euo pipefail
+DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$DIR/.." && pwd)"
+VACUUM="$("$DIR/ensure-vacuum")"
+RULESET="$ROOT/schema/openapi-ruleset.yaml"
+DOCUMENT="$ROOT/test/MMLib.Alvo.Api.Tests/OpenApiDocumentTests.The_document_is_stable.verified.txt"
+
+if [ ! -f "$DOCUMENT" ]; then
+  echo "[lint-api] FAIL: the document snapshot is missing: $DOCUMENT" >&2
+  echo "[lint-api] Run the Api.Tests suite first — a lint with no document to lint is not a pass." >&2
+  exit 1
+fi
+
+echo "[lint-api] vacuum lint $(basename "$DOCUMENT")"
+"$VACUUM" lint --no-style --no-banner --details --all-results \
+  --fail-severity warn --ruleset "$RULESET" "$DOCUMENT"
+echo "[lint-api] OK"
