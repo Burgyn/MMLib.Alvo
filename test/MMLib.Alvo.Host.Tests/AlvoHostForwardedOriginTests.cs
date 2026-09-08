@@ -39,7 +39,7 @@ public class AlvoHostForwardedOriginTests
         var origin = await DocumentOriginAsync(world, Forwarded("X-Forwarded-Proto", "https"));
 
         origin.ShouldBe(
-            "https://localhost/",
+            "https://localhost",
             "a client that arrived over TLS must not be handed an http:// base URL by the document");
     }
 
@@ -52,7 +52,7 @@ public class AlvoHostForwardedOriginTests
         var origin = await DocumentOriginAsync(world, Forwarded("X-Forwarded-Host", "api.example.com"));
 
         origin.ShouldBe(
-            "http://api.example.com/",
+            "http://api.example.com",
             "the document must name the origin the client reached, not the container's own hostname");
     }
 
@@ -71,7 +71,7 @@ public class AlvoHostForwardedOriginTests
         var origin = await DocumentOriginAsync(world, headers);
 
         origin.ShouldBe(
-            "http://localhost/",
+            "http://localhost",
             "an untrusted caller must not choose the base URL the document hands the next client");
     }
 

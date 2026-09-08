@@ -171,7 +171,7 @@ public class AlvoHostPathBaseTests
         var origin = Origin(await DocumentAsync(world, ForwardedPrefix()));
 
         origin.ShouldBe(
-            "http://localhost/",
+            "http://localhost",
             "an untrusted caller must not choose the base URL the document hands the next client");
     }
 
