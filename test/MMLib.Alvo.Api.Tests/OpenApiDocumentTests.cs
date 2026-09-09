@@ -834,7 +834,7 @@ public sealed class OpenApiDocumentTests
         Operations(document)
             .SelectMany(operation => operation["responses"]!.AsObject().Select(response => response.Key))
             .ShouldNotContain("415", "no request can reach it, so no operation may promise it");
-        document["components"]!["responses"]!.AsObject().ContainsKey("unsupported-media-type").ShouldBeFalse(
+        document["components"]!["responses"]!.AsObject().ContainsKey("unsupportedMediaType").ShouldBeFalse(
             "a published component nothing in the document can point at is an orphan");
     }
 

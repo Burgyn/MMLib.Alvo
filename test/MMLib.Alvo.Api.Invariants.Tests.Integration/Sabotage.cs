@@ -49,6 +49,18 @@ internal static class Sabotage
         new(ConfigureServicesAfterAlvo: services =>
             services.Decorate<IAlvoData>(inner => new ForgetfulAlvoData(inner)));
 
+    /// <summary>A host that turned the media-type guard off.</summary>
+    /// <remarks>
+    /// <b>The one saboteur that needs no decorator, and it is the more honest for it.</b> The regression
+    /// <see cref="BehaviourInvariants.NonJsonBodiesAreRefusedAsync"/> watches for is not an exotic
+    /// misbehaviour — it is somebody flipping <c>RequireJsonContentType</c>'s default, or a host setting it
+    /// to <see langword="false"/> without the cross-site-request-forgery defence the option assumes it has.
+    /// That is exactly what this configures, so the invariant is seen to fail for the reason it exists
+    /// rather than for a contrived one.
+    /// </remarks>
+    internal static AlvoApiWorldSetup TheMediaTypeGuardIsOff() =>
+        new(ConfigureApi: api => api.RequireJsonContentType = false);
+
     /// <summary>Answers every denial with the decision a permissive entity got.</summary>
     /// <param name="inner">The real engine.</param>
     /// <param name="permissive">An entity whose rules admit every caller.</param>

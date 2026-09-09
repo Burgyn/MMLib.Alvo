@@ -61,8 +61,29 @@ public class SabotageTests
             + "duplicate write would go unnoticed");
     }
 
+    /// <summary>The media-type invariant goes red when the host opts out of the guard.</summary>
+    /// <remarks>
+    /// The saboteur here is a configuration value rather than a decorator, which makes this the closest of
+    /// the three to a regression somebody would really ship: the option exists, and a host that turns it off
+    /// without its own cross-site-request-forgery defence has reopened #191's door.
+    /// </remarks>
+    [Fact]
+    public async Task Turning_the_media_type_guard_off_makes_its_invariant_fail()
+    {
+        var project = Project;
+        await using var world = await project.StartAsync(
+            [project.Admin()], Sabotage.TheMediaTypeGuardIsOff());
+
+        var failure = await Record.ExceptionAsync(
+            () => BehaviourInvariants.NonJsonBodiesAreRefusedAsync(world, project));
+
+        failure.ShouldNotBeNull(
+            "a host with the guard off must make the media-type invariant fail; it passed, so a body-taking "
+            + "route reachable as a CORS simple request would go unnoticed");
+    }
+
     /// <summary>
-    /// And the same two invariants pass on the unsabotaged host, so the failures above are the sabotage.
+    /// And the same invariants pass on the unsabotaged host, so the failures above are the sabotage.
     /// </summary>
     /// <remarks>
     /// Without this, both facts above would pass for a project whose invariants failed for some unrelated
@@ -70,7 +91,7 @@ public class SabotageTests
     /// that something, anything, goes wrong.
     /// </remarks>
     [Fact]
-    public async Task Both_invariants_pass_on_the_unsabotaged_host()
+    public async Task Every_sabotaged_invariant_passes_on_the_unsabotaged_host()
     {
         var project = Project;
         await using var world = await project.StartAsync([project.Admin()]);
@@ -78,5 +99,6 @@ public class SabotageTests
         await BehaviourInvariants.DefaultDenyAsync(world, project);
         await BehaviourInvariants.PerOperationDefaultDenyAsync(world, project);
         await BehaviourInvariants.IdempotencyKeyWritesOneRowAsync(world, project);
+        await BehaviourInvariants.NonJsonBodiesAreRefusedAsync(world, project);
     }
 }

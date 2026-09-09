@@ -163,7 +163,7 @@
             "$ref": "#/components/responses/conflict"
           },
           "415": {
-            "$ref": "#/components/responses/unsupported-media-type"
+            "$ref": "#/components/responses/unsupportedMediaType"
           }
         },
         "security": [
@@ -227,7 +227,7 @@
             "$ref": "#/components/responses/unprocessable"
           },
           "415": {
-            "$ref": "#/components/responses/unsupported-media-type"
+            "$ref": "#/components/responses/unsupportedMediaType"
           }
         },
         "security": [
@@ -346,7 +346,7 @@
             "$ref": "#/components/responses/conflict"
           },
           "415": {
-            "$ref": "#/components/responses/unsupported-media-type"
+            "$ref": "#/components/responses/unsupportedMediaType"
           }
         },
         "security": [
@@ -433,7 +433,7 @@
             "$ref": "#/components/responses/conflict"
           },
           "415": {
-            "$ref": "#/components/responses/unsupported-media-type"
+            "$ref": "#/components/responses/unsupportedMediaType"
           }
         },
         "security": [
@@ -549,7 +549,7 @@
             "$ref": "#/components/responses/conflict"
           },
           "415": {
-            "$ref": "#/components/responses/unsupported-media-type"
+            "$ref": "#/components/responses/unsupportedMediaType"
           }
         },
         "security": [
@@ -615,7 +615,7 @@
             "$ref": "#/components/responses/conflict"
           },
           "415": {
-            "$ref": "#/components/responses/unsupported-media-type"
+            "$ref": "#/components/responses/unsupportedMediaType"
           }
         },
         "security": [
@@ -681,7 +681,7 @@
             "$ref": "#/components/responses/conflict"
           },
           "415": {
-            "$ref": "#/components/responses/unsupported-media-type"
+            "$ref": "#/components/responses/unsupportedMediaType"
           }
         },
         "security": [
@@ -970,7 +970,7 @@
             "$ref": "#/components/responses/conflict"
           },
           "415": {
-            "$ref": "#/components/responses/unsupported-media-type"
+            "$ref": "#/components/responses/unsupportedMediaType"
           }
         },
         "security": [
@@ -1037,7 +1037,7 @@
             "$ref": "#/components/responses/unprocessable"
           },
           "415": {
-            "$ref": "#/components/responses/unsupported-media-type"
+            "$ref": "#/components/responses/unsupportedMediaType"
           }
         },
         "security": [
@@ -1178,7 +1178,7 @@
             "$ref": "#/components/responses/conflict"
           },
           "415": {
-            "$ref": "#/components/responses/unsupported-media-type"
+            "$ref": "#/components/responses/unsupportedMediaType"
           }
         },
         "security": [
@@ -1273,7 +1273,7 @@
             "$ref": "#/components/responses/conflict"
           },
           "415": {
-            "$ref": "#/components/responses/unsupported-media-type"
+            "$ref": "#/components/responses/unsupportedMediaType"
           }
         },
         "security": [
@@ -1394,7 +1394,7 @@
             "$ref": "#/components/responses/conflict"
           },
           "415": {
-            "$ref": "#/components/responses/unsupported-media-type"
+            "$ref": "#/components/responses/unsupportedMediaType"
           }
         },
         "security": [
@@ -1463,7 +1463,7 @@
             "$ref": "#/components/responses/conflict"
           },
           "415": {
-            "$ref": "#/components/responses/unsupported-media-type"
+            "$ref": "#/components/responses/unsupportedMediaType"
           }
         },
         "security": [
@@ -1532,7 +1532,7 @@
             "$ref": "#/components/responses/conflict"
           },
           "415": {
-            "$ref": "#/components/responses/unsupported-media-type"
+            "$ref": "#/components/responses/unsupportedMediaType"
           }
         },
         "security": [
@@ -3135,7 +3135,7 @@
           }
         }
       },
-      "unsupported-media-type": {
+      "unsupportedMediaType": {
         "description": "The request body was not declared as JSON, or carried no 'Content-Type' at all. Send 'Content-Type: application/json', or any 'application/*+json'; a POST refusal also carries 'Accept-Post' and a PATCH refusal 'Accept-Patch' naming what the operation accepts. The requirement exists because a body-taking route with no media-type requirement is reachable as a CORS simple request, and a host with its own cross-site-request-forgery defence can turn it off.",
         "headers": {
           "Cache-Control": {

@@ -376,7 +376,7 @@ internal static class DataApiDocumentation
         + "'Accept-Post' and a PATCH refusal 'Accept-Patch' naming what the operation accepts. The "
         + "requirement exists because a body-taking route with no media-type requirement is reachable as a "
         + "CORS simple request, and a host with its own cross-site-request-forgery defence can turn it off.",
-        SharedId: "unsupported-media-type");
+        SharedId: "unsupportedMediaType");
 
     private static Response Malformed => new(
         StatusCodes.Status422UnprocessableEntity,

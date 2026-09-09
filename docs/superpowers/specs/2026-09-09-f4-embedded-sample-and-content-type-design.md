@@ -333,15 +333,25 @@ document (§4.5).
 
 ### 4.3 Where it is enforced, and why authorization still wins
 
-**Beside the other pre-body guards, one line per delegate.** `DataApiEndpoints`' five body-taking
-delegates already open the same way — resolve the decision, then guard the request's *headers* before
-touching its body:
+**Beside the other pre-body guards, one line per delegate, and *first* among them.**
+`DataApiEndpoints`' five body-taking delegates already open the same way — resolve the decision, then
+guard the request's *headers* before touching its body. The media-type guard goes at the head of that
+header block:
 
 ```csharp
 var decision = EnsureOperationIsAllowed(policies, entity.Name, kind.ToDataOperation(), context);
-EnsureUnconditional(http.Request);                       // the existing precondition guard
+
 if (JsonContentType.Refuse(http.Request, options) is { } unsupported) { return unsupported; }
+
+EnsureUnconditional(http.Request);                       // the existing precondition guard
+var key = IdempotencyKey(http.Request, context, options);
 ```
+
+**First, and not merely somewhere in the block.** A request that is not even in the form this endpoint
+reads should not be answered with advice about `If-Match` or `Idempotency-Key`. It also makes all five
+delegates identical — decision, then media type, then the other header guards — where an
+each-where-it-fell placement would leave an ordering asymmetry nothing asserts, in a change whose whole
+argument is that the ordering is deliberate.
 
 `JsonContentType` is one `internal static` class with one method returning `IResult?`; the five call
 sites are `MapCreate`, `MapUpdate`, `MapReplace`, `MapQuery` and `BatchAsync`.
@@ -356,10 +366,22 @@ were rejected for stated reasons rather than taste:
 | A `GuardAsync` arm on a thrown exception, like `EnsureUnconditional` | The exceptions `GuardAsync` catches are `MMLib.Alvo.Abstractions` port exceptions with meaning to a provider. 415 is a pure HTTP concern; minting an Abstractions exception for it would widen the port to describe a transport. |
 
 **403 before 415, and 401 before both.** `AlvoContextFilter` answers the credential 401 and the scope
-403 before the delegate runs at all; `EnsureOperationIsAllowed` answers the policy 403 on the line
+403 before the delegate runs at all; `EnsureOperationIsAllowed` answers the decision's 403 on the line
 above the guard. So the existing rule holds unchanged — *"an unauthorized caller must be told they are
 unauthorized, not that their body was malformed"* — and the guard still refuses before a byte of the
 body is read, which is the resource half of the same rule.
+
+**What "after the decision" does not buy, measured rather than assumed.** `PolicyEngine.ResolveOperation`
+denies at the decision layer for four reasons only: no descriptor applied, an unconfigured operation, a
+tenant-scoped entity with no tenant, and a predicate reading a caller value the caller lacks. A
+*configured* rule always resolves to an **allow carrying a `USING` / `WITH CHECK` predicate the port
+enforces per row** — so a caller whom `'admin' in @user.roles` will ultimately refuse is *not* denied
+here, and for that caller the 415 comes first. This was found by a fact written the other way round,
+which failed. It is not a regression and not new: `EnsureUnconditional`'s 412 already precedes that same
+port 403 for the same caller, and a 415 names nothing about the entity, the row, or whether it exists —
+its fix is knowable to the caller before they send anything. The ordering facts therefore measure the
+three refusals that really do precede it: the credential 401, the scope 403, and a *decision* 403 (a
+tenantless caller on a tenant-scoped entity).
 
 Ordering costs the CSRF defence nothing: the mechanism is the browser's preflight, decided before the
 request is sent (§4.1). Server-side precedence only decides which true thing a caller is told first.
