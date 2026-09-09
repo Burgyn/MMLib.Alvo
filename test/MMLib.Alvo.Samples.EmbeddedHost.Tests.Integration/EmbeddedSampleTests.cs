@@ -18,8 +18,17 @@ namespace MMLib.Alvo.Samples.EmbeddedHost.Tests.Integration;
 /// The embedded sample, proved rather than described.
 /// </summary>
 /// <remarks>
+/// <para>
 /// #24's Definition of Done is <em>"both modes start up the same functional backend from the same
-/// descriptor"</em>, and prose cannot hold that. <see cref="Both_modes_generate_the_same_routes"/> is the
+/// descriptor"</em>, and prose cannot hold that.
+/// </para>
+/// <para>
+/// <b>Both worlds supply their whole configuration in memory, so nothing here depends on which project's
+/// <c>appsettings.json</c> lands in this project's output.</b> The consequence, stated so it is not
+/// mistaken for coverage: the sample's own <c>appsettings.json</c> and its user-secrets path are
+/// <em>not</em> exercised by this suite — <c>dotnet run</c> is what exercises those, and its
+/// <c>README.md</c> is the instruction that has to stay true.
+/// </para> <see cref="Both_modes_generate_the_same_routes"/> is the
 /// one fact that turns it into a check; the rest establish that the sample's two surfaces actually work,
 /// because a backend that starts and refuses everything would satisfy a route comparison on its own.
 /// </remarks>
@@ -320,7 +329,20 @@ public class EmbeddedSampleTests
                 ["--environment", environment],
                 configuration => configuration.AddInMemoryCollection(new Dictionary<string, string?>
                 {
+                    // The WHOLE dev key, not just its secret. The sample declares the rest in its own
+                    // appsettings.json, and depending on that file reaching this project's output is how
+                    // this suite came to pass in Debug and fail in Release: content from a referenced
+                    // project is not guaranteed to win, and in Release another project's appsettings.json
+                    // did — leaving a key with a secret and no KeyId, which the validator refuses. A
+                    // fixture that supplies its own configuration cannot be broken by build layout, and it
+                    // is the shape AlvoHostWorld.Settings already uses for the standalone host.
+                    ["Alvo:Auth:DevKeys:0:KeyId"] = "agent",
                     ["Alvo:Auth:DevKeys:0:Secret"] = Secret,
+                    ["Alvo:Auth:DevKeys:0:User"] = "9f1d3c7e-5b2a-4f18-8c6d-2e7a9b4c1d05",
+                    ["Alvo:Auth:DevKeys:0:Roles:0"] = "admin",
+                    ["Alvo:Auth:DevKeys:0:Roles:1"] = "authenticated",
+                    ["Alvo:Auth:DevKeys:0:Scopes:0"] = "*:read",
+                    ["Alvo:Auth:DevKeys:0:Scopes:1"] = "*:write",
                     ["FleetDesk:DatabasePath"] = databasePath,
                     ["FleetDesk:DescriptorPath"] = DescriptorPath,
                 }));
