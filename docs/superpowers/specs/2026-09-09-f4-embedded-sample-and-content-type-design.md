@@ -333,29 +333,41 @@ document (§4.5).
 
 ### 4.3 Where it is enforced, and why authorization still wins
 
-**One chokepoint decides.** All three body readers — `JsonPayloadReader` (create/update/replace),
-`QueryBodyReader` (query) and `BatchBodyReader` (batch) — funnel through
-`BoundedJsonBody.ReadAsync`. The media-type check goes there, before a byte is read, and is reported
-through the existing `BodyRefusal?` channel as a new member `BodyRefusal.UnsupportedMediaType`. Each
-surface then *renders* it through one shared factory rather than through its own violation catalogue,
-so the three cannot disagree about the status.
+**Beside the other pre-body guards, one line per delegate.** `DataApiEndpoints`' five body-taking
+delegates already open the same way — resolve the decision, then guard the request's *headers* before
+touching its body:
 
-`BoundedJsonBody.CodeOf` gains a **named arm** for it that throws with the reason — a 415 carries no
-`violations` array, so asking for a violation code is a framework-author error, and the existing
-`_ => throw` would have reported it as an out-of-range enum instead of as the category mistake it is.
+```csharp
+var decision = EnsureOperationIsAllowed(policies, entity.Name, kind.ToDataOperation(), context);
+EnsureUnconditional(http.Request);                       // the existing precondition guard
+if (JsonContentType.Refuse(http.Request, options) is { } unsupported) { return unsupported; }
+```
 
-**403 before 415.** Every write delegate resolves the operation's decision before reading the body,
-and the doc states the rule plainly: *"a denied caller is told they are denied rather than that their
-body is malformed"*. The guard sits inside the body read, so it inherits that order for free. This is
-the right order twice over: it preserves the existing rule, and the CSRF defence is the browser's
-preflight, which happens before the request is sent — so nothing about server-side ordering weakens it.
-A 415-before-authz would only hand an unauthenticated cross-site caller one more bit about their own
-request.
+`JsonContentType` is one `internal static` class with one method returning `IResult?`; the five call
+sites are `MapCreate`, `MapUpdate`, `MapReplace`, `MapQuery` and `BatchAsync`.
 
-**Exhaustiveness is proved by a test, not by the chokepoint.** A single decision point still lets a
-future body-taking surface forget to call it. §6.2's fact enumerates every body-taking
-`DataApiEndpointKind` and drives a `text/plain` request at each — the same construction the repo
-already uses to prove `Protect` is on every endpoint two ways.
+**Three enforcement points were considered; this one preserves the ordering rule.** The alternatives
+were rejected for stated reasons rather than taste:
+
+| Where | Why not |
+|---|---|
+| Inside `BoundedJsonBody.ReadAsync` — the one place all three readers funnel through | Those readers return a *violations list*, which every caller renders as a 422. A 415 would have to travel as a `BodyRefusal` member that each surface's violation catalogue must remember *not* to word as a violation, and `CodeOf` would need an arm that throws. One chokepoint, three places to get it wrong, and a refusal type smuggled through a channel built for another status. |
+| An `IEndpointFilter` added in `Protect` for body-taking kinds | Genuinely the single registration point, and it would refuse before the delegate did any work. Rejected because it lands **between** the scope 403 and the *policy* 403 — the policy decision is resolved inside the delegate — so a policy-denied caller sending `text/plain` would be answered 415 instead of 403. That reverses a rule this layer states explicitly and treats as security-core, and `Protect` would still need an `if (kind is …)` that a future kind could miss. Not worth changing an authorization ordering as a side effect of a header check. |
+| A `GuardAsync` arm on a thrown exception, like `EnsureUnconditional` | The exceptions `GuardAsync` catches are `MMLib.Alvo.Abstractions` port exceptions with meaning to a provider. 415 is a pure HTTP concern; minting an Abstractions exception for it would widen the port to describe a transport. |
+
+**403 before 415, and 401 before both.** `AlvoContextFilter` answers the credential 401 and the scope
+403 before the delegate runs at all; `EnsureOperationIsAllowed` answers the policy 403 on the line
+above the guard. So the existing rule holds unchanged — *"an unauthorized caller must be told they are
+unauthorized, not that their body was malformed"* — and the guard still refuses before a byte of the
+body is read, which is the resource half of the same rule.
+
+Ordering costs the CSRF defence nothing: the mechanism is the browser's preflight, decided before the
+request is sent (§4.1). Server-side precedence only decides which true thing a caller is told first.
+
+**Exhaustiveness is proved by a test, not by the call sites.** Five call sites means a sixth
+body-taking route could forget one. §6.2's fact enumerates every body-taking `DataApiEndpointKind` and
+drives a `text/plain` request at each — the same construction this file already uses to prove `Protect`
+is on every endpoint two ways.
 
 ### 4.4 The response
 
@@ -419,7 +431,7 @@ grown-baseline check — answered here rather than at commit time:
 |---|---|
 | `AlvoApiOptions.RequireJsonContentType` | An option is configuration; a host cannot opt out of something it cannot see. Same category as the other seven members. |
 | `AlvoProblemTypes.UnsupportedMediaType` | That type's own remarks answer this: *"Public because it **is** the contract: an agent or an embedded host branching on a refusal needs the same constants the framework emits, and a copied string literal is how the two come to disagree."* |
-| *(nothing else)* | The guard itself, the refusal member, the result type and the document entry are all `internal`. |
+| *(nothing else)* | `JsonContentType`, the `IResult` implementation and the document entry are all `internal`. |
 
 `MMLib.Alvo.Abstractions` is untouched — there is no new port, and that is the point: the guard is a
 property of the HTTP surface, not of the data layer, and an embedded host calling `IAlvoData` directly
@@ -460,8 +472,9 @@ Over `AlvoApiWorld`, one fact per claim:
     initializer would leave facts 1–8 green under a suite that always sent JSON.
 11. A caller a policy denies gets **403, not 415**, for a `text/plain` body — the ordering rule.
 12. A caller whose credential cannot be used gets **401, not 415** — the same rule one step earlier.
-13. `BoundedJsonBody.CodeOf(BodyRefusal.UnsupportedMediaType)` throws, and the message says the
-    refusal is answered as a 415 rather than as a violation.
+13. A read route is **unaffected**: `GET {entity}` and `GET {entity}/{id}` with a `text/plain`
+    `Content-Type` and no body still answer 200. The guard must not spread to routes that parse no
+    body, or it refuses a request that was fine.
 
 ### 6.3 The sample, ring2
 
