@@ -48,8 +48,7 @@ curl -s -XPOST localhost:5199/api/alvo/owners \
 
 # This app's surface: its own cookie, its own endpoints, Alvo's policy.
 curl -s -c /tmp/fleet -XPOST localhost:5199/app/login \
-  -H "Content-Type: application/json" \
-  -d '{"user":"11111111-1111-1111-1111-111111111111","roles":["inspector"]}'
+  -H "Content-Type: application/json" -d '{"user":"inspector"}'
 curl -s -b /tmp/fleet localhost:5199/app/vehicles
 ```
 
@@ -66,12 +65,29 @@ curl -s -b /tmp/fleet localhost:5199/app/vehicles
 | Your users, Alvo's rules | `AsCaller` → `IRoleCatalogProvider` → `RoleCatalog.Resolve` → `AlvoContext` | an application role can only be minted through the catalog the applied descriptor primed, so a typo is refused where it arrives |
 | Your wire contract, Alvo's field map | `RepaintRequest` mapped to a field dictionary | a host owns its DTOs; a `Dictionary<string, object?>` bound straight from JSON carries `JsonElement` values `IAlvoData` has no field type for |
 | The CSRF guard | `RequireJsonContentType` left at its default | #191 — and this host is exactly the context that default exists for |
+| Tenancy, by its absence | `AsCaller` sets no `Tenant` | `vehicles.alvo.json` declares none; a host over a **tenant-scoped** entity must set `AlvoContext.Tenant`, or every request is denied at the decision layer |
 
 **The demonstration worth reading twice** is `PATCH /app/vehicles/{id}`. The descriptor says
 `vehicles.update: "'admin' in @user.roles || 'inspector' in @user.roles"`, and this sample contains no
 authorization code at all — so a cookie user holding `inspector` repaints a vehicle and a plain
 `authenticated` one gets a **404**, because the rule renders to a row-level `USING` predicate and for that
 caller the row is *invisible* rather than forbidden.
+
+### About `/app/login`
+
+It is a **development-only** endpoint — mapped only outside production, and a test pins that — and it
+issues a cookie with **no credential of any kind**. It takes a demo user's *name* (`inspector` or `clerk`)
+and reads that user's roles from a fixed table inside the app.
+
+**It deliberately does not take a role list from the request**, which is the shape it had first. A sign-in
+that lets the caller name its own roles is an unauthenticated privilege-escalation endpoint, and "this app
+writes no authorization logic of its own" — true, and the good half of this sample — is no comfort if its
+*authentication* trusts whatever arrives. Replace this endpoint with your own identity provider; what has to
+survive the replacement is that **the roles come from somewhere the caller does not control**.
+
+The cookie's own options are set explicitly rather than defaulted, for the same reason: `SameSite=Lax` is
+what stops a cross-site form from carrying it, `Secure` is unconditional outside development, and the
+session has a finite lifetime.
 
 ## One thing embedded cannot do yet
 

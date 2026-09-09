@@ -356,14 +356,18 @@ internal static class ProblemResultFactory
     /// </para>
     /// </remarks>
     /// <param name="method">The request's method, which decides the advertised header and its value.</param>
-    internal static IResult UnsupportedMediaType(string method) => new AdvertisingResult(
-        Problem(
-            StatusCodes.Status415UnsupportedMediaType,
-            AlvoProblemTypes.UnsupportedMediaType,
-            "This endpoint reads a JSON request body. Send it with 'Content-Type: "
-            + $"{JsonContentType.Advertised(method)}'."),
-        AcceptHeaderFor(method),
-        JsonContentType.Advertised(method));
+    internal static IResult UnsupportedMediaType(string method)
+    {
+        var advertised = JsonContentType.Advertised(method);
+
+        return new AdvertisingResult(
+            Problem(
+                StatusCodes.Status415UnsupportedMediaType,
+                AlvoProblemTypes.UnsupportedMediaType,
+                $"This endpoint reads a JSON request body. Send it with 'Content-Type: {advertised}'."),
+            AcceptHeaderFor(method),
+            advertised);
+    }
 
     /// <summary>
     /// The registered header advertising acceptable media types for <paramref name="method"/>, or

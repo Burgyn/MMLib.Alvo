@@ -932,10 +932,14 @@ Alvo can mint, not a per-host reachability claim.
   accurate — the request no longer arrives as JSON — but it moves a case documented above under
   [the batch](#the-batch-one-path-three-verbs-one-transaction-106). **#206** would remove the case entirely
   by moving the verb.
-- **`Alvo:Auth:HeaderName` may no longer name a browser-attached header.** `Cookie` is refused at startup.
-  It was configuration-reachable — `Alvo__Auth__HeaderName=Cookie` with no code change and nothing to
-  review — and combined with a custom `IAlvoContextResolver` it was the whole reason this guard is needed.
-  A host that wants its own users on the generated routes wants **#210**, not this.
+- **Neither `Alvo:Auth:HeaderName` nor `Alvo:Auth:TenantHeaderName` may name a browser-attached header.**
+  `Cookie` is refused at startup, for both. It was configuration-reachable — `Alvo__Auth__HeaderName=Cookie`
+  with no code change and nothing to review — and combined with a custom `IAlvoContextResolver` it was the
+  whole reason this guard is needed. The tenant header buys an attacker nothing on its own, and is covered
+  because it is the same one-variable mistake in the same section. `Authorization` is deliberately *not*
+  refused: a browser re-sends it only to an origin where the user already completed an HTTP authentication
+  challenge, it is not CORS-safelisted, and it is a legitimate place for an API key. A host that wants its
+  own users on the generated routes wants **#210**, not any of this.
 
 ## The status and `type`-slug catalogue
 

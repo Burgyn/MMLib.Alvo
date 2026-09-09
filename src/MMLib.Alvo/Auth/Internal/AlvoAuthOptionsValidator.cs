@@ -18,7 +18,8 @@ internal sealed class AlvoAuthOptionsValidator : IValidateOptions<AlvoAuthOption
         var failures = new List<string>();
         var seenKeyIds = new HashSet<string>(StringComparer.Ordinal);
 
-        ValidateHeaderName(options.HeaderName, failures);
+        ValidateHeaderName(nameof(AlvoAuthOptions.HeaderName), options.HeaderName, failures);
+        ValidateHeaderName(nameof(AlvoAuthOptions.TenantHeaderName), options.TenantHeaderName, failures);
 
         foreach (var key in options.DevKeys)
         {
@@ -32,9 +33,18 @@ internal sealed class AlvoAuthOptionsValidator : IValidateOptions<AlvoAuthOption
 
     /// <summary>Headers a browser attaches by itself, which a credential must never be read from.</summary>
     /// <remarks>
-    /// <c>Cookie</c> is the whole list, and one entry is enough: it is the only request header a browser
-    /// attaches to a cross-origin request <em>without the page asking</em>. Every other header a forged
-    /// request could carry has to be set by script, which is what a preflight then governs.
+    /// <para>
+    /// <c>Cookie</c> is the whole list, and one entry is enough: it is the request header a browser attaches
+    /// to a cross-origin request <em>without the page asking</em>, for every visitor who has one. Every other
+    /// header a forged request could carry has to be set by script, which is what a preflight then governs.
+    /// </para>
+    /// <para>
+    /// <b><c>Authorization</c> is deliberately not on the list, and the exception is stated so a later reader
+    /// does not re-derive it and doubt the list.</b> A browser does re-send it by itself, but only to an
+    /// origin where the user has already completed an HTTP authentication challenge — and it is not
+    /// CORS-safelisted, so script cannot set it cross-origin without a preflight. It is also a legitimate
+    /// place for an API key, which <c>Cookie</c> never is.
+    /// </para>
     /// </remarks>
     private static readonly string[] _browserAttachedHeaders = ["Cookie"];
 
@@ -66,19 +76,23 @@ internal sealed class AlvoAuthOptionsValidator : IValidateOptions<AlvoAuthOption
     /// What this refuses is the version nobody decided: a one-line environment override.
     /// </para>
     /// </remarks>
-    /// <param name="headerName">The configured credential header.</param>
+    /// <param name="option">The option's name, so the message names the key an operator has to change.</param>
+    /// <param name="headerName">The configured header.</param>
     /// <param name="failures">The failure list to add to.</param>
-    private static void ValidateHeaderName(string headerName, List<string> failures)
+    private static void ValidateHeaderName(string option, string headerName, List<string> failures)
     {
-        if (!_browserAttachedHeaders.Contains(headerName, StringComparer.OrdinalIgnoreCase))
+        // Trimmed before the comparison, and the reason is the message rather than the security: a
+        // configured "Cookie " reads no header at all, so the host is broken rather than exposed — and an
+        // operator facing a blanket 403 with no explanation is exactly who this validator exists for.
+        if (!_browserAttachedHeaders.Contains(headerName.Trim(), StringComparer.OrdinalIgnoreCase))
         {
             return;
         }
 
         failures.Add(
-            $"Alvo:Auth:HeaderName is '{headerName}', a header the browser attaches to cross-origin "
+            $"Alvo:Auth:{option} is '{headerName}', a header the browser attaches to cross-origin "
             + "requests by itself — reading a credential from it makes every Alvo route a "
-            + "cross-site-request-forgery target. Read the credential from a header only script can set "
+            + "cross-site-request-forgery target. Read it from a header only script can set "
             + "(the default is 'X-Alvo-Api-Key'). To let your host's own users reach Alvo, resolve them in "
             + "your own endpoints and pass the AlvoContext to IAlvoData instead; see "
             + "samples/MMLib.Alvo.Samples.EmbeddedHost.");

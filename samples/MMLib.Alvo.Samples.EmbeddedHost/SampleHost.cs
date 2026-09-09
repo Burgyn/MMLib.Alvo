@@ -59,9 +59,23 @@ public static class SampleHost
 
         // This app's own authentication. Nothing about it is Alvo's: an embedded host owns its pipeline,
         // and Alvo never adds authentication, authorization or routing middleware on a host's behalf.
+        //
+        // The options are set explicitly rather than defaulted, because a sample is a specification of the
+        // pattern people copy: SameSite=Lax is what keeps a cross-site form from carrying this cookie,
+        // Secure is unconditional outside development, and a session with no expiry is one nobody can end.
         builder.Services
             .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
-            .AddCookie(options => options.Cookie.Name = "fleet-desk");
+            .AddCookie(options =>
+            {
+                options.Cookie.Name = "fleet-desk";
+                options.Cookie.HttpOnly = true;
+                options.Cookie.SameSite = SameSiteMode.Lax;
+                options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
+                    ? CookieSecurePolicy.SameAsRequest
+                    : CookieSecurePolicy.Always;
+                options.ExpireTimeSpan = TimeSpan.FromHours(8);
+                options.SlidingExpiration = false;
+            });
         builder.Services.AddAuthorization();
 
         // Alvo's own credential for the /api/alvo surface. The secret is deliberately absent from
@@ -126,20 +140,35 @@ public static class SampleHost
     /// <param name="app">The application to map onto.</param>
     private static void MapAppEndpoints(WebApplication app)
     {
-        // A development sign-in. A real app has its own; all that matters here is that the cookie ends up
-        // carrying a stable user id and the role names this app grants.
-        app.MapPost("/app/login", (LoginRequest request, HttpContext http) =>
+        // A development sign-in, and DEVELOPMENT-ONLY: it is mapped at all only outside production,
+        // because it issues a cookie with no credential of any kind.
+        //
+        // It takes a demo user's NAME and reads that user's roles from a fixed table on this side. It does
+        // NOT take a role list from the request, which is the shape this endpoint had first and the shape a
+        // reader would have copied: a caller naming its own roles is an unauthenticated
+        // privilege-escalation endpoint, and the fact that this app writes no *authorization* logic is no
+        // comfort if its *authentication* trusts whatever arrives.
+        if (!app.Environment.IsProduction())
         {
-            var identity = new ClaimsIdentity(
-                [
-                    new Claim(ClaimTypes.NameIdentifier, request.User.ToString()),
-                    .. request.Roles.Select(role => new Claim(ClaimTypes.Role, role)),
-                ],
-                CookieAuthenticationDefaults.AuthenticationScheme);
+            app.MapPost("/app/login", (LoginRequest request, HttpContext http) =>
+            {
+                if (!DemoUsers.TryGetValue(request.User, out var user))
+                {
+                    return Results.NotFound(new { known = DemoUsers.Keys });
+                }
 
-            return http.SignInAsync(
-                CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(identity));
-        });
+                var identity = new ClaimsIdentity(
+                    [
+                        new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+                        .. user.Roles.Select(role => new Claim(ClaimTypes.Role, role)),
+                    ],
+                    CookieAuthenticationDefaults.AuthenticationScheme);
+
+                return Results.SignIn(
+                    new ClaimsPrincipal(identity), authenticationScheme:
+                    CookieAuthenticationDefaults.AuthenticationScheme);
+            });
+        }
 
         // A read. `vehicles.list` admits any authenticated caller, so every signed-in user gets a page —
         // and the rows they get are the rows the descriptor's own predicate admits, not a set this file
@@ -216,6 +245,12 @@ public static class SampleHost
     /// bigger than its backend's, and only the overlap means anything to Alvo's rules.
     /// </para>
     /// <para>
+    /// <b>No <c>Tenant</c> is set, and that is a property of this descriptor rather than a shortcut.</b>
+    /// <c>vehicles.alvo.json</c> declares no tenancy, so there is no tenant to carry. A host over a
+    /// tenant-scoped entity must set <see cref="AlvoContext.Tenant"/> here, or every request is denied at
+    /// the decision layer — <c>PolicyEngine</c> refuses a tenantless caller on a scoped entity by design.
+    /// </para>
+    /// <para>
     /// <b>The two ways this can fail are answered differently, deliberately.</b>
     /// <c>DeclaredRoles</c> is <see langword="null"/> until a descriptor is applied, and its contract is to
     /// fail closed on that — but it is a <em>boot</em> problem, so it earns a 503 rather than a 401 that
@@ -284,6 +319,22 @@ public static class SampleHost
         }
     }
 
+    /// <summary>
+    /// The fixed set of users the development sign-in will issue a cookie for, and the roles each holds.
+    /// </summary>
+    /// <remarks>
+    /// <b>Server-side on purpose.</b> A real host resolves these from its own identity provider; what
+    /// matters for the seam this sample demonstrates is only that the roles come from somewhere the caller
+    /// does not control. The two entries are the two halves of the demonstration:
+    /// <c>vehicles.update</c> admits <c>inspector</c> and <c>clerk</c> is a plain authenticated user.
+    /// </remarks>
+    private static IReadOnlyDictionary<string, DemoUser> DemoUsers { get; } =
+        new Dictionary<string, DemoUser>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["inspector"] = new(Guid.Parse("3f6b9c21-5a4d-4e88-9b2f-7c1a0d5e6f30"), ["inspector"]),
+            ["clerk"] = new(Guid.Parse("b8a45d17-2e93-4c60-8f1d-6a2b3c4d5e6f"), []),
+        };
+
     /// <summary>Where this app keeps its SQLite file.</summary>
     /// <remarks>
     /// Configurable because the suite runs several hosts and each needs a database of its own; the default
@@ -330,7 +381,14 @@ public static class SampleHost
 /// <param name="Color">The vehicle's new colour.</param>
 public sealed record RepaintRequest(string Color);
 
-/// <summary>A development sign-in request.</summary>
-/// <param name="User">The user id the cookie will carry.</param>
-/// <param name="Roles">The role names this app grants the user.</param>
-public sealed record LoginRequest(Guid User, IReadOnlyList<string> Roles);
+/// <summary>A development sign-in request: which demo user to sign in as.</summary>
+/// <remarks>
+/// It names a user and carries no roles, which is the whole point — see <c>/app/login</c>'s own comment.
+/// </remarks>
+/// <param name="User">The demo user's name, resolved server-side.</param>
+public sealed record LoginRequest(string User);
+
+/// <summary>One demo user: a stable id and the roles this app grants them.</summary>
+/// <param name="Id">The user id the cookie will carry, and the id Alvo's audit columns record.</param>
+/// <param name="Roles">The role names this app grants; only those the descriptor declares reach Alvo.</param>
+public sealed record DemoUser(Guid Id, IReadOnlyList<string> Roles);

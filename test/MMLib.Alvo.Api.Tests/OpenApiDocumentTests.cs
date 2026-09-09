@@ -1482,13 +1482,6 @@ public sealed class OpenApiDocumentTests
     /// <param name="Key">The key to present, or <see langword="null"/> for an anonymous caller.</param>
     /// <param name="Body">The body to send, or <see langword="null"/> for none.</param>
     /// <param name="Headers">Any further request headers the status needs.</param>
-    /// <param name="Operation">The operation this probe drives, as the document spells it.</param>
-    /// <param name="Status">The status it goes for, asserted before it counts.</param>
-    /// <param name="Method">The HTTP method.</param>
-    /// <param name="Path">The request path.</param>
-    /// <param name="Key">The credential to present, or <see langword="null"/> for none.</param>
-    /// <param name="Body">The body to send, or <see langword="null"/> for none.</param>
-    /// <param name="Headers">Any further request headers.</param>
     /// <param name="MediaType">
     /// The media type the body is declared under; <see langword="null"/> means <c>application/json</c>, which
     /// every probe but the 415 ones wants. It exists because the guard's whole subject is a declaration, and

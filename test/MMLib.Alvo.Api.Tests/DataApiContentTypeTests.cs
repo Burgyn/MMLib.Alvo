@@ -185,14 +185,20 @@ public class DataApiContentTypeTests
     }
 
     /// <summary>
-    /// A form-urlencoded body is refused — one of the three values WHATWG Fetch safelists, and the one a
-    /// cross-site HTML form actually sends.
+    /// <b>All three CORS-safelisted values are refused, and the list is the guard's whole justification.</b>
+    /// WHATWG Fetch safelists exactly <c>application/x-www-form-urlencoded</c>, <c>multipart/form-data</c>
+    /// and <c>text/plain</c> — these are the declarations a cross-site HTML form can actually produce, so
+    /// each is enumerated here rather than left to the <c>text/plain</c> case standing in for the family.
     /// </summary>
-    [Fact]
-    public async Task A_form_urlencoded_body_is_refused()
+    /// <param name="safelisted">The safelisted media type to present.</param>
+    [Theory]
+    [InlineData("application/x-www-form-urlencoded")]
+    [InlineData("multipart/form-data; boundary=----WebKitFormBoundaryAlvo")]
+    [InlineData("text/plain")]
+    public async Task Every_cors_safelisted_media_type_is_refused(string safelisted)
     {
         await using var world = await AlvoApiWorld.VehicleRegistryAsync([Admin]);
-        using var content = Body("name=Acme+Ltd", "application/x-www-form-urlencoded");
+        using var content = Body("""{"name":"Acme Ltd"}""", safelisted);
 
         using var response = await world.SendRawAsync(
             HttpMethod.Post, "/api/owners", Admin, content: content);

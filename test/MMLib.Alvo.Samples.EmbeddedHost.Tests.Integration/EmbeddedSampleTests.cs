@@ -31,6 +31,9 @@ public class EmbeddedSampleTests
     /// <summary>The credential the generated Data API reads.</summary>
     private const string ApiKeyHeader = "X-Alvo-Api-Key";
 
+    /// <summary>The roles a caller would try to grant itself, if the sign-in read them from the body.</summary>
+    private static readonly string[] _forgedRoles = ["admin"];
+
     /// <summary>The descriptor both modes serve — the one the root compose mounts into the image.</summary>
     private static string DescriptorPath => Path.Combine(
         RepositoryRoot.Find(), "examples", "vehicle-registry", "vehicles.alvo.json");
@@ -112,12 +115,12 @@ public class EmbeddedSampleTests
         await using var sample = await SampleWorld.StartAsync();
         var vehicleId = await sample.SeedAVehicleAsync();
 
-        using var inspector = await sample.SignedInAsync(["inspector"]);
+        using var inspector = await sample.SignedInAsync("inspector");
         using var repainted = await inspector.PatchAsJsonAsync(
             $"/app/vehicles/{vehicleId}", new RepaintRequest("red"), ct);
         repainted.StatusCode.ShouldBe(HttpStatusCode.OK);
 
-        using var plain = await sample.SignedInAsync([]);
+        using var plain = await sample.SignedInAsync("clerk");
         using var refused = await plain.PatchAsJsonAsync(
             $"/app/vehicles/{vehicleId}", new RepaintRequest("blue"), ct);
         refused.StatusCode.ShouldBe(
@@ -128,6 +131,63 @@ public class EmbeddedSampleTests
         using var read = await plain.GetAsync("/app/vehicles", ct);
         read.StatusCode.ShouldBe(
             HttpStatusCode.OK, "vehicles.list admits any authenticated caller, so the same user may read");
+    }
+
+    /// <summary>
+    /// The development sign-in refuses a user it does not know, so a caller cannot name its own identity —
+    /// and it grants no role the caller asked for, because it takes no role list at all.
+    /// </summary>
+    /// <remarks>
+    /// <b>This fact exists because the endpoint had the other shape first.</b> A sign-in that accepted a
+    /// role list is an unauthenticated privilege-escalation endpoint, and a sample is a specification of the
+    /// pattern people copy — so the refusal is pinned rather than left to the endpoint's comment.
+    /// </remarks>
+    [Fact]
+    public async Task The_development_sign_in_does_not_let_a_caller_choose_its_own_identity()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var sample = await SampleWorld.StartAsync();
+        using var client = sample.WithoutCredentials();
+
+        using var unknown = await client.PostAsJsonAsync("/app/login", new LoginRequest("root"), ct);
+        using var forged = await client.PostAsJsonAsync(
+            "/app/login", new { User = "clerk", Roles = _forgedRoles }, ct);
+
+        unknown.StatusCode.ShouldBe(
+            HttpStatusCode.NotFound, "only the demo users this app declares may be signed in as");
+        forged.StatusCode.ShouldBe(
+            HttpStatusCode.OK, "an extra member is ignored rather than refused, which is the risk");
+        forged.Headers.GetValues("Set-Cookie").ShouldNotBeEmpty();
+
+        // And the cookie it issued is the clerk's, not an admin's: the roles came from the sample's table.
+        var cookie = forged.Headers.GetValues("Set-Cookie").First().Split(';')[0];
+        using var asClerk = sample.WithoutCredentials();
+        asClerk.DefaultRequestHeaders.Add("Cookie", cookie);
+        var vehicleId = await sample.SeedAVehicleAsync();
+
+        using var refused = await asClerk.PatchAsJsonAsync(
+            $"/app/vehicles/{vehicleId}", new RepaintRequest("gold"), ct);
+
+        refused.StatusCode.ShouldBe(
+            HttpStatusCode.NotFound,
+            "the request asked for 'admin' and got the clerk's roles, so vehicles.update still excludes it");
+    }
+
+    /// <summary>
+    /// The development sign-in is <b>not mapped at all</b> in production. It issues a cookie with no
+    /// credential of any kind, so its absence there is the control that makes it safe to ship in a file
+    /// people copy — and a comment saying "development only" is not a control.
+    /// </summary>
+    [Fact]
+    public async Task The_development_sign_in_is_not_mapped_in_production()
+    {
+        await using var sample = await SampleWorld.StartAsync(environment: "Production");
+        using var client = sample.WithoutCredentials();
+
+        using var response = await client.PostAsJsonAsync(
+            "/app/login", new LoginRequest("inspector"), TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }
 
     /// <summary>An unauthenticated caller sees no data on either surface.</summary>
@@ -237,11 +297,18 @@ public class EmbeddedSampleTests
         internal IEnumerable<Endpoint> Routes =>
             _app.Services.GetRequiredService<EndpointDataSource>().Endpoints;
 
-        internal static async Task<SampleWorld> StartAsync()
+        /// <summary>Starts the sample.</summary>
+        /// <param name="environment">
+        /// Which environment to run as, passed as <c>--environment</c> because the host reads it before any
+        /// configuration source this fixture could add. It defaults to <c>Development</c>, which is what
+        /// makes the development sign-in reachable at all —
+        /// <see cref="The_development_sign_in_is_not_mapped_in_production"/> is the other half.
+        /// </param>
+        internal static async Task<SampleWorld> StartAsync(string environment = "Development")
         {
             var databasePath = TempDatabasePath("sample");
             var builder = SampleHost.CreateBuilder(
-                [],
+                ["--environment", environment],
                 configuration => configuration.AddInMemoryCollection(new Dictionary<string, string?>
                 {
                     ["Alvo:Auth:DevKeys:0:Secret"] = Secret,
@@ -256,15 +323,17 @@ public class EmbeddedSampleTests
             return new SampleWorld(app, databasePath);
         }
 
-        /// <summary>A client holding this app's sign-in cookie for <paramref name="roles"/>.</summary>
-        /// <param name="roles">The role names the sign-in grants beyond <c>authenticated</c>.</param>
-        internal async Task<HttpClient> SignedInAsync(IReadOnlyList<string> roles)
+        /// <summary>A client holding this app's sign-in cookie for one of its demo users.</summary>
+        /// <remarks>
+        /// The user is named and its roles come from the sample's own table — the sign-in takes no role list
+        /// from the caller, which is the point of that endpoint's shape and therefore of this helper's.
+        /// </remarks>
+        /// <param name="user">The demo user's name: <c>inspector</c> or <c>clerk</c>.</param>
+        internal async Task<HttpClient> SignedInAsync(string user)
         {
             var client = _app.GetTestServer().CreateClient();
             using var response = await client.PostAsJsonAsync(
-                "/app/login",
-                new LoginRequest(Guid.NewGuid(), roles),
-                TestContext.Current.CancellationToken);
+                "/app/login", new LoginRequest(user), TestContext.Current.CancellationToken);
             response.EnsureSuccessStatusCode();
 
             var cookie = response.Headers.GetValues("Set-Cookie").First().Split(';')[0];
