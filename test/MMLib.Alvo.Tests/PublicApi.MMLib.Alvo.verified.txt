@@ -20,7 +20,6 @@ namespace MMLib.Alvo.Api
         public int MaxPayloadDepth { get; set; }
         public int MaxPayloadKeys { get; set; }
         public int MaxRequestBodyBytes { get; set; }
-        public bool RequireJsonContentType { get; set; }
         public string RoutePrefix { get; set; }
     }
     public static class AlvoHealth

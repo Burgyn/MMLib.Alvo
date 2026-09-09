@@ -811,39 +811,6 @@ public sealed class OpenApiDocumentTests
             [_admin, _narrow],
             new AlvoApiWorldSetup(MapOpenApiDocument: true));
 
-    /// <summary>
-    /// A host that turned the <c>Content-Type</c> guard off publishes no 415 — on no operation and as no
-    /// component. A document listing a status no request can reach describes behaviour that does not exist,
-    /// and a component nothing can reference is the orphan
-    /// <c>AlvoDocumentTransformer.Reusable</c>'s own remarks argue against.
-    /// </summary>
-    /// <remarks>
-    /// <b>The problem <c>type</c> enumeration is deliberately not asserted here, and the distinction is the
-    /// point.</b> <c>ProblemComponents</c> publishes <c>AlvoProblemTypes.All</c> verbatim, and
-    /// <see cref="The_problem_details_shape_is_a_component_referenced_by_every_error_response"/> pins that as
-    /// set equality: the enum is
-    /// the framework's <em>vocabulary</em>, one document-wide list of every classification Alvo can ever mint,
-    /// not a per-host reachability claim. A response listing is the reachability claim, which is why only that
-    /// half moves with the option.
-    /// </remarks>
-    [Fact]
-    public async Task A_host_that_opted_out_publishes_no_415()
-    {
-        await using var world = await AlvoApiWorld.FromDescriptorAsync(
-            "documented-store.alvo.json",
-            [_admin, _narrow],
-            new AlvoApiWorldSetup(
-                MapOpenApiDocument: true, ConfigureApi: api => api.RequireJsonContentType = false));
-
-        var document = await world.OpenApiDocumentAsync();
-
-        Operations(document)
-            .SelectMany(operation => operation["responses"]!.AsObject().Select(response => response.Key))
-            .ShouldNotContain("415", "no request can reach it, so no operation may promise it");
-        document["components"]!["responses"]!.AsObject().ContainsKey("unsupportedMediaType").ShouldBeFalse(
-            "a published component nothing in the document can point at is an orphan");
-    }
-
     /// <summary>Every route Alvo mapped, as <c>METHOD path</c> in the document's own path spelling.</summary>
     /// <remarks>
     /// The route constraint is stripped here independently of the production code that strips it: OpenAPI has no

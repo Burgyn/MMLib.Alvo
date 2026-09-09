@@ -85,7 +85,7 @@ internal sealed class AlvoDocumentTransformer(
 
         foreach (var endpoint in generated)
         {
-            Enrich(document, views[endpoint.Marker.Entity], endpoint, options.Value);
+            Enrich(document, views[endpoint.Marker.Entity], endpoint);
         }
 
         return Task.CompletedTask;
@@ -339,8 +339,8 @@ internal sealed class AlvoDocumentTransformer(
     private void Reusable(
         OpenApiDocument document, IReadOnlyList<(DataApiEndpointKind Kind, EntitySchema Entity)> operations)
     {
-        DataApiHeaders.AddTo(document, operations, options.Value);
-        foreach (var refusal in DataApiDocumentation.SharedRefusals(options.Value))
+        DataApiHeaders.AddTo(document, operations);
+        foreach (var refusal in DataApiDocumentation.SharedRefusals)
         {
             document.AddComponent(refusal.SharedId!, Response(refusal, entity: null, document));
         }
@@ -403,15 +403,7 @@ internal sealed class AlvoDocumentTransformer(
             + "WithTags(entity.Name). The document and the endpoint table disagree about what was mapped.");
 
     /// <summary>Rewrites one operation into the contract its endpoint actually implements.</summary>
-    /// <param name="document">The document being rewritten.</param>
-    /// <param name="view">The entity as this document publishes it.</param>
-    /// <param name="endpoint">The endpoint whose operation to rewrite.</param>
-    /// <param name="apiOptions">
-    /// The API options the response catalogue is read under — passed down rather than read off the primary
-    /// constructor, which a static member cannot reach.
-    /// </param>
-    private static void Enrich(
-        OpenApiDocument document, EntityView view, Endpoint endpoint, AlvoApiOptions apiOptions)
+    private static void Enrich(OpenApiDocument document, EntityView view, Endpoint endpoint)
     {
         var entity = view.Schema;
         var operation = Find(document, endpoint);
@@ -424,7 +416,7 @@ internal sealed class AlvoDocumentTransformer(
         operation.Parameters = DataApiParameters.For(
             endpoint.Marker.Kind, entity, flags.Hidden, document);
         operation.RequestBody = RequestBody(endpoint.Marker, entity, document);
-        operation.Responses = Responses(endpoint.Marker, entity, document, apiOptions);
+        operation.Responses = Responses(endpoint.Marker, entity, document);
         operation.Security = Security(document);
     }
 
@@ -614,21 +606,11 @@ internal sealed class AlvoDocumentTransformer(
     /// 200 with no schema beside the real ones; and the catalogue is the authority for which statuses exist, so
     /// anything else present is by definition not one this endpoint answers with.
     /// </remarks>
-    /// <param name="marker">The endpoint's own kind-and-entity metadata.</param>
-    /// <param name="entity">The entity the operation serves.</param>
-    /// <param name="document">The document being built.</param>
-    /// <param name="apiOptions">
-    /// The API options the catalogue is read under — passed rather than read off the primary constructor,
-    /// which a static member cannot reach.
-    /// </param>
     private static OpenApiResponses Responses(
-        DataApiOperationMetadata marker,
-        EntitySchema entity,
-        OpenApiDocument document,
-        AlvoApiOptions apiOptions)
+        DataApiOperationMetadata marker, EntitySchema entity, OpenApiDocument document)
     {
         var responses = new OpenApiResponses();
-        foreach (var response in DataApiDocumentation.ResponsesFor(marker.Kind, entity, apiOptions))
+        foreach (var response in DataApiDocumentation.ResponsesFor(marker.Kind, entity))
         {
             responses[Text(response.Status)] = response.SharedId is { } shared
                 ? Referenced(response, shared, document)

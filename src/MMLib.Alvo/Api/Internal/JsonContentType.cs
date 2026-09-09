@@ -80,19 +80,22 @@ internal static class JsonContentType
     /// Refuses the request when it does not declare a JSON body, or <see langword="null"/> when it may
     /// proceed.
     /// </summary>
+    /// <remarks>
+    /// <b>Unconditional, and an option to turn it off was considered and dropped.</b> The case for one was
+    /// "a host with its own CSRF defence should not be forced through Alvo's" — which does not hold: leaving
+    /// the requirement on costs such a host nothing, because every legitimate client already sends
+    /// <c>application/json</c>. The only real case is a legacy caller that sends no <c>Content-Type</c>, and
+    /// Alvo has no released package and therefore no such caller. Adding an option later is not a breaking
+    /// change; removing one is, so the asymmetry says not now — and an option that disables a security
+    /// control is a liability of its own, being a thing a later host sets without understanding why it is
+    /// there.
+    /// </remarks>
     /// <param name="request">The request whose declaration to judge.</param>
-    /// <param name="options">
-    /// The API options; <see cref="AlvoApiOptions.RequireJsonContentType"/> turns this off for a host with
-    /// its own CSRF defence.
-    /// </param>
-    internal static IResult? Refuse(HttpRequest request, AlvoApiOptions options)
+    internal static IResult? Refuse(HttpRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        ArgumentNullException.ThrowIfNull(options);
 
-        return !options.RequireJsonContentType || IsJson(request.ContentType)
-            ? null
-            : ProblemResultFactory.UnsupportedMediaType(request.Method);
+        return IsJson(request.ContentType) ? null : ProblemResultFactory.UnsupportedMediaType(request.Method);
     }
 
     /// <summary>

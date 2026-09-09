@@ -59,9 +59,9 @@ internal sealed class AlvoAuthOptionsValidator : IValidateOptions<AlvoAuthOption
     /// <c>Alvo:Auth</c> section — the standalone host does, and so does the embedded sample — so
     /// <c>Alvo__Auth__HeaderName=Cookie</c> is an environment variable away, with no code change and no
     /// review to catch it. The combination it enables is exactly #191's threat model: a browser-authenticated
-    /// caller reaching a body-taking route, at which point
-    /// <see cref="Api.AlvoApiOptions.RequireJsonContentType"/> is the only thing left standing between a
-    /// cross-site form and a write.
+    /// caller reaching a body-taking route, at which point the JSON <c>Content-Type</c> requirement
+    /// (<c>Api.Internal.JsonContentType</c>) is the only thing left standing between a cross-site form and a
+    /// write.
     /// </para>
     /// <para>
     /// <b>Refused rather than warned about, and refused at startup.</b> A warning in a log an operator is

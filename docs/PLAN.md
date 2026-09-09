@@ -118,9 +118,10 @@ other:**
 2. **[#191] The Data API requires a JSON `Content-Type`.** Seven body-taking
    routes answer 415 for a body that is not declared as JSON, or declares
    nothing at all — the preflight a cross-site form cannot generate.
-   `AlvoApiOptions.RequireJsonContentType` defaults to `true`, so a host opts
-   out rather than in, and the generated document lists the status exactly where
-   a request can reach it. Reading the code first **corrected the issue's own
+   The requirement is unconditional — an option to turn it off was written and
+   then dropped, because its justification did not hold and an option that
+   disables a security control is a liability — and the generated document lists
+   the status exactly where a request can reach it. Reading the code first **corrected the issue's own
    premise**: the vector is not reachable through `IAlvoContextAccessor`, which
    `AlvoContextFilter` overwrites on every request, but through
    `Alvo:Auth:HeaderName` — configuration — plus a custom

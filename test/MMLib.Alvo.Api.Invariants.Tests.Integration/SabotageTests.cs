@@ -61,25 +61,27 @@ public class SabotageTests
             + "duplicate write would go unnoticed");
     }
 
-    /// <summary>The media-type invariant goes red when the host opts out of the guard.</summary>
+    /// <summary>
+    /// The media-type invariant goes red when host middleware answers the caller's declaration for them.
+    /// </summary>
     /// <remarks>
-    /// The saboteur here is a configuration value rather than a decorator, which makes this the closest of
-    /// the three to a regression somebody would really ship: the option exists, and a host that turns it off
-    /// without its own cross-site-request-forgery defence has reopened #191's door.
+    /// The closest of the three saboteurs to a regression somebody would really ship: a compatibility shim
+    /// in front of Alvo that sets <c>Content-Type</c> so "old clients keep working" reopens #191's door,
+    /// and every request still looks well-formed afterwards.
     /// </remarks>
     [Fact]
-    public async Task Turning_the_media_type_guard_off_makes_its_invariant_fail()
+    public async Task Bypassing_the_media_type_guard_upstream_makes_its_invariant_fail()
     {
         var project = Project;
         await using var world = await project.StartAsync(
-            [project.Admin()], Sabotage.TheMediaTypeGuardIsOff());
+            [project.Admin()], Sabotage.TheMediaTypeGuardIsBypassedUpstream());
 
         var failure = await Record.ExceptionAsync(
             () => BehaviourInvariants.NonJsonBodiesAreRefusedAsync(world, project));
 
         failure.ShouldNotBeNull(
-            "a host with the guard off must make the media-type invariant fail; it passed, so a body-taking "
-            + "route reachable as a CORS simple request would go unnoticed");
+            "middleware that rewrites the declaration must make the media-type invariant fail; it passed, "
+            + "so a body-taking route reachable as a CORS simple request would go unnoticed");
     }
 
     /// <summary>

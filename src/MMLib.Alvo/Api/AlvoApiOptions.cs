@@ -126,38 +126,4 @@ public sealed class AlvoApiOptions
     /// </para>
     /// </remarks>
     public int MaxIdempotencyKeyBytes { get; set; } = Data.AlvoIdempotency.MaxKeyBytes;
-
-    /// <summary>
-    /// Whether a body-taking endpoint requires a JSON <c>Content-Type</c>. Default <see langword="true"/>.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <b>It is a CSRF guard, and the mechanism is the browser's rather than Alvo's.</b> WHATWG Fetch
-    /// safelists three <c>Content-Type</c> values — <c>application/x-www-form-urlencoded</c>,
-    /// <c>multipart/form-data</c> and <c>text/plain</c> — and a request carrying only safelisted headers is
-    /// sent cross-origin with cookies attached and <em>no preflight</em>; a request declaring no
-    /// <c>Content-Type</c> at all is safelisted by omission. Requiring <c>application/json</c> therefore puts
-    /// every body-taking route behind a preflight an HTML form cannot generate. The response being unreadable
-    /// to the attacker does not undo a write, which is why this is a rule about the request and not about
-    /// CORS response headers.
-    /// </para>
-    /// <para>
-    /// <b>Why it matters in embedded mode specifically.</b> Alvo's own credential is a request header, so a
-    /// cross-site form POST arrives with no credential at all and default-deny answers it exactly as it
-    /// answers any other anonymous caller. The forgery only becomes *authenticated* when something
-    /// browser-carried identifies the caller — and the one-variable version of that,
-    /// <see cref="Auth.AlvoAuthOptions.HeaderName"/> pointed at <c>Cookie</c>, is now
-    /// <b>refused at startup</b> (<c>Auth.Internal.AlvoAuthOptionsValidator</c>). What remains reachable is a
-    /// host that maps its own session onto a header in its own middleware, deliberately and visibly: this
-    /// guard is what stands between that host and a cross-site form.
-    /// <c>docs/architecture/data-api.md</c> carries the whole reasoning under "Requiring a JSON
-    /// <c>Content-Type</c>".
-    /// </para>
-    /// <para>
-    /// <b>Set it to <see langword="false"/> only in a host that has its own CSRF defence</b> — ASP.NET Core
-    /// antiforgery, or routes no browser can reach. It restores the previous behaviour exactly, the generated
-    /// document included: with the guard off no request can produce a 415, so none is published.
-    /// </para>
-    /// </remarks>
-    public bool RequireJsonContentType { get; set; } = true;
 }

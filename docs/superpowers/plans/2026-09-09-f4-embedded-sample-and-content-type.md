@@ -21,6 +21,15 @@ Verify for the OpenAPI snapshot, `WebApplicationFactory` for the sample suite, S
 **Spec:** `docs/superpowers/specs/2026-09-09-f4-embedded-sample-and-content-type-design.md` — read it
 first; every task below argues from a numbered section of it.
 
+> **Superseded in five places. The spec is the record; this plan is what was tried.** Implementation and
+> three review rounds reversed: `AlvoApiOptions.RequireJsonContentType` **does not exist** — the guard is
+> unconditional and the spec's §4.2(d) says why, so every mention of the option below is stale, including
+> Task 1, Task 3's options threading, and Task 4's saboteur; the sample's write endpoint is
+> `PATCH /app/vehicles/{id}` on `vehicles.update`, not a create (`vehicles.create` admits `admin` only);
+> the suite uses `TestServer` over each host's own `CreateBuilder`/`Build` seam, not
+> `WebApplicationFactory`; the DoD compares route sets off `EndpointDataSource`, not a served OpenAPI path
+> set; and the guard is the *first* header guard rather than one placed after `EnsureUnconditional`.
+
 ## Global Constraints
 
 - **C# files are UTF-8 with BOM and CRLF line endings.** `.gitattributes` pins `*.cs text eol=crlf` and

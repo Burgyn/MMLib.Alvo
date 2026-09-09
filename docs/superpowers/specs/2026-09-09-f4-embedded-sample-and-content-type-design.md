@@ -276,7 +276,7 @@ line below is in the sample for a named reason, and the `README.md` says which:
 | **No** `AddAlvoProblemDetails()` | an embedded host owns its error rendering | rule 10 / #119 |
 | `IRoleCatalogProvider` + `RoleCatalog.Resolve` | how a host maps its own roles into Alvo's closed set, failing closed on `null` | `IRoleCatalogProvider` contract |
 | `new AlvoContext { … }` + `IAlvoData` | Alvo as a policy-enforcing data layer for the host's own endpoints | `IAlvoData` remarks |
-| `RequireJsonContentType` left at its default | the guard is on in embedded mode, which is where it matters | §4 |
+| nothing to configure for the guard | the JSON `Content-Type` requirement is unconditional, and embedded mode is where that matters | §4 |
 
 Spec §"Režim 2" sketches `AddModule<T>`, `AddAuthorizationHandler<T>`, `UseAdmin`, `Hooks(...)` and
 `.Embedded(e => e.SchemaPrefix("alvo"))`. **None of them exists**, and the sample does not pretend
@@ -350,12 +350,24 @@ not arrive as JSON" — which is what that catalogue's own rule demands, and it 
 `MalformedQuery` (Alvo read the content and refused it) and from `UnreadableRequest` (the server
 refused before Alvo looked).
 
-**(d) The guard is on by default and a host may opt out.**
-`AlvoApiOptions.RequireJsonContentType`, default `true`. Secure-by-default is §0 principle 5; the
-opt-out exists because an embedded host owns its pipeline — a host running ASP.NET Core antiforgery,
-or one whose Alvo routes are unreachable from a browser at all, should not be forced through Alvo's
-version of a defence it already has. `false` restores today's behaviour exactly, including the
-document (§4.5).
+**(d) The guard is unconditional. An opt-out option was built and then dropped.**
+It shipped as `AlvoApiOptions.RequireJsonContentType` (default `true`) on the reasoning that an embedded
+host owns its pipeline and one already running ASP.NET Core antiforgery should not be forced through
+Alvo's version of it. **That reasoning does not survive inspection**, and the option was removed before
+merge: leaving the requirement on costs such a host *nothing*, because every legitimate client already
+sends `application/json`. A host whose Alvo routes no browser can reach is likewise unaffected. The only
+genuine case is a legacy caller sending no `Content-Type`, and Alvo has no released package and therefore
+no such caller.
+
+Two things then settle it. **Adding an option later is not a breaking change; removing one is** — so the
+asymmetry says not now. And **an option that disables a security control is a liability of its own**: a
+thing a later host sets without understanding why it is there, which is the same argument that reshaped
+the sample's sign-in (§3.5). §0 principle 5 is satisfied more simply by there being nothing to set.
+
+Recorded because the cost is what a similar option would cost again: while it existed, `ResponsesFor` and
+`SharedRefusals` took an `AlvoApiOptions` threaded through four collaborators and eight `.Protect` call
+sites, plus a catalogue branch, two facts and an invariant saboteur whose whole content was "somebody
+turned it off".
 
 ### 4.3 Where it is enforced, and why authorization still wins
 
@@ -450,10 +462,16 @@ unreachable from them, and `ResponsesFor`'s contract is that *each entry is a cl
 reach it* — a claim `OpenApiDocumentTests.Every_documented_status_code_is_one_the_endpoint_can_actually_return`
 drives a real request for.
 
-**When `RequireJsonContentType` is `false` the 415 is omitted from the document.** That keeps the
-reachability contract true, and it has a precedent in the same file: the 304 is listed only for an
-entity whose rows carry a version, because otherwise the status is unreachable and a document listing
-it would describe behaviour that does not exist.
+**`List` and `Query` stop sharing a response arm**, which is the one structural consequence: they are one
+read behind two transports and only the body-shaped one can reach a 415, so a shared arm would publish
+the status on the query-string list where no request can produce it. That is the same reachability rule
+the 304 already follows — listed only for an entity whose rows carry a version.
+
+**The problem `type` enumeration stays complete**, and the distinction is worth stating because it looks
+like an inconsistency. `ProblemComponents` publishes `AlvoProblemTypes.All` verbatim and a document fact
+pins that as set equality: the enum is the framework's *vocabulary*, one document-wide list of every
+classification Alvo can ever mint. A response listing is the *reachability* claim. Only the second is
+per-operation.
 
 ### 4.6 Two behaviour changes, recorded rather than discovered
 
@@ -477,9 +495,11 @@ grown-baseline check — answered here rather than at commit time:
 
 | Addition | Why it is `public` and not `internal` |
 |---|---|
-| `AlvoApiOptions.RequireJsonContentType` | An option is configuration; a host cannot opt out of something it cannot see. Same category as the other seven members. |
-| `AlvoProblemTypes.UnsupportedMediaType` | That type's own remarks answer this: *"Public because it **is** the contract: an agent or an embedded host branching on a refusal needs the same constants the framework emits, and a copied string literal is how the two come to disagree."* |
+| `AlvoProblemTypes.UnsupportedMediaType` | That type's own remarks answer this: *"Public because it **is** the contract: an agent or an embedded host branching on a refusal needs the same constants the framework emits, and a copied string literal is how the two come to disagree."* The slug is on the wire regardless — `AlvoProblemTypes.All` is public and the document publishes the whole `type` enum — so keeping it `internal` would hide nothing and force a copied literal, which is the defect the type exists to prevent. |
 | *(nothing else)* | `JsonContentType`, the `IResult` implementation and the document entry are all `internal`. |
+
+**`AlvoApiOptions.RequireJsonContentType` was the second addition and is gone** — §4.2(d) carries the
+reasoning. One added public member is the whole delta.
 
 `MMLib.Alvo.Abstractions` is untouched — there is no new port, and that is the point: the guard is a
 property of the HTTP surface, not of the data layer, and an embedded host calling `IAlvoData` directly
@@ -515,11 +535,11 @@ Over `AlvoApiWorld`, one fact per claim:
    `Content-Type: application/json`.
 8. `Accept-Post` is present on the POST refusals and `Accept-Patch` on the PATCH refusal, with the
    media types §4.4 lists; neither is present on the `PUT` or `DELETE` refusal.
-9. `RequireJsonContentType = false` restores acceptance of `text/plain` on every one of the seven.
-10. The default is `true` — a fact of its own, or the option is invisible to mutation: flipping the
-    initializer would leave facts 1–8 green under a suite that always sent JSON.
-11. A caller a policy denies gets **403, not 415**, for a `text/plain` body — the ordering rule.
-12. A caller whose credential cannot be used gets **401, not 415** — the same rule one step earlier.
+9. A caller the *decision* denies gets **403, not 415** — the ordering rule. Measured over a tenantless
+    caller on a tenant-scoped entity, because that is a decision denial and a role literal is not
+    (§4.3).
+10. A caller whose scopes exclude the operation gets **403, not 415** — the filter, before the delegate.
+11. A caller whose credential cannot be used gets **401, not 415** — one step earlier still.
 13. A read route is **unaffected**: `GET {entity}` and `GET {entity}/{id}` with a `text/plain`
     `Content-Type` and no body still answer 200. The guard must not spread to routes that parse no
     body, or it refuses a request that was fine.
@@ -652,9 +672,10 @@ This design is met when:
 2. The sample's generated Data API route set equals the standalone host's over the same descriptor, as a
    test, compared as `METHOD path` off `EndpointDataSource` with the count pinned from outside.
 3. Every body-taking route refuses a non-JSON or absent `Content-Type` with a 415 problem document,
-   `RequireJsonContentType` defaults to `true` and turns it off, authorization still answers first, and
-   the document lists the 415 exactly where a request can reach it.
-4. The invariant suite holds the guard across the generated descriptors, and its sabotage counterpart
+   unconditionally, authorization still answers first, and the document lists the 415 exactly where a
+   request can reach it.
+4. The invariant suite holds the guard across the generated descriptors, and its sabotage counterpart —
+   host middleware that rewrites the declaration, since there is no option to turn the guard off —
    proves the invariant can fail.
 5. `data-api.md`, `extensibility.md` and `host.md` record what changed — including the correction in
    §7.1 — and `docs/PLAN.md` §3a reflects that F4's remaining work is done.

@@ -127,8 +127,8 @@ public static class AlvoProblemTypes
     /// refusing before Alvo was reached at all.
     /// </para>
     /// <para>
-    /// Answered only while <see cref="AlvoApiOptions.RequireJsonContentType"/> is set. A host that opted out
-    /// never emits one, and its generated document lists it nowhere.
+    /// Answered on every route that reads a request body, and on no other — a read that parses no body
+    /// cannot reach it, which is why the generated document lists it on exactly seven operations per entity.
     /// </para>
     /// </remarks>
     public const string UnsupportedMediaType = "unsupported-media-type";

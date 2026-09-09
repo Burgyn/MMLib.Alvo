@@ -912,18 +912,33 @@ renders as a 422 with a `violations` array, on a path that has already consumed 
 until its delegate calls the guard. `BehaviourInvariants.NonJsonBodiesAreRefusedAsync` holds the same claim
 across the generated descriptor corpus, and its saboteur turns the option off.
 
-### The opt-out, and what it does to the document
+### There is no opt-out, and an option for one was dropped
 
-`AlvoApiOptions.RequireJsonContentType` defaults to `true`; a host **opts out**, never in. It exists because
-an embedded host owns its pipeline: one already running ASP.NET Core antiforgery, or whose Alvo routes no
-browser can reach, should not be forced through Alvo's version of a defence it has.
+The requirement is **unconditional**. It shipped with an `AlvoApiOptions.RequireJsonContentType` (default
+`true`), and that option was removed before the PR merged, because its own justification did not survive
+inspection.
 
-`false` restores the previous behaviour exactly, **the generated document included**: with the guard off no
-request can produce a 415, so `ResponsesFor` publishes none and no `unsupportedMediaType` component is
-minted. That is the same construction that keeps a 304 off a version-less entity, and it keeps the
-transformer's *"the refusal components are never orphans"* guarantee true. The problem **`type` enumeration**
-stays complete either way — it is the framework's vocabulary, one document-wide list of every classification
-Alvo can mint, not a per-host reachability claim.
+The case for it was *"an embedded host with its own CSRF defence should not be forced through Alvo's"*. That
+does not hold: **leaving the requirement on costs such a host nothing**, because every legitimate client
+already sends `application/json`. Same for a host whose Alvo routes no browser can reach — the requirement
+is invisible to it. The only genuine case is a legacy caller that sends no `Content-Type` at all, and Alvo
+has no released package and therefore no such caller.
+
+The asymmetry then settles it: **adding an option later is not a breaking change; removing one is.** And an
+option that disables a security control is a liability of its own — a thing a later host sets without
+understanding why it is there, which is the same argument that reshaped the embedded sample's sign-in.
+
+What it cost while it existed is worth recording, because it is what a similar option would cost again:
+`ResponsesFor` and `SharedRefusals` took an `AlvoApiOptions`, threaded through `AlvoDocumentTransformer`,
+`DataApiHeaders.AddTo`/`UsedIds` and `DataApiEndpoints.Protect`/`Documenting`/`MapGet` — eight `.Protect`
+call sites — plus a `MediaType(options)` branch in the catalogue, two facts about the opt-out, and an
+invariant saboteur whose whole content was "somebody turned it off".
+
+**One thing the removal does not change:** the 415 is still published on exactly the seven body-taking
+operations and on none of the three that read no body. `List` and `Query` still occupy separate arms of
+`ResponsesFor` for that reason — they are one read behind two transports, and only one of them has a body to
+declare. The problem **`type` enumeration** is complete, as it always was: it is the framework's vocabulary,
+one document-wide list of every classification Alvo can mint, not a per-operation reachability claim.
 
 ### Two behaviour changes, recorded rather than discovered
 

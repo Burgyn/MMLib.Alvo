@@ -19,16 +19,6 @@ namespace MMLib.Alvo.Api.Tests;
 public class DataApiContentTypeTests
 {
     /// <summary>
-    /// The default is the whole security value of the feature, and nothing else in this file can hold it:
-    /// every other fact either sends JSON or sets the option explicitly, so flipping the initializer to
-    /// <see langword="false"/> would leave them all green.
-    /// </summary>
-    [Fact]
-    public void The_guard_is_on_by_default() =>
-        new AlvoApiOptions().RequireJsonContentType.ShouldBeTrue(
-            "secure-by-default: a host must opt out of the guard, never into it");
-
-    /// <summary>
     /// The slug is a published constant an embedded host branches on, so it is enumerated in
     /// <see cref="AlvoProblemTypes.All"/> and mintable through <see cref="AlvoProblemTypes.UriOf"/> —
     /// which throws for a slug the catalogue does not declare.
@@ -59,6 +49,12 @@ public class DataApiContentTypeTests
     /// This is not circular. The enum is the API's vocabulary for "which endpoint is this"; it is not the
     /// route table, and it is not the set of call sites the guard has. Reading the expected set out of the
     /// route builder would have been.
+    /// </para>
+    /// <para>
+    /// <b>There is no option to turn this off, so this fact is the whole statement of the requirement.</b>
+    /// An earlier version of the feature had <c>AlvoApiOptions.RequireJsonContentType</c>; it was dropped
+    /// because its justification did not hold — leaving the requirement on costs a host with its own CSRF
+    /// defence nothing — and <see cref="JsonContentType.Refuse"/> records the reasoning.
     /// </para>
     /// </remarks>
     [Fact]
@@ -264,30 +260,6 @@ public class DataApiContentTypeTests
             .ShouldContain("application/merge-patch+json");
         put.Headers.Contains("Accept-Put").ShouldBeFalse(
             "there is no registered Accept-Put, and inventing one to tidy the set is worse than omitting it");
-    }
-
-    /// <summary>Turning the guard off restores the previous behaviour on every body-taking kind.</summary>
-    [Fact]
-    public async Task A_host_that_opted_out_accepts_any_media_type()
-    {
-        await using var world = await AlvoApiWorld.VehicleRegistryAsync(
-            [Admin], new AlvoApiWorldSetup(ConfigureApi: api => api.RequireJsonContentType = false));
-
-        foreach (var kind in Enum.GetValues<DataApiEndpointKind>())
-        {
-            var (method, path, body) = RouteOf(kind);
-            if (body is null)
-            {
-                continue;
-            }
-
-            using var content = Body(body, "text/plain");
-            using var response = await world.SendRawAsync(method, path, Admin, content: content);
-
-            response.StatusCode.ShouldNotBe(
-                HttpStatusCode.UnsupportedMediaType,
-                $"{kind} ({method} {path}) must accept anything once the host has opted out");
-        }
     }
 
     /// <summary>

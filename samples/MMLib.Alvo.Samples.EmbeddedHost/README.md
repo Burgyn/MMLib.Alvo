@@ -64,7 +64,7 @@ curl -s -b /tmp/fleet localhost:5199/app/vehicles
 | Your errors stay yours | `AddAlvoProblemDetails()` is **not** called | #119 — an embedded host owns its error rendering; the sample renders its own refusals in `Answered` |
 | Your users, Alvo's rules | `AsCaller` → `IRoleCatalogProvider` → `RoleCatalog.Resolve` → `AlvoContext` | an application role can only be minted through the catalog the applied descriptor primed, so a typo is refused where it arrives |
 | Your wire contract, Alvo's field map | `RepaintRequest` mapped to a field dictionary | a host owns its DTOs; a `Dictionary<string, object?>` bound straight from JSON carries `JsonElement` values `IAlvoData` has no field type for |
-| The CSRF guard | `RequireJsonContentType` left at its default | #191 — and this host is exactly the context that default exists for |
+| The CSRF guard | nothing to configure — the JSON `Content-Type` requirement is unconditional | #191 — and this host is exactly the context it exists for |
 | Tenancy, by its absence | `AsCaller` sets no `Tenant` | `vehicles.alvo.json` declares none; a host over a **tenant-scoped** entity must set `AlvoContext.Tenant`, or every request is denied at the decision layer |
 
 **The demonstration worth reading twice** is `PATCH /app/vehicles/{id}`. The descriptor says

@@ -99,10 +99,11 @@ public static class SampleHost
                 // Alvo mounts BESIDE this app's own routes, never over them.
                 api.RoutePrefix = "/api/alvo";
 
-                // RequireJsonContentType is left at its default (true), and this is the context that
-                // default exists for: a body-taking route with no media-type requirement is reachable as a
-                // CORS simple request, which stops being harmless the moment a host authenticates with
-                // cookies. See docs/architecture/data-api.md, "Requiring a JSON Content-Type".
+                // Nothing here turns off the JSON Content-Type requirement, because nothing can: it is
+                // unconditional, and this host is the context it exists for. A body-taking route with no
+                // media-type requirement is reachable as a CORS simple request, which stops being harmless
+                // the moment a host authenticates with cookies. See docs/architecture/data-api.md,
+                // "Requiring a JSON Content-Type".
             }));
 
         // AddAlvoProblemDetails() is deliberately NOT called. An embedded host owns its own error
