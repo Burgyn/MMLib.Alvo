@@ -114,6 +114,25 @@ public static class AlvoProblemTypes
     /// </remarks>
     public const string UnreadableRequest = "unreadable-request";
 
+    /// <summary>
+    /// The request carried a body that is not declared as JSON, or carried no <c>Content-Type</c> at all
+    /// (415).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Distinct from <see cref="MalformedQuery"/>, and it is the <em>kind</em> that separates them.</b>
+    /// This one means Alvo never looked at the content, because the caller did not declare it as JSON, and
+    /// the fix is a header. <see cref="MalformedQuery"/> means Alvo read the content and refused it, and the
+    /// fix is the body. It is distinct from <see cref="UnreadableRequest"/> too — that one is the web server
+    /// refusing before Alvo was reached at all.
+    /// </para>
+    /// <para>
+    /// Answered on every route that reads a request body, and on no other — a read that parses no body
+    /// cannot reach it, which is why the generated document lists it on exactly seven operations per entity.
+    /// </para>
+    /// </remarks>
+    public const string UnsupportedMediaType = "unsupported-media-type";
+
     /// <summary>An invariant Alvo itself relies on is broken (500).</summary>
     /// <remarks>
     /// Emitted only by <c>AlvoExceptionHandler</c>, and therefore only in a host that registered it. The slug
@@ -138,6 +157,7 @@ public static class AlvoProblemTypes
         Conflict,
         Unauthenticated,
         UnreadableRequest,
+        UnsupportedMediaType,
         Internal,
     ];
 

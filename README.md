@@ -37,6 +37,22 @@ rules that differ by role. It runs on `:8081` from its own compose file, and
 [`test/teapie-field-service`](test/teapie-field-service/README.md) drives it end to end.
 `scripts/test-e2e` runs both stacks and both suites — the same thing CI runs.
 
+### Alvo inside your own app
+
+The standalone image above is one of Alvo's two distribution modes; the other is a NuGet package inside your
+own ASP.NET Core host. [`samples/MMLib.Alvo.Samples.EmbeddedHost`](samples/MMLib.Alvo.Samples.EmbeddedHost/README.md)
+is the runnable version of it — a fleet-desk app whose own cookie users reach Alvo through its own endpoints,
+with Alvo's generated Data API mounted beside them for agents:
+
+```bash
+dotnet user-secrets --project samples/MMLib.Alvo.Samples.EmbeddedHost \
+  set "Alvo:Auth:DevKeys:0:Secret" "$(openssl rand -hex 16)"
+dotnet run --project samples/MMLib.Alvo.Samples.EmbeddedHost
+```
+
+It runs the **same** `vehicles.alvo.json` the compose stack above mounts, which is what lets its test suite
+assert that both modes generate the same backend.
+
 ## Building & testing
 
 Requires the .NET SDK pinned in [`global.json`](global.json) (`10.0.100`).

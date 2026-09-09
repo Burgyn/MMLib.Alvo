@@ -135,22 +135,25 @@ internal static class DataApiDocumentation
         ArgumentNullException.ThrowIfNull(entity);
         return kind switch
         {
-            DataApiEndpointKind.List or DataApiEndpointKind.Query =>
+            DataApiEndpointKind.List =>
                 [Ok(ResponseBody.Page, "A page of rows the caller's policy admits."), .. Refusals(Malformed)],
+            DataApiEndpointKind.Query =>
+                [Ok(ResponseBody.Page, "A page of rows the caller's policy admits."),
+                 .. Refusals(Malformed), UnsupportedMediaType],
             DataApiEndpointKind.Get =>
                 [Ok(ResponseBody.Row, "The row."), .. NotModified(entity), .. Refusals(Absent)],
             DataApiEndpointKind.Create =>
-                [Created(entity), .. Refusals(Malformed, Precondition, Conflict)],
+                [Created(entity), .. Refusals(Malformed, Precondition, Conflict), UnsupportedMediaType],
             DataApiEndpointKind.Update =>
                 [Ok(ResponseBody.Row, "The row as it now stands."),
-                 .. Refusals(Malformed, Absent, PreconditionOn(entity), Conflict)],
+                 .. Refusals(Malformed, Absent, PreconditionOn(entity), Conflict), UnsupportedMediaType],
             DataApiEndpointKind.Delete =>
                 [NoContent(), .. Refusals(Absent, PreconditionOn(entity), Conflict)],
             DataApiEndpointKind.Replace =>
                 [Created(entity),
                  Ok(ResponseBody.Row, "The row as it now stands, when this request replaced an existing one "
                     + "or replayed an 'Idempotency-Key' a previous request spent."),
-                 .. Refusals(Malformed, PreconditionOn(entity), Conflict)],
+                 .. Refusals(Malformed, PreconditionOn(entity), Conflict), UnsupportedMediaType],
             DataApiEndpointKind.BatchCreate or DataApiEndpointKind.BatchUpdate
                 or DataApiEndpointKind.BatchDelete =>
                 [Ok(ResponseBody.Batch, "Every row the batch wrote, in request order, and how many it "
@@ -159,10 +162,12 @@ internal static class DataApiDocumentation
                  ForbiddenOnBatch,
                  Malformed,
                  Precondition,
-                 Conflict],
+                 Conflict,
+                 UnsupportedMediaType],
             _ => throw new InvalidOperationException($"No response catalogue for endpoint kind '{kind}'."),
         };
     }
+
 
     /// <summary>The two refusals <em>every</em> generated endpoint can answer with, plus the ones it can.</summary>
     /// <remarks>
@@ -179,11 +184,11 @@ internal static class DataApiDocumentation
     /// operation.
     /// </summary>
     /// <remarks>
-    /// It is the same six records <see cref="ResponsesFor"/> hands out, so a refusal cannot be published under
+    /// It is the same seven records <see cref="ResponsesFor"/> hands out, so a refusal cannot be published under
     /// one wording and referenced under another. A reviewer reads each sentence here exactly once.
     /// </remarks>
     internal static IReadOnlyList<Response> SharedRefusals { get; } =
-        [Unauthenticated, Forbidden, Absent, Precondition, Conflict, Malformed];
+        [Unauthenticated, Forbidden, Absent, Precondition, Conflict, Malformed, UnsupportedMediaType];
 
     private static Response Ok(ResponseBody body, string description) =>
         new(StatusCodes.Status200OK, body, description);
@@ -328,6 +333,30 @@ internal static class DataApiDocumentation
         + "references through a 'ref' declaring onDelete: restrict. The 'violations' array names the field "
         + "for the first of those and carries a fix suggestion for both.",
         SharedId: "conflict");
+
+    /// <summary>The 415, on every operation that reads a request body.</summary>
+    /// <remarks>
+    /// <para>
+    /// One sentence covering both ways to earn it — a declaration that is not JSON, and no declaration at
+    /// all — because OpenAPI keys a response by status and the fix is the same for both. The registered
+    /// <c>Accept-Post</c>/<c>Accept-Patch</c> header the refusal carries is named, so a client knows to read
+    /// it rather than to parse the prose.
+    /// </para>
+    /// <para>
+    /// <b><see cref="DataApiEndpointKind.List"/> and <see cref="DataApiEndpointKind.Query"/> no longer share
+    /// an arm because of this.</b> They are one read behind two transports, and only one of them has a body
+    /// to declare; a shared arm would publish a 415 on the query-string list, where no request can reach it.
+    /// </para>
+    /// </remarks>
+    private static Response UnsupportedMediaType => new(
+        StatusCodes.Status415UnsupportedMediaType,
+        ResponseBody.Problem,
+        "The request body was not declared as JSON, or carried no 'Content-Type' at all. Send "
+        + "'Content-Type: application/json', or any 'application/*+json'; a POST refusal also carries "
+        + "'Accept-Post' and a PATCH refusal 'Accept-Patch' naming what the operation accepts. The "
+        + "requirement exists because a body-taking route with no media-type requirement is reachable as a "
+        + "CORS simple request, and a host with its own cross-site-request-forgery defence can turn it off.",
+        SharedId: "unsupportedMediaType");
 
     private static Response Malformed => new(
         StatusCodes.Status422UnprocessableEntity,

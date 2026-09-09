@@ -1,5 +1,6 @@
 ﻿using System.Globalization;
 using System.Net;
+using System.Text;
 using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Api.Tests.Invariants;
@@ -81,6 +82,54 @@ internal static class BehaviourInvariants
         reached.ShouldBe(
             project.DeniedEntities.Count * _routes.Length,
             "or this claim did not reach every route of every unconfigured entity");
+    }
+
+    /// <summary>
+    /// Every route that reads a body refuses one that is not declared as JSON — the cross-descriptor half
+    /// of #191.
+    /// </summary>
+    /// <param name="world">The running API.</param>
+    /// <param name="project">The generated project.</param>
+    /// <remarks>
+    /// <para>
+    /// <b>Over the <em>permissive</em> entities, not the denied ones.</b> A denied entity is refused by the
+    /// decision before the delegate interprets a single header, so running this there would assert 415 and
+    /// get 403 — for a reason that is not the guard.
+    /// </para>
+    /// <para>
+    /// <b>And it is the shape a metadata-driven framework actually gets wrong.</b> The ring0 facts prove
+    /// the guard over one descriptor; this proves it over the whole corpus, which is where "works for the
+    /// demo, breaks on another combination of fields" lives. The body is valid JSON in every request: what
+    /// is being measured is the declaration, and a body that would also have failed validation could pass
+    /// this while the guard did nothing.
+    /// </para>
+    /// </remarks>
+    internal static async Task NonJsonBodiesAreRefusedAsync(AlvoApiWorld world, GeneratedProject project)
+    {
+        project.PermissiveEntities.ShouldNotBeEmpty(
+            "every generated project must declare an entity that admits its admin, or this walks nothing");
+
+        var bodyTaking = _routes.Where(route => route.NeedsBody).ToList();
+        var reached = 0;
+        foreach (var entity in project.PermissiveEntities)
+        {
+            foreach (var (method, suffix, _) in bodyTaking)
+            {
+                var path = $"/api/{entity}{suffix.Replace("{id}", Guid.NewGuid().ToString(), StringComparison.Ordinal)}";
+                using var content = new StringContent(
+                    Batch(method, suffix).ToJsonString(), Encoding.UTF8, "text/plain");
+                using var response = await world.SendRawAsync(method, path, project.Admin(), content: content);
+
+                response.StatusCode.ShouldBe(
+                    HttpStatusCode.UnsupportedMediaType,
+                    $"{method} {path} reads a body, so a text/plain declaration must be refused");
+                reached++;
+            }
+        }
+
+        reached.ShouldBe(
+            project.PermissiveEntities.Count * bodyTaking.Count,
+            "or this claim did not reach every body-taking route of every permissive entity");
     }
 
     /// <summary>

@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The sample's proof, and the mechanised form of #24's Definition of Done: "both modes start up the same
+    functional backend from the same descriptor".
+
+    ".Tests.Integration" is what puts it in ring2 rather than ring0 — it boots two real web hosts per
+    comparison, which is not "after every small step" work. scripts/test-ring0 excludes it by that naming
+    alone, so no ring script changes. AlvoSharedArchTests=false because it maps to no production assembly
+    of its own.
+  -->
+  <PropertyGroup>
+    <AlvoSharedArchTests>false</AlvoSharedArchTests>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../samples/MMLib.Alvo.Samples.EmbeddedHost/MMLib.Alvo.Samples.EmbeddedHost.csproj" />
+    <!-- The standalone host, so the DoD is a comparison against the other mode rather than against a list
+         this suite wrote down. Both are composed through their own public CreateBuilder/Build seam and run
+         on TestServer — the arrangement AlvoHostWorld already uses, rather than WebApplicationFactory,
+         whose content-root handling would fight the sample's descriptor lookup. -->
+    <ProjectReference Include="../../src/MMLib.Alvo.Host/MMLib.Alvo.Host.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Both hosts are composed and run in-process here, so this project needs the same framework
+         reference they carry — the same line MMLib.Alvo.Api.Tests takes for the same reason. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+</Project>

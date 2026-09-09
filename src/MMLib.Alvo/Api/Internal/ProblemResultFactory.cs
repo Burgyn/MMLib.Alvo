@@ -339,6 +339,49 @@ internal static class ProblemResultFactory
     private const string ArgumentNameSuffix = " (Parameter '";
 
     /// <summary>
+    /// The 415 for a body-taking route whose caller did not declare a JSON body — or did not declare one at
+    /// all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>It carries the registered <c>Accept-*</c> header for the method, where one exists.</b>
+    /// <c>Accept-Post</c> (W3C LDP 1.0 §7.1.2, IANA-registered) and <c>Accept-Patch</c> (RFC 5789 §3.1) say
+    /// exactly what is needed here, so the fix is machine-readable and not only prose — §0 principle 4 served
+    /// by prior art rather than by an invented header.
+    /// </para>
+    /// <para>
+    /// <b><c>PUT</c> and <c>DELETE</c> deliberately carry none.</b> No registered <c>Accept-Put</c> or
+    /// <c>Accept-Delete</c> exists, and minting one to make the set tidy is the "inventing a variant of a
+    /// standard" this project treats as a defect. The <c>detail</c> names the fix for every method.
+    /// </para>
+    /// </remarks>
+    /// <param name="method">The request's method, which decides the advertised header and its value.</param>
+    internal static IResult UnsupportedMediaType(string method)
+    {
+        var advertised = JsonContentType.Advertised(method);
+
+        return new AdvertisingResult(
+            Problem(
+                StatusCodes.Status415UnsupportedMediaType,
+                AlvoProblemTypes.UnsupportedMediaType,
+                $"This endpoint reads a JSON request body. Send it with 'Content-Type: {advertised}'."),
+            AcceptHeaderFor(method),
+            advertised);
+    }
+
+    /// <summary>
+    /// The registered header advertising acceptable media types for <paramref name="method"/>, or
+    /// <see langword="null"/> when no such header exists.
+    /// </summary>
+    /// <param name="method">The request's method.</param>
+    private static string? AcceptHeaderFor(string method) => method switch
+    {
+        _ when HttpMethods.IsPost(method) => "Accept-Post",
+        _ when HttpMethods.IsPatch(method) => "Accept-Patch",
+        _ => null,
+    };
+
+    /// <summary>
     /// One problem document whose <c>detail</c> is the violations' own messages and whose
     /// <c>violations</c> extension carries them structured.
     /// </summary>
@@ -394,6 +437,28 @@ internal static class ProblemResultFactory
         {
             ArgumentNullException.ThrowIfNull(httpContext);
             httpContext.Response.Headers.Append(HeaderNames.WWWAuthenticate, challenge);
+            return problem.ExecuteAsync(httpContext);
+        }
+    }
+
+    /// <summary>
+    /// A problem response plus the registered header advertising what the method accepts. The same shape
+    /// <see cref="UnauthenticatedResult"/> uses, and for the same reason: one place produces the pairing, so
+    /// a second path answering 415 cannot forget the header.
+    /// </summary>
+    /// <param name="problem">The problem response to write.</param>
+    /// <param name="header">The header to advertise under, or <see langword="null"/> for none.</param>
+    /// <param name="value">The media types to advertise.</param>
+    private sealed class AdvertisingResult(IResult problem, string? header, string value) : IResult
+    {
+        public Task ExecuteAsync(HttpContext httpContext)
+        {
+            ArgumentNullException.ThrowIfNull(httpContext);
+            if (header is not null)
+            {
+                httpContext.Response.Headers.Append(header, value);
+            }
+
             return problem.ExecuteAsync(httpContext);
         }
     }

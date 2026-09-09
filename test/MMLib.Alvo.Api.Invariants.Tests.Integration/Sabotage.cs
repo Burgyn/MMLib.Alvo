@@ -49,6 +49,28 @@ internal static class Sabotage
         new(ConfigureServicesAfterAlvo: services =>
             services.Decorate<IAlvoData>(inner => new ForgetfulAlvoData(inner)));
 
+    /// <summary>A host with middleware that rewrites every declaration to JSON before Alvo sees it.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The saboteur is middleware rather than a decorated service, because the media-type guard has no
+    /// service to decorate</b> — it reads <c>HttpRequest.ContentType</c> and there is no option to turn it
+    /// off. So the sabotage is applied where such a regression would really come from: something upstream in
+    /// the host's own pipeline normalising the header, which is exactly what a well-meaning compatibility
+    /// shim in front of Alvo would do.
+    /// </para>
+    /// <para>
+    /// It is also the more faithful sabotage. The guard's whole subject is what the <em>caller</em>
+    /// declared; a shim that answers that question on the caller's behalf reopens #191's door while every
+    /// request still looks well-formed, which is the shape nobody would notice.
+    /// </para>
+    /// </remarks>
+    internal static AlvoApiWorldSetup TheMediaTypeGuardIsBypassedUpstream() =>
+        new(ConfigureApp: app => app.Use(next => async context =>
+        {
+            context.Request.ContentType = "application/json";
+            await next(context);
+        }));
+
     /// <summary>Answers every denial with the decision a permissive entity got.</summary>
     /// <param name="inner">The real engine.</param>
     /// <param name="permissive">An entity whose rules admit every caller.</param>

@@ -41,6 +41,7 @@ namespace MMLib.Alvo.Api
         public const string PreconditionFailed = "precondition-failed";
         public const string Unauthenticated = "unauthenticated";
         public const string UnreadableRequest = "unreadable-request";
+        public const string UnsupportedMediaType = "unsupported-media-type";
         public const string Validation = "validation";
         public static System.Collections.Generic.IReadOnlyList<string> All { get; }
         public static string UriOf(string slug) { }

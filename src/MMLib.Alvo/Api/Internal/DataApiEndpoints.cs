@@ -41,6 +41,18 @@ namespace MMLib.Alvo.Api.Internal;
 /// <see cref="AlvoContext"/> as a parameter on purpose.
 /// </para>
 /// <para>
+/// <b>Five of the eight delegates read a request body, and each guards its <em>declaration</em> before
+/// reading it.</b> <see cref="JsonContentType.Refuse"/> answers 415 for a body not declared as JSON —
+/// #191's CSRF guard — and in each of the five it is the <em>first</em> header guard: after the operation's
+/// decision, before <see cref="EnsureUnconditional"/>, <see cref="Precondition"/> and
+/// <see cref="IdempotencyKey"/>. After the decision for the two reasons
+/// <see cref="EnsureOperationIsAllowed"/> gives; before the other header guards because a request that is
+/// not in the form this endpoint reads should not be answered with advice about <c>If-Match</c>. Nothing is
+/// lost by putting it after the decision, because the defence is the browser's preflight and is decided
+/// before the request is sent. <see cref="JsonContentType"/>'s own remarks carry the two enforcement points
+/// that were rejected, and the one thing "after the decision" does not buy.
+/// </para>
+/// <para>
 /// <b>Five of the six delegates resolve the operation's decision before doing any work, and none of them
 /// is the authority for it.</b> The distinction is the whole of this layer's relationship with
 /// authorization, and it is worth stating precisely rather than as "this layer never re-checks a decision",
@@ -169,6 +181,12 @@ internal static class DataApiEndpoints
     {
         var context = Caller(caller);
         var decision = EnsureOperationIsAllowed(policies, entity.Name, kind.ToDataOperation(), context);
+
+        if (JsonContentType.Refuse(http.Request) is { } unsupported)
+        {
+            return unsupported;
+        }
+
         EnsureUnconditional(http.Request);
         var key = IdempotencyKey(http.Request, context, options);
 
@@ -333,6 +351,11 @@ internal static class DataApiEndpoints
                     var decision = EnsureOperationIsAllowed(
                         policies, entity.Name, DataApiEndpointKind.Query.ToDataOperation(), context);
 
+                    if (JsonContentType.Refuse(http.Request) is { } unsupported)
+                    {
+                        return unsupported;
+                    }
+
                     var body = await QueryBodyReader.ReadAsync(http.Request, options, ct).ConfigureAwait(false);
                     if (body.Parameters is not { } parameters)
                     {
@@ -477,6 +500,12 @@ internal static class DataApiEndpoints
                     var context = Caller(caller);
                     var decision = EnsureOperationIsAllowed(
                         policies, entity.Name, DataApiEndpointKind.Create.ToDataOperation(), context);
+
+                    if (JsonContentType.Refuse(http.Request) is { } unsupported)
+                    {
+                        return unsupported;
+                    }
+
                     EnsureUnconditional(http.Request);
                     var key = IdempotencyKey(http.Request, context, options);
 
@@ -532,6 +561,12 @@ internal static class DataApiEndpoints
                     var context = Caller(caller);
                     var creating = EnsureOperationIsAllowed(policies, entity.Name, DataOperation.Create, context);
                     var decision = EnsureOperationIsAllowed(policies, entity.Name, DataOperation.Update, context);
+
+                    if (JsonContentType.Refuse(http.Request) is { } unsupported)
+                    {
+                        return unsupported;
+                    }
+
                     var precondition = Precondition(http.Request);
                     var key = IdempotencyKey(http.Request, context, options);
 
@@ -576,6 +611,12 @@ internal static class DataApiEndpoints
                     var context = Caller(caller);
                     var decision = EnsureOperationIsAllowed(
                         policies, entity.Name, DataApiEndpointKind.Update.ToDataOperation(), context);
+
+                    if (JsonContentType.Refuse(http.Request) is { } unsupported)
+                    {
+                        return unsupported;
+                    }
+
                     var precondition = Precondition(http.Request);
                     var key = IdempotencyKey(http.Request, context, options);
 

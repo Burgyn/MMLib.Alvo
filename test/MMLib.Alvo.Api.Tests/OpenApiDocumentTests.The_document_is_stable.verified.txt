@@ -161,6 +161,9 @@
           },
           "409": {
             "$ref": "#/components/responses/conflict"
+          },
+          "415": {
+            "$ref": "#/components/responses/unsupportedMediaType"
           }
         },
         "security": [
@@ -222,6 +225,9 @@
           },
           "422": {
             "$ref": "#/components/responses/unprocessable"
+          },
+          "415": {
+            "$ref": "#/components/responses/unsupportedMediaType"
           }
         },
         "security": [
@@ -338,6 +344,9 @@
           },
           "409": {
             "$ref": "#/components/responses/conflict"
+          },
+          "415": {
+            "$ref": "#/components/responses/unsupportedMediaType"
           }
         },
         "security": [
@@ -422,6 +431,9 @@
           },
           "409": {
             "$ref": "#/components/responses/conflict"
+          },
+          "415": {
+            "$ref": "#/components/responses/unsupportedMediaType"
           }
         },
         "security": [
@@ -535,6 +547,9 @@
           },
           "409": {
             "$ref": "#/components/responses/conflict"
+          },
+          "415": {
+            "$ref": "#/components/responses/unsupportedMediaType"
           }
         },
         "security": [
@@ -598,6 +613,9 @@
           },
           "409": {
             "$ref": "#/components/responses/conflict"
+          },
+          "415": {
+            "$ref": "#/components/responses/unsupportedMediaType"
           }
         },
         "security": [
@@ -661,6 +679,9 @@
           },
           "409": {
             "$ref": "#/components/responses/conflict"
+          },
+          "415": {
+            "$ref": "#/components/responses/unsupportedMediaType"
           }
         },
         "security": [
@@ -947,6 +968,9 @@
           },
           "409": {
             "$ref": "#/components/responses/conflict"
+          },
+          "415": {
+            "$ref": "#/components/responses/unsupportedMediaType"
           }
         },
         "security": [
@@ -1011,6 +1035,9 @@
           },
           "422": {
             "$ref": "#/components/responses/unprocessable"
+          },
+          "415": {
+            "$ref": "#/components/responses/unsupportedMediaType"
           }
         },
         "security": [
@@ -1149,6 +1176,9 @@
           },
           "409": {
             "$ref": "#/components/responses/conflict"
+          },
+          "415": {
+            "$ref": "#/components/responses/unsupportedMediaType"
           }
         },
         "security": [
@@ -1241,6 +1271,9 @@
           },
           "409": {
             "$ref": "#/components/responses/conflict"
+          },
+          "415": {
+            "$ref": "#/components/responses/unsupportedMediaType"
           }
         },
         "security": [
@@ -1359,6 +1392,9 @@
           },
           "409": {
             "$ref": "#/components/responses/conflict"
+          },
+          "415": {
+            "$ref": "#/components/responses/unsupportedMediaType"
           }
         },
         "security": [
@@ -1425,6 +1461,9 @@
           },
           "409": {
             "$ref": "#/components/responses/conflict"
+          },
+          "415": {
+            "$ref": "#/components/responses/unsupportedMediaType"
           }
         },
         "security": [
@@ -1491,6 +1530,9 @@
           },
           "409": {
             "$ref": "#/components/responses/conflict"
+          },
+          "415": {
+            "$ref": "#/components/responses/unsupportedMediaType"
           }
         },
         "security": [
@@ -1881,6 +1923,7 @@
               "https://alvo.dev/errors/conflict",
               "https://alvo.dev/errors/unauthenticated",
               "https://alvo.dev/errors/unreadable-request",
+              "https://alvo.dev/errors/unsupported-media-type",
               "https://alvo.dev/errors/internal"
             ],
             "type": "string",
@@ -3079,6 +3122,21 @@
       },
       "unprocessable": {
         "description": "The request could not be acted on: a query string or body that is malformed, a body the entity's declared shape refuses, or a header this API cannot honour. The 'violations' array carries every reason at once — a pointer, a stable code and a fix suggestion each — never only the first, so one round trip is enough to repair the request.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/Cache-Control"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/problemDetails"
+            }
+          }
+        }
+      },
+      "unsupportedMediaType": {
+        "description": "The request body was not declared as JSON, or carried no 'Content-Type' at all. Send 'Content-Type: application/json', or any 'application/*+json'; a POST refusal also carries 'Accept-Post' and a PATCH refusal 'Accept-Patch' naming what the operation accepts. The requirement exists because a body-taking route with no media-type requirement is reachable as a CORS simple request, and a host with its own cross-site-request-forgery defence can turn it off.",
         "headers": {
           "Cache-Control": {
             "$ref": "#/components/headers/Cache-Control"

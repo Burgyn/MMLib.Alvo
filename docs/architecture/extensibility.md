@@ -37,6 +37,29 @@ pattern), each registering its own services into `builder.Services`. **Core neve
 references a provider** — this is the Open/Closed seam: a new capability is a new
 extension method in its own package, never an edit to `AddAlvo`/`IAlvoBuilder`.
 
+## The runnable example
+
+`samples/MMLib.Alvo.Samples.EmbeddedHost` is this document with a `dotnet run`. It is a fleet-desk app that
+keeps its records in Alvo, and it exercises rules 1, 4 and 10 plus the identity seam below, over
+`examples/vehicle-registry/vehicles.alvo.json` — **the same descriptor the root `docker-compose.yml` mounts
+into the standalone image**, which is what lets its suite assert the two modes generate the same routes
+(spec §"Spoločné kontrakty" point 2). Its `README.md` maps each seam to the rule it comes from.
+
+**Two surfaces, and the distinction is the thing an embedded reader most needs.** The app's own `/app/*`
+endpoints resolve `IAlvoData` and pass an `AlvoContext` they build from their cookie — through
+`IRoleCatalogProvider.DeclaredRoles` and `RoleCatalog.Resolve`, so an application role can only be minted
+through the catalog the applied descriptor primed. `MapAlvoDataApi()` mounts Alvo's generated Data API
+beside them under `/api/alvo`, for API-key callers.
+
+**And one thing embedded cannot do, which the sample documents rather than works around.** A host **cannot
+publish its own principal to the generated Data API**: `AlvoContextFilter` is attached to every generated
+route and publishes the principal *it* resolved from the credential header, clearing it again in a
+`finally`, so middleware that sets `IAlvoContextAccessor.Principal` has that value discarded before the
+delegate runs. `IAlvoContextAccessor` is *availability, not enforcement* — its own remarks say so — and it
+is not a seam a host can write through on a generated route. The seam a host actually wants is **#210**,
+filed for F7. Pointing `Alvo:Auth:HeaderName` at `Cookie` is **not** the workaround: it makes every
+generated route a CSRF target and is refused at startup.
+
 ## Strict rules
 
 1. **One entry:** `AddAlvo(this IServiceCollection, Action<IAlvoBuilder>?)` returns
