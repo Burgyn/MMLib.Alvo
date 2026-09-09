@@ -30,7 +30,20 @@ public class OpenApiServersTests
 
     private const string PathBase = "/alvo";
 
-    /// <summary>With no path base the origin is the bare root, so the fix below is additive.</summary>
+    /// <summary>
+    /// With no path base the origin is the bare origin — and <b>without a trailing slash</b>, so the fix
+    /// below is additive.
+    /// </summary>
+    /// <remarks>
+    /// OpenAPI 3.1.1's Server Object is explicit that a path key is <em>appended</em> to this value, "no
+    /// relative URL resolution", so <c>http://localhost/</c> makes a conforming client build
+    /// <c>http://localhost//api/vehicles</c> — a URL wrong by the specification's own construction rule.
+    /// This pinned the slash-suffixed value until #26's Vacuum lint reported it
+    /// (<c>oas3-api-servers</c>), which is also why <see cref="FollowingItAnswersOkAsync"/> below never
+    /// caught it: <see cref="Uri"/> performs relative resolution, and a client that appends does not.
+    /// The path-base case was always correct, so the fix makes the two consistent rather than
+    /// special-casing either.
+    /// </remarks>
     [Fact]
     public async Task With_no_path_base_the_document_advertises_the_bare_origin()
     {
@@ -39,7 +52,7 @@ public class OpenApiServersTests
 
         var origin = await OriginAsync(world, "/openapi/v1.json");
 
-        origin.ShouldBe("http://localhost/");
+        origin.ShouldBe("http://localhost");
     }
 
     /// <summary>
@@ -76,7 +89,7 @@ public class OpenApiServersTests
         var resolved = Resolve(Origin(document), CollectionPathKey(document));
 
         await FollowingItAnswersOkAsync(world, resolved);
-        Origin(document).ShouldBe("http://localhost/");
+        Origin(document).ShouldBe("http://localhost", "and bare means no trailing slash — see the fact above");
         resolved.ShouldBe("http://localhost/backend/api/owners");
     }
 

@@ -9,6 +9,12 @@ $root = Split-Path -Parent $dir
 & "$dir/test-ring1.ps1"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+# Same reason as the bash script: resolve the pinned Vacuum binary before the invariant
+# project's parallel cases each ask for it.
+Write-Host '[ring2] resolving the pinned Vacuum binary'
+bash "$dir/ensure-vacuum" | Out-Null
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
 $integration = Get-ChildItem -Path $root -Recurse -Filter '*.Tests.Integration.csproj' -File |
     Where-Object { $_.FullName -notmatch '[\\/](bin|obj)[\\/]' }
 if (-not $integration) {
@@ -35,5 +41,7 @@ if (-not $integration) {
     }
 }
 
-Write-Host '[ring2] placeholder: API invariant + Vacuum — land in a later F1 PR'
+bash "$dir/lint-api"
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
 Write-Host '[ring2] OK'

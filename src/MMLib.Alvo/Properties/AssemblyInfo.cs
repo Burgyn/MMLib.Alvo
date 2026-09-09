@@ -23,6 +23,12 @@
 // assembly, and the two legs are two assemblies because ring0 must stay Docker-free.
 [assembly: InternalsVisibleTo("MMLib.Alvo.Api.Tests.Integration")]
 
+// #26's API invariant suite, on the same terms and for the same reason: it compiles the same
+// test/_shared/api sources, so it reaches exactly the two internals named above and nothing further. It is a
+// third assembly because the tier discriminator in this repository is the project name, and this suite boots
+// twenty generated and example descriptors — which belongs before a PR, not after every small step.
+[assembly: InternalsVisibleTo("MMLib.Alvo.Api.Invariants.Tests.Integration")]
+
 // The PostgreSQL leg of the event acceptance criteria, for the same reason and on the same terms: the criteria
 // are "green on SQLite + Postgres", the world is one linked source file (test/_shared/events), and it reaches
 // exactly three internals — OutboxDispatcher.PumpOneBatchAsync for a deterministic drain, WebhookDelivery's

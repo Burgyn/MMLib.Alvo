@@ -1,0 +1,47 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "nullable-enum",
+  "description": "One entity carrying a nullable enum and a required one, which is the pair that tells a value set that admits null from one that does not. A single nullable enum would let 'null is in the enum array' pass for a build that put it in every enum array.",
+  "auth": {
+    "providers": [
+      "local"
+    ]
+  },
+  "entities": {
+    "tasks": {
+      "description": "A task whose priority may be unset and whose state may not.",
+      "fields": {
+        "title": {
+          "type": "string",
+          "required": true,
+          "maxLength": 120
+        },
+        "priority": {
+          "type": "enum",
+          "values": [
+            "low",
+            "normal",
+            "high"
+          ],
+          "nullable": true
+        },
+        "state": {
+          "type": "enum",
+          "values": [
+            "open",
+            "done"
+          ],
+          "required": true
+        }
+      },
+      "rules": {
+        "list": "true",
+        "get": "true",
+        "create": "true",
+        "update": "true",
+        "delete": "true"
+      }
+    }
+  }
+}

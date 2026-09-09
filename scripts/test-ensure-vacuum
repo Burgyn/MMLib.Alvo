@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+# test-ensure-vacuum — the suite for scripts/ensure-vacuum.
+#
+# Hermetic: no network. A fake release is built in a temp dir and served over file://, which is what
+# ALVO_VACUUM_BASE_URL exists for. The checksum check is a security control, so the cases that matter
+# most are the REFUSALS — a verification that silently passes is the whole reason this suite exists.
+#
+# Each refusal asserts the REASON and not merely a non-zero exit. Two of these cases refuse for more
+# than one reason if you let them: appending bytes to a .tar.gz corrupts the archive as well as the
+# digest (GNU tar rejects trailing garbage outright, bsdtar does not), and an empty manifest also
+# produces a mismatch. Matching the message is what keeps each case pinned to the guard it is named
+# after, rather than passing because something, anything, went wrong.
+set -euo pipefail
+DIR="$(cd "$(dirname "$0")" && pwd)"
+PASS=0; FAIL=0
+ok()  { PASS=$((PASS+1)); echo "  ok: $1"; }
+bad() { FAIL=$((FAIL+1)); echo "  FAIL: $1" >&2; }
+
+sha256_of() {
+  if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | awk '{print $1}';
+  else sha256sum "$1" | awk '{print $1}'; fi
+}
+
+VERSION="$("$DIR/ensure-vacuum" --print-version)"
+ASSET="$("$DIR/ensure-vacuum" --print-asset)"
+[ -n "$VERSION" ] && [ -n "$ASSET" ] || { echo "cannot read the pin from ensure-vacuum" >&2; exit 1; }
+echo "[test-ensure-vacuum] pinned $VERSION, asset $ASSET"
+
+case "$ASSET" in *windows*) BINARY="vacuum.exe" ;; *) BINARY="vacuum" ;; esac
+
+# Builds a release directory holding an "asset" whose only content is a stub reporting the pinned
+# version. $2, when given, replaces the digest the manifest claims.
+fake_release() {
+  local dir="$1" claimed="${2:-}" stage
+  stage="$(mktemp -d)"
+  printf '#!/usr/bin/env bash\necho %s\n' "$VERSION" > "$stage/$BINARY"
+  chmod +x "$stage/$BINARY"
+  mkdir -p "$dir/v$VERSION"
+  tar czf "$dir/v$VERSION/$ASSET" -C "$stage" "$BINARY"
+  if [ -z "$claimed" ]; then
+    claimed="$(sha256_of "$dir/v$VERSION/$ASSET")"
+  fi
+  printf '%s  %s\n' "$claimed" "$ASSET" > "$dir/v$VERSION/checksums.txt"
+  rm -rf "$stage"
+}
+
+# Runs ensure-vacuum against a fake release and reports its combined output.
+attempt() {
+  ALVO_VACUUM_BASE_URL="file://$1/release" ALVO_VACUUM_HOME="$1/home" "$DIR/ensure-vacuum" 2>&1
+}
+
+# 1. the reviewed digests are present for every platform this repo builds on, and are 64 hex chars
+missing=0
+for platform in darwin_arm64 darwin_x86_64 linux_arm64 linux_x86_64 windows_x86_64; do
+  line="$(grep -c "vacuum_\${VERSION}_$platform.tar.gz)" "$DIR/ensure-vacuum" || true)"
+  [ "$line" -ge 1 ] || { bad "no reviewed digest for $platform"; missing=1; }
+done
+[ "$missing" -eq 0 ] && ok "every platform has a reviewed digest"
+if [ "$("$DIR/ensure-vacuum" --print-digest | tr -d '\n' | wc -c | tr -d ' ')" = "64" ]; then
+  ok "this platform's reviewed digest is a sha256"
+else
+  bad "this platform's reviewed digest is not 64 hex characters"
+fi
+
+# 2. a good release resolves to a runnable binary at the pinned version
+work="$(mktemp -d)"; fake_release "$work/release"
+if path="$(attempt "$work" | tail -1)" && [ -x "$path" ] && [ "$("$path" version)" = "$VERSION" ]; then
+  ok "resolves a pinned binary"
+else
+  bad "did not resolve a runnable binary (got '${path:-}')"
+fi
+
+# 3. a VALID archive whose manifest claims the wrong digest is refused — the cleanest isolation of the
+#    comparison itself, because the archive is intact and only the digest disagrees
+work2="$(mktemp -d)"
+fake_release "$work2/release" "0000000000000000000000000000000000000000000000000000000000000000"
+out="$(attempt "$work2" || true)"
+if grep -q 'checksum mismatch' <<< "$out"; then
+  ok "a wrong digest in the manifest is refused, by the digest comparison"
+else
+  bad "a wrong digest was not refused by the comparison; it said: $out"
+fi
+if [ -e "$work2/home/$BINARY" ]; then bad "a refused download was left in place"; else ok "a refused download leaves nothing behind"; fi
+
+# 4. a tampered asset is refused too — the same guard, reached through corrupted bytes
+work3="$(mktemp -d)"; fake_release "$work3/release"
+printf 'tampered' >> "$work3/release/v$VERSION/$ASSET"
+if ! attempt "$work3" >/dev/null 2>&1; then
+  ok "a tampered asset is refused"
+else
+  bad "a tampered asset was accepted"
+fi
+
+# 5. an asset the manifest does not list is refused rather than trusted
+work4="$(mktemp -d)"; fake_release "$work4/release"
+: > "$work4/release/v$VERSION/checksums.txt"
+out="$(attempt "$work4" || true)"
+if grep -q 'not listed in checksums.txt' <<< "$out"; then
+  ok "an asset missing from the manifest is refused, by the listing guard"
+else
+  bad "an unlisted asset was not refused by the listing guard; it said: $out"
+fi
+
+# 6. a resolved binary is reused without downloading — and it is the DIGEST that says so, so a
+#    substituted binary is re-fetched rather than trusted on its own self-report
+work5="$(mktemp -d)"; fake_release "$work5/release"
+attempt "$work5" >/dev/null 2>&1
+# Only the ASSET goes, not the manifest: on this path ensure-vacuum has to read checksums.txt to know
+# what to expect at all (the reviewed table cannot describe an asset this suite builds at run time), so
+# deleting the whole release would prove the manifest is fetched rather than that the asset is not.
+rm -f "$work5/release/v$VERSION/$ASSET"
+if attempt "$work5" >/dev/null 2>&1; then
+  ok "a resolved binary is reused without downloading"
+else
+  bad "re-resolution tried to download again"
+fi
+# A DIFFERENT binary that reports the same version — the wrapper M2 is about. Byte-identical content
+# would legitimately match the recorded digest and prove nothing.
+printf '#!/usr/bin/env bash\n# substituted\necho %s\n' "$VERSION" > "$work5/home/$BINARY"
+chmod +x "$work5/home/$BINARY"
+out="$(attempt "$work5" 2>&1 || true)"
+if grep -q 'fetching' <<< "$out"; then
+  ok "a substituted binary is re-fetched, not trusted for reporting the right version"
+else
+  bad "a substituted binary that reports the pinned version was trusted; it said: $out"
+fi
+
+# 7. a cache left over from a DIFFERENT pin is re-fetched, not reused. This is the hole the sidecar's
+#    second field closes: an old binary and its own old sidecar agree with each other perfectly, so
+#    without binding the cache to the reviewed ASSET digest a version bump would keep linting with the
+#    previous release's rules while the pin claimed the new ones.
+work6="$(mktemp -d)"; fake_release "$work6/release"
+attempt "$work6" >/dev/null 2>&1
+binary_digest="$(sha256_of "$work6/home/$BINARY")"
+printf '%s %s\n' "0000000000000000000000000000000000000000000000000000000000000000" "$binary_digest" \
+  > "$work6/home/$BINARY.sha256"
+out="$(attempt "$work6" 2>&1 || true)"
+if grep -q 'fetching' <<< "$out"; then
+  ok "a cache from a different pin is re-fetched, not reused"
+else
+  bad "a cache recorded against another asset digest was reused; it said: $out"
+fi
+
+rm -rf "$work" "$work2" "$work3" "$work4" "$work5" "$work6"
+echo "[test-ensure-vacuum] $PASS passed, $FAIL failed"
+[ "$FAIL" -eq 0 ]

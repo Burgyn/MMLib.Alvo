@@ -98,6 +98,21 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
             setup ?? new AlvoApiWorldSetup(),
             SqliteApiEngine.Instance);
 
+    /// <summary>Starts a world over a descriptor at an absolute path.</summary>
+    /// <param name="descriptorPath">The descriptor file's full path.</param>
+    /// <param name="keys">The dev API keys the world issues.</param>
+    /// <param name="setup">Anything the world's host is configured differently from the default.</param>
+    /// <remarks>
+    /// <see cref="FromDescriptorAsync"/> resolves a <em>name</em> under the calling project's own
+    /// <c>descriptors/</c> directory, which a generated descriptor has no business being in: #26's invariant
+    /// suite writes each of its sixteen to a temp directory, and the alternative would be to pollute a
+    /// shipped fixture folder with files whose only author is a seed.
+    /// </remarks>
+    internal static Task<AlvoApiWorld> FromDescriptorPathAsync(
+        string descriptorPath, IReadOnlyList<TestApiKey>? keys = null, AlvoApiWorldSetup? setup = null) =>
+        StartAsync(
+            descriptorPath, keys ?? [], setup ?? new AlvoApiWorldSetup(), SqliteApiEngine.Instance);
+
     private static async Task<AlvoApiWorld> StartAsync(
         string descriptorPath, IReadOnlyList<TestApiKey> keys, AlvoApiWorldSetup setup, AlvoApiEngine engine)
     {

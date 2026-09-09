@@ -100,8 +100,11 @@ compresses out. Violating one of these is a bug, not a style nit.
 Each ring wraps the previous one and adds a layer: ring1 adds architecture
 tests (already inside `dotnet test`) and, once it lands, public-API
 approval; ring2 adds affected-scoped integration tests, the API invariant
-check, and Vacuum. See each script's own comments for what is a placeholder
-today.
+suite (`test/MMLib.Alvo.Api.Invariants.Tests.Integration` — generated
+descriptors, `scripts/ensure-vacuum` resolving the pinned linter) and the
+Vacuum contract lint (`scripts/lint-api` over `schema/openapi-ruleset.yaml`).
+Nothing in the rings is a placeholder any more; each script's comments say what
+it covers.
 
 **Load is in no ring, like `test-e2e`**, and for the same reason: the rings are
 `dotnet test` tiers, and this builds an image and stands up a multi-service

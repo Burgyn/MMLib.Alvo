@@ -74,6 +74,7 @@ internal sealed class AlvoDocumentTransformer(
         var operations = Operations(generated, entities);
 
         Overview(document);
+        Origin(document);
         ProblemComponents.AddTo(document);
         document.AddComponent(CredentialScheme, Credential());
         Reusable(document, operations);
@@ -270,6 +271,43 @@ internal sealed class AlvoDocumentTransformer(
         document.Info.Description = string.IsNullOrWhiteSpace(document.Info.Description)
             ? DataApiDocumentation.Overview
             : document.Info.Description + "\n\n" + DataApiDocumentation.Overview;
+    }
+
+    /// <summary>Drops a bare trailing slash from every advertised server URL.</summary>
+    /// <remarks>
+    /// <para>
+    /// OpenAPI 3.1.1's Server Object requires that a path key be <em>appended</em> to this value, with "no
+    /// relative URL resolution". A host served at the root is given <c>http://localhost/</c> by ASP.NET's own
+    /// server derivation, and appending <c>/api/vehicles</c> to that yields <c>http://localhost//api/vehicles</c>
+    /// — a URL wrong by the specification's own construction rule, and one no test caught because
+    /// <see cref="Uri"/> resolves relatively where a conforming client appends. #26's Vacuum lint reports it as
+    /// <c>oas3-api-servers</c>.
+    /// </para>
+    /// <para>
+    /// <b>Only a trailing slash is removed, and only where something precedes it.</b> A URL carrying a real path
+    /// — <c>http://localhost/alvo</c>, the path-base shape #130 pins — already ends without one, so this is
+    /// exactly the bare-root case; a server a host declared for itself is not otherwise rewritten. It runs after
+    /// this transformer's own early return, so a document Alvo contributes no endpoints to is left alone
+    /// entirely.
+    /// </para>
+    /// </remarks>
+    private static void Origin(OpenApiDocument document)
+    {
+        if (document.Servers is null)
+        {
+            return;
+        }
+
+        foreach (var server in document.Servers)
+        {
+            // One slash, not every trailing slash — `TrimEnd('/')` would turn a hypothetical "//" into the
+            // empty string, which is a worse document than the one it fixed. The remark above says "a bare
+            // trailing slash"; this is that, exactly.
+            if (server.Url is { Length: > 1 } url && url[^1] == '/')
+            {
+                server.Url = url[..^1];
+            }
+        }
     }
 
     /// <summary>

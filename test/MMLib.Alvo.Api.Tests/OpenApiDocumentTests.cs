@@ -742,6 +742,65 @@ public sealed class OpenApiDocumentTests
         await Verify(await world.OpenApiTextAsync());
     }
 
+    /// <summary>
+    /// The document satisfies the <em>generic</em> shape claims — the ones every Alvo document must satisfy,
+    /// whatever its descriptor said.
+    /// </summary>
+    /// <remarks>
+    /// The claims live in <see cref="OpenApiDocumentFacts"/> because
+    /// <c>MMLib.Alvo.Api.Invariants.Tests.Integration</c> applies the same ones to three
+    /// <c>examples/</c> descriptors and to sixteen generated ones (#26) — the point of that issue being
+    /// that the rules hold <em>across</em> descriptors and not only for the one they were written against.
+    /// Running them here as well is what keeps the fixture and the generated documents judged by a single
+    /// notion of "well shaped"; the rest of this file stays what it is, the fixture's own detailed pins.
+    /// </remarks>
+    [Fact]
+    public async Task The_document_satisfies_the_generic_shape_facts()
+    {
+        await using var world = await StoreAsync();
+
+        OpenApiDocumentFacts.AssertShape(await world.OpenApiDocumentAsync(), _entities);
+    }
+
+    /// <summary>
+    /// A nullable enum's value set contains <c>null</c>, and a required one's does not.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>type</c> and <c>enum</c> are <b>conjunctive</b>: widening the type to <c>["null", "string"]</c>
+    /// while leaving <c>enum</c> at the three declared values published a schema that admits null and
+    /// forbids it at once, so a validator rejected the null this API returns and a generated client rejected
+    /// a legitimate row. Two shipped examples carried exactly that until #26's Vacuum lint reported it.
+    /// </para>
+    /// <para>
+    /// <b>Both directions, over one descriptor.</b> "null is in the enum array" would pass for a build that
+    /// put null in <em>every</em> enum array — which would then admit null on a required field — so the
+    /// required enum beside it is what makes the claim mean anything. Its own descriptor rather than a field
+    /// added to <c>documented-store</c>: that fixture's snapshot is 164 KB, and one facet does not need to
+    /// move it.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_nullable_enums_value_set_contains_null_and_a_required_ones_does_not()
+    {
+        await using var world = await AlvoApiWorld.FromDescriptorAsync(
+            "nullable-enum.alvo.json", [_admin], new AlvoApiWorldSetup(MapOpenApiDocument: true));
+
+        var document = await world.OpenApiDocumentAsync();
+
+        Values(document, "priority").ShouldBe(["low", "normal", "high", null], ignoreOrder: true);
+        Values(document, "state").ShouldBe(["open", "done"], ignoreOrder: true);
+    }
+
+    /// <summary>One field's published value set, nulls included, off the read schema.</summary>
+    /// <param name="document">The served document.</param>
+    /// <param name="field">The field name.</param>
+    private static List<string?> Values(JsonObject document, string field) =>
+    [
+        .. document["components"]!["schemas"]!["tasks"]!["properties"]![field]!["enum"]!.AsArray()
+            .Select(value => value?.GetValue<string>())
+    ];
+
     /// <summary>The fixture: one audited entity and one that is not, and the document served over HTTP.</summary>
     private static Task<AlvoApiWorld> StoreAsync() =>
         AlvoApiWorld.FromDescriptorAsync(
