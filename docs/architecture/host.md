@@ -628,7 +628,17 @@ is a navigation hazard for exactly the agent-first reader this project optimises
 
 ## What is left of #24
 
-PR4 starts `[20] Standalone run (Docker) + embedded run`; F4 finishes it. Still owed:
+PR4 starts `[20] Standalone run (Docker) + embedded run`; F4 finishes it.
+
+**The embedded half is done.** `samples/MMLib.Alvo.Samples.EmbeddedHost` mounts Alvo into its own
+cookie-authenticated app over `examples/vehicle-registry/vehicles.alvo.json` — the same descriptor this
+image mounts — and `test/MMLib.Alvo.Samples.EmbeddedHost.Tests.Integration` boots both modes on `TestServer`
+and asserts they generate the same Data API routes. That is #24's Definition of Done, as a check.
+`docs/architecture/extensibility.md` carries the seam inventory. One gap it found is **#210** (F7): a host
+cannot federate its own identity into the generated routes, because `AlvoContextFilter` publishes the
+principal it resolved and clears it again.
+
+Still owed on the standalone side:
 
 - the **published multi-arch image** (`mmlib/alvo`, amd64 + arm64) and the release pipeline that pushes it —
   the Dockerfile's `ARG VERSION` is where that pipeline hands in the real MinVer version;

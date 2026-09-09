@@ -46,7 +46,7 @@ Where, not how — see the design brief for the reasoning behind each bullet.
 
 ## 3. Phase map F0–F7
 
-`← YOU ARE HERE` sits on **F4**. Each phase = one GitHub milestone; issues
+`← YOU ARE HERE` sits on **F5**. Each phase = one GitHub milestone; issues
 are numbered independently of the plan's own bracketed `[N]` step numbers
 (see `docs/superpowers/` for the distinction).
 
@@ -64,11 +64,11 @@ are numbered independently of the plan's own bracketed `[N]` step numbers
 - [x] **F3 — Vertical slice (CRUD)** — the smallest thing that actually
   works: project → table → CRUD API + validations.
   ([milestone #4](https://github.com/Burgyn/MMLib.Alvo/milestone/4))
-- [ ] **F4 — Demo from the start** — proof of intent + a testing surface, in
+- [x] **F4 — Demo from the start** — proof of intent + a testing surface, in
   parallel with F3, not after it.
-  ← YOU ARE HERE ([milestone #5](https://github.com/Burgyn/MMLib.Alvo/milestone/5))
+  ([milestone #5](https://github.com/Burgyn/MMLib.Alvo/milestone/5))
 - [ ] **F5 — Admin mode** — dashboard, rules/automation builder, AI agent.
-  ([milestone #6](https://github.com/Burgyn/MMLib.Alvo/milestone/6))
+  ← YOU ARE HERE ([milestone #6](https://github.com/Burgyn/MMLib.Alvo/milestone/6))
 - [ ] **F6 — v0.1** — documentation, logo, release.
   ([milestone #7](https://github.com/Burgyn/MMLib.Alvo/milestone/7))
 - [ ] **F7 — Further components** — by value, gradually, contract tests
@@ -77,16 +77,17 @@ are numbered independently of the plan's own bracketed `[N]` step numbers
   types at runtime without a table per entity (spec §2.1).
   ([milestone #8](https://github.com/Burgyn/MMLib.Alvo/milestone/8))
 
-## 3a. What actually closes F4
+## 3a. What closed F4
 
 *Audited against the code on 2026-09-06, not against issue titles — most of
 F4's demo layer had already landed as a by-product of other PRs and nobody
-had closed the issues.*
+had closed the issues. **Closed on 2026-09-09** by the embedded sample and the
+`Content-Type` guard; what follows is the record of what the phase contained.*
 
 F4's point is **proof of intent plus a testing surface**, not features. Read
-that way, most of it is done and the milestone's open count is misleading:
-of the issues still open, only one is what the phase is actually about —
-#26 closed the other.
+that way, most of it was already done and the milestone's open count was
+misleading; the audit found one real item left, and #26 closed the placeholder
+beside it.
 
 **Done, and verifiable by running it:**
 
@@ -96,15 +97,39 @@ of the issues still open, only one is what the phase is actually about —
 | standalone run | `src/MMLib.Alvo.Host/Dockerfile`, two compose stacks (8080 vehicle-registry, 8081 field-service), no credential shipped in the image, `up --wait` gated on `/health/ready` |
 | playground | `playground/run` — glob-based projects, `--pg`, `--test`, `--down`; two projects with their own suites, deliberately in no ring |
 | E2E | `test/teapie-field-service/`, 12 collections, 404 assertions, a **required check on every PR** with a JUnit artifact |
-| the Data API itself | reads, writes, batch, idempotency, preconditions, projections, paging, create-or-replace |
+| embedded run | `samples/MMLib.Alvo.Samples.EmbeddedHost` — `AddAlvo` + `MapAlvo` inside a cookie-authenticated host of its own, over the descriptor the image mounts, with a suite that compares both modes' generated routes |
+| the Data API itself | reads, writes, batch, idempotency, preconditions, projections, paging, create-or-replace, and a JSON `Content-Type` requirement on every body-taking route |
 | API contract lint + invariants | `schema/openapi-ruleset.yaml` through Vacuum (pinned, checksum-verified, no Node and no Docker), plus 16 generated descriptors and 3 shipped examples holding default-deny, CRUD shape, replace idempotence and a replayed `Idempotency-Key` — **both halves proven able to fail**, one mutation per lint rule and a sabotaged host per behaviour |
 
-**What remains — one thing:**
+**What closed it — two things, in one PR, because neither finished without the
+other:**
 
-1. **[#24] An embedded-run sample.** Nothing in the repo demonstrates
-   `AddAlvo()` / `IAlvoBuilder`, though `docs/architecture/extensibility.md`
-   documents the seam and `AddAlvoIntegrationTests` exercises it. Embedded is
-   one of the two declared distribution modes and it has no readable example.
+1. **[#24] The embedded-run sample.** `samples/MMLib.Alvo.Samples.EmbeddedHost`
+   is a fleet-desk app that mounts Alvo into its own cookie-authenticated host:
+   `/app/*` are its own endpoints, resolving a caller through
+   `IRoleCatalogProvider` and calling `IAlvoData` directly, so the
+   *descriptor's* rules decide and the sample writes no authorization of its
+   own; `/api/alvo/*` is Alvo's generated Data API for API-key callers. It runs
+   `examples/vehicle-registry/vehicles.alvo.json` — the same descriptor the
+   root compose mounts into the image — and its ring2 suite boots **both modes
+   on `TestServer` and asserts they generate the same 30 routes**, which turns
+   the Definition of Done into a check. `docs/architecture/extensibility.md`
+   carries the seam inventory.
+2. **[#191] The Data API requires a JSON `Content-Type`.** Seven body-taking
+   routes answer 415 for a body that is not declared as JSON, or declares
+   nothing at all — the preflight a cross-site form cannot generate.
+   `AlvoApiOptions.RequireJsonContentType` defaults to `true`, so a host opts
+   out rather than in, and the generated document lists the status exactly where
+   a request can reach it. Reading the code first **corrected the issue's own
+   premise**: the vector is not reachable through `IAlvoContextAccessor`, which
+   `AlvoContextFilter` overwrites on every request, but through
+   `Alvo:Auth:HeaderName` — configuration — plus a custom
+   `IAlvoContextResolver`. That misconfiguration is now refused at startup, and
+   **[#210]** (F7) is the identity seam a host actually wants.
+
+**[#25] closed with it**, unchanged: `test/teapie-field-service` was already the
+E2E suite it asked for — 12 collections, 404 assertions, a required check on
+every PR — and only the issue was still open.
 
 **[#26] closed the last placeholder**, and it did what the issue said it would:
 measuring the rules across descriptors instead of against one fixture found
@@ -117,11 +142,10 @@ validates the schema and never appliability (**[#208]**). Two further findings
 were filed rather than bent around: the request body on batch `DELETE`
 (**[#206]**) and the absent examples in generated schemas (**[#207]**).
 
-**One debt stays in F4 and should not wait its turn: [#191]** — the Data API
-requires no `Content-Type`, which is a CSRF vector in an embedded host that
-authenticates by cookie. It is a security issue, and the embedded sample above
-is exactly the shape that would ship it. Everything else that was parked in F4
-has moved; the rule is below.
+**[#191] was parked in F4 rather than moved, and that was the right call:** it
+is a security issue, and the embedded sample above is exactly the shape that
+would have shipped it. Everything else that was parked in F4 has moved; the rule
+is below.
 
 ### The triage rule, and where the backlog went
 
@@ -151,8 +175,9 @@ tenant, because the foreign key does not span `(tenant_id, id)`. That is the
 same shape as `#198`, and both are the tenant-isolation seam the composite key
 would close.
 
-Counts after the triage: **F4 = 5** (four real, plus `#105` closing with its
-PR), F5 = 3, F6 = 45, F7 = 37. Nothing is unfiled. A milestone is one
+Counts after the triage were **F4 = 5** (four real, plus `#105` closing with its
+PR), F5 = 3, F6 = 45, F7 = 37. **F4 is now 0** — `#24`, `#191` and `#25` closed
+it — and F7 gained `#210`. Nothing is unfiled. A milestone is one
 `gh issue edit` to change and none of this is a commitment to an order.
 
 ## 4. Key invariants that must not break

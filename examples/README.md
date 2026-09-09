@@ -3,6 +3,12 @@
 Reference descriptors validated against `schema/project.schema.json`
 (the type-2 "examples against the schema" corpus, F2 issue #17).
 
+> **`vehicle-registry/` serves both distribution modes.** The root `docker-compose.yml` mounts it into the
+> standalone image and `samples/MMLib.Alvo.Samples.EmbeddedHost` runs the same file embedded, which is what
+> lets that sample's suite compare the two modes' generated routes for equality — spec §"Spoločné kontrakty"
+> point 2 (*mount do Dockera = … = `FromDescriptor()` v embedded*), as a test rather than a claim. Point a
+> second descriptor at either mode and the comparison stops meaning anything.
+
 - **`simple-tasks/`** — the smallest real backend, and the one to start from:
   two owned entities (`projects`, `tasks`), ownership rules, an `enum`, `audit`,
   one composite index. **Applies as it stands.** It used to carry a `count`

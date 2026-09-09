@@ -267,16 +267,24 @@ told they are denied rather than that their body is malformed, and never pays fo
 `If-Match`, `If-None-Match` (a page has no version) and `Idempotency-Key` (nothing is written). Honoured:
 `Prefer: count`. `Cache-Control: no-store`, as everywhere.
 
-**No endpoint requires a `Content-Type`, and that is worth recording here rather than only in the code.**
-`POST …/query` reads its body unconditionally, so it is reachable as a CORS *simple* request — no preflight.
-That is harmless while Alvo's credential is a request header, because a cross-site form POST arrives with no
-credential at all. It stops being harmless in **embedded mode inside a host whose own auth is cookie-based
-and which populates `IAlvoContextAccessor`**: a POST-that-reads is then a live, read-only CSRF vector.
-Requiring `application/json` would force a preflight and cost nothing. The gap is pre-existing — the create
-and the update have it too, and worse — so it is not this route's to close; the query route is simply the
-first *read* to acquire it, which is why it is written down. Tracked as **#191**, which also carries the
-three things that need deciding rather than committing: which media types are accepted, whether a body with
-no `Content-Type` at all is refused, and whether an embedded host may opt out.
+**This route requires a JSON `Content-Type`, like every other body-taking one — and it is the route that
+made the requirement visible.** `POST …/query` used to read its body unconditionally, which made it
+reachable as a CORS *simple* request: no preflight, cookies attached, a live **read-only** CSRF vector in an
+embedded host whose own auth is browser-carried. The create, the update, the replace and the three batch
+verbs had the same gap and worse, so the fix is uniform rather than this route's — see
+[*Requiring a JSON `Content-Type`*](#requiring-a-json-content-type) below, which closed **#191** and
+answered its three open questions. The query route is simply the first *read* to acquire the gap, which is
+why it was written down here.
+
+**One thing #191 and this section both had wrong, corrected rather than quietly dropped.** Both described
+the threat as *"embedded mode inside a host whose own auth is cookie-based **and which populates
+`IAlvoContextAccessor`**"*. **That path does not exist.** `AlvoContextFilter` is attached to every generated
+route and publishes the principal *it* resolved, clearing it again in a `finally` — so a host that sets
+`IAlvoContextAccessor.Principal` from a cookie has the value discarded before the delegate runs
+(`AlvoContextFilter.cs:133`). The reachable door was **`Alvo:Auth:HeaderName` plus a custom
+`IAlvoContextResolver`**: configuration, so `Alvo__Auth__HeaderName=Cookie` needed no code change and no
+review. It is refused at startup now (`AlvoAuthOptionsValidator`), and the identity seam a host actually
+wants is **#210**, filed for F7.
 
 **Two consequences, recorded rather than discovered.** `GET`/`PATCH`/`DELETE` on `{entity}/query` are now
 **405 from routing** rather than 404 — no problem document and no `no-store`, the same class of answer as
@@ -816,6 +824,118 @@ document became wrong by the prefix. Those facts now also gate a bump of `Micros
 is a virtue worth stating rather than a surprise worth discovering.
 
 The docs UI's own document fetch under a path base is a separate question and stays **#134**.
+
+## Requiring a JSON `Content-Type` (#191)
+
+**Every body-taking route refuses a body that is not declared as JSON, and refuses one declaring nothing at
+all.** Seven routes: `POST {entity}`, `PATCH {entity}/{id}`, `PUT {entity}/{id}`,
+`POST {entity}/query`, and `POST`/`PATCH`/`DELETE` on `{entity}/batch`. The three that read no body — the
+query-string list, the row read and the single-row delete — are untouched.
+
+### Why a media type is a CSRF control at all
+
+WHATWG Fetch defines a **CORS-safelisted request-header** for `Content-Type` as one whose value parses to
+`application/x-www-form-urlencoded`, `multipart/form-data` or `text/plain`. A request carrying only
+safelisted headers is a *simple* request: the browser sends it cross-origin **with cookies attached and no
+preflight**, and the response being unreadable to the attacker does not undo a write. A request declaring no
+`Content-Type` is safelisted by omission.
+
+Requiring `application/json` therefore puts every body-taking route behind a preflight, which an HTML form
+cannot generate and a cross-origin `fetch` cannot pass without the server opting in. **The mechanism is the
+browser's, not Alvo's** — which is why the refusal's position in Alvo's own pipeline is free to follow the
+ordering rule rather than race it: by the time a request arrives, the preflight has already been demanded or
+skipped.
+
+This is harmless-but-pointless while Alvo's credential is a request header: a cross-site form POST arrives
+with no credential and default-deny answers it. It matters in **embedded mode**, where the host's own
+browser-carried authentication can be what identifies the caller.
+
+### What is accepted
+
+| Declared | Answer | Why |
+|---|---|---|
+| `application/json` | accepted | what the generated document declares |
+| `application/merge-patch+json`, any `application/*+json` | accepted | the RFC 6839 structured suffix; refusing RFC 7396's spelling would refuse a *more* precise declaration of the same bytes |
+| `application/json; charset=utf-8` | accepted | parameters are parsed and **ignored** |
+| `text/plain`, `application/x-www-form-urlencoded`, anything else | **415** | the first two are exactly what a cross-site form can send |
+| *no `Content-Type` at all* | **415** | the half that actually closes the vector |
+| `application/notjson`, `text/plain+json` | **415** | the suffix test goes through `MediaTypeHeaderValue`'s own `Type`/`Suffix`, so a subtype that merely ends in the word does not pass and the suffix is scoped to `application` |
+
+A `charset` other than UTF-8 is ignored rather than refused: the readers are UTF-8 by construction, so a
+body actually encoded otherwise earns the existing `malformed-json` 422 — a diagnosis about the bytes, which
+is the accurate one. A second refusal for the same underlying failure would only make a caller guess which
+to repair. **This is not a contradiction of `baas-analyza` §328** ("never trust the client's declared MIME;
+sniff magic bytes"), which is about *uploads*: the guard trusts the declaration as a **gate** and never as a
+description of the bytes, which the JSON scan still decides.
+
+### The refusal
+
+An RFC 9457 problem document, `application/problem+json`, `type:
+https://alvo.dev/errors/unsupported-media-type`, **no `violations` array** — a 415 is about the declaration,
+not about anything inside the body, so there is nothing to point at — and a `detail` naming the fix. Plus
+the registered header for the methods that have one, so the fix is machine-readable and not only prose:
+
+| Method | Header | Defined by |
+|---|---|---|
+| `POST` | `Accept-Post: application/json` | W3C LDP 1.0 §7.1.2, IANA-registered |
+| `PATCH` | `Accept-Patch: application/json, application/merge-patch+json` | RFC 5789 §3.1 |
+| `PUT`, `DELETE` | *(none)* | no registered `Accept-Put`/`Accept-Delete` exists, and minting one to tidy the table would be inventing a variant of a standard |
+
+### Where it sits, and what that does and does not buy
+
+The guard is the **first header guard** in each of the five body-taking delegates: after the operation's
+decision, before `EnsureUnconditional`, `Precondition` and `IdempotencyKey`. A request that is not in the
+form this endpoint reads should not be answered with advice about `If-Match`.
+
+So the order is **401 → scope 403 → decision 403 → 415 → body**. The credential 401 and the scope 403 come
+from `AlvoContextFilter`, before the delegate runs at all.
+
+**What "after the decision" does not buy, stated because it is easy to overread.** `PolicyEngine` denies at
+the decision layer for four reasons only: no descriptor applied, an unconfigured operation, a tenant-scoped
+entity with no tenant, and a predicate reading a caller value the caller lacks. A *configured* rule always
+resolves to an **allow carrying a `USING`/`WITH CHECK` predicate the port enforces per row**. So a caller
+whom `'admin' in @user.roles` will ultimately refuse is not denied at this layer, and for that caller the
+415 comes first. That is not new and not a leak: `EnsureUnconditional`'s 412 already precedes the same port
+403 for the same caller, and a 415 names nothing about the entity, the row, or whether it exists — its fix
+is knowable to the caller before they send anything.
+
+**Two enforcement points were considered and rejected**, recorded on `JsonContentType` so a later reader can
+tell a decision from an oversight. An `IEndpointFilter` registered in `Protect` would be the single
+registration point, but it lands *between* the scope 403 and the decision — inverting the stated ordering —
+and would still need a per-kind condition a future kind could miss. Inside `BoundedJsonBody.ReadAsync`,
+where all three body readers funnel, the refusal would travel as a `BodyRefusal`: a channel every caller
+renders as a 422 with a `violations` array, on a path that has already consumed the body.
+
+**Exhaustiveness is a test, not a chokepoint.** Five call sites can be forgotten, so
+`DataApiContentTypeTests.Every_endpoint_kind_is_guarded_exactly_when_it_reads_a_body` drives every
+`DataApiEndpointKind` — not a list of routes — so a new kind, or an existing one that acquires a body, fails
+until its delegate calls the guard. `BehaviourInvariants.NonJsonBodiesAreRefusedAsync` holds the same claim
+across the generated descriptor corpus, and its saboteur turns the option off.
+
+### The opt-out, and what it does to the document
+
+`AlvoApiOptions.RequireJsonContentType` defaults to `true`; a host **opts out**, never in. It exists because
+an embedded host owns its pipeline: one already running ASP.NET Core antiforgery, or whose Alvo routes no
+browser can reach, should not be forced through Alvo's version of a defence it has.
+
+`false` restores the previous behaviour exactly, **the generated document included**: with the guard off no
+request can produce a 415, so `ResponsesFor` publishes none and no `unsupportedMediaType` component is
+minted. That is the same construction that keeps a 304 off a version-less entity, and it keeps the
+transformer's *"the refusal components are never orphans"* guarantee true. The problem **`type` enumeration**
+stays complete either way — it is the framework's vocabulary, one document-wide list of every classification
+Alvo can mint, not a per-host reachability claim.
+
+### Two behaviour changes, recorded rather than discovered
+
+- **A stripped batch `DELETE` body may now be a 415 rather than the empty-batch 422.** RFC 9110 §9.3.5 lets
+  an intermediary strip a `DELETE` body; if it strips `Content-Type` with it, the answer becomes 415. More
+  accurate — the request no longer arrives as JSON — but it moves a case documented above under
+  [the batch](#the-batch-one-path-three-verbs-one-transaction-106). **#206** would remove the case entirely
+  by moving the verb.
+- **`Alvo:Auth:HeaderName` may no longer name a browser-attached header.** `Cookie` is refused at startup.
+  It was configuration-reachable — `Alvo__Auth__HeaderName=Cookie` with no code change and nothing to
+  review — and combined with a custom `IAlvoContextResolver` it was the whole reason this guard is needed.
+  A host that wants its own users on the generated routes wants **#210**, not this.
 
 ## The status and `type`-slug catalogue
 
