@@ -41,6 +41,18 @@ namespace MMLib.Alvo.Api.Internal;
 /// <see cref="AlvoContext"/> as a parameter on purpose.
 /// </para>
 /// <para>
+/// <b>Five of the eight delegates read a request body, and each guards its <em>declaration</em> before
+/// reading it.</b> <see cref="JsonContentType.Refuse"/> answers 415 for a body not declared as JSON —
+/// #191's CSRF guard — and in each of the five it is the <em>first</em> header guard: after the operation's
+/// decision, before <see cref="EnsureUnconditional"/>, <see cref="Precondition"/> and
+/// <see cref="IdempotencyKey"/>. After the decision for the two reasons
+/// <see cref="EnsureOperationIsAllowed"/> gives; before the other header guards because a request that is
+/// not in the form this endpoint reads should not be answered with advice about <c>If-Match</c>. Nothing is
+/// lost by putting it after the decision, because the defence is the browser's preflight and is decided
+/// before the request is sent. <see cref="JsonContentType"/>'s own remarks carry the two enforcement points
+/// that were rejected, and the one thing "after the decision" does not buy.
+/// </para>
+/// <para>
 /// <b>Five of the six delegates resolve the operation's decision before doing any work, and none of them
 /// is the authority for it.</b> The distinction is the whole of this layer's relationship with
 /// authorization, and it is worth stating precisely rather than as "this layer never re-checks a decision",
@@ -78,7 +90,7 @@ internal static class DataApiEndpoints
 
         MapList(endpoints, entity, collection, options, filters, conventions);
         MapQuery(endpoints, entity, query, options, filters, conventions);
-        MapGet(endpoints, entity, item, filters, conventions);
+        MapGet(endpoints, entity, item, options, filters, conventions);
         MapCreate(endpoints, entity, collection, options, filters, formats, conventions);
         MapUpdate(endpoints, entity, item, options, filters, formats, conventions);
         MapReplace(endpoints, entity, item, collection, options, filters, formats, conventions);
@@ -130,7 +142,7 @@ internal static class DataApiEndpoints
                         CancellationToken ct) =>
                     ProblemResultFactory.GuardAsync(() =>
                         BatchAsync(http, entity, kind, options, formats, data, policies, caller, ct)))
-                .Protect(entity, kind, filters, conventions);
+                .Protect(entity, kind, filters, options, conventions);
     }
 
     /// <summary>One batch request: the decision, the body, then the port.</summary>
@@ -169,6 +181,12 @@ internal static class DataApiEndpoints
     {
         var context = Caller(caller);
         var decision = EnsureOperationIsAllowed(policies, entity.Name, kind.ToDataOperation(), context);
+
+        if (JsonContentType.Refuse(http.Request, options) is { } unsupported)
+        {
+            return unsupported;
+        }
+
         EnsureUnconditional(http.Request);
         var key = IdempotencyKey(http.Request, context, options);
 
@@ -282,7 +300,7 @@ internal static class DataApiEndpoints
                         http, data, entity, options, decision, http.Request.Query, context, ct)
                         .ConfigureAwait(false);
                 }))
-            .Protect(entity, DataApiEndpointKind.List, filters, conventions);
+            .Protect(entity, DataApiEndpointKind.List, filters, options, conventions);
 
     /// <summary>
     /// Maps the body-shaped collection read: the same parameters, the same parser and the same page, for a
@@ -333,6 +351,11 @@ internal static class DataApiEndpoints
                     var decision = EnsureOperationIsAllowed(
                         policies, entity.Name, DataApiEndpointKind.Query.ToDataOperation(), context);
 
+                    if (JsonContentType.Refuse(http.Request, options) is { } unsupported)
+                    {
+                        return unsupported;
+                    }
+
                     var body = await QueryBodyReader.ReadAsync(http.Request, options, ct).ConfigureAwait(false);
                     if (body.Parameters is not { } parameters)
                     {
@@ -342,7 +365,7 @@ internal static class DataApiEndpoints
                     return await PageAsync(http, data, entity, options, decision, parameters, context, ct)
                         .ConfigureAwait(false);
                 }))
-            .Protect(entity, DataApiEndpointKind.Query, filters, conventions);
+            .Protect(entity, DataApiEndpointKind.Query, filters, options, conventions);
 
     /// <summary>
     /// Parses one set of list parameters and answers the page they describe — the whole of what the two
@@ -424,6 +447,7 @@ internal static class DataApiEndpoints
         IEndpointRouteBuilder endpoints,
         EntitySchema entity,
         string pattern,
+        AlvoApiOptions options,
         AlvoContextFilterFactory filters,
         AlvoDataApiConventions conventions) =>
         endpoints.MapGet(pattern, (
@@ -456,7 +480,7 @@ internal static class DataApiEndpoints
                         ? ProblemResultFactory.NotFound()
                         : Representation(http.Request, record, entity);
                 }))
-            .Protect(entity, DataApiEndpointKind.Get, filters, conventions);
+            .Protect(entity, DataApiEndpointKind.Get, filters, options, conventions);
 
     private static void MapCreate(
         IEndpointRouteBuilder endpoints,
@@ -477,6 +501,12 @@ internal static class DataApiEndpoints
                     var context = Caller(caller);
                     var decision = EnsureOperationIsAllowed(
                         policies, entity.Name, DataApiEndpointKind.Create.ToDataOperation(), context);
+
+                    if (JsonContentType.Refuse(http.Request, options) is { } unsupported)
+                    {
+                        return unsupported;
+                    }
+
                     EnsureUnconditional(http.Request);
                     var key = IdempotencyKey(http.Request, context, options);
 
@@ -494,7 +524,7 @@ internal static class DataApiEndpoints
                         .ConfigureAwait(false);
                     return Created(pattern, record, entity);
                 }))
-            .Protect(entity, DataApiEndpointKind.Create, filters, conventions);
+            .Protect(entity, DataApiEndpointKind.Create, filters, options, conventions);
 
     /// <summary>The create-or-replace: <c>PUT</c> on the item route, gated on <b>both</b> operations.</summary>
     /// <remarks>
@@ -532,6 +562,12 @@ internal static class DataApiEndpoints
                     var context = Caller(caller);
                     var creating = EnsureOperationIsAllowed(policies, entity.Name, DataOperation.Create, context);
                     var decision = EnsureOperationIsAllowed(policies, entity.Name, DataOperation.Update, context);
+
+                    if (JsonContentType.Refuse(http.Request, options) is { } unsupported)
+                    {
+                        return unsupported;
+                    }
+
                     var precondition = Precondition(http.Request);
                     var key = IdempotencyKey(http.Request, context, options);
 
@@ -554,7 +590,7 @@ internal static class DataApiEndpoints
                         ? Created(collection, result.Row, entity)
                         : Row(result.Row, entity);
                 }))
-            .Protect(entity, DataApiEndpointKind.Replace, filters, conventions);
+            .Protect(entity, DataApiEndpointKind.Replace, filters, options, conventions);
 
     private static void MapUpdate(
         IEndpointRouteBuilder endpoints,
@@ -576,6 +612,12 @@ internal static class DataApiEndpoints
                     var context = Caller(caller);
                     var decision = EnsureOperationIsAllowed(
                         policies, entity.Name, DataApiEndpointKind.Update.ToDataOperation(), context);
+
+                    if (JsonContentType.Refuse(http.Request, options) is { } unsupported)
+                    {
+                        return unsupported;
+                    }
+
                     var precondition = Precondition(http.Request);
                     var key = IdempotencyKey(http.Request, context, options);
 
@@ -594,7 +636,7 @@ internal static class DataApiEndpoints
                         .ConfigureAwait(false);
                     return Row(record, entity);
                 }))
-            .Protect(entity, DataApiEndpointKind.Update, filters, conventions);
+            .Protect(entity, DataApiEndpointKind.Update, filters, options, conventions);
 
     private static void MapDelete(
         IEndpointRouteBuilder endpoints,
@@ -625,7 +667,7 @@ internal static class DataApiEndpoints
                         .ConfigureAwait(false);
                     return Results.NoContent();
                 }))
-            .Protect(entity, DataApiEndpointKind.Delete, filters, conventions);
+            .Protect(entity, DataApiEndpointKind.Delete, filters, options, conventions);
 
     /// <summary>
     /// Attaches the authorization filter <b>and</b> the operation marker in one call, so an endpoint
@@ -653,11 +695,13 @@ internal static class DataApiEndpoints
     /// filter and the operation marker already rest on. Last, so a host's convention observes Alvo's own
     /// metadata and can override what it means to.
     /// </param>
+    /// <param name="options">The API options, threaded to <see cref="Documenting"/>.</param>
     private static RouteHandlerBuilder Protect(
         this RouteHandlerBuilder builder,
         EntitySchema entity,
         DataApiEndpointKind kind,
         AlvoContextFilterFactory filters,
+        AlvoApiOptions options,
         AlvoDataApiConventions conventions)
     {
         var route = builder
@@ -667,7 +711,7 @@ internal static class DataApiEndpoints
             .AddEndpointFilter(NoStoreResponseFilter.Instance)
             .AddEndpointFilter(filters.For(entity.Name, kind.ToDataOperation()))
             .WithMetadata(new DataApiOperationMetadata(entity.Name, kind))
-            .Documenting(entity, kind);
+            .Documenting(entity, kind, options);
 
         conventions.ApplyTo(route);
 
@@ -701,11 +745,18 @@ internal static class DataApiEndpoints
     /// <param name="builder">The route just mapped.</param>
     /// <param name="entity">The entity the endpoint serves, which decides whether a 304 is reachable.</param>
     /// <param name="kind">Which endpoint this is.</param>
+    /// <param name="options">
+    /// The API options, which decide whether a 415 is reachable at all — so the metadata and the served
+    /// document cannot disagree about it.
+    /// </param>
     private static RouteHandlerBuilder Documenting(
-        this RouteHandlerBuilder builder, EntitySchema entity, DataApiEndpointKind kind)
+        this RouteHandlerBuilder builder,
+        EntitySchema entity,
+        DataApiEndpointKind kind,
+        AlvoApiOptions options)
     {
         builder.WithTags(entity.Name);
-        foreach (var response in DataApiDocumentation.ResponsesFor(kind, entity))
+        foreach (var response in DataApiDocumentation.ResponsesFor(kind, entity, options))
         {
             builder.Produces(response.Status, contentType: MediaTypeOf(response.Body));
         }

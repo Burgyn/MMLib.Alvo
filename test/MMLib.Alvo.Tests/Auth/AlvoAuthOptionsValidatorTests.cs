@@ -178,4 +178,50 @@ public class AlvoAuthOptionsValidatorTests
         result.FailureMessage.ShouldContain("empty Secret");
         result.FailureMessage.ShouldNotContain("at least");
     }
+
+    /// <summary>
+    /// A credential read from <c>Cookie</c> is refused at startup: it is the one request header a browser
+    /// attaches to a cross-origin request by itself, so reading a credential from it turns every Alvo route
+    /// into a cross-site-request-forgery target (#191).
+    /// </summary>
+    /// <remarks>
+    /// <b>The refusal has to be here rather than in a review.</b> Any host that binds the <c>Alvo:Auth</c>
+    /// section — the standalone host does — reaches this value from configuration, so
+    /// <c>Alvo__Auth__HeaderName=Cookie</c> is one environment variable with no code change and nothing to
+    /// review. And it is silent afterwards: every request looks like it worked.
+    /// </remarks>
+    [Fact]
+    public void A_credential_header_the_browser_attaches_by_itself_is_refused()
+    {
+        var options = new AlvoAuthOptions { HeaderName = "Cookie" };
+        options.DevKeys.Add(ValidKey());
+
+        var result = _validator.Validate(name: null, options);
+
+        result.Failed.ShouldBeTrue();
+        result.FailureMessage.ShouldContain("X-Alvo-Api-Key", Case.Sensitive, "the refusal must name the fix");
+    }
+
+    /// <summary>Case does not get a host out of it — HTTP header names are case-insensitive.</summary>
+    [Fact]
+    public void The_browser_attached_header_refusal_is_case_insensitive()
+    {
+        var options = new AlvoAuthOptions { HeaderName = "cookie" };
+        options.DevKeys.Add(ValidKey());
+
+        _validator.Validate(name: null, options).Failed.ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// The non-vacuity control: a host <em>may</em> move the credential onto a header of its own, which is
+    /// what <see cref="AlvoAuthOptions.HeaderName"/> exists for. Only the browser-attached ones are refused.
+    /// </summary>
+    [Fact]
+    public void A_host_may_still_move_the_credential_onto_its_own_header()
+    {
+        var options = new AlvoAuthOptions { HeaderName = "X-Fleet-Desk-Key" };
+        options.DevKeys.Add(ValidKey());
+
+        _validator.Validate(name: null, options).Succeeded.ShouldBeTrue();
+    }
 }

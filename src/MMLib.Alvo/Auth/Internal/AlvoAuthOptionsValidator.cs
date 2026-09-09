@@ -4,11 +4,11 @@ namespace MMLib.Alvo.Auth.Internal;
 
 /// <summary>
 /// Fail-fast startup check (spec §0 principle 5, secure-by-default) for
-/// <see cref="AlvoAuthOptions.DevKeys"/>. A misconfigured dev key — an unparseable scope, a
-/// missing <c>KeyId</c>/<c>Secret</c>, a duplicate <c>KeyId</c>, or a <c>KeyId</c> containing the
-/// <c>.</c> separator — is otherwise dropped silently by <see cref="InMemoryApiKeyStore"/> (or
-/// throws lazily from a <c>Dictionary</c> key collision on first use), leaving an operator staring
-/// at an indistinguishable 401 with no clue which key or value is wrong.
+/// <see cref="AlvoAuthOptions.DevKeys"/> and <see cref="AlvoAuthOptions.HeaderName"/>. A misconfigured
+/// dev key — an unparseable scope, a missing <c>KeyId</c>/<c>Secret</c>, a duplicate <c>KeyId</c>, or a
+/// <c>KeyId</c> containing the <c>.</c> separator — is otherwise dropped silently by
+/// <see cref="InMemoryApiKeyStore"/> (or throws lazily from a <c>Dictionary</c> key collision on first
+/// use), leaving an operator staring at an indistinguishable 401 with no clue which key or value is wrong.
 /// </summary>
 internal sealed class AlvoAuthOptionsValidator : IValidateOptions<AlvoAuthOptions>
 {
@@ -18,6 +18,8 @@ internal sealed class AlvoAuthOptionsValidator : IValidateOptions<AlvoAuthOption
         var failures = new List<string>();
         var seenKeyIds = new HashSet<string>(StringComparer.Ordinal);
 
+        ValidateHeaderName(options.HeaderName, failures);
+
         foreach (var key in options.DevKeys)
         {
             ValidateKey(key, seenKeyIds, failures);
@@ -26,6 +28,60 @@ internal sealed class AlvoAuthOptionsValidator : IValidateOptions<AlvoAuthOption
         return failures.Count == 0
             ? ValidateOptionsResult.Success
             : ValidateOptionsResult.Fail(failures);
+    }
+
+    /// <summary>Headers a browser attaches by itself, which a credential must never be read from.</summary>
+    /// <remarks>
+    /// <c>Cookie</c> is the whole list, and one entry is enough: it is the only request header a browser
+    /// attaches to a cross-origin request <em>without the page asking</em>. Every other header a forged
+    /// request could carry has to be set by script, which is what a preflight then governs.
+    /// </remarks>
+    private static readonly string[] _browserAttachedHeaders = ["Cookie"];
+
+    /// <summary>
+    /// Refuses a credential header a browser attaches by itself — reading a credential from
+    /// <c>Cookie</c> turns every Alvo route into a cross-site-request-forgery target.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Configuration-reachable, which is why it is checked here rather than trusted to a code review.</b>
+    /// <see cref="AlvoAuthOptions.HeaderName"/> is bound from configuration by any host that binds the
+    /// <c>Alvo:Auth</c> section — the standalone host does, and so does the embedded sample — so
+    /// <c>Alvo__Auth__HeaderName=Cookie</c> is an environment variable away, with no code change and no
+    /// review to catch it. The combination it enables is exactly #191's threat model: a browser-authenticated
+    /// caller reaching a body-taking route, at which point
+    /// <see cref="Api.AlvoApiOptions.RequireJsonContentType"/> is the only thing left standing between a
+    /// cross-site form and a write.
+    /// </para>
+    /// <para>
+    /// <b>Refused rather than warned about, and refused at startup.</b> A warning in a log an operator is
+    /// not reading is not a control, and the misconfiguration is not one a request can reveal: every request
+    /// afterwards looks like it worked. §0 principle 5 says the insecure combination must be unreachable, not
+    /// merely discouraged — and the message names the fix, because a refusal an operator cannot act on is
+    /// its own defect (§0 principle 4).
+    /// </para>
+    /// <para>
+    /// <b>It does not close the general problem, and does not pretend to.</b> A host that maps its own
+    /// session cookie onto a header in its own middleware reaches the same place, deliberately and visibly.
+    /// What this refuses is the version nobody decided: a one-line environment override.
+    /// </para>
+    /// </remarks>
+    /// <param name="headerName">The configured credential header.</param>
+    /// <param name="failures">The failure list to add to.</param>
+    private static void ValidateHeaderName(string headerName, List<string> failures)
+    {
+        if (!_browserAttachedHeaders.Contains(headerName, StringComparer.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        failures.Add(
+            $"Alvo:Auth:HeaderName is '{headerName}', a header the browser attaches to cross-origin "
+            + "requests by itself — reading a credential from it makes every Alvo route a "
+            + "cross-site-request-forgery target. Read the credential from a header only script can set "
+            + "(the default is 'X-Alvo-Api-Key'). To let your host's own users reach Alvo, resolve them in "
+            + "your own endpoints and pass the AlvoContext to IAlvoData instead; see "
+            + "samples/MMLib.Alvo.Samples.EmbeddedHost.");
     }
 
     private static void ValidateKey(AlvoDevApiKey key, HashSet<string> seenKeyIds, List<string> failures)

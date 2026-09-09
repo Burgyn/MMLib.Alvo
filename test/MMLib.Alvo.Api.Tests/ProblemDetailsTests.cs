@@ -424,6 +424,7 @@ public sealed class ProblemDetailsTests
 
         reached.Add(await InternalSlugAnsweredByAFaultingStoreAsync());
         reached.Add(await UnreadableSlugAnsweredByABodyTheServerRefusesAsync());
+        reached.Add(await UnsupportedMediaTypeSlugAnsweredByANonJsonBodyAsync(world));
 
         reached.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ShouldBe(
             AlvoProblemTypes.All.Except(PendingUntilALaterTask, StringComparer.Ordinal).Order(StringComparer.Ordinal),
@@ -454,6 +455,26 @@ public sealed class ProblemDetailsTests
             [_admin], new AlvoApiWorldSetup(MapAlvoProblemDetails: true, ServerBodyLimitBytes: ServerBodyLimitBytes));
 
         return await SlugAnsweredByAsync(world, new Probe(HttpMethod.Post, "/api/owners", _admin, OversizedOwner()));
+    }
+
+    /// <summary>
+    /// The <c>unsupported-media-type</c> slug's probe. It needs no world of its own — a refused declaration
+    /// touches nothing — but it does need a body this world does not serialize for it, which
+    /// <see cref="Probe"/> cannot express: the whole point is a <c>Content-Type</c> that is not JSON.
+    /// </summary>
+    /// <param name="world">The world the rest of the probes ran against.</param>
+    private static async Task<string> UnsupportedMediaTypeSlugAnsweredByANonJsonBodyAsync(AlvoApiWorld world)
+    {
+        using var content = new StringContent(
+            """{"name":"Plain Ltd"}""", System.Text.Encoding.UTF8, "text/plain");
+        using var response = await world.SendRawAsync(
+            HttpMethod.Post, "/api/owners", _admin, content: content);
+
+        response.StatusCode.ShouldBe(
+            HttpStatusCode.UnsupportedMediaType,
+            "or this probe reaches some other refusal and the slug's reachability is unproven");
+
+        return await response.ReadProblemTypeAsync();
     }
 
     /// <summary>
@@ -583,6 +604,7 @@ public sealed class ProblemDetailsTests
         ProblemResultFactory.Unauthenticated("X-Alvo-Api-Key"),
         ProblemResultFactory.Internal(),
         ProblemResultFactory.Unreadable(StatusCodes.Status413PayloadTooLarge),
+        ProblemResultFactory.UnsupportedMediaType(HttpMethods.Post),
         Guarded(new AlvoAuthorizationException("refused")),
         Guarded(new AlvoRecordNotFoundException()),
         Guarded(new AlvoPreconditionFailedException("stale")),

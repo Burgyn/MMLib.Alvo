@@ -148,14 +148,15 @@ public sealed class OpenApiDocumentTests
         }
 
         documented.Count.ShouldBe(
-            113,
-            "31 on the version-less entity and 32 on the audited one, whose read adds a 304 — pinned from "
+            127,
+            "38 on the version-less entity and 39 on the audited one, whose read adds a 304 — pinned from "
             + "outside so the equality below cannot be satisfied by two empty sets. It went 51 -> 55 with "
             + "#138 (an update and a delete can each answer 409 when a database constraint refuses the "
             + "write), 55 -> 63 with #107 (the body-shaped read answers the list's own four statuses, on "
             + "both entities), and 99 -> 113 with #105: create-or-replace answers seven on each entity — "
             + "201 and 200 for its two branches, and 401, 403, 422, 412 and 409. It lists no 404, because "
-            + "an id nothing holds is the branch that creates rather than a row that is missing");
+            + "an id nothing holds is the branch that creates rather than a row that is missing. 113 -> 127 "
+            + "with #191: seven body-taking operations on each entity gained a 415");
         observed.ShouldBe(documented, "a documented status no request reaches, or a status no document lists");
     }
 
@@ -354,10 +355,12 @@ public sealed class OpenApiDocumentTests
         var refusals = Refusals(document).ToList();
 
         refusals.Count.ShouldBe(
-            90,
-            "forty-five for two entities — three on each of the two collection reads and on the row read, "
-            + "five on a create, six on an update, five on a delete and five on a create-or-replace. The "
-            + "last of those is #105's: 401, 403, 422, 412 and 409, and no 404, because an id nothing holds "
+            104,
+            "fifty-two for two entities — three on the query-string list, four on the body-shaped one, three "
+            + "on the row read, six on a create, seven on an update, five on a delete and six on a "
+            + "create-or-replace. It went 90 -> 104 with #191: the seven operations that read a body each "
+            + "gained a 415, and the three that read none did not. Before that, #105's create-or-replace "
+            + "answered 401, 403, 422, 412 and 409, and no 404, because an id nothing holds "
             + "is the branch that creates rather than a row that is missing");
         foreach (var (route, status, response) in refusals)
         {
@@ -802,6 +805,39 @@ public sealed class OpenApiDocumentTests
     ];
 
     /// <summary>The fixture: one audited entity and one that is not, and the document served over HTTP.</summary>
+    /// <summary>
+    /// A host that turned the <c>Content-Type</c> guard off publishes no 415 — on no operation and as no
+    /// component. A document listing a status no request can reach describes behaviour that does not exist,
+    /// and a component nothing can reference is the orphan
+    /// <c>AlvoDocumentTransformer.Reusable</c>'s own remarks argue against.
+    /// </summary>
+    /// <remarks>
+    /// <b>The problem <c>type</c> enumeration is deliberately not asserted here, and the distinction is the
+    /// point.</b> <c>ProblemComponents</c> publishes <c>AlvoProblemTypes.All</c> verbatim, and
+    /// <see cref="The_problem_details_shape_is_a_component_referenced_by_every_error_response"/> pins that as
+    /// set equality: the enum is
+    /// the framework's <em>vocabulary</em>, one document-wide list of every classification Alvo can ever mint,
+    /// not a per-host reachability claim. A response listing is the reachability claim, which is why only that
+    /// half moves with the option.
+    /// </remarks>
+    [Fact]
+    public async Task A_host_that_opted_out_publishes_no_415()
+    {
+        await using var world = await AlvoApiWorld.FromDescriptorAsync(
+            "documented-store.alvo.json",
+            [_admin, _narrow],
+            new AlvoApiWorldSetup(
+                MapOpenApiDocument: true, ConfigureApi: api => api.RequireJsonContentType = false));
+
+        var document = await world.OpenApiDocumentAsync();
+
+        Operations(document)
+            .SelectMany(operation => operation["responses"]!.AsObject().Select(response => response.Key))
+            .ShouldNotContain("415", "no request can reach it, so no operation may promise it");
+        document["components"]!["responses"]!.AsObject().ContainsKey("unsupported-media-type").ShouldBeFalse(
+            "a published component nothing in the document can point at is an orphan");
+    }
+
     private static Task<AlvoApiWorld> StoreAsync() =>
         AlvoApiWorld.FromDescriptorAsync(
             "documented-store.alvo.json",
@@ -1064,12 +1100,9 @@ public sealed class OpenApiDocumentTests
         var observed = new List<string>();
         foreach (var probe in await ProbesAsync(world, entity, categoryId))
         {
+            using var content = Content(probe);
             using var response = await world.SendRawAsync(
-                probe.Method,
-                probe.Path,
-                probe.Key,
-                content: probe.Body is null ? null : AlvoApiWorld.RawJson(probe.Body.ToJsonString()),
-                headers: probe.Headers);
+                probe.Method, probe.Path, probe.Key, content: content, headers: probe.Headers);
 
             ((int)response.StatusCode).ShouldBe(
                 probe.Status, $"{probe.Method} {probe.Path} no longer reaches the {probe.Status} it was written for");
@@ -1077,6 +1110,24 @@ public sealed class OpenApiDocumentTests
         }
 
         return observed;
+    }
+
+    /// <summary>The body one probe sends, under the media type it declares.</summary>
+    /// <param name="probe">The probe whose body to build.</param>
+    private static StringContent? Content(Probe probe)
+    {
+        if (probe.Body is null)
+        {
+            return null;
+        }
+
+        var content = AlvoApiWorld.RawJson(probe.Body.ToJsonString());
+        if (probe.MediaType is { } declared)
+        {
+            content.Headers.ContentType = System.Net.Http.Headers.MediaTypeHeaderValue.Parse(declared);
+        }
+
+        return content;
     }
 
     /// <summary>
@@ -1155,6 +1206,43 @@ public sealed class OpenApiDocumentTests
             new("delete", 204, HttpMethod.Delete, doomed, _admin, null),
 
             .. BatchProbes(collection, entity, categoryId, stale, spent, condemned),
+            .. UnsupportedMediaTypeProbes(collection, row, entity, categoryId),
+        ];
+    }
+
+    /// <summary>
+    /// The 415 on each of the seven operations that read a body — and on none of the three that do not.
+    /// </summary>
+    /// <remarks>
+    /// <b>Seven probes rather than one, because the document lists it seven times.</b>
+    /// <c>Every_documented_status_code_is_one_the_endpoint_can_actually_return</c> compares
+    /// <c>&lt;operationId&gt; &lt;status&gt;</c> pairs, so a single probe would leave six documented statuses
+    /// unreached. The body itself is valid JSON in every one: the request is refused for its
+    /// <em>declaration</em>, and a body that would also have failed validation could pass this while the
+    /// guard did nothing.
+    /// </remarks>
+    /// <param name="collection">The entity's collection path.</param>
+    /// <param name="row">A row that exists, for the operations that address one.</param>
+    /// <param name="entity">The entity being written.</param>
+    /// <param name="categoryId">The category a product must belong to.</param>
+    private static IEnumerable<Probe> UnsupportedMediaTypeProbes(
+        string collection, string row, string entity, Guid categoryId)
+    {
+        const string plain = "text/plain";
+        var body = Body(entity, categoryId);
+
+        return
+        [
+            new("query", 415, HttpMethod.Post, $"{collection}/query", _admin, new JsonObject(), MediaType: plain),
+            new("create", 415, HttpMethod.Post, collection, _admin, body, MediaType: plain),
+            new("update", 415, HttpMethod.Patch, row, _admin, Rename(), MediaType: plain),
+            new("replace", 415, HttpMethod.Put, row, _admin, body, MediaType: plain),
+            new("batchCreate", 415, HttpMethod.Post, $"{collection}/batch", _admin,
+                Rows(body), MediaType: plain),
+            new("batchUpdate", 415, HttpMethod.Patch, $"{collection}/batch", _admin,
+                new JsonObject { ["rows"] = new JsonArray() }, MediaType: plain),
+            new("batchDelete", 415, HttpMethod.Delete, $"{collection}/batch", _admin,
+                new JsonObject { ["ids"] = new JsonArray() }, MediaType: plain),
         ];
     }
 
@@ -1394,6 +1482,18 @@ public sealed class OpenApiDocumentTests
     /// <param name="Key">The key to present, or <see langword="null"/> for an anonymous caller.</param>
     /// <param name="Body">The body to send, or <see langword="null"/> for none.</param>
     /// <param name="Headers">Any further request headers the status needs.</param>
+    /// <param name="Operation">The operation this probe drives, as the document spells it.</param>
+    /// <param name="Status">The status it goes for, asserted before it counts.</param>
+    /// <param name="Method">The HTTP method.</param>
+    /// <param name="Path">The request path.</param>
+    /// <param name="Key">The credential to present, or <see langword="null"/> for none.</param>
+    /// <param name="Body">The body to send, or <see langword="null"/> for none.</param>
+    /// <param name="Headers">Any further request headers.</param>
+    /// <param name="MediaType">
+    /// The media type the body is declared under; <see langword="null"/> means <c>application/json</c>, which
+    /// every probe but the 415 ones wants. It exists because the guard's whole subject is a declaration, and
+    /// no probe could express one that is not JSON.
+    /// </param>
     private sealed record Probe(
         string Operation,
         int Status,
@@ -1401,5 +1501,6 @@ public sealed class OpenApiDocumentTests
         string Path,
         TestApiKey? Key,
         JsonObject? Body,
-        IReadOnlyDictionary<string, string>? Headers = null);
+        IReadOnlyDictionary<string, string>? Headers = null,
+        string? MediaType = null);
 }

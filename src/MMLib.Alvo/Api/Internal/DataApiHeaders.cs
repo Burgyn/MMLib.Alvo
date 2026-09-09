@@ -95,13 +95,20 @@ internal static class DataApiHeaders
     /// </remarks>
     /// <param name="document">The document being built.</param>
     /// <param name="operations">Every generated endpoint's kind and the entity it serves.</param>
+    /// <param name="options">
+    /// The API options, threaded through to the response catalogue because which responses an operation has
+    /// decides which headers any of them carries.
+    /// </param>
     internal static void AddTo(
-        OpenApiDocument document, IEnumerable<(DataApiEndpointKind Kind, EntitySchema Entity)> operations)
+        OpenApiDocument document,
+        IEnumerable<(DataApiEndpointKind Kind, EntitySchema Entity)> operations,
+        AlvoApiOptions options)
     {
         ArgumentNullException.ThrowIfNull(document);
         ArgumentNullException.ThrowIfNull(operations);
+        ArgumentNullException.ThrowIfNull(options);
 
-        var used = UsedIds(operations);
+        var used = UsedIds(operations, options);
         document.AddComponent(CacheControl, NoStore);
         if (used.Contains(EntityTagHeader))
         {
@@ -130,13 +137,14 @@ internal static class DataApiHeaders
     /// carries it, refusals included.
     /// </summary>
     /// <param name="operations">Every generated endpoint's kind and the entity it serves.</param>
+    /// <param name="options">The API options the response catalogue is read under.</param>
     private static HashSet<string> UsedIds(
-        IEnumerable<(DataApiEndpointKind Kind, EntitySchema Entity)> operations)
+        IEnumerable<(DataApiEndpointKind Kind, EntitySchema Entity)> operations, AlvoApiOptions options)
     {
         var used = new HashSet<string>(StringComparer.Ordinal);
         foreach (var (kind, entity) in operations)
         {
-            foreach (var response in DataApiDocumentation.ResponsesFor(kind, entity))
+            foreach (var response in DataApiDocumentation.ResponsesFor(kind, entity, options))
             {
                 if (CarriesEntityTag(response.Status) && AlvoManagedColumns.VersionColumn(entity) is not null)
                 {
