@@ -507,3 +507,8 @@ affected.proj
 # it was published on, and the generated TeaPie environment. Recreated by playground/run on every
 # start; nothing here is a deliverable.
 playground/.run/
+
+# The embedded sample's SQLite file, created beside the app on `dotnet run`.
+samples/**/*.db
+samples/**/*.db-shm
+samples/**/*.db-wal

@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    The embedded-run sample (#24, spec §"Režim 2"): somebody else's ASP.NET Core app that keeps its
+    records in Alvo.
+
+    Project references rather than PackageReferences, so a breaking change to the AddAlvo/MapAlvo seam
+    breaks the sample in the same build instead of rotting until someone runs it.
+  -->
+  <PropertyGroup>
+    <UserSecretsId>mmlib-alvo-samples-embedded-host</UserSecretsId>
+    <RootNamespace>MMLib.Alvo.Samples.EmbeddedHost</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/MMLib.Alvo/MMLib.Alvo.csproj" />
+    <!-- SQLite so `dotnet run` needs no container. The engine is not part of what this sample
+         demonstrates: §0 principle 3 (engine-agnostic core) is what makes it irrelevant, and
+         DataApiEngineTests proves the same API on both shipped engines. -->
+    <ProjectReference Include="../../src/MMLib.Alvo.Data.Sqlite/MMLib.Alvo.Data.Sqlite.csproj" />
+  </ItemGroup>
+
+</Project>

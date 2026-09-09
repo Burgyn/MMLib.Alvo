@@ -1,0 +1,17 @@
+<Project>
+
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))"
+          Condition="'' != $([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+  <PropertyGroup>
+    <!-- A sample is read and run, never referenced: a .nupkg of one would publish a surface nobody
+         consumes, exactly as for MMLib.Alvo.Host. It also keeps SolutionConventionTests'
+         "every packable src project has a tests project" rule out of a directory it was never
+         written for. -->
+    <IsPackable>false</IsPackable>
+    <!-- The sample's own types carry the explanations that are the whole point of it, so they are
+         documented like shipped code. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+</Project>
