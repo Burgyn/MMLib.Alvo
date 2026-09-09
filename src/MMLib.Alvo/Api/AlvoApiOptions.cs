@@ -144,11 +144,14 @@ public sealed class AlvoApiOptions
     /// <para>
     /// <b>Why it matters in embedded mode specifically.</b> Alvo's own credential is a request header, so a
     /// cross-site form POST arrives with no credential at all and default-deny answers it exactly as it
-    /// answers any other anonymous caller. But an embedded host may point
-    /// <see cref="Auth.AlvoAuthOptions.HeaderName"/> at <c>Cookie</c> and register its own
-    /// <c>IAlvoContextResolver</c> — public API, no framework change — at which point the browser
-    /// authenticates the forgery. <c>docs/architecture/data-api.md</c> carries the whole reasoning under
-    /// "Requiring a JSON <c>Content-Type</c>".
+    /// answers any other anonymous caller. The forgery only becomes *authenticated* when something
+    /// browser-carried identifies the caller — and the one-variable version of that,
+    /// <see cref="Auth.AlvoAuthOptions.HeaderName"/> pointed at <c>Cookie</c>, is now
+    /// <b>refused at startup</b> (<c>Auth.Internal.AlvoAuthOptionsValidator</c>). What remains reachable is a
+    /// host that maps its own session onto a header in its own middleware, deliberately and visibly: this
+    /// guard is what stands between that host and a cross-site form.
+    /// <c>docs/architecture/data-api.md</c> carries the whole reasoning under "Requiring a JSON
+    /// <c>Content-Type</c>".
     /// </para>
     /// <para>
     /// <b>Set it to <see langword="false"/> only in a host that has its own CSRF defence</b> — ASP.NET Core

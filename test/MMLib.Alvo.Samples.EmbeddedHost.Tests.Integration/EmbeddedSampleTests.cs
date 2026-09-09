@@ -174,14 +174,23 @@ public class EmbeddedSampleTests
     }
 
     /// <summary>
-    /// The development sign-in is <b>not mapped at all</b> in production. It issues a cookie with no
-    /// credential of any kind, so its absence there is the control that makes it safe to ship in a file
-    /// people copy — and a comment saying "development only" is not a control.
+    /// The development sign-in is <b>not mapped at all</b> outside Development. It issues a cookie with no
+    /// credential of any kind, so its absence everywhere else is the control that makes it safe to ship in
+    /// a file people copy — and a comment saying "development only" is not a control.
     /// </summary>
-    [Fact]
-    public async Task The_development_sign_in_is_not_mapped_in_production()
+    /// <remarks>
+    /// <b>Staging is asserted, not only Production, because the predicate first said
+    /// <c>!IsProduction()</c>.</b> That maps a credential-free sign-in somewhere real people reach, in a
+    /// file whose whole purpose is to be copied — so the environment that would have slipped through is
+    /// the one worth naming here.
+    /// </remarks>
+    /// <param name="environment">An environment the sign-in must not be reachable in.</param>
+    [Theory]
+    [InlineData("Production")]
+    [InlineData("Staging")]
+    public async Task The_development_sign_in_is_not_mapped_outside_development(string environment)
     {
-        await using var sample = await SampleWorld.StartAsync(environment: "Production");
+        await using var sample = await SampleWorld.StartAsync(environment);
         using var client = sample.WithoutCredentials();
 
         using var response = await client.PostAsJsonAsync(
@@ -302,7 +311,7 @@ public class EmbeddedSampleTests
         /// Which environment to run as, passed as <c>--environment</c> because the host reads it before any
         /// configuration source this fixture could add. It defaults to <c>Development</c>, which is what
         /// makes the development sign-in reachable at all —
-        /// <see cref="The_development_sign_in_is_not_mapped_in_production"/> is the other half.
+        /// <see cref="The_development_sign_in_is_not_mapped_outside_development"/> is the other half.
         /// </param>
         internal static async Task<SampleWorld> StartAsync(string environment = "Development")
         {

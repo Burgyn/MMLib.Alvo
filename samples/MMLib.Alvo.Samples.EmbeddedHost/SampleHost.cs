@@ -140,15 +140,16 @@ public static class SampleHost
     /// <param name="app">The application to map onto.</param>
     private static void MapAppEndpoints(WebApplication app)
     {
-        // A development sign-in, and DEVELOPMENT-ONLY: it is mapped at all only outside production,
-        // because it issues a cookie with no credential of any kind.
+        // A development sign-in, and DEVELOPMENT-ONLY in the predicate as well as the prose: it issues a
+        // cookie with no credential of any kind, so IsDevelopment() and not !IsProduction(). Staging is
+        // somewhere real people reach, and this file is one people copy.
         //
         // It takes a demo user's NAME and reads that user's roles from a fixed table on this side. It does
         // NOT take a role list from the request, which is the shape this endpoint had first and the shape a
         // reader would have copied: a caller naming its own roles is an unauthenticated
         // privilege-escalation endpoint, and the fact that this app writes no *authorization* logic is no
         // comfort if its *authentication* trusts whatever arrives.
-        if (!app.Environment.IsProduction())
+        if (app.Environment.IsDevelopment())
         {
             app.MapPost("/app/login", (LoginRequest request, HttpContext http) =>
             {

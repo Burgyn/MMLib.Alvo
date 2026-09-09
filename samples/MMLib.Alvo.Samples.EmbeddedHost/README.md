@@ -75,7 +75,8 @@ caller the row is *invisible* rather than forbidden.
 
 ### About `/app/login`
 
-It is a **development-only** endpoint — mapped only outside production, and a test pins that — and it
+It is a **development-only** endpoint — mapped only when the environment is `Development`, and a test
+pins that for `Production` *and* `Staging` — and it
 issues a cookie with **no credential of any kind**. It takes a demo user's *name* (`inspector` or `clerk`)
 and reads that user's roles from a fixed table inside the app.
 

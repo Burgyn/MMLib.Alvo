@@ -78,14 +78,25 @@ simply not a seam a host can write through on a generated route.
 
 ### 2.2 The reachable cookie door: `HeaderName` plus a custom resolver — so the vector is live
 
-`AlvoAuthOptions.HeaderName` is an `init` property with a public setter path through the options
-pattern, and `IAlvoContextResolver` is registered with `TryAddSingleton` (`Auth/Setup.cs`), so a host
-registering its own takes it over. An embedded host can therefore write:
+`AlvoAuthOptions.HeaderName` is `{ get; init; }` — so it is **not** settable from a
+`Configure<AlvoAuthOptions>` delegate (CS8852), and the first version of this section illustrated it
+that way and was wrong. The reachable path is **configuration binding**, which any host that binds the
+`Alvo:Auth` section already has (`AlvoHost.cs:85` does; so does the sample). `IAlvoContextResolver` is
+registered with `TryAddSingleton` (`Auth/Setup.cs`), so a host registering its own takes it over:
 
+```bash
+Alvo__Auth__HeaderName=Cookie          # one environment variable, no code change, nothing to review
+```
 ```csharp
-services.Configure<AlvoAuthOptions>(o => o.HeaderName = "Cookie");
 services.AddSingleton<IAlvoContextResolver, SessionCookieResolver>();
 ```
+
+**That is worse than the code version, not better**, and it changed the design: an insecure combination
+one environment variable away, silent afterwards because every request looks like it worked, is one §0
+principle 5 says must be *unreachable* rather than discouraged. So the fix grew a second half —
+`AlvoAuthOptionsValidator` refuses `Cookie` on `HeaderName` and on `TenantHeaderName` at startup, naming
+the fix. What stays reachable, deliberately, is a host that maps its own session onto a header in its own
+middleware: visible, decided, and exactly what the guard below exists for.
 
 `AlvoContextFilter.Presented(request, "Cookie")` reads the browser's `Cookie` header like any other
 header and hands the raw text to the host's resolver, which parses its session out of it. That is
@@ -214,12 +225,27 @@ important thing an embedded reader needs to understand, and the thing no amount 
 documentation conveys.
 
 **`/app/*` — the host's own endpoints, for the host's own cookie users.**
-Cookie authentication (`AddAuthentication().AddCookie()`), a dev `POST /app/login` that issues the
-cookie, and two endpoints — `GET /app/vehicles`, `POST /app/vehicles` — that resolve `IAlvoData` and
-`IRoleCatalogProvider`, build an `AlvoContext` from the cookie's claims, and call the port. Alvo's
-policy engine still decides: `vehicles.create` admits `admin` or `inspector`, so the sample's
-`inspector` user can create and its plain `authenticated` user cannot, without the sample writing a
-single authorization line of its own.
+Cookie authentication (`AddAuthentication().AddCookie()`), a **development-only** `POST /app/login` that
+issues the cookie for a named demo user whose roles come from a table inside the app, and two endpoints
+— `GET /app/vehicles` and `PATCH /app/vehicles/{id}` — that resolve `IAlvoData` and
+`IRoleCatalogProvider`, build an `AlvoContext` from the cookie's claims, and call the port. Alvo's policy
+engine still decides: **`vehicles.update`** admits `admin` or `inspector`, so the sample's `inspector`
+user may repaint a vehicle and its plain `authenticated` one may not, without the sample writing a single
+authorization line of its own.
+
+**The write is `update`, not `create`, and the descriptor is why.** `vehicles.create` reads
+`'admin' in @user.roles` — admin only — so an `inspector` creating a vehicle would have been refused for
+a reason that is not the demonstration. `vehicles.update` is the `admin || inspector` rule; a create also
+needs five more required fields including a `ref` to an owner, which would have buried the seam under
+seeding. The agent surface does that seeding instead, which is the two-surface story doing real work.
+The refusal a plain user gets is a **404**, not a 403: the rule renders to a row-level `USING` predicate,
+so the row is *invisible* rather than forbidden, and `AlvoProblemTypes.NotFound` says the two are
+deliberately indistinguishable.
+
+**The sign-in takes a user name and no roles.** The first version took a role list from the request body,
+which the security review correctly called an unauthenticated privilege-escalation endpoint — in the one
+file people copy. It reads roles server-side now and is mapped only in Development, with a fact for each
+half.
 
 **`/api/alvo/*` — Alvo's generated Data API, for agents and machines.**
 `app.MapAlvoHealth()` then `app.MapAlvoDataApi()`, with Alvo's own API-key credential
@@ -500,18 +526,29 @@ Over `AlvoApiWorld`, one fact per claim:
 
 ### 6.3 The sample, ring2
 
-`WebApplicationFactory<Program>` over the sample host (an `InternalsVisibleTo` in the sample's csproj,
-which is what makes a top-level `Program` reachable — the same arrangement any minimal-API test uses).
+**`TestServer` over both hosts' own composition seams, not `WebApplicationFactory`.** An earlier draft of
+this section said `WebApplicationFactory<Program>` plus an `InternalsVisibleTo` was "the same arrangement
+any minimal-API test uses" — it is not the arrangement *this repository* uses, and `AlvoApiWorld`'s own
+remarks record the opposite decision. `AlvoHostWorld` composes the standalone host through
+`AlvoHost.CreateBuilder`/`BuildAsync` with `UseTestServer()`, and the sample gets the same shape: a public
+`SampleHost.CreateBuilder`/`Build`, which `Program.cs` is two lines over. That needs no
+`Microsoft.AspNetCore.Mvc.Testing`, no `InternalsVisibleTo`, and does not fight
+`WebApplicationFactory`'s content-root handling — which the sample's descriptor lookup walks.
 `AlvoSharedArchTests=false`, because the suite maps to no production assembly.
 
 1. **It boots.** `/health/ready` reports healthy, which means the descriptor applied — `AlvoBootService`
    ran and the schema is up (§2.4). A sample that does not start is worse than no sample.
-2. **The DoD, mechanised.** The sample's served OpenAPI **path set** equals the standalone
-   `MMLib.Alvo.Host`'s over the same `vehicles.alvo.json`, modulo the route prefix. This is the fact
-   that turns *"both modes start up the same functional backend from the same descriptor"* from prose
-   into a check, and it is the reason §3.2 picks that descriptor. Compared as a set, deliberately:
-   memory of #26 is that the e2e suite pins the path set by equality and that is what catches a route
-   quietly appearing or vanishing.
+2. **The DoD, mechanised.** The sample's generated Data API **routes** equal the standalone
+   `MMLib.Alvo.Host`'s over the same `vehicles.alvo.json` — as `METHOD path` pairs with each host's own
+   prefix stripped, pinned at 30 from outside so the equality cannot be satisfied by two empty sets.
+   This is the fact that turns *"both modes start up the same functional backend from the same
+   descriptor"* from prose into a check, and it is the reason §3.2 picks that descriptor.
+
+   **Routes read off `EndpointDataSource`, not an OpenAPI path set.** An earlier draft of this section
+   asked for the served *document's* paths; the sample maps no OpenAPI document and adding one would be
+   ceremony in the one file that has to stay readable. The route set is also the stronger comparison:
+   ten routes per entity live on four paths, so comparing paths would not notice a missing `PUT` or a
+   batch verb, and method-and-path does.
 3. **The host's own surface works, and Alvo's policy decides.** A cookie user with `inspector` can
    `POST /app/vehicles`; a cookie user with only `authenticated` is refused by the *descriptor's*
    rule, not by the sample's code; an unauthenticated caller is refused by the cookie scheme.
@@ -557,7 +594,21 @@ being correct for `vehicle-registry` and absent for an entity shape nobody tried
 4. **`Accept-Post` is a W3C LDP header, not an RFC 9110 one.** It is IANA-registered and means exactly
    what is needed; the alternative was inventing nothing and leaving POST without the machine-readable
    fix, or inventing `Accept-Put`, which is worse. `PUT` and `DELETE` therefore carry no `Accept-*`.
-5. **From `baas-analyza.md` §328's `Content-Type` guidance:** that bullet is about *upload* content
+5. **From this design's own first draft, corrected in place rather than left standing.** Four statements
+   were wrong and are fixed above, each where it was wrong: §2.2's `Configure(o => o.HeaderName = …)`
+   (the property is `init`; the real door is configuration binding, which is worse and grew the validator
+   refusal), §3.3's `POST /app/vehicles` on a `vehicles.create` that admits `admin` only (the write moved
+   to `update`), §6.3's `WebApplicationFactory<Program>` (this repository uses `TestServer` over each
+   host's own composition seam, and `AlvoApiWorld` records that decision), and §6.3/§9's "served OpenAPI
+   path set" (the sample maps no document; the route set off `EndpointDataSource` is both achievable and
+   the stronger comparison). Three of the four were caught by `alvo-plan-guard` before implementation
+   started and one by the security review; the plan in `docs/superpowers/plans/` still carries the
+   originals in its Tasks 5 and 6, and this design is the record that supersedes it.
+6. **From the plan's ordering of the guard within the header block.** The plan showed the guard *after*
+   `EnsureUnconditional`; it is *before* it, and before `Precondition` and `IdempotencyKey` — §4.3 says
+   why. The five delegates are identical as a result, where an each-where-it-fell placement would have
+   left an asymmetry nothing asserts.
+7. **From `baas-analyza.md` §328's `Content-Type` guidance:** that bullet is about *upload* content
    sniffing ("never trust the client's declared MIME; sniff magic bytes"). This guard does the
    opposite — it trusts the declared type as a *gate* and never as a description of the bytes, which
    the JSON scan still decides. The two are compatible; naming it here so a later reader does not read
@@ -598,7 +649,8 @@ This design is met when:
    `/app/vehicles` to its own cookie users and `/api/alvo/vehicles` to an API-key caller, both over
    `examples/vehicle-registry/vehicles.alvo.json`, and its `README.md` explains every seam in §3.4
    plus the limit in §3.5.
-2. The sample's OpenAPI path set equals the standalone host's over the same descriptor, as a test.
+2. The sample's generated Data API route set equals the standalone host's over the same descriptor, as a
+   test, compared as `METHOD path` off `EndpointDataSource` with the count pinned from outside.
 3. Every body-taking route refuses a non-JSON or absent `Content-Type` with a 415 problem document,
    `RequireJsonContentType` defaults to `true` and turns it off, authorization still answers first, and
    the document lists the 415 exactly where a request can reach it.

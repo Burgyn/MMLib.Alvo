@@ -48,10 +48,24 @@
   them reference. It also takes `Microsoft.AspNetCore.OpenApi` directly rather than
   transitively, because a package's build targets do not travel through a
   `ProjectReference`. Details in [`host.md`](./host.md).
+- `samples/MMLib.Alvo.Samples.EmbeddedHost` — the runnable embedded-mode example
+  (spec §2.14 mode 2, #24): an ASP.NET Core app that mounts Alvo with
+  `AddAlvo`/`MapAlvoDataApi` over `examples/vehicle-registry/vehicles.alvo.json`,
+  the descriptor the standalone image mounts. **Not a package** —
+  `IsPackable=false`, the same non-shipping category as `MMLib.Alvo.Host`, because
+  a sample is read and run and never referenced. **One project, not two**: the
+  tempting `Samples.Common` split buys nothing, and this rule applies to a sample
+  with even less tolerance than to shipped code, since a sample's whole value is
+  being readable in one sitting. Project references rather than package ones, so a
+  breaking change to the seam breaks the sample in the same build instead of
+  rotting until someone runs it. Details in
+  [`extensibility.md`](./extensibility.md), *The runnable example*.
 - `test/` — one `*.Tests` per shipped project (arch + public-API approval
   auto-linked), `MMLib.Alvo.Conventions.Tests` (solution-structure checks),
   `MMLib.Alvo.Api.Tests`, and the `*.Tests.Integration` projects
-  (Testcontainers).
+  (Testcontainers) — including
+  `MMLib.Alvo.Samples.EmbeddedHost.Tests.Integration`, which boots the sample and
+  the standalone host together to compare the two modes' generated routes.
 
 Keep this list current — update it whenever a project is added or removed.
 

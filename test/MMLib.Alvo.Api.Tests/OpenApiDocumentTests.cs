@@ -805,6 +805,12 @@ public sealed class OpenApiDocumentTests
     ];
 
     /// <summary>The fixture: one audited entity and one that is not, and the document served over HTTP.</summary>
+    private static Task<AlvoApiWorld> StoreAsync() =>
+        AlvoApiWorld.FromDescriptorAsync(
+            "documented-store.alvo.json",
+            [_admin, _narrow],
+            new AlvoApiWorldSetup(MapOpenApiDocument: true));
+
     /// <summary>
     /// A host that turned the <c>Content-Type</c> guard off publishes no 415 — on no operation and as no
     /// component. A document listing a status no request can reach describes behaviour that does not exist,
@@ -837,12 +843,6 @@ public sealed class OpenApiDocumentTests
         document["components"]!["responses"]!.AsObject().ContainsKey("unsupportedMediaType").ShouldBeFalse(
             "a published component nothing in the document can point at is an orphan");
     }
-
-    private static Task<AlvoApiWorld> StoreAsync() =>
-        AlvoApiWorld.FromDescriptorAsync(
-            "documented-store.alvo.json",
-            [_admin, _narrow],
-            new AlvoApiWorldSetup(MapOpenApiDocument: true));
 
     /// <summary>Every route Alvo mapped, as <c>METHOD path</c> in the document's own path spelling.</summary>
     /// <remarks>
