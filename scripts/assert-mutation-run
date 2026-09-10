@@ -3,7 +3,7 @@
 # its config asked for. Called by .github/workflows/mutation.yml after every shard;
 # runnable by hand over a saved log, which is the point (see "Verifying this" below).
 #
-# usage: scripts/assert-mutation-run <stryker-log> <stryker-config> <expected-mutants> <expected-tests> <shard-name>
+# usage: scripts/assert-mutation-run <stryker-log> <stryker-config> <expected-mutants> <expected-tests> <shard-name> [canary]
 #
 # WHY THIS EXISTS. A mutation gate has two ways to be green, and only one of them is
 # honest. This repository has already shipped the dishonest one twice: once as a
@@ -35,11 +35,43 @@
 # did not contain a line it had just quoted back. scripts/test-assert-mutation-run
 # pins it with an oversized fixture; keep that case if you touch this.
 #
+# CHECK 5 IS A DIFFERENT KIND OF CHECK FROM 1-4, and it is worth saying why before
+# reading it. Checks 1-4 all assert that the run MEASURED THE RIGHT THING — the right
+# suite, a plausible mutant count, a suite that did not shrink. #142 is a run that
+# measures exactly the right thing and LIES ABOUT THE RESULT: Stryker's MTP runner
+# counts a test in `State: error` as a failing test, i.e. as a kill, and every
+# per-mutant run of a real suite produces a handful of arbitrary errored nodes, so
+# essentially every mutant comes back Killed regardless of the mutant. No count can
+# reveal that, and neither can a percentage: the output is indistinguishable from a
+# genuinely adversarial suite.
+#
+# So check 5 asserts the one thing a lying runner cannot fake: a KNOWN-SURVIVING
+# mutant must be reported as Survived. `stryker-config.canary.json` mutates
+# src/MMLib.Alvo.Testing/Migrations/InMemoryDescriptorVersionStore.cs against
+# test/MMLib.Alvo.Abstractions.Tests, a suite that mentions neither that class nor
+# anything it touches (`grep -rn 'DescriptorVersion' test/MMLib.Alvo.Abstractions.Tests`
+# → nothing), so EVERY one of its mutants must survive. When the 6th argument is the
+# word `canary`, this script refuses any run that reports a kill.
+#
+# THE CHECK IS ONE-SIDED, AND THAT IS WHY IT CANNOT BE FLAKY IN THE DANGEROUS
+# DIRECTION. A reported kill on the canary is always a lie, whatever caused it. A
+# canary that comes back all-Survived might be luck rather than health — which is
+# exactly the direction a guard is allowed to be generous in.
+#
+# MEASURED 2026-09-10, and this is why the canary is worth its 17 seconds: 13 mutants,
+# 142 tests, and the run reported **9 Killed / 4 Survived** — nine kills by a suite
+# that cannot reach the code. That is #142, reproduced in a quarter of a minute instead
+# of the ten it takes on a real shard.
+#
 # VERIFYING THIS SCRIPT: scripts/test-assert-mutation-run runs it over real Stryker
 # logs captured in both working directories. To try one by hand:
 #   scripts/assert-mutation-run scripts/fixtures/mutation-logs/data-ef-solution-mode.txt \
 #                               stryker-config.data-ef.json 596 858 data-ef
-# It must fail check 2 on a solution-mode log and pass on a `test/`-scoped one.
+# It must fail check 2 on a solution-mode log and pass on a `test/`-scoped one. And for
+# the canary, over a real run of it (17 s: cd test && dotnet tool run dotnet-stryker
+# -f ../stryker-config.canary.json --concurrency 4):
+#   scripts/assert-mutation-run <that log> stryker-config.canary.json 13 142 canary canary
+# It must FAIL today, naming the kill count, and that failure is the finding.
 set -uo pipefail
 
 log="${1:?usage: assert-mutation-run <log> <config> <expected-mutants> <expected-tests> <shard-name>}"
@@ -47,6 +79,14 @@ config="${2:?missing stryker config path}"
 expected_mutants="${3:?missing expected mutant count}"
 expected_tests="${4:?missing expected test count}"
 shard="${5:?missing shard name}"
+# Optional 6th argument, literally the word `canary`. Anything else is refused rather
+# than ignored: a typo that silently turned check 5 off would leave the one check that
+# can detect a lying runner quietly absent, which is the defect class it exists for.
+canary="${6:-}"
+case "$canary" in
+    ''|canary) ;;
+    *) echo "::error::Mutation run ($shard): the 6th argument must be the word 'canary' or absent, got '$canary'."; exit 1 ;;
+esac
 
 fail() {
     echo "::error::Mutation run ($shard): $1"
@@ -161,6 +201,43 @@ test_floor=$(( expected_tests * 60 / 100 ))
 if [ "$found" -lt "$test_floor" ]; then
     fail "ran against $found tests, but this shard was calibrated at $expected_tests (floor $test_floor = 60 %).
     A suite that lost two fifths of its tests is the exact regression this gate exists to catch, and it is invisible to the mutation score. If the shrinkage is legitimate, update the shard's 'suite:' in .github/workflows/mutation.yml."
+fi
+
+# ---------------------------------------------------------------------------
+# Check 5 — the canary. Only for a run whose config is a known-uncovered pairing (see
+# the header). Reads the summary block Stryker prints unconditionally:
+#
+#   Killed:    9
+#   Survived:  4
+#
+# Both lines are required, positively: a missing "Killed:" line must fail rather than
+# read as zero kills, which is the fail-OPEN shape every other check here was already
+# repaired for once.
+# ---------------------------------------------------------------------------
+if [ "$canary" = canary ]; then
+    killed="$(command grep -oE '^Killed:[[:space:]]+[0-9]+' "$norm" | command grep -oE '[0-9]+$' | head -1)"
+    survived="$(command grep -oE '^Survived:[[:space:]]+[0-9]+' "$norm" | command grep -oE '[0-9]+$' | head -1)"
+
+    [ -n "$killed" ] || fail "the canary run's log never reports 'Killed: N', so there is no verdict to judge. If a Stryker upgrade reworded the summary, fix this assertion rather than deleting it."
+    [ -n "$survived" ] || fail "the canary run's log never reports 'Survived: N'. Same rule as above: fix the assertion, do not drop the check."
+
+    if [ "$killed" -ne 0 ]; then
+        fail "the CANARY reported $killed killed mutant(s) (and $survived survived).
+    Every mutant in this config is known-surviving by construction — '$config' mutates a file that its
+    declared test project does not reference at all — so a kill here is the runner reporting a verdict it
+    cannot have reached. That is #142: the MTP runner counts a test in 'State: error' as a failing test,
+    and every per-mutant run of a real suite produces a handful of arbitrary errored nodes.
+    Nothing this gate says about any other shard's score is evidence while this check is red."
+    fi
+
+    if [ "$survived" -ne "$tested" ]; then
+        fail "the canary tested $tested mutants but reports only $survived survived (and $killed killed).
+    Every one must survive. A mutant that is neither killed nor survived (timeout, error, no coverage) is
+    also a verdict this pairing cannot produce honestly."
+    fi
+
+    echo "[assert-mutation-run] $shard OK — CANARY honest: $tested mutants, all $survived survived, 0 killed."
+    exit 0
 fi
 
 echo "[assert-mutation-run] $shard OK — $declared test project(s) as configured, $tested mutants tested (declared $expected_mutants, floor $mutant_floor), $found tests (declared $expected_tests, floor $test_floor)."
