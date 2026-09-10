@@ -426,6 +426,48 @@ for f in expressions-scoped expressions-solution-mode vacuous-run; do
   fi
 done
 
+# ============ the data-ef configs must stay a partition of the whole shard =========
+#
+# stryker-config.data-ef.json is read by no matrix leg, but it is NOT orphaned: this
+# suite jq's `test-projects` out of it on every PR (ci.yml's `Script suites` job), and
+# it is the only config that can adjudicate the blind spot the split creates — "is a
+# data-ef-rest survivor real, or did it only survive because Sqlite.Tests was not
+# there?". Both roles need it to stay the union of the two legs, and nothing else
+# checks that. The rot direction is silent: forgetting to update data-ef-rest.json
+# fails a leg loudly, forgetting data-ef.json fails nothing.
+#
+# The comparison is over the literal mutate LISTS, not over resolved globs — exact,
+# and it cannot drift the way a re-implementation of Stryker's glob matching would.
+if ! command -v jq >/dev/null 2>&1; then
+  fail "the data-ef configs are a partition of the whole shard" "jq on PATH" "jq is not installed"
+else
+  whole="$(jq -S '.["stryker-config"].mutate' "$ROOT/stryker-config.data-ef.json")"
+  core_list="$(jq -S '.["stryker-config"].mutate' "$ROOT/stryker-config.data-ef-core.json")"
+  rest_list="$(jq -S '.["stryker-config"].mutate' "$ROOT/stryker-config.data-ef-rest.json")"
+
+  # rest must be exactly the whole shard plus an exclusion for each core entry.
+  expected_rest="$(jq -S -n --argjson whole "$whole" --argjson core "$core_list" \
+    '$whole + ($core | map("!" + .))' | jq -S '.')"
+  if [ "$rest_list" = "$expected_rest" ]; then
+    pass "data-ef-rest.json is the whole shard minus exactly the core leg's files"
+  else
+    fail "data-ef-rest.json is the whole shard minus exactly the core leg's files" \
+      "$expected_rest" "$rest_list"
+  fi
+
+  # And every core entry must be a file the whole shard actually mutates — an entry
+  # naming a file data-ef.json excludes would mutate something the union does not.
+  stray="$(jq -r -n --argjson whole "$whole" --argjson core "$core_list" \
+    '($whole | map(select(startswith("!")) | ltrimstr("!"))) as $ex
+     | $core | map(select(. as $c | $ex | index($c))) | join(", ")')"
+  if [ -z "$stray" ]; then
+    pass "every data-ef-core.json entry is a file the whole shard mutates, not one it excludes"
+  else
+    fail "every data-ef-core.json entry is a file the whole shard mutates, not one it excludes" \
+      "no overlap with data-ef.json's exclusions" "also excluded there: $stray"
+  fi
+fi
+
 # ============================================================================ total
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"

@@ -24,7 +24,16 @@
       "!Internal/EfAlvoData.cs",
       "!Internal/SortSqlRenderer.cs",
       "!Internal/UpdateSetterFactory.cs",
-      "!Internal/WritePropertyBag.cs"
+      "!Internal/WritePropertyBag.cs",
+      "!Internal/AlvoModelCacheKeyFactory.cs",
+      "!Internal/BatchWrite.cs",
+      "!Internal/ConstraintViolationTranslator.cs",
+      "!Internal/RenameGuessSplitter.cs",
+      "!Internal/RenamePrePass.cs",
+      "!Internal/WholeRowGuard.cs",
+      "!EfCoreOutboxStore.cs",
+      "!Internal/OutboxTable.cs",
+      "!Internal/OutboxEventFactory.cs"
     ],
     "thresholds": {
       "high": 90,

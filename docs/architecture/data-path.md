@@ -1487,7 +1487,9 @@ past 120 without its config changing: F3's PR3/PR4 added `Api.Tests`, `Api.Tests
 which reference the mutated assemblies and were therefore swept into every shard.
 
 Measured for `data-ef` specifically, the shard that regressed with no config change: **858** tests from `test/`
-against **1489** from the repo root, and **596 mutants either way**.
+against **1489** from the repo root, and **596 mutants either way** — the figures *as of 2026-08-02*, which is
+the point of the passage (the ratio, not the absolute numbers). The same shard measures **1135** tests and
+**1108** mutants today, and it is now two legs; the table above carries the current set.
 
 **The previous edition of the table above was already showing this and nobody read it that way**: it recorded
 1267 tests for a config whose single `test-projects` entry is `MMLib.Alvo.Tests` (722 today, fewer then). A
@@ -1558,8 +1560,18 @@ Re-measure before re-enabling; do not take this table on trust once Stryker is u
 **The `data-ef` `test-projects` list is a result, not a hypothesis.** It names both
 `MMLib.Alvo.Data.EntityFrameworkCore.Tests` and `MMLib.Alvo.Data.Sqlite.Tests`, because the killing tests for
 `EfAlvoData`, `SortSqlRenderer`'s engine behaviour, `UpdateSetterFactory` and `WritePropertyBag` live in the
-latter; the probe confirms 858 tests reach the run, which is the two projects together rather than the EF
-project's own suite alone. `MMLib.Alvo.Data.PostgreSql.Tests.Integration` is deliberately **not** added: it is
+latter; the probe confirmed 858 tests reach the run — the two projects together rather than the EF project's
+own suite alone.
+
+> **That attribution is a 488-mutant-era result, and #205's split had to stop leaning on it.** It was measured
+> when the shard held 488 tested mutants and 858 tests; it holds 1108 and 1135 now, and everything the provider
+> grew since (outbox, rollup, batch, whole-row/replace, reachability, idempotency, before-hooks, pre-image) was
+> never re-attributed. So the two legs are partitioned by a **conservative rule** rather than by that list: a
+> file goes on `data-ef-core`, which keeps both assemblies, unless
+> `MMLib.Alvo.Data.EntityFrameworkCore.Tests` can be *shown* to hold its killers — either it references the
+> type by name in source, or a design doc attributes it. A file reached only behaviourally through
+> `IAlvoData`/`ISchemaMigrator`, which no test names, goes on core. `.github/workflows/mutation.yml`'s header
+> carries the rule, the resulting membership, and what it still cannot prove. `MMLib.Alvo.Data.PostgreSql.Tests.Integration` is deliberately **not** added: it is
 Docker-gated end to end, so on a CI shard with no daemon every one of its kills would report as a survivor and
 the score would read as a regression that is really an absent container. `MMLib.Alvo.Data.PostgreSql.Tests` is
 not added either, for a different reason — it holds the per-engine golden CEL→SQL snapshot, which renders
