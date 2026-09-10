@@ -9,6 +9,17 @@ namespace MMLib.Alvo.Descriptor.Internal;
 /// </summary>
 /// <remarks>
 /// <para>
+/// <b>"Once, at apply" means the BOOT apply, and that is a gap rather than a wording nicety.</b> The only
+/// caller of <see cref="Warn"/> is <c>DescriptorBootPlan.LoadAsync</c>; <c>RuntimeSchemaService.ApplyAsync</c>
+/// — the dashboard-first / Management-API path — calls it nowhere, so a descriptor applied at runtime earns
+/// no line at all. That is pre-existing and true of every entry here, and it matters most for the newest
+/// one: an operator applying through a dashboard is the reader least likely to be watching boot logs, and
+/// <c>access</c> is the entry whose absence they cannot otherwise notice. Tracked on #83, whose scope is
+/// exactly "nothing primes, and nothing warns, at startup in runtime-apply mode".
+/// </para>
+/// </remarks>
+/// <remarks>
+/// <para>
 /// <b>Warned, not refused, and the line is a rule rather than a case-by-case judgement.</b>
 /// <see cref="UnhonouredFeatures"/> refuses what <em>silently produces wrong data</em>: an ignored
 /// <c>default</c> stores NULL where a value was expected, and no author can see that from the outside.
@@ -41,11 +52,33 @@ namespace MMLib.Alvo.Descriptor.Internal;
 /// is a line they cannot act on.
 /// </para>
 /// <para>
-/// <b>Two blocks are deliberately absent, and the reason is the "observable absence" test above.</b>
-/// <c>branding</c> and <c>access</c> are parsed and consumed by no product code either, but both describe
-/// an admin-dashboard surface that does not exist in this build — there is no place their absence could be
-/// observed, so a warning would name a disappointment the author cannot yet have. They join this table on
-/// the day the dashboard does.
+/// <b>An entry is earned two ways, and it is worth saying so rather than pretending there is one rule.</b>
+/// Limb one is the original: the absence is observable but easy to misattribute — a webhook that never
+/// fires looks like an endpoint that is down. Limb two is a block whose <em>name</em> promises something it
+/// does not do, where the author's mistake is not an unmet expectation but a <em>false belief</em>. That
+/// limb is not new here: the <c>webhooks</c> entry already rests on it — <em>"an unsigned delivery an
+/// author believes is signed is a security absence"</em> — and it is why that entry names <c>secretRef</c>
+/// specifically.
+/// </para>
+/// <para>
+/// <b><c>access</c> is on the table under limb two; <c>branding</c> is on neither and stays out.</b> An
+/// earlier version of this paragraph excluded the pair together, on limb one alone: both are parsed and
+/// consumed by no product code, both describe an admin-dashboard surface this build has no trace of, so
+/// neither absence could be observed and neither warning could name a disappointment the author can yet
+/// have. That reasoning holds for <c>branding</c> — an author who writes it and sees no logo has looked and
+/// found out, and it is harmless — and fails for <c>access</c> (#146), whose author has a false belief that
+/// administration is restricted. Nothing happening is precisely what a working restriction looks like, so
+/// there is no looking that finds it out.
+/// </para>
+/// <para>
+/// <b>Why <c>access</c> is warned about rather than refused, since the argument above is
+/// <see cref="UnhonouredFeatures"/>' criterion word for word.</b> A false belief the author cannot check
+/// is exactly what that table refuses — the three <c>before*</c> hooks are refused because "a write the
+/// author believes is vetted is neither". The difference is that a before-hook sits on a live write path,
+/// so ignoring it permits something <em>now</em>; <c>access</c> governs an administration surface that does
+/// not exist in this build at all, so today nothing is wrongly permitted and refusing the descriptor would
+/// refuse it for being ahead of the implementation. That is also what ties this entry to #146's ordering:
+/// the day the surface lands, <c>access</c> is either honoured or refused — never warned about.
 /// </para>
 /// <para>
 /// <b><c>realtime</c> is absent for a different and sharper reason: it is not a top-level block at all.</b>
@@ -88,6 +121,13 @@ internal static partial class UnhonouredSubsystems
             descriptor => descriptor.DynamicEntities?.Enabled == true,
             "no runtime entity can be created and the whole dynamic schema-registry driver is absent, so "
             + "every governance limit declared here bounds nothing (F7)"),
+        new(
+            "access",
+            descriptor => descriptor.Access is { } access
+                && (access.Admin is not null || access.Developer is not null || access.Viewer is not null),
+            "no management level is enforced anywhere, so a project an author believes only an admin may "
+            + "administer is administrable by whoever the host lets in — and the CEL is not compiled either, "
+            + "so a rule that could never evaluate is not reported as one (#146)"),
         new(
             "automation",
             descriptor => descriptor.Automation is { Count: > 0 },
@@ -172,11 +212,18 @@ internal static partial class UnhonouredSubsystems
     /// <param name="unhonouredBlockCount">How many unhonoured blocks the descriptor declares.</param>
     /// <param name="unhonouredBlocks">Their names, comma-separated — the part a reader acts on.</param>
     /// <param name="unhonouredConsequences">What does not happen, per block.</param>
+    /// <remarks>
+    /// <b>The preamble no longer offers "because their absence is observable" as the blanket reason.</b>
+    /// That was true when every entry was on limb one, and it is false for <c>access</c> — which is on the
+    /// table precisely because its absence is <em>not</em> observable. It was therefore the one sentence in
+    /// the one line an operator reads that pointed the reassuring way about the one security-relevant block
+    /// it names. What replaced it holds for both limbs and says nothing about observability.
+    /// </remarks>
     [LoggerMessage(
         Level = LogLevel.Warning,
         Message = "This descriptor declares {UnhonouredBlockCount} block(s) this build does not honour: "
-            + "{UnhonouredBlocks}. They are accepted rather than refused, because their absence is "
-            + "observable, but nothing runs for them — {UnhonouredConsequences}.")]
+            + "{UnhonouredBlocks}. They are accepted rather than refused, because a warning can carry what "
+            + "is missing, but nothing runs for them — {UnhonouredConsequences}.")]
     private static partial void DeclaresUnhonouredBlocks(
         ILogger logger,
         int unhonouredBlockCount,

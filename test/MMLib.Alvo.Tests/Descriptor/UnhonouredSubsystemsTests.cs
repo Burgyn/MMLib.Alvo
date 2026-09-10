@@ -22,7 +22,7 @@ namespace MMLib.Alvo.Tests.Descriptor;
 /// <see cref="Every_unhonoured_subsystem_names_a_block_the_schema_declares"/> reads
 /// <c>schema/project.schema.json</c>, which is what makes the set <em>right</em> rather than merely
 /// unchanged; and <see cref="The_warning_names_every_unhonoured_block_the_showcase_declares"/> spells the
-/// five names as a literal beside a fixture that was authored for a different purpose entirely. Deleting an
+/// six names as a literal beside a fixture that was authored for a different purpose entirely. Deleting an
 /// entry fails both.
 /// </para>
 /// <para>
@@ -45,7 +45,7 @@ namespace MMLib.Alvo.Tests.Descriptor;
 public class UnhonouredSubsystemsTests
 {
     /// <summary>
-    /// The five blocks the format showcase declares, named as a literal — the pin that a table-driven
+    /// The six blocks the format showcase declares, named as a literal — the pin that a table-driven
     /// assertion structurally cannot be.
     /// </summary>
     /// <remarks>
@@ -54,7 +54,7 @@ public class UnhonouredSubsystemsTests
     /// two disagreeing is the whole signal.
     /// </remarks>
     private static readonly string[] _blocksComplexCrmDeclares =
-        ["dynamicEntities", "automation", "templates", "webhooks", "functions"];
+        ["dynamicEntities", "access", "automation", "templates", "webhooks", "functions"];
 
     /// <summary>
     /// <b>The warning names each declared-but-unhonoured block</b>, and the fixture is a descriptor that was
@@ -69,7 +69,7 @@ public class UnhonouredSubsystemsTests
         UnhonouredSubsystems.Warn(logger, descriptor);
 
         var warning = logger.Warnings.ShouldHaveSingleItem(
-            "one line for the whole set — an author reading five separate warnings has to reassemble the "
+            "one line for the whole set — an author reading six separate warnings has to reassemble the "
             + "list the single line already gives them");
         foreach (var block in _blocksComplexCrmDeclares)
         {
@@ -82,11 +82,11 @@ public class UnhonouredSubsystemsTests
     }
 
     /// <summary>
-    /// The fixture really does declare exactly those five blocks and no sixth — read from the example's own
+    /// The fixture really does declare exactly those six blocks and no seventh — read from the example's own
     /// JSON, so the literal above cannot drift away from the descriptor it describes.
     /// </summary>
     /// <remarks>
-    /// Without this, the fact above would still pass if <c>complex-crm</c> gained a sixth unhonoured block:
+    /// Without this, the fact above would still pass if <c>complex-crm</c> gained a seventh unhonoured block:
     /// the loop asserts every expected name is present, not that no other is. This is the other direction,
     /// and it is what keeps the literal honest as the showcase grows.
     /// </remarks>
@@ -162,6 +162,45 @@ public class UnhonouredSubsystemsTests
     }
 
     /// <summary>
+    /// <b>The table's order really is the schema's</b> — which
+    /// <see cref="UnhonouredSubsystems.All"/>'s own summary claims ("ordered as the schema declares them,
+    /// so the warning's order is a property of the schema rather than of this file") and nothing pinned.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A claim in a doc comment that no fact reads is a claim the next entry can violate silently, and the
+    /// warning's order is user-visible: it is the order the blocks are named in the one line an author
+    /// reads. The sibling fact above asserts <em>membership</em> against the schema
+    /// (<c>ShouldBeSubsetOf</c>) and <see cref="The_showcase_declares_exactly_the_blocks_the_expected_set_names"/>
+    /// passes <c>ignoreOrder: true</c>, so between them the ordering was the one property of this table
+    /// stated in prose and asserted nowhere.
+    /// </para>
+    /// <para>
+    /// Derived from <c>schema/project.schema.json</c> rather than restated as a literal, because a literal
+    /// here would be a second copy of the schema's property order and the two would drift apart on the
+    /// first insertion — which is the failure this fact exists to catch, one level up.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void The_tables_order_is_the_schemas_declaration_order()
+    {
+        JsonNode schema = JsonNode.Parse(File.ReadAllText(
+            Path.Combine(RepositoryRoot.Find(), "schema", "project.schema.json")))!;
+        var blocks = UnhonouredSubsystems.All.Select(subsystem => subsystem.Block).ToList();
+
+        var schemaOrder = schema["properties"]!.AsObject()
+            .Select(property => property.Key)
+            .Where(key => blocks.Contains(key, StringComparer.Ordinal))
+            .ToList();
+
+        blocks.ShouldBe(
+            schemaOrder,
+            "UnhonouredSubsystems.All says its order is the schema's, and the warning names the blocks in "
+            + "that order — so an entry inserted in the wrong place makes the summary a lie and changes "
+            + "what an author reads");
+    }
+
+    /// <summary>
     /// <b>The two blocks an after-hook now reaches say so</b>, rather than going on claiming that nothing
     /// renders a template and no event is ever delivered.
     /// </summary>
@@ -204,6 +243,61 @@ public class UnhonouredSubsystemsTests
 
         consequence.ShouldContain("secretRef", Shouldly.Case.Sensitive);
         consequence.ShouldContain("HMAC", Shouldly.Case.Sensitive);
+    }
+
+    /// <summary>
+    /// <b>The <c>access</c> line names a <em>false restriction</em>, not a missing feature</b> — which is
+    /// the whole reason this block is on the table while <c>branding</c> is not.
+    /// </summary>
+    /// <remarks>
+    /// The table earns an entry two ways: limb one is <em>"the absence is observable but easy to
+    /// misattribute"</em>, limb two is <em>"the block's name promises something it does not do, so the
+    /// author holds a false belief"</em>. <c>access</c> is here on limb two, and the wording is the whole
+    /// product of that: an author who writes <c>branding</c> and sees no logo has looked and found out,
+    /// while an author who writes <c>access</c> sees nothing happen, which is indistinguishable from a
+    /// restriction that works. So the words have to say administration is <em>not</em> restricted, and they
+    /// have to say the CEL is never compiled — because the second half is what makes an unwritable rule
+    /// (#146: <c>@user</c> exposes <c>id</c> and <c>roles</c> only) fail silently instead of at apply, the
+    /// way every other CEL slot does.
+    /// </remarks>
+    [Fact]
+    public void The_access_line_names_the_unenforced_restriction_and_the_uncompiled_rule()
+    {
+        var consequence = Consequence("access");
+
+        consequence.ShouldContain(
+            "administrable",
+            Shouldly.Case.Sensitive,
+            "the security half — the author believes administration is restricted, and it is not");
+        consequence.ShouldContain(
+            "not compiled",
+            Shouldly.Case.Sensitive,
+            "the second half — a rule that could never evaluate is not even reported, unlike every other "
+            + "CEL slot in the descriptor");
+    }
+
+    /// <summary>
+    /// <b><c>branding</c> stays off the table</b>, and this fact is what stops "access is here, so branding
+    /// should be too" from being applied later as tidying.
+    /// </summary>
+    /// <remarks>
+    /// Both blocks are honoured nowhere and both describe a dashboard this build does not have, so the
+    /// distinction is not obvious from the code and is worth a fact rather than only a comment: a warning
+    /// every author of a <c>branding</c> block earns is a line they cannot act on, about an absence they can
+    /// see by looking. <c>branding</c> qualifies under neither limb of the rule — not limb one (no surface
+    /// exists, so nothing to misattribute) and not limb two (its name promises styling, and no styling is
+    /// what the author gets). The day the dashboard lands, <c>branding</c> joins and this fact goes with it.
+    /// </remarks>
+    [Fact]
+    public void Branding_is_not_on_the_table_because_its_absence_is_merely_visible()
+    {
+        UnhonouredSubsystems.All
+            .Select(subsystem => subsystem.Block)
+            .ShouldNotContain(
+                "branding",
+                "an unstyled dashboard is an unmet expectation the author sees the moment they look — "
+                + "unlike 'access', where nothing happening is exactly what a working restriction looks "
+                + "like");
     }
 
     /// <summary>One entry's consequence, looked up by block name.</summary>

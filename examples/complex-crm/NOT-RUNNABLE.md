@@ -19,24 +19,41 @@ Today it declares three such features, each refused at apply by
 `invoices.gross_total` is a computed column *over* that rollup. What is left of the pair is
 `companies.open_deals`' `where`, above.
 
-## It also declares five blocks that are *warned about*, not refused
+## It also declares six blocks that are *warned about*, not refused
 
 The distinction is the rule, not a per-case judgement: **a feature is refused when ignoring it silently
 produces wrong data, and warned about when its absence is observable.** An ignored `default` stores NULL where
 a value was expected and nobody can see it from outside; a webhook that never fires is a webhook that never
-fires. So these five apply cleanly and earn one warning at apply naming each of them
+fires. So these six apply cleanly and earn one warning at apply naming each of them
 (`Descriptor.Internal.UnhonouredSubsystems`):
 
 | Block | Where | What does not happen |
 |---|---|---|
 | `dynamicEntities` | root | no runtime entity can be created; every governance limit here bounds nothing (F7) |
+| `access` | root | no management level is enforced, so a project the author believes only an admin may administer is administrable by whoever the host lets in — and the CEL is never compiled, so a rule that could never evaluate is not reported either (#146) |
 | `automation` | root | no rule is evaluated, so no declared action runs — which looks like a condition that never matched |
 | `templates` | root | an after-hook `email` action renders a template; one referenced only from an automation rule does not, and a `bodyFile` is read on neither path |
 | `webhooks` | root | an endpoint an after-hook posts to is delivered to; one referenced only from an automation rule receives nothing. No delivery is signed — `secretRef` is unread, no Standard Webhooks HMAC header is sent (7.1) — nor projected per endpoint (#152) |
 | `functions` | root | no function is invoked, on any trigger or schedule it declares |
 
 `UnhonouredSubsystemsTests` uses this file's descriptor as its fixture and asserts that the warning names
-exactly those five, so adding a sixth such block here fails a test rather than going unnoticed.
+exactly those six. **What that does and does not catch, precisely:** it filters this file's root keys
+*through the table* before comparing, so adding a block here that is **also** added to
+`UnhonouredSubsystems.All` fails the test until the expected set is updated — while a block added here and
+left out of the table is invisible to it. That second state is exactly where `branding` sat until #146, and
+`Branding_is_not_on_the_table_because_its_absence_is_merely_visible` is what now pins the one case most
+likely to be "tidied in" later.
+
+**`access` is on that list and `branding` is not**, though this file declares both and neither is honoured.
+An entry is earned two ways, and this is the second: limb one is "the absence is observable but easy to
+misattribute" (a webhook that never fires looks like an endpoint that is down), and limb two is "the block's
+*name* promises something it does not do, so the author holds a **false belief**". An unstyled dashboard is
+an unmet expectation the author sees by looking; an unenforced `access` block is a false belief that
+administration is restricted, and nothing happening is precisely what a working restriction looks like
+(#146). The `webhooks` entry rests on the same limb — an unsigned delivery an author believes is signed. What `access` should ultimately *mean* — role-based only, or attribute-based once `@user` carries
+claims (#37) — is still open on #146; note that this file's own `access` expressions are role-based because
+`@user` exposes `id` and `roles` only, and the `@user.email` domain gate the block was written for cannot be
+expressed in any descriptor today.
 
 **`entity.realtime` is unhonoured too and is deliberately *not* in that warning.** The schema declares it per
 entity with a default of `true`, so it is unhonoured for every entity of every descriptor — warning only on an
