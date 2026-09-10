@@ -6,20 +6,24 @@ name: Mutation
 #                        (stryker-config.expressions.json)
 #   - "security core (rules, auth, rest)" → the rest of src/MMLib.Alvo EXCEPT Api/**
 #                        (stryker-config.json). See "DECLARED GAP" below for Api/**.
-#   - "data-ef"        → the EF provider's PURE-LOGIC only: DestructiveScan,
-#                        RenamePrePass, RenameGuessSplitter, DescriptorModelBuilder,
-#                        AlvoSqlIdentifier, and the data path's Internal/* composers
-#                        (stryker-config.data-ef.json). The EF project's
-#                        transaction/DB-round-trip code is deliberately excluded —
-#                        its defects only manifest against a real database, so
-#                        mutation there is noise; it's covered by the SQLite +
-#                        PostgreSQL integration tests instead. Internal/AlvoDataSeed.cs
-#                        is excluded for a different reason: it is the test-only
-#                        seeding seam, so mutating it measures the harness, not the
-#                        product. This target's test-projects list BOTH the EF
-#                        package's own tests and MMLib.Alvo.Data.Sqlite.Tests, since
-#                        the killing tests for EfAlvoData, SortSqlRenderer,
-#                        UpdateSetterFactory and WritePropertyBag live in the latter.
+#   - "data-ef-core"   → the four classes whose killing tests live in
+#                        MMLib.Alvo.Data.Sqlite.Tests: EfAlvoData, SortSqlRenderer,
+#                        UpdateSetterFactory, WritePropertyBag
+#                        (stryker-config.data-ef-core.json). This is the ONLY leg that
+#                        pays for two test assemblies, and that is the whole point of
+#                        the split — see "WHY data-ef IS TWO LEGS" below.
+#   - "data-ef-rest"   → everything else of the EF provider's pure logic:
+#                        DestructiveScan, RenamePrePass, RenameGuessSplitter,
+#                        DescriptorModelBuilder, AlvoSqlIdentifier and the remaining
+#                        Internal/* composers (stryker-config.data-ef-rest.json),
+#                        against MMLib.Alvo.Data.EntityFrameworkCore.Tests ALONE.
+#                        Both legs exclude the same files the single leg did: the EF
+#                        project's transaction/DB-round-trip code, because its defects
+#                        only manifest against a real database, so mutation there is
+#                        noise and the SQLite + PostgreSQL integration tests cover it;
+#                        and Internal/AlvoDataSeed.cs, for a different reason — it is
+#                        the test-only seeding seam, so mutating it measures the
+#                        harness, not the product.
 #                        Measured per-config mutant counts, the two Safe-Mode blind
 #                        spots and the known survivors are recorded in
 #                        docs/architecture/data-path.md ("Mutation-testing notes").
@@ -122,6 +126,72 @@ name: Mutation
 # Run it on demand meanwhile: cd test && dotnet tool run dotnet-stryker
 #   -f ../stryker-config.api.json --concurrency 4
 #
+# WHY data-ef IS TWO LEGS, AND WHY IT IS SPLIT BY *TEST PROJECT* RATHER THAN BY FILE.
+# The single data-ef leg was killed by `timeout-minutes: 120` on three consecutive main
+# commits (#205), and every shard's declared counts had gone stale. Re-probed
+# 2026-09-10, discovery only, from `test/`:
+#
+#   shard                 mutants: declared -> now    suite: declared -> now
+#   expressions                  834 ->  900                 722 -> 1188
+#   rules, auth, rest            657 -> 1638                 722 -> 1185
+#   data-ef (single leg)         596 -> 1108                 858 -> 1135
+#   data-sqlite                   38 ->   44                 403 ->  581
+#   data-postgresql               16 ->   20                 101 ->  110
+#
+# So data-ef was running 1108 mutants against a budget sized for 596. Note check 3's
+# floor is ONE-SIDED by design — growth never fails a run — which is why nothing
+# reported this before the timeout did.
+#
+# THE MODEL THAT ACTUALLY PREDICTS THE COST IS NOT mutants x test COUNT. Measured
+# runner-seconds per mutant on the 4-vCPU runner: rules/auth/rest ~6.2 s (1185 tests,
+# ONE assembly), data-ef ~26 s (1135 tests, TWO assemblies). Four times the cost for
+# the same test count, because each mutant run restarts every test server it uses and
+# MMLib.Alvo.Data.Sqlite.Tests stands up real databases per test. The lever is
+# therefore "how many test assemblies does a leg pay for", not "how many files does it
+# mutate".
+#
+# That is why the obvious split — the five migration classes on one leg, the data path
+# on the other — was PROBED AND REJECTED. It divides the mutants 133/975, so the
+# data-path leg keeps 88 % of them AND both assemblies: ~106 min, still on the edge.
+# Splitting along the line the header above already names (which four classes are
+# killed by Sqlite.Tests) divides them 344/764 and drops the second assembly from the
+# larger half:
+#
+#   data-ef-core   344 mutants x 2 assemblies (1135 tests)  ~26 s/mutant  -> ~37 min
+#   data-ef-rest   764 mutants x 1 assembly  ( 554 tests)   derived       -> ~29 min
+#
+# 344 + 764 = 1108: same files, same score domain, arithmetic as the proof. Both legs
+# keep the 120-minute budget the single one had, deliberately — the per-leg estimates
+# above are DERIVED from the core leg's measured seconds-per-mutant, not measured end
+# to end (running these locally stays forbidden), so the first post-merge run is the
+# measurement and a budget cut on a derived number would just re-create #205.
+#
+# stryker-config.data-ef.json STAYS, read by no leg, on stryker-config.api.json's
+# precedent. It is the whole shard in one run, which is what a human wants when
+# investigating a score the split legs disagree about, and it is the config
+# scripts/test-assert-mutation-run drives its committed data-ef fixtures against — the
+# only pair in the repo captured from both a scoped and a solution-mode run, and the
+# only thing that exercises the guard's real-regression branch. It is deliberately NOT
+# in the `paths:` filter below, for the same reason api.json is not: no leg reads it, so
+# a change to it would start a multi-hour run that cannot exercise it.
+#
+# TWO ONE-LINE LEVERS, BOTH PROBED, NEITHER APPLIED:
+#   - `ignore-methods: ["*Log*", "ThrowIfNull*"]` removes 96 of 1108 mutants (8.7 %).
+#     Not a lever; the cost is not in the guards.
+#   - `mutation-level: "Basic"` removes 694 of 1108 (63 %). A real cut, and a different
+#     measurement rather than a cheaper one: it drops the Standard mutators, so the
+#     score is no longer comparable to any other leg's. Changing the score domain in
+#     the same commit that re-partitions it is what #99 warned against; if the budget
+#     is ever the binding constraint again, this is the next decision to take
+#     deliberately.
+#
+# BUDGETS ARE NOW SIZED FROM MEASURED WALL CLOCK, not from mutant counts. expressions
+# went 180 -> 90 (measured 27-31 min twice) and the two drivers 60 -> 30 (7 min and
+# 2 min), because a budget six times the measured time hides the growth curve the
+# per-shard budgets exist to expose — expressions held 180 minutes and used 29.
+# rules/auth/rest keeps 120 against a measured 41-47 min: it grew 149 % in mutants
+# since its last calibration and is the next leg to run out.
+#
 # WHY POST-MERGE AND NOT ON THE PR: this is the one deliberate exception to the
 # repo's "the PR is the only full gate" rule. A mutation run costs ~20 minutes,
 # which is a real tax on every PR touching the core, and unlike the other layers
@@ -150,7 +220,8 @@ on:
       - 'src/MMLib.Alvo.Data.PostgreSql/**'
       - 'stryker-config.json'
       - 'stryker-config.expressions.json'
-      - 'stryker-config.data-ef.json'
+      - 'stryker-config.data-ef-core.json'
+      - 'stryker-config.data-ef-rest.json'
       - 'stryker-config.data-sqlite.json'
       - 'stryker-config.data-postgresql.json'
       # The test projects belong in the filter too: mutation judges the test
@@ -215,41 +286,56 @@ jobs:
           # mutants × suite. `Expressions/**` in one leg, everything except `Api/**` in the
           # other, and `Api/**` in neither — see DECLARED GAP in the header.
           #
-          # `mutants:` below is a MEASURED count (discovery probe, 2026-08-02, at the commit
-          # that added this comment), not an estimate — it is what sizes the budget, and it
-          # is the number to re-probe when a leg starts timing out. F3's PR3 took
-          # stryker-config.json from 478 mutants to 2159; 1502 of those were `Api/**`, and
-          # excluding it leaves the 657 measured here.
+          # `mutants:` and `suite:` below are MEASURED counts, not estimates — they size
+          # the budget and they are what checks 3 and 4 of scripts/assert-mutation-run
+          # take their floors from. RE-PROBED 2026-09-10 (discovery only, from `test/`),
+          # because every one of them had gone stale since 2026-08-02 and check 3's floor
+          # is one-sided, so growth reported nothing: data-ef had reached 1108 mutants
+          # against a budget sized for 596, and rules/auth/rest 1638 against 657. Re-probe
+          # a leg the moment it starts timing out, and re-probe ALL of them when one does
+          # — the stale set is what made #205 look like one shard's problem.
+          #
+          # `timeout:` is now sized from MEASURED WALL CLOCK rather than from the mutant
+          # count; the table in the header carries each measurement and its source.
           - name: security core (expressions)
             config: stryker-config.expressions.json
             project: src/MMLib.Alvo/MMLib.Alvo.csproj
-            mutants: 834
-            suite: 722
-            timeout: 180
+            mutants: 900
+            suite: 1188
+            timeout: 90     # measured 27 and 31 min on two runs; 180 was 6x the real cost
           - name: security core (rules, auth, rest)
             config: stryker-config.json
             project: src/MMLib.Alvo/MMLib.Alvo.csproj
-            mutants: 657
-            suite: 722
-            timeout: 120
-          - name: data-ef
-            config: stryker-config.data-ef.json
+            mutants: 1638
+            suite: 1185
+            timeout: 120    # measured 41-47 min; +149 % mutants since calibration, next to run out
+          # THE TWO HALVES OF THE OLD data-ef LEG. Split by test project, not by file —
+          # see "WHY data-ef IS TWO LEGS" in the header for the measurement that decided
+          # it. 344 + 764 = 1108, the single leg's count: same files, same score domain.
+          - name: data-ef-core
+            config: stryker-config.data-ef-core.json
             project: src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj
-            mutants: 596
-            suite: 858    # two test projects
-            timeout: 120
+            mutants: 344
+            suite: 1135     # two test projects — the only leg that pays for a second one
+            timeout: 120    # ~37 min derived from 26 s/mutant measured; budget kept until a real run measures it
+          - name: data-ef-rest
+            config: stryker-config.data-ef-rest.json
+            project: src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj
+            mutants: 764
+            suite: 554      # one test project
+            timeout: 120    # ~29 min derived; same reason the core leg keeps 120
           - name: data-sqlite
             config: stryker-config.data-sqlite.json
             project: src/MMLib.Alvo.Data.Sqlite/MMLib.Alvo.Data.Sqlite.csproj
-            mutants: 38
-            suite: 403
-            timeout: 60
+            mutants: 44
+            suite: 581
+            timeout: 30     # measured 7 min
           - name: data-postgresql
             config: stryker-config.data-postgresql.json
             project: src/MMLib.Alvo.Data.PostgreSql/MMLib.Alvo.Data.PostgreSql.csproj
-            mutants: 16
-            suite: 101
-            timeout: 60
+            mutants: 20
+            suite: 110
+            timeout: 30     # measured 2 min
     steps:
       - name: Checkout
         uses: actions/checkout@v7

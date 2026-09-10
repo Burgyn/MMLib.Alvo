@@ -1423,16 +1423,37 @@ the working directory is load-bearing), watched until Stryker had printed the tw
 for, and then killed before the mutation loop began. That exercises the whole configuration — glob resolution,
 project resolution, the MTP runner, the initial test run — without paying for the run.
 
-Measured 2026-08-02 on Stryker 4.16.0 / .NET SDK 10.0.100 / xunit.v3 3.2.2:
+**Re-probed 2026-09-10** on Stryker 4.16.0 / .NET SDK 10.0.100 / xunit.v3 3.2.2, because every 2026-08-02
+figure had gone stale and nothing reported it: check 3 of `scripts/assert-mutation-run` is a one-sided
+*floor*, so growth never fails a run. `data-ef` had reached 1108 mutants against a budget sized for 596 —
+that is #205 — and `rules, auth, rest` 1638 against 657.
 
 | Config | Mutated project | Tests found | Mutants to be tested | In the matrix? |
 |---|---|---|---|---|
-| `stryker-config.expressions.json` | `MMLib.Alvo` (`Expressions/**`) | 722 | 834 | yes |
-| `stryker-config.json` | `MMLib.Alvo` (the rest, minus `Api/**`) | 722 | 657 | yes |
-| `stryker-config.data-ef.json` | `MMLib.Alvo.Data.EntityFrameworkCore` | 858 | 596 | yes |
-| `stryker-config.data-sqlite.json` | `MMLib.Alvo.Data.Sqlite` | 403 | 38 | yes |
-| `stryker-config.data-postgresql.json` | `MMLib.Alvo.Data.PostgreSql` | 101 | 16 | yes |
+| `stryker-config.expressions.json` | `MMLib.Alvo` (`Expressions/**`) | 1188 | 900 | yes |
+| `stryker-config.json` | `MMLib.Alvo` (the rest, minus `Api/**`) | 1185 | 1638 | yes |
+| `stryker-config.data-ef-core.json` | `MMLib.Alvo.Data.EntityFrameworkCore` (the four Sqlite-killed classes) | 1135 | 344 | yes |
+| `stryker-config.data-ef-rest.json` | `MMLib.Alvo.Data.EntityFrameworkCore` (everything else) | 554 | 764 | yes |
+| `stryker-config.data-sqlite.json` | `MMLib.Alvo.Data.Sqlite` | 581 | 44 | yes |
+| `stryker-config.data-postgresql.json` | `MMLib.Alvo.Data.PostgreSql` | 110 | 20 | yes |
+| `stryker-config.data-ef.json` | `MMLib.Alvo.Data.EntityFrameworkCore` (the whole shard) | 1135 | 1108 | **no — on demand** |
 | `stryker-config.api.json` | `MMLib.Alvo` (`Api/**`) | 333 | 1502 | **no — on demand** |
+
+**`data-ef` is two legs since #205, and it is split by *test project* rather than by file.** The model that
+predicts the cost is not mutants × test *count*: measured runner-seconds per mutant on the 4-vCPU runner are
+~6.2 s for `rules, auth, rest` (1185 tests, **one** assembly) and ~26 s for the single `data-ef` leg (1135
+tests, **two** assemblies) — four times the cost at the same test count, because every mutant run restarts
+each test server it uses and `MMLib.Alvo.Data.Sqlite.Tests` stands up real databases per test. So the lever
+is how many test assemblies a leg pays for. The obvious split (the five migration classes against the data
+path) was probed and rejected: it divides the mutants 133/975, leaving the data-path leg 88 % of them *and*
+both assemblies. Splitting along the line the `test-projects` list already implies — the four classes whose
+killing tests live in `Sqlite.Tests` — divides them **344 / 764** and drops the second assembly from the
+larger half. 344 + 764 = 1108: same files, same score domain, and the arithmetic is the proof.
+
+Two one-line levers were probed on the same shard and neither applied: `ignore-methods` over `*Log*` and the
+`ThrowIfNull*` guards removes **96 of 1108** (8.7 % — the cost is not in the guards), and
+`mutation-level: "Basic"` removes **694 of 1108** (63 %, and a *different measurement* rather than a cheaper
+one, since it drops the Standard mutators and the score stops being comparable to any other leg's).
 
 F3's PR3 took `stryker-config.json` from 478 mutants to 2159, of which 1502 were `Api/**`. Splitting them is
 arithmetically exact — 657 + 1502 = 2159 — but **`Api/**` has no matrix leg**, so the Data API's query parsing,
