@@ -1293,17 +1293,24 @@ working" was written to buy. The refusals PR5a *added* are in the same table abo
 record is [`events.md`](./events.md).
 
 **Warned about, not refused** — one line at apply naming each block it finds
-(`Descriptor.Internal.UnhonouredSubsystems`): `dynamicEntities`, `automation`, `templates`, `webhooks`,
-`functions` — one issue each, and `webhooks` earned a new one (**#120**) because nothing covered it.
+(`Descriptor.Internal.UnhonouredSubsystems`): `dynamicEntities`, `access`, `automation`, `templates`,
+`webhooks`, `functions` — one issue each, and `webhooks` earned a new one (**#120**) because nothing
+covered it.
 **`templates` and `webhooks` are now *partially* honoured, and the wording carries that rather than the
 entry leaving:** an after-hook does render a template and does post to a declared endpoint, so "nothing
 renders a template" and "no event is ever delivered" stopped being true — but both blocks are still dead
 from `automation`, which is where most descriptors reference them, and a delivery that happens is
 **unsigned** (`secretRef` unread, no Standard Webhooks HMAC header) and unprojected (**#152**). Deleting
 either entry would have been the larger lie.
-`branding` and `access` are parsed and consumed by nothing either, but both describe an
-admin-dashboard surface that does not exist in this build, so there is no place their absence could be
-observed yet.
+`branding` is parsed and consumed by nothing either and stays **out** of that warning, and the pair
+splitting is the "observable absence" rule doing its job rather than an exception to it (**#146**). Both
+describe an admin-dashboard surface this build has no trace of, but the two failures are different shapes:
+an author who writes `branding` and sees no logo has an unmet expectation, visible the moment they look;
+an author who writes `access` has a **false belief that administration is restricted**, and nothing
+happening is exactly what a working restriction looks like. `access` also has its CEL compiled nowhere, so
+an expression that could never evaluate — `@user` exposes `id` and `roles` only — is not reported at apply
+the way every other CEL slot's is. So `access` is in the table and `branding` joins on the day the
+dashboard does.
 
 `entity.realtime` is unhonoured too and is **deliberately not in that warning**: the schema declares it per
 entity with a default of `true`, so it is unhonoured for *every* entity of *every* descriptor. Warning only

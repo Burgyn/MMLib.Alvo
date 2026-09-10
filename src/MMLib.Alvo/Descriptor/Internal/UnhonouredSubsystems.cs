@@ -41,11 +41,18 @@ namespace MMLib.Alvo.Descriptor.Internal;
 /// is a line they cannot act on.
 /// </para>
 /// <para>
-/// <b>Two blocks are deliberately absent, and the reason is the "observable absence" test above.</b>
-/// <c>branding</c> and <c>access</c> are parsed and consumed by no product code either, but both describe
-/// an admin-dashboard surface that does not exist in this build — there is no place their absence could be
-/// observed, so a warning would name a disappointment the author cannot yet have. They join this table on
-/// the day the dashboard does.
+/// <b><c>branding</c> is deliberately absent, and <c>access</c> deliberately is not — the "observable
+/// absence" test above is what separates them.</b> Both are parsed and consumed by no product code, and
+/// both describe an admin-dashboard surface this build has no trace of, so an earlier version of this
+/// paragraph excluded the pair together: no place their absence could be observed, so no disappointment to
+/// name. That is right for <c>branding</c> and wrong for <c>access</c> (#146), because the two failures are
+/// not the same shape. An author who writes <c>branding</c> and sees no logo has an <em>unmet
+/// expectation</em> — visible the moment they look, and harmless. An author who writes <c>access</c> has a
+/// <em>false belief that administration is restricted</em>, and a false sense of security is by definition
+/// not an absence anyone can observe: nothing happens, which is exactly what a working restriction looks
+/// like. It is also the block whose <em>name</em> most invites that belief. So <c>access</c> earns the entry
+/// on the table's own rule rather than as an exception to it; <c>branding</c> joins on the day the dashboard
+/// does.
 /// </para>
 /// <para>
 /// <b><c>realtime</c> is absent for a different and sharper reason: it is not a top-level block at all.</b>
@@ -88,6 +95,13 @@ internal static partial class UnhonouredSubsystems
             descriptor => descriptor.DynamicEntities?.Enabled == true,
             "no runtime entity can be created and the whole dynamic schema-registry driver is absent, so "
             + "every governance limit declared here bounds nothing (F7)"),
+        new(
+            "access",
+            descriptor => descriptor.Access is { } access
+                && (access.Admin is not null || access.Developer is not null || access.Viewer is not null),
+            "no management level is enforced anywhere, so a project an author believes only an admin may "
+            + "administer is administrable by whoever the host lets in — and the CEL is not compiled either, "
+            + "so a rule that could never evaluate is not reported as one (#146)"),
         new(
             "automation",
             descriptor => descriptor.Automation is { Count: > 0 },
