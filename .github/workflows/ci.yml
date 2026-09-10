@@ -218,6 +218,15 @@ jobs:
       - name: Mutation-run guard suite
         run: bash scripts/test-assert-mutation-run
 
+      # The mutation gate's NOTIFICATION, as opposed to its verdict. Same argument as
+      # the guard above, one step further: scripts/mutation-notify executes only when a
+      # run produced no usable verdict, so a defect in it is invisible until the one
+      # moment it is needed — which is literally what happened (#98 sat open for a
+      # month over a one-line `if:`). Needs python3 for the stubbed `gh`'s issue lookup;
+      # preinstalled on ubuntu-latest.
+      - name: Mutation-notify suite
+        run: bash scripts/test-mutation-notify
+
       # The load gate's verdict lives in scripts/assert-load-baseline, and it decides
       # whether a red measurement is a regression or a void run. It belongs HERE rather
       # than in load.yml: load.yml is paths-filtered and advisory, so a PR that changed
@@ -259,7 +268,7 @@ jobs:
             exit 1
           fi
           if [ "${{ needs.scripts.result }}" != "success" ]; then
-            echo "A shell script suite failed (scripts/test-hooks or scripts/test-assert-mutation-run)."
+            echo "A shell script suite failed (see the 'Script suites' job for which one)."
             exit 1
           fi
           echo "All Build & test matrix legs, the e2e and the script suites passed."

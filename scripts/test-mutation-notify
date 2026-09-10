@@ -1,0 +1,259 @@
+#!/usr/bin/env bash
+# Tests for scripts/mutation-notify — the durable notification a mutation run with no
+# usable verdict leaves behind.
+#
+# Run: scripts/test-mutation-notify
+#
+# WHY THIS EXISTS. The script under test executes ONLY in the failure case, so a defect
+# in it is invisible until the one moment it matters. That is not hypothetical here:
+# #98 was exactly this shape (the notify job's `if:` was false for the outcome it
+# existed to report) and it survived a month because nothing exercised the path. The
+# routing rule this suite pins is the one that changed — one issue per COMMIT, not one
+# issue forever — plus the two properties whose loss would silence the notification
+# altogether: the API call is advisory, and the report's heredocs survive an
+# apostrophe.
+#
+# `gh` IS STUBBED, NOT MOCKED AT THE LIBRARY LEVEL. The stub is a real executable on
+# PATH that records its argv and replays canned output, so what is exercised is the
+# actual argument construction and the actual routing branch, not a re-description of
+# them. Each case gets its own stub state directory.
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+NOTIFY="$ROOT/scripts/mutation-notify"
+TMP_ROOT="$(mktemp -d)"
+trap 'rm -rf "$TMP_ROOT"' EXIT
+
+PASS=0
+FAIL=0
+
+pass() { PASS=$((PASS + 1)); printf '  ok   %s\n' "$1"; }
+fail() {
+  FAIL=$((FAIL + 1))
+  printf '  FAIL %s\n' "$1"
+  printf '       expected: %s\n' "$2"
+  printf '       actual:   %s\n' "$3"
+}
+
+# ---------------------------------------------------------------------------
+# The stub. Behaviour is steered by files in $STUB_DIR so a case can say "the
+# Actions API is down" or "an issue with this title is already open" without
+# editing the stub.
+#   jobs.tsv       - what `gh api .../jobs` returns; absent => the call fails
+#   issues.json    - what `gh issue list` returns
+#   calls.log      - every invocation, one `subcommand<TAB>joined-argv` per line
+#   body.<n>       - the report file's content as passed to --body-file
+# ---------------------------------------------------------------------------
+make_stub() { # <stub-dir>
+  local dir="$1"
+  mkdir -p "$dir/bin"
+  cat > "$dir/bin/gh" <<'STUB'
+#!/usr/bin/env bash
+set -uo pipefail
+printf '%s\t%s\n' "${1:-}${2:+ $2}" "$*" >> "$STUB_DIR/calls.log"
+
+# Capture whatever --body-file points at, so a case can assert on the report.
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "--body-file" ]; then
+    cat "$arg" >> "$STUB_DIR/bodies.txt"
+  fi
+  prev="$arg"
+done
+
+case "${1:-}" in
+  api)
+    [ -f "$STUB_DIR/jobs.tsv" ] || { echo "stub: api unavailable" >&2; exit 1; }
+    cat "$STUB_DIR/jobs.tsv"
+    ;;
+  label) exit 0 ;;
+  issue)
+    case "${2:-}" in
+      list)
+        # Mimic `--jq 'map(select(.title == env.MUTATION_ISSUE_TITLE)) | .[0].number // empty'`
+        # over $STUB_DIR/issues.json, using the same env var the real call uses.
+        [ -f "$STUB_DIR/issues.json" ] || exit 0
+        MUTATION_ISSUE_TITLE="${MUTATION_ISSUE_TITLE:-}" python3 - "$STUB_DIR/issues.json" <<'PY'
+import json, os, sys
+want = os.environ.get("MUTATION_ISSUE_TITLE", "")
+with open(sys.argv[1], encoding="utf-8") as fh:
+    for issue in json.load(fh):
+        if issue["title"] == want:
+            print(issue["number"])
+            break
+PY
+        ;;
+      create|comment) exit 0 ;;
+      *) exit 0 ;;
+    esac
+    ;;
+  *) exit 0 ;;
+esac
+STUB
+  chmod +x "$dir/bin/gh"
+}
+
+SHA_A="b62176d0e81f626e4aec91abeb59603aed00c530"
+SHA_B="83afbbfb5211354690066bc0f85ae76a3bdc2ef8"
+TITLE_A="Mutation gate failed on main — b62176d0e81f"
+TITLE_B="Mutation gate failed on main — 83afbbfb5211"
+
+CASE_DIR=""
+NOTIFY_OUT=""
+new_case() { # <name>
+  CASE_DIR="$TMP_ROOT/$1"
+  make_stub "$CASE_DIR"
+  : > "$CASE_DIR/calls.log"
+  : > "$CASE_DIR/bodies.txt"
+}
+
+run_notify() { # <sha> [event] [ref]
+  NOTIFY_OUT="$(
+    STUB_DIR="$CASE_DIR" PATH="$CASE_DIR/bin:$PATH" \
+      "$NOTIFY" "Burgyn/MMLib.Alvo" "$1" "34356889695" \
+      "https://example.invalid/runs/34356889695" "cancelled" \
+      "${2:-push}" "${3:-main}" 2>&1
+  )"
+  return $?
+}
+
+calls() { cat "$CASE_DIR/calls.log"; }
+report() { cat "$CASE_DIR/bodies.txt"; }
+
+healthy_jobs() {
+  printf 'success\tStryker (security core (expressions))\n' > "$CASE_DIR/jobs.tsv"
+  printf 'cancelled\tStryker (data-ef)\n' >> "$CASE_DIR/jobs.tsv"
+}
+
+echo "scripts/test-mutation-notify"
+echo
+
+# --- 1. A commit with no issue of its own opens one, titled with its short sha ------
+new_case new-sha
+healthy_jobs
+echo '[]' > "$CASE_DIR/issues.json"
+if run_notify "$SHA_A"; then
+  if calls | grep -q '^issue create' && calls | grep -qF -- "$TITLE_A"; then
+    pass "a commit with no issue opens one, titled with its short sha"
+  else
+    fail "a commit with no issue opens one, titled with its short sha" \
+         "issue create with '$TITLE_A'" "$(calls)"
+  fi
+else
+  fail "a commit with no issue opens one" "exit 0" "exit $?: $NOTIFY_OUT"
+fi
+
+# --- 2. THE REGRESSION THIS CHANGE IS FOR ------------------------------------------
+# An OPEN mutation-gate issue for a DIFFERENT commit must not absorb this one. Before
+# the fix the lookup was by label alone, so three consecutive main commits landed as
+# three comments on one ten-day-old issue.
+new_case other-sha-open
+healthy_jobs
+printf '[{"number":181,"title":"%s"}]\n' "$TITLE_A" > "$CASE_DIR/issues.json"
+if run_notify "$SHA_B"; then
+  if calls | grep -q '^issue create' && ! calls | grep -q '^issue comment'; then
+    pass "an open issue for another commit does not absorb this commit"
+  else
+    fail "an open issue for another commit does not absorb this commit" \
+         "issue create, no issue comment" "$(calls)"
+  fi
+else
+  fail "an open issue for another commit does not absorb this commit" "exit 0" "$NOTIFY_OUT"
+fi
+
+# --- 3. The same commit twice comments, rather than piling up duplicates -----------
+new_case same-sha
+healthy_jobs
+printf '[{"number":181,"title":"%s"}]\n' "$TITLE_B" > "$CASE_DIR/issues.json"
+if run_notify "$SHA_B"; then
+  if calls | grep -q '^issue comment' && calls | grep -qF -- '181'; then
+    pass "a re-run of the same commit comments on that commit's issue"
+  else
+    fail "a re-run of the same commit comments on that commit's issue" \
+         "issue comment 181" "$(calls)"
+  fi
+else
+  fail "a re-run of the same commit comments" "exit 0" "$NOTIFY_OUT"
+fi
+
+# --- 4. The Actions API is advisory: the report is filed without the breakdown -----
+new_case api-down
+rm -f "$CASE_DIR/jobs.tsv"
+echo '[]' > "$CASE_DIR/issues.json"
+if run_notify "$SHA_A"; then
+  if calls | grep -q '^issue create' \
+     && report | grep -q 'per-shard conclusions unavailable'; then
+    pass "a failing Actions API still files the report, without the breakdown"
+  else
+    fail "a failing Actions API still files the report" \
+         "issue create + the fallback line" "$(calls)"$'\n'"$(report)"
+  fi
+else
+  fail "a failing Actions API still files the report" "exit 0" "$NOTIFY_OUT"
+fi
+
+# --- 5. An apostrophe in a shard name does not break the heredocs ------------------
+# The reason the report is built in a file with statement-level heredocs; a nested
+# heredoc inside `$( )` is still scanned for quotes on bash 3.2.
+new_case apostrophe
+printf "cancelled\tStryker (the shard's own leg)\n" > "$CASE_DIR/jobs.tsv"
+echo '[]' > "$CASE_DIR/issues.json"
+if run_notify "$SHA_A"; then
+  if report | grep -qF "the shard's own leg"; then
+    pass "an apostrophe in a shard name reaches the report intact"
+  else
+    fail "an apostrophe in a shard name reaches the report intact" \
+         "the shard's own leg in the body" "$(report)"
+  fi
+else
+  fail "an apostrophe in a shard name reaches the report intact" "exit 0" "$NOTIFY_OUT"
+fi
+
+# --- 6. Only the non-successful shards are listed ----------------------------------
+new_case only-failed-legs
+healthy_jobs
+echo '[]' > "$CASE_DIR/issues.json"
+run_notify "$SHA_A" >/dev/null 2>&1
+if report | grep -q 'data-ef' && ! report | grep -q 'expressions'; then
+  pass "the breakdown lists only the shards that did not succeed"
+else
+  fail "the breakdown lists only the shards that did not succeed" \
+       "data-ef listed, expressions not" "$(report)"
+fi
+
+# --- 7. The trigger is in the report, so a dispatch run is distinguishable ---------
+# The `if:` now admits workflow_dispatch (CLAUDE.md prescribes an on-demand run before
+# a risky security-core merge), and a reader must be able to tell that run from a push.
+new_case dispatch
+healthy_jobs
+echo '[]' > "$CASE_DIR/issues.json"
+run_notify "$SHA_A" "workflow_dispatch" "chore/spike" >/dev/null 2>&1
+if report | grep -q 'workflow_dispatch' \
+   && calls | grep -qF -- "Mutation gate failed on chore/spike — b62176d0e81f"; then
+  pass "a dispatch run names its trigger and its ref"
+else
+  fail "a dispatch run names its trigger and its ref" \
+       "workflow_dispatch in the body, ref in the title" "$(calls)"$'\n'"$(report)"
+fi
+
+# --- 8. A ref name carrying a jq metacharacter cannot rewrite the lookup -----------
+# The title goes to jq through the environment for this reason: a branch name is
+# attacker-influenced, and this code path only runs on failure.
+new_case hostile-ref
+healthy_jobs
+printf '[{"number":181,"title":"%s"}]\n' "$TITLE_A" > "$CASE_DIR/issues.json"
+if run_notify "$SHA_A" "push" 'x") | .[0] // empty, ("' ; then
+  if calls | grep -q '^issue create' && ! calls | grep -q '^issue comment'; then
+    pass "a ref name with jq metacharacters neither breaks nor rewrites the lookup"
+  else
+    fail "a ref name with jq metacharacters neither breaks nor rewrites the lookup" \
+         "issue create, no comment" "$(calls)"
+  fi
+else
+  fail "a ref name with jq metacharacters neither breaks nor rewrites the lookup" \
+       "exit 0" "$NOTIFY_OUT"
+fi
+
+echo
+printf '%d passed, %d failed\n' "$PASS" "$FAIL"
+[ "$FAIL" -eq 0 ]
