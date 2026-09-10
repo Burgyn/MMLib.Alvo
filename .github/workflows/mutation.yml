@@ -102,6 +102,34 @@ name: Mutation
 # cheap legs still exercise the plumbing and a *drop* is still informative; the
 # absolute number is not.
 #
+# THE CANARY, AND WHY IT HAS NO MATRIX LEG YET. stryker-config.canary.json is this
+# gate's instrument for the one failure no count can see: a run that measures exactly
+# the right thing and LIES about the result (#142). It mutates
+# src/MMLib.Alvo.Testing/Migrations/InMemoryDescriptorVersionStore.cs against
+# test/MMLib.Alvo.Abstractions.Tests — a suite that mentions neither that class nor
+# DescriptorVersion at all — so every one of its mutants is known-surviving by
+# construction, and `scripts/assert-mutation-run <log> <config> 13 142 canary canary`
+# (check 5) refuses any run that reports a kill. The check is ONE-SIDED on purpose: a
+# reported kill is always a lie, whatever caused it, while an all-survived canary might
+# be luck — which is the direction a guard may be generous in.
+#
+# Measured 2026-09-10, run to completion in 17 seconds: 13 mutants, 142 tests,
+# **9 Killed / 4 Survived**. Nine kills by a suite that cannot reach the code. So the
+# canary is red today, and that is correct: while it is red, no absolute score any leg
+# here publishes is evidence.
+#
+# It is therefore NOT in the matrix, on the same rule the Api/** gap below is declared
+# under — a leg that fails on every commit is a notification nobody reads, and its
+# failing would tell nobody anything #142 does not already say. What it buys instead is
+# that the instrument exists, is tested (7 cases in scripts/test-assert-mutation-run,
+# driven off a committed real run of it), and cannot rot. Run it by hand any time:
+#   cd test && dotnet tool run dotnet-stryker -f ../stryker-config.canary.json --concurrency 4
+#
+# THE DAY #142 CLEARS, THE CANARY LEG GOES IN FIRST — before any score-bearing leg is
+# believed again — with a `timeout: 5`. That is the decision this comment exists to
+# hand over rather than take: the alternative, adding it now and accepting a red main
+# plus one tracking issue per commit, is defensible too and is the maintainer's call.
+#
 # DECLARED GAP: src/MMLib.Alvo/Api/** IS NOT UNDER MUTATION TODAY. It is excluded
 # from stryker-config.json and stryker-config.api.json has no matrix leg, so nothing
 # mutates the Data API's query parsing, authorization filter, idempotency or ETag
@@ -175,9 +203,11 @@ on:
       # And what DECIDES what this gate checks, on the same principle
       # .husky/task-runner.json already applies to the local gate. Breaking the
       # guard or the workflow must trigger a run, or the breakage lands unrun.
-      # stryker-config.api.json is deliberately NOT here: no matrix leg reads it
-      # (see DECLARED GAP), so a change to it would start a multi-hour run that
-      # cannot exercise it.
+      # stryker-config.api.json and stryker-config.canary.json are deliberately NOT
+      # here: no matrix leg reads either (see DECLARED GAP and THE CANARY above), so a
+      # change to one would start a multi-hour run that cannot exercise it. The canary
+      # is exercised by scripts/test-assert-mutation-run in ci.yml's `Script suites`
+      # job, against a committed real run of it, in seconds.
       - '.github/workflows/mutation.yml'
       - 'scripts/assert-mutation-run'
   workflow_dispatch:

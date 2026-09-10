@@ -1,0 +1,17 @@
+{
+  "stryker-config": {
+    "project": "MMLib.Alvo.Testing.csproj",
+    "test-projects": [
+      "MMLib.Alvo.Abstractions.Tests/MMLib.Alvo.Abstractions.Tests.csproj"
+    ],
+    "test-runner": "mtp",
+    "coverage-analysis": "off",
+    "mutate": [
+      "Migrations/InMemoryDescriptorVersionStore.cs"
+    ],
+    "reporters": [
+      "progress",
+      "cleartext"
+    ]
+  }
+}

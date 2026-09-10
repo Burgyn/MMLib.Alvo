@@ -71,6 +71,35 @@ assert_rejected() { # <label> <needle proving which check tripped> <log> <config
   esac
 }
 
+# Check 5 needs the 6th argument, so it gets its own runner rather than overloading the
+# four-argument one — a default-on canary flag would silently apply the check to every
+# other case's fixture, which has no summary block at all.
+run_canary() { # <log> <config> <expected-mutants> <expected-tests>
+  GUARD_OUT="$("$GUARD" "$1" "$2" "$3" "$4" "canary" "canary" 2>&1)"
+  return $?
+}
+
+assert_canary_ok() { # <label> <log> <config> <expected-mutants> <expected-tests>
+  local label="$1"; shift
+  if run_canary "$@"; then
+    pass "$label"
+  else
+    fail "$label" "exit 0 (guard accepts an honest canary)" "exit non-zero: $GUARD_OUT"
+  fi
+}
+
+assert_canary_rejected() { # <label> <needle> <log> <config> <expected-mutants> <expected-tests>
+  local label="$1" needle="$2"; shift 2
+  if run_canary "$@"; then
+    fail "$label" "non-zero exit (guard rejects a lying canary)" "exit 0: $GUARD_OUT"
+    return
+  fi
+  case "$GUARD_OUT" in
+    *"$needle"*) pass "$label" ;;
+    *) fail "$label" "rejection mentioning '$needle'" "$GUARD_OUT" ;;
+  esac
+}
+
 # Rejection fingerprints, one per check, so a case cannot pass by tripping the wrong one.
 VACUOUS="tested zero mutants"
 WRONG_SUITE="expected Stryker to analyse exactly"
@@ -78,6 +107,11 @@ NO_MUTANT_LINE="never reports 'N total mutants will be tested'"
 COLLAPSED="A collapse this size is not ordinary drift"
 NO_TEST_PROJECTS="declares no test-projects"
 NO_LOG="no Stryker log at"
+CANARY_KILLED="the CANARY reported"
+CANARY_NO_KILLED_LINE="never reports 'Killed: N'"
+CANARY_NO_SURVIVED_LINE="never reports 'Survived: N'"
+CANARY_SHORT="reports only"
+CANARY_BAD_ARG="must be the word 'canary' or absent"
 
 # A perturbation that silently matches nothing would leave the fixture untouched, and
 # the `assert_ok` drift/growth cases would then pass against an UNCHANGED fixture —
@@ -416,6 +450,10 @@ done
 # the same failure as a test quietly stopping.
 # Per FILE, not summed: the two data-ef captures contain no \r of their own, so a total
 # would stay green while three of five fixtures were silently normalised.
+# canary-dishonest.txt is deliberately NOT in this list: it was captured with stdout
+# redirected to a file, and Stryker's progress reporter emits its carriage returns only
+# to a TTY, so it genuinely has none. That is the shape CI captures too. The \r handling
+# stays exercised by the three above.
 for f in expressions-scoped expressions-solution-mode vacuous-run; do
   crs="$(tr -cd '\r' < "$FIXTURES/$f.txt" | command wc -c | tr -d ' ')"
   if [ "$crs" -gt 0 ]; then
@@ -425,6 +463,63 @@ for f in expressions-scoped expressions-solution-mode vacuous-run; do
       "none — check the scripts/fixtures/mutation-logs/*.txt -text rule in .gitattributes"
   fi
 done
+
+# ====================================================== check 5 — the canary (#142)
+#
+# The one check that catches a run which measured the right thing and LIED about the
+# result. `canary-dishonest.txt` is a REAL, COMPLETE run of stryker-config.canary.json:
+# 13 mutants of InMemoryDescriptorVersionStore against MMLib.Alvo.Abstractions.Tests, a
+# suite that mentions neither that class nor DescriptorVersion, so every mutant is
+# known-surviving by construction — and Stryker reported 9 Killed. That fixture is the
+# finding and the negative case at once.
+#
+# The honest case has to be DERIVED from it, because this repository cannot currently
+# produce an honest canary run at all. That is the point of the check.
+
+CANARY_CFG="$ROOT/stryker-config.canary.json"
+CANARY_LOG="$FIXTURES/canary-dishonest.txt"
+
+assert_canary_rejected "a canary reporting kills is rejected, naming the count" "$CANARY_KILLED" \
+  "$CANARY_LOG" "$CANARY_CFG" 13 142
+
+# Same fixture, no canary flag: checks 1-4 have nothing to complain about, which is what
+# makes the point that no count and no percentage can see this defect.
+assert_ok "the same lying run passes checks 1-4 unchanged — the reason check 5 exists" \
+  "$CANARY_LOG" "$CANARY_CFG" 13 142
+
+# An honest canary: all 13 survived, none killed.
+derive canary-dishonest.txt 's/^Killed:    9/Killed:    0/; s/^Survived:  4/Survived:  13/' || exit 1
+assert_canary_ok "an honest canary — 13 tested, 13 survived, 0 killed — is accepted" \
+  "$DERIVED" "$CANARY_CFG" 13 142
+
+# Fail-CLOSED on a missing summary line, both halves. A reworded Stryker summary must
+# fail the check rather than read as zero kills, which is the shape checks 1-4 were all
+# repaired for once.
+derive canary-dishonest.txt '/^Killed:/d' || exit 1
+assert_canary_rejected "a canary log with no 'Killed:' line is rejected, not read as zero" \
+  "$CANARY_NO_KILLED_LINE" "$DERIVED" "$CANARY_CFG" 13 142
+
+derive canary-dishonest.txt 's/^Killed:    9/Killed:    0/; /^Survived:/d' || exit 1
+assert_canary_rejected "a canary log with no 'Survived:' line is rejected" \
+  "$CANARY_NO_SURVIVED_LINE" "$DERIVED" "$CANARY_CFG" 13 142
+
+# Zero kills is not sufficient: a mutant that timed out or errored is also a verdict
+# this pairing cannot produce honestly, and it would leave survived < tested.
+derive canary-dishonest.txt 's/^Killed:    9/Killed:    0/; s/^Survived:  4/Survived:  11/' || exit 1
+assert_canary_rejected "zero kills but survived < tested is rejected — a timeout is a verdict too" \
+  "$CANARY_SHORT" "$DERIVED" "$CANARY_CFG" 13 142
+
+# A typo'd 6th argument must be refused, not ignored: silently turning check 5 off is
+# the defect class it exists for.
+GUARD_OUT="$("$GUARD" "$CANARY_LOG" "$CANARY_CFG" 13 142 "canary" "canry" 2>&1)"
+if [ $? -eq 0 ]; then
+  fail "a typo'd 6th argument is refused rather than ignored" "non-zero exit" "exit 0: $GUARD_OUT"
+else
+  case "$GUARD_OUT" in
+    *"$CANARY_BAD_ARG"*) pass "a typo'd 6th argument is refused rather than ignored" ;;
+    *) fail "a typo'd 6th argument is refused rather than ignored" "rejection mentioning the allowed values" "$GUARD_OUT" ;;
+  esac
+fi
 
 # ============================================================================ total
 
