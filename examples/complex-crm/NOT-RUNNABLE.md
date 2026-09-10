@@ -37,7 +37,12 @@ fires. So these six apply cleanly and earn one warning at apply naming each of t
 | `functions` | root | no function is invoked, on any trigger or schedule it declares |
 
 `UnhonouredSubsystemsTests` uses this file's descriptor as its fixture and asserts that the warning names
-exactly those six, so adding a seventh such block here fails a test rather than going unnoticed.
+exactly those six. **What that does and does not catch, precisely:** it filters this file's root keys
+*through the table* before comparing, so adding a block here that is **also** added to
+`UnhonouredSubsystems.All` fails the test until the expected set is updated — while a block added here and
+left out of the table is invisible to it. That second state is exactly where `branding` sat until #146, and
+`Branding_is_not_on_the_table_because_its_absence_is_merely_visible` is what now pins the one case most
+likely to be "tidied in" later.
 
 **`access` is on that list and `branding` is not**, though this file declares both and neither is honoured.
 An entry is earned two ways, and this is the second: limb one is "the absence is observable but easy to

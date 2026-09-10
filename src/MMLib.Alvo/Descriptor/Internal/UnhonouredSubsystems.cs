@@ -9,6 +9,17 @@ namespace MMLib.Alvo.Descriptor.Internal;
 /// </summary>
 /// <remarks>
 /// <para>
+/// <b>"Once, at apply" means the BOOT apply, and that is a gap rather than a wording nicety.</b> The only
+/// caller of <see cref="Warn"/> is <c>DescriptorBootPlan.LoadAsync</c>; <c>RuntimeSchemaService.ApplyAsync</c>
+/// — the dashboard-first / Management-API path — calls it nowhere, so a descriptor applied at runtime earns
+/// no line at all. That is pre-existing and true of every entry here, and it matters most for the newest
+/// one: an operator applying through a dashboard is the reader least likely to be watching boot logs, and
+/// <c>access</c> is the entry whose absence they cannot otherwise notice. Tracked on #83, whose scope is
+/// exactly "nothing primes, and nothing warns, at startup in runtime-apply mode".
+/// </para>
+/// </remarks>
+/// <remarks>
+/// <para>
 /// <b>Warned, not refused, and the line is a rule rather than a case-by-case judgement.</b>
 /// <see cref="UnhonouredFeatures"/> refuses what <em>silently produces wrong data</em>: an ignored
 /// <c>default</c> stores NULL where a value was expected, and no author can see that from the outside.
@@ -201,11 +212,18 @@ internal static partial class UnhonouredSubsystems
     /// <param name="unhonouredBlockCount">How many unhonoured blocks the descriptor declares.</param>
     /// <param name="unhonouredBlocks">Their names, comma-separated — the part a reader acts on.</param>
     /// <param name="unhonouredConsequences">What does not happen, per block.</param>
+    /// <remarks>
+    /// <b>The preamble no longer offers "because their absence is observable" as the blanket reason.</b>
+    /// That was true when every entry was on limb one, and it is false for <c>access</c> — which is on the
+    /// table precisely because its absence is <em>not</em> observable. It was therefore the one sentence in
+    /// the one line an operator reads that pointed the reassuring way about the one security-relevant block
+    /// it names. What replaced it holds for both limbs and says nothing about observability.
+    /// </remarks>
     [LoggerMessage(
         Level = LogLevel.Warning,
         Message = "This descriptor declares {UnhonouredBlockCount} block(s) this build does not honour: "
-            + "{UnhonouredBlocks}. They are accepted rather than refused, because their absence is "
-            + "observable, but nothing runs for them — {UnhonouredConsequences}.")]
+            + "{UnhonouredBlocks}. They are accepted rather than refused, because a warning can carry what "
+            + "is missing, but nothing runs for them — {UnhonouredConsequences}.")]
     private static partial void DeclaresUnhonouredBlocks(
         ILogger logger,
         int unhonouredBlockCount,

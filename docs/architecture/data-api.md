@@ -1292,8 +1292,9 @@ author of a `before*` hook saw a changed message, which is what "each one is lif
 working" was written to buy. The refusals PR5a *added* are in the same table above, and the subsystem's own
 record is [`events.md`](./events.md).
 
-**Warned about, not refused** — one line at apply naming each block it finds
-(`Descriptor.Internal.UnhonouredSubsystems`): `dynamicEntities`, `access`, `automation`, `templates`,
+**Warned about, not refused** — one line at the **boot** apply naming each block it finds
+(`Descriptor.Internal.UnhonouredSubsystems`, called only from `DescriptorBootPlan.LoadAsync`; the
+runtime/Management-API path in `RuntimeSchemaService.ApplyAsync` emits nothing, **#83**): `dynamicEntities`, `access`, `automation`, `templates`,
 `webhooks`, `functions` — one issue each, and `webhooks` earned a new one (**#120**) because nothing
 covered it.
 **`templates` and `webhooks` are now *partially* honoured, and the wording carries that rather than the
