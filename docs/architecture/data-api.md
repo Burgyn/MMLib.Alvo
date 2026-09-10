@@ -1302,15 +1302,20 @@ renders a template" and "no event is ever delivered" stopped being true — but 
 from `automation`, which is where most descriptors reference them, and a delivery that happens is
 **unsigned** (`secretRef` unread, no Standard Webhooks HMAC header) and unprojected (**#152**). Deleting
 either entry would have been the larger lie.
-`branding` is parsed and consumed by nothing either and stays **out** of that warning, and the pair
-splitting is the "observable absence" rule doing its job rather than an exception to it (**#146**). Both
-describe an admin-dashboard surface this build has no trace of, but the two failures are different shapes:
-an author who writes `branding` and sees no logo has an unmet expectation, visible the moment they look;
-an author who writes `access` has a **false belief that administration is restricted**, and nothing
-happening is exactly what a working restriction looks like. `access` also has its CEL compiled nowhere, so
-an expression that could never evaluate — `@user` exposes `id` and `roles` only — is not reported at apply
-the way every other CEL slot's is. So `access` is in the table and `branding` joins on the day the
-dashboard does.
+`branding` is parsed and consumed by nothing either and stays **out** of that warning. An entry is earned
+two ways (**#146**): limb one is "the absence is observable but easy to misattribute", limb two is "the
+block's *name* promises something it does not do, so the author holds a false belief" — the limb the
+`webhooks` entry already rests on, and why it names `secretRef`. Both `branding` and `access` describe an
+admin-dashboard surface this build has no trace of, so neither qualifies under limb one; `access`
+qualifies under limb two and `branding` under neither. An author who writes `branding` and sees no logo has
+an unmet expectation, visible the moment they look; an author who writes `access` has a false belief that
+administration is restricted, and nothing happening is exactly what a working restriction looks like.
+`access` also has its CEL compiled nowhere, so an expression that could never evaluate — `@user` exposes
+`id` and `roles` only — is not reported at apply the way every other CEL slot's is. **Warned rather than
+refused**, though a false belief is `UnhonouredFeatures`' refusal criterion: a `before*` hook sits on a live
+write path and ignoring it permits something *now*, while `access` governs a surface that does not exist
+yet, so nothing is wrongly permitted today. The day that surface lands, `access` is honoured or refused,
+never warned — which is what ties it to #146's ordering.
 
 `entity.realtime` is unhonoured too and is **deliberately not in that warning**: the schema declares it per
 entity with a default of `true`, so it is unhonoured for *every* entity of *every* descriptor. Warning only

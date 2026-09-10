@@ -40,10 +40,12 @@ fires. So these six apply cleanly and earn one warning at apply naming each of t
 exactly those six, so adding a seventh such block here fails a test rather than going unnoticed.
 
 **`access` is on that list and `branding` is not**, though this file declares both and neither is honoured.
-That is the same "observable absence" rule, not an inconsistency: an unstyled dashboard is an unmet
-expectation the author sees by looking, while an unenforced `access` block is a **false belief that
-administration is restricted** — and nothing happening is precisely what a working restriction looks like
-(#146). What `access` should ultimately *mean* — role-based only, or attribute-based once `@user` carries
+An entry is earned two ways, and this is the second: limb one is "the absence is observable but easy to
+misattribute" (a webhook that never fires looks like an endpoint that is down), and limb two is "the block's
+*name* promises something it does not do, so the author holds a **false belief**". An unstyled dashboard is
+an unmet expectation the author sees by looking; an unenforced `access` block is a false belief that
+administration is restricted, and nothing happening is precisely what a working restriction looks like
+(#146). The `webhooks` entry rests on the same limb — an unsigned delivery an author believes is signed. What `access` should ultimately *mean* — role-based only, or attribute-based once `@user` carries
 claims (#37) — is still open on #146; note that this file's own `access` expressions are role-based because
 `@user` exposes `id` and `roles` only, and the `@user.email` domain gate the block was written for cannot be
 expressed in any descriptor today.

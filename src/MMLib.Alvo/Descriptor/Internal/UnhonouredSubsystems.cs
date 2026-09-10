@@ -41,18 +41,33 @@ namespace MMLib.Alvo.Descriptor.Internal;
 /// is a line they cannot act on.
 /// </para>
 /// <para>
-/// <b><c>branding</c> is deliberately absent, and <c>access</c> deliberately is not — the "observable
-/// absence" test above is what separates them.</b> Both are parsed and consumed by no product code, and
-/// both describe an admin-dashboard surface this build has no trace of, so an earlier version of this
-/// paragraph excluded the pair together: no place their absence could be observed, so no disappointment to
-/// name. That is right for <c>branding</c> and wrong for <c>access</c> (#146), because the two failures are
-/// not the same shape. An author who writes <c>branding</c> and sees no logo has an <em>unmet
-/// expectation</em> — visible the moment they look, and harmless. An author who writes <c>access</c> has a
-/// <em>false belief that administration is restricted</em>, and a false sense of security is by definition
-/// not an absence anyone can observe: nothing happens, which is exactly what a working restriction looks
-/// like. It is also the block whose <em>name</em> most invites that belief. So <c>access</c> earns the entry
-/// on the table's own rule rather than as an exception to it; <c>branding</c> joins on the day the dashboard
-/// does.
+/// <b>An entry is earned two ways, and it is worth saying so rather than pretending there is one rule.</b>
+/// Limb one is the original: the absence is observable but easy to misattribute — a webhook that never
+/// fires looks like an endpoint that is down. Limb two is a block whose <em>name</em> promises something it
+/// does not do, where the author's mistake is not an unmet expectation but a <em>false belief</em>. That
+/// limb is not new here: the <c>webhooks</c> entry already rests on it — <em>"an unsigned delivery an
+/// author believes is signed is a security absence"</em> — and it is why that entry names <c>secretRef</c>
+/// specifically.
+/// </para>
+/// <para>
+/// <b><c>access</c> is on the table under limb two; <c>branding</c> is on neither and stays out.</b> An
+/// earlier version of this paragraph excluded the pair together, on limb one alone: both are parsed and
+/// consumed by no product code, both describe an admin-dashboard surface this build has no trace of, so
+/// neither absence could be observed and neither warning could name a disappointment the author can yet
+/// have. That reasoning holds for <c>branding</c> — an author who writes it and sees no logo has looked and
+/// found out, and it is harmless — and fails for <c>access</c> (#146), whose author has a false belief that
+/// administration is restricted. Nothing happening is precisely what a working restriction looks like, so
+/// there is no looking that finds it out.
+/// </para>
+/// <para>
+/// <b>Why <c>access</c> is warned about rather than refused, since the argument above is
+/// <see cref="UnhonouredFeatures"/>' criterion word for word.</b> A false belief the author cannot check
+/// is exactly what that table refuses — the three <c>before*</c> hooks are refused because "a write the
+/// author believes is vetted is neither". The difference is that a before-hook sits on a live write path,
+/// so ignoring it permits something <em>now</em>; <c>access</c> governs an administration surface that does
+/// not exist in this build at all, so today nothing is wrongly permitted and refusing the descriptor would
+/// refuse it for being ahead of the implementation. That is also what ties this entry to #146's ordering:
+/// the day the surface lands, <c>access</c> is either honoured or refused — never warned about.
 /// </para>
 /// <para>
 /// <b><c>realtime</c> is absent for a different and sharper reason: it is not a top-level block at all.</b>
