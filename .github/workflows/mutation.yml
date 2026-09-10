@@ -180,7 +180,13 @@ on:
       # cannot exercise it.
       - '.github/workflows/mutation.yml'
       - 'scripts/assert-mutation-run'
-      - 'scripts/mutation-notify'
+      # scripts/mutation-notify is deliberately NOT here, on the same rule as
+      # stryker-config.api.json above and for a sharper version of the same reason: a
+      # matrix that SUCCEEDS never runs `notify`, so a push touching only that script
+      # would start the whole multi-hour matrix and still not execute the changed
+      # line. What does exercise it is scripts/test-mutation-notify, in ci.yml's
+      # `Script suites` job, in seconds — and that folds into the required
+      # `Build & test`.
   workflow_dispatch:
 
 permissions:
@@ -348,8 +354,14 @@ jobs:
   # Post-merge, nothing blocks on this workflow, so a failure has to leave a mark
   # somebody trips over. Without this the only signal is GitHub's default email to
   # whoever clicked merge — which is precisely how a quietly-rotting main happens.
-  # One open tracking issue at a time: later failures comment on it rather than
-  # spawning a pile.
+  # ONE TRACKING ISSUE PER COMMIT. An earlier version keyed it on the `mutation-gate`
+  # label alone — "one open issue at a time, later failures comment on it rather than
+  # spawning a pile" — and that turned out to be the "grey X nobody opens" problem one
+  # level up: three consecutive main commits (b62176d0, e1ec3a6e, 83afbbfb) landed as
+  # three comments on a ten-day-old #181, where they read as an old known problem
+  # rather than as news about this commit. The title now carries the ref and the short
+  # sha, so a new commit opens its own issue and a re-run of the same commit comments
+  # on that commit's. scripts/mutation-notify owns the routing.
   notify:
     name: Report a failed mutation run
     needs: mutation

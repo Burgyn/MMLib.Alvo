@@ -14,9 +14,28 @@
 # apostrophe.
 #
 # `gh` IS STUBBED, NOT MOCKED AT THE LIBRARY LEVEL. The stub is a real executable on
-# PATH that records its argv and replays canned output, so what is exercised is the
-# actual argument construction and the actual routing branch, not a re-description of
-# them. Each case gets its own stub state directory.
+# PATH that records its argv and replays canned output, so the argument construction
+# and the routing branch that are exercised are the real ones. Each case gets its own
+# stub state directory.
+#
+# ONE THING THE STUB CANNOT EXERCISE, SAID PLAINLY: it reimplements the `--jq` program
+# in Python, so cases 1-3 and 7-8 prove the ROUTING is right without ever evaluating
+# the jq expression the script actually ships. A typo inside
+# `map(select(.title == env.MUTATION_ISSUE_TITLE))` would leave every one of them
+# green, and case 8's whole subject is a security property. Case 9 closes that: it
+# greps the expression out of scripts/mutation-notify — so it cannot drift from what
+# ships — and runs it through real `jq`. `gh` embeds gojq rather than jq, and this
+# expression is in the two languages' common subset (`map`, `select`, `env`, `//`);
+# that is the residual gap, and it is a language-compatibility question rather than a
+# question about this repository's code.
+#
+# NO PIPELINES INTO grep. Every check greps a FILE, for the reason
+# scripts/assert-mutation-run's header spells out: `cat file | grep -q PATTERN` under
+# `pipefail` yields 141, not 0, whenever grep matches and exits while the writer is
+# still going, so a genuine match can report as a miss. These files are small enough
+# that it is unlikely rather than impossible — which is exactly the kind of
+# intermittent that costs an afternoon, and the sibling script in this same change was
+# repaired for it.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -120,6 +139,12 @@ run_notify() { # <sha> [event] [ref]
 calls() { cat "$CASE_DIR/calls.log"; }
 report() { cat "$CASE_DIR/bodies.txt"; }
 
+# grep the FILES, never a pipeline (see the header).
+calls_have() { command grep -q "$1" "$CASE_DIR/calls.log"; }
+calls_have_fixed() { command grep -qF -- "$1" "$CASE_DIR/calls.log"; }
+report_has() { command grep -q "$1" "$CASE_DIR/bodies.txt"; }
+report_has_fixed() { command grep -qF -- "$1" "$CASE_DIR/bodies.txt"; }
+
 healthy_jobs() {
   printf 'success\tStryker (security core (expressions))\n' > "$CASE_DIR/jobs.tsv"
   printf 'cancelled\tStryker (data-ef)\n' >> "$CASE_DIR/jobs.tsv"
@@ -133,7 +158,7 @@ new_case new-sha
 healthy_jobs
 echo '[]' > "$CASE_DIR/issues.json"
 if run_notify "$SHA_A"; then
-  if calls | grep -q '^issue create' && calls | grep -qF -- "$TITLE_A"; then
+  if calls_have '^issue create' && calls_have_fixed "$TITLE_A"; then
     pass "a commit with no issue opens one, titled with its short sha"
   else
     fail "a commit with no issue opens one, titled with its short sha" \
@@ -151,7 +176,7 @@ new_case other-sha-open
 healthy_jobs
 printf '[{"number":181,"title":"%s"}]\n' "$TITLE_A" > "$CASE_DIR/issues.json"
 if run_notify "$SHA_B"; then
-  if calls | grep -q '^issue create' && ! calls | grep -q '^issue comment'; then
+  if calls_have '^issue create' && ! calls_have '^issue comment'; then
     pass "an open issue for another commit does not absorb this commit"
   else
     fail "an open issue for another commit does not absorb this commit" \
@@ -166,7 +191,7 @@ new_case same-sha
 healthy_jobs
 printf '[{"number":181,"title":"%s"}]\n' "$TITLE_B" > "$CASE_DIR/issues.json"
 if run_notify "$SHA_B"; then
-  if calls | grep -q '^issue comment' && calls | grep -qF -- '181'; then
+  if calls_have '^issue comment' && calls_have_fixed '181'; then
     pass "a re-run of the same commit comments on that commit's issue"
   else
     fail "a re-run of the same commit comments on that commit's issue" \
@@ -181,8 +206,8 @@ new_case api-down
 rm -f "$CASE_DIR/jobs.tsv"
 echo '[]' > "$CASE_DIR/issues.json"
 if run_notify "$SHA_A"; then
-  if calls | grep -q '^issue create' \
-     && report | grep -q 'per-shard conclusions unavailable'; then
+  if calls_have '^issue create' \
+     && report_has 'per-shard conclusions unavailable'; then
     pass "a failing Actions API still files the report, without the breakdown"
   else
     fail "a failing Actions API still files the report" \
@@ -199,7 +224,7 @@ new_case apostrophe
 printf "cancelled\tStryker (the shard's own leg)\n" > "$CASE_DIR/jobs.tsv"
 echo '[]' > "$CASE_DIR/issues.json"
 if run_notify "$SHA_A"; then
-  if report | grep -qF "the shard's own leg"; then
+  if report_has_fixed "the shard's own leg"; then
     pass "an apostrophe in a shard name reaches the report intact"
   else
     fail "an apostrophe in a shard name reaches the report intact" \
@@ -214,7 +239,7 @@ new_case only-failed-legs
 healthy_jobs
 echo '[]' > "$CASE_DIR/issues.json"
 run_notify "$SHA_A" >/dev/null 2>&1
-if report | grep -q 'data-ef' && ! report | grep -q 'expressions'; then
+if report_has 'data-ef' && ! report_has 'expressions'; then
   pass "the breakdown lists only the shards that did not succeed"
 else
   fail "the breakdown lists only the shards that did not succeed" \
@@ -228,8 +253,8 @@ new_case dispatch
 healthy_jobs
 echo '[]' > "$CASE_DIR/issues.json"
 run_notify "$SHA_A" "workflow_dispatch" "chore/spike" >/dev/null 2>&1
-if report | grep -q 'workflow_dispatch' \
-   && calls | grep -qF -- "Mutation gate failed on chore/spike — b62176d0e81f"; then
+if report_has 'workflow_dispatch' \
+   && calls_have_fixed "Mutation gate failed on chore/spike — b62176d0e81f"; then
   pass "a dispatch run names its trigger and its ref"
 else
   fail "a dispatch run names its trigger and its ref" \
@@ -243,7 +268,7 @@ new_case hostile-ref
 healthy_jobs
 printf '[{"number":181,"title":"%s"}]\n' "$TITLE_A" > "$CASE_DIR/issues.json"
 if run_notify "$SHA_A" "push" 'x") | .[0] // empty, ("' ; then
-  if calls | grep -q '^issue create' && ! calls | grep -q '^issue comment'; then
+  if calls_have '^issue create' && ! calls_have '^issue comment'; then
     pass "a ref name with jq metacharacters neither breaks nor rewrites the lookup"
   else
     fail "a ref name with jq metacharacters neither breaks nor rewrites the lookup" \
@@ -252,6 +277,39 @@ if run_notify "$SHA_A" "push" 'x") | .[0] // empty, ("' ; then
 else
   fail "a ref name with jq metacharacters neither breaks nor rewrites the lookup" \
        "exit 0" "$NOTIFY_OUT"
+fi
+
+# --- 9. The REAL jq expression, extracted from the script, run through real jq ------
+# Cases 1-3 and 7-8 route through a Python re-description of this program. This is the
+# one case that evaluates what actually ships.
+if ! command -v jq >/dev/null 2>&1; then
+  fail "the shipped jq expression is evaluated by real jq" \
+       "jq on PATH" "jq is not installed — the one case that is not a re-description cannot run"
+else
+  expr="$(command grep -oE "map\(select\(\.title == env\.[A-Z_]+\)\)[^']*" "$NOTIFY" | head -1)"
+  if [ -z "$expr" ]; then
+    fail "the shipped jq expression is evaluated by real jq" \
+         "the --jq program still matchable in scripts/mutation-notify" \
+         "not found — if the lookup was rewritten, update this extraction rather than deleting the case"
+  else
+    fixture="$TMP_ROOT/jq-fixture.json"
+    printf '[{"number":7,"title":"%s"},{"number":9,"title":"%s"}]\n' "$TITLE_A" "$TITLE_B" > "$fixture"
+
+    hit="$(MUTATION_ISSUE_TITLE="$TITLE_B" jq -r "$expr" "$fixture" 2>&1)"
+    miss="$(MUTATION_ISSUE_TITLE="Mutation gate failed on main — 000000000000" \
+            jq -r "$expr" "$fixture" 2>&1)"
+    # A ref name full of jq metacharacters must be DATA, not program text. It reaches
+    # the expression the same way the real call passes it: through the environment.
+    hostile="$(MUTATION_ISSUE_TITLE='x") | .[0].number, ("' jq -r "$expr" "$fixture" 2>&1)"
+
+    if [ "$hit" = "9" ] && [ -z "$miss" ] && [ -z "$hostile" ]; then
+      pass "the shipped jq expression selects by exact title, and a hostile title is data"
+    else
+      fail "the shipped jq expression selects by exact title, and a hostile title is data" \
+           "hit=9, miss empty, hostile empty" \
+           "hit='$hit' miss='$miss' hostile='$hostile' (expr: $expr)"
+    fi
+  fi
 fi
 
 echo

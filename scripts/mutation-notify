@@ -43,7 +43,17 @@ ref_name="${7:?missing ref name}"
 
 short_sha="${sha:0:12}"
 title="Mutation gate failed on ${ref_name} — ${short_sha}"
-report="$(mktemp -t mutation-report)"
+
+# PLAIN `mktemp`, and the reason is worth a line because the first version of this
+# was `mktemp -t mutation-report`, which is a hard failure on the only platform the
+# notify job runs on. GNU coreutils requires the template to contain `XXXXXX` when
+# `-t` names one ("mktemp: too few X's in template"); BSD mktemp on macOS appends a
+# suffix itself, so it worked everywhere it was tried and nowhere it mattered. Under
+# `set -euo pipefail` that aborted the script before a single `gh` call — the
+# notification silently missing, which is #98 again by a different route. Every other
+# mktemp in this repository is plain or carries an explicit XXXXXX; keep it that way.
+report="$(mktemp)"
+trap 'rm -f "$report"' EXIT
 
 legs="$(gh api --paginate \
     "repos/$repo/actions/runs/$run_id/jobs?per_page=100" \
@@ -120,6 +130,14 @@ gh label create mutation-gate \
 # the jq program. A ref name is attacker-influenced (anyone who can open a PR can name
 # a branch), and a `"` or `\` in it would either break the program or let it be
 # rewritten — a shape that would only ever be exercised in the failure path.
+#
+# A FAILING LOOKUP FALLS THROUGH TO `create`, DELIBERATELY. If this call itself fails
+# (rate limit, transient API error) `existing` is empty and a re-dispatch of a commit
+# that already has an issue opens a second one. That is the right direction: the
+# invariant this script exists for is "the failure leaves a mark", and a duplicate
+# issue is a mark, while a swallowed error is not. Unlike the shard-breakdown call
+# above, it is not advisory enrichment — it decides where the report goes — so the
+# fall-through is stated here rather than left to be inferred from `|| true`.
 existing="$(MUTATION_ISSUE_TITLE="$title" gh issue list --repo "$repo" --state open \
     --label mutation-gate --limit 100 --json number,title \
     --jq 'map(select(.title == env.MUTATION_ISSUE_TITLE)) | .[0].number // empty' 2>/dev/null || true)"
