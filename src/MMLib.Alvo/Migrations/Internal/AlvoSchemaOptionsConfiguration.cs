@@ -36,6 +36,8 @@ internal sealed class AlvoSchemaOptionsConfiguration(IConfiguration? configurati
     private const string AllowDestructiveKey =
         $"{AlvoSchemaOptions.SectionName}:{nameof(AlvoSchemaOptions.AllowDestructive)}";
 
+    internal const string ProjectKey = $"{AlvoSchemaOptions.SectionName}:{nameof(AlvoSchemaOptions.Project)}";
+
     private const string StartupEnvironmentVariable = AlvoSchemaOptions.StartupEnvironmentVariable;
 
     /// <inheritdoc/>
@@ -51,6 +53,14 @@ internal sealed class AlvoSchemaOptionsConfiguration(IConfiguration? configurati
         if (configuration?.GetValue<bool?>(AllowDestructiveKey) is { } allowDestructive)
         {
             options.AllowDestructive = allowDestructive;
+        }
+
+        // Blank reads as absent, on IsAbsent's rule: an environment variable set to nothing is a shell
+        // accident, not an operator naming a project called "".
+        var project = configuration?[ProjectKey];
+        if (!IsAbsent(project))
+        {
+            options.Project = project!.Trim();
         }
     }
 

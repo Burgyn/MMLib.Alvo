@@ -22,6 +22,31 @@ internal enum SchemaStartupOutcome
     Refuse,
 
     /// <summary>
+    /// Serve and report ready with <b>nothing applied</b>: this is a dashboard-first host whose project has
+    /// no descriptor history yet, so there is nothing to prime from and nothing to serve until one is
+    /// applied.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Distinct from every other outcome because it is the only one that is Ready without a revision.</b>
+    /// <see cref="Unchanged"/> means "what the database holds already matches"; this means "the database
+    /// holds nothing and that is the expected first state of a fresh <c>docker run</c>". A:557 requires that
+    /// run to come up with a working dashboard inside 60 s with no configuration, so refusing would delete
+    /// mode 1 of the specification, and reporting <em>not</em> ready would keep the process alive while
+    /// taking the pod out of rotation behind an ingress — which is exactly where the first-run wizard has to
+    /// be reachable.
+    /// </para>
+    /// <para>
+    /// <b>Nothing is primed, and that is the only representable state rather than a shortcut.</b>
+    /// <c>schema/project.schema.json</c> puts <c>minProperties: 1</c> on <c>entities</c>, so a zero-entity
+    /// descriptor is not a valid descriptor and an "empty catalog" does not exist. An unprimed provider
+    /// denies everything, which is harmless here: zero entities means zero Data API routes, so a data
+    /// request 404s at routing before authorization is consulted at all.
+    /// </para>
+    /// </remarks>
+    Awaiting,
+
+    /// <summary>
     /// Serve nothing and report not ready, without stopping the process: this descriptor is older than the one
     /// the database is on, so applying it would rewrite a newer schema with an older one (#145).
     /// </summary>

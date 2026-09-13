@@ -638,6 +638,17 @@ and asserts they generate the same Data API routes. That is #24's Definition of 
 cannot federate its own identity into the generated routes, because `AlvoContextFilter` publishes the
 principal it resolved and clears it again.
 
+**The dashboard-first half of the boot works since #83.** `AddAlvo` plus a driver plus
+`Alvo__Schema__Project`, with **no** `FromDescriptor`, now starts: stage 1 reads the stored descriptor,
+stage 0 plans from the JSON it was handed — so it still takes no migrator, store or introspector — and stage
+3 primes. A project with no history yet starts too, reports ready, serves nothing and says so once at warning
+level, because A:557 requires `docker run mmlib/alvo` to come up with a dashboard inside 60 s with no
+configuration. Before that, a host with no descriptor source did not come up at all, which is stronger than
+what #83 described. **What is still open on #83** is its second half: the declared-but-unhonoured-subsystems
+warning fires only on the boot path, so a descriptor applied through `RuntimeSchemaService` earns no line —
+closing it needs an `ILogger` on that type's **public** six-parameter constructor, which moves the public-API
+baseline.
+
 Still owed on the standalone side:
 
 - the **published multi-arch image** (`mmlib/alvo`, amd64 + arm64) and the release pipeline that pushes it —
@@ -651,7 +662,13 @@ Still owed on the standalone side:
 - the **full compose stack** (MinIO, MailHog) once storage and email exist;
 - an operator-facing **`ALVO_*` environment vocabulary**, if the CLI work shows it earns its keep — and it
   has to be settled **before the image is published**, because after that the env names are a breaking
-  change (deviation 39). `Alvo__Schema__Startup` and `Alvo__Schema__AllowDestructive` join that set;
+  change (deviation 39). `Alvo__Schema__Startup`, `Alvo__Schema__AllowDestructive` and — since #83 —
+  **`Alvo__Schema__Project`** join that set. The last one is the newest and the one most worth arguing about
+  now rather than after publication: it names *which* project a **dashboard-first** host boots, because
+  `IDescriptorVersionStore` is keyed by project and in that mode there is no file to read the name from. It
+  sits inside the `Alvo:Schema` section rather than at the root so the boot's three settings keep one binder,
+  one validator and one prefix an operator has to learn. Design:
+  `docs/superpowers/specs/2026-09-13-f5-runtime-apply-boot-design.md`;
 - the **upgrade/downgrade contract between the NuGet version and the system-schema version** (A:555). Stage 1
   creates the current `alvo.*` tables idempotently and carries no version contract, so a container rolled back
   to an older image against a newer system schema is undefined. Recorded as design deviation 55, deferred here

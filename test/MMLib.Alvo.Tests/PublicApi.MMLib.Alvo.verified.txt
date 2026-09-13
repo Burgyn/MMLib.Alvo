@@ -123,6 +123,7 @@ namespace MMLib.Alvo.Migrations
         public const string SectionName = "Alvo:Schema";
         public AlvoSchemaOptions() { }
         public bool AllowDestructive { get; set; }
+        public string? Project { get; set; }
         public MMLib.Alvo.Migrations.AlvoSchemaStartupMode Startup { get; set; }
     }
     public sealed class AlvoStartupRefusedException : System.Exception
