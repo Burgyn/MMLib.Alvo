@@ -83,18 +83,19 @@ descriptor JSON must come from a file. Split the type's one method along that li
 internal async Task<BootPlan> LoadAsync(CancellationToken ct)
 {
     var source = _source ?? throw new AlvoStartupRefusedException(...);
-    return await PlanAsync(await source.LoadAsync(ct), ct);
+    return Plan(await source.LoadAsync(ct).ConfigureAwait(false));
 }
 
 // NEW: everything stage 0 actually does — validate, parse, map, compile, warn.
 // Takes no source, no store, no database. The contract is unchanged and the fact
-// that proves it still passes.
-internal Task<BootPlan> PlanAsync(string descriptorJson, CancellationToken ct)
+// that proves it still passes. Synchronous, because every step is CPU plus one
+// already-materialised string: LoadAsync is async because the *source* is.
+internal BootPlan Plan(string descriptorJson)
 ```
 
 `AlvoBootService` then reads the stored descriptor itself — in **stage 1**, where the
 store read already lives and is already unconditional — and hands the JSON to
-`PlanAsync`. Nothing about stage 0 becomes database-aware; the stage *order* is the
+`Plan`. Nothing about stage 0 becomes database-aware; the stage *order* is the
 only thing that differs, and it differs in the direction stage 1 was always in.
 
 This is deliberately neither of the two shapes above. It is what both were reaching
@@ -142,7 +143,7 @@ going to be renamed at all.**
 |---|---|---|
 | 0 | load descriptor from source, validate/map/compile | — |
 | 1 | create `alvo.*`, read the applied snapshot | create `alvo.*`, read the applied snapshot **and the latest `DescriptorVersion`** |
-| 0′ | — | `PlanAsync(version.DescriptorJson)` — validate/map/compile, no database |
+| 0′ | — | `Plan(version.DescriptorJson)` — validate/map/compile, no database |
 | 2 | plan the diff, judge it | **nothing to diff**: the stored descriptor *is* what was applied |
 | 3 | apply, prime the catalog | prime the catalog from stage 0′ |
 | 4 | publish `Ready` | publish `Ready` |
@@ -179,15 +180,46 @@ nothing is *declared*. Zero entities means zero Data API routes, so a data reque
 404s at routing, before authorization is consulted at all. The deny-everything an
 unprimed provider produces has nothing to deny.
 
+### What a stored descriptor is, and is not, trusted to be
+
+`Plan` runs `EnsureValid` — the `IDescriptorValidator` port — before parsing, exactly as the
+file path does, and compiles the policy through the same `PolicyCatalog.Build`. There is no
+step the file path takes that this one skips.
+
+**What validation is not is an authenticity gate, and in this mode that matters more than in
+the other one.** In dashboard-first mode the versions table *is* the policy source of truth
+with no file to contradict it: anyone who can `INSERT` into `alvo_descriptor_versions`
+authors the authorization policy the next boot compiles and serves — over the *existing*
+physical tables, with no schema change needed to make it take effect, because stage 2 is a
+no-op. On the code-first path a rogue row can at worst confuse a diff; here it is the input.
+
+That is inherent to "two sources of truth, one format" rather than introduced here, and the
+mitigation is the same one that protects the table itself: it is Alvo's own system schema, in
+the project's own database, reachable only by whoever already holds the connection string.
+But it is the argument for a checksum or signature on stored descriptors when the Management
+API (#212) opens a second writer, and it should be read alongside the next paragraph.
+
+**`IRuntimeSchemaWriter.ApplyAndAppendAsync` is the only sanctioned writer**, and the "stage 2
+has nothing to converge on" claim rests on that rather than on the type system:
+`IDescriptorVersionStore.AppendAsync` is a *public* port member, so a host — or a future
+Management API — can append a version row without applying it, and the next boot would then
+prime rules for a schema that was never applied. No production code does (the only other
+callers are the testing fakes and the contract suite), and the boot now refuses a row whose
+descriptor names a different project, but nothing structurally prevents it.
+
 ### What this does not do
 
 - **No `DbDescriptorSource`.** #212 names "no DB-backed `IDescriptorSource`" as its
   blocker; this design answers the need without the type, so #212's dependency is
   satisfied without adding a public seam nobody has a second implementation for.
 - **No Management API.** Applying at runtime still has no HTTP surface (#212).
-- **No new routes at runtime.** #103 is unchanged: a descriptor applied later cannot
-  add a Data API route. In runtime-apply mode the descriptor is read at *boot*, so
-  routes map normally; it is the second apply, without a restart, that #103 bounds.
+- **No new routes at runtime, and for the empty-history case that bites on the *first*
+  apply.** #103 is unchanged: the Data API's route table is built once, at first
+  enumeration, with a `NullChangeToken`. For a populated history the descriptor is read at
+  *boot*, so routes map normally and #103 bounds only the second apply. For an **empty**
+  history the first apply is itself post-boot, so mode 1 — run the image, open the
+  dashboard, create a project — still needs a **restart** before data is servable. That is
+  fail-closed, and the `Awaiting` warning now says it rather than implying otherwise.
 - **Part 2 of #83 stays open** — the unhonoured-subsystems warning still fires only
   on the boot path, so a descriptor applied through `RuntimeSchemaService` earns no
   line. PR #215 records that; closing it needs an `ILogger` on
@@ -209,6 +241,36 @@ unprimed provider produces has nothing to deny.
 4. **The stated `NoDescriptorSourceMessage` refusal becomes unreachable from the
    boot** and its fix suggestion gains a second answer. It is kept (a host may still
    ask for a plan without a source) and now has the test it never had.
+5. **Stage-0 checks no longer run before anything is durable, in this mode.** The
+   2026-08-02 design justifies putting the reserved-name and format checks in stage 0
+   because they *"run before anything is durable and still fail the start"*. Here the
+   stage-1 store read comes first, and its side effect is the driver creating the
+   `alvo.*` system schema — DDL against the target database before any descriptor has
+   been validated. Unavoidable (the descriptor lives in that database) and harmless
+   (those tables are Alvo's own and are created idempotently), but it is a property the
+   earlier design stated and this mode does not have.
+6. **A wrong project name is indistinguishable from a first run.** Both produce
+   `Awaiting`: ready, serving nothing. It fails closed and never open, but it is a pod
+   that passes readiness behind an ingress because of one character. Telling the two
+   apart would need a "does this store hold any project" port member — exactly the
+   surface this design declined for #141's sake — so the mitigation is the warning line,
+   which names the variable. The **outbox** consequence of the same typo is not
+   cosmetic and is handled: see below.
+7. **A stored descriptor this build refuses stands down rather than failing the start**,
+   which is the opposite of the code-first answer. In code-first, failing fast is right
+   because a human edits the file. Here the descriptor lives in the database and the
+   only sanctioned editor is the dashboard, which is in this process — failing the start
+   crash-loops the container and removes the one tool that could repair it. Reachable
+   without anyone erring: an older image against a row a newer one wrote (deviation 55).
+8. **`Ready` no longer implies a primed policy catalog, and one consumer had to change.**
+   `OutboxDispatcher` gated its pump on `AlvoBootPhase.Ready` alone. Under `Awaiting`
+   that pump claims entries, `Catalog` throws, the per-entry containment abandons the
+   attempt, and `attempts` reaches `MaxAttempts` within about a minute — after which
+   `ClaimAsync` excludes those entries permanently and this build has no DLQ. With a
+   typo'd project name against a populated database, the entries burned are the real
+   project's, because the outbox has no project column. The pump now also requires a
+   primed catalog and stands down loudly otherwise. Two doc comments that asserted the
+   old invariant (`OutboxDispatcher.Catalog`, `AlvoBootState`) are corrected.
 
 ## Ratification needed from the maintainer
 
@@ -223,7 +285,14 @@ unprimed provider produces has nothing to deny.
   starts, primes from the stored descriptor, and serves its entities — pinned by a
   fact, not by a doc comment.
 - The same host against an **empty** history starts, reports ready, serves no data
-  route, and logs one line naming the state.
+  route — asserted as a **404 from the router**, with a health request beside it as the
+  non-vacuity control, rather than inferred from an empty registry — and logs one line
+  naming the state and the restart the first apply needs.
+- A pending outbox entry survives an unprimed boot untouched (`attempts` still 0), which
+  is the regression deviation 8 describes.
+- A stored descriptor this build refuses, and one whose own name does not match the
+  configured project, both **stand down**: process alive, readiness `Failed`, nothing
+  primed.
 - A host with **neither** a descriptor source nor `Alvo__Schema__Project` still refuses, by
   name, with a fix suggestion that names both answers — the test
   `NoDescriptorSourceMessage` never had.

@@ -643,7 +643,12 @@ principal it resolved and clears it again.
 stage 0 plans from the JSON it was handed — so it still takes no migrator, store or introspector — and stage
 3 primes. A project with no history yet starts too, reports ready, serves nothing and says so once at warning
 level, because A:557 requires `docker run mmlib/alvo` to come up with a dashboard inside 60 s with no
-configuration. Before that, a host with no descriptor source did not come up at all, which is stronger than
+configuration. **One caveat that belongs next to that claim:** the Data API's route table is built once, so
+the *first* descriptor applied to an empty project is not served until the process restarts — #103 is what
+removes that, and the warning line says so rather than implying otherwise. A stored descriptor this build
+refuses, or one whose own name does not match the configured project, **stands down** instead of failing
+the start: alive, not ready, serving nothing — because the dashboard that could repair it is in the same
+process. Before that, a host with no descriptor source did not come up at all, which is stronger than
 what #83 described. **What is still open on #83** is its second half: the declared-but-unhonoured-subsystems
 warning fires only on the boot path, so a descriptor applied through `RuntimeSchemaService` earns no line —
 closing it needs an `ILogger` on that type's **public** six-parameter constructor, which moves the public-API

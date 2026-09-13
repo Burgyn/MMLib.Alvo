@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
+using MMLib.Alvo.Events;
 using MMLib.Alvo.Rules;
 using System.Text.Json.Nodes;
 
@@ -123,8 +124,22 @@ public sealed class OpenApiDocumentCostTests
         var world = await AlvoApiWorld.VehicleRegistryAsync(
             setup: new AlvoApiWorldSetup(
                 MapOpenApiDocument: true,
-                ConfigureServicesAfterAlvo: services => services.Decorate<IPolicyCatalogProvider>(
-                    inner => new CountingPolicyCatalogProvider(inner))));
+                ConfigureServicesAfterAlvo: services =>
+                {
+                    services.Decorate<IPolicyCatalogProvider>(
+                        inner => new CountingPolicyCatalogProvider(inner));
+
+                    // THE COUNTER IS PROCESS-WIDE, SO THE ONLY OTHER READER HAS TO BE OFF. These facts
+                    // measure what building the document costs; the outbox dispatcher reads the same
+                    // provider from a background thread, and since #83 it reads `Current` once at pump
+                    // start to decide whether anything is primed (an unprimed pump abandons entries past
+                    // their attempt ceiling, which nothing can recover). That read is correct and is not
+                    // this fact's subject — but raced against `Clear()` it lands inside the measured
+                    // window and reports the transformer reading twice. Before #83 the pump happened to
+                    // read nothing at start-up with an empty queue, so this fact was passing on an
+                    // accident rather than on isolation.
+                    services.Configure<AlvoEventOptions>(events => events.Enabled = false);
+                }));
 
         var ports = world.Services.GetRequiredService<IPolicyCatalogProvider>()
             .ShouldBeOfType<CountingPolicyCatalogProvider>("the decoration must have replaced the provider");

@@ -66,6 +66,13 @@ public sealed class AlvoSchemaOptions
     /// database on purpose. Anything that collapses the two — reading the property's default off the enum, or
     /// moving <see cref="AlvoSchemaStartupMode.Apply"/> to zero to "match" — loses one of the two guarantees.
     /// </remarks>
+    /// <remarks>
+    /// <b>Not consulted in dashboard-first mode</b> (<see cref="Project"/> set, no descriptor source). That
+    /// boot emits no DDL and plans no diff — the stored descriptor is by construction what was already
+    /// applied — so every mode is satisfied vacuously and none of them has anything to decide. Worth knowing
+    /// rather than discovering: an operator who sets <see cref="AlvoSchemaStartupMode.Verify"/> on such a
+    /// host believes a verification runs, and none does.
+    /// </remarks>
     public AlvoSchemaStartupMode Startup { get; set; } = AlvoSchemaStartupMode.Apply;
 
     /// <summary>

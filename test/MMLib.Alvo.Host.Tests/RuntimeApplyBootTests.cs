@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Migrations;
+using System.Net;
 
 namespace MMLib.Alvo.Host.Tests;
 
@@ -117,6 +118,168 @@ public class RuntimeApplyBootTests
             "Alvo__Schema__Project",
             Case.Sensitive,
             "the half they can act on — and it is the env spelling, because that is what a container sets");
+    }
+
+    /// <summary>
+    /// <b>The security claim the whole <c>Awaiting</c> state rests on, asked of the router rather than
+    /// asserted in prose.</b> A data request 404s.
+    /// </summary>
+    /// <remarks>
+    /// "Zero entities means zero Data API routes, so a request 404s at routing before authorization is
+    /// consulted" is the argument for why Ready-and-serving-nothing is safe, and it was written in five
+    /// places and checked by none — <see cref="An_empty_history_starts_and_serves_nothing"/> asserts that
+    /// nothing is <em>primed</em>, which is the claim's input, not the claim. This asks the host. 404 rather
+    /// than 401/403 is the part that matters: it means the endpoint does not exist, so the answer cannot
+    /// depend on a policy engine that has no catalog to consult.
+    /// </remarks>
+    [Fact]
+    public async Task An_empty_history_serves_no_data_route()
+    {
+        await using var world = await RuntimeApplyBootWorld.TryStartAsync(project: "brand-new");
+        using var client = world.Client;
+
+        // The non-vacuity control, and it is not ceremony: without it this fact passes just as well against a
+        // world that mapped nothing at all, which would make the 404 prove nothing about the route table.
+        var health = await client.GetAsync(
+            new Uri("/health/ready", UriKind.Relative), TestContext.Current.CancellationToken);
+        health.StatusCode.ShouldBe(
+            HttpStatusCode.OK, "MapAlvo ran and the router is answering — so the 404 below is a real miss");
+
+        var response = await client.GetAsync(
+            new Uri("/api/notes", UriKind.Relative), TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(
+            HttpStatusCode.NotFound,
+            "the route table is empty, so this is the matcher answering — not an authorization decision taken "
+            + "against a catalog that does not exist");
+    }
+
+    /// <summary>
+    /// <b>An unprimed boot must not let the outbox dispatcher touch pending deliveries</b> — the worst
+    /// consequence this change could have had, and the one a security pass caught.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>Awaiting</c> publishes <c>Ready</c>, and the dispatcher's pump gated on exactly that. Downstream,
+    /// <c>Catalog</c> throws when nothing is primed, the per-entry containment catches it and calls
+    /// <c>AbandonAttemptAsync</c>, and <c>attempts</c> climbs to <c>MaxAttempts</c> — after which
+    /// <c>ClaimAsync</c> excludes the entry <b>permanently</b>, and this build has no DLQ. At the shipped
+    /// defaults that is about a minute.
+    /// </para>
+    /// <para>
+    /// <b>The scenario is a typo, not an attack.</b> A wrong <c>Alvo__Schema__Project</c> against a database
+    /// that <em>does</em> have pending deliveries: the outbox has no project column and the claim takes no
+    /// project filter, so the entries burned are the real project's. Before #83 that host simply refused to
+    /// start.
+    /// </para>
+    /// <para>
+    /// Asserted on <c>attempts</c> rather than on the log line, because the log says what the code intended
+    /// and this says what the database holds.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task An_unprimed_boot_leaves_pending_outbox_entries_untouched()
+    {
+        var databasePath = AlvoHostWorld.TempDatabasePath();
+        try
+        {
+            _ = await RuntimeApplyBootWorld.SeedAsync(databasePath);
+            var queued = await RuntimeApplyBootWorld.QueueOutboxEntryAsync(databasePath);
+
+            await using (var world = await RuntimeApplyBootWorld.TryStartAsync(
+                databasePath, project: "typo-in-the-project-name"))
+            {
+                world.BootState.Phase.ShouldBe(
+                    AlvoBootPhase.Ready, "an unknown project is indistinguishable from a first run");
+                world.PrimedEntities.ShouldBeEmpty("nothing is primed under that name");
+
+                // Long enough that a pump gated only on Ready would have claimed and abandoned: the shipped
+                // poll interval is one second.
+                await Task.Delay(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken);
+            }
+
+            (await RuntimeApplyBootWorld.OutboxAttemptsAsync(databasePath, queued)).ShouldBe(
+                0,
+                "the dispatcher must stand down when nothing is primed — an abandoned attempt here is "
+                + "unrecoverable once attempts reach the ceiling, and there is no dead-letter queue");
+        }
+        finally
+        {
+            AlvoHostWorld.TryDeleteDatabase(databasePath);
+        }
+    }
+
+    /// <summary>
+    /// <b>A stored descriptor this build refuses stands down rather than crash-looping the container.</b>
+    /// </summary>
+    /// <remarks>
+    /// The code-first answer — fail the start — is right when a human can edit the file. Here the descriptor
+    /// lives in the database and the only sanctioned editor is the dashboard, which is in this process, so
+    /// failing the start takes away the one tool that could fix it. Reachable without anyone doing anything
+    /// wrong: an older image against a row a newer one wrote (deviation 55). Standing down is not "serving
+    /// anyway" — readiness reports Failed, nothing is primed, and the route table stays empty.
+    /// </remarks>
+    [Fact]
+    public async Task A_stored_descriptor_this_build_refuses_stands_down_instead_of_failing_the_start()
+    {
+        var databasePath = AlvoHostWorld.TempDatabasePath();
+        try
+        {
+            var project = await RuntimeApplyBootWorld.SeedAsync(databasePath);
+            await RuntimeApplyBootWorld.CorruptStoredDescriptorAsync(databasePath, project);
+
+            await using var world = await RuntimeApplyBootWorld.TryStartAsync(databasePath, project);
+
+            world.StartFailure.ShouldBeNull(
+                "the process must stay up — the dashboard that can repair the descriptor is inside it");
+            world.BootState.Phase.ShouldBe(
+                AlvoBootPhase.Failed, "it is not serving, and a readiness probe has to say so");
+            world.PrimedEntities.ShouldBeEmpty("nothing was primed from a descriptor this build refuses");
+
+            var refusal = world.BootState.Failure.ShouldNotBeNull();
+            refusal.ShouldContain("this build refuses", Case.Sensitive);
+            refusal.ShouldContain(
+                "staying up", Case.Sensitive, "the operator has to know the process is alive on purpose");
+        }
+        finally
+        {
+            AlvoHostWorld.TryDeleteDatabase(databasePath);
+        }
+    }
+
+    /// <summary>
+    /// <b>A stored descriptor whose own name does not match the configured project is refused</b>, rather
+    /// than primed under one name while the boot state uses the other.
+    /// </summary>
+    /// <remarks>
+    /// <c>Prime</c> publishes the catalog under <c>boot.Descriptor.Name</c> while the boot reads and reports
+    /// under the configured key. Letting them differ means the next runtime apply for the configured key is
+    /// refused as "already primed for project X" — a dashboard that can never apply again without a restart.
+    /// It is reachable today because <c>RuntimeSchemaService.ApplyAsync</c> takes the project as a parameter
+    /// independent of the descriptor's own <c>name</c>.
+    /// </remarks>
+    [Fact]
+    public async Task A_stored_descriptor_naming_another_project_is_refused()
+    {
+        var databasePath = AlvoHostWorld.TempDatabasePath();
+        try
+        {
+            var project = await RuntimeApplyBootWorld.SeedAsync(databasePath);
+            await RuntimeApplyBootWorld.RenameStoredDescriptorAsync(databasePath, project, "someone-else");
+
+            await using var world = await RuntimeApplyBootWorld.TryStartAsync(databasePath, project);
+
+            world.BootState.Phase.ShouldBe(AlvoBootPhase.Failed);
+            world.PrimedEntities.ShouldBeEmpty("priming under a name the boot does not use is the defect");
+
+            var refusal = world.BootState.Failure.ShouldNotBeNull();
+            refusal.ShouldContain("someone-else", Case.Sensitive, "naming what it found, so it is fixable");
+            refusal.ShouldContain("Alvo__Schema__Project", Case.Sensitive);
+        }
+        finally
+        {
+            AlvoHostWorld.TryDeleteDatabase(databasePath);
+        }
     }
 
     /// <summary>
