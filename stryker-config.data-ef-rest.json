@@ -1,0 +1,48 @@
+{
+  "stryker-config": {
+    "project": "MMLib.Alvo.Data.EntityFrameworkCore.csproj",
+    "test-projects": [
+      "MMLib.Alvo.Data.EntityFrameworkCore.Tests/MMLib.Alvo.Data.EntityFrameworkCore.Tests.csproj"
+    ],
+    "test-runner": "mtp",
+    "coverage-analysis": "off",
+    "mutate": [
+      "**/*.cs",
+      "!**/AssemblyInfo.cs",
+      "!Internal/AppliedSchemaJsonContext.cs",
+      "!Internal/RelationalConnectionFactory.cs",
+      "!Internal/RelationalSqlBatch.cs",
+      "!Internal/SystemSchemaInitializer.cs",
+      "!Internal/VersionRowWriter.cs",
+      "!Internal/AlvoDataSeed.cs",
+      "!EfCoreDescriptorVersionStore.cs",
+      "!EfCoreRuntimeSchemaWriter.cs",
+      "!EfCoreSchemaIntrospector.cs",
+      "!EfCoreSchemaMigrator.cs",
+      "!AlvoEfCoreProvider.cs",
+      "!RelationalProviderRegistration.cs",
+      "!Internal/EfAlvoData.cs",
+      "!Internal/SortSqlRenderer.cs",
+      "!Internal/UpdateSetterFactory.cs",
+      "!Internal/WritePropertyBag.cs",
+      "!Internal/AlvoModelCacheKeyFactory.cs",
+      "!Internal/BatchWrite.cs",
+      "!Internal/ConstraintViolationTranslator.cs",
+      "!Internal/RenameGuessSplitter.cs",
+      "!Internal/RenamePrePass.cs",
+      "!Internal/WholeRowGuard.cs",
+      "!EfCoreOutboxStore.cs",
+      "!Internal/OutboxTable.cs",
+      "!Internal/OutboxEventFactory.cs"
+    ],
+    "thresholds": {
+      "high": 90,
+      "low": 85,
+      "break": 80
+    },
+    "reporters": [
+      "progress",
+      "cleartext"
+    ]
+  }
+}

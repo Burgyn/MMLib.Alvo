@@ -1398,17 +1398,39 @@ string.
 
 ## Mutation-testing notes
 
-Mutation runs post-merge on `main` (`.github/workflows/mutation.yml`), across five parallel configs. Nothing
+Mutation runs post-merge on `main` (`.github/workflows/mutation.yml`), across the parallel configs the
+matrix declares. Nothing
 blocks a merge on the score, so a red run is a notification someone has to act on — which makes it worth
 knowing, before the merge, that each config is configured to answer at all.
 
-> **The absolute scores below and elsewhere in this repository are not currently evidence — see #142.**
-> Measured on Stryker 4.16.0 / .NET SDK 10.0.100 / MTP: the runner reports mutants as **Killed** that
-> demonstrably survive the suite (124/124 "Killed", 100.00 %, for two files that the configured test project
-> does not exercise at all; applying the same mutation by hand fails nothing in 731 tests). It is not an
-> always-red suite — `--break-on-initial-test-failure` does not abort. Until #142 is understood, treat a high
-> score as unproven and `break: 80` as unable to fire. Every "100.00 %" recorded in this file and in commit
-> messages predates that measurement and may be the same artefact.
+> **The absolute scores below and elsewhere in this repository are not evidence, and #142 is now
+> root-caused rather than merely observed.** Measured on Stryker 4.16.0 / .NET SDK 10.0.100 / MTP: the MTP
+> runner counts a test in **`State: error`** as a failing test — that is, as a kill — and every per-mutant
+> run of a real suite produces **1–7 arbitrary, non-reproducible errored nodes** out of ~1200, in unrelated
+> areas, different ones each time. So essentially every mutant is reported **Killed regardless of the
+> mutant**. A second, independent false-kill source: a run killed by Stryker's own RPC timeout is also
+> reported as a kill rather than as a timeout, which is why a summary can read `Timeout: 0` while the log
+> carries `Test run timed out`.
+>
+> The cheapest demonstration is `stryker-config.canary.json`, whose 13 mutants are known-surviving by
+> construction — it mutates `MMLib.Alvo.Testing`'s `InMemoryDescriptorVersionStore` against a suite that
+> mentions neither it nor `DescriptorVersion`. Run to completion in 17 s, it reports **9 Killed /
+> 4 Survived**. `scripts/assert-mutation-run`'s check 5 exists to refuse exactly that, and it is red today.
+>
+> **Two earlier hypotheses are dead, and are recorded because they were plausible and cost time.** The
+> public-API approval gate is *not* always red under mutation — the trace shows
+> `PublicApiApprovalTests.Public_api_has_not_changed` reporting **`State: passed`** on every mutant run, so
+> Stryker's injected `MutantControl` does not move the baseline. And `test/_shared`'s reflective facts are at
+> most marginal: removing all five (confirmed by Stryker discovering 1185 tests with them and 1180 without)
+> left **178 of 182** mutants still falsely killed, and a run with a 130-second per-mutant budget — zero
+> timeouts — still reported 182/182. Concurrency is not it either: `--concurrency 1` reproduces it.
+>
+> **So the recorded scores cannot be re-derived, only re-characterised.** Every "100.00 %" in this file and
+> in commit messages is unsafe in a specific way rather than merely unproven: it is what this defect
+> produces whether or not the suite is adversarial, so a suite could be deleted wholesale and the number
+> would not move. `break: 80` cannot fire. The one thing still informative is a *drop*, because a drop needs
+> a mechanism this artefact does not supply. Re-deriving them means fixing the runner first; until then, the
+> honest reading of any absolute score here is "no measurement".
 
 ### Each config was verified non-vacuous, and here is how
 
@@ -1423,16 +1445,37 @@ the working directory is load-bearing), watched until Stryker had printed the tw
 for, and then killed before the mutation loop began. That exercises the whole configuration — glob resolution,
 project resolution, the MTP runner, the initial test run — without paying for the run.
 
-Measured 2026-08-02 on Stryker 4.16.0 / .NET SDK 10.0.100 / xunit.v3 3.2.2:
+**Re-probed 2026-09-10** on Stryker 4.16.0 / .NET SDK 10.0.100 / xunit.v3 3.2.2, because every 2026-08-02
+figure had gone stale and nothing reported it: check 3 of `scripts/assert-mutation-run` is a one-sided
+*floor*, so growth never fails a run. `data-ef` had reached 1108 mutants against a budget sized for 596 —
+that is #205 — and `rules, auth, rest` 1638 against 657.
 
 | Config | Mutated project | Tests found | Mutants to be tested | In the matrix? |
 |---|---|---|---|---|
-| `stryker-config.expressions.json` | `MMLib.Alvo` (`Expressions/**`) | 722 | 834 | yes |
-| `stryker-config.json` | `MMLib.Alvo` (the rest, minus `Api/**`) | 722 | 657 | yes |
-| `stryker-config.data-ef.json` | `MMLib.Alvo.Data.EntityFrameworkCore` | 858 | 596 | yes |
-| `stryker-config.data-sqlite.json` | `MMLib.Alvo.Data.Sqlite` | 403 | 38 | yes |
-| `stryker-config.data-postgresql.json` | `MMLib.Alvo.Data.PostgreSql` | 101 | 16 | yes |
+| `stryker-config.expressions.json` | `MMLib.Alvo` (`Expressions/**`) | 1188 | 900 | yes |
+| `stryker-config.json` | `MMLib.Alvo` (the rest, minus `Api/**`) | 1185 | 1638 | yes |
+| `stryker-config.data-ef-core.json` | `MMLib.Alvo.Data.EntityFrameworkCore` (the four Sqlite-killed classes) | 1135 | 344 | yes |
+| `stryker-config.data-ef-rest.json` | `MMLib.Alvo.Data.EntityFrameworkCore` (everything else) | 554 | 764 | yes |
+| `stryker-config.data-sqlite.json` | `MMLib.Alvo.Data.Sqlite` | 581 | 44 | yes |
+| `stryker-config.data-postgresql.json` | `MMLib.Alvo.Data.PostgreSql` | 110 | 20 | yes |
+| `stryker-config.data-ef.json` | `MMLib.Alvo.Data.EntityFrameworkCore` (the whole shard) | 1135 | 1108 | **no — on demand** |
 | `stryker-config.api.json` | `MMLib.Alvo` (`Api/**`) | 333 | 1502 | **no — on demand** |
+
+**`data-ef` is two legs since #205, and it is split by *test project* rather than by file.** The model that
+predicts the cost is not mutants × test *count*: measured runner-seconds per mutant on the 4-vCPU runner are
+~6.2 s for `rules, auth, rest` (1185 tests, **one** assembly) and ~26 s for the single `data-ef` leg (1135
+tests, **two** assemblies) — four times the cost at the same test count, because every mutant run restarts
+each test server it uses and `MMLib.Alvo.Data.Sqlite.Tests` stands up real databases per test. So the lever
+is how many test assemblies a leg pays for. The obvious split (the five migration classes against the data
+path) was probed and rejected: it divides the mutants 133/975, leaving the data-path leg 88 % of them *and*
+both assemblies. Splitting along the line the `test-projects` list already implies — the four classes whose
+killing tests live in `Sqlite.Tests` — divides them **344 / 764** and drops the second assembly from the
+larger half. 344 + 764 = 1108: same files, same score domain, and the arithmetic is the proof.
+
+Two one-line levers were probed on the same shard and neither applied: `ignore-methods` over `*Log*` and the
+`ThrowIfNull*` guards removes **96 of 1108** (8.7 % — the cost is not in the guards), and
+`mutation-level: "Basic"` removes **694 of 1108** (63 %, and a *different measurement* rather than a cheaper
+one, since it drops the Standard mutators and the score stops being comparable to any other leg's).
 
 F3's PR3 took `stryker-config.json` from 478 mutants to 2159, of which 1502 were `Api/**`. Splitting them is
 arithmetically exact — 657 + 1502 = 2159 — but **`Api/**` has no matrix leg**, so the Data API's query parsing,
@@ -1466,7 +1509,9 @@ past 120 without its config changing: F3's PR3/PR4 added `Api.Tests`, `Api.Tests
 which reference the mutated assemblies and were therefore swept into every shard.
 
 Measured for `data-ef` specifically, the shard that regressed with no config change: **858** tests from `test/`
-against **1489** from the repo root, and **596 mutants either way**.
+against **1489** from the repo root, and **596 mutants either way** — the figures *as of 2026-08-02*, which is
+the point of the passage (the ratio, not the absolute numbers). The same shard measures **1135** tests and
+**1108** mutants today, and it is now two legs; the table above carries the current set.
 
 **The previous edition of the table above was already showing this and nobody read it that way**: it recorded
 1267 tests for a config whose single `test-projects` entry is `MMLib.Alvo.Tests` (722 today, fewer then). A
@@ -1537,8 +1582,18 @@ Re-measure before re-enabling; do not take this table on trust once Stryker is u
 **The `data-ef` `test-projects` list is a result, not a hypothesis.** It names both
 `MMLib.Alvo.Data.EntityFrameworkCore.Tests` and `MMLib.Alvo.Data.Sqlite.Tests`, because the killing tests for
 `EfAlvoData`, `SortSqlRenderer`'s engine behaviour, `UpdateSetterFactory` and `WritePropertyBag` live in the
-latter; the probe confirms 858 tests reach the run, which is the two projects together rather than the EF
-project's own suite alone. `MMLib.Alvo.Data.PostgreSql.Tests.Integration` is deliberately **not** added: it is
+latter; the probe confirmed 858 tests reach the run — the two projects together rather than the EF project's
+own suite alone.
+
+> **That attribution is a 488-mutant-era result, and #205's split had to stop leaning on it.** It was measured
+> when the shard held 488 tested mutants and 858 tests; it holds 1108 and 1135 now, and everything the provider
+> grew since (outbox, rollup, batch, whole-row/replace, reachability, idempotency, before-hooks, pre-image) was
+> never re-attributed. So the two legs are partitioned by a **conservative rule** rather than by that list: a
+> file goes on `data-ef-core`, which keeps both assemblies, unless
+> `MMLib.Alvo.Data.EntityFrameworkCore.Tests` can be *shown* to hold its killers — either it references the
+> type by name in source, or a design doc attributes it. A file reached only behaviourally through
+> `IAlvoData`/`ISchemaMigrator`, which no test names, goes on core. `.github/workflows/mutation.yml`'s header
+> carries the rule, the resulting membership, and what it still cannot prove. `MMLib.Alvo.Data.PostgreSql.Tests.Integration` is deliberately **not** added: it is
 Docker-gated end to end, so on a CI shard with no daemon every one of its kills would report as a survivor and
 the score would read as a regression that is really an absent container. `MMLib.Alvo.Data.PostgreSql.Tests` is
 not added either, for a different reason — it holds the per-engine golden CEL→SQL snapshot, which renders

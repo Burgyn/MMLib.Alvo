@@ -1296,12 +1296,20 @@ so an include that stopped matching would pass with zero tests executed. A misna
 ever land back in ring0, which is loud.
 
 **One Stryker consequence of that move, stated rather than discovered.** The Stryker configs pin explicit
-test-project lists, and `stryker-config.data-ef.json` names `MMLib.Alvo.Data.EntityFrameworkCore.Tests`
+test-project lists, and the EF provider's configs name `MMLib.Alvo.Data.EntityFrameworkCore.Tests`
 and `MMLib.Alvo.Data.Sqlite.Tests` only — so the chaos suite no longer contributes to that assembly's
-run. What remains as `data-ef`'s killers for the outbox files, which are **not** excluded from its
-`mutate` list: `OutboxTableTests`, `OutboxClaimSqlTests` and `OutboxEventFactoryTests` in
+run. What remains as the killers for the outbox files, which are **not** excluded from the `mutate` list:
+`OutboxTableTests`, `OutboxClaimSqlTests` and `OutboxEventFactoryTests` in
 `MMLib.Alvo.Data.EntityFrameworkCore.Tests`, and `SqliteOutboxTableTests`, `SqliteOutboxStoreTests` and
-`SqliteAlvoDataOutboxTests` in `MMLib.Alvo.Data.Sqlite.Tests`. Read the report for `OutboxTable.cs`
+`SqliteAlvoDataOutboxTests` in `MMLib.Alvo.Data.Sqlite.Tests`.
+
+Since #205 the single `data-ef` leg is **two** — `data-ef-core` and `data-ef-rest` — and this paragraph is
+why the three outbox files (`EfCoreOutboxStore.cs`, `Internal/OutboxTable.cs`,
+`Internal/OutboxEventFactory.cs`) are on **`data-ef-core`**: that is the only leg that still runs
+`MMLib.Alvo.Data.Sqlite.Tests`, and the attribution above names half their killers there. An attribution in
+a design doc is one of the two things that can move a file off the conservative default; the other is the
+test project referencing the type by name. `stryker-config.data-ef.json` remains as the whole shard in one
+run, so a survivor on `data-ef-rest` can be checked against a leg that runs both assemblies. Read the report for `OutboxTable.cs`
 specifically: a surviving mutant in the claim predicate is a claim that cannot lose a row *because
 nothing tests it*. And read every absolute score against **#142** — Stryker reports `Killed` for mutants
 that survive the suite here, so no percentage from that run is proof of anything on its own.

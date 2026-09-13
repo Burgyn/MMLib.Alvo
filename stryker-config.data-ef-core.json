@@ -1,0 +1,35 @@
+{
+  "stryker-config": {
+    "project": "MMLib.Alvo.Data.EntityFrameworkCore.csproj",
+    "test-projects": [
+      "MMLib.Alvo.Data.EntityFrameworkCore.Tests/MMLib.Alvo.Data.EntityFrameworkCore.Tests.csproj",
+      "MMLib.Alvo.Data.Sqlite.Tests/MMLib.Alvo.Data.Sqlite.Tests.csproj"
+    ],
+    "test-runner": "mtp",
+    "coverage-analysis": "off",
+    "mutate": [
+      "Internal/EfAlvoData.cs",
+      "Internal/SortSqlRenderer.cs",
+      "Internal/UpdateSetterFactory.cs",
+      "Internal/WritePropertyBag.cs",
+      "Internal/AlvoModelCacheKeyFactory.cs",
+      "Internal/BatchWrite.cs",
+      "Internal/ConstraintViolationTranslator.cs",
+      "Internal/RenameGuessSplitter.cs",
+      "Internal/RenamePrePass.cs",
+      "Internal/WholeRowGuard.cs",
+      "EfCoreOutboxStore.cs",
+      "Internal/OutboxTable.cs",
+      "Internal/OutboxEventFactory.cs"
+    ],
+    "thresholds": {
+      "high": 90,
+      "low": 85,
+      "break": 80
+    },
+    "reporters": [
+      "progress",
+      "cleartext"
+    ]
+  }
+}
