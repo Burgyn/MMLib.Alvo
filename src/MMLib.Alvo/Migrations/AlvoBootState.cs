@@ -44,6 +44,16 @@ public enum AlvoBootPhase
 /// route traffic to a process that can only 403.
 /// </para>
 /// <para>
+/// <b>Ready no longer implies a primed policy catalog, and any consumer that assumed so has to say which one
+/// it needs.</b> Since #83 a dashboard-first host whose project has no descriptor history publishes Ready
+/// with nothing primed — the expected first state of <c>docker run</c>. That is still the fail-closed
+/// direction for <em>serving</em> (zero entities means an empty route table, so a data request 404s at the
+/// matcher before authorization is consulted), but it is not the same statement as "a catalog exists".
+/// <c>OutboxDispatcher</c> was the one consumer that conflated them and now checks for a primed catalog
+/// separately; the cost of the old reading there was not a denied request but an outbox entry abandoned
+/// past its attempt ceiling, which nothing in this build can recover.
+/// </para>
+/// <para>
 /// <b>A published failure is terminal for the process, and that is a decision rather than an oversight.</b>
 /// <see cref="Phase"/> short-circuits on <see cref="Failure"/>, so no later <see cref="Ready"/> can restore the
 /// phase and nothing clears it. Every path that records one either stops the start or freezes the route table it

@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
 using System.Data.Common;
@@ -174,6 +175,15 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     /// </remarks>
     private async Task BootAsync(CancellationToken ct)
     {
+        if (!_bootPlan.HasSource)
+        {
+            await BootFromTheStoredDescriptorAsync(ct).ConfigureAwait(false);
+
+            return;
+        }
+
+        RefuseAProjectNameInCodeFirstMode();
+
         var boot = await LoadTheDescriptorAsync(ct).ConfigureAwait(false);
         var project = boot.Descriptor.Name;
 
@@ -185,6 +195,182 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
 
         _state.Ready(project, revision);
         RecordWhatTheBootDid(project, outcome, revision);
+    }
+
+    /// <summary>
+    /// The dashboard-first boot: stage 1 reads the stored descriptor, stage 0 plans from it, stage 3 primes.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Stage 2 does nothing here, and that is a finding rather than a shortcut.</b> The stored descriptor
+    /// is by construction the one <see cref="RuntimeSchemaService"/> last applied <em>in the same
+    /// transaction</em> that wrote the schema (<see cref="IRuntimeSchemaWriter.ApplyAndAppendAsync"/>), so
+    /// there is nothing to converge on: a drift between them would mean the schema was changed by something
+    /// other than Alvo, which is a different problem from the one this boot solves.
+    /// </para>
+    /// <para>
+    /// <b>Stage 0 stays database-free.</b> The read happens here, in stage 1, where the store read already
+    /// lived and was already unconditional; <see cref="DescriptorBootPlan"/> is handed the JSON and still
+    /// takes no migrator, no store and no introspector — the fact that proves it is untouched. That is why
+    /// this is neither of the two shapes #83 proposed.
+    /// </para>
+    /// </remarks>
+    private async Task BootFromTheStoredDescriptorAsync(CancellationToken ct)
+    {
+        var project = RequireProjectName();
+
+        // Stage 1, unconditionally and in this order: the applied-snapshot read is what brings the `alvo.*`
+        // system schema up, and the history read below needs those tables to exist.
+        _ = await ReadAppliedSchemaAsync(project, ct).ConfigureAwait(false);
+
+        var stored = await _history.GetCurrentAsync(project, ct).ConfigureAwait(false);
+        if (stored is null)
+        {
+            _state.Ready(project, appliedRevision: null);
+            RecordWhatTheBootDid(project, SchemaStartupOutcome.Awaiting, revision: null);
+
+            return;
+        }
+
+        if (!TryPlanTheStoredDescriptor(project, stored, out var boot))
+        {
+            return;
+        }
+
+        _ = Prime(boot, stored.Revision);
+
+        _state.Ready(project, stored.Revision);
+        RecordWhatTheBootDid(project, SchemaStartupOutcome.Unchanged, stored.Revision);
+    }
+
+    /// <summary>
+    /// Stage 0′ over the stored descriptor, <b>standing down instead of failing the start</b> when this build
+    /// refuses it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The code-first answer is wrong here, and the design's own argument says why.</b> A descriptor this
+    /// build refuses is an authoring error a human fixes — by editing the file, which is what makes failing
+    /// the start the fastest feedback in code-first mode. In dashboard-first mode the descriptor lives in the
+    /// database and the only sanctioned editor is the dashboard, which is in this process: failing the start
+    /// crash-loops the container and takes away the one tool that could fix it. That is the same argument the
+    /// empty-history case already rests on ("refusing would delete mode 1"), and it applies with more force,
+    /// because here there is something to repair.
+    /// </para>
+    /// <para>
+    /// It is reachable without anybody doing anything wrong: an older image against a row a newer one wrote
+    /// (deviation 55, the not-yet-designed system-schema version contract), or a validator tightened between
+    /// releases.
+    /// </para>
+    /// <para>
+    /// <b>Standing down is not "serving anyway".</b> Nothing is primed, so the route table is empty and
+    /// <c>IPolicyEngine</c> denies; readiness reports <see cref="AlvoBootPhase.Failed"/> with the reason, so
+    /// an orchestrator drains the pod rather than routing to it; and the line is <c>Critical</c>. The process
+    /// stays alive for exactly one reason — so an operator can reach it.
+    /// </para>
+    /// </remarks>
+    /// <param name="project">The project whose stored descriptor this is.</param>
+    /// <param name="stored">The version read from the history.</param>
+    /// <param name="boot">The plan, when one could be made.</param>
+    /// <returns>Whether stage 0′ produced a plan.</returns>
+    private bool TryPlanTheStoredDescriptor(
+        string project, DescriptorVersion stored, [NotNullWhen(true)] out BootPlan? boot)
+    {
+        try
+        {
+            boot = _bootPlan.Plan(stored.DescriptorJson);
+        }
+        catch (Exception refused) when (refused is DescriptorValidationException or InvalidOperationException)
+        {
+            boot = null;
+            var reason =
+                $"Alvo cannot serve project '{project}': the descriptor stored at revision {stored.Revision} "
+                + $"is one this build refuses — {refused.Message} The process is staying up, reporting not "
+                + "ready and serving nothing, so the descriptor can be corrected through the dashboard or the "
+                + "Management API; it does not live in a file this host can edit.";
+
+            _state.Failed(project, reason);
+            BootRefused(_logger, reason);
+
+            return false;
+        }
+
+        if (!string.Equals(boot.Descriptor.Name, project, StringComparison.Ordinal))
+        {
+            var mismatch =
+                $"Alvo cannot serve project '{project}': the descriptor stored under that key declares the "
+                + $"name '{boot.Descriptor.Name}'. Priming would publish the policy catalog under one name "
+                + "while the boot state and the version history use the other, and the next runtime apply "
+                + "would then be refused for a project that was 'already primed' as something else. Check "
+                + $"{AlvoSchemaOptions.ProjectEnvironmentVariable}, or the caller that appended a version "
+                + "under a key the descriptor does not match.";
+
+            boot = null;
+            _state.Failed(project, mismatch);
+            BootRefused(_logger, mismatch);
+
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// The project a dashboard-first boot operates on, or the refusal that names both ways to supply one.
+    /// </summary>
+    /// <remarks>
+    /// Recorded on <see cref="AlvoBootState"/> before it propagates, for the same reason
+    /// <see cref="LoadTheDescriptorAsync"/> records its own: the catch in <see cref="StartingAsync"/>
+    /// rethrows an <see cref="AlvoStartupRefusedException"/> untouched, so a refusal nothing recorded would
+    /// leave an embedded host unable to tell "nothing is configured" from "the boot has not run".
+    /// </remarks>
+    private string RequireProjectName()
+    {
+        var project = _options.Value.Project;
+        if (!string.IsNullOrWhiteSpace(project))
+        {
+            return project;
+        }
+
+        var refusal = new AlvoStartupRefusedException(
+            DescriptorBootPlan.NoDescriptorSourceMessage, DescriptorBootPlan.NoDescriptorSourceFix);
+
+        _state.Failed(refusal.Message);
+        BootRefused(_logger, refusal.Message);
+
+        throw refusal;
+    }
+
+    /// <summary>
+    /// Refuses a host that configured <b>both</b> a descriptor source and a project name.
+    /// </summary>
+    /// <remarks>
+    /// Refused rather than ignored: the two can disagree, and silently preferring one of them is how a
+    /// deployment ends up serving a project nobody chose. The descriptor names its own project, so in
+    /// code-first mode the setting has nothing to say and its presence means the operator believed something
+    /// untrue about which mode they were in.
+    /// </remarks>
+    private void RefuseAProjectNameInCodeFirstMode()
+    {
+        var project = _options.Value.Project;
+        if (string.IsNullOrWhiteSpace(project))
+        {
+            return;
+        }
+
+        var message =
+            "Alvo cannot start: this host configured a descriptor source (FromDescriptor) AND a project "
+            + $"name ('{project}'). The descriptor names its own project, so the two can disagree and Alvo "
+            + "will not pick one for you.";
+        var fix =
+            $"Remove {AlvoSchemaOptions.ProjectEnvironmentVariable} for a code-first host, or remove "
+            + "FromDescriptor(...) for a dashboard-first one.";
+
+        var refusal = new AlvoStartupRefusedException(message, fix);
+        _state.Failed(refusal.Message);
+        BootRefused(_logger, refusal.Message);
+
+        throw refusal;
     }
 
     /// <summary>Stage 0, with its refusal recorded before it propagates.</summary>
@@ -592,8 +778,37 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
             return;
         }
 
+        if (outcome is SchemaStartupOutcome.Awaiting)
+        {
+            BootIsAwaitingItsFirstDescriptor(_logger, project);
+
+            return;
+        }
+
         BootIsReady(_logger, project, outcome, revision);
     }
+
+    /// <summary>
+    /// The line a fresh dashboard-first host writes: ready, and serving nothing, on purpose.
+    /// </summary>
+    /// <remarks>
+    /// <b>Warning rather than information, and the only boot line that is.</b> Every other outcome describes
+    /// a host that is doing its job; this one describes a host that will answer 404 to every data request
+    /// until somebody applies a descriptor, and the operator most likely to meet it is the one who has just
+    /// run the image for the first time and does not yet know that is expected. It says what to do, because
+    /// "ready" and "serving nothing" read as a contradiction otherwise.
+    /// </remarks>
+    /// <param name="logger">The logger the boot writes through.</param>
+    /// <param name="project">The project that has no descriptor history yet.</param>
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Alvo is ready for project {Project} but is serving nothing: no descriptor has ever been "
+            + "applied to it, so there are no data routes and requests to them answer 404. This is the "
+            + "expected first state of a dashboard-first host. Apply a descriptor through the dashboard, or "
+            + "set Alvo__Schema__Project to a project that already has one — and note that the first apply "
+            + "needs a RESTART before its routes are served: the Data API's route table is built once, and "
+            + "making it rebuild at runtime is #103.")]
+    private static partial void BootIsAwaitingItsFirstDescriptor(ILogger logger, string project);
 
     /// <summary>The one record of what a boot did, as a compile-time-generated <c>LoggerMessage</c> delegate.</summary>
     /// <remarks>

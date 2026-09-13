@@ -119,6 +119,22 @@ internal sealed class OutboxDispatcher(
             return;
         }
 
+        // READY IS NO LONGER SUFFICIENT, and the reason is worth the extra line. Since #83 a
+        // dashboard-first host publishes Ready with NOTHING primed when its project has no descriptor
+        // history yet (SchemaStartupOutcome.Awaiting) — the expected first state of `docker run`. Pumping
+        // there is not merely useless, it is destructive: `Catalog` below throws, the per-entry containment
+        // in DeliverAsync catches it and calls AbandonAttemptAsync, and `attempts` climbs to MaxAttempts
+        // within about a minute at the shipped defaults — after which ClaimAsync excludes those entries
+        // FOREVER and this build has no DLQ to recover them from. An embedded host that published an
+        // application event before its first descriptor, or an operator who typo'd the project name against
+        // a populated database, would lose real deliveries.
+        if (catalogs.Current is null)
+        {
+            EventLog.DispatcherStoodDownUnprimed(logger);
+
+            return;
+        }
+
         await store.EnsureAsync(stoppingToken).ConfigureAwait(false);
 
         while (!stoppingToken.IsCancellationRequested)
@@ -270,10 +286,20 @@ internal sealed class OutboxDispatcher(
     /// The primed catalog, or a refusal — never an empty one.
     /// </summary>
     /// <remarks>
-    /// The boot primes the catalog before it publishes <see cref="AlvoBootPhase.Ready"/>, so this cannot be null
-    /// downstream of the gate and reaching it means the invariant broke. It throws rather than treating the
-    /// events as unmatched, because "unmatched" retires them: the loud version costs a stopped pump and keeps
-    /// every event, and the quiet version loses them all.
+    /// <para>
+    /// <b>Ready alone no longer implies a primed catalog</b>, so <see cref="PumpUntilStoppedAsync"/> checks
+    /// for one explicitly before it claims anything: since #83 a dashboard-first host publishes Ready with
+    /// nothing primed when its project has no descriptor history yet. Downstream of *that* gate this still
+    /// cannot be null, and reaching it still means an invariant broke.
+    /// </para>
+    /// <para>
+    /// It throws rather than treating the events as unmatched, because "unmatched" retires them. Note what
+    /// the throw actually costs, since the earlier wording promised something this type does not do: the
+    /// per-entry containment in <c>DeliverAsync</c> catches it and abandons the attempt, so it is the
+    /// <em>entry's</em> attempt counter that pays, not the pump. That is survivable for a genuine invariant
+    /// break on one entry and was catastrophic for the unprimed state, which is why the unprimed state is
+    /// now refused at the gate instead of here.
+    /// </para>
     /// </remarks>
     private PolicyCatalog Catalog =>
         catalogs.Current ?? throw new InvalidOperationException(

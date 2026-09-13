@@ -117,6 +117,28 @@ internal static partial class EventLog
             + "serving requests, and no event is delivered until it is restarted.")]
     internal static partial void DispatcherStopped(ILogger logger, Exception failure);
 
+    /// <summary>
+    /// The dispatcher stood down because the boot reported Ready with no policy catalog primed.
+    /// </summary>
+    /// <remarks>
+    /// <b>Warning, not error, because in the expected case nothing is wrong.</b> A dashboard-first host whose
+    /// project has no descriptor history yet publishes Ready with nothing primed (#83) — the first state of a
+    /// fresh <c>docker run</c> — and a pump that claimed there would abandon every entry it touched until
+    /// <c>attempts</c> hit the ceiling, after which <c>ClaimAsync</c> excludes them permanently and this build
+    /// has no DLQ. Standing down keeps them claimable. It names the other reachable cause too, because that
+    /// one <em>is</em> a mistake and looks identical from the outside: a wrong project name against a database
+    /// that does have deliveries pending.
+    /// </remarks>
+    /// <param name="logger">The logger the dispatcher writes through.</param>
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Alvo's outbox dispatcher stood down: the boot reported ready but primed no policy "
+            + "catalog, so nothing can be judged against a hook. No event was claimed and none was "
+            + "abandoned — every queued delivery is still pending. This is expected for a project that has "
+            + "no descriptor applied yet; if this project should have one, check Alvo__Schema__Project. The "
+            + "pump starts on the next boot that primes.")]
+    internal static partial void DispatcherStoodDownUnprimed(ILogger logger);
+
     /// <summary>A hook's condition threw, so the hook was not selected.</summary>
     /// <remarks>
     /// Debug, because the loud version of this is one line per event and per hook — exactly the noise the

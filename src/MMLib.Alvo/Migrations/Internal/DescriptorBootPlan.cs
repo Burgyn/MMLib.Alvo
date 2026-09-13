@@ -64,8 +64,10 @@ internal sealed class DescriptorBootPlan
     /// descriptor becomes required exactly here, when something asks for a boot plan.
     /// </remarks>
     internal const string NoDescriptorSourceFix =
-        "Call FromDescriptor(\"project.alvo.json\") inside AddAlvo(...), or register an IDescriptorSource of "
-        + "your own.";
+        "Call FromDescriptor(\"project.alvo.json\") inside AddAlvo(...), register an IDescriptorSource of "
+        + "your own, or — for a dashboard-first host that receives its descriptor at runtime — set "
+        + AlvoSchemaOptions.ProjectEnvironmentVariable
+        + " to the project name so the boot can read the stored one.";
 
     internal const string NoDescriptorSourceMessage =
         "Alvo cannot start: no project descriptor source is configured. " + NoDescriptorSourceFix;
@@ -99,6 +101,17 @@ internal sealed class DescriptorBootPlan
         _logger = logger;
     }
 
+    /// <summary>
+    /// Whether a descriptor source is attached — i.e. whether this host is <b>code-first</b>.
+    /// </summary>
+    /// <remarks>
+    /// The boot has no mode flag and deliberately never gains one: which mode a host is in is decided by
+    /// what it configured, the same way a driver is registered or is not. A host with a source boots from it
+    /// (today's path, unchanged); a host without one boots from the stored descriptor. See
+    /// <c>docs/superpowers/specs/2026-09-13-f5-runtime-apply-boot-design.md</c>.
+    /// </remarks>
+    internal bool HasSource => _source is not null;
+
     /// <summary>Runs stage 0 and returns what every later stage reads.</summary>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The descriptor, the schema it wants, and its compiled policy.</returns>
@@ -117,7 +130,47 @@ internal sealed class DescriptorBootPlan
         var source = _source
             ?? throw new AlvoStartupRefusedException(NoDescriptorSourceMessage, NoDescriptorSourceFix);
 
-        var descriptorJson = await source.LoadAsync(ct).ConfigureAwait(false);
+        return Plan(await source.LoadAsync(ct).ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Stage 0 over descriptor JSON the caller already has: validate, parse, map, compile, and run the
+    /// serve-ability checks — <b>with no database access and no descriptor source</b>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This is how runtime-apply mode gets a boot plan without giving stage 0 a store.</b> The type's
+    /// contract is that it takes no migrator, no store and no introspector, and that contract is
+    /// load-bearing: it is what lets a host ask to <em>serve</em> an already-migrated database without also
+    /// asking to migrate it. The contract says nothing about where the JSON comes from, so splitting
+    /// <see cref="LoadAsync"/> along that line keeps it exactly as true as it was — the dashboard-first boot
+    /// reads the stored descriptor in <em>stage 1</em>, where the store read already lives and is already
+    /// unconditional, and hands the JSON here.
+    /// </para>
+    /// <para>
+    /// Deliberately neither of the two shapes #83 proposed: a <c>DbDescriptorSource</c> would put the read
+    /// inside stage 0, and making the whole stage <em>sequence</em> conditional on the mode would bend the
+    /// design's main idea. See
+    /// <c>docs/superpowers/specs/2026-09-13-f5-runtime-apply-boot-design.md</c>.
+    /// </para>
+    /// <para>
+    /// Synchronous, and that is not an oversight: every step is CPU plus one already-materialised string.
+    /// <see cref="LoadAsync"/> is asynchronous because reading the source is, not because planning is.
+    /// </para>
+    /// </remarks>
+    /// <param name="descriptorJson">The descriptor JSON to plan from, trusted no more than a file's would be.</param>
+    /// <returns>The descriptor, the schema it wants, and its compiled policy.</returns>
+    /// <exception cref="DescriptorValidationException">
+    /// <paramref name="descriptorJson"/> failed validation, or one of its rules, tenant scopes or field flags
+    /// failed to compile.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// The mapped schema cannot be served: a field shadows a reserved query-string key, or a declared format
+    /// is not a regular expression.
+    /// </exception>
+    internal BootPlan Plan(string descriptorJson)
+    {
+        ArgumentNullException.ThrowIfNull(descriptorJson);
         EnsureValid(descriptorJson);
 
         var descriptor = AlvoDescriptor.Parse(descriptorJson);
