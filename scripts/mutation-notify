@@ -1,0 +1,152 @@
+#!/usr/bin/env bash
+# mutation-notify — file the durable notification for a post-merge mutation run that
+# produced no usable verdict. Called by .github/workflows/mutation.yml's `notify` job;
+# runnable by hand, which is the point (see "Verifying this" below).
+#
+# usage: scripts/mutation-notify <repo> <sha> <run-id> <run-url> <matrix-result> <event-name> <ref-name>
+#
+# WHY THIS EXISTS AS A SCRIPT AND NOT AS AN INLINE `run:` BLOCK. This code only ever
+# executes in the failure case, so a defect in it is invisible until the one moment it
+# is needed — which is exactly how #98 stayed open for a month. Inline YAML cannot be
+# run against a stubbed `gh`; a script can, and scripts/test-mutation-notify does.
+#
+# ONE ISSUE PER COMMIT, NOT ONE ISSUE FOREVER. The first version keyed the tracking
+# issue on the `mutation-gate` label alone, so every later run commented on whichever
+# issue was already open. Three consecutive `main` commits (b62176d0, e1ec3a6e,
+# 83afbbfb) therefore landed as three comments on a ten-day-old #181 — which is the
+# "grey X nobody opens" failure one level up: the notification exists, is loud, and
+# still reads as an old known problem rather than as news about this commit. The title
+# now carries the short sha, so a new commit opens a new issue and a re-dispatch of the
+# same commit comments on that commit's issue.
+#
+# WHY THE TITLE IS THE KEY AND NOT A MARKER IN THE BODY. `gh issue list --json title`
+# is one call and an exact string compare; a body marker needs a per-issue fetch or a
+# `--search` whose matching rules are GitHub's, not ours. The title is also what a
+# human scanning the issue list actually reads.
+#
+# ADVISORY ENRICHMENT ONLY. The per-shard breakdown comes from the Actions API. If that
+# call fails the report is still filed, just without the breakdown — fetching detail
+# must never be the reason the notification goes missing.
+#
+# VERIFYING THIS SCRIPT: scripts/test-mutation-notify runs it against a stubbed `gh`
+# and asserts both routing branches, the API-failure fallback, and that an apostrophe
+# in the shard list does not break the heredocs.
+set -euo pipefail
+
+repo="${1:?usage: mutation-notify <repo> <sha> <run-id> <run-url> <matrix-result> <event-name> <ref-name>}"
+sha="${2:?missing sha}"
+run_id="${3:?missing run id}"
+run_url="${4:?missing run url}"
+matrix_result="${5:?missing matrix result}"
+event_name="${6:?missing event name}"
+ref_name="${7:?missing ref name}"
+
+short_sha="${sha:0:12}"
+title="Mutation gate failed on ${ref_name} — ${short_sha}"
+
+# PLAIN `mktemp`, and the reason is worth a line because the first version of this
+# was `mktemp -t mutation-report`, which is a hard failure on the only platform the
+# notify job runs on. GNU coreutils requires the template to contain `XXXXXX` when
+# `-t` names one ("mktemp: too few X's in template"); BSD mktemp on macOS appends a
+# suffix itself, so it worked everywhere it was tried and nowhere it mattered. Under
+# `set -euo pipefail` that aborted the script before a single `gh` call — the
+# notification silently missing, which is #98 again by a different route. Every other
+# mktemp in this repository is plain or carries an explicit XXXXXX; keep it that way.
+report="$(mktemp)"
+trap 'rm -f "$report"' EXIT
+
+legs="$(gh api --paginate \
+    "repos/$repo/actions/runs/$run_id/jobs?per_page=100" \
+    --jq '.jobs[] | select(.name | startswith("Stryker (")) | [.conclusion, .name] | @tsv' \
+    2>/dev/null || true)"
+
+legs_md="$(printf '%s\n' "$legs" \
+    | awk -F'\t' 'NF==2 && $1!="success" { printf "- `%s` — **%s**\n", $2, $1 }')"
+
+if [ -z "$legs_md" ]; then
+    legs_md="- (per-shard conclusions unavailable; matrix result: \`$matrix_result\`)"
+fi
+
+# Build the report in a FILE, with the heredocs at statement level and the static half
+# quoted (<<'MD'). Not cosmetic: a heredoc nested inside a `$( )` command substitution
+# still has its body scanned for quotes on bash 3.2, so a single apostrophe ("the
+# shard's log") turns the whole script into a syntax error — and this code only ever
+# runs in the failure case, where that would silence the notification exactly like the
+# bug it was written for. `--body-file` also means backticks need no escaping, so the
+# Markdown below reads as Markdown.
+{
+    cat <<EOF
+The mutation run did not succeed for \`$sha\` on \`$ref_name\` (matrix result:
+\`$matrix_result\`, trigger: \`$event_name\`).
+
+Run: $run_url
+
+Shards that did not succeed:
+
+$legs_md
+EOF
+    cat <<'MD'
+
+Mutation runs post-merge by design, so this did not block the merge — it
+needs someone to act. There are three shapes, and the right action differs
+per shape; each shard's conclusion above says which one you are looking at.
+
+- **`failure` — mutation score below threshold.** The adversarial suite
+  stopped biting. The fix is to add or strengthen a test, not to revert.
+- **`failure` — a vacuous run, or one that measured the wrong thing.**
+  The gate is broken, not the suite (stryker-net#3094); the shard's log
+  carries an `::error::` annotation naming it, emitted by
+  `scripts/assert-mutation-run`. More urgent than a low score: it means
+  the previous greens were meaningless.
+- **`cancelled` / `timed_out` — no verdict produced.** The shard hit
+  `timeout-minutes`, so there is no score at all, and nothing here says
+  the suite got worse. What needs looking at is the run's cost and its
+  budget — not the tests.
+
+Each shard uploads its Stryker log as a **`stryker-log-<shard>`** artifact
+on the run linked above; that is how to tell a vacuous run from a
+below-threshold score. One gap worth knowing rather than discovering: a
+shard killed by `timeout-minutes` is *cancelled*, and a cancelled job never
+reaches its upload step — so the third case above is precisely the one with
+no artifact. It is a budget question anyway, not a log-reading one.
+
+This issue is keyed on the commit above. A later commit opens its own issue
+rather than commenting here, so a stale one closing does not lose news about
+a newer one.
+MD
+} > "$report"
+
+# The label may not exist yet; creating it must not fail the job.
+gh label create mutation-gate \
+    --repo "$repo" \
+    --description "Post-merge mutation run needs attention" \
+    --color B60205 2>/dev/null || true
+
+# Exact-title match among the OPEN mutation-gate issues. `--limit 100` is generous
+# enough that a plausible backlog cannot push this commit's own issue off the page,
+# and the compare is exact so a similar title from another commit cannot absorb it.
+#
+# The title reaches jq through the ENVIRONMENT, not through string interpolation into
+# the jq program. A ref name is attacker-influenced (anyone who can open a PR can name
+# a branch), and a `"` or `\` in it would either break the program or let it be
+# rewritten — a shape that would only ever be exercised in the failure path.
+#
+# A FAILING LOOKUP FALLS THROUGH TO `create`, DELIBERATELY. If this call itself fails
+# (rate limit, transient API error) `existing` is empty and a re-dispatch of a commit
+# that already has an issue opens a second one. That is the right direction: the
+# invariant this script exists for is "the failure leaves a mark", and a duplicate
+# issue is a mark, while a swallowed error is not. Unlike the shard-breakdown call
+# above, it is not advisory enrichment — it decides where the report goes — so the
+# fall-through is stated here rather than left to be inferred from `|| true`.
+existing="$(MUTATION_ISSUE_TITLE="$title" gh issue list --repo "$repo" --state open \
+    --label mutation-gate --limit 100 --json number,title \
+    --jq 'map(select(.title == env.MUTATION_ISSUE_TITLE)) | .[0].number // empty' 2>/dev/null || true)"
+
+if [ -n "$existing" ]; then
+    gh issue comment "$existing" --repo "$repo" --body-file "$report"
+else
+    gh issue create --repo "$repo" \
+        --title "$title" \
+        --label mutation-gate \
+        --body-file "$report"
+fi
