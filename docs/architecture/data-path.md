@@ -1398,17 +1398,39 @@ string.
 
 ## Mutation-testing notes
 
-Mutation runs post-merge on `main` (`.github/workflows/mutation.yml`), across five parallel configs. Nothing
+Mutation runs post-merge on `main` (`.github/workflows/mutation.yml`), across the parallel configs the
+matrix declares. Nothing
 blocks a merge on the score, so a red run is a notification someone has to act on — which makes it worth
 knowing, before the merge, that each config is configured to answer at all.
 
-> **The absolute scores below and elsewhere in this repository are not currently evidence — see #142.**
-> Measured on Stryker 4.16.0 / .NET SDK 10.0.100 / MTP: the runner reports mutants as **Killed** that
-> demonstrably survive the suite (124/124 "Killed", 100.00 %, for two files that the configured test project
-> does not exercise at all; applying the same mutation by hand fails nothing in 731 tests). It is not an
-> always-red suite — `--break-on-initial-test-failure` does not abort. Until #142 is understood, treat a high
-> score as unproven and `break: 80` as unable to fire. Every "100.00 %" recorded in this file and in commit
-> messages predates that measurement and may be the same artefact.
+> **The absolute scores below and elsewhere in this repository are not evidence, and #142 is now
+> root-caused rather than merely observed.** Measured on Stryker 4.16.0 / .NET SDK 10.0.100 / MTP: the MTP
+> runner counts a test in **`State: error`** as a failing test — that is, as a kill — and every per-mutant
+> run of a real suite produces **1–7 arbitrary, non-reproducible errored nodes** out of ~1200, in unrelated
+> areas, different ones each time. So essentially every mutant is reported **Killed regardless of the
+> mutant**. A second, independent false-kill source: a run killed by Stryker's own RPC timeout is also
+> reported as a kill rather than as a timeout, which is why a summary can read `Timeout: 0` while the log
+> carries `Test run timed out`.
+>
+> The cheapest demonstration is `stryker-config.canary.json`, whose 13 mutants are known-surviving by
+> construction — it mutates `MMLib.Alvo.Testing`'s `InMemoryDescriptorVersionStore` against a suite that
+> mentions neither it nor `DescriptorVersion`. Run to completion in 17 s, it reports **9 Killed /
+> 4 Survived**. `scripts/assert-mutation-run`'s check 5 exists to refuse exactly that, and it is red today.
+>
+> **Two earlier hypotheses are dead, and are recorded because they were plausible and cost time.** The
+> public-API approval gate is *not* always red under mutation — the trace shows
+> `PublicApiApprovalTests.Public_api_has_not_changed` reporting **`State: passed`** on every mutant run, so
+> Stryker's injected `MutantControl` does not move the baseline. And `test/_shared`'s reflective facts are at
+> most marginal: removing all five (confirmed by Stryker discovering 1185 tests with them and 1180 without)
+> left **178 of 182** mutants still falsely killed, and a run with a 130-second per-mutant budget — zero
+> timeouts — still reported 182/182. Concurrency is not it either: `--concurrency 1` reproduces it.
+>
+> **So the recorded scores cannot be re-derived, only re-characterised.** Every "100.00 %" in this file and
+> in commit messages is unsafe in a specific way rather than merely unproven: it is what this defect
+> produces whether or not the suite is adversarial, so a suite could be deleted wholesale and the number
+> would not move. `break: 80` cannot fire. The one thing still informative is a *drop*, because a drop needs
+> a mechanism this artefact does not supply. Re-deriving them means fixing the runner first; until then, the
+> honest reading of any absolute score here is "no measurement".
 
 ### Each config was verified non-vacuous, and here is how
 

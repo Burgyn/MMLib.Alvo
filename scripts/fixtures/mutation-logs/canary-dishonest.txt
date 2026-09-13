@@ -1,0 +1,55 @@
+# Stryker log fixture for scripts/test-assert-mutation-run. DO NOT hand-edit.
+# Produced by: cd test && dotnet tool run dotnet-stryker -f ../stryker-config.canary.json --concurrency 4
+# Captured: 2026-09-10 15:50 local, source tree at 83afbbf (branch fix/142-mutation-canary).
+# Stryker 4.16.0 / .NET SDK 10.0.100 / xunit.v3 3.2.2, macOS arm64. Run to COMPLETION (17 s).
+# SHOWS #142, as small as it gets: 13 mutants of InMemoryDescriptorVersionStore against
+# MMLib.Alvo.Abstractions.Tests, a suite that mentions neither that class nor DescriptorVersion at
+# all -- so all 13 are known-surviving by construction. The run reports 9 Killed / 4 Survived.
+# This is the fixture check 5 must REJECT; the honest counterpart is derived from it in the suite,
+# because this repository cannot currently produce an honest canary run at all.
+# It is also the only committed log here captured from a COMPLETE run rather than killed after
+# discovery, which is what makes the Killed:/Survived: summary block available to assert on.
+# Machine-specific absolute paths replaced by /repo and /tmp/stryker. Otherwise verbatim, bytes
+# included -- read and written as binary. It carries NO carriage returns, unlike the three older
+# fixtures, and that is a property of the capture rather than an edit: stdout was redirected to a
+# file, and Stryker's progress reporter emits \r only to a TTY. That is also how CI captures a log,
+# so this fixture is if anything the more representative one; the guard's \r handling stays
+# exercised by expressions-scoped, expressions-solution-mode and vacuous-run.
+#
+
+   _____ _              _               _   _ ______ _______  
+  / ____| |            | |             | \ | |  ____|__   __| 
+ | (___ | |_ _ __ _   _| | _____ _ __  |  \| | |__     | |    
+  \___ \| __| '__| | | | |/ / _ \ '__| | . ` |  __|    | |    
+  ____) | |_| |  | |_| |   <  __/ |    | |\  | |____   | |    
+ |_____/ \__|_|   \__, |_|\_\___|_| (_)|_| \_|______|  |_|    
+                   __/ |                                      
+                  |___/                                       
+
+
+Version: 4.16.0
+
+[15:49:44 INF] Stryker will use a max of 4 parallel testsessions.
+[15:49:44 INF] Analysis starting.
+[15:49:44 INF] Analyzing 1 test project(s).
+[15:49:47 INF] Found project /repo/src/MMLib.Alvo.Testing/MMLib.Alvo.Testing.csproj to mutate.
+[15:49:47 INF] Analysis complete.
+[15:49:47 INF] Building test project /repo/test/MMLib.Alvo.Abstractions.Tests/MMLib.Alvo.Abstractions.Tests.csproj (1/1)
+[15:49:47 INF] Building project MMLib.Alvo.Abstractions.Tests.csproj using dotnet build MMLib.Alvo.Abstractions.Tests.csproj -c Debug --property:Platform=AnyCPU (directory /repo/test/MMLib.Alvo.Abstractions.Tests.)
+[15:49:50 WRN] The Microsoft Test Platform testrunner is currently in preview. Results should be verified since this feature is still being tested.
+[15:49:50 INF] Number of tests found: 142 for project /repo/src/MMLib.Alvo.Testing/MMLib.Alvo.Testing.csproj. Initial test run started.
+[15:49:57 WRN] An unidentified mutation in /repo/src/MMLib.Alvo.Testing/Data/AlvoFilterEvaluator.cs resulted in a compile error (at 235:34) with id: CS0165, message: Use of unassigned local variable 'values' (Source code: values)
+[15:49:57 INF] Safe Mode! Stryker will remove all mutations in In and mark them as 'compile error'.
+[15:49:58 INF] 4702 mutants created
+[15:49:58 INF] 573   mutants got status CompileError. Reason: Mutant caused compile errors
+[15:49:58 INF] 8     mutants got status Ignored.      Reason: Removed by block already covered filter
+[15:49:58 INF] 4108  mutants got status Ignored.      Reason: Removed by mutate filter
+[15:49:58 INF] 4689  total mutants are skipped for the above mentioned reasons
+[15:49:58 INF] 13    total mutants will be tested
+
+Killed:    9
+Survived:  4
+Timeout:   0
+Errors:   0
+[15:50:01 INF] Time Elapsed 00:00:16.2271917
+[15:50:01 INF] The final mutation score is 69.23 %
