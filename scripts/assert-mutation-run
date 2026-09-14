@@ -135,9 +135,21 @@ command -v jq >/dev/null 2>&1 || fail "jq is not installed, so the config's decl
 
 # Stryker's progress reporter writes \r-terminated lines; normalise once, to a FILE,
 # so that no check has to pipe into grep (see the header).
+#
+# THE ANSI STRIP IS NOT COSMETIC, and it is here because it cost a red canary on the
+# first run that ever exercised check 5 on CI. Stryker's summary block is written
+# through Spectre.Console, which decides on colour by asking the environment rather
+# than by asking whether stdout is a terminal. On a developer machine redirecting to a
+# file it emits `Killed:    9`; on a GitHub runner — same command, also not a TTY — it
+# emits `Killed:   \e[38;5;13m 0\e[0m`. Checks 1-4 never noticed because they read
+# Stryker's `[HH:mm:ss INF]` lines, which are not colourised; check 5 is the only one
+# that reads the summary, so it was the only one that could see this, and every
+# committed fixture had been captured with `>` on macOS. The failure mode was the worst
+# available: not a wrong verdict but NO verdict — "never reports 'Killed: N'" on a run
+# whose numbers were sitting right there, correct.
 norm="$(mktemp)"
 trap 'rm -f "$norm"' EXIT
-tr '\r' '\n' < "$log" > "$norm"
+tr '\r' '\n' < "$log" | command sed -E 's/\x1B\[[0-9;]*[A-Za-z]//g' > "$norm"
 
 # ---------------------------------------------------------------------------
 # Check 1 — vacuity. A run that discovered or tested zero mutants is not a passing

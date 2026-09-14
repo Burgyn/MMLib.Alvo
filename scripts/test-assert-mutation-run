@@ -452,8 +452,10 @@ done
 # would stay green while three of five fixtures were silently normalised.
 # canary-dishonest.txt is deliberately NOT in this list: it was captured with stdout
 # redirected to a file, and Stryker's progress reporter emits its carriage returns only
-# to a TTY, so it genuinely has none. That is the shape CI captures too. The \r handling
-# stays exercised by the three above.
+# to a TTY, so it genuinely has none. That is the shape CI captures too — for carriage
+# returns. NOT for colour: see the ANSI assertion below, which is the half of "what CI
+# looks like" this comment used to get wrong. The \r handling stays exercised by the
+# three above.
 for f in expressions-scoped expressions-solution-mode vacuous-run; do
   crs="$(tr -cd '\r' < "$FIXTURES/$f.txt" | command wc -c | tr -d ' ')"
   if [ "$crs" -gt 0 ]; then
@@ -463,6 +465,19 @@ for f in expressions-scoped expressions-solution-mode vacuous-run; do
       "none — check the scripts/fixtures/mutation-logs/*.txt -text rule in .gitattributes"
   fi
 done
+
+# The same argument for the OTHER thing the guard normalises. canary-honest-ci.txt is the
+# only fixture captured on a GitHub runner, and the only one carrying SGR escapes, because
+# Spectre.Console picks colour from the environment rather than from whether stdout is a
+# TTY. Strip them to "tidy" the fixture and the ANSI branch of the normalisation stops
+# being exercised while every case here stays green — which is exactly how the guard came
+# to have no coverage of the shape it meets on every real run.
+ansi="$(command grep -ac $'\x1b\\[' "$FIXTURES/canary-honest-ci.txt" || true)"
+if [ "${ansi:-0}" -gt 0 ]; then
+  pass "canary-honest-ci.txt still carries ANSI escapes (the guard's colour handling stays exercised)"
+else
+  fail "canary-honest-ci.txt still carries ANSI escapes" "at least one line with \x1b[" "none"
+fi
 
 # ============ the data-ef configs must stay a partition of the whole shard =========
 #
@@ -525,6 +540,7 @@ fi
 CANARY_CFG="$ROOT/stryker-config.canary.json"
 CANARY_LOG="$FIXTURES/canary-dishonest.txt"
 CANARY_HONEST_LOG="$FIXTURES/canary-honest.txt"
+CANARY_HONEST_CI_LOG="$FIXTURES/canary-honest-ci.txt"
 
 assert_canary_rejected "a canary reporting kills is rejected, naming the count" "$CANARY_KILLED" \
   "$CANARY_LOG" "$CANARY_CFG" 13 142
@@ -542,6 +558,18 @@ assert_canary_ok "an honest canary — 13 tested, 13 survived, 0 killed — is a
 # produced it measured the wrong suite.
 assert_ok "the honest canary run also measured the right thing (checks 1-4)" \
   "$CANARY_HONEST_LOG" "$CANARY_CFG" 13 142
+
+# THE SAME VERDICT IN CI'S BYTES. Stryker colourises its summary block on a GitHub
+# runner and not on a developer machine redirecting to a file, so `Killed: 0` arrives
+# wrapped in SGR escapes. Check 5 is the only check that reads that block, which is why
+# nothing here caught it until the canary leg entered the matrix and the first CI run
+# failed with "never reports 'Killed: N'" on correct numbers. Both captures are real and
+# both stay: one per environment, because that is the axis the defect lived on.
+assert_canary_ok "an honest canary is accepted through CI's ANSI colour codes" \
+  "$CANARY_HONEST_CI_LOG" "$CANARY_CFG" 13 142
+
+assert_ok "the ANSI-coloured CI run also passes checks 1-4" \
+  "$CANARY_HONEST_CI_LOG" "$CANARY_CFG" 13 142
 
 # Fail-CLOSED on a missing summary line, both halves. A reworded Stryker summary must
 # fail the check rather than read as zero kills, which is the shape checks 1-4 were all
