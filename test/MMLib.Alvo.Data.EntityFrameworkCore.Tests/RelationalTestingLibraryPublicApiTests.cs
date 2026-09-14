@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Testing.Data;
+using MMLib.Alvo.Tests;
 using MMLib.Alvo.Tests.Api;
 using PublicApiGenerator;
 
@@ -44,6 +45,10 @@ public class RelationalTestingLibraryPublicApiTests
     /// </summary>
     [Fact]
     public Task Public_api_has_not_changed()
-        => Verify(VerifyBuildMetadata.RemoveFrom(typeof(TSqlSqlDialect).Assembly.GeneratePublicApi(_options)))
+    {
+        Assert.SkipWhen(MutationRun.IsActive, MutationRun.PublicApiGateSkipReason);
+
+        return Verify(VerifyBuildMetadata.RemoveFrom(typeof(TSqlSqlDialect).Assembly.GeneratePublicApi(_options)))
             .UseFileName("PublicApi.MMLib.Alvo.Testing.EntityFrameworkCore");
+    }
 }

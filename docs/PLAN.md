@@ -169,9 +169,12 @@ it is now sorted by one question, applied on 2026-09-06:
   extensions, JSONata, and the create-or-replace follow-ups (`#198`–`#201`).
 
 **Two in F6 deserve naming**, because a milestone label makes them look
-ordinary and they are not. **`#142`** — Stryker reports `Killed` for mutants
-that survive the suite, so *every 100% score is suspect*: a gate that lies is
-worse than no gate. **`#161`** — a scoped `ref` may name a row in another
+ordinary and they are not. **`#142`** — Stryker reported `Killed` for mutants
+that survive the suite, so *every 100% score was suspect*: a gate that lies is
+worse than no gate. **Closed 2026-09-14**: two of our own tests were only
+correct on a process's first run, and Stryker re-runs the suite in one test host
+per mutant (`test/_shared/mutation/`). Scores published before that date are not
+comparable with scores after it. **`#161`** — a scoped `ref` may name a row in another
 tenant, because the foreign key does not span `(tenant_id, id)`. That is the
 same shape as `#198`, and both are the tenant-isolation seam the composite key
 would close.
