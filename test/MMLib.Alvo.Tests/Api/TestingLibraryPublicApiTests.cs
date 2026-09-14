@@ -30,6 +30,8 @@ public class TestingLibraryPublicApiTests
     [Fact]
     public Task Public_api_has_not_changed()
     {
+        Assert.SkipWhen(MutationRun.IsActive, MutationRun.PublicApiGateSkipReason);
+
         var assembly = typeof(TestFieldSqlRenderer).Assembly;
         var publicApi = VerifyBuildMetadata.RemoveFrom(assembly.GeneratePublicApi(_options));
         return Verify(publicApi).UseFileName("PublicApi.MMLib.Alvo.Testing");

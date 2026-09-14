@@ -30,6 +30,8 @@ public class PublicApiApprovalTests
     [Fact]
     public Task Public_api_has_not_changed()
     {
+        Assert.SkipWhen(MutationRun.IsActive, MutationRun.PublicApiGateSkipReason);
+
         var target = TestTarget.Resolve();
 
         return Verify(target.GeneratePublicApi(_options))

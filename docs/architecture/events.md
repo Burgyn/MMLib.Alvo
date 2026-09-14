@@ -1311,8 +1311,9 @@ a design doc is one of the two things that can move a file off the conservative 
 test project referencing the type by name. `stryker-config.data-ef.json` remains as the whole shard in one
 run, so a survivor on `data-ef-rest` can be checked against a leg that runs both assemblies. Read the report for `OutboxTable.cs`
 specifically: a surviving mutant in the claim predicate is a claim that cannot lose a row *because
-nothing tests it*. And read every absolute score against **#142** — Stryker reports `Killed` for mutants
-that survive the suite here, so no percentage from that run is proof of anything on its own.
+nothing tests it*. And read every absolute score recorded **before 2026-09-14** against **#142** — Stryker reported `Killed` for
+mutants that survive the suite, so no percentage captured before that date is proof of anything on its own.
+It is fixed (`test/_shared/mutation/`), but the numbers written down here were not re-derived.
 
 **Two facts carry no mutation of their own, deliberately.**
 `A_webhook_receives_the_unmasked_record_and_that_is_documented` is D7's named pin and there is no masking

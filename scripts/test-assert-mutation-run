@@ -515,11 +515,16 @@ fi
 # known-surviving by construction — and Stryker reported 9 Killed. That fixture is the
 # finding and the negative case at once.
 #
-# The honest case has to be DERIVED from it, because this repository cannot currently
-# produce an honest canary run at all. That is the point of the check.
+# `canary-honest.txt` is the SAME pairing after the fix in test/_shared/mutation/ (#142):
+# 13 mutants, 0 Killed, 13 Survived. It is a capture, not a derivation — until that fix
+# landed this repository could not produce an honest canary run at all, and the honest
+# case had to be sed-derived from the dishonest log. The two fixtures together are what
+# stop check 5 from rotting in either direction: one run it must reject, one it must
+# accept, both real.
 
 CANARY_CFG="$ROOT/stryker-config.canary.json"
 CANARY_LOG="$FIXTURES/canary-dishonest.txt"
+CANARY_HONEST_LOG="$FIXTURES/canary-honest.txt"
 
 assert_canary_rejected "a canary reporting kills is rejected, naming the count" "$CANARY_KILLED" \
   "$CANARY_LOG" "$CANARY_CFG" 13 142
@@ -529,10 +534,14 @@ assert_canary_rejected "a canary reporting kills is rejected, naming the count" 
 assert_ok "the same lying run passes checks 1-4 unchanged — the reason check 5 exists" \
   "$CANARY_LOG" "$CANARY_CFG" 13 142
 
-# An honest canary: all 13 survived, none killed.
-derive canary-dishonest.txt 's/^Killed:    9/Killed:    0/; s/^Survived:  4/Survived:  13/' || exit 1
+# An honest canary: all 13 survived, none killed. A real run, not a derived one.
 assert_canary_ok "an honest canary — 13 tested, 13 survived, 0 killed — is accepted" \
-  "$DERIVED" "$CANARY_CFG" 13 142
+  "$CANARY_HONEST_LOG" "$CANARY_CFG" 13 142
+
+# And it must pass checks 1-4 too: an honest verdict is worth nothing if the run that
+# produced it measured the wrong suite.
+assert_ok "the honest canary run also measured the right thing (checks 1-4)" \
+  "$CANARY_HONEST_LOG" "$CANARY_CFG" 13 142
 
 # Fail-CLOSED on a missing summary line, both halves. A reworded Stryker summary must
 # fail the check rather than read as zero kills, which is the shape checks 1-4 were all

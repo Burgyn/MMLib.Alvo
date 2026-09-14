@@ -1403,34 +1403,56 @@ matrix declares. Nothing
 blocks a merge on the score, so a red run is a notification someone has to act on — which makes it worth
 knowing, before the merge, that each config is configured to answer at all.
 
-> **The absolute scores below and elsewhere in this repository are not evidence, and #142 is now
-> root-caused rather than merely observed.** Measured on Stryker 4.16.0 / .NET SDK 10.0.100 / MTP: the MTP
-> runner counts a test in **`State: error`** as a failing test — that is, as a kill — and every per-mutant
-> run of a real suite produces **1–7 arbitrary, non-reproducible errored nodes** out of ~1200, in unrelated
-> areas, different ones each time. So essentially every mutant is reported **Killed regardless of the
-> mutant**. A second, independent false-kill source: a run killed by Stryker's own RPC timeout is also
-> reported as a kill rather than as a timeout, which is why a summary can read `Timeout: 0` while the log
-> carries `Test run timed out`.
+> **#142 is CLOSED as of 2026-09-14, and every absolute score recorded in this file or in a commit message
+> before that date is still not evidence.** They were measured through the defect; they were not
+> re-derived, and nothing here has been recalculated.
 >
-> The cheapest demonstration is `stryker-config.canary.json`, whose 13 mutants are known-surviving by
-> construction — it mutates `MMLib.Alvo.Testing`'s `InMemoryDescriptorVersionStore` against a suite that
-> mentions neither it nor `DescriptorVersion`. Run to completion in 17 s, it reports **9 Killed /
-> 4 Survived**. `scripts/assert-mutation-run`'s check 5 exists to refuse exactly that, and it is red today.
+> **What it was.** Stryker's MTP runner keeps **one test-host process alive across mutants** and re-runs the
+> whole assembly in it once per mutant. Two things in our suites are only correct the first time a process
+> runs them, and each therefore errors on the second and every later mutant:
 >
-> **Two earlier hypotheses are dead, and are recorded because they were plausible and cost time.** The
-> public-API approval gate is *not* always red under mutation — the trace shows
-> `PublicApiApprovalTests.Public_api_has_not_changed` reporting **`State: passed`** on every mutant run, so
-> Stryker's injected `MutantControl` does not move the baseline. And `test/_shared`'s reflective facts are at
-> most marginal: removing all five (confirmed by Stryker discovering 1185 tests with them and 1180 without)
-> left **178 of 182** mutants still falsely killed, and a run with a 130-second per-mutant budget — zero
-> timeouts — still reported 182/182. Concurrency is not it either: `--concurrency 1` reproduces it.
+> - **Verify's `PrefixUnique`** remembers every snapshot prefix the *process* has verified, so a second run
+>   throws `The prefix has already been used: …`;
+> - **the public-API approval gate** reads the *mutated* assembly with Mono.Cecil, whose PDB no longer
+>   matches the rewritten IL → `Mono.Cecil.Cil.SymbolsNotMatchingException`.
 >
-> **So the recorded scores cannot be re-derived, only re-characterised.** Every "100.00 %" in this file and
-> in commit messages is unsafe in a specific way rather than merely unproven: it is what this defect
-> produces whether or not the suite is adversarial, so a suite could be deleted wholesale and the number
-> would not move. `break: 80` cannot fire. The one thing still informative is a *drop*, because a drop needs
-> a mechanism this artefact does not supply. Re-deriving them means fixing the runner first; until then, the
-> honest reading of any absolute score here is "no measurement".
+> xUnit surfaces both as an MTP `ErrorTestNodeStateProperty`, the runner counts an errored node as a failing
+> test — that part is upstream and unchanged — and the mutant is recorded **Killed**. Every mutant.
+>
+> **Why that took three rounds to find, recorded because each wrong turn was reasonable.** The **first**
+> mutant of a run is clean: fresh process, empty prefix set, and Stryker's *initial* test run is always a
+> first run, so `--break-on-initial-test-failure` never fires and the approval gate reads as "not always
+> red". And Stryker's trace line prints one node's **state** next to the **following** node's **name**, so
+> the blame lands on whichever innocent test was reported after the Verify test — a different one each run
+> with xUnit parallelism on, which is exactly what "1–7 arbitrary, non-reproducible errored nodes" was. It
+> was never arbitrary: counting node states per mutant gives **exactly one** error, on every mutant but the
+> first, in every run. The earlier "removing all five `test/_shared` facts left 178 of 182 still killed"
+> probe is consistent rather than contradictory — it removed five tests while every *other* Verify-based
+> test in `MMLib.Alvo.Tests` went on poisoning the run.
+>
+> **The fix**, in `test/_shared/mutation/`, compiled into every test project from
+> `test/Directory.Build.props` and gated on the environment variable Stryker sets in the test host
+> (`STRYKER_MUTANT_FILE` under the MTP runner, `STRYKER_MUTANT_ID_CONTROL_VAR` under VsTest): Verify's
+> prefix guard is disabled **under Stryker only**, and the three public-API approval tests
+> `Assert.SkipWhen` there. **Deviation, stated because neither variable is a documented contract**: an
+> upstream rename turns the gate off silently and restores the old behaviour. What catches that is the
+> canary leg, which is in the matrix first precisely so it fails before any score-bearing leg is believed.
+>
+> **Measured, before → after.** The canary — 13 mutants of `MMLib.Alvo.Testing`'s
+> `InMemoryDescriptorVersionStore` against a suite that mentions neither it nor `DescriptorVersion`, so
+> known-surviving by construction — went **9 Killed / 4 Survived (69.23 %) → 0 / 13 (0.00 %)**, at
+> `--concurrency 1` and `4` alike. #142's own repro, 182 mutants of `Api/**` against `MMLib.Alvo.Tests`,
+> went **182 Killed / 0 Survived (100.00 %) → 0 / 182 (0.00 %)**. Both "after" figures are the honest
+> answer by construction.
+>
+> **Getting the message Stryker drops**, which is what made this findable: run with
+> `TESTINGPLATFORM_DIAGNOSTIC=1`, `TESTINGPLATFORM_DIAGNOSTIC_VERBOSITY=trace` and
+> `TESTINGPLATFORM_DIAGNOSTIC_OUTPUT_DIRECTORY=<dir>`. MTP's own `.diag` files carry the full
+> `ErrorTestNodeStateProperty { Exception = … }` per node; Stryker reports only the state.
+>
+> **The one false-kill source NOT addressed here**: a run killed by Stryker's own RPC timeout is reported as
+> a kill rather than as a timeout, which is why a summary can read `Timeout: 0` while the log carries
+> `Test run timed out`. Unchanged, and still upstream.
 
 ### Each config was verified non-vacuous, and here is how
 
@@ -1489,8 +1511,8 @@ rather than an oversight, and it costs nothing real:
   — the measured cost is **6.3 s/mutant** (124 mutants in 779 s), so ~2.6 h for 1502 on a 10-core dev machine
   and more on a 4-vCPU runner: no budget under GitHub's 6 h ceiling produces a verdict without sharding it
   several ways;
-- sharding it that way is premature while #142 makes the resulting score untrustworthy, and a leg that always
-  times out is noise rather than a gate.
+- a leg that always times out is noise rather than a gate. This used to add "premature while #142 makes the
+  resulting score untrustworthy"; #142 closed on 2026-09-14, so what is left is purely the budget.
 
 The five matrix configs are non-vacuous. The two driver configs are small on purpose — each driver is two files of rendering
 — and small is the point: `TrueLiteral => "1"` mutated to `"0"` inverts a boolean inside a policy `WHERE`, and
@@ -1534,8 +1556,9 @@ makes four **positive** assertions after every shard:
 Note which number catches solution mode and which does not: the mutant count is *identical* in both modes
 (834/834, 596/596), so only assertion 2 can catch it. Assertions 3 and 4 exist for the two collapses a score
 cannot show — a glob that stops matching after a rename, and a suite that stopped biting — both one-sided,
-because growth is never the defect and a band would fail every ordinary PR. Assertion 4 matters especially
-while #142 stands: with the score untrustworthy, a gutted suite would otherwise pass every check.
+because growth is never the defect and a band would fail every ordinary PR. Assertion 4 mattered especially
+while #142 stood, because a gutted suite would otherwise have passed every check; with the score honest again
+it is the ordinary guard it was meant to be, and check 5 is what keeps it from being needed that way twice.
 
 Two lessons are embedded in the implementation rather than the assertions, and both were found by review after
 the guard was already "verified". The guard normalises the log into a temp **file** instead of piping into
