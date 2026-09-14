@@ -1,0 +1,230 @@
+# Stryker log fixture for scripts/test-assert-mutation-run. DO NOT hand-edit.
+# Produced by: cd test && dotnet tool run dotnet-stryker -f ../stryker-config.canary.json --concurrency 4
+# Captured: 2026-09-14 07:46 local, source tree on branch fix/222-verify-prefix-guard-under-stryker.
+# Stryker 4.16.0 / .NET SDK 10.0.100 / xunit.v3 4.0.0, macOS arm64. Run to COMPLETION (~20 s).
+# SHOWS #142 FIXED: the same 13 mutants of InMemoryDescriptorVersionStore against
+# MMLib.Alvo.Abstractions.Tests that canary-dishonest.txt reported 9 Killed for now report
+# 0 Killed / 13 Survived -- the honest answer, since that suite cannot reach the mutated class.
+# This is the fixture check 5 must ACCEPT, and it is a CAPTURE rather than a derivation: until
+# test/_shared/mutation/ landed this repository could not produce an honest canary run at all,
+# so the honest case had to be sed-derived from the dishonest log. It no longer does.
+# Machine-specific absolute paths replaced by /repo and /tmp/stryker. Otherwise verbatim, bytes
+# included -- read and written as binary. It carries no carriage returns, for the same reason
+# canary-dishonest.txt does not: stdout was redirected to a file, and Stryker's progress reporter
+# emits them only to a TTY.
+#
+
+   _____ _              _               _   _ ______ _______  
+  / ____| |            | |             | \ | |  ____|__   __| 
+ | (___ | |_ _ __ _   _| | _____ _ __  |  \| | |__     | |    
+  \___ \| __| '__| | | | |/ / _ \ '__| | . ` |  __|    | |    
+  ____) | |_| |  | |_| |   <  __/ |    | |\  | |____   | |    
+ |_____/ \__|_|   \__, |_|\_\___|_| (_)|_| \_|______|  |_|    
+                   __/ |                                      
+                  |___/                                       
+
+
+Version: 4.16.0
+
+A new version of Stryker.NET (5.0.0) is available. Please consider upgrading 
+using `dotnet tool update -g dotnet-stryker`
+
+[07:46:31 INF] Stryker will use a max of 4 parallel testsessions.
+[07:46:31 INF] Analysis starting.
+[07:46:31 INF] Analyzing 1 test project(s).
+[07:46:34 INF] Found project /repo/src/MMLib.Alvo.Testing/MMLib.Alvo.Testing.csproj to mutate.
+[07:46:34 INF] Analysis complete.
+[07:46:34 INF] Building test project /repo/test/MMLib.Alvo.Abstractions.Tests/MMLib.Alvo.Abstractions.Tests.csproj (1/1)
+[07:46:34 INF] Building project MMLib.Alvo.Abstractions.Tests.csproj using dotnet build MMLib.Alvo.Abstractions.Tests.csproj -c Debug --property:Platform=AnyCPU (directory /repo/test/MMLib.Alvo.Abstractions.Tests.)
+[07:46:37 WRN] The Microsoft Test Platform testrunner is currently in preview. Results should be verified since this feature is still being tested.
+[07:46:37 INF] Number of tests found: 142 for project /repo/src/MMLib.Alvo.Testing/MMLib.Alvo.Testing.csproj. Initial test run started.
+[07:46:44 WRN] An unidentified mutation in /repo/src/MMLib.Alvo.Testing/Data/AlvoFilterEvaluator.cs resulted in a compile error (at 235:34) with id: CS0165, message: Use of unassigned local variable 'values' (Source code: values)
+[07:46:44 INF] Safe Mode! Stryker will remove all mutations in In and mark them as 'compile error'.
+[07:46:46 INF] 4702 mutants created
+[07:46:46 INF] 573   mutants got status CompileError. Reason: Mutant caused compile errors
+[07:46:46 INF] 8     mutants got status Ignored.      Reason: Removed by block already covered filter
+[07:46:46 INF] 4108  mutants got status Ignored.      Reason: Removed by mutate filter
+[07:46:46 INF] 4689  total mutants are skipped for the above mentioned reasons
+[07:46:46 INF] 13    total mutants will be tested
+
+Killed:    0
+Survived: 13
+Timeout:   0
+Errors:   0
+
+
+All mutants have been tested, and your mutation score has been calculated
+╭───────────────────────────────────────────────────┬────┬───┬────┬─────┬───┬──╮
+│ File                                              │ %  │ # │ #  │  #  │ # │  │
+│                                                   │ s… │ … │ t… │ su… │ … │  │
+│                                                   │    │   │    │     │ … │  │
+├───────────────────────────────────────────────────┼────┼───┼────┼─────┼───┼──┤
+│ /repo/Developer/GitHub/Burgyn/MMLib.Al │ 0. │ 0 │  0 │ 470 │ 0 │  │
+│ vo/src                                            │ 00 │   │    │   2 │   │  │
+│ AlvoExamples.cs                                   │ N/ │ 0 │  0 │   8 │ 0 │  │
+│                                                   │  A │   │    │     │   │  │
+│ ArchTargetAttribute.cs                            │ N/ │ 0 │  0 │   0 │ 0 │  │
+│                                                   │  A │   │    │     │   │  │
+│ Data/AlvoDataAdversarialTests.cs                  │ Ex │ 0 │  0 │ 706 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+│ Data/AlvoDataBatchTests.cs                        │ Ex │ 0 │  0 │ 191 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+│ Data/AlvoDataBeforeHookTests.cs                   │ Ex │ 0 │  0 │ 260 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+│ Data/AlvoDataComparisonTests.cs                   │ Ex │ 0 │  0 │   0 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+│ Data/AlvoDataComputedRollupTests.cs               │ Ex │ 0 │  0 │ 215 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+│ Data/AlvoDataConcurrencyTests.cs                  │ Ex │ 0 │  0 │ 232 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+│ Data/AlvoDataConstraintTests.cs                   │ Ex │ 0 │  0 │ 132 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+│ Data/AlvoDataDifferentialTests.cs                 │ Ex │ 0 │  0 │  66 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+│ Data/AlvoDataFixture.cs                           │ Ex │ 0 │  0 │ 120 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+│ Data/AlvoDataFixtures.cs                          │ Ex │ 0 │  0 │  38 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+│ Data/AlvoDataOrderingTests.cs                     │ Ex │ 0 │  0 │ 141 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+│ Data/AlvoDataOutboxTests.cs                       │ Ex │ 0 │  0 │ 183 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+│ Data/AlvoDataPagingTests.cs                       │ Ex │ 0 │  0 │ 199 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+│ Data/AlvoDataProjectionTests.cs                   │ Ex │ 0 │  0 │ 273 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+│ Data/AlvoDataReachabilityContractTests.cs         │ Ex │ 0 │  0 │  19 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+│ Data/AlvoDataReplaceTests.cs                      │ Ex │ 0 │  0 │ 124 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+│ Data/AlvoDataSqlSnapshotTests.cs                  │ Ex │ 0 │  0 │  29 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+│ Data/AlvoDataStatementTests.cs                    │ Ex │ 0 │  0 │ 134 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+│ Data/AlvoFilterEvaluator.cs                       │ Ex │ 0 │  0 │ 216 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+│ Data/IAlvoDataBeforeHookWorld.cs                  │ Ex │ 0 │  0 │   0 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+│ Data/IAlvoDataOutboxWorld.cs                      │ Ex │ 0 │  0 │   0 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+│ Data/IDifferentialProbe.cs                        │ Ex │ 0 │  0 │   0 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+│ Data/InMemoryAlvoData.cs                          │ Ex │ 0 │  0 │ 579 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+│ Data/IStatementProbe.cs                           │ Ex │ 0 │  0 │   0 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+│ Events/AlvoEventCriteriaTests.cs                  │ Ex │ 0 │  0 │  81 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+│ Events/IAlvoEventWorld.cs                         │ Ex │ 0 │  0 │   0 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+│ Events/IOutboxStoreWorld.cs                       │ Ex │ 0 │  0 │   0 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+│ Events/OutboxStoreContractTests.cs                │ Ex │ 0 │  0 │  78 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+│ Expressions/DifferentialRuleCases.cs              │ Ex │ 0 │  0 │  92 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+│ Expressions/TestFieldSqlRenderer.cs               │ Ex │ 0 │  0 │  22 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+│ Expressions/TSqlFieldSqlRenderer.cs               │ Ex │ 0 │  0 │  21 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+│ Migrations/DescriptorVersionStoreContractTests.cs │ Ex │ 0 │  0 │  61 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+│ Migrations/InMemoryDescriptorVersionStore.cs      │ 0. │ 0 │  0 │  21 │ 0 │  │
+│                                                   │ 00 │   │    │     │   │  │
+│ Migrations/InMemoryRuntimeSchemaWriter.cs         │ Ex │ 0 │  0 │   2 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+│ Migrations/InMemorySchemaMigrator.cs              │ Ex │ 0 │  0 │  16 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+│ Migrations/RuntimeSchemaWriterContractTests.cs    │ Ex │ 0 │  0 │  22 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+│ Migrations/SchemaDiff.cs                          │ Ex │ 0 │  0 │ 127 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+│ Migrations/SchemaMigratorContractTests.cs         │ Ex │ 0 │  0 │  38 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+│ Migrations/SchemaSqlSnapshotTests.cs              │ Ex │ 0 │  0 │ 148 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+│ RepositoryRoot.cs                                 │ N/ │ 0 │  0 │   7 │ 0 │  │
+│                                                   │  A │   │    │     │   │  │
+│ Rules/PolicyEngineContractTests.cs                │ Ex │ 0 │  0 │ 101 │ 0 │  │
+│                                                   │ cl │   │    │     │   │  │
+│                                                   │ ud │   │    │     │   │  │
+│                                                   │ ed │   │    │     │   │  │
+╰───────────────────────────────────────────────────┴────┴───┴────┴─────┴───┴──╯
+[07:46:48 INF] Time Elapsed 00:00:16.9333405
+[07:46:48 INF] The final mutation score is 0.00 %

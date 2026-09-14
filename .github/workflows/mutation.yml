@@ -95,20 +95,43 @@ name: Mutation
 # `suite:` values in the matrix are what those two floors are measured against.
 # scripts/test-assert-mutation-run runs the whole thing over real logs from both modes.
 #
-# READ #142 BEFORE TRUSTING A SCORE FROM THIS WORKFLOW. Measured on the same
-# versions: this runner reports mutants as Killed that demonstrably survive the
-# suite (124/124 "Killed", 100.00 %, for two files no test in the configured test
-# project exercises; the same mutation applied by hand fails nothing in 731 tests).
-# It is not an always-red suite — with --break-on-initial-test-failure Stryker does
-# not abort. Until #142 is understood, a high score here is not evidence, and
-# `break: 80` cannot be relied on to fire. The workflow is kept running because the
-# cheap legs still exercise the plumbing and a *drop* is still informative; the
-# absolute number is not.
+# #142 IS CLOSED, AND WHAT IT WAS IS WORTH KEEPING HERE. Every score this workflow
+# published before 2026-09-14 was inflated, most of them to 100 %, and the cause was
+# not Stryker's arithmetic: it was two of OUR tests erroring for reasons that had
+# nothing to do with the mutant, in a way only a mutation run can produce.
 #
-# THE CANARY, AND WHY IT HAS NO MATRIX LEG YET. stryker-config.canary.json is this
-# gate's instrument for the one failure no count can see: a run that measures exactly
-# the right thing and LIES about the result (#142). It mutates
-# src/MMLib.Alvo.Testing/Migrations/InMemoryDescriptorVersionStore.cs against
+#   Stryker's MTP runner keeps ONE test-server process alive across mutants and re-runs
+#   the whole assembly in it once per mutant. Two things in our suites are only correct
+#   the first time a process runs them:
+#     - Verify's PrefixUnique guard remembers every snapshot prefix the PROCESS has
+#       verified, so from the second mutant on every Verify-based test throws
+#       "The prefix has already been used: …";
+#     - the public-API approval gate reads the MUTATED assembly with Mono.Cecil, whose
+#       PDB no longer matches the rewritten IL — "SymbolsNotMatchingException".
+#   xUnit reports both as an MTP ErrorTestNodeStateProperty, Stryker counts an errored
+#   node as a failing test, and the mutant is recorded Killed. Every mutant.
+#
+# THAT IS ALSO WHY THE INVESTIGATION TOOK THREE ROUNDS TO LAND, and the two wrong turns
+# are the reason this paragraph exists. The FIRST mutant of a run is clean — fresh
+# process, empty prefix set, and Stryker's initial test run passes — so
+# `--break-on-initial-test-failure` never fires and the approval gate looked ruled out.
+# And Stryker's trace line prints one node's state next to the FOLLOWING node's name,
+# so the blame landed on whichever innocent test was reported after the Verify test,
+# which changed from run to run and read exactly like flakiness (#222 named three such
+# tests; none of them was ever at fault). The fix is test-only and gated on
+# STRYKER_MUTANT_FILE: test/_shared/mutation/ carries it.
+#
+#   config                                   before        after
+#   stryker-config.canary.json (13 mutants)   9 Killed /  4 Survived   0 / 13   0.00 %
+#   #142's own repro (182 mutants, Api/**)  182 Killed /  0 Survived   0 / 182  0.00 %
+#
+# Both "after" numbers are the honest answer by construction: neither suite can reach
+# the mutated code. Scores recorded before that date are not comparable with scores
+# after it — every one of them was measured through this defect.
+#
+# THE CANARY is this gate's instrument for the one failure no count can see: a run that
+# measures exactly the right thing and LIES about the result. stryker-config.canary.json
+# mutates src/MMLib.Alvo.Testing/Migrations/InMemoryDescriptorVersionStore.cs against
 # test/MMLib.Alvo.Abstractions.Tests — a suite that mentions neither that class nor
 # DescriptorVersion at all — so every one of its mutants is known-surviving by
 # construction, and `scripts/assert-mutation-run <log> <config> 13 142 canary canary`
@@ -116,30 +139,20 @@ name: Mutation
 # reported kill is always a lie, whatever caused it, while an all-survived canary might
 # be luck — which is the direction a guard may be generous in.
 #
-# Measured, run to completion in 17 seconds: 13 mutants, 142 tests,
-# **9 Killed / 4 Survived**. Nine kills by a suite that cannot reach the code. So the
-# canary is red today, and that is correct: while it is red, no absolute score any leg
-# here publishes is evidence.
+# IT HAS EARNED ITS KEEP THREE TIMES. It verified Dependabot's Stryker 5.0.0 bump (#220)
+# in 17 seconds — identical verdict, so the upgrade fixes nothing and was held; 5.0's
+# trace run against it is what first named the erroring tests; and it is what proved the
+# fix above, in seconds, on a defect whose real repro costs 8 minutes.
 #
-# IT HAS ALREADY EARNED ITS KEEP TWICE. It verified Dependabot's Stryker 5.0.0 bump
-# (#220) in 17 seconds — identical verdict, so the upgrade fixes nothing and was held —
-# and 5.0's trace, run against it, NAMED the tests that error. #142 is two defects
-# stacked, and the half that binds is OURS (#222): one of our tests erroring
-# non-deterministically under load becomes every mutant's false kill. Fix those, re-run
-# the canary, and all-survived is the signal to put this leg into the matrix and
-# re-derive every recorded score.
-#
-# It is therefore NOT in the matrix, on the same rule the Api/** gap below is declared
-# under — a leg that fails on every commit is a notification nobody reads, and its
-# failing would tell nobody anything #142 does not already say. What it buys instead is
-# that the instrument exists, is tested (7 cases in scripts/test-assert-mutation-run,
-# driven off a committed real run of it), and cannot rot. Run it by hand any time:
+# IT IS NOW THE FIRST LEG IN THE MATRIX, which is what the previous version of this
+# comment handed over as the decision to take the day #142 cleared. It is first because
+# it is the only leg whose answer is known in advance: if the canary reports a kill, no
+# other leg's number on that run is evidence, whatever it says. `timeout: 5` against a
+# run measured at ~20 s locally — the margin is for checkout and restore, not for the
+# run. STRYKER_MUTANT_FILE is an undocumented Stryker internal, so if a release renames
+# it the gates in test/_shared/mutation/ silently stop applying; the canary going red is
+# exactly how that surfaces. Run it by hand any time:
 #   cd test && dotnet tool run dotnet-stryker -f ../stryker-config.canary.json --concurrency 4
-#
-# THE DAY #142 CLEARS, THE CANARY LEG GOES IN FIRST — before any score-bearing leg is
-# believed again — with a `timeout: 5`. That is the decision this comment exists to
-# hand over rather than take: the alternative, adding it now and accepting a red main
-# plus one tracking issue per commit, is defensible too and is the maintainer's call.
 #
 # DECLARED GAP: src/MMLib.Alvo/Api/** IS NOT UNDER MUTATION TODAY. It is excluded
 # from stryker-config.json and stryker-config.api.json has no matrix leg, so nothing
@@ -288,6 +301,7 @@ on:
       - 'stryker-config.data-ef-rest.json'
       - 'stryker-config.data-sqlite.json'
       - 'stryker-config.data-postgresql.json'
+      - 'stryker-config.canary.json'
       # The test projects belong in the filter too: mutation judges the test
       # suite, so deleting or loosening an adversarial test drops the score
       # without touching src/. Post-merge is now the only run that can catch it.
@@ -295,6 +309,12 @@ on:
       - 'test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/**'
       - 'test/MMLib.Alvo.Data.Sqlite.Tests/**'
       - 'test/MMLib.Alvo.Data.PostgreSql.Tests/**'
+      # The canary leg's suite, and the shared sources every leg's suite compiles.
+      # test/_shared/mutation/** is what makes a run's verdict honest at all (#142):
+      # break it and every leg reports 100 % again, which is the failure this filter
+      # must not let land unrun.
+      - 'test/MMLib.Alvo.Abstractions.Tests/**'
+      - 'test/_shared/**'
       # And so does the SHIPPED half of those suites, which lives under src/ and
       # not test/: MMLib.Alvo.Testing carries AlvoDataAdversarialTests,
       # AlvoDataStatementTests, AlvoDataDifferentialTests, AlvoDataComparisonTests
@@ -310,11 +330,10 @@ on:
       # And what DECIDES what this gate checks, on the same principle
       # .husky/task-runner.json already applies to the local gate. Breaking the
       # guard or the workflow must trigger a run, or the breakage lands unrun.
-      # stryker-config.api.json and stryker-config.canary.json are deliberately NOT
-      # here: no matrix leg reads either (see DECLARED GAP and THE CANARY above), so a
-      # change to one would start a multi-hour run that cannot exercise it. The canary
-      # is exercised by scripts/test-assert-mutation-run in ci.yml's `Script suites`
-      # job, against a committed real run of it, in seconds.
+      # stryker-config.api.json is deliberately NOT here: no matrix leg reads it (see
+      # DECLARED GAP above), so a change to it would start a multi-hour run that cannot
+      # exercise it. stryker-config.canary.json WAS excluded on that same rule and is
+      # now listed above, because the canary has a leg.
       - '.github/workflows/mutation.yml'
       - 'scripts/assert-mutation-run'
       # scripts/mutation-notify is deliberately NOT here, on the same rule as
@@ -370,6 +389,20 @@ jobs:
           #
           # `timeout:` is now sized from MEASURED WALL CLOCK rather than from the mutant
           # count; the table in the header carries each measurement and its source.
+          #
+          # THE CANARY GOES FIRST, and only it carries `canary:` — the other legs leave the
+          # key undefined, which `${{ matrix.canary }}` renders as the empty string that
+          # scripts/assert-mutation-run's optional 6th argument accepts. It is first
+          # because its answer is known in advance (0 killed, by construction), so a kill
+          # here says every other leg's number on this run is measured through a defect
+          # rather than through the mutants. See THE CANARY in the header.
+          - name: canary
+            config: stryker-config.canary.json
+            project: src/MMLib.Alvo.Testing/MMLib.Alvo.Testing.csproj
+            mutants: 13
+            suite: 142
+            timeout: 5      # measured ~20 s; the margin is checkout + restore, not the run
+            canary: canary
           - name: security core (expressions)
             config: stryker-config.expressions.json
             project: src/MMLib.Alvo/MMLib.Alvo.csproj
@@ -456,6 +489,8 @@ jobs:
           MUTANTS: ${{ matrix.mutants }}
           SUITE: ${{ matrix.suite }}
           SHARD: ${{ matrix.name }}
+          # Empty for every leg but the canary — see the matrix comment.
+          CANARY: ${{ matrix.canary }}
         run: |
           # `shell: bash` means `bash -eo pipefail`, so the pipeline below would abort
           # the whole step the moment Stryker exits non-zero — before the assertions
@@ -482,7 +517,7 @@ jobs:
           # is the test-project count and not the mutant count (measured: solution mode
           # leaves the mutant count identical and moves only the test count).
           ../scripts/assert-mutation-run \
-            stryker-output.log "$CONFIG" "$MUTANTS" "$SUITE" "$SHARD"
+            stryker-output.log "$CONFIG" "$MUTANTS" "$SUITE" "$SHARD" "$CANARY"
 
           exit "$stryker_exit"
 

@@ -37,15 +37,22 @@
 #
 # CHECK 5 IS A DIFFERENT KIND OF CHECK FROM 1-4, and it is worth saying why before
 # reading it. Checks 1-4 all assert that the run MEASURED THE RIGHT THING — the right
-# suite, a plausible mutant count, a suite that did not shrink. #142 is a run that
-# measures exactly the right thing and LIES ABOUT THE RESULT, and it is two defects
+# suite, a plausible mutant count, a suite that did not shrink. #142 was a run that
+# measured exactly the right thing and LIED ABOUT THE RESULT, and it was two defects
 # stacked: Stryker's MTP runner counts a test in `State: error` as a failing test —
-# i.e. as a kill — and carries no message for it (upstream, unchanged in 5.0.0); and a
-# handful of OUR tests error non-deterministically under the load of running once per
-# mutant (#222). One flaky test therefore converts every mutant into a false kill,
-# silently, so essentially every mutant comes back Killed regardless of the mutant. No count can
-# reveal that, and neither can a percentage: the output is indistinguishable from a
-# genuinely adversarial suite.
+# i.e. as a kill — and carries no message for it (upstream, unchanged in 5.0.0); and two
+# of OUR tests error on the second and later runs inside one test-host process, which is
+# exactly how Stryker runs a suite. One such test converts every mutant into a false
+# kill, silently, so essentially every mutant comes back Killed regardless of the mutant.
+# No count can reveal that, and neither can a percentage: the output is
+# indistinguishable from a genuinely adversarial suite.
+#
+# Our half is FIXED as of 2026-09-14 (test/_shared/mutation/, gated on
+# STRYKER_MUTANT_FILE): Verify's process-wide prefix guard and the public-API approval
+# gate are the two, and #142 records how each one lied. The upstream half — an errored
+# node counted as a kill, with its message dropped — is unchanged, which is precisely
+# why this check stays: it is what catches the next thing that errors for a reason that
+# is not the mutant.
 #
 # So check 5 asserts the one thing a lying runner cannot fake: a KNOWN-SURVIVING
 # mutant must be reported as Survived. `stryker-config.canary.json` mutates
@@ -61,13 +68,15 @@
 # exactly the direction a guard is allowed to be generous in.
 #
 # MEASURED, and this is why the canary is worth its 17 seconds: 13 mutants, 142 tests,
-# and the run reports **9 Killed / 4 Survived** — nine kills by a suite that cannot
-# reach the code. That is #142, reproduced in a quarter of a minute instead of the ten
-# it takes on a real shard. Identical on Stryker **4.16.0 and 5.0.0** (verified against
-# Dependabot's #220), and WORSE at `--concurrency 1` (12 Killed / 1 Survived), so
-# neither an upgrade nor serialising the run is the answer. Raising `additional-timeout`
-# to 120 s changes nothing either: no run times out and the same tests still error. The
-# canary is also what named them — see #222.
+# and before the fix the run reported **9 Killed / 4 Survived** — nine kills by a suite
+# that cannot reach the code. That was #142, reproduced in a quarter of a minute instead
+# of the eight it takes on its real repro. Identical on Stryker **4.16.0 and 5.0.0**
+# (verified against Dependabot's #220), and WORSE at `--concurrency 1` (12 Killed /
+# 1 Survived) — not because serialising is worse, but because one process then runs more
+# mutants, and every run of a process after its first is the poisoned one. Raising
+# `additional-timeout` to 120 s changed nothing either: nothing timed out.
+# Since 2026-09-14 the same run reports **0 Killed / 13 Survived**, at both
+# concurrencies, which is the honest answer by construction.
 #
 # VERIFYING THIS SCRIPT: scripts/test-assert-mutation-run runs it over real Stryker
 # logs captured in both working directories. To try one by hand:
@@ -77,7 +86,10 @@
 # the canary, over a real run of it (17 s: cd test && dotnet tool run dotnet-stryker
 # -f ../stryker-config.canary.json --concurrency 4):
 #   scripts/assert-mutation-run <that log> stryker-config.canary.json 13 142 canary canary
-# It must FAIL today, naming the kill count, and that failure is the finding.
+# It must PASS. If it ever fails again, the kill count it names is the finding, and the
+# first thing to check is whether Stryker still sets STRYKER_MUTANT_FILE in the test
+# host — that variable is what test/_shared/mutation/ keys off, and an upstream rename
+# would turn the fix off silently.
 set -uo pipefail
 
 log="${1:?usage: assert-mutation-run <log> <config> <expected-mutants> <expected-tests> <shard-name>}"

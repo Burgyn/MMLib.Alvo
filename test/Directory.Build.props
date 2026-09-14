@@ -39,4 +39,16 @@
     <PackageReference Include="Verify.XunitV3" />
   </ItemGroup>
 
+  <!--
+    What a test assembly must do differently when Stryker is the one running it
+    (issue #142). Unconditional, unlike the shared set above, because the projects
+    that opt out of that set use Verify too and one of them (MMLib.Alvo.Api.Tests)
+    is a mutation target. Its own subdirectory so the non-recursive _shared/*.cs
+    glob above cannot also pick it up and double-include it. Verify itself arrives
+    transitively from MMLib.Alvo.Testing.
+  -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)_shared/mutation/*.cs" Link="_shared/mutation/%(Filename)%(Extension)" />
+  </ItemGroup>
+
 </Project>
