@@ -47,9 +47,9 @@
 # No count can reveal that, and neither can a percentage: the output is
 # indistinguishable from a genuinely adversarial suite.
 #
-# Our half is FIXED as of 2026-09-14 (test/_shared/mutation/, gated on
-# STRYKER_MUTANT_FILE): Verify's process-wide prefix guard and the public-API approval
-# gate are the two, and #142 records how each one lied. The upstream half — an errored
+# Our half is FIXED as of 2026-09-14 (test/_shared/mutation/, gated on the env var
+# Stryker sets in the test host): Verify's process-wide prefix guard and the public-API
+# approval gate are the two, and #142 records how each one lied. The upstream half — an errored
 # node counted as a kill, with its message dropped — is unchanged, which is precisely
 # why this check stays: it is what catches the next thing that errors for a reason that
 # is not the mutant.
@@ -87,9 +87,7 @@
 # -f ../stryker-config.canary.json --concurrency 4):
 #   scripts/assert-mutation-run <that log> stryker-config.canary.json 13 142 canary canary
 # It must PASS. If it ever fails again, the kill count it names is the finding, and the
-# first thing to check is whether Stryker still sets STRYKER_MUTANT_FILE in the test
-# host — that variable is what test/_shared/mutation/ keys off, and an upstream rename
-# would turn the fix off silently.
+# check-5 failure message says what to do about it.
 set -uo pipefail
 
 log="${1:?usage: assert-mutation-run <log> <config> <expected-mutants> <expected-tests> <shard-name>}"
@@ -208,8 +206,9 @@ fi
 # (solution mode inflates it); this catches it being GUTTED, which is the failure
 # mutation testing exists to detect in the first place — "the adversarial suite
 # stopped biting". Without it, deleting half of MMLib.Alvo.Tests passes checks 1-3
-# unchanged (same projects, same mutants), and per #142 the score cannot currently be
-# relied on to notice either. Same one-sided 60 % floor, same reasoning: tests are
+# unchanged (same projects, same mutants); before #142 was fixed the score could not be
+# relied on to notice either, and check 5 is what keeps that from coming back. Same
+# one-sided 60 % floor, same reasoning: tests are
 # added far more often than removed, so only a collapse is a signal.
 # ---------------------------------------------------------------------------
 found="$(command grep -oE 'Number of tests found: [0-9]+' "$norm" | command grep -oE '[0-9]+$' | head -1)"
@@ -243,9 +242,18 @@ if [ "$canary" = canary ]; then
         fail "the CANARY reported $killed killed mutant(s) (and $survived survived).
     Every mutant in this config is known-surviving by construction — '$config' mutates a file that its
     declared test project does not reference at all — so a kill here is the runner reporting a verdict it
-    cannot have reached. That is #142: the MTP runner counts a test in 'State: error' as a failing test and
-    drops its message, and a handful of our own tests error non-deterministically under the load of running
-    once per mutant (#222) — so one flaky test converts every mutant into a false kill.
+    cannot have reached. The mechanism is #142's: the MTP runner counts a test in 'State: error' as a failing
+    test and drops its message, and Stryker re-runs the whole suite inside ONE test-host process, once per
+    mutant. Any test that is only correct on a process's FIRST run therefore errors on every later mutant,
+    and each such error is counted as a kill. It is not flakiness and not load: expect it to be exactly one
+    test, on every mutant but the first.
+    FIRST THING TO CHECK: whether Stryker still sets STRYKER_MUTANT_FILE (mtp) or STRYKER_MUTANT_ID_CONTROL_VAR
+    (VsTest) in the test host. test/_shared/mutation/MutationRun.cs keys the fix off those two names, and an
+    upstream rename turns it off silently. Then get the dropped message — Stryker never carries it, but MTP
+    does: re-run with TESTINGPLATFORM_DIAGNOSTIC=1, TESTINGPLATFORM_DIAGNOSTIC_VERBOSITY=trace and
+    TESTINGPLATFORM_DIAGNOSTIC_OUTPUT_DIRECTORY=<dir>, then grep the .diag files for
+    ErrorTestNodeStateProperty. Do not read Stryker's own trace to name the test: it prints one node's state
+    next to the FOLLOWING node's name, which is what sent #222 after three innocent tests.
     Nothing this gate says about any other shard's score is evidence while this check is red."
     fi
 

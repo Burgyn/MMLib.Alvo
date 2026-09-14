@@ -1,7 +1,8 @@
 name: Mutation
 
 # Mutation testing of the security-relevant logic. Path-filtered so it runs only
-# when a mutated project changes. Five targets run in parallel via a matrix:
+# when a mutated project changes. Seven targets run in parallel via a matrix, the
+# canary first (see THE CANARY below):
 #   - "security core (expressions)"       → src/MMLib.Alvo/Expressions/**
 #                        (stryker-config.expressions.json)
 #   - "security core (rules, auth, rest)" → the rest of src/MMLib.Alvo EXCEPT Api/**
@@ -68,6 +69,15 @@ name: Mutation
 # executes the whole assembly anyway. Do not re-enable this without re-measuring;
 # raw folklore is what this table replaces (it was previously only a sentence in
 # commit 2b6b340).
+#
+# CAVEAT ADDED 2026-09-14: the `off` row above was measured THROUGH #142, so its
+# `38 Killed / 100.00 %` is the artefact, not a result — which also undercuts the
+# sentence "with coverage off the very same mutants are Killed". The `perTest`
+# conclusion probably survives, because `NoCoverage` is a discovery fact rather than a
+# kill count, and the wall-clock comparison certainly does. Re-measured post-fix on the
+# current file set, `off` gives 44 tested / 29 Killed / 1 Survived / 14 Timeout,
+# 97.73 % (local, under load). `perTest` has NOT been re-measured. Treat the decision as
+# standing on stryker-net#3516 and #3750 rather than on this table until it is.
 #
 # WHY THE RUN HAPPENS FROM `test/` AND NOT THE REPO ROOT. When Stryker is started in
 # a directory containing MMLib.Alvo.slnx it enters solution mode and IGNORES each
@@ -154,6 +164,31 @@ name: Mutation
 # exactly how that surfaces. Run it by hand any time:
 #   cd test && dotnet tool run dotnet-stryker -f ../stryker-config.canary.json --concurrency 4
 #
+# It exits 0 at 0.00 %, which is the one thing a leg scoring zero has to get right:
+# stryker-config.canary.json declares no `thresholds`, so Stryker's default `break: 0`
+# applies and nothing is below it. Verified end to end — Stryker exit 0, and
+# `scripts/assert-mutation-run … canary canary` prints "CANARY honest".
+#
+# EXPECT THE FIRST HONEST RUN TO GO RED, ON SEVERAL LEGS AT ONCE. Every score-bearing
+# config carries `break: 80` and every one of them has been passing on a false ~100 %.
+# The one leg measured locally after the fix, `data-postgresql`, comes back
+# 15 Killed / 5 Survived — 75.00 %, below its own break. That is five real survivors and
+# a test debt, not a regression this commit introduced, and the thresholds are
+# deliberately left alone: lowering them to match the first honest measurement would
+# rebuild the lying gate by a slower route. `data-sqlite` measured 97.73 % locally
+# (29 Killed / 1 Survived / 14 Timeout, under load — the timeouts want the CI run to
+# confirm). `expressions`, `rules/auth/rest`, `data-ef-core` and `data-ef-rest` are
+# unmeasured post-fix. scripts/mutation-notify titles the tracking issue with the merge
+# commit's sha, so read the first few as recalibration rather than as that commit's
+# doing.
+#
+# WHAT THE CANARY DOES NOT PROVE. It exercises MMLib.Alvo.Abstractions.Tests, and #142's
+# own repro exercised MMLib.Alvo.Tests. The evidence that the data suites are honest too
+# is indirect but real: a poisoned leg reports 100 %, and neither driver leg measured
+# above does. MMLib.Alvo.Data.EntityFrameworkCore.Tests has not been measured post-fix at
+# all — the leg that runs it is the 60-minute one. Its first post-merge score is the
+# measurement.
+#
 # DECLARED GAP: src/MMLib.Alvo/Api/** IS NOT UNDER MUTATION TODAY. It is excluded
 # from stryker-config.json and stryker-config.api.json has no matrix leg, so nothing
 # mutates the Data API's query parsing, authorization filter, idempotency or ETag
@@ -167,8 +202,10 @@ name: Mutation
 #     1502 mutants: ~2.6 h on a 10-core dev machine, so more than that on a 4-vCPU
 #     runner. It cannot produce a verdict inside any budget under GitHub's 6 h
 #     ceiling without being sharded several ways.
-#   - Sharding it that way is premature while #142 makes the resulting scores
-#     untrustworthy, and a leg that always times out is noise, not a gate.
+#   - A leg that always times out is noise, not a gate. This used to read "premature
+#     while #142 makes the resulting scores untrustworthy"; that half is spent — #142
+#     is closed — and what remains is purely the budget, so #143 is now a scheduling
+#     question rather than one waiting on anything.
 # TRACKED IN #143, which is where the re-shard checklist lives — this comment is not the
 # work item, because #99 closes with this change and #142 is about the Killed artefact.
 # Run it on demand meanwhile: cd test && dotnet tool run dotnet-stryker
@@ -198,7 +235,8 @@ name: Mutation
 # MMLib.Alvo.Data.Sqlite.Tests stands up real databases per test. The lever is
 # therefore "how many test assemblies does a leg pay for", not "how many files does it
 # mutate". (That same run printed `Killed: 888 / Survived: 0 / 100.00 %`, which is #142
-# on display.)
+# on display — one of ours erroring on every run after a process's first, not 888 real
+# kills. Re-measure that leg before quoting its score anywhere.)
 #
 # That is why the split #205 proposes — the five migration classes on one leg, the data
 # path on the other — was PROBED AND REJECTED. It divides the mutants 133/975, so the
@@ -229,10 +267,11 @@ name: Mutation
 # preserves the MUTANT set; it does not preserve each mutant's SCORE DOMAIN, because a
 # score is (file x suite) and the suite changed for the 565 on `data-ef-rest`. If any
 # of those killers does live in Sqlite.Tests after all, that mutant becomes a survivor
-# with no product change. #142 does not rescue this — it produces false KILLS, so today
-# such a survivor is masked; on the day #142 clears, `data-ef-rest` is where a wave of
-# survivors would appear and could be misread as weak tests rather than a missing
-# assembly. The rule above is the mitigation, not a proof, and the adjudicator is
+# with no product change. #142 masked exactly that — it produced false KILLS — and THIS
+# IS THE COMMIT THAT CLEARS IT, so `data-ef-rest` is where a wave of survivors may appear
+# on the very next run, and misreading them as weak tests rather than as a misplaced file
+# is the live risk rather than a future one. The rule above is the mitigation, not a
+# proof, and the adjudicator is
 # stryker-config.data-ef.json: re-run the whole shard and any mutant that survives on
 # `rest` but is killed there is a misplaced file, not a missing test.
 #
@@ -315,6 +354,10 @@ on:
       # must not let land unrun.
       - 'test/MMLib.Alvo.Abstractions.Tests/**'
       - 'test/_shared/**'
+      # And the file that LINKS test/_shared/mutation/*.cs into every test project.
+      # Deleting that ItemGroup turns the fix off everywhere, which is the same
+      # failure as deleting the sources and just as invisible.
+      - 'test/Directory.Build.props'
       # And so does the SHIPPED half of those suites, which lives under src/ and
       # not test/: MMLib.Alvo.Testing carries AlvoDataAdversarialTests,
       # AlvoDataStatementTests, AlvoDataDifferentialTests, AlvoDataComparisonTests
@@ -401,7 +444,11 @@ jobs:
             project: src/MMLib.Alvo.Testing/MMLib.Alvo.Testing.csproj
             mutants: 13
             suite: 142
-            timeout: 5      # measured ~20 s; the margin is checkout + restore, not the run
+            timeout: 10     # measured ~20 s warm; the margin is cold checkout, setup-dotnet,
+                            # `dotnet tool restore` and Stryker's own build, none of which this
+                            # workflow caches. A timed-out job is CANCELLED, which uploads no log
+                            # and still files a tracking issue, so the tight-budget rule the other
+                            # legs follow is the wrong trade on the one leg that must be believed.
             canary: canary
           - name: security core (expressions)
             config: stryker-config.expressions.json

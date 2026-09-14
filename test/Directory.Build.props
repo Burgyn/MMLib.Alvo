@@ -41,11 +41,13 @@
 
   <!--
     What a test assembly must do differently when Stryker is the one running it
-    (issue #142). Unconditional, unlike the shared set above, because the projects
-    that opt out of that set use Verify too and one of them (MMLib.Alvo.Api.Tests)
-    is a mutation target. Its own subdirectory so the non-recursive _shared/*.cs
+    (issue #142). Unconditional, unlike the shared set above: MMLib.Alvo.Api.Tests
+    and MMLib.Alvo.Schema.Tests opt out of that set and use Verify anyway, and
+    listing the projects that need this instead would be a list to keep in step
+    with stryker-config*.json — which is exactly the kind of rot that makes a gate
+    quietly stop guarding. Its own subdirectory so the non-recursive _shared/*.cs
     glob above cannot also pick it up and double-include it. Verify itself arrives
-    transitively from MMLib.Alvo.Testing.
+    transitively from MMLib.Alvo.Testing, which every test project references.
   -->
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)_shared/mutation/*.cs" Link="_shared/mutation/%(Filename)%(Extension)" />
