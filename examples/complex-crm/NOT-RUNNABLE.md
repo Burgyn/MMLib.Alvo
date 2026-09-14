@@ -50,10 +50,45 @@ misattribute" (a webhook that never fires looks like an endpoint that is down), 
 *name* promises something it does not do, so the author holds a **false belief**". An unstyled dashboard is
 an unmet expectation the author sees by looking; an unenforced `access` block is a false belief that
 administration is restricted, and nothing happening is precisely what a working restriction looks like
-(#146). The `webhooks` entry rests on the same limb — an unsigned delivery an author believes is signed. What `access` should ultimately *mean* — role-based only, or attribute-based once `@user` carries
-claims (#37) — is still open on #146; note that this file's own `access` expressions are role-based because
-`@user` exposes `id` and `roles` only, and the `@user.email` domain gate the block was written for cannot be
-expressed in any descriptor today.
+(#146). The `webhooks` entry rests on the same limb — an unsigned delivery an author believes is signed.
+
+### `access` is **role-based only**, and what this file lost to that is `admin`
+
+Settled on #146 (option A). An `access` level is a CEL predicate over the closed context `@user` exposes —
+`@user.id` and `@user.roles`, nothing else (`docs/architecture/cel.md`, deviation 1) — so a level can test
+role membership and identity and nothing else.
+
+The block this file was born with (commit `c84e1ab`, before `@user.role` was retired for `@user.roles`) was:
+
+```json
+"access": {
+  "admin":     "@user.role == 'manager' && @user.email.endsWith('@firma.sk')",
+  "developer": "@user.role == 'manager'",
+  "viewer":    "@user.role in ['sales', 'manager', 'finance']"
+}
+```
+
+**Only `admin` carried the domain gate, and only `admin` lost anything.** `developer` and `viewer` were
+already rendered into the membership idiom the compiler mandates (`@user.role` is not a member `@user` has;
+`CelParser` answers it with *"a caller holds a set of roles — test membership instead"*), and this change
+leaves both untouched. That rendering is not quite an identity — membership *widens* the original equality
+for a caller who holds several roles — but it is the only form that compiles, and it is applied repo-wide.
+
+`admin` is the one that cannot be rendered at all: `@user.email` is not a member `@user` has, in this block
+or any other, so the half that distinguished an admin from a developer — *"a manager, and one of ours"* — is
+inexpressible. What is left of it is `'manager' in @user.roles`, which is exactly `developer`.
+
+**So `admin` and `developer` are now the same predicate, and that is the finding rather than a mistake to
+tidy.** It is the precise cost of option A, visible in the one file whose job is to show the schema's whole
+surface: without attribute claims, a two-level distinction that rested on an attribute collapses to one. The
+alternative — inventing a role for `developer` so the two differ again — would assert an org shape this CRM
+never had, which is the same error as the rewrite that put
+`'manager' in @user.roles && 'finance' in @user.roles` on `admin` and **invented a requirement** the original
+never carried (#146 point 3). That conjunction is gone; nothing replaces it.
+
+Attribute-based rules — typed claims, `@user.teams` — are #37's scope, and widening `@user` is additive, so
+these expressions keep compiling on the day they land, and `admin` can be given its distinguishing half back
+without touching anything else.
 
 **`entity.realtime` is unhonoured too and is deliberately *not* in that warning.** The schema declares it per
 entity with a default of `true`, so it is unhonoured for every entity of every descriptor — warning only on an

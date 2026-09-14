@@ -149,19 +149,19 @@
     "access": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Who may manage THIS project in the admin dashboard (project-scoped), mapped to management levels via CEL over @user. Whether the dashboard is reachable at all — enablement, path, IP allowlist, the script UI-edit gate — is host/env config, not here.",
+      "description": "Who may manage THIS project in the admin dashboard (project-scoped), mapped to management levels by ROLE MEMBERSHIP. Each level is a CEL predicate over the closed context @user exposes — @user.id and @user.roles, nothing else — so a level can test role membership and identity, and nothing else. Attribute-based rules (an email domain, a team) are NOT expressible in this or any other block; typed claims are tracked by #37, and widening @user is additive, so a role-based level keeps compiling once they land. NOTE: nothing reads or compiles this block yet — applying a descriptor that declares it earns a warning naming it, and a level referring to a role that auth.roles does not declare is therefore not reported today either.",
       "properties": {
         "admin": {
           "$ref": "#/$defs/cel",
-          "description": "CEL: who may fully administer this project (schema, rules, data, settings)."
+          "description": "CEL over @user.roles / @user.id: who may fully administer this project (schema, rules, data, settings)."
         },
         "developer": {
           "$ref": "#/$defs/cel",
-          "description": "CEL: who may edit this project's schema, rules, and automation, but not its settings."
+          "description": "CEL over @user.roles / @user.id: who may edit this project's schema, rules, and automation, but not its settings."
         },
         "viewer": {
           "$ref": "#/$defs/cel",
-          "description": "CEL: who may view this project's data and configuration read-only."
+          "description": "CEL over @user.roles / @user.id: who may view this project's data and configuration read-only."
         }
       }
     },

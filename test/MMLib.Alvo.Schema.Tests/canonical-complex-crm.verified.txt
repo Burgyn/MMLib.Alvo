@@ -1,7 +1,7 @@
 {
   "$schema": "https://alvo.dev/schema/v1/project.json",
   "access": {
-    "admin": "'manager' in @user.roles && 'finance' in @user.roles",
+    "admin": "'manager' in @user.roles",
     "developer": "'manager' in @user.roles",
     "viewer": "'sales' in @user.roles || 'manager' in @user.roles || 'finance' in @user.roles"
   },

@@ -328,6 +328,27 @@ of a standard:
    an otherwise-recognized context name throws a syntax error with a specific fix suggestion
    (`@user.role` → test membership via `in @user.roles`; `@user.claims`/`@user.teams` → tracked by
    `#37`), and an unrecognized `@name` throws at the lexer.
+
+   **Deviation from `baas-analyza.md` §16.1 (line 1155), stated because the analysis sketches what
+   this forecloses.** Its worked `access` block reads
+   `"admin": "'manager' in @user.roles && @user.email.endsWith('@firma.sk')"` — an *attribute* gate
+   on an email domain. `@user.email` is not in the closed set above and there is no descriptor, in
+   any block, that can express it today. So the descriptor's `access` is **role-based only** — the
+   decision recorded on `#146`, taken because an attribute-based one would put the hardest half of
+   `#37` on F5's critical path, while a runtime string dictionary on `AlvoContext` would forfeit
+   fail-fast rule compilation. The narrowing costs nothing later: `@user` gaining typed members is
+   additive, so `'manager' in @user.roles` keeps compiling once `#37` lands.
+
+   **What it costs now is visible in `examples/complex-crm`**, and its `NOT-RUNNABLE.md` records it
+   rather than papering over it: the domain gate was the only thing distinguishing that example's
+   `admin` from its `developer`, so under this narrowing the two collapse to one predicate. A
+   two-level distinction resting on an attribute cannot survive a role-only context, and inventing a
+   role to keep them apart would assert an org shape the example never had.
+
+   **This is a grammar narrowing, not an enforcement one.** Nothing compiles the `access` block yet
+   — `PolicyCatalogBuilder` walks `schema.Entities` only, so a level naming a role `auth.roles` does
+   not declare is not reported today. `UnhonouredSubsystems` warns at apply that the block is inert,
+   which is the whole of what happens to it (`#146`).
 2. **`changed(field)`** — not a CEL macro; an Alvo addition for the Condition profile only, parsed
    with the same one-bare-identifier-argument shape as `has(...)`.
 3. **`old.field`/`new.field` state-qualified row references** — Alvo's own way of expressing a
