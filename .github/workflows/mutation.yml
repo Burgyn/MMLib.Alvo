@@ -128,8 +128,10 @@ name: Mutation
 # And Stryker's trace line prints one node's state next to the FOLLOWING node's name,
 # so the blame landed on whichever innocent test was reported after the Verify test,
 # which changed from run to run and read exactly like flakiness (#222 named three such
-# tests; none of them was ever at fault). The fix is test-only and gated on
-# STRYKER_MUTANT_FILE: test/_shared/mutation/ carries it.
+# tests; none of them was ever at fault). The fix is test-only and gated on the env var
+# Stryker sets in the test host — STRYKER_MUTANT_FILE under the MTP runner every config
+# here pins, STRYKER_MUTANT_ID_CONTROL_VAR under VsTest; test/_shared/mutation/ keys off
+# both, and its remarks say why the second one is there when nothing reaches it today.
 #
 #   config                                   before        after
 #   stryker-config.canary.json (13 mutants)   9 Killed /  4 Survived   0 / 13   0.00 %
@@ -157,11 +159,12 @@ name: Mutation
 # IT IS NOW THE FIRST LEG IN THE MATRIX, which is what the previous version of this
 # comment handed over as the decision to take the day #142 cleared. It is first because
 # it is the only leg whose answer is known in advance: if the canary reports a kill, no
-# other leg's number on that run is evidence, whatever it says. `timeout: 5` against a
-# run measured at ~20 s locally — the margin is for checkout and restore, not for the
-# run. STRYKER_MUTANT_FILE is an undocumented Stryker internal, so if a release renames
-# it the gates in test/_shared/mutation/ silently stop applying; the canary going red is
-# exactly how that surfaces. Run it by hand any time:
+# other leg's number on that run is evidence, whatever it says. Its `timeout:` is the one
+# budget in this matrix NOT sized tight; the matrix comment on the leg says why.
+# Neither env-var name above is a documented Stryker contract, so if a release renames
+# one the gates in test/_shared/mutation/ silently stop applying; the canary going red is
+# exactly how that surfaces, and check 5's failure message says what to check first.
+# Run it by hand any time:
 #   cd test && dotnet tool run dotnet-stryker -f ../stryker-config.canary.json --concurrency 4
 #
 # It exits 0 at 0.00 %, which is the one thing a leg scoring zero has to get right:
@@ -173,7 +176,8 @@ name: Mutation
 # config carries `break: 80` and every one of them has been passing on a false ~100 %.
 # The one leg measured locally after the fix, `data-postgresql`, comes back
 # 15 Killed / 5 Survived — 75.00 %, below its own break. That is five real survivors and
-# a test debt, not a regression this commit introduced, and the thresholds are
+# a test debt, not a regression this commit introduced; they are enumerated in #225, so
+# the first tracking issue has somewhere to point. The thresholds are
 # deliberately left alone: lowering them to match the first honest measurement would
 # rebuild the lying gate by a slower route. `data-sqlite` measured 97.73 % locally
 # (29 Killed / 1 Survived / 14 Timeout, under load — the timeouts want the CI run to
