@@ -466,18 +466,35 @@ for f in expressions-scoped expressions-solution-mode vacuous-run; do
   fi
 done
 
-# The same argument for the OTHER thing the guard normalises. canary-honest-ci.txt is the
-# only fixture captured on a GitHub runner, and the only one carrying SGR escapes, because
+# The same argument for the OTHER thing the guard normalises. Three fixtures are now CI
+# captures carrying SGR escapes — canary-honest-ci.txt and the two data-ef legs added
+# with check 6 — and all three are asserted below. canary-honest-ci.txt came first, because
 # Spectre.Console picks colour from the environment rather than from whether stdout is a
 # TTY. Strip them to "tidy" the fixture and the ANSI branch of the normalisation stops
 # being exercised while every case here stays green — which is exactly how the guard came
 # to have no coverage of the shape it meets on every real run.
-ansi="$(command grep -ac $'\x1b\\[' "$FIXTURES/canary-honest-ci.txt" || true)"
-if [ "${ansi:-0}" -gt 0 ]; then
-  pass "canary-honest-ci.txt still carries ANSI escapes (the guard's colour handling stays exercised)"
-else
-  fail "canary-honest-ci.txt still carries ANSI escapes" "at least one line with \x1b[" "none"
-fi
+for f in canary-honest-ci data-ef-core-timeout-inflated data-ef-rest-no-timeouts; do
+  ansi="$(command grep -ac $'\x1b\\[' "$FIXTURES/$f.txt" || true)"
+  if [ "${ansi:-0}" -gt 0 ]; then
+    pass "$f.txt still carries ANSI escapes (the guard's colour handling stays exercised)"
+  else
+    fail "$f.txt still carries ANSI escapes" "at least one line with \x1b[" "none"
+  fi
+done
+
+# Specifically the SUMMARY lines, which is the half that matters and the half that was
+# missing. check 6 reads `^Timeout:` and `^Killed:`, and on a runner their digits sit
+# between SGR escapes (`Timeout:  \e[38;5;13m249\e[0m`) — so a fixture that kept colour
+# somewhere in its banner while losing it on the summary would leave the anchors
+# untested while every case here stayed green.
+for f in data-ef-core-timeout-inflated data-ef-rest-no-timeouts; do
+  if command grep -aqE $'^Timeout:[[:space:]]+\x1b\\[' "$FIXTURES/$f.txt"; then
+    pass "$f.txt's Timeout: line still carries colour around its digits"
+  else
+    fail "$f.txt's Timeout: line still carries colour around its digits" \
+      "^Timeout: followed by an SGR escape" "plain digits — the ANSI strip is no longer exercised on the line check 6 reads"
+  fi
+done
 
 # ============ the data-ef configs must stay a partition of the whole shard =========
 #
@@ -613,6 +630,7 @@ CORE_CFG="$ROOT/stryker-config.data-ef-core.json"
 REST_CFG="$ROOT/stryker-config.data-ef-rest.json"
 TIMEOUT_SHARE="mutants TIMED OUT"
 NO_TIMEOUT_LINE="but never 'Timeout: N'"
+OCTAL="must not have a leading zero"
 
 assert_rejected "a leg whose pass is 45 % timeouts is rejected" "$TIMEOUT_SHARE" \
   "$FIXTURES/data-ef-core-timeout-inflated.txt" "$CORE_CFG" 543 1135
@@ -631,7 +649,10 @@ assert_ok "a low score with NO timeouts is accepted — check 6 judges the gate,
   "$FIXTURES/data-ef-rest-no-timeouts.txt" "$REST_CFG" 565 554
 
 # One-sided, like checks 3 and 4: fewer timeouts than the ceiling is never the defect.
-# 108 is exactly 20 % of 543, and the comparison is `-gt`, so the boundary passes.
+# The ceiling is integer `tested * 20 / 100`, so for 543 it is floor(108.6) = 108 and the
+# effective bound is 19.89 %, not a clean 20 %. The comparison is `-gt`, so 108 passes
+# and 109 fails. Stated exactly because "exactly 20 % of 543" is what the first draft of
+# this comment claimed, and it is wrong by half a mutant.
 #
 # The `249` sits BETWEEN SGR escapes in this capture — `Timeout:  \e[38;5;13m249\e[0m` —
 # because Spectre.Console colourises on a GitHub runner. Perturbing the digits alone is
@@ -663,9 +684,65 @@ assert_ok "a discovery probe with no summary block is untouched by check 6" \
 
 # The canary is exempt: check 5 already asserts every mutant survived, which is
 # strictly stronger, and its message diagnoses #142 rather than the timeout threshold.
-# Pinned because the exemption is a condition in the guard that could silently invert.
 assert_canary_ok "the canary is exempt from check 6 (check 5 is strictly stronger there)" \
   "$FIXTURES/canary-honest.txt" "$ROOT/stryker-config.canary.json" 13 142
+
+# ...but the case above does NOT pin the exemption, and saying so is the point. The
+# honest canary fixture has `Timeout: 0`, so check 6 would pass on it either way —
+# deleting the `!= canary` condition from the guard leaves the whole suite green. The
+# exemption only becomes observable on a canary that DID time out, which is what this
+# derives: check 5 must be the check that speaks, because "every mutant must survive" is
+# the stronger statement and its message is the one that diagnoses #142.
+derive canary-honest.txt 's/^Survived: 13$/Survived: 10/; s/^Timeout:   0$/Timeout:   3/' || exit 1
+assert_canary_rejected "a canary with timeouts is judged by check 5, not check 6" "$CANARY_SHORT" \
+  "$DERIVED" "$ROOT/stryker-config.canary.json" 13 142
+
+# The ceiling must be a share of what the run TESTED, not of what the matrix DECLARED.
+# The two used to be interchangeable and are not any more: data-ef-core declares 459
+# while this capture logs 543, so reading the wrong one moves the ceiling by 17 % and
+# nothing else here would notice. 20 % of 543 is 108.6 -> 108, so 109 is over; 20 % of
+# 459 is 91, which 109 would also exceed — hence the second case, where the declared
+# count is LOWER and a guard reading it would still reject something it must accept.
+derive data-ef-core-timeout-inflated.txt 's/\(^Timeout:  .*m\)249/\1109/' || exit 1
+assert_rejected "the ceiling follows the TESTED count, not the declared one (109 > 108)" "$TIMEOUT_SHARE" \
+  "$DERIVED" "$CORE_CFG" 459 1135
+
+derive data-ef-core-timeout-inflated.txt 's/\(^Timeout:  .*m\)249/\1100/' || exit 1
+assert_ok "100 timeouts of 543 tested is accepted even though it exceeds 20 % of the declared 459" \
+  "$DERIVED" "$CORE_CFG" 459 1135
+
+# The summary block is the LAST thing a completed run prints, so the guard reads the
+# LAST `Timeout:` line. With `head -1` a single earlier line anywhere above the summary
+# decides the verdict — and this is not hypothetical: `head -1` passes this case.
+derive data-ef-core-timeout-inflated.txt 's/^.*Safe Mode.*$/Timeout:  0/' || exit 1
+assert_rejected "an earlier 'Timeout: 0' line does not override the summary" "$TIMEOUT_SHARE" \
+  "$DERIVED" "$CORE_CFG" 543 1135
+
+# And the anchor. Stryker prints its cleartext per-file TABLE *after* the summary block,
+# so "the last match wins" is only safe while the pattern is anchored to the start of a
+# line: an unanchored `Timeout:[[:space:]]+[0-9]+` plus `tail -1` would read whatever the
+# table said last. Nothing in a real table matches today; this pins the pair.
+derive data-ef-core-timeout-inflated.txt 's/^\(.*The final mutation score.*\)$/\1 Timeout:  0/' || exit 1
+assert_rejected "a mid-line 'Timeout:' AFTER the summary is not mistaken for it" "$TIMEOUT_SHARE" \
+  "$DERIVED" "$CORE_CFG" 543 1135
+
+# Malformed input fails CLOSED. `$(( 08 ))` is an octal error in bash; without
+# require_number the arithmetic aborts the enclosing `if` and the script runs on to its
+# success line and exits 0 — a guard failing open on a typo, which is the exact failure
+# require_number's own comment was written for. Declared counts are 1 so check 3's
+# magnitude floor cannot reject it first; only the format check can.
+derive data-ef-core-timeout-inflated.txt 's/^\(\[09:35:33 INF\] \)543  /\108   /' || exit 1
+assert_rejected "a zero-padded mutant count is refused, not silently treated as octal" "$OCTAL" \
+  "$DERIVED" "$CORE_CFG" 1 1
+
+# The same guard must NOT reject a bare `Timeout: 0`, which is the healthiest reading
+# this script can take. require_number (used for the declared counts) rejects `0` on
+# purpose — a floor of zero is a check that cannot fail — so reusing it here would have
+# failed every honest run. That is why check 6 has its own require_log_number, and this
+# case is what separates the two.
+derive data-ef-core-timeout-inflated.txt 's/\(^Timeout:  .*m\)249/\10/' || exit 1
+assert_ok "a bare 'Timeout: 0' is a legitimate reading, not a malformed one" \
+  "$DERIVED" "$CORE_CFG" 543 1135
 
 # ============================================================================ total
 

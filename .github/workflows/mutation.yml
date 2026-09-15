@@ -340,10 +340,13 @@ name: Mutation
 # and the second assembly turns out to kill nothing of theirs. It left
 # RollupRecompute, IdempotencyTable, ColumnValue and PredicateParameterBinder on `rest`,
 # where 74 of their mutants survive only because Sqlite.Tests is absent. Those four are
-# deliberately NOT moved here: moving them buys `data-ef-rest` a better-looking score
-# and buys the gate nothing, while pushing 163 mutants onto the leg with the least
-# budget headroom. The honest fix for them is a test in the cheap assembly, which is
-# test debt and has its own issue.
+# deliberately NOT moved here, and the reason is the one this whole change rests on:
+# moving them converts 74 survivors into kills by BUYING A SECOND TEST ASSEMBLY rather
+# than by detecting anything — the same fake score the timeout defect was producing. The
+# honest fix is a test in the cheap assembly. Tracked in #238, with the per-file counts.
+# (The weaker version of this argument, "it would push 163 mutants onto the leg with the
+# least budget headroom", is deliberately dropped: after the budget change below that
+# leg has headroom, and the honesty argument does not need the help.)
 #
 #   data-ef-core   459 mutants x 2 assemblies (1135 tests)  -> ~100 min, budget 240
 #   data-ef-rest   649 mutants x 1 assembly  ( 554 tests)   ->   ~2 min, budget 120
@@ -384,15 +387,45 @@ name: Mutation
 # is cut below ~2x: a cancelled shard never reaches its log-upload step, so there is
 # neither a score nor a log to read.
 #
-# TWO BUDGETS WENT UP ON 2026-09-14, AGAINST THE DIRECTION OF THAT RULE, and the reason
-# is worth stating because it is not budget creep. Raising `additional-timeout` makes a
-# leg SLOWER — a mutant that used to be cut off at the threshold now runs the suite to
-# the end — so the legs that were reporting timeouts as kills are exactly the legs whose
-# wall clock grows when they stop. `data-ef-core` 120 -> 240 and `data-sqlite` 30 -> 60.
-# This is the honest cost of the score being a measurement, and the rule above still
-# binds: both numbers get cut back to ~2x the measured wall clock as soon as a real
-# post-merge run has produced one. What is NOT acceptable is the alternative — keeping
-# the old budgets by leaving the timeout low, which buys a fast green that counts
+# THREE BUDGETS WENT UP ON 2026-09-14, AGAINST THE DIRECTION OF THAT RULE, and the
+# reason is worth stating because it is not budget creep. Raising `additional-timeout`
+# makes a leg SLOWER — a mutant that used to be cut off at the threshold now runs the
+# suite to the end — so the legs that were reporting timeouts as kills are exactly the
+# legs whose wall clock grows when they stop.
+#
+# THE MODEL, applied to every leg rather than to the two obvious ones. The threshold is
+# `initialTestRunTime * timeout-ratio + additional-timeout` (coverage is off, so there
+# is no covering-tests term), and `initialTestRunTime` is readable from each shard's log
+# as the gap between "Initial test run started" and "N total mutants will be tested".
+# The WORST CASE is that every currently-timing-out mutant is a genuine hang and now
+# runs to the NEW ceiling instead of the old one, costing
+# `(new - old) x timeouts / concurrency` on top of the measured wall clock:
+#
+#   leg                init  old thr  new thr  timeouts  measured  +worst  total  budget
+#   expressions          94s     146s     441s        68    26 min  +84min 110min    180
+#   rules, auth, rest    76s     119s     414s        36    28 min  +44min  72min    120
+#   data-sqlite          19s      34s     328s        22   5.5 min  +27min  33min     60
+#   data-ef-core         26s      44s     339s       249    60 min +306min 366min    240
+#   data-ef-rest         13s      24s     320s         0     2 min       -   2min    120
+#   data-postgresql       4s      11s     306s         0     5 s         -      -     30
+#   canary               21s      36s     332s         0     7 s         -      -     10
+#
+# `data-ef-core`'s 366 is where the model stops applying and MEASUREMENT takes over: its
+# whole mutate set was run with `additional-timeout: 300000` and took **74 minutes with
+# exactly ONE timeout**, so the premise "these are hangs that will run to the ceiling" is
+# refuted for that leg — they were slow survivors, which is the entire finding above.
+# 240 is sized off the 74-minute measurement (on a 10-core dev box) with room for a
+# 4-vCPU runner, NOT off the 366.
+#
+# For `expressions` the premise is NOT refuted and deliberately so: an endless loop is
+# genuinely plausible in an expression evaluator, so some of those 68 may be real hangs,
+# and its budget has to cover the case where they all are. 90 -> 180. That is also why
+# check 6's ceiling is 20 % rather than 10 % — see its header.
+#
+# So: `expressions` 90 -> 180, `data-ef-core` 120 -> 240, `data-sqlite` 30 -> 60. The
+# rule above still binds — each gets cut back to ~2x the measured wall clock as soon as
+# a real post-merge run has produced one. What is NOT acceptable is the alternative:
+# keeping the old budgets by leaving the timeout low, which buys a fast green that counts
 # non-verdicts as kills.
 #
 # stryker-config.data-ef.json STAYS, and it is NOT orphaned. scripts/test-assert-mutation-run
@@ -557,14 +590,20 @@ jobs:
             project: src/MMLib.Alvo/MMLib.Alvo.csproj
             mutants: 900
             suite: 1188     # same test project as the leg below, so the two must be equal
-            timeout: 90     # measured 27, 31 and 26 min on three runs; 180 was 6x the real cost
+            timeout: 180    # measured 27, 31 and 26 min on three runs, but 68 of its 900 mutants were
+                            # timing out and `additional-timeout` lets each run to the new ceiling: worst
+                            # case 110 min (see THE MODEL in the header). This is the ONE leg whose
+                            # timeouts may genuinely be endless loops — it mutates an expression evaluator
+                            # — so the budget covers the case where all 68 are. Cut it back once a real
+                            # post-merge run says how many actually were.
           - name: security core (rules, auth, rest)
             config: stryker-config.json
             project: src/MMLib.Alvo/MMLib.Alvo.csproj
             mutants: 1713   # 1638 -> 1713 on run 34828632562; growth never fails a run (check 3)
             suite: 1188
-            timeout: 120    # measured 28 min on run 34828632562, at 36 of 1713 timing out (2.1 %),
-                            # so `additional-timeout` moves this leg very little
+            timeout: 120    # measured 28 min on run 34828632562, at 36 of 1713 timing out (2.1 %).
+                            # Worst case with the raised timeout is 72 min, inside the existing budget,
+                            # so this one is left alone — see THE MODEL in the header.
           # THE TWO HALVES OF THE OLD data-ef LEG. Split by test project, not by file —
           # see "WHY data-ef IS TWO LEGS" in the header for the measurement that decided
           # it and the rule that decides which leg a file lands on. 459 + 649 = 1108, the

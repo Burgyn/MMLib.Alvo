@@ -174,7 +174,19 @@ that survive the suite, so *every 100% score was suspect*: a gate that lies is
 worse than no gate. **Closed 2026-09-14**: two of our own tests were only
 correct on a process's first run, and Stryker re-runs the suite in one test host
 per mutant (`test/_shared/mutation/`). Scores published before that date are not
-comparable with scores after it. **`#161`** — a scoped `ref` may name a row in another
+comparable with scores after it — **and the first honest run then exposed a
+second, unrelated lie**: Stryker scores `(Killed + Timeout) / tested`, so a
+mutant that merely ran out of time counted as a kill while naming no killing
+test at all. The two legs that passed that run were the two whose pass was made
+of timeouts: `data-ef-core` reported 99.82 % and measures **59.30 %**,
+`data-sqlite` reported 100 % on 22 kills and 22 timeouts. Fixed by
+`additional-timeout` on every config plus check 6 of
+`scripts/assert-mutation-run`; the measurement is in
+`docs/architecture/data-path.md`. **Treat no data-layer score published on or
+before 2026-09-14 as a measurement**, and expect the mutation gate to stay red
+on `main` — honest scores sit under `break: 80` almost everywhere, and the debt
+is tracked in `#238` and `#239` rather than hidden by lowering the threshold.
+**`#161`** — a scoped `ref` may name a row in another
 tenant, because the foreign key does not span `(tenant_id, id)`. That is the
 same shape as `#198`, and both are the tenant-isolation seam the composite key
 would close.

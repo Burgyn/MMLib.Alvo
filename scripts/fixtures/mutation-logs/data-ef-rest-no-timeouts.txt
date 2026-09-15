@@ -8,7 +8,10 @@
 #   NOTHING times out — 308 Killed / 257 Survived / 0 Timeout = 54.51 %. Same commit and
 #   same provider as the core capture, so the only difference between the two is the
 #   number of test assemblies the leg pays for. A low score with no timeouts must pass.
-# Paths scrubbed to /repo. Carries SGR escapes, like every CI capture.
+# Paths scrubbed to /repo -- a plain textual substitution, so the per-file report table
+#   printed after the summary has its column alignment shifted where a path appeared in it.
+#   The guard never reads that table (it wraps and its cells concatenate, which is why the
+#   numbers in it cannot be trusted); every line any check reads is byte-faithful. Carries SGR escapes, like every CI capture.
 
 [38;5;11m   _____ _              _               _   _ ______ _______  [0m
 [38;5;11m  / ____| |            | |             | \ | |  ____|__   __| [0m

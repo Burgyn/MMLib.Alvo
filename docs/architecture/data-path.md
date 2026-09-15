@@ -1486,6 +1486,16 @@ only the test-projects list and then only the timeout:
 | B | `+ Data.Sqlite.Tests` | 391 | 31 | **143** | 94.51 % |
 | C | `+ Data.Sqlite.Tests`, `additional-timeout: 300000` | 397 | 168 | **0** | 70.27 % |
 
+(Run A is the local reproduction of what CI measured for this leg — CI reported 308 / 257 / 0 = 54.51 %
+on the same commit. One mutant's verdict differs between the two runs; that is ordinary run-to-run
+variance on a leg with no timeouts, not a contradiction between the tables, and it is called out here
+because the two figures appear side by side in this file.)
+
+Run A is the local reproduction of what CI measured for this leg; CI reported **308 / 257 / 0 = 54.51 %**
+on the same commit. One mutant's verdict differs between the two runs — ordinary run-to-run variance on a
+leg with no timeouts, not a contradiction between the two tables on this page, which is worth saying
+because both figures appear here within a screen of each other.
+
 Per mutant, A → B: 309 `Killed→Killed`, 82 `Survived→Killed`, 143 `Survived→Timeout`, and **zero
 `Killed→Timeout`**. Not one killed mutant ever timed out, because bail-out makes a killed mutant fast and a
 surviving one slow. Endless loops do not select for mutants that were about to survive; a threshold below
@@ -1504,9 +1514,11 @@ the suite's own runtime does exactly that. Raising the timeout resolved all 143 
 | `data-postgresql` | 20 | 15 | 5 | 0 | 75.00 % | 75.00 % |
 
 **The two legs that passed were the two whose pass was made of timeouts.** `data-ef-core` had **221 real
-survivors and the gate recorded one**. Taken with run C, the whole EF provider is at **64.89 %** honest
-(1108 mutants against both assemblies: 718 killed / 389 survived), against the 99.82 % / 54.51 % pair the
-gate was reporting.
+survivors and the gate recorded one**. Taken with run C, the whole EF provider is at **64.80 %** honest
+(1108 mutants against both assemblies: 718 killed / 389 survived / 1 timeout — that last mutant is the
+only one in the provider that Stryker still cannot separate from a hang), against the 99.82 % / 54.51 %
+pair the gate was reporting. Counting that single timeout as a kill the way Stryker does gives 64.89 %;
+the difference is stated rather than smoothed over, because smoothing it over is the defect.
 
 **The fix, and its cost.** `additional-timeout: 300000` on every config, uniformly — a timeout must mean
 "the mutant hung" on every leg, and a per-leg exception is the kind of thing that rots. It makes the honest
@@ -1603,7 +1615,10 @@ rather than an oversight, and it costs nothing real:
 - judged by `MMLib.Alvo.Api.Tests` — the suite that does exercise it, which `stryker-config.api.json` now names
   — the measured cost is **6.3 s/mutant** (124 mutants in 779 s), so ~2.6 h for 1502 on a 10-core dev machine
   and more on a 4-vCPU runner: no budget under GitHub's 6 h ceiling produces a verdict without sharding it
-  several ways;
+  several ways. **That 6.3 s figure has NOT been re-measured since `additional-timeout` was raised**, and it
+  was taken the same way as the `24.3 s/mutant` figure corrected above — on a run that could cut a mutant off
+  at the threshold. It is therefore a floor, not an estimate, and re-measuring it is part of whatever finally
+  shards this leg;
 - a leg that always times out is noise rather than a gate. This used to add "premature while #142 makes the
   resulting score untrustworthy"; #142 closed on 2026-09-14, so what is left is purely the budget.
 
