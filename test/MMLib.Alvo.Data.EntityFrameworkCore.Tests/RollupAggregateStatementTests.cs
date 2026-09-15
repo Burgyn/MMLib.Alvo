@@ -44,12 +44,57 @@ public class RollupAggregateStatementTests
         => Setter(new RollupSchema { From = "invoice_items", Via = "invoice", Op = RollupOperation.Count })
             .ShouldContain("COUNT(*)");
 
+    /// <summary>
+    /// The subquery follows the rollup's own foreign key, and is closed — the parent id is bound into the
+    /// child's <c>WHERE</c> rather than the aggregate being taken over the whole child table.
+    /// </summary>
+    [Fact]
+    public void An_aggregate_is_narrowed_to_the_children_of_one_parent()
+        => Setter(Sum("line_total")).ShouldEndWith("""FROM "invoice_items" WHERE "invoice" = {0})""");
+
+    /// <summary>
+    /// Every value operation composes <b>its own</b> SQL aggregate, because a defaulted one is a wrong number
+    /// nothing reports: the statement still runs, the parent still stores something, and no reader can tell it
+    /// from a right one.
+    /// </summary>
+    /// <remarks>
+    /// All four are asserted rather than a representative one: the mapping is a table, and a table goes wrong
+    /// one row at a time. <c>count</c> never reaches it — it aggregates rows and short-circuits to
+    /// <c>COUNT(*)</c> above.
+    /// </remarks>
+    [Theory]
+    [InlineData(RollupOperation.Sum, "SUM")]
+    [InlineData(RollupOperation.Avg, "AVG")]
+    [InlineData(RollupOperation.Min, "MIN")]
+    [InlineData(RollupOperation.Max, "MAX")]
+    public void Each_value_operation_composes_its_own_sql_aggregate(RollupOperation op, string aggregate)
+        => Setter(Aggregate(op, "line_total")).ShouldContain($"SELECT {aggregate}(");
+
+    /// <summary>
+    /// An operation with no aggregate mapped is <b>refused</b> rather than defaulted, and the refusal carries
+    /// the unmapped value — the enum is appended to, and a rollup silently aggregated as something else is the
+    /// same stored-wrong-number failure the whole feature exists to remove.
+    /// </summary>
+    [Fact]
+    public void An_operation_with_no_aggregate_mapped_is_refused()
+    {
+        var refused = Should.Throw<ArgumentOutOfRangeException>(() => Setter(Aggregate(Unmapped, "line_total")));
+
+        refused.ParamName.ShouldBe("op");
+        refused.ActualValue.ShouldBe(Unmapped);
+    }
+
+    /// <summary>A member no <c>switch</c> arm names — the shape a later append to the enum has here.</summary>
+    private static RollupOperation Unmapped => (RollupOperation)99;
+
     private static string Setter(RollupSchema rollup) =>
         new RollupRecompute(new TestSqlDialect(), new TestFieldSqlRenderer())
             .Setter(Child, new FieldSchema { Name = "net_total", Type = FieldType.Decimal, Rollup = rollup });
 
-    private static RollupSchema Sum(string field) =>
-        new() { From = "invoice_items", Via = "invoice", Op = RollupOperation.Sum, Field = field };
+    private static RollupSchema Sum(string field) => Aggregate(RollupOperation.Sum, field);
+
+    private static RollupSchema Aggregate(RollupOperation op, string field) =>
+        new() { From = "invoice_items", Via = "invoice", Op = op, Field = field };
 
     private static EntitySchema Child => new()
     {
