@@ -6,6 +6,7 @@
     ],
     "test-runner": "mtp",
     "coverage-analysis": "off",
+    "additional-timeout": 300000,
     "mutate": [
       "**/*.cs",
       "!**/AssemblyInfo.cs",
@@ -22,18 +23,13 @@
       "!AlvoEfCoreProvider.cs",
       "!RelationalProviderRegistration.cs",
       "!Internal/EfAlvoData.cs",
-      "!Internal/SortSqlRenderer.cs",
       "!Internal/UpdateSetterFactory.cs",
       "!Internal/WritePropertyBag.cs",
-      "!Internal/AlvoModelCacheKeyFactory.cs",
       "!Internal/BatchWrite.cs",
       "!Internal/ConstraintViolationTranslator.cs",
-      "!Internal/RenameGuessSplitter.cs",
-      "!Internal/RenamePrePass.cs",
       "!Internal/WholeRowGuard.cs",
       "!EfCoreOutboxStore.cs",
-      "!Internal/OutboxTable.cs",
-      "!Internal/OutboxEventFactory.cs"
+      "!Internal/OutboxTable.cs"
     ],
     "thresholds": {
       "high": 90,
