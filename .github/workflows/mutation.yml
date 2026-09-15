@@ -117,7 +117,10 @@ name: Mutation
 # timeout raised — 221 real survivors that the gate recorded as one. `data-sqlite`
 # reported **100.00 %** on 22 Killed / 0 Survived / 22 Timeout. The two legs that passed
 # were the two whose pass was made of timeouts. Taken together the whole EF provider is
-# at 64.89 % honest (1108 mutants, both assemblies: 718 killed / 389 survived).
+# at 64.80 % honest (1108 mutants, both assemblies: 718 killed / 389 survived / 1 timeout —
+# that last mutant is the only one in the provider Stryker still cannot separate from a hang;
+# counting it as a kill the way Stryker does gives 64.89 %, and the difference is stated rather
+# than smoothed over, because smoothing it over is the defect this section is about).
 #
 # `scripts/assert-mutation-run` check 6 is what keeps this from coming back silently: it
 # fails a shard whose timeouts exceed 20 % of its tested mutants. Its header carries the
