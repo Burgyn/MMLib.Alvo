@@ -600,6 +600,73 @@ else
   esac
 fi
 
+# ============================================ check 6 — the timeout share of a score
+#
+# Stryker's score is (Killed + Timeout) / tested, so a mutant that merely ran out of
+# time lands in the NUMERATOR while its report entry names no killing test at all. The
+# two fixtures below are the same commit, the same provider and the same CI run,
+# differing only in how many test assemblies the leg pays for — which is what makes
+# them a control pair rather than two anecdotes.
+echo "check 6 — a score that is mostly timeouts is not a measurement"
+
+CORE_CFG="$ROOT/stryker-config.data-ef-core.json"
+REST_CFG="$ROOT/stryker-config.data-ef-rest.json"
+TIMEOUT_SHARE="mutants TIMED OUT"
+NO_TIMEOUT_LINE="but never 'Timeout: N'"
+
+assert_rejected "a leg whose pass is 45 % timeouts is rejected" "$TIMEOUT_SHARE" \
+  "$FIXTURES/data-ef-core-timeout-inflated.txt" "$CORE_CFG" 543 1135
+
+# The rejection must name the numbers, or nobody reading a red shard can tell this
+# check from a low score — which is the distinction the whole message exists to draw.
+case "$GUARD_OUT" in
+  *"249 of 543"*) pass "the rejection names the counts (249 of 543)" ;;
+  *) fail "the rejection names the counts (249 of 543)" "'249 of 543' in the message" "$GUARD_OUT" ;;
+esac
+
+# And it must NOT fire on a leg that simply scores badly. data-ef-rest reports 54.51 %
+# — well under `break: 80` — with zero timeouts, and this guard has no opinion about
+# that: a low score is the suite's problem, an inflated one is the gate's.
+assert_ok "a low score with NO timeouts is accepted — check 6 judges the gate, not the suite" \
+  "$FIXTURES/data-ef-rest-no-timeouts.txt" "$REST_CFG" 565 554
+
+# One-sided, like checks 3 and 4: fewer timeouts than the ceiling is never the defect.
+# 108 is exactly 20 % of 543, and the comparison is `-gt`, so the boundary passes.
+#
+# The `249` sits BETWEEN SGR escapes in this capture — `Timeout:  \e[38;5;13m249\e[0m` —
+# because Spectre.Console colourises on a GitHub runner. Perturbing the digits alone is
+# therefore the honest edit: it leaves the colour codes in place, so these cases keep
+# exercising the guard's ANSI strip as well as its arithmetic. (The first draft matched
+# `^Timeout:  249$`, which matched nothing; `derive` refused it rather than quietly
+# feeding an unchanged fixture to a green assertion — which is what that helper is for.)
+derive data-ef-core-timeout-inflated.txt 's/\(^Timeout:  .*m\)249/\1108/' || exit 1
+assert_ok "exactly at the 20 % ceiling is accepted (the bound is one-sided)" \
+  "$DERIVED" "$CORE_CFG" 543 1135
+
+derive data-ef-core-timeout-inflated.txt 's/\(^Timeout:  .*m\)249/\1109/' || exit 1
+assert_rejected "one mutant over the ceiling is rejected" "$TIMEOUT_SHARE" \
+  "$DERIVED" "$CORE_CFG" 543 1135
+
+# Fail-closed on a rewording, the property every other check here was repaired for:
+# once the summary block is present, a missing Timeout line must be refused rather
+# than read as zero timeouts.
+derive data-ef-core-timeout-inflated.txt '/^Timeout:/d' || exit 1
+assert_rejected "a summary with no 'Timeout:' line is refused, not read as zero" "$NO_TIMEOUT_LINE" \
+  "$DERIVED" "$CORE_CFG" 543 1135
+
+# But a log with NO summary at all is a discovery probe — started, watched until the
+# mutant list prints, killed by hand — and four committed fixtures are exactly that,
+# by their own headers. Check 6 must stay silent there instead of failing a legitimate
+# capture, which is why it is conditional on the `Killed:` line rather than on nothing.
+assert_ok "a discovery probe with no summary block is untouched by check 6" \
+  "$FIXTURES/expressions-scoped.txt" "$EXPR_CFG" 834 722
+
+# The canary is exempt: check 5 already asserts every mutant survived, which is
+# strictly stronger, and its message diagnoses #142 rather than the timeout threshold.
+# Pinned because the exemption is a condition in the guard that could silently invert.
+assert_canary_ok "the canary is exempt from check 6 (check 5 is strictly stronger there)" \
+  "$FIXTURES/canary-honest.txt" "$ROOT/stryker-config.canary.json" 13 142
+
 # ============================================================================ total
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"

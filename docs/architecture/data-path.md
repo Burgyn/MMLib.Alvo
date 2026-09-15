@@ -1454,6 +1454,77 @@ knowing, before the merge, that each config is configured to answer at all.
 > a kill rather than as a timeout, which is why a summary can read `Timeout: 0` while the log carries
 > `Test run timed out`. Unchanged, and still upstream.
 
+### A SECOND way the score lied, found 2026-09-14: a timeout counts as a kill
+
+> **Fixing #142 did not make the scores honest — it made the next defect visible.** Every score published
+> between #142 closing and this section being written is still not a measurement, for an unrelated reason.
+
+**Stryker's mutation score is `(Killed + Timeout) / tested`.** Verified arithmetically against all seven
+shards of run [34828632562](https://github.com/Burgyn/MMLib.Alvo/actions/runs/34828632562) — seven
+independent data points, each exact to two decimals. The documentation states the timeout *formula* but not
+this; the arithmetic states it. So a **Timeout sits in the numerator**, while that mutant's `killedBy`
+array in `mutation-report.json` is **empty**, exactly like a survivor's:
+
+```
+Killed:    n=391   killedBy empty=0
+Timeout:   n=143   killedBy empty=143
+Survived:  n=31    killedBy empty=31
+```
+
+That accounting is right for an endless loop and wrong for a slow run, and the threshold cannot tell them
+apart: `timeout = (initialTestRunTime + coveringTestsTime) * timeout-ratio + additional-timeout`, where the
+*initial* run happens **alone** and every mutant run happens **four at a time** (`--concurrency 4`). With
+`coverage-analysis: off` each mutant re-runs the whole assembly, so on a slow leg the full-suite time sits
+above a threshold derived from a faster, uncontended run.
+
+**The controlled experiment**, on the identical 565 mutants of `data-ef-rest`'s own mutate set, changing
+only the test-projects list and then only the timeout:
+
+| run | suite | Killed | Survived | Timeout | reported |
+|---|---|---|---|---|---|
+| A | `EntityFrameworkCore.Tests` alone | 309 | 256 | **0** | 54.69 % |
+| B | `+ Data.Sqlite.Tests` | 391 | 31 | **143** | 94.51 % |
+| C | `+ Data.Sqlite.Tests`, `additional-timeout: 300000` | 397 | 168 | **0** | 70.27 % |
+
+Per mutant, A → B: 309 `Killed→Killed`, 82 `Survived→Killed`, 143 `Survived→Timeout`, and **zero
+`Killed→Timeout`**. Not one killed mutant ever timed out, because bail-out makes a killed mutant fast and a
+surviving one slow. Endless loops do not select for mutants that were about to survive; a threshold below
+the suite's own runtime does exactly that. Raising the timeout resolved all 143 — 137 to *Survived*, 6 to
+*Killed* — which settles it.
+
+**What it was costing**, reported vs. `Killed`-only, run 34828632562:
+
+| leg | tested | Killed | Survived | Timeout | reported | honest |
+|---|---|---|---|---|---|---|
+| **`data-ef-core`** | 543 | 293 | **1** | **249** | **99.82 %** | **59.30 %** (measured, long timeout: 321 / 221 / 1) |
+| **`data-sqlite`** | 44 | 22 | **0** | **22** | **100.00 %** | ≥ 50.00 % (not yet re-measured) |
+| `expressions` | 900 | 726 | 106 | 68 | 88.22 % | ≥ 80.67 % (not yet re-measured) |
+| `rules, auth, rest` | 1713 | 912 | 765 | 36 | 55.34 % | ≥ 53.24 % |
+| `data-ef-rest` | 565 | 308 | 257 | 0 | 54.51 % | 54.51 % |
+| `data-postgresql` | 20 | 15 | 5 | 0 | 75.00 % | 75.00 % |
+
+**The two legs that passed were the two whose pass was made of timeouts.** `data-ef-core` had **221 real
+survivors and the gate recorded one**. Taken with run C, the whole EF provider is at **64.89 %** honest
+(1108 mutants against both assemblies: 718 killed / 389 survived), against the 99.82 % / 54.51 % pair the
+gate was reporting.
+
+**The fix, and its cost.** `additional-timeout: 300000` on every config, uniformly — a timeout must mean
+"the mutant hung" on every leg, and a per-leg exception is the kind of thing that rots. It makes the honest
+run *slower* than the dishonest one, because a survivor now runs to completion instead of being cut off:
+measured **31 → 63 min** on the same 565-mutant set, one machine, one concurrency. `data-ef-core`'s budget
+goes 120 → 240 and `data-sqlite`'s 30 → 60 for that reason, to be cut back to ~2× measured wall clock once
+a real post-merge run produces one. `scripts/assert-mutation-run` **check 6** keeps it from coming back
+silently: a shard whose timeouts exceed **20 %** of its tested mutants fails. The ceiling is calibrated on
+this run — the lying legs were at 45.86 % and 50.00 %, the honest ones at 0 %, 0 %, 2.10 % and 7.56 % — and
+is deliberately not tighter, because `expressions`' 7.56 % has not been re-measured and an endless loop is
+genuinely plausible in an expression evaluator.
+
+**This also corrects the `24.3 s/mutant` figure** every `data-ef` budget was derived from. It was measured
+on a leg that was cutting a large share of its mutants off at the timeout, so it is the cost of "run until
+killed, or until the clock runs out" — not the cost of reaching a verdict. The conclusion it supported (a
+second test assembly is the lever) survives and is in fact understated: core's 543 mutants take **78
+seconds** against one assembly and **74 minutes** against two.
+
 ### Each config was verified non-vacuous, and here is how
 
 A config that discovers **zero** mutants, or whose test projects yield **zero** tests, reports a false green;
@@ -1472,27 +1543,49 @@ figure had gone stale and nothing reported it: check 3 of `scripts/assert-mutati
 *floor*, so growth never fails a run. `data-ef` had reached 1108 mutants against a budget sized for 596 —
 that is #205 — and `rules, auth, rest` 1638 against 657.
 
+**Re-probed again 2026-09-14**, against run 34828632562's own shard logs rather than a local probe — strictly
+better evidence, being the runner that gets judged. The table below is that re-probe. Two rows had gone
+stale with nothing reporting it (`rules, auth, rest` 1638 → 1713, and both suites 1185 → 1188), and the two
+`data-ef` rows moved because that day re-partitioned them; both were probed *after* the move.
+
 | Config | Mutated project | Tests found | Mutants to be tested | In the matrix? |
 |---|---|---|---|---|
 | `stryker-config.expressions.json` | `MMLib.Alvo` (`Expressions/**`) | 1188 | 900 | yes |
-| `stryker-config.json` | `MMLib.Alvo` (the rest, minus `Api/**`) | 1185 | 1638 | yes |
-| `stryker-config.data-ef-core.json` | `MMLib.Alvo.Data.EntityFrameworkCore` (the four Sqlite-killed classes) | 1135 | 344 | yes |
-| `stryker-config.data-ef-rest.json` | `MMLib.Alvo.Data.EntityFrameworkCore` (everything else) | 554 | 764 | yes |
+| `stryker-config.json` | `MMLib.Alvo` (the rest, minus `Api/**`) | 1188 | 1713 | yes |
+| `stryker-config.data-ef-core.json` | `MMLib.Alvo.Data.EntityFrameworkCore` (the files measured to need `Sqlite.Tests`) | 1135 | 459 | yes |
+| `stryker-config.data-ef-rest.json` | `MMLib.Alvo.Data.EntityFrameworkCore` (everything else) | 554 | 649 | yes |
 | `stryker-config.data-sqlite.json` | `MMLib.Alvo.Data.Sqlite` | 581 | 44 | yes |
 | `stryker-config.data-postgresql.json` | `MMLib.Alvo.Data.PostgreSql` | 110 | 20 | yes |
+| `stryker-config.canary.json` | `MMLib.Alvo.Testing` (`InMemoryDescriptorVersionStore`) | 142 | 13 | yes |
 | `stryker-config.data-ef.json` | `MMLib.Alvo.Data.EntityFrameworkCore` (the whole shard) | 1135 | 1108 | **no — on demand** |
 | `stryker-config.api.json` | `MMLib.Alvo` (`Api/**`) | 333 | 1502 | **no — on demand** |
 
 **`data-ef` is two legs since #205, and it is split by *test project* rather than by file.** The model that
 predicts the cost is not mutants × test *count*: measured runner-seconds per mutant on the 4-vCPU runner are
-~6.2 s for `rules, auth, rest` (1185 tests, **one** assembly) and ~26 s for the single `data-ef` leg (1135
+~6.2 s for `rules, auth, rest` (1188 tests, **one** assembly) and ~26 s for the single `data-ef` leg (1135
 tests, **two** assemblies) — four times the cost at the same test count, because every mutant run restarts
 each test server it uses and `MMLib.Alvo.Data.Sqlite.Tests` stands up real databases per test. So the lever
 is how many test assemblies a leg pays for. The obvious split (the five migration classes against the data
 path) was probed and rejected: it divides the mutants 133/975, leaving the data-path leg 88 % of them *and*
-both assemblies. Splitting along the line the `test-projects` list already implies — the four classes whose
-killing tests live in `Sqlite.Tests` — divides them **344 / 764** and drops the second assembly from the
-larger half. 344 + 764 = 1108: same files, same score domain, and the arithmetic is the proof.
+both assemblies.
+
+**The split is 459 / 649 as of 2026-09-14, and the membership rule is now a measurement rather than a
+proxy.** Until then a file went on `data-ef-core` unless `MMLib.Alvo.Data.EntityFrameworkCore.Tests` could
+be *shown* to hold its killers — a deliberately conservative stand-in, because nobody had run each half
+against each suite. That has now been done, and it moved files in **both** directions:
+
+| set | vs `EF.Tests` alone | vs both assemblies |
+|---|---|---|
+| core's 543 mutants | 62 killed, **11.42 %**, 78 s | 321 killed, **59.30 %**, 74 min |
+| rest's 565 mutants | 309 killed, **54.69 %**, 104 s | 397 killed, **70.27 %**, 63 min |
+
+Five of core's thirteen files — `SortSqlRenderer`, `RenamePrePass`, `RenameGuessSplitter`,
+`OutboxEventFactory`, `AlvoModelCacheKeyFactory`, **84 mutants** — record the *identical* verdict under one
+assembly and two, so they were paying ~57× for a second assembly that changed no verdict. They are on
+`rest` now. The eight that stay are not close calls: **259** of core's mutants die only when
+`Sqlite.Tests` is present, 177 of them in `EfAlvoData.cs` alone. 459 + 649 = 1108: same files, same mutant
+set, and the arithmetic is the proof — but **not** the same score domain, which is the cost the split has
+always carried and which is now quantified below.
 
 Two one-line levers were probed on the same shard and neither applied: `ignore-methods` over `*Log*` and the
 `ThrowIfNull*` guards removes **96 of 1108** (8.7 % — the cost is not in the guards), and

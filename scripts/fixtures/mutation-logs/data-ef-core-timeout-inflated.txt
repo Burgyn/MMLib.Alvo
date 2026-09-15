@@ -1,0 +1,191 @@
+# Stryker log fixture for scripts/test-assert-mutation-run. DO NOT hand-edit.
+# Produced by: the `Stryker (data-ef-core)` shard of .github/workflows/mutation.yml,
+#   i.e. cd test && dotnet tool run dotnet-stryker -f ../stryker-config.data-ef-core.json --concurrency 4
+# Captured: 2026-09-14 09:35-10:35 UTC on a GitHub-hosted 4-vCPU runner, run 34828632562,
+#   main at 4d1ed16 — the FIRST run after #142 was fixed, i.e. the first honest one.
+# Stryker 4.16.0 / .NET SDK 10.0.100 / xunit.v3 3.2.2, ubuntu-latest.
+# WHY IT IS HERE: it reports 99.82 % on 293 Killed / 1 Survived / 249 Timeout. Stryker
+#   scores a timeout as a kill, so 45.86 % of this leg's pass is mutants that named no
+#   killing test. Re-measured with additional-timeout raised, the same 543 mutants give
+#   321 Killed / 221 Survived / 1 Timeout = 59.30 %. This is check 6's regression case.
+# Paths scrubbed to /repo. Carries SGR escapes, like every CI capture.
+
+[38;5;11m   _____ _              _               _   _ ______ _______  [0m
+[38;5;11m  / ____| |            | |             | \ | |  ____|__   __| [0m
+[38;5;11m | (___ | |_ _ __ _   _| | _____ _ __  |  \| | |__     | |    [0m
+[38;5;11m  \___ \| __| '__| | | | |/ / _ \ '__| | . ` |  __|    | |    [0m
+[38;5;11m  ____) | |_| |  | |_| |   <  __/ |    | |\  | |____   | |    [0m
+[38;5;11m |_____/ \__|_|   \__, |_|\_\___|_| (_)|_| \_|______|  |_|    [0m
+[38;5;11m                   __/ |                                      [0m
+[38;5;11m                  |___/                                       [0m
+
+
+Version: [38;5;2m4.16.0[0m
+
+[09:34:05 WRN] Using a concurrency of 4 which is more than recommended 2 for normal system operation. This might have an impact on performance.
+[09:34:05 INF] Stryker will use a max of 4 parallel testsessions.
+[09:34:05 INF] Analysis starting.
+[09:34:05 INF] Analyzing 2 test project(s).
+[38;5;11mA new version of Stryker.NET (5.0.0) is available. Please consider upgrading [0m
+[38;5;11musing `dotnet tool update -g dotnet-stryker`[0m
+
+[09:34:15 INF] Found project /repo/src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj to mutate.
+[09:34:15 INF] Analysis complete.
+[09:34:15 INF] Building test project /repo/test/MMLib.Alvo.Data.Sqlite.Tests/MMLib.Alvo.Data.Sqlite.Tests.csproj (1/2)
+[09:34:15 INF] Building project MMLib.Alvo.Data.Sqlite.Tests.csproj using dotnet build MMLib.Alvo.Data.Sqlite.Tests.csproj -c Debug --property:Platform=AnyCPU (directory /repo/test/MMLib.Alvo.Data.Sqlite.Tests.)
+[09:35:00 INF] Building test project /repo/test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/MMLib.Alvo.Data.EntityFrameworkCore.Tests.csproj (2/2)
+[09:35:00 INF] Building project MMLib.Alvo.Data.EntityFrameworkCore.Tests.csproj using dotnet build MMLib.Alvo.Data.EntityFrameworkCore.Tests.csproj -c Debug --property:Platform=AnyCPU (directory /repo/test/MMLib.Alvo.Data.EntityFrameworkCore.Tests.)
+[09:35:06 WRN] The Microsoft Test Platform testrunner is currently in preview. Results should be verified since this feature is still being tested.
+[09:35:07 INF] Number of tests found: 1135 for project /repo/src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj. Initial test run started.
+[09:35:32 WRN] An unidentified mutation in /repo/src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfAlvoData.cs resulted in a compile error (at 1251:64) with id: CS0165, message: Use of unassigned local variable 'record' (Source code: record)
+[09:35:32 INF] Safe Mode! Stryker will remove all mutations in ReplayedAfterKeyRaceAsync and mark them as 'compile error'.
+[09:35:32 WRN] An unidentified mutation in /repo/src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfAlvoData.cs resulted in a compile error (at 2712:55) with id: CS0165, message: Use of unassigned local variable 'vetted' (Source code: vetted)
+[09:35:32 INF] Safe Mode! Stryker will remove all mutations in UpdatedRowsAsync and mark them as 'compile error'.
+[09:35:33 INF] 2166 mutants created
+[09:35:33 INF] 336   mutants got status CompileError. Reason: Mutant caused compile errors
+[09:35:33 INF] 147   mutants got status Ignored.      Reason: Removed by block already covered filter
+[09:35:33 INF] 1140  mutants got status Ignored.      Reason: Removed by mutate filter
+[09:35:33 INF] 1623  total mutants are skipped for the above mentioned reasons
+[09:35:33 INF] 543   total mutants will be tested
+
+Killed:   [38;5;13m293[0m
+Survived: [38;5;13m  1[0m
+Timeout:  [38;5;13m249[0m
+Errors:  [38;5;13m  0[0m
+
+
+All mutants have been tested, and your mutation score has been calculated
+╭────────────────────────────────────────┬─────┬─────┬──────┬───────┬─────┬────╮
+│ File                                   │  %  │  #  │   #  │    #  │  #  │ #  │
+│                                        │ sc… │ ki… │ tim… │ surv… │ no  │ e… │
+│                                        │     │     │      │       │ cov │    │
+├────────────────────────────────────────┼─────┼─────┼──────┼───────┼─────┼────┤
+│ /repo │ [38;5;2m99.[0m │ 293 │  249 │  1624 │   0 │ 33 │
+│ o/src                                  │  [38;5;2m82[0m │     │      │       │     │  6 │
+│ AlvoEfCoreProvider.cs                  │ [38;5;8mN/A[0m │   0 │    0 │    30 │   0 │  5 │
+│ AlvoSqlIdentifier.cs                   │ [38;5;8mN/A[0m │   0 │    0 │     6 │   0 │  0 │
+│ EfCoreDescriptorVersionStore.cs        │ [38;5;8mN/A[0m │   0 │    0 │   101 │   0 │  0 │
+│ EfCoreOutboxStore.cs                   │ [38;5;2m100[0m │  29 │   27 │    16 │   0 │  0 │
+│                                        │ [38;5;2m.00[0m │     │      │       │     │    │
+│ EfCoreRuntimeSchemaWriter.cs           │ [38;5;8mN/A[0m │   0 │    0 │    34 │   0 │  0 │
+│ EfCoreSchemaIntrospector.cs            │ [38;5;8mN/A[0m │   0 │    0 │    55 │   0 │  2 │
+│ EfCoreSchemaMigrator.cs                │ [38;5;8mN/A[0m │   0 │    0 │    84 │   0 │ 10 │
+│ IAlvoSqlDialect.cs                     │ [38;5;8mN/A[0m │   0 │    0 │     5 │   0 │  0 │
+│ Internal/AlvoDataContext.cs            │ [38;5;8mExc[0m │   0 │    0 │    34 │   0 │  6 │
+│                                        │ [38;5;8mlud[0m │     │      │       │     │    │
+│                                        │  [38;5;8med[0m │     │      │       │     │    │
+│ Internal/AlvoDataContextFactory.cs     │ [38;5;8mExc[0m │   0 │    0 │     9 │   0 │  0 │
+│                                        │ [38;5;8mlud[0m │     │      │       │     │    │
+│                                        │  [38;5;8med[0m │     │      │       │     │    │
+│ Internal/AlvoDataSeed.cs               │ [38;5;8mExc[0m │   0 │    0 │     9 │   0 │  0 │
+│                                        │ [38;5;8mlud[0m │     │      │       │     │    │
+│                                        │  [38;5;8med[0m │     │      │       │     │    │
+│ Internal/AlvoModelCacheKeyFactory.cs   │ [38;5;2m100[0m │   1 │    4 │     2 │   0 │  1 │
+│                                        │ [38;5;2m.00[0m │     │      │       │     │    │
+│ Internal/AppliedSchemaJsonContext.cs   │ [38;5;8mExc[0m │   0 │    0 │     0 │   0 │  0 │
+│                                        │ [38;5;8mlud[0m │     │      │       │     │    │
+│                                        │  [38;5;8med[0m │     │      │       │     │    │
+│ Internal/BatchWrite.cs                 │ [38;5;2m100[0m │   4 │    2 │     6 │   0 │  2 │
+│                                        │ [38;5;2m.00[0m │     │      │       │     │    │
+│ Internal/BoundValue.cs                 │ [38;5;8mExc[0m │   0 │    0 │     3 │   0 │  0 │
+│                                        │ [38;5;8mlud[0m │     │      │       │     │    │
+│                                        │  [38;5;8med[0m │     │      │       │     │    │
+│ Internal/ColumnValue.cs                │ [38;5;8mExc[0m │   0 │    0 │    58 │   0 │  5 │
+│                                        │ [38;5;8mlud[0m │     │      │       │     │    │
+│                                        │  [38;5;8med[0m │     │      │       │     │    │
+│ Internal/ComputedColumnSql.cs          │ [38;5;8mExc[0m │   0 │    0 │    34 │   0 │  8 │
+│                                        │ [38;5;8mlud[0m │     │      │       │     │    │
+│                                        │  [38;5;8med[0m │     │      │       │     │    │
+│ Internal/ConstraintViolationTranslator │ [38;5;2m100[0m │   9 │   10 │    26 │   0 │ 20 │
+│ .cs                                    │ [38;5;2m.00[0m │     │      │       │     │    │
+│ Internal/DescriptorModelBuilder.cs     │ [38;5;8mExc[0m │   0 │    0 │    64 │   0 │  6 │
+│                                        │ [38;5;8mlud[0m │     │      │       │     │    │
+│                                        │  [38;5;8med[0m │     │      │       │     │    │
+│ Internal/DestructiveScan.cs            │ [38;5;8mExc[0m │   0 │    0 │   109 │   0 │ 45 │
+│                                        │ [38;5;8mlud[0m │     │      │       │     │    │
+│                                        │  [38;5;8med[0m │     │      │       │     │    │
+│ Internal/EfAlvoData.cs                 │ [38;5;2m100[0m │ 146 │  165 │   238 │   0 │ 14 │
+│                                        │ [38;5;2m.00[0m │     │      │       │     │  4 │
+│ Internal/FieldClrTypeMap.cs            │ [38;5;8mExc[0m │   0 │    0 │     4 │   0 │  0 │
+│                                        │ [38;5;8mlud[0m │     │      │       │     │    │
+│                                        │  [38;5;8med[0m │     │      │       │     │    │
+│ Internal/FilterSqlRenderer.cs          │ [38;5;8mExc[0m │   0 │    0 │    53 │   0 │ 10 │
+│                                        │ [38;5;8mlud[0m │     │      │       │     │    │
+│                                        │  [38;5;8med[0m │     │      │       │     │    │
+│ Internal/IdempotencyTable.cs           │ [38;5;8mExc[0m │   0 │    0 │    43 │   0 │  1 │
+│                                        │ [38;5;8mlud[0m │     │      │       │     │    │
+│                                        │  [38;5;8med[0m │     │      │       │     │    │
+│ Internal/KeysetCursor.cs               │ [38;5;8mExc[0m │   0 │    0 │    15 │   0 │  0 │
+│                                        │ [38;5;8mlud[0m │     │      │       │     │    │
+│                                        │  [38;5;8med[0m │     │      │       │     │    │
+│ Internal/KeysetSqlRenderer.cs          │ [38;5;8mExc[0m │   0 │    0 │    50 │   0 │ 11 │
+│                                        │ [38;5;8mlud[0m │     │      │       │     │    │
+│                                        │  [38;5;8med[0m │     │      │       │     │    │
+│ Internal/OutboxEventFactory.cs         │ [38;5;2m100[0m │  21 │    9 │     3 │   0 │  2 │
+│                                        │ [38;5;2m.00[0m │     │      │       │     │    │
+│ Internal/OutboxTable.cs                │ [38;5;2m100[0m │  19 │    5 │     5 │   0 │  1 │
+│                                        │ [38;5;2m.00[0m │     │      │       │     │    │
+│ Internal/PolicyParameterPrefix.cs      │ [38;5;8mExc[0m │   0 │    0 │     0 │   0 │  0 │
+│                                        │ [38;5;8mlud[0m │     │      │       │     │    │
+│                                        │  [38;5;8med[0m │     │      │       │     │    │
+│ Internal/PredicateParameterBinder.cs   │ [38;5;8mExc[0m │   0 │    0 │    23 │   0 │  1 │
+│                                        │ [38;5;8mlud[0m │     │      │       │     │    │
+│                                        │  [38;5;8med[0m │     │      │       │     │    │
+│ Internal/QueryFieldGuard.cs            │ [38;5;8mExc[0m │   0 │    0 │    28 │   0 │  0 │
+│                                        │ [38;5;8mlud[0m │     │      │       │     │    │
+│                                        │  [38;5;8med[0m │     │      │       │     │    │
+│ Internal/ReadProjection.cs             │ [38;5;8mExc[0m │   0 │    0 │    21 │   0 │  0 │
+│                                        │ [38;5;8mlud[0m │     │      │       │     │    │
+│                                        │  [38;5;8med[0m │     │      │       │     │    │
+│ Internal/ReadStatementComposer.cs      │ [38;5;8mExc[0m │   0 │    0 │   105 │   0 │ 22 │
+│                                        │ [38;5;8mlud[0m │     │      │       │     │    │
+│                                        │  [38;5;8med[0m │     │      │       │     │    │
+│ Internal/RecordMaterializer.cs         │ [38;5;8mExc[0m │   0 │    0 │    10 │   0 │  0 │
+│                                        │ [38;5;8mlud[0m │     │      │       │     │    │
+│                                        │  [38;5;8med[0m │     │      │       │     │    │
+│ Internal/RelationalConnectionFactory.c │ [38;5;8mExc[0m │   0 │    0 │     0 │   0 │  0 │
+│ s                                      │ [38;5;8mlud[0m │     │      │       │     │    │
+│                                        │  [38;5;8med[0m │     │      │       │     │    │
+│ Internal/RelationalReachability.cs     │ [38;5;8mExc[0m │   0 │    0 │    13 │   0 │  1 │
+│                                        │ [38;5;8mlud[0m │     │      │       │     │    │
+│                                        │  [38;5;8med[0m │     │      │       │     │    │
+│ Internal/RelationalSqlBatch.cs         │ [38;5;8mExc[0m │   0 │    0 │    38 │   0 │  2 │
+│                                        │ [38;5;8mlud[0m │     │      │       │     │    │
+│                                        │  [38;5;8med[0m │     │      │       │     │    │
+│ Internal/RenameGuessSplitter.cs        │ [38;5;2m100[0m │   5 │    5 │     5 │   0 │  3 │
+│                                        │ [38;5;2m.00[0m │     │      │       │     │    │
+│ Internal/RenamePrePass.cs              │ [38;5;2m100[0m │  17 │    4 │    10 │   0 │  4 │
+│                                        │ [38;5;2m.00[0m │     │      │       │     │    │
+│ Internal/RollupRecompute.cs            │ [38;5;8mExc[0m │   0 │    0 │    95 │   0 │ 17 │
+│                                        │ [38;5;8mlud[0m │     │      │       │     │    │
+│                                        │  [38;5;8med[0m │     │      │       │     │    │
+│ Internal/SortSqlRenderer.cs            │ [38;5;2m100[0m │  16 │    2 │     4 │   0 │  1 │
+│                                        │ [38;5;2m.00[0m │     │      │       │     │    │
+│ Internal/StoredInstant.cs              │ [38;5;8mExc[0m │   0 │    0 │     9 │   0 │  0 │
+│                                        │ [38;5;8mlud[0m │     │      │       │     │    │
+│                                        │  [38;5;8med[0m │     │      │       │     │    │
+│ Internal/SystemSchemaInitializer.cs    │ [38;5;8mExc[0m │   0 │    0 │    42 │   0 │  1 │
+│                                        │ [38;5;8mlud[0m │     │      │       │     │    │
+│                                        │  [38;5;8med[0m │     │      │       │     │    │
+│ Internal/UpdateSetterFactory.cs        │ [38;5;2m100[0m │   5 │    6 │     4 │   0 │  0 │
+│                                        │ [38;5;2m.00[0m │     │      │       │     │    │
+│ Internal/VersionRowWriter.cs           │ [38;5;8mExc[0m │   0 │    0 │    70 │   0 │  0 │
+│                                        │ [38;5;8mlud[0m │     │      │       │     │    │
+│                                        │  [38;5;8med[0m │     │      │       │     │    │
+│ Internal/WholeRowGuard.cs              │ [38;5;2m100[0m │  19 │    9 │     5 │   0 │  0 │
+│                                        │ [38;5;2m.00[0m │     │      │       │     │    │
+│ Internal/WritePayloadGuard.cs          │ [38;5;8mExc[0m │   0 │    0 │    41 │   0 │  2 │
+│                                        │ [38;5;8mlud[0m │     │      │       │     │    │
+│                                        │  [38;5;8med[0m │     │      │       │     │    │
+│ Internal/WritePropertyBag.cs           │ [38;5;9m75.[0m │   2 │    1 │     5 │   0 │  3 │
+│                                        │  [38;5;9m00[0m │     │      │       │     │    │
+│ MigrationBatchFraming.cs               │ [38;5;8mN/A[0m │   0 │    0 │     0 │   0 │  0 │
+│ PreImageMutation.cs                    │ [38;5;8mN/A[0m │   0 │    0 │     0 │   0 │  0 │
+│ Properties/AssemblyInfo.cs             │ [38;5;8mExc[0m │   0 │    0 │     0 │   0 │  0 │
+│                                        │ [38;5;8mlud[0m │     │      │       │     │    │
+│                                        │  [38;5;8med[0m │     │      │       │     │    │
+│ RelationalProviderRegistration.cs      │ [38;5;8mN/A[0m │   0 │    0 │     0 │   0 │  0 │
+│ SqlConstraintViolation.cs              │ [38;5;8mN/A[0m │   0 │    0 │     0 │   0 │  0 │
+╰────────────────────────────────────────┴─────┴─────┴──────┴───────┴─────┴────╯
+[10:35:12 INF] Time Elapsed 01:01:07.7335844
+[10:35:12 INF] The final mutation score is 99.82 %

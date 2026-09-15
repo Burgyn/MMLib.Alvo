@@ -1304,11 +1304,26 @@ run. What remains as the killers for the outbox files, which are **not** exclude
 `SqliteAlvoDataOutboxTests` in `MMLib.Alvo.Data.Sqlite.Tests`.
 
 Since #205 the single `data-ef` leg is **two** — `data-ef-core` and `data-ef-rest` — and this paragraph is
-why the three outbox files (`EfCoreOutboxStore.cs`, `Internal/OutboxTable.cs`,
-`Internal/OutboxEventFactory.cs`) are on **`data-ef-core`**: that is the only leg that still runs
-`MMLib.Alvo.Data.Sqlite.Tests`, and the attribution above names half their killers there. An attribution in
-a design doc is one of the two things that can move a file off the conservative default; the other is the
-test project referencing the type by name. `stryker-config.data-ef.json` remains as the whole shard in one
+why the outbox files were put on `data-ef-core`: that is the only leg that still runs
+`MMLib.Alvo.Data.Sqlite.Tests`, and the attribution above names half their killers there.
+
+**Measured 2026-09-14, and it splits the three of them.** The attribution above was a design-doc claim,
+which was one of the two things that could move a file off the conservative default; the membership rule is
+now a direct measurement of each file against each suite instead. It confirms the claim for two files and
+refutes it for the third:
+
+| file | mutants | killed by `EF.Tests` alone | killed with `Sqlite.Tests` too | leg |
+|---|---|---|---|---|
+| `EfCoreOutboxStore.cs` | 56 | 0 | **29** | `data-ef-core` |
+| `Internal/OutboxTable.cs` | 24 | 2 | **19** | `data-ef-core` |
+| `Internal/OutboxEventFactory.cs` | 30 | 21 | 21 | **moved to `data-ef-rest`** |
+
+`OutboxEventFactory` records the *identical* verdict either way — `OutboxEventFactoryTests` in
+`EF.Tests` holds all of its killers, and the Sqlite suite adds none — so it was paying ~57× for a second
+assembly that changed nothing. The other two are the strongest cases on the leg: `EfCoreOutboxStore` is
+killed **only** by `Sqlite.Tests`.
+
+`stryker-config.data-ef.json` remains as the whole shard in one
 run, so a survivor on `data-ef-rest` can be checked against a leg that runs both assemblies. Read the report for `OutboxTable.cs`
 specifically: a surviving mutant in the claim predicate is a claim that cannot lose a row *because
 nothing tests it*. And read every absolute score recorded **before 2026-09-14** against **#142** — Stryker reported `Killed` for

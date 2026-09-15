@@ -6,6 +6,7 @@
     ],
     "test-runner": "mtp",
     "coverage-analysis": "off",
+    "additional-timeout": 300000,
     "mutate": [
       "Migrations/InMemoryDescriptorVersionStore.cs"
     ],

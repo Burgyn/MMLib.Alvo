@@ -233,6 +233,112 @@ if [ "$found" -lt "$test_floor" ]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Check 6 — the timeout share, i.e. how much of the score is not evidence.
+#
+# WHAT IT CATCHES, and it is a THIRD way for this gate to be green dishonestly, after
+# the vacuous run and #142. Stryker's score is (Killed + Timeout) / tested — verified
+# arithmetically against all seven shards of run 34828632562, not quoted from the
+# docs, which do not state it. A Timeout is therefore in the NUMERATOR, while the
+# report's own `killedBy` array for a timed-out mutant is EMPTY, exactly like a
+# survivor's. Counting it as a detection is right when the mutant caused the hang (an
+# endless loop is a real kill) and wrong when the run merely ran out of time.
+#
+# WHY IT IS USUALLY THE SECOND ONE HERE, measured. `timeout = (initialTestRunTime +
+# coveringTestsTime) * timeout-ratio + additional-timeout`, and every config sets
+# `coverage-analysis: off`, so each mutant re-runs the WHOLE assembly. The threshold is
+# derived from the initial run, which happens ALONE; mutant runs happen four at a time
+# (`--concurrency 4` on a 4-vCPU runner), so each is several times slower than the run
+# the threshold came from. Bail-out then splits the population cleanly: a KILLED mutant
+# aborts at the first failing test and finishes fast, a SURVIVING one runs to the end —
+# so on a slow leg "survived" and "timed out" become the same event.
+#
+# THE CONTROLLED EXPERIMENT, on the identical 565 mutants of data-ef-rest's own mutate
+# set, changing only the test-projects list and then only the timeout:
+#
+#   suite                                       Killed  Survived  Timeout  reported
+#   EntityFrameworkCore.Tests alone                309       256        0    54.69 %
+#   + Data.Sqlite.Tests                            391        31      143    94.51 %
+#   + Data.Sqlite.Tests, additional-timeout 300 s  397       168        0    70.27 %
+#
+# Per-mutant, A -> B: 309 Killed->Killed, 82 Survived->Killed, 143 Survived->Timeout,
+# and ZERO Killed->Timeout. Not one killed mutant ever timed out. Endless loops do not
+# select for mutants that were about to survive; a threshold below the suite's own
+# runtime does exactly that. Raising the timeout resolved all 143 — 137 to Survived,
+# 6 to Killed — which is what settles it.
+#
+# WHAT IT COST, and this is why the check is worth a shard's failure: data-ef-core
+# reported 99.82 % (293 Killed / 1 Survived / 249 Timeout) and measures 59.30 %
+# (321 Killed / 221 Survived / 1 Timeout) once the timeout is raised. It had 221 real
+# survivors and the gate saw one. data-sqlite reported 100.00 % on 22 Killed / 0
+# Survived / 22 Timeout. THE TWO LEGS THAT PASSED WERE THE TWO WHOSE PASS WAS MADE OF
+# TIMEOUTS.
+#
+# THE CEILING IS 20 %, ONE-SIDED, and here is the calibration it comes from — the same
+# run, timeouts as a share of tested mutants:
+#
+#   lying:   data-ef-core 45.86 %, data-sqlite 50.00 %
+#   honest:  data-ef-rest 0 %, data-postgresql 0 %, rules/auth/rest 2.10 %,
+#            expressions 7.56 %
+#
+# 20 % sits with a factor of ~2.3 of margin on both sides. It is deliberately NOT 10 %:
+# expressions' 7.56 % has not been re-measured under a raised timeout, and an endless
+# loop is genuinely plausible in an expression evaluator, so some of those 68 may be
+# real detections. Tighten this once expressions is measured; do not tighten it on the
+# strength of this comment alone.
+#
+# ONE-SIDED for the same reason as checks 3 and 4: a run with FEWER timeouts than
+# calibrated is never the defect. And the fix when it fires is `additional-timeout` in
+# the shard's config plus the `timeout:` budget that buys — NOT deleting the check and
+# not lowering `break`, both of which rebuild the lying gate by a slower route.
+#
+# Skipped for the canary, which asserts something strictly stronger below: every mutant
+# must be Survived, so a single timeout there already fails check 5 with a better
+# diagnosis than this one could give.
+#
+# WHY IT IS CONDITIONAL ON THE SUMMARY BLOCK, and why that is not the fail-open shape
+# this file keeps repairing. Checks 1-4 read Stryker's `[HH:mm:ss INF]` lines, which a
+# run prints before the mutation loop; this check reads the SUMMARY, which only a
+# COMPLETED run prints. The repository's own discovery probes — started, watched until
+# the mutant list appears, then killed by hand — are legitimate logs with no summary at
+# all, and four committed fixtures are exactly that, said so in their own headers. So
+# the condition is "did this run finish", read as "is there a `Killed:` line", and it is
+# fail-closed where it matters: once the summary is there, a missing `Timeout:` line is
+# a rewording and is REFUSED rather than read as zero.
+#
+# The residual gap is stated rather than waved away: a Stryker release that dropped the
+# whole summary block would skip this check silently. What covers that is the canary,
+# which requires `Killed:` and `Survived:` positively and runs FIRST in the matrix, so
+# it fails before any score-bearing leg is believed — the reason it is first.
+# ---------------------------------------------------------------------------
+if [ "$canary" != canary ] && command grep -qE '^Killed:[[:space:]]+[0-9]+' "$norm"; then
+    timed_out="$(command grep -oE '^Timeout:[[:space:]]+[0-9]+' "$norm" | command grep -oE '[0-9]+$' | head -1)"
+    [ -n "$timed_out" ] || fail "the log reports 'Killed: N' but never 'Timeout: N', so the share of this score that is a timeout rather than a kill is unknown. Stryker prints both in the same summary block; if an upgrade reworded it, fix this assertion rather than deleting it."
+
+    # Integer arithmetic, deliberately: $tested is already known non-empty and numeric
+    # from check 3, so this cannot divide by zero.
+    timeout_ceiling=$(( tested * 20 / 100 ))
+    if [ "$timed_out" -gt "$timeout_ceiling" ]; then
+        timeout_pct=$(( timed_out * 100 / tested ))
+        fail "$timed_out of $tested mutants TIMED OUT (${timeout_pct} %, ceiling ${timeout_ceiling} = 20 %).
+    Stryker scores a timeout as a kill — the score is (Killed + Timeout) / tested — but a timed-out mutant
+    names no killing test (its 'killedBy' is empty, exactly like a survivor's). At this share the reported
+    score is mostly not evidence: measured on this repository, data-ef-core reported 99.82 % with 249 of 543
+    timing out and measures 59.30 % once the timeout is raised, with 221 real survivors the gate had recorded
+    as one.
+    THE CAUSE IS ALMOST NEVER ENDLESS LOOPS. With 'coverage-analysis: off' every mutant re-runs the whole
+    assembly, and the timeout threshold is derived from an initial test run that happened ALONE while mutant
+    runs happen four at a time. Bail-out makes killed mutants fast and surviving ones slow, so on a slow leg
+    surviving and timing out become the same event. The tell is the split: if timeouts were real hangs they
+    would land on killed and surviving mutants alike.
+    THE FIX is 'additional-timeout' in '$config' — raise it above the suite's own wall clock under
+    concurrency — together with this shard's 'timeout:' budget in .github/workflows/mutation.yml, because a
+    survivor that runs to completion costs more than one that was cut off (measured: ~2x on the same mutant
+    set). Do NOT lower 'break', and do not delete this check: both rebuild a gate that reports a number
+    nothing measured."
+    fi
+fi
+
+# ---------------------------------------------------------------------------
 # Check 5 — the canary. Only for a run whose config is a known-uncovered pairing (see
 # the header). Reads the summary block Stryker prints unconditionally:
 #
