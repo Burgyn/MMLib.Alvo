@@ -45,6 +45,10 @@ public sealed class SqliteAlvoDataDeleteHookTests : IAsyncDisposable
 
         result.Succeeded.ShouldBeFalse("a rejected row refuses the whole batch");
         result.Refusals.Select(refusal => refusal.Index).ShouldBe([0], ignoreOrder: false);
+        // BOTH rows, and the rejected one is the half that was missing: "removes nothing at all" is
+        // satisfied for `open` by an implementation that deletes `won` — the row the hook protected — and
+        // that is the failure this case exists to catch, not the collateral one.
+        (await host.Data.GetAsync(Deals, won, Caller, Ct)).ShouldNotBeNull("the rejected row must not be removed");
         (await host.Data.GetAsync(Deals, open, Caller, Ct)).ShouldNotBeNull("no row of a refused batch is removed");
     }
 

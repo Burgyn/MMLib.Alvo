@@ -1538,10 +1538,13 @@ honest reading**, not over it, and saying otherwise in a document whose whole su
 smoothing would be self-defeating.
 
 So the provider went **64.80 % → 83.38 %** honest — both figures Killed-only, so they compare — by
-tests alone: no file moved between the two legs, no mutator level lowered, no denominator touched.
-(1107 rather than 1108 because one of
-`data-ef-core`'s mutants records `Errors`, which Stryker leaves out of the denominator; the union
-mutant set is still 1108.) Of the 183 remaining survivors **63 are message prose** — 22 on core,
+tests alone: no file moved between the two legs, no mutator level lowered, and **the mutate scope is
+byte-for-byte the one it was measured on**. The two denominators are nonetheless 1108 and 1107, and
+that is Stryker's doing rather than a scope change: one of
+`data-ef-core`'s mutants records `Errors`, which Stryker leaves out of the denominator. The union
+mutant set is still 1108, and the one-mutant difference moves the score by 0.07 pp — stated rather
+than rounded away, because "the denominator did not move" would be false and the claim that matters
+is the narrower one above. Of the 183 remaining survivors **63 are message prose** — 22 on core,
 41 on rest — which the four-bucket rule in
 `docs/superpowers/specs/2026-09-15-mutation-gate-to-threshold-design.md` leaves alive on purpose,
 so the non-prose residue is 120. Both legs' `break` is now calibrated from these numbers — **77** for

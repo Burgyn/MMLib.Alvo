@@ -248,7 +248,11 @@ public class CelTypeCheckerErrorShapeTests
         var result = Compile(source, CelProfile.Computed);
 
         result.IsSuccess.ShouldBeFalse();
-        result.Errors.ShouldAllBe(error => error.Position >= 0 && error.Position <= source.Length);
+        // `< source.Length`, not `<=`: `source.Length` is one PAST the end, so it is not "inside the
+        // string" the summary above promises — a position an agent indexes the source with would throw
+        // there. EOF is a deliberate position for the PARSER, which can legitimately refuse at end of
+        // input; it is not one for this arm, whose fallback is the cursor.
+        result.Errors.ShouldAllBe(error => error.Position >= 0 && error.Position < source.Length);
     }
 
     /// <summary>

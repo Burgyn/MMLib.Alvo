@@ -273,11 +273,21 @@ public sealed class AlvoBootServiceTests
     }
 
     /// <summary>
-    /// A replica that lost the cold-start race re-reads and decides again rather than crash-looping the
-    /// ordinary first deployment of a replica set.
+    /// A replica that lost the cold-start race <b>retries instead of failing the boot</b>, which is what
+    /// keeps the ordinary first deployment of a replica set from crash-looping.
     /// </summary>
+    /// <remarks>
+    /// <b>What this does NOT prove, stated so nobody reads more into it.</b>
+    /// <c>ConflictingRuntimeSchemaWriter</c> refuses the attempt without advancing any simulated database
+    /// state, so the retry re-reads a world nothing changed and re-plans the identical apply with
+    /// <c>expectedRevision == 0</c>. The fact pinned here is therefore "the conflict is retried and the boot
+    /// completes", not "the replica converged on what the winner wrote". The stronger case needs the fake to
+    /// model a competitor's COMPLETE write — the append, the applied snapshot and the live schema — and is
+    /// filed in #245 rather than approximated here, because a fake that advances only the append would prove
+    /// something else again.
+    /// </remarks>
     [Fact]
-    public async Task A_lost_race_is_re_read_and_decided_again_instead_of_failing_the_boot()
+    public async Task A_lost_race_is_retried_instead_of_failing_the_boot()
     {
         using var world = new BootServiceWorld().BootingFrom(BootServiceWorld.City);
         world.ConflictsBeforeTheWriteLands = 1;

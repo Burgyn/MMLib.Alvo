@@ -23,6 +23,19 @@ public class EfAlvoDataEnsureOnceTests
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     /// <summary>
+    /// Every message in an exception's chain. The engine's failure is wrapped by the port's own retry and
+    /// failure families, so the table name is not on the outermost exception.
+    /// </summary>
+    /// <param name="exception">The exception the write raised.</param>
+    private static IEnumerable<string> Chain(Exception? exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            yield return current.Message;
+        }
+    }
+
+    /// <summary>
     /// The outbox table is created by the first write and is not re-created by the second: with it dropped in
     /// between, the second write has nowhere to emit its event and says so.
     /// </summary>
@@ -39,7 +52,14 @@ public class EfAlvoDataEnsureOnceTests
         var second = await Record.ExceptionAsync(() =>
             world.Data.CreateAsync(Entity, Payload("second"), world.Caller, cancellationToken: Ct));
 
+        // NOT just `ShouldNotBeNull`: any failure satisfies that, and a validation or authorization refusal
+        // raised before the outbox insert is ever reached would keep this green while proving the opposite
+        // of what the case claims. The table NAME is the contract-carrying substring here — the engine's
+        // sentence around it is not asserted, only that the failure is about the table that was dropped.
         second.ShouldNotBeNull("the event had nowhere to go");
+        Chain(second).ShouldContain(
+            message => message.Contains(Outbox, StringComparison.Ordinal),
+            "the failure must be about the dropped outbox table, not something raised before it");
         (await ExistsAsync(world, Outbox)).ShouldBeFalse("the second write issued no DDL of its own");
     }
 

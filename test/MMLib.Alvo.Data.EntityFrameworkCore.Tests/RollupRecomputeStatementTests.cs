@@ -119,8 +119,12 @@ public class RollupRecomputeStatementTests
     {
         var images = tenants == 0 ? [] : new[] { TenantA };
 
-        var refused = await Should.ThrowAsync<InvalidOperationException>(
-            () => StatementsAsync(Schema(parent), Child(child), images));
+        var (refused, statements) = await RefusedAsync(Schema(parent), Child(child), images);
+
+        // BEFORE either statement is issued, which is what the class summary claims and what an assertion
+        // on the exception alone does not pin: an implementation that takes the parent lock and only then
+        // refuses passes a `ThrowAsync` and has already touched another tenant's row.
+        statements.ShouldBeEmpty("a pair that cannot be narrowed honestly must issue nothing at all");
 
         // The contract is that the refusal names both entities and says which side carries a tenant. The
         // sentence that joins them is not contract: asserting "Entity 'invoices' rolls up 'invoice_items'"
@@ -140,9 +144,10 @@ public class RollupRecomputeStatementTests
     [Fact]
     public async Task A_scoped_write_whose_images_name_two_tenants_is_refused()
     {
-        var refused = await Should.ThrowAsync<InvalidOperationException>(
-            () => StatementsAsync(Schema(TenancyMode.Scoped), Child(TenancyMode.Scoped), TenantA, TenantB));
+        var (refused, statements) = await RefusedAsync(
+            Schema(TenancyMode.Scoped), Child(TenancyMode.Scoped), TenantA, TenantB);
 
+        statements.ShouldBeEmpty("an image set that did not come off one stored row must issue nothing");
         refused.Message.ShouldContain("'invoice_items'");
         refused.Message.ShouldContain(AlvoManagedColumns.TenantId);
     }
@@ -171,12 +176,41 @@ public class RollupRecomputeStatementTests
         SchemaModel schema, EntitySchema child, params Guid[] tenants)
     {
         var recorder = new StatementRecorder();
+        await RunAsync(recorder, schema, child, tenants);
+
+        return recorder.Statements;
+    }
+
+    /// <summary>
+    /// Runs a write the recompute is expected to <b>refuse</b>, and hands back the refusal together with
+    /// whatever reached the database before it.
+    /// </summary>
+    /// <remarks>
+    /// The statements are the half that matters and the half an assertion on the exception alone leaves
+    /// open: every refusal in this class claims to happen before either statement is issued, and a guard
+    /// moved one line later still throws.
+    /// </remarks>
+    /// <param name="schema">The applied schema.</param>
+    /// <param name="child">The child entity that was written.</param>
+    /// <param name="tenants">One <c>tenant_id</c> per row image.</param>
+    private static async Task<(InvalidOperationException Refusal, IReadOnlyList<string> Statements)> RefusedAsync(
+        SchemaModel schema, EntitySchema child, params Guid[] tenants)
+    {
+        var recorder = new StatementRecorder();
+
+        var refusal = await Should.ThrowAsync<InvalidOperationException>(
+            () => RunAsync(recorder, schema, child, tenants));
+
+        return (refusal, recorder.Statements);
+    }
+
+    private static async Task RunAsync(
+        StatementRecorder recorder, SchemaModel schema, EntitySchema child, Guid[] tenants)
+    {
         await using var db = new AlvoDataContext(Options(recorder), schema, Guid.NewGuid());
 
         await new RollupRecompute(new TestSqlDialect(), new TestFieldSqlRenderer())
             .ForChildWriteAsync(db, child, Images(tenants), TestContext.Current.CancellationToken);
-
-        return recorder.Statements;
     }
 
     private static IReadOnlyList<IReadOnlyDictionary<string, object?>> Images(Guid[] tenants) =>
