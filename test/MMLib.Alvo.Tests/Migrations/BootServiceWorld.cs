@@ -75,6 +75,32 @@ internal sealed class BootServiceWorld : IDisposable
         { "apiVersion": "alvo.dev/v1", "name": "depots" }
         """;
 
+    /// <summary>
+    /// A descriptor the <b>schema validator accepts and the policy catalog refuses</b>: its authorization
+    /// rule reads a field the entity does not declare, so the CEL compiler has nothing to bind
+    /// <c>owner_id</c> to.
+    /// </summary>
+    /// <remarks>
+    /// The other unservable fixture fails on a missing <c>entities</c> block, which is the JSON-Schema arm.
+    /// This one exists because the boot path's refusal catches <b>two</b> exceptions from two different
+    /// passes, and the second is the one that matters for a dashboard-first host: the stored descriptor is a
+    /// DATABASE ROW, so a rule that does not compile is a row somebody wrote, and the rule in question is an
+    /// authorization rule. Without this fixture the arm that re-validates CEL on load is unexercised, and an
+    /// arm nothing reaches is an arm that can be deleted without a test noticing.
+    /// </remarks>
+    internal const string UnservableRule = """
+        {
+          "apiVersion": "alvo.dev/v1",
+          "name": "depots",
+          "entities": {
+            "depots": {
+              "fields": { "city": { "type": "string" } },
+              "rules": { "list": "owner_id == @user.id" }
+            }
+          }
+        }
+        """;
+
     private readonly InMemoryDescriptorVersionStore _appends = new();
     private readonly CountingVersionStore _history;
     private readonly StubAppliedSchemaStore _store = new();

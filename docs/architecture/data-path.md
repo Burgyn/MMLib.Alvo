@@ -1544,8 +1544,10 @@ tests alone: no file moved between the two legs, no mutator level lowered, no de
 mutant set is still 1108.) Of the 183 remaining survivors **63 are message prose** — 22 on core,
 41 on rest — which the four-bucket rule in
 `docs/superpowers/specs/2026-09-15-mutation-gate-to-threshold-design.md` leaves alive on purpose,
-so the non-prose residue is 120. Both legs' `break` is now calibrated from these numbers (78 and
-83); the rule is in the `mutation.yml` header.
+so the non-prose residue is 120. Both legs' `break` is now calibrated from these numbers — **77** for
+`data-ef-core` (from its Killed-only 79.91 %, not from the 80.13 % its one timeout buys) and **83**
+for `data-ef-rest`; the rule, and the real slack each threshold leaves, are in the `mutation.yml`
+header.
 
 **The fix, and its cost.** `additional-timeout: 300000` on every config, uniformly — a timeout must mean
 "the mutant hung" on every leg, and a per-leg exception is the kind of thing that rots. It makes the honest

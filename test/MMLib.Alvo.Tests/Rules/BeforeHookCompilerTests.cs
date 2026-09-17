@@ -216,9 +216,20 @@ public class BeforeHookCompilerTests
     /// answer — and an unanswerable reference collapses every comparison against it, including <c>!=</c>, so a
     /// condition reading "every deal except the won ones" fires for every deal.
     /// </summary>
+    /// <remarks>
+    /// The rows are one per <c>CelTree.Children</c> arm the walk has to descend, not four spellings of one
+    /// case: <c>Unanswerable</c> finds the reference by recursing through that method, so an arm reporting
+    /// an empty subtree takes the reference out of view and the refusal silently stops happening. The
+    /// <c>has(old.title)</c> row is the one that was missing, and it is the worst of them — a
+    /// <c>beforeCreate</c> guarded on it compiles, resolves <c>old.title</c> to null at request time,
+    /// answers <see langword="false"/>, and the <c>reject</c> never fires. A deny rule that is never
+    /// refused and never denies. <c>CelTreeChildrenTests</c> pins the walk itself.
+    /// </remarks>
     [Theory]
-    [InlineData("old.title == 'x'")]
-    [InlineData("!(old.title == 'x')")]
+    [InlineData("old.title == 'x'")]              // CelBinary
+    [InlineData("!(old.title == 'x')")]           // CelUnary
+    [InlineData("has(old.title)")]                // CelHas
+    [InlineData("old.title == 'x' ? true : false")] // CelConditional
     [InlineData("changed(title)")]
     public void A_before_create_expression_reading_the_row_that_does_not_exist_yet_is_refused(string condition)
         => CompileErrors(BeforeCreate(Reject("no"), condition)).ShouldHaveSingleItem()
@@ -228,6 +239,7 @@ public class BeforeHookCompilerTests
     [Theory]
     [InlineData("new.title == 'x'")]
     [InlineData("!(new.title == 'x')")]
+    [InlineData("has(new.title)")]
     [InlineData("changed(title)")]
     public void A_before_delete_expression_reading_the_row_that_will_not_exist_is_refused(string condition)
         => CompileErrors(At("beforeDelete", Reject("no"), condition)).ShouldHaveSingleItem()

@@ -244,10 +244,7 @@ public class DestructiveScanTests
     [Fact]
     public void A_shrinking_max_length_names_the_old_and_the_new_bound()
     {
-        var detail = DetailOf(Alter(Old(maxLength: 100), maxLength: 20));
-
-        detail.ShouldContain("100");
-        detail.ShouldContain("20");
+        ShouldNarrowFrom(DetailOf(Alter(Old(maxLength: 100), maxLength: 20)), "100", "20");
     }
 
     /// <summary>An unbounded column gaining a bound has only the new one to name.</summary>
@@ -258,10 +255,7 @@ public class DestructiveScanTests
     [Fact]
     public void A_shrinking_precision_names_the_old_and_the_new_precision()
     {
-        var detail = DetailOf(AlterDecimal(Old(Money, precision: 18), precision: 10));
-
-        detail.ShouldContain("18");
-        detail.ShouldContain("10");
+        ShouldNarrowFrom(DetailOf(AlterDecimal(Old(Money, precision: 18), precision: 10)), "18", "10");
     }
 
     [Fact]
@@ -272,10 +266,8 @@ public class DestructiveScanTests
     public void A_shrinking_scale_names_the_old_and_the_new_scale()
     {
         var old = Old(Money, precision: 18, scale: 4);
-        var detail = DetailOf(AlterDecimal(old, precision: 18, scale: 2));
 
-        detail.ShouldContain("4");
-        detail.ShouldContain("2");
+        ShouldNarrowFrom(DetailOf(AlterDecimal(old, precision: 18, scale: 2)), "4", "2");
     }
 
     [Fact]
@@ -286,10 +278,26 @@ public class DestructiveScanTests
     [Fact]
     public void A_type_change_names_both_clr_types()
     {
-        var detail = DetailOf(Alter(Old(), clrType: typeof(long)));
+        ShouldNarrowFrom(DetailOf(Alter(Old(), clrType: typeof(long))), nameof(String), nameof(Int64));
+    }
 
-        detail.ShouldContain(nameof(String));
-        detail.ShouldContain(nameof(Int64));
+    /// <summary>
+    /// The detail names both bounds <b>and</b> names them in the direction the narrowing runs. Asserting
+    /// only that both numbers appear is satisfied with the operands swapped — "Scale shrinks from 2 to 4"
+    /// passes a pair of <c>ShouldContain</c>s — and an operator reads this sentence while deciding whether
+    /// to set <c>AllowDestructive</c>. Position, not prose: the wording around the two values is free to
+    /// change.
+    /// </summary>
+    /// <param name="detail">The classification's detail.</param>
+    /// <param name="from">The bound being left, which must appear first.</param>
+    /// <param name="to">The bound being moved to.</param>
+    private static void ShouldNarrowFrom(string detail, string from, string to)
+    {
+        var start = detail.IndexOf(from, StringComparison.Ordinal);
+        start.ShouldBeGreaterThanOrEqualTo(0, $"the detail must name the bound being left ('{from}'): {detail}");
+
+        var end = detail.IndexOf(to, start + from.Length, StringComparison.Ordinal);
+        end.ShouldBeGreaterThan(start, $"'{to}' must be named AFTER '{from}', or the narrowing reads backwards: {detail}");
     }
 
     private static Type Money => typeof(decimal);

@@ -269,25 +269,44 @@ mutant, and in percent on the large ones.
 what it measured today. `high` stays the **ambition**, which is where 80 now lives for the shard
 under it — the goal did not move, only the gate did.
 
-| config | Killed-only | break | low | high |
-|---|---|---|---|---|
-| `stryker-config.data-postgresql.json` | 100.00 % | 90 | 95 | 100 |
-| `stryker-config.expressions.json` | 92.33 % | 90 | 92 | 96 |
-| `stryker-config.data-sqlite.json` | 86.36 % | 81 | 86 | 90 |
-| `stryker-config.data-ef-rest.json` | 85.82 % | 83 | 85 | 90 |
-| `stryker-config.data-ef-core.json` | 79.91 % | 77 | 79 | 90 |
-| `stryker-config.json` (rules, auth, rest) | 57.88 % | 55 | 57 | 80 |
+| config | Killed-only | break | low | high | nominal margin | **real slack** |
+|---|---|---|---|---|---|---|
+| `stryker-config.data-postgresql.json` | 100.00 % | 90 | 95 | 100 | 2 of 20 | **2 kills** |
+| `stryker-config.expressions.json` | 92.33 % | 90 | 92 | 96 | 2 pp (18) | **39 kills** |
+| `stryker-config.data-sqlite.json` | 86.36 % | 81 | 86 | 90 | 2 of 44 | **2 kills** |
+| `stryker-config.data-ef-rest.json` | 85.82 % | 83 | 85 | 90 | 2 pp (13) | **18 kills** |
+| `stryker-config.data-ef-core.json` | 79.91 % | 77 | 79 | 90 | 2 pp (9) | **14 kills** |
+| `stryker-config.json` (rules, auth, rest) | 57.88 % | 55 | 57 | 80 | 2 pp (34) | **49 kills** |
+
+**The nominal margin is not the slack, and the slack is what binds.** `break` is an integer percent
+floored *after* the margin is subtracted, and Stryker enforces against its own `(Killed + Timeout)`
+score rather than the Killed-only figure the margin was taken from. Both roundings go the permissive
+way, so the nominal margin understates by 40–115 % on the four shards where it is expressed in
+percent. Real slack is `(Killed + Timeout) − ceil(break × tested / 100)` and is the number to quote —
+publishing the nominal one as if it were the real one would be this design's own defect wearing a
+different hat.
 
 **What the aggregate on `stryker-config.json` costs, stated rather than left to be discovered.**
 That shard covers Rules, Auth, Events, Migrations and Descriptor — the rule engine and RBAC, the
 code §0 principle 5 rests on — and at 1707 mutants a 2 pp margin is 34 kills of slack. `Auth` is
 104 mutants with 75 killed, so a regression unpinning nearly half the authorization area stays
-inside that slack and reports green. Two things bound the damage and neither makes it acceptable
-indefinitely: the gate is post-merge and advisory, so the slack costs a *notification* rather than
-a merge; and `low: 57` still takes the report off green on any real drop. The fix is to give `Auth`
-— or `Auth` + `Rules` — its own shard. It is filed in #245 with the numbers rather than done here,
-because splitting a shard in the same change that re-cuts every threshold is the
-change-two-things-at-once mistake this design rejects elsewhere.
+inside that slack and reports green — precisely, **49 of Auth's 75 killed mutants, 65 % of the
+area's pinned behaviour**, can be unpinned before the gate trips. (Unpinning all 75 does trip it, at
+53.49 %, so the bound is real; it is just looser than the "nearly half" this paragraph claimed
+before the slack was computed rather than assumed.)
+
+**One** thing bounds the damage: the gate is post-merge and advisory, so the slack costs a
+*notification* rather than a merge. `low: 57` is **not** on that list, though an earlier version of
+this section listed it — nothing in the pipeline reads it. These configs declare no `json` reporter,
+the workflow uploads only the log, `scripts/assert-mutation-run` never looks at the score, and
+`notify` fires only on a failing leg. A drop to 57.1 % passes `break`, shows green, files nothing,
+and is amber only inside a log artifact on a green run.
+
+Two fixes are filed in #245 rather than done here, and the cheaper one is the better one: give
+`Auth` its own shard (costs a second Stryker run), or — strictly more precise and free — add `json`
+to that shard's reporters and have `scripts/assert-mutation-run` assert a per-area **killed floor**
+from the report (`Auth` ≥ 73, `Rules` ≥ 199). Neither belongs in the change that re-cuts every
+threshold; that is the change-two-things-at-once mistake this design rejects elsewhere.
 
 `stryker-config.api.json` is deliberately left at 90/85/80. It has no matrix leg (DECLARED GAP,
 #143), so it has no measurement to calibrate against, and a calibrated-looking number there would be

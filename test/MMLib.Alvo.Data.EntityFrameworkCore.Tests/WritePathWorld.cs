@@ -30,6 +30,20 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore.Tests;
 /// <c>AlvoDataContext</c>), so the columns a write binds are the columns EF mapped rather than DDL a test
 /// wrote out and could get wrong.
 /// </para>
+/// <para>
+/// <b>THIS IS NOT AN ADVERSARIAL WORLD, and nothing built on it proves an authorization fact.</b> The
+/// descriptor it synthesizes rules every operation <c>"true"</c>, and its caller is one fixed user in one
+/// fixed tenant that no test varies — so the real <c>IPolicyEngine</c> and <c>IPredicateRenderer</c> are
+/// wired (this is not a stubbed gate) but are only ever asked questions whose answer is yes. That matters
+/// specifically because <c>tenant_id</c> is deliberately caller-writable on a create
+/// (<c>WritePayloadGuard</c>), so the synthesized tenant scope is the only thing here standing between a
+/// create and a foreign tenant: weaken it and every test in this file's dependents stays green.
+/// </para>
+/// <para>
+/// The cross-tenant facts live where they can be asserted against both shipped engines —
+/// <c>MMLib.Alvo.Testing.Data.AlvoDataAdversarialTests</c> pins create-into-another-tenant,
+/// update-moving-tenant and no-tenant-context. Read that file, not this one, for the boundary.
+/// </para>
 /// </remarks>
 internal sealed class WritePathWorld : IAsyncDisposable
 {

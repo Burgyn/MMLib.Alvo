@@ -253,6 +253,14 @@ name: Mutation
 # 0da5b4e with `additional-timeout: 300000` in force. Reproduce any one of them with
 #   cd test && dotnet tool run dotnet-stryker -f ../<config> --concurrency 4
 #
+# TESTS LANDED AFTER THOSE MEASUREMENTS AND THE NUMBERS WERE NOT RE-TAKEN, which is stated
+# rather than quietly ignored. A review pass added cases to MMLib.Alvo.Tests
+# (CelTreeChildrenTests, BeforeHookCompilerTests) and to the EF suite, touching the
+# `expressions`, `rules/auth/rest` and `data-ef-rest` legs. Adding a test can only turn a
+# survivor into a kill, never the reverse, so every figure above is a FLOOR for those legs
+# and every `break` derived from one is conservative. Re-measure when convenient; nothing
+# here is wrong, it is only stale in the safe direction.
+#
 # THE RULE THAT SETS `break`. It stops being an ambition and becomes a REGRESSION LATCH:
 #
 #   break = KILLED-ONLY score − max(2 percentage points, 2 mutants), floored to a whole percent
@@ -270,30 +278,57 @@ name: Mutation
 # measurement noise. That is why it is expressed in mutants on the small legs, where 2 pp
 # is less than a single mutant, and in percent on the large ones.
 #
-#   config                                K-only   break  low  high   margin
-#   stryker-config.data-postgresql.json   100.00 %     90   95   100   2 of 20 mutants
-#   stryker-config.expressions.json        92.33 %     90   92    96   2 pp (18 mutants)
-#   stryker-config.data-sqlite.json        86.36 %     81   86    90   2 of 44 mutants
-#   stryker-config.data-ef-rest.json       85.82 %     83   85    90   2 pp (13 mutants)
-#   stryker-config.data-ef-core.json       79.91 %     77   79    90   2 pp (9 mutants)
-#   stryker-config.json (rules/auth/rest)  57.88 %     55   57    80   2 pp (34 mutants)
+#   config                                K-only   break  low  high   nominal margin   REAL SLACK
+#   stryker-config.data-postgresql.json   100.00 %     90   95   100   2 of 20 mutants    2 kills
+#   stryker-config.expressions.json        92.33 %     90   92    96   2 pp (18)         39 kills
+#   stryker-config.data-sqlite.json        86.36 %     81   86    90   2 of 44 mutants    2 kills
+#   stryker-config.data-ef-rest.json       85.82 %     83   85    90   2 pp (13)         18 kills
+#   stryker-config.data-ef-core.json       79.91 %     77   79    90   2 pp (9)          14 kills
+#   stryker-config.json (rules/auth/rest)  57.88 %     55   57    80   2 pp (34)         49 kills
 #
-# `low` is the Killed-only score floored, so a leg's report goes amber the moment it drops
-# below what it measured today. `high` stays the AMBITION — which is where 80 still lives
-# for the leg under it. The goal did not move; only the gate did.
+# THE LAST TWO COLUMNS DIFFER, AND THE REAL ONE IS WHAT BINDS. `break` is an integer
+# percent floored AFTER the margin is subtracted, and enforcement runs against Stryker's
+# own (Killed + Timeout) score rather than the Killed-only figure the margin was taken
+# from. Both roundings go the permissive way, so the nominal margin UNDERSTATES the slack
+# by 40-115 % on the four legs where it is expressed in percent; the two small legs, where
+# it is expressed in mutants, are exact. REAL SLACK is computed per leg as
+# `(Killed + Timeout) − ceil(break × tested / 100)` and is the number to quote. Stating the
+# nominal one as if it were the real one would be the same class of error as quoting a
+# timeout as a kill, two sections up.
+#
+# `low` is the Killed-only score floored. It colours the cleartext report and NOTHING ELSE
+# READS IT — this is stated because the first version of this section listed it as a
+# mitigation, and it is not one: these configs declare no `json` reporter, the workflow
+# uploads only `stryker-output.log`, `scripts/assert-mutation-run` never looks at the
+# score, and the `notify` job fires only when a leg fails. A leg that drops from 57.88 % to
+# 57.1 % passes `break`, shows a GREEN check, files no issue, and its amber colour exists
+# only as a line in a log artifact on a green run nobody opens. `high` stays the AMBITION —
+# which is where 80 still lives for the leg under it. The goal did not move; only the gate
+# did.
 #
 # WHAT THE AGGREGATE ON `stryker-config.json` COSTS, stated because it is the one leg where
 # the margin is uncomfortable. That leg covers Rules, Auth, Events, Migrations and
-# Descriptor — the rule engine and RBAC, the code §0 principle 5 rests on — and at 1707
-# mutants a 2 pp margin is 34 kills of slack. `Auth` is 104 mutants with 75 killed, so a
-# regression unpinning nearly half the authorization area stays inside that slack and
-# reports green. Two things bound the damage and neither makes it acceptable indefinitely:
-# this gate is POST-MERGE and advisory (see "WHY POST-MERGE" below), so what the slack
-# costs is a notification rather than a merge; and `low: 57` still moves the report off
-# green on any real drop. The fix is to give `Auth` — or `Auth` + `Rules` — its own leg, so
-# the aggregate cannot mask the area; the per-area table below is already the partition,
-# and it is filed in #245 with the numbers rather than done here, because splitting a leg
-# in the same commit that re-cuts every threshold is the change-two-things-at-once mistake
+# Descriptor — the rule engine and RBAC, the code §0 principle 5 rests on — and its real
+# slack is 49 kills. `Auth` is 104 mutants with 75 killed, so a regression unpinning 49 of
+# those 75 — 65 % of the authorization area's pinned behaviour — stays inside the slack and
+# reports green. (Unpinning all 75 takes the leg to 53.49 % and does break it, so the bound
+# is real, but it is looser than "nearly half", which is what this paragraph said before
+# the slack was computed rather than assumed.)
+#
+# ONE thing bounds the damage: this gate is POST-MERGE and advisory (see "WHY POST-MERGE"
+# below), so what the slack costs is a notification rather than a merge. That is the whole
+# list — `low` is not on it, for the reason above.
+#
+# TWO FIXES ARE FILED IN #245 RATHER THAN DONE HERE, and the cheaper one is the better one.
+#   - Give `Auth` — or `Auth` + `Rules` — its own leg, so the aggregate cannot mask the
+#     area; the per-area table below is already the partition. Costs a second Stryker run.
+#   - Cheaper and strictly more precise: add `"json"` to this leg's reporters and have
+#     `scripts/assert-mutation-run` — which already runs on every leg and already routes to
+#     the tracking issue — assert a per-area KILLED FLOOR from that report (`Auth` ≥ 73,
+#     `Rules` ≥ 199). No new leg, no second run, no re-partition, and it closes exactly the
+#     hole the slack opens.
+# Neither is done in this commit because splitting a leg, or adding a check to the guard,
+# in the same change that re-cuts every threshold is the change-two-things-at-once mistake
 # this header spends its length warning about.
 #
 # stryker-config.api.json KEEPS 90/85/80 and that is deliberate: it has no matrix leg

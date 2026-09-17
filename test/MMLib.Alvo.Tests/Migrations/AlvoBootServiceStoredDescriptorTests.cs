@@ -143,6 +143,30 @@ public sealed class AlvoBootServiceStoredDescriptorTests
     }
 
     /// <summary>
+    /// The same refusal through the <b>other</b> pass: a stored descriptor whose authorization rule does not
+    /// compile. The case above fails JSON-Schema validation; this one passes it and is refused when the
+    /// policy catalog is built, which is the arm a dashboard-first host actually depends on — the stored
+    /// descriptor is a database row, so an uncompilable rule is a row somebody wrote.
+    /// </summary>
+    /// <remarks>
+    /// Asserted separately rather than folded into a theory with the case above, because what is being
+    /// claimed is that BOTH passes reach the same fail-up-not-ready outcome; a single row proves it for one
+    /// pass and says nothing about the other, and the two are caught by one <c>catch</c> whose second
+    /// exception type nothing else in this suite produces.
+    /// </remarks>
+    [Fact]
+    public async Task A_stored_descriptor_whose_rule_does_not_compile_stands_the_host_up_not_ready()
+    {
+        using var world = Dashboard().StoredVerbatim(BootServiceWorld.UnservableRule);
+
+        (await world.BootAsync()).ShouldBeNull("an uncompilable authorization rule must not be served");
+
+        world.State.Phase.ShouldBe(AlvoBootPhase.Failed);
+        world.State.AppliedRevision.ShouldBeNull();
+        world.PrimedEntities.ShouldBeEmpty();
+    }
+
+    /// <summary>
     /// That refusal names the project and the revision it was reading, and carries the reason the descriptor
     /// was refused — the three things an operator needs to find the row and repair it.
     /// </summary>
