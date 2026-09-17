@@ -220,19 +220,91 @@ name: Mutation
 # applies and nothing is below it. Verified end to end — Stryker exit 0, and
 # `scripts/assert-mutation-run … canary canary` prints "CANARY honest".
 #
-# EXPECT THE FIRST HONEST RUN TO GO RED, ON SEVERAL LEGS AT ONCE. Every score-bearing
-# config carries `break: 80` and every one of them has been passing on a false ~100 %.
-# The one leg measured locally after the fix, `data-postgresql`, comes back
-# 15 Killed / 5 Survived — 75.00 %, below its own break. That is five real survivors and
-# a test debt, not a regression this commit introduced; they are enumerated in #225, so
-# the first tracking issue has somewhere to point. The thresholds are
-# deliberately left alone: lowering them to match the first honest measurement would
-# rebuild the lying gate by a slower route. `data-sqlite` measured 97.73 % locally
-# (29 Killed / 1 Survived / 14 Timeout, under load — the timeouts want the CI run to
-# confirm). `expressions`, `rules/auth/rest`, `data-ef-core` and `data-ef-rest` are
-# unmeasured post-fix. scripts/mutation-notify titles the tracking issue with the merge
-# commit's sha, so read the first few as recalibration rather than as that commit's
-# doing.
+# THE FIRST HONEST RUN DID GO RED, ON EVERY SCORING LEG, and that is the history the
+# section below replaces. Each config carried `break: 80` while passing on a false
+# ~100 %; measured post-#142 and post-#240 the six legs came back 75.00 / 75.00 / 65.91 /
+# 56.86 / 57.30 / 52.02 %. The thresholds were deliberately left alone at that point —
+# lowering them to match the first honest measurement would have rebuilt the lying gate
+# by a slower route — and the debt was tracked in #225, #238, #239 and #241 instead.
+# scripts/mutation-notify titles the tracking issue with the merge commit's sha, so read
+# those runs as recalibration rather than as that commit's doing.
+#
+# THRESHOLDS ARE NOW CALIBRATED FROM MEASUREMENT, 2026-09-17, and the order matters: the
+# work came first and the numbers below are what it produced. Five legs were raised by
+# TESTS — no file moved between shards, no mutator level lowered, no denominator touched
+# — and only then were the gates re-cut to sit under what each leg actually measures.
+#
+#   leg                 honest 2026-09-15   measured 2026-09-17   report
+#   data-postgresql               75.00 %            100.00 %     20 K /  0 S /  0 T
+#   expressions                   75.00 %             94.33 %    831 K / 51 S / 18 T
+#   data-sqlite                   65.91 %             86.36 %     38 K /  6 S /  0 T
+#   data-ef-rest                  56.86 %             85.82 %    557 K / 92 S /  0 T
+#   data-ef-core                  57.30 %             80.13 %    366 K / 91 S /  1 T
+#   rules, auth, rest             52.02 %             57.88 %    988 K /719 S /  0 T
+#
+# All six measured locally on a 10-core box, `--concurrency 4`, from `test/`, at commit
+# 0da5b4e with `additional-timeout: 300000` in force. Reproduce any one of them with
+#   cd test && dotnet tool run dotnet-stryker -f ../<config> --concurrency 4
+#
+# THE RULE THAT SETS `break`. It stops being an ambition and becomes a REGRESSION LATCH:
+#
+#   break = measured score − max(2 percentage points, 2 mutants), floored to a whole percent
+#
+# The margin is sized for CODE CHURN — one new unkilled line of product code — not for
+# measurement noise. With `additional-timeout` in force every leg here is deterministic
+# except `expressions`, whose 18 surviving timeouts are the only moving part in the
+# repository. That is why the margin is expressed in mutants on the small legs, where
+# 2 pp is less than a single mutant, and in percent on the large ones.
+#
+#   config                                measured   break  low  high   margin
+#   stryker-config.data-postgresql.json    100.00 %      90   95   100   2 of 20 mutants
+#   stryker-config.expressions.json         94.33 %      92   94    96   2 pp (18 mutants)
+#   stryker-config.data-sqlite.json         86.36 %      81   86    90   2 of 44 mutants
+#   stryker-config.data-ef-rest.json        85.82 %      83   85    90   2 pp (13 mutants)
+#   stryker-config.data-ef-core.json        80.13 %      78   80    90   2 pp (9 mutants)
+#   stryker-config.json (rules/auth/rest)   57.88 %      55   57    80   2 pp (34 mutants)
+#
+# `low` is the measured score floored, so a leg's report goes amber the moment it drops
+# below what it measured today. `high` stays the AMBITION — which is where 80 still lives
+# for the leg under it. The goal did not move; only the gate did.
+#
+# stryker-config.api.json KEEPS 90/85/80 and that is deliberate: it has no matrix leg
+# (see DECLARED GAP), so it has no measurement to calibrate against, and a
+# calibrated-LOOKING number there would be the fabrication this exercise exists to avoid.
+#
+# MOVEMENT RULE: up freely, down only with a written reason and the re-measurement it
+# names. A threshold raised because a leg improved needs no ceremony. A threshold lowered
+# is the gate weakening, so the commit message carries the log or report it was
+# recomputed from.
+#
+# WHY `rules, auth, rest` IS THE ONE LEG UNDER 80, AS ARITHMETIC RATHER THAN AS AN EXCUSE.
+# 1707 tested, 988 killed, 719 survivors. Classifying each survivor by whether the mutated
+# string literal is message PROSE (a sentence carrying no contract — bucket 3 of the design
+# spec, deliberately left alive) or anything else:
+#
+#   area              K     S   prose   non-prose   score
+#   Events          211   202      70         132   51.1 %
+#   Migrations      219   133      36          97   62.2 %
+#   Descriptor      249   229     141          88   52.1 %
+#   Rules           202   117      44          73   63.3 %
+#   Auth             75    29       9          20   72.1 %
+#   Internal+root    32     9       0           9   78.0 %
+#   total           988   719     300         419   57.88 %
+#
+# `break: 80` needs 1366 kills: +378, out of 419 non-prose survivors — 90 % of everything
+# left that is not a sentence, with no allowance for the equivalent mutants inside that
+# 419. Reachable, and expensive; not a reason to call the gate calibrated. Tracked in
+# #245 per area and per file, so the next person picks up a bucket rather than a
+# percentage.
+#
+# WHY NONE OF THIS IS IN THE CONFIG FILES, though that was the plan. Probed, both halves:
+# Stryker REJECTS an unknown key ("The allowed keys for the \"stryker-config\" object
+# are { … } but \"_calibration\" was found") and ACCEPTS `//` comments — but
+# scripts/assert-mutation-run reads each config's `test-projects` with `jq`, and
+# scripts/test-assert-mutation-run reads three more `mutate` lists the same way. `jq` is
+# strict JSON and dies on the first `//`, so a comment in a config reddens the PR gate.
+# The configs therefore carry values only, and the calibration lives here beside every
+# other measurement this gate is sized from.
 #
 # WHAT THE CANARY DOES NOT PROVE. It exercises MMLib.Alvo.Abstractions.Tests, and #142's
 # own repro exercised MMLib.Alvo.Tests. The evidence that the data suites are honest too

@@ -184,3 +184,115 @@ Every scoring shard at or above 80 on a locally measured, honest run, with:
 
 If a shard cannot get there under those constraints, the plan says so with numbers and stops —
 that is a result, not a failure to finish.
+
+---
+
+## Addendum, 2026-09-17: the thresholds moved, and this is not the alternative rejected above
+
+**The instruction changed.** The section "Why not the alternatives" rejects *"move `break` per shard
+to match measurement"* on the maintainer's own constraint ("keep the thresholds"). That constraint
+was lifted once every shard had been measured honestly:
+
+> Ok keď dokončíš tak uprav prahy aby boli reálne a priprav už PR.
+
+So the rejection above stands **as the reason not to move a threshold instead of doing the work**,
+and it is not a reason not to move one *after* the work. The work is done first, and the numbers
+below are what it produced.
+
+### What the work produced
+
+Five shards were raised by tests, not by arithmetic. No threshold was touched while they were being
+raised, no file moved between shards, no mutator level lowered.
+
+| shard | honest baseline (2026-09-15) | measured now | by |
+|---|---|---|---|
+| `data-postgresql` | 75.00 % | **100.00 %** | +5 kills |
+| `expressions` | 75.00 % | **94.33 %** | +172 kills |
+| `data-sqlite` | 65.91 % | **86.36 %** | +9 kills |
+| `data-ef-rest` | 56.86 % | **85.82 %** | +188 kills (PR #242) |
+| `data-ef-core` | 57.30 % | **80.13 %** | +104 kills |
+| `rules, auth, rest` | 52.02 % | **57.88 %** | +100 kills |
+
+### Why the sixth shard did not reach 80, stated as arithmetic
+
+`rules, auth, rest` is 1707 tested mutants, 988 killed, 719 survivors. Classifying every survivor
+by whether the mutated string literal is **message prose** (bucket 3 — a sentence, no contract) or
+anything else:
+
+| area | K | S | prose | non-prose | score |
+|---|---|---|---|---|---|
+| Events | 211 | 202 | 70 | **132** | 51.1 % |
+| Migrations | 219 | 133 | 36 | **97** | 62.2 % |
+| Descriptor | 249 | 229 | 141 | **88** | 52.1 % |
+| Rules | 202 | 117 | 44 | **73** | 63.3 % |
+| Auth | 75 | 29 | 9 | **20** | 72.1 % |
+| Internal + root | 32 | 9 | 0 | **9** | 78.0 % |
+| **total** | **988** | **719** | **300** | **419** | **57.88 %** |
+
+`break: 80` needs 1366 kills. That is **+378, out of 419 non-prose survivors — 90 % of everything
+left that is not a sentence**, with no allowance for the equivalent mutants inside that 419 (the
+bucket-1 class this design opens with, of which `ConfigureAwait` alone accounted for 36 on the two
+EF shards). It is not arithmetically impossible; it is one shard's worth of work again, and it is
+not what "the thresholds are realistic" means.
+
+**Correction to an earlier claim of mine.** Before the `AlvoBootService` work landed I told the
+maintainer this shard's 80 was *arithmetically unreachable* — 478 needed against 424 behavioural
+survivors. That was true of the measurement it was computed from and is no longer true of this one:
+the gap is now 378 against 419. The honest statement is the one above — reachable, and expensive —
+not the stronger one.
+
+### The rule the new thresholds follow
+
+`break` stops being an ambition and becomes a **regression latch calibrated from measurement**:
+
+> `break` = the measured score minus the larger of **2 percentage points** or **2 mutants**, floored
+> to a whole percent.
+
+The margin is sized for *code churn* — one new unkilled line of product code — not for measurement
+noise; with `additional-timeout: 300000` every shard here is deterministic except `expressions`,
+whose 18 surviving timeouts are the only moving part in the repository. That is why the margin is
+expressed in mutants on the small shards, where 2 pp is less than one mutant, and in percent on the
+large ones.
+
+`low` is the measured score floored, so a shard's report goes amber the moment it drops below what
+it measured today. `high` stays the **ambition**, which is where 80 now lives for the shards under
+it — the goal did not move, only the gate did.
+
+| config | measured | break | low | high |
+|---|---|---|---|---|
+| `stryker-config.data-postgresql.json` | 100.00 % | 90 | 95 | 100 |
+| `stryker-config.expressions.json` | 94.33 % | 92 | 94 | 96 |
+| `stryker-config.data-sqlite.json` | 86.36 % | 81 | 86 | 90 |
+| `stryker-config.data-ef-rest.json` | 85.82 % | 83 | 85 | 90 |
+| `stryker-config.data-ef-core.json` | 80.13 % | 78 | 80 | 90 |
+| `stryker-config.json` (rules, auth, rest) | 57.88 % | 55 | 57 | 80 |
+
+`stryker-config.api.json` is deliberately left at 90/85/80. It has no matrix leg (DECLARED GAP,
+#143), so it has no measurement to calibrate against, and a calibrated-looking number there would be
+the fabrication this whole design is about.
+
+**Movement rule: up freely, down only with a written reason and a re-measurement it names.** A
+threshold raised because a shard improved needs no ceremony. A threshold lowered is the gate
+weakening, so it carries the log or report it was recomputed from, in the commit message.
+
+### Why the provenance is not in the configs, though that was the plan
+
+The intent was to record the date, the measured number and the run beside each threshold. **Probed,
+and it does not work**, for two independent reasons — both verified rather than assumed:
+
+- Stryker rejects an unknown key outright: *"The allowed keys for the `stryker-config` object are
+  { … } but `_calibration` was found"*. It accepts `//` comments (JSONC), so that half would have
+  worked;
+- but `scripts/assert-mutation-run` reads each config's `test-projects` with **`jq`**, and
+  `scripts/test-assert-mutation-run` reads three more `mutate` lists the same way. `jq` is strict
+  JSON and fails on the first `//`. A comment in a config reddens the PR gate.
+
+So the configs stay pure JSON carrying values only, and the calibration table, its date and its
+source runs live in `.github/workflows/mutation.yml`'s header beside every other measurement this
+gate is sized from.
+
+### What is still owed
+
+The `+378` is not written off. **#245** files it per area and per file, together with the same
+prose/non-prose split for every other shard (581 non-prose survivors in total), so the next person
+picks up a bucket rather than a percentage.

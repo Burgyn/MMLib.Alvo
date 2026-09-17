@@ -1520,6 +1520,25 @@ only one in the provider that Stryker still cannot separate from a hang), agains
 pair the gate was reporting. Counting that single timeout as a kill the way Stryker does gives 64.89 %;
 the difference is stated rather than smoothed over, because smoothing it over is the defect.
 
+**WHERE THE EF PROVIDER STANDS NOW, 2026-09-17.** The table above is the record of run
+34828632562 and stays as history. Re-measured locally at commit `0da5b4e` (10-core box,
+`--concurrency 4`, from `test/`, `additional-timeout: 300000`):
+
+| leg | tested | Killed | Survived | Timeout | score |
+|---|---|---|---|---|---|
+| `data-ef-core` | 458 | 366 | 91 | 1 | **80.13 %** |
+| `data-ef-rest` | 649 | 557 | 92 | 0 | **85.82 %** |
+| **the whole provider** | **1107** | **923** | **183** | **1** | **83.47 %** |
+
+So the provider went **64.80 % → 83.47 %** honest, by tests alone: no file moved between the two
+legs, no mutator level lowered, no denominator touched. (1107 rather than 1108 because one of
+`data-ef-core`'s mutants records `Errors`, which Stryker leaves out of the denominator; the union
+mutant set is still 1108.) Of the 183 remaining survivors **63 are message prose** — 22 on core,
+41 on rest — which the four-bucket rule in
+`docs/superpowers/specs/2026-09-15-mutation-gate-to-threshold-design.md` leaves alive on purpose,
+so the non-prose residue is 120. Both legs' `break` is now calibrated from these numbers (78 and
+83); the rule is in the `mutation.yml` header.
+
 **The fix, and its cost.** `additional-timeout: 300000` on every config, uniformly — a timeout must mean
 "the mutant hung" on every leg, and a per-leg exception is the kind of thing that rots. It makes the honest
 run *slower* than the dishonest one, because a survivor now runs to completion instead of being cut off:

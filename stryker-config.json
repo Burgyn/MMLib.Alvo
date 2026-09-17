@@ -21,9 +21,9 @@
       "!**/Api/**"
     ],
     "thresholds": {
-      "high": 90,
-      "low": 85,
-      "break": 80
+      "high": 80,
+      "low": 57,
+      "break": 55
     },
     "reporters": [
       "progress",

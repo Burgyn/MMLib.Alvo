@@ -14,9 +14,9 @@
       "!PostgreSqlProviderOptions.cs"
     ],
     "thresholds": {
-      "high": 90,
-      "low": 85,
-      "break": 80
+      "high": 100,
+      "low": 95,
+      "break": 90
     },
     "reporters": [
       "progress",
