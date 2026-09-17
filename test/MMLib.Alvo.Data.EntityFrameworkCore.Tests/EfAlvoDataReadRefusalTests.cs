@@ -69,7 +69,13 @@ public class EfAlvoDataReadRefusalTests
             async () => await harness.Data.GetAsync(
                 AlvoDataFixtures.Vehicle.Name, Guid.NewGuid(), AlvoDataFixtures.Caller));
 
-        refusal.Message.ShouldBe(AlvoDataContext.UnmappedEntityMessage);
+        // NOT `ShouldBe(AlvoDataContext.UnmappedEntityMessage)`. `EfAlvoData` derives its own message from
+        // that very constant (`private const string UnknownEntityMessage = AlvoDataContext.UnmappedEntityMessage`),
+        // so both sides of such an assertion read one field and it holds however that field is rewritten —
+        // the shape `AlvoDataContextModelTests` removes and names. What the summary above actually claims is
+        // NON-DISCLOSURE, and that is the security property: a caller probing for an entity it is not
+        // entitled to must not learn from the refusal whether the name exists.
+        refusal.Message.ShouldNotContain(AlvoDataFixtures.Vehicle.Name);
     }
 
     /// <summary>
@@ -86,7 +92,31 @@ public class EfAlvoDataReadRefusalTests
         var refusal = await Should.ThrowAsync<AlvoAuthorizationException>(
             async () => await harness.Data.QueryAsync(query, AlvoDataFixtures.Caller));
 
-        refusal.Message.ShouldBe(AlvoDataContext.UnmappedEntityMessage);
+        // Same non-disclosure claim as the single-row arm, for the same reason.
+        refusal.Message.ShouldNotContain(AlvoDataFixtures.Vehicle.Name);
+    }
+
+    /// <summary>
+    /// And the two arms refuse <b>indistinguishably</b>. Non-disclosure is a relation between refusals, so
+    /// it is asserted as one: each arm checked alone leaves the oracle open, because giving the list path
+    /// its own wording keeps both single-sided assertions green while a caller can still tell which read it
+    /// reached by diffing the two messages — and the list arm walks further (it composes read options and
+    /// the unselected-field set) before failing closed, so the two are genuinely different code paths.
+    /// </summary>
+    [Fact]
+    public async Task Both_reads_refuse_an_undeclared_entity_with_one_indistinguishable_message()
+    {
+        using var harness = EfAlvoDataHarness.OverAnEmptySchema(
+            EfAlvoDataHarness.VehicleRuledBy(get: "true", list: "true"));
+
+        var fromGet = await Should.ThrowAsync<AlvoAuthorizationException>(
+            async () => await harness.Data.GetAsync(
+                AlvoDataFixtures.Vehicle.Name, Guid.NewGuid(), AlvoDataFixtures.Caller));
+        var fromList = await Should.ThrowAsync<AlvoAuthorizationException>(
+            async () => await harness.Data.QueryAsync(
+                new AlvoQuery { Entity = AlvoDataFixtures.Vehicle.Name }, AlvoDataFixtures.Caller));
+
+        fromList.Message.ShouldBe(fromGet.Message);
     }
 
     /// <summary>

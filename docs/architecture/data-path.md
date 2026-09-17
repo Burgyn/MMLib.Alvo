@@ -1524,14 +1524,22 @@ the difference is stated rather than smoothed over, because smoothing it over is
 34828632562 and stays as history. Re-measured locally at commit `0da5b4e` (10-core box,
 `--concurrency 4`, from `test/`, `additional-timeout: 300000`):
 
-| leg | tested | Killed | Survived | Timeout | score |
-|---|---|---|---|---|---|
-| `data-ef-core` | 458 | 366 | 91 | 1 | **80.13 %** |
-| `data-ef-rest` | 649 | 557 | 92 | 0 | **85.82 %** |
-| **the whole provider** | **1107** | **923** | **183** | **1** | **83.47 %** |
+| leg | tested | Killed | Survived | Timeout | reported | honest (Killed-only) |
+|---|---|---|---|---|---|---|
+| `data-ef-core` | 458 | 366 | 91 | 1 | 80.13 % | **79.91 %** |
+| `data-ef-rest` | 649 | 557 | 92 | 0 | 85.82 % | **85.82 %** |
+| **the whole provider** | **1107** | **923** | **183** | **1** | 83.47 % | **83.38 %** |
 
-So the provider went **64.80 % → 83.47 %** honest, by tests alone: no file moved between the two
-legs, no mutator level lowered, no denominator touched. (1107 rather than 1108 because one of
+**The two columns are kept apart here for the same reason the table sixty lines above keeps them
+apart**, and it is the one number in this document most likely to be quoted carelessly:
+`data-ef-core` still carries exactly one mutant Stryker cannot separate from a hang, and counting it
+as a kill is what takes the leg from 79.91 % to 80.13 %. So the leg is **0.09 pp short of 80 on the
+honest reading**, not over it, and saying otherwise in a document whose whole subject is that
+smoothing would be self-defeating.
+
+So the provider went **64.80 % → 83.38 %** honest — both figures Killed-only, so they compare — by
+tests alone: no file moved between the two legs, no mutator level lowered, no denominator touched.
+(1107 rather than 1108 because one of
 `data-ef-core`'s mutants records `Errors`, which Stryker leaves out of the denominator; the union
 mutant set is still 1108.) Of the 183 remaining survivors **63 are message prose** — 22 on core,
 41 on rest — which the four-bucket rule in

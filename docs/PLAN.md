@@ -184,15 +184,20 @@ of timeouts: `data-ef-core` reported 99.82 % and measures **59.30 %**,
 `scripts/assert-mutation-run`; the measurement is in
 `docs/architecture/data-path.md`. **Treat no data-layer score published on or
 before 2026-09-14 as a measurement.** The honest baselines then sat under
-`break: 80` almost everywhere; **as of 2026-09-17 five of the six scoring shards
-are at or above it** — `data-postgresql` 100.00 %, `expressions` 94.33 %,
-`data-sqlite` 86.36 %, `data-ef-rest` 85.82 %, `data-ef-core` 80.13 % — raised by
-tests, with no shard re-partitioned and no mutator level lowered. The sixth,
+`break: 80` almost everywhere; **as of 2026-09-17 four of the six scoring shards
+are at or above it and a fifth is 0.09 pp short** — `data-postgresql` 100.00 %,
+`expressions` 92.33 %, `data-sqlite` 86.36 %, `data-ef-rest` 85.82 %,
+`data-ef-core` 79.91 % — all Killed-only, because Stryker's own
+`(Killed + Timeout)` reading is the second lie described above and would report
+94.33 % and 80.13 % for the two shards that have timeouts. Raised by tests, with
+no shard re-partitioned since the post-#240 baselines and no mutator level
+lowered. The sixth,
 `rules, auth, rest`, measures **57.88 %**, and 80 there costs +378 kills against
 419 non-prose survivors, so **`break` is now calibrated per shard from the
 measurement** (the rule and the full table live in the `mutation.yml` header).
-The remaining debt — 581 non-prose survivors across the six shards — is tracked in
-`#245`, with `#241` and `#244` for the two causes that are not test debt.
+The remaining debt — **581 non-prose survivors plus 19 unresolved timeouts, 600
+undetected mutants** across the six shards — is tracked in `#245`, with `#241`
+and `#244` for the two causes that are not test debt.
 **`#161`** — a scoped `ref` may name a row in another
 tenant, because the foreign key does not span `(tenant_id, id)`. That is the
 same shape as `#198`, and both are the tenant-isolation seam the composite key

@@ -204,14 +204,19 @@ below are what it produced.
 Five shards were raised by tests, not by arithmetic. No threshold was touched while they were being
 raised, no file moved between shards, no mutator level lowered.
 
-| shard | honest baseline (2026-09-15) | measured now | by |
-|---|---|---|---|
-| `data-postgresql` | 75.00 % | **100.00 %** | +5 kills |
-| `expressions` | 75.00 % | **94.33 %** | +172 kills |
-| `data-sqlite` | 65.91 % | **86.36 %** | +9 kills |
-| `data-ef-rest` | 56.86 % | **85.82 %** | +188 kills (PR #242) |
-| `data-ef-core` | 57.30 % | **80.13 %** | +104 kills |
-| `rules, auth, rest` | 52.02 % | **57.88 %** | +100 kills |
+| shard | honest baseline (2026-09-15) | Stryker now | **Killed-only now** | by |
+|---|---|---|---|---|
+| `data-postgresql` | 75.00 % | 100.00 % | **100.00 %** | +5 kills |
+| `expressions` | 75.00 % | 94.33 % | **92.33 %** | +172 kills |
+| `data-sqlite` | 65.91 % | 86.36 % | **86.36 %** | +9 kills |
+| `data-ef-rest` | 56.86 % | 85.82 % | **85.82 %** | +188 kills (PR #242) |
+| `data-ef-core` | 57.30 % | 80.13 % | **79.91 %** | +104 kills |
+| `rules, auth, rest` | 52.02 % | 57.88 % | **57.88 %** | +100 kills |
+
+**Both columns, because this design's own subject forbids quoting only one.** Stryker scores
+`(Killed + Timeout) / tested`; PR #240 exists because that counts a slow run as a detection. So the
+honest headline is **four shards at or above 80, with `data-ef-core` 0.09 pp short on its single
+remaining timeout** — not five. The two readings differ only on the two shards that have timeouts.
 
 ### Why the sixth shard did not reach 80, stated as arithmetic
 
@@ -245,27 +250,44 @@ not the stronger one.
 
 `break` stops being an ambition and becomes a **regression latch calibrated from measurement**:
 
-> `break` = the measured score minus the larger of **2 percentage points** or **2 mutants**, floored
-> to a whole percent.
+> `break` = the **Killed-only** score minus the larger of **2 percentage points** or **2 mutants**,
+> floored to a whole percent.
+
+Killed-only rather than Stryker's own score, and not only for consistency with the paragraph above.
+A margin computed from `(Killed + Timeout)` is partly *made of* the timeouts, so on a shard that has
+any the headroom is not what it looks like. `expressions` is the case: 18 of its mutants are
+timeouts sitting in Stryker's numerator, so a `break` of 92 taken from 94.33 % leaves 21 mutants of
+apparent headroom of which 18 are those timeouts — **3 mutants of real room for new code**. Taken
+from 92.33 % the threshold is 90 and the 21 are genuine. `data-ef-core` moves 78 → 77 for the same
+reason on one mutant. The other four shards have no timeouts, so the two bases agree.
 
 The margin is sized for *code churn* — one new unkilled line of product code — not for measurement
-noise; with `additional-timeout: 300000` every shard here is deterministic except `expressions`,
-whose 18 surviving timeouts are the only moving part in the repository. That is why the margin is
-expressed in mutants on the small shards, where 2 pp is less than one mutant, and in percent on the
-large ones.
+noise. That is why it is expressed in mutants on the small shards, where 2 pp is less than one
+mutant, and in percent on the large ones.
 
-`low` is the measured score floored, so a shard's report goes amber the moment it drops below what
-it measured today. `high` stays the **ambition**, which is where 80 now lives for the shards under
-it — the goal did not move, only the gate did.
+`low` is the Killed-only score floored, so a shard's report goes amber the moment it drops below
+what it measured today. `high` stays the **ambition**, which is where 80 now lives for the shard
+under it — the goal did not move, only the gate did.
 
-| config | measured | break | low | high |
+| config | Killed-only | break | low | high |
 |---|---|---|---|---|
 | `stryker-config.data-postgresql.json` | 100.00 % | 90 | 95 | 100 |
-| `stryker-config.expressions.json` | 94.33 % | 92 | 94 | 96 |
+| `stryker-config.expressions.json` | 92.33 % | 90 | 92 | 96 |
 | `stryker-config.data-sqlite.json` | 86.36 % | 81 | 86 | 90 |
 | `stryker-config.data-ef-rest.json` | 85.82 % | 83 | 85 | 90 |
-| `stryker-config.data-ef-core.json` | 80.13 % | 78 | 80 | 90 |
+| `stryker-config.data-ef-core.json` | 79.91 % | 77 | 79 | 90 |
 | `stryker-config.json` (rules, auth, rest) | 57.88 % | 55 | 57 | 80 |
+
+**What the aggregate on `stryker-config.json` costs, stated rather than left to be discovered.**
+That shard covers Rules, Auth, Events, Migrations and Descriptor — the rule engine and RBAC, the
+code §0 principle 5 rests on — and at 1707 mutants a 2 pp margin is 34 kills of slack. `Auth` is
+104 mutants with 75 killed, so a regression unpinning nearly half the authorization area stays
+inside that slack and reports green. Two things bound the damage and neither makes it acceptable
+indefinitely: the gate is post-merge and advisory, so the slack costs a *notification* rather than
+a merge; and `low: 57` still takes the report off green on any real drop. The fix is to give `Auth`
+— or `Auth` + `Rules` — its own shard. It is filed in #245 with the numbers rather than done here,
+because splitting a shard in the same change that re-cuts every threshold is the
+change-two-things-at-once mistake this design rejects elsewhere.
 
 `stryker-config.api.json` is deliberately left at 90/85/80. It has no matrix leg (DECLARED GAP,
 #143), so it has no measurement to calibrate against, and a calibrated-looking number there would be
@@ -294,5 +316,6 @@ gate is sized from.
 ### What is still owed
 
 The `+378` is not written off. **#245** files it per area and per file, together with the same
-prose/non-prose split for every other shard (581 non-prose survivors in total), so the next person
-picks up a bucket rather than a percentage.
+prose/non-prose split for every other shard — **581 non-prose survivors, plus the 19 mutants that
+still time out (18 on `expressions`, 1 on `data-ef-core`) and are therefore also undetected, for 600
+in total** — so the next person picks up a bucket rather than a percentage.

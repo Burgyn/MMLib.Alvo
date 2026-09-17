@@ -13,8 +13,8 @@
     ],
     "thresholds": {
       "high": 96,
-      "low": 94,
-      "break": 92
+      "low": 92,
+      "break": 90
     },
     "reporters": [
       "progress",
