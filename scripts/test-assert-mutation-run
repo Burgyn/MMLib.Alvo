@@ -643,8 +643,10 @@ case "$GUARD_OUT" in
 esac
 
 # And it must NOT fire on a leg that simply scores badly. data-ef-rest reports 54.51 %
-# — well under `break: 80` — with zero timeouts, and this guard has no opinion about
-# that: a low score is the suite's problem, an inflated one is the gate's.
+# in this capture — well under its break threshold, whatever that threshold is set to;
+# it was 80 when the log was taken and is 83 now that the leg measures 85.82 % — with
+# zero timeouts, and this guard has no opinion about that: a low score is the suite's
+# problem, an inflated one is the gate's.
 assert_ok "a low score with NO timeouts is accepted — check 6 judges the gate, not the suite" \
   "$FIXTURES/data-ef-rest-no-timeouts.txt" "$REST_CFG" 565 554
 

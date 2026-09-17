@@ -1520,6 +1520,38 @@ only one in the provider that Stryker still cannot separate from a hang), agains
 pair the gate was reporting. Counting that single timeout as a kill the way Stryker does gives 64.89 %;
 the difference is stated rather than smoothed over, because smoothing it over is the defect.
 
+**WHERE THE EF PROVIDER STANDS NOW, 2026-09-17.** The table above is the record of run
+34828632562 and stays as history. Re-measured locally at commit `0da5b4e` (10-core box,
+`--concurrency 4`, from `test/`, `additional-timeout: 300000`):
+
+| leg | tested | Killed | Survived | Timeout | reported | honest (Killed-only) |
+|---|---|---|---|---|---|---|
+| `data-ef-core` | 458 | 366 | 91 | 1 | 80.13 % | **79.91 %** |
+| `data-ef-rest` | 649 | 557 | 92 | 0 | 85.82 % | **85.82 %** |
+| **the whole provider** | **1107** | **923** | **183** | **1** | 83.47 % | **83.38 %** |
+
+**The two columns are kept apart here for the same reason the table sixty lines above keeps them
+apart**, and it is the one number in this document most likely to be quoted carelessly:
+`data-ef-core` still carries exactly one mutant Stryker cannot separate from a hang, and counting it
+as a kill is what takes the leg from 79.91 % to 80.13 %. So the leg is **0.09 pp short of 80 on the
+honest reading**, not over it, and saying otherwise in a document whose whole subject is that
+smoothing would be self-defeating.
+
+So the provider went **64.80 % → 83.38 %** honest — both figures Killed-only, so they compare — by
+tests alone: no file moved between the two legs, no mutator level lowered, and **the mutate scope is
+byte-for-byte the one it was measured on**. The two denominators are nonetheless 1108 and 1107, and
+that is Stryker's doing rather than a scope change: one of
+`data-ef-core`'s mutants records `Errors`, which Stryker leaves out of the denominator. The union
+mutant set is still 1108, and the one-mutant difference moves the score by 0.07 pp — stated rather
+than rounded away, because "the denominator did not move" would be false and the claim that matters
+is the narrower one above. Of the 183 remaining survivors **63 are message prose** — 22 on core,
+41 on rest — which the four-bucket rule in
+`docs/superpowers/specs/2026-09-15-mutation-gate-to-threshold-design.md` leaves alive on purpose,
+so the non-prose residue is 120. Both legs' `break` is now calibrated from these numbers — **77** for
+`data-ef-core` (from its Killed-only 79.91 %, not from the 80.13 % its one timeout buys) and **83**
+for `data-ef-rest`; the rule, and the real slack each threshold leaves, are in the `mutation.yml`
+header.
+
 **The fix, and its cost.** `additional-timeout: 300000` on every config, uniformly — a timeout must mean
 "the mutant hung" on every leg, and a per-leg exception is the kind of thing that rots. It makes the honest
 run *slower* than the dishonest one, because a survivor now runs to completion instead of being cut off:
