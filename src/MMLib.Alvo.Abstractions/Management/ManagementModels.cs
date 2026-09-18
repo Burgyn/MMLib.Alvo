@@ -115,3 +115,48 @@ public sealed record ManagementPolicyVerdict(
     string? TenantScope,
     IReadOnlyList<string> HiddenFields,
     IReadOnlyList<string> ReadOnlyFields);
+
+/// <summary>One apply.</summary>
+/// <param name="DescriptorJson">The descriptor to apply, exactly as it should be stored.</param>
+/// <param name="ExpectedRevision">
+/// The revision the caller believes is current — over HTTP this is <c>If-Match</c> (the F5 design's
+/// deviation D3), and it is the same integer <c>schema/project.schema.json</c> froze as the
+/// optimistic-concurrency token. It is also what makes a retry safe without a separate idempotency key: a
+/// replayed apply names a revision that is no longer current and is refused.
+/// </param>
+/// <param name="AllowDestructive">
+/// Whether a plan that discards data may proceed. <b>Never implied</b> — not by a dry run that reported the
+/// plan, and not by a caller's management level.
+/// </param>
+/// <param name="DryRun">
+/// Plan and report without writing anything. The destructive guardrail still applies, so a dry run cannot
+/// report a plan the apply would refuse.
+/// </param>
+/// <param name="Author">Who is applying, carried into the appended revision.</param>
+/// <param name="Reason">Why, carried into the appended revision.</param>
+public sealed record ManagementApplyRequest(
+    string DescriptorJson,
+    int ExpectedRevision,
+    bool AllowDestructive = false,
+    bool DryRun = false,
+    string? Author = null,
+    string? Reason = null);
+
+/// <summary>What an apply did, or would do.</summary>
+/// <param name="Applied"><see langword="false"/> for a dry run, <see langword="true"/> when a revision was appended.</param>
+/// <param name="Revision">The appended revision — or, for a dry run, the base it planned against.</param>
+/// <param name="Plan">The migration, so the caller can show a diff without asking again.</param>
+public sealed record ManagementApplyResult(bool Applied, int Revision, ManagementPlanSummary Plan);
+
+/// <summary>A migration plan, in the shape a diff view needs.</summary>
+/// <param name="IsEmpty">
+/// <see langword="true"/> when the descriptor changes nothing about the schema — which a rules-only edit
+/// does, and which is therefore not the same claim as "nothing was applied".
+/// </param>
+/// <param name="HasDestructiveChanges"><see langword="true"/> when at least one step discards data.</param>
+/// <param name="Steps">
+/// One line per step, destructive steps marked — <b>the framework's own summary wording</b>, the same
+/// sentences a refused boot prints. A client that reworded one would be a second spelling of one truth.
+/// </param>
+public sealed record ManagementPlanSummary(
+    bool IsEmpty, bool HasDestructiveChanges, IReadOnlyList<string> Steps);

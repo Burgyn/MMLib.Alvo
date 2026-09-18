@@ -1094,6 +1094,7 @@ namespace MMLib.Alvo.Management
 {
     public interface IAlvoManagement
     {
+        System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementApplyResult> ApplyDescriptorAsync(string project, MMLib.Alvo.Management.ManagementApplyRequest request, System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementCapabilities> GetCapabilitiesAsync(string project, System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementDescriptor> GetDescriptorAsync(string project, System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementInfo> GetInfoAsync(System.Threading.CancellationToken ct = default);
@@ -1102,6 +1103,23 @@ namespace MMLib.Alvo.Management
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementProject>> ListProjectsAsync(System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementRevision>> ListRevisionsAsync(string project, System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementPolicyVerdict> SimulatePolicyAsync(string project, MMLib.Alvo.Management.ManagementPolicySimulation simulation, System.Threading.CancellationToken ct = default);
+    }
+    public sealed class ManagementApplyRequest : System.IEquatable<MMLib.Alvo.Management.ManagementApplyRequest>
+    {
+        public ManagementApplyRequest(string DescriptorJson, int ExpectedRevision, bool AllowDestructive = false, bool DryRun = false, string? Author = null, string? Reason = null) { }
+        public bool AllowDestructive { get; init; }
+        public string? Author { get; init; }
+        public string DescriptorJson { get; init; }
+        public bool DryRun { get; init; }
+        public int ExpectedRevision { get; init; }
+        public string? Reason { get; init; }
+    }
+    public sealed class ManagementApplyResult : System.IEquatable<MMLib.Alvo.Management.ManagementApplyResult>
+    {
+        public ManagementApplyResult(bool Applied, int Revision, MMLib.Alvo.Management.ManagementPlanSummary Plan) { }
+        public bool Applied { get; init; }
+        public MMLib.Alvo.Management.ManagementPlanSummary Plan { get; init; }
+        public int Revision { get; init; }
     }
     public sealed class ManagementCapabilities : System.IEquatable<MMLib.Alvo.Management.ManagementCapabilities>
     {
@@ -1124,6 +1142,13 @@ namespace MMLib.Alvo.Management
         public string Mode { get; init; }
         public string StartupMode { get; init; }
         public string Version { get; init; }
+    }
+    public sealed class ManagementPlanSummary : System.IEquatable<MMLib.Alvo.Management.ManagementPlanSummary>
+    {
+        public ManagementPlanSummary(bool IsEmpty, bool HasDestructiveChanges, System.Collections.Generic.IReadOnlyList<string> Steps) { }
+        public bool HasDestructiveChanges { get; init; }
+        public bool IsEmpty { get; init; }
+        public System.Collections.Generic.IReadOnlyList<string> Steps { get; init; }
     }
     public sealed class ManagementPolicySimulation : System.IEquatable<MMLib.Alvo.Management.ManagementPolicySimulation>
     {

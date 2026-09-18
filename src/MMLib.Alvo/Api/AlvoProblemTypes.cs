@@ -67,6 +67,15 @@ public static class AlvoProblemTypes
     /// <summary>The write carried a version the stored row does not have (412).</summary>
     public const string PreconditionFailed = "precondition-failed";
 
+    /// <summary>The write requires a precondition and carried none (428).</summary>
+    /// <remarks>
+    /// RFC 6585 §3. Distinct from <see cref="PreconditionFailed"/>, which is a precondition that <em>was</em>
+    /// sent and did not hold: this one is the header's absence, and the fix is to read the current revision
+    /// and send it. Applying without one is a lost update with nothing to detect it, on the one document
+    /// that defines the whole backend — so it is refused rather than defaulted.
+    /// </remarks>
+    public const string PreconditionRequired = "precondition-required";
+
     /// <summary>An idempotency key was reused for a different request (409).</summary>
     public const string IdempotencyConflict = "idempotency-conflict";
 
@@ -93,6 +102,22 @@ public static class AlvoProblemTypes
     /// </para>
     /// </remarks>
     public const string Conflict = "conflict";
+
+    /// <summary>The change would discard data and the caller did not ask for that (409).</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A third 409, and it is a different fix from both of the others.</b> An
+    /// <see cref="IdempotencyConflict"/> is repaired with a fresh key, a <see cref="Conflict"/> with a
+    /// different value — and this one with the same request plus an explicit destructive allowance, or with
+    /// a descriptor that keeps what the plan would drop. A caller who cannot tell the three apart retries
+    /// the wrong one.
+    /// </para>
+    /// <para>
+    /// Not <see cref="Validation"/>: nothing about the descriptor is malformed. It is a well-formed request
+    /// that collides with data already stored, which is what 409 means.
+    /// </para>
+    /// </remarks>
+    public const string DestructiveChange = "destructive-change";
 
     /// <summary>A credential was presented and cannot be used (401).</summary>
     public const string Unauthenticated = "unauthenticated";
@@ -153,8 +178,10 @@ public static class AlvoProblemTypes
         OutOfScope,
         NotFound,
         PreconditionFailed,
+        PreconditionRequired,
         IdempotencyConflict,
         Conflict,
+        DestructiveChange,
         Unauthenticated,
         UnreadableRequest,
         UnsupportedMediaType,

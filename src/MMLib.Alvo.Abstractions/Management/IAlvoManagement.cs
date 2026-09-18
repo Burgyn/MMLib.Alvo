@@ -10,8 +10,15 @@
 /// <para>
 /// <b>Every member is descriptor-shaped and idempotent</b>, so an MCP adapter is a mapping rather than a
 /// translation: there is no HTTP-only affordance an adapter would have to fake. A write carries its own
-/// expected revision (optimistic concurrency) and its own idempotency key, rather than reading either off a
-/// request header, which is what keeps the in-process caller's semantics identical to the HTTP caller's.
+/// expected revision rather than reading it off a request header, which is what keeps the in-process
+/// caller's semantics identical to the HTTP caller's.
+/// </para>
+/// <para>
+/// <b>A write is idempotent through that revision, and carries no separate idempotency key.</b> A retried
+/// apply names the revision it was written against, so the second attempt loses the optimistic-lock race
+/// and is refused — which is a stronger guarantee than a caller-chosen key, and one nothing has to store.
+/// A key parameter beside it would be a second token for one decision, and, until something honoured it,
+/// exactly the "declared but not honoured" defect the capability report exists to enumerate.
 /// </para>
 /// <para>
 /// <b>Data is deliberately absent.</b> Rows are read and written through the Data API under the caller's own
@@ -109,4 +116,34 @@ public interface IAlvoManagement
     /// </exception>
     Task<ManagementPolicyVerdict> SimulatePolicyAsync(
         string project, ManagementPolicySimulation simulation, CancellationToken ct = default);
+
+    /// <summary>
+    /// Applies a descriptor — <b>the one write path to a project's configuration.</b>
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <paramref name="request"/> carries its own expected revision rather than reading it off a request
+    /// header, which is what makes the in-process caller's semantics identical to the HTTP caller's. Over
+    /// HTTP that integer arrives as <c>If-Match</c>.
+    /// </para>
+    /// <para>
+    /// <b><see cref="ManagementApplyRequest.DryRun"/> plans and reports without writing</b>, and is refused
+    /// by the same destructive guardrail a real apply is: a preview that reported a plan the apply would
+    /// then refuse would tell an editor its change is ready when it is not.
+    /// </para>
+    /// </remarks>
+    /// <param name="project">The project name.</param>
+    /// <param name="request">The descriptor, the expected revision, and the allowances.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>What was applied, or what would be.</returns>
+    /// <exception cref="ManagementProjectNotFoundException">This instance does not serve that project.</exception>
+    /// <exception cref="Descriptor.DescriptorValidationException">The descriptor is invalid.</exception>
+    /// <exception cref="Migrations.DescriptorConcurrencyException">
+    /// <see cref="ManagementApplyRequest.ExpectedRevision"/> is not the current one.
+    /// </exception>
+    /// <exception cref="Migrations.DestructiveChangeNotAllowedException">
+    /// The plan discards data and <see cref="ManagementApplyRequest.AllowDestructive"/> is not set.
+    /// </exception>
+    Task<ManagementApplyResult> ApplyDescriptorAsync(
+        string project, ManagementApplyRequest request, CancellationToken ct = default);
 }

@@ -111,6 +111,90 @@ internal static class ProblemResultFactory
         StatusCodes.Status422UnprocessableEntity, AlvoProblemTypes.Validation, detail);
 
     /// <summary>
+    /// The 428 for a write that requires a precondition and carried none.
+    /// </summary>
+    /// <remarks>
+    /// <b>RFC 6585 §3, and it is a different refusal from <see cref="AlvoProblemTypes.PreconditionFailed"/>.</b>
+    /// That one is a precondition the caller sent and that did not hold; this one is its <em>absence</em>, and
+    /// the fix is to read the current revision and send it. The detail says which header and where to read
+    /// its value, because an agent that cannot discover the precondition cannot satisfy it.
+    /// </remarks>
+    /// <param name="detail">Which precondition is required, and where to read its value.</param>
+    internal static IResult PreconditionRequired(string detail) => Problem(
+        StatusCodes.Status428PreconditionRequired, AlvoProblemTypes.PreconditionRequired, detail);
+
+    /// <summary>
+    /// The 412 for a precondition that was sent and does not hold — or that names nothing this API can
+    /// compare.
+    /// </summary>
+    /// <remarks>
+    /// The Data API mints the same slug from inside <see cref="GuardAsync"/>, out of the port's own
+    /// <see cref="AlvoPreconditionFailedException"/>. This entry point exists because the Management API's
+    /// precondition is decided <em>before</em> any port is called — the revision is compared against the
+    /// descriptor history, and an uncomparable tag never reaches a store at all.
+    /// </remarks>
+    /// <param name="detail">Which revision was expected and which is current, or why the tag names none.</param>
+    internal static IResult PreconditionFailed(string detail) => Problem(
+        StatusCodes.Status412PreconditionFailed, AlvoProblemTypes.PreconditionFailed, detail);
+
+    /// <summary>
+    /// The 409 for a plan that would discard data without an explicit allowance.
+    /// </summary>
+    /// <remarks>
+    /// The detail is the framework's own refusal, whose message already lists the destructive steps, plus
+    /// the two ways out — ask for it, or change the descriptor. A 409 that named neither would tell an agent
+    /// to stop without telling it what to send instead.
+    /// </remarks>
+    /// <param name="detail">What would be discarded, and how to ask for it.</param>
+    internal static IResult DestructiveChange(string detail) => Problem(
+        StatusCodes.Status409Conflict, AlvoProblemTypes.DestructiveChange, detail);
+
+    /// <summary>
+    /// The 422 for a descriptor the validator refused, carrying its per-pointer findings.
+    /// </summary>
+    /// <remarks>
+    /// The slug is <see cref="AlvoProblemTypes.Validation"/>, the one a refused body already carries: the
+    /// kind of refusal is the same — this was read, understood, and measured against a declared shape — and
+    /// a management-only spelling would be a classification an agent has to learn twice.
+    /// </remarks>
+    /// <param name="refusal">The validation failure.</param>
+    internal static IResult ManagementDescriptorRefused(Descriptor.DescriptorValidationException refusal)
+    {
+        ArgumentNullException.ThrowIfNull(refusal);
+
+        return Validation(DescriptorViolations(refusal));
+    }
+
+    /// <summary>One violation per blocking finding, or one for the whole document when it names none.</summary>
+    /// <remarks>
+    /// The fallback is <see cref="ConflictViolations"/>' rule one subsystem over: a refusal that carried no
+    /// per-pointer finding — a rule that failed to compile, say — would otherwise ship an empty
+    /// <c>violations</c> array, which is the shape a caller reads as "no machine-readable reason". RFC
+    /// 6901's empty pointer is the whole document, which is exactly what was refused.
+    /// </remarks>
+    /// <param name="refusal">The validation failure.</param>
+    private static List<AlvoViolation> DescriptorViolations(Descriptor.DescriptorValidationException refusal)
+    {
+        var findings = refusal.Result.Errors
+            .Where(error => error.Severity == Descriptor.DescriptorValidationSeverity.Error)
+            .Select(error => new AlvoViolation(
+                error.Path, DescriptorViolationCode, error.Message, error.FixSuggestion))
+            .ToList();
+
+        return findings.Count > 0
+            ? findings
+            : [new AlvoViolation(string.Empty, DescriptorViolationCode, refusal.Message, null)];
+    }
+
+    /// <summary>The stable code every descriptor finding carries.</summary>
+    /// <remarks>
+    /// One code, because a code keys on the <em>kind</em> of refusal and "this descriptor is invalid here"
+    /// is one kind; which rule it broke is the pointer and the message, which is where the descriptor's own
+    /// validator already says it.
+    /// </remarks>
+    private const string DescriptorViolationCode = "descriptor";
+
+    /// <summary>
     /// The 404 for something the Management API does not have — a project this instance does not serve, a
     /// revision nothing ever appended.
     /// </summary>

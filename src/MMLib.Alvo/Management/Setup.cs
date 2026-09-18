@@ -38,6 +38,12 @@ internal static class ManagementSetup
     /// composition — so taking <c>IAlvoData</c> the ordinary way would make <c>info</c> unresolvable in it.
     /// <c>IDescriptorVersionStore</c> is registered by a database provider and by nothing else, so it is
     /// resolved the same way for the same reason.
+    /// <para>
+    /// <c>RuntimeSchemaService</c> is registered unconditionally but <em>activates</em> only where a
+    /// database provider registered its writer and its store, so <c>GetService</c> would throw rather than
+    /// answer <see langword="null"/>. It is passed as the resolver itself — a <c>Func</c> the service calls
+    /// on the first apply — which defers that activation to a call a driver-less container cannot reach.
+    /// </para>
     /// </remarks>
     /// <param name="services">The service collection to add the service to.</param>
     private static void AddManagementService(IServiceCollection services) =>
@@ -50,7 +56,8 @@ internal static class ManagementSetup
             provider.GetRequiredService<Rules.IPolicyEngine>(),
             provider.GetRequiredService<IRoleCatalogProvider>(),
             provider.GetService<Data.IAlvoData>(),
-            provider.GetService<Migrations.IDescriptorVersionStore>()));
+            provider.GetService<Migrations.IDescriptorVersionStore>(),
+            provider.GetRequiredService<Migrations.RuntimeSchemaService>));
 
     /// <summary>
     /// Registers <see cref="AlvoManagementOptions"/>, bound from its configuration section and validated at

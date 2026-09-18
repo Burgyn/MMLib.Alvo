@@ -36,6 +36,15 @@ namespace MMLib.Alvo.Management.Internal;
 /// <param name="versions">
 /// The descriptor history, or <see langword="null"/> when no provider registered one.
 /// </param>
+/// <param name="runtime">
+/// <b>The apply path, resolved lazily.</b> <see cref="RuntimeSchemaService"/> needs
+/// <see cref="IRuntimeSchemaWriter"/> and <see cref="IDescriptorVersionStore"/>, which only a database
+/// provider registers — and unlike <paramref name="data"/> it cannot be resolved optionally, because a
+/// container that registered the type and not its dependencies throws on activation rather than answering
+/// <see langword="null"/>. A delegate defers that activation to the first apply, which is unreachable in a
+/// driver-less container for <see cref="History"/>'s reason: no store, no boot, no project, so
+/// <see cref="EnsureServed"/> has already answered 404.
+/// </param>
 internal sealed class AlvoManagementService(
     IOptions<AlvoOptions> alvo,
     IOptions<AlvoManagementOptions> management,
@@ -45,7 +54,8 @@ internal sealed class AlvoManagementService(
     IPolicyEngine policies,
     IRoleCatalogProvider roles,
     IAlvoData? data,
-    IDescriptorVersionStore? versions) : IAlvoManagement
+    IDescriptorVersionStore? versions,
+    Func<RuntimeSchemaService> runtime) : IAlvoManagement
 {
     /// <summary>What <see cref="ManagementInfo.DataProvider"/> reports when no driver is registered.</summary>
     private const string NoDriverRegistered = "none";
@@ -118,6 +128,88 @@ internal sealed class AlvoManagementService(
 
         return Task.FromResult(Verdict(decision));
     }
+
+    /// <inheritdoc/>
+    public async Task<ManagementApplyResult> ApplyDescriptorAsync(
+        string project, ManagementApplyRequest request, CancellationToken ct = default)
+    {
+        EnsureServed(project);
+        ArgumentNullException.ThrowIfNull(request);
+
+        var options = OptionsFor(request);
+        var schema = runtime();
+        var preview = await schema.PreviewAsync(
+            project, request.DescriptorJson, request.ExpectedRevision, options, ct).ConfigureAwait(false);
+        Guard(project, preview);
+
+        return request.DryRun
+            ? new ManagementApplyResult(Applied: false, preview.CurrentRevision, Summary(preview.Plan))
+            : await AppendAsync(schema, project, request, options, preview, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Applies what the preview described, and reports the preview's plan beside the new revision.</summary>
+    /// <remarks>
+    /// <b>The apply path plans twice, and that is deliberate.</b> <see cref="RuntimeSchemaService.ApplyAsync"/>
+    /// does not return its plan and the response owes the caller a diff; planning is a pure function of two
+    /// schemas and takes no lock, so the second call costs a diff and buys the editor's confirmation view.
+    /// The alternative is widening <see cref="RuntimeSchemaService.ApplyAsync"/>'s public return type for a
+    /// rendering convenience, which is a breaking change. If the second plan ever shows up in the load gate,
+    /// widen it then; the cost is recorded here rather than left to be rediscovered.
+    /// </remarks>
+    /// <param name="schema">The runtime apply path.</param>
+    /// <param name="project">The project being changed.</param>
+    /// <param name="request">What the caller asked for.</param>
+    /// <param name="options">The migration options the request resolved to.</param>
+    /// <param name="preview">What the plan-only pass reported.</param>
+    /// <param name="ct">Cancellation token.</param>
+    private static async Task<ManagementApplyResult> AppendAsync(
+        RuntimeSchemaService schema, string project, ManagementApplyRequest request,
+        MigrationOptions options, DescriptorApplyPreview preview, CancellationToken ct)
+    {
+        var applied = await schema.ApplyAsync(
+            project, request.DescriptorJson, request.ExpectedRevision, options, ct).ConfigureAwait(false);
+
+        return new ManagementApplyResult(Applied: true, applied.Revision, Summary(preview.Plan));
+    }
+
+    /// <summary>Refuses a plan that discards data the caller never asked to lose.</summary>
+    /// <remarks>
+    /// <b>Applied to the dry run too.</b> A preview that reported a plan the apply would then refuse would
+    /// tell an editor its change is ready when it is not — and it is the framework's own refusal, so the
+    /// endpoint maps one exception type for both branches.
+    /// </remarks>
+    /// <param name="project">The project the plan was built for.</param>
+    /// <param name="preview">What the plan-only pass reported.</param>
+    /// <exception cref="DestructiveChangeNotAllowedException">The guardrail refused the plan.</exception>
+    private static void Guard(string project, DescriptorApplyPreview preview)
+    {
+        if (!preview.AllowedByGuardrail)
+        {
+            throw new DestructiveChangeNotAllowedException(project, preview.Plan);
+        }
+    }
+
+    /// <summary>The migration options one request resolves to.</summary>
+    /// <param name="request">The request as it was bound.</param>
+    private static MigrationOptions OptionsFor(ManagementApplyRequest request) => new()
+    {
+        AllowDestructive = request.AllowDestructive,
+        Author = request.Author,
+        Reason = request.Reason,
+    };
+
+    /// <summary>One plan, in the shape a diff view needs.</summary>
+    /// <remarks>
+    /// The step lines are <c>DestructiveChangeGuard</c>'s own, split back into a list: the wording an
+    /// operator sees in a refused boot and the wording the dashboard renders are then the same sentence,
+    /// rather than two formatters that agree until one is edited.
+    /// </remarks>
+    /// <param name="plan">The plan to project.</param>
+    private static ManagementPlanSummary Summary(MigrationPlan plan) => new(
+        plan.IsEmpty,
+        plan.HasDestructiveChanges,
+        [.. DestructiveChangeGuard.DescribeAllSteps(plan).Split(
+            Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)]);
 
     /// <summary>Refuses a simulation the engine could only answer by guessing at what was meant.</summary>
     /// <remarks>

@@ -32,6 +32,7 @@ namespace MMLib.Alvo.Api
     {
         public const string BaseUri = "https://alvo.dev/errors/";
         public const string Conflict = "conflict";
+        public const string DestructiveChange = "destructive-change";
         public const string Forbidden = "forbidden";
         public const string IdempotencyConflict = "idempotency-conflict";
         public const string Internal = "internal";
@@ -39,6 +40,7 @@ namespace MMLib.Alvo.Api
         public const string NotFound = "not-found";
         public const string OutOfScope = "out-of-scope";
         public const string PreconditionFailed = "precondition-failed";
+        public const string PreconditionRequired = "precondition-required";
         public const string Unauthenticated = "unauthenticated";
         public const string UnreadableRequest = "unreadable-request";
         public const string UnsupportedMediaType = "unsupported-media-type";

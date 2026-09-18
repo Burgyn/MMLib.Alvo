@@ -1,7 +1,11 @@
 ﻿using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Net.Http.Headers;
 using MMLib.Alvo.Api.Internal;
+using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Migrations;
+using System.Globalization;
 
 namespace MMLib.Alvo.Management.Internal;
 
@@ -48,6 +52,7 @@ internal static class ManagementEndpoints
         MapSchema(group);
         MapCapabilities(group);
         MapPolicySimulation(group);
+        MapApply(group);
 
         return group;
     }
@@ -165,6 +170,150 @@ internal static class ManagementEndpoints
             new ManagementRoute(nameof(IAlvoManagement.SimulatePolicyAsync), ManagementOperation.SimulatePolicy));
 
     /// <summary>
+    /// <c>PUT {prefix}/projects/{project}/descriptor</c> — <see cref="IAlvoManagement.ApplyDescriptorAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The one write path to a project's configuration</b>, at the same address its export is read from:
+    /// spec §0.5 contract 4 forbids a second route, and <c>PUT</c> on the resource whose representation is
+    /// being replaced is what RFC 9110 §9.3.4 already means.
+    /// </para>
+    /// <para>
+    /// <b>The body binds as nullable</b>, for <see cref="MapPolicySimulation"/>'s reason: a required one is
+    /// refused by the framework with a 400 <em>before</em> either filter runs, so a caller the access block
+    /// admits nobody from could tell a mapped route from an unmapped one by the status they got.
+    /// </para>
+    /// </remarks>
+    /// <param name="group">The group to map into.</param>
+    private static void MapApply(RouteGroupBuilder group) =>
+        Gate(
+            group.MapPut(
+                "/projects/{project}/descriptor",
+                (string project,
+                    ManagementApplyBody? body,
+                    HttpRequest request,
+                    IAlvoManagement management,
+                    CancellationToken ct) => ApplyAsync(project, body, request, management, ct)),
+            new ManagementRoute(
+                nameof(IAlvoManagement.ApplyDescriptorAsync), ManagementOperation.ApplyDescriptor));
+
+    /// <summary>
+    /// Reads the precondition and the dry-run flag, and refuses before anything is applied when either is
+    /// missing or unreadable.
+    /// </summary>
+    /// <remarks>
+    /// <b>Every precondition this API cannot evaluate is refused, never ignored</b> — the Data API's own
+    /// rule, and the reason the three arms below are three different statuses. An absent <c>If-Match</c>
+    /// answered as "revision 0" would be a lost update; a <c>?dryRun=</c> value this API cannot read,
+    /// answered as "not a dry run", would commit the very schema change the caller asked to preview.
+    /// </remarks>
+    /// <param name="project">The project to apply to.</param>
+    /// <param name="body">The request body, or <see langword="null"/> when none was sent.</param>
+    /// <param name="request">The request, read for <c>If-Match</c> and <c>?dryRun=</c>.</param>
+    /// <param name="management">The contract member's implementation.</param>
+    /// <param name="ct">Cancellation token.</param>
+    private static Task<IResult> ApplyAsync(
+        string project,
+        ManagementApplyBody? body,
+        HttpRequest request,
+        IAlvoManagement management,
+        CancellationToken ct)
+    {
+        var expected = Revision(request);
+        if (!expected.Present)
+        {
+            return Refused(ProblemResultFactory.PreconditionRequired(IfMatchRequired));
+        }
+
+        if (expected.Value is not { } revision)
+        {
+            return Refused(ProblemResultFactory.PreconditionFailed(IfMatchUncomparable));
+        }
+
+        if (DryRunAsked(request) is not { } planOnly)
+        {
+            return Refused(ProblemResultFactory.ManagementValidation(DryRunUnreadable));
+        }
+
+        return body?.DescriptorJson is null
+            ? Refused(ProblemResultFactory.ManagementValidation(BodyRequired))
+            : Answer(() => management.ApplyDescriptorAsync(project, body.ToRequest(revision, planOnly), ct));
+    }
+
+    /// <summary>One already-decided refusal, as the completed task a route handler answers with.</summary>
+    /// <param name="problem">The problem document to answer.</param>
+    private static Task<IResult> Refused(IResult problem) => Task.FromResult(problem);
+
+    /// <summary>
+    /// The revision an <c>If-Match</c> names, or which of the two ways it names none.
+    /// </summary>
+    /// <remarks>
+    /// <b>A strong tag over an integer, and nothing else.</b> A weak tag is by definition not usable for a
+    /// write precondition (RFC 9110 §8.8.3), <c>*</c> means "any current representation" — which no revision
+    /// comparison can honour — and a list of tags names more than one. All three are
+    /// <see cref="IfMatchRevision.Uncomparable"/> rather than ignored.
+    /// </remarks>
+    /// <param name="request">The request to read the header from.</param>
+    internal static IfMatchRevision Revision(HttpRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (!request.Headers.TryGetValue(HeaderNames.IfMatch, out var values) || values.Count == 0)
+        {
+            return IfMatchRevision.Absent;
+        }
+
+        var single = values.Count == 1 ? values[0] : null;
+
+        return single is not null && !single.StartsWith(WeakTagPrefix, StringComparison.Ordinal)
+            && int.TryParse(single.Trim('"'), NumberStyles.None, CultureInfo.InvariantCulture, out var revision)
+            ? IfMatchRevision.Of(revision)
+            : IfMatchRevision.Uncomparable;
+    }
+
+    /// <summary>
+    /// Whether <c>?dryRun=</c> asked for a plan-only pass, or <see langword="null"/> when it carried a value
+    /// this API cannot read.
+    /// </summary>
+    /// <remarks>
+    /// <b>An unreadable value is refused rather than read as <see langword="false"/>.</b> A caller who wrote
+    /// <c>?dryRun=yes</c> asked for a preview, and answering that with a committed schema change is the one
+    /// outcome a dry run exists to make impossible. A bare <c>?dryRun</c> is unreadable too, deliberately:
+    /// the allowance is explicit or it is not given.
+    /// </remarks>
+    /// <param name="request">The request to read the query string from.</param>
+    private static bool? DryRunAsked(HttpRequest request) =>
+        !request.Query.TryGetValue(DryRunKey, out var values)
+            ? false
+            : values.Count == 1 && bool.TryParse(values[0], out var asked) ? asked : null;
+
+    /// <summary>The query-string key that asks for a plan-only pass.</summary>
+    private const string DryRunKey = "dryRun";
+
+    /// <summary>How a weak entity tag is introduced (RFC 9110 §8.8.3).</summary>
+    private const string WeakTagPrefix = "W/";
+
+    /// <summary>What a caller who sent no precondition has to do.</summary>
+    private const string IfMatchRequired =
+        "This write requires 'If-Match' carrying the descriptor's current revision, e.g. If-Match: \"3\". "
+        + "Read that revision from GET the same path. Applying without one is a lost update nothing "
+        + "would detect.";
+
+    /// <summary>What a caller whose precondition names no revision has to do.</summary>
+    private const string IfMatchUncomparable =
+        "'If-Match' must carry the descriptor's revision as a single strong tag, e.g. If-Match: \"3\". "
+        + "A weak tag, a list of tags and '*' name no revision this API can compare.";
+
+    /// <summary>What a caller whose dry-run flag could not be read has to do.</summary>
+    private const string DryRunUnreadable =
+        "'dryRun' takes 'true' or 'false'. It is refused rather than assumed, because reading an "
+        + "unrecognised value as 'false' would apply the change a caller asked to preview.";
+
+    /// <summary>What a caller who sent no descriptor has to do.</summary>
+    private const string BodyRequired =
+        "An apply needs a JSON body carrying 'descriptorJson'. Send the descriptor to apply; "
+        + "'allowDestructive', 'author' and 'reason' are optional.";
+
+    /// <summary>
     /// Runs one contract member and turns its refusals into problem documents.
     /// </summary>
     /// <remarks>
@@ -190,6 +339,21 @@ internal static class ManagementEndpoints
         catch (ManagementSimulationException refusal)
         {
             return ProblemResultFactory.ManagementValidation(refusal.Message);
+        }
+        catch (DescriptorValidationException refusal)
+        {
+            return ProblemResultFactory.ManagementDescriptorRefused(refusal);
+        }
+        catch (DescriptorConcurrencyException refusal)
+        {
+            return ProblemResultFactory.PreconditionFailed(refusal.Message);
+        }
+        catch (DestructiveChangeNotAllowedException refusal)
+        {
+            return ProblemResultFactory.DestructiveChange(
+                refusal.Message
+                + " Send 'allowDestructive': true to proceed, or change the descriptor to keep what the "
+                + "plan would drop.");
         }
     }
 

@@ -425,11 +425,63 @@ public sealed class ProblemDetailsTests
         reached.Add(await InternalSlugAnsweredByAFaultingStoreAsync());
         reached.Add(await UnreadableSlugAnsweredByABodyTheServerRefusesAsync());
         reached.Add(await UnsupportedMediaTypeSlugAnsweredByANonJsonBodyAsync(world));
+        reached.AddRange(await ManagementSlugsAnsweredByTheDescriptorWriteAsync());
 
         reached.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ShouldBe(
             AlvoProblemTypes.All.Except(PendingUntilALaterTask, StringComparer.Ordinal).Order(StringComparer.Ordinal),
             "every slug not pending a later task must be reachable from an endpoint");
     }
+
+    /// <summary>
+    /// The two management slugs' probes — <c>precondition-required</c> and <c>destructive-change</c>.
+    /// </summary>
+    /// <remarks>
+    /// They need their own world because the Data API maps no route that can answer either: a required
+    /// precondition and a destructive refusal are both properties of the descriptor <em>write</em> path,
+    /// which is the Management API's. Each probe presents the thing that causes its slug — one apply with no
+    /// <c>If-Match</c> at all, and one that drops an entity without asking to — so honouring either
+    /// differently fails this fact rather than leaving a stale entry behind.
+    /// </remarks>
+    private static async Task<IReadOnlyList<string>> ManagementSlugsAnsweredByTheDescriptorWriteAsync()
+    {
+        await using var world = await Management.ManagedFleet.StartAsync([_developer]);
+        const string path = Management.ManagedFleet.Routes + "/descriptor";
+        var current = (await (await world.SendAsync(HttpMethod.Get, path, _developer)).ReadJsonObjectAsync())
+            ["descriptorJson"]!.GetValue<string>();
+
+        using var required = await world.SendAsync(
+            HttpMethod.Put, path, _developer, body: new JsonObject { ["descriptorJson"] = current });
+        using var destructive = await world.SendAsync(
+            HttpMethod.Put,
+            path,
+            _developer,
+            body: new JsonObject
+            {
+                ["descriptorJson"] = Management.DescriptorEdits.RemoveEntity(current, "audits"),
+            },
+            headers: [new KeyValuePair<string, string>("If-Match", "\"1\"")]);
+
+        return [await ManagementSlugOfAsync(required, 428), await ManagementSlugOfAsync(destructive, 409)];
+    }
+
+    /// <summary>The slug one management refusal carries, after pinning the status it claims to have.</summary>
+    /// <remarks>
+    /// The status is asserted first for <see cref="UnsupportedMediaTypeSlugAnsweredByANonJsonBodyAsync"/>'s
+    /// reason: without it, a probe that reached some <em>other</em> refusal would still contribute a slug and
+    /// the reachability it claims to prove would be unproven.
+    /// </remarks>
+    /// <param name="response">The refusal.</param>
+    /// <param name="status">The status this probe must have reached.</param>
+    private static async Task<string> ManagementSlugOfAsync(HttpResponseMessage response, int status)
+    {
+        ((int)response.StatusCode).ShouldBe(
+            status, "or this probe reached some other refusal and its slug's reachability is unproven");
+
+        return await response.ReadProblemTypeAsync();
+    }
+
+    /// <summary>A caller <c>managed-fleet</c>'s <c>access</c> block admits at <c>developer</c>.</summary>
+    private static readonly TestApiKey _developer = new("problems-dev", ["dispatcher"], ["*:write"]);
 
     /// <summary>
     /// The <c>internal</c> slug's probe. It needs a <em>second</em> world, because the store it drives faults
@@ -605,6 +657,11 @@ public sealed class ProblemDetailsTests
         ProblemResultFactory.Internal(),
         ProblemResultFactory.Unreadable(StatusCodes.Status413PayloadTooLarge),
         ProblemResultFactory.UnsupportedMediaType(HttpMethods.Post),
+        ProblemResultFactory.PreconditionRequired("send If-Match"),
+        ProblemResultFactory.PreconditionFailed("revision 1 is current"),
+        ProblemResultFactory.DestructiveChange("a plan that discards data"),
+        ProblemResultFactory.ManagementDescriptorRefused(
+            new MMLib.Alvo.Descriptor.DescriptorValidationException("no entities")),
         Guarded(new AlvoAuthorizationException("refused")),
         Guarded(new AlvoRecordNotFoundException()),
         Guarded(new AlvoPreconditionFailedException("stale")),
