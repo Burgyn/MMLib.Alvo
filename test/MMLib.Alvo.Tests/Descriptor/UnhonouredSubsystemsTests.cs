@@ -22,7 +22,7 @@ namespace MMLib.Alvo.Tests.Descriptor;
 /// <see cref="Every_unhonoured_subsystem_names_a_block_the_schema_declares"/> reads
 /// <c>schema/project.schema.json</c>, which is what makes the set <em>right</em> rather than merely
 /// unchanged; and <see cref="The_warning_names_every_unhonoured_block_the_showcase_declares"/> spells the
-/// six names as a literal beside a fixture that was authored for a different purpose entirely. Deleting an
+/// five names as a literal beside a fixture that was authored for a different purpose entirely. Deleting an
 /// entry fails both.
 /// </para>
 /// <para>
@@ -45,7 +45,7 @@ namespace MMLib.Alvo.Tests.Descriptor;
 public class UnhonouredSubsystemsTests
 {
     /// <summary>
-    /// The six blocks the format showcase declares, named as a literal — the pin that a table-driven
+    /// The five blocks the format showcase declares, named as a literal — the pin that a table-driven
     /// assertion structurally cannot be.
     /// </summary>
     /// <remarks>
@@ -54,7 +54,7 @@ public class UnhonouredSubsystemsTests
     /// two disagreeing is the whole signal.
     /// </remarks>
     private static readonly string[] _blocksComplexCrmDeclares =
-        ["dynamicEntities", "access", "automation", "templates", "webhooks", "functions"];
+        ["dynamicEntities", "automation", "templates", "webhooks", "functions"];
 
     /// <summary>
     /// <b>The warning names each declared-but-unhonoured block</b>, and the fixture is a descriptor that was
@@ -69,7 +69,7 @@ public class UnhonouredSubsystemsTests
         UnhonouredSubsystems.Warn(logger, descriptor);
 
         var warning = logger.Warnings.ShouldHaveSingleItem(
-            "one line for the whole set — an author reading six separate warnings has to reassemble the "
+            "one line for the whole set — an author reading five separate warnings has to reassemble the "
             + "list the single line already gives them");
         foreach (var block in _blocksComplexCrmDeclares)
         {
@@ -82,11 +82,11 @@ public class UnhonouredSubsystemsTests
     }
 
     /// <summary>
-    /// The fixture really does declare exactly those six blocks and no seventh — read from the example's own
+    /// The fixture really does declare exactly those five blocks and no sixth — read from the example's own
     /// JSON, so the literal above cannot drift away from the descriptor it describes.
     /// </summary>
     /// <remarks>
-    /// Without this, the fact above would still pass if <c>complex-crm</c> gained a seventh unhonoured block:
+    /// Without this, the fact above would still pass if <c>complex-crm</c> gained a sixth unhonoured block:
     /// the loop asserts every expected name is present, not that no other is. This is the other direction,
     /// and it is what keeps the literal honest as the showcase grows.
     /// </remarks>
@@ -246,47 +246,41 @@ public class UnhonouredSubsystemsTests
     }
 
     /// <summary>
-    /// <b>The <c>access</c> line names a <em>false restriction</em>, not a missing feature</b> — which is
-    /// the whole reason this block is on the table while <c>branding</c> is not.
+    /// <b><c>access</c> is off the table because it is <em>honoured</em> now</b> — the transition the
+    /// file itself demanded: <em>"the day the surface lands, <c>access</c> is either honoured or refused
+    /// — never warned about."</em>
     /// </summary>
     /// <remarks>
-    /// The table earns an entry two ways: limb one is <em>"the absence is observable but easy to
-    /// misattribute"</em>, limb two is <em>"the block's name promises something it does not do, so the
-    /// author holds a false belief"</em>. <c>access</c> is here on limb two, and the wording is the whole
-    /// product of that: an author who writes <c>branding</c> and sees no logo has looked and found out,
-    /// while an author who writes <c>access</c> sees nothing happen, which is indistinguishable from a
-    /// restriction that works. So the words have to say administration is <em>not</em> restricted, and they
-    /// have to say the CEL is never compiled — because the second half is what makes an unwritable rule
-    /// (#146: <c>@user</c> exposes <c>id</c> and <c>roles</c> only) fail silently instead of at apply, the
-    /// way every other CEL slot does.
+    /// This is not the same claim as <see cref="Branding_is_not_on_the_table_because_its_absence_is_merely_visible"/>.
+    /// <c>branding</c> is off the table because it earns no entry under either limb of the rule;
+    /// <c>access</c> is off it because there is nothing left to warn about — the three levels are
+    /// compiled at apply, their role literals are validated against <c>auth.roles</c>, and a caller who
+    /// matches no level is refused. A warning beside working enforcement would tell an author their
+    /// restriction does nothing, which is now false and is the worse of the two directions.
     /// </remarks>
     [Fact]
-    public void The_access_line_names_the_unenforced_restriction_and_the_uncompiled_rule()
+    public void Access_is_not_on_the_table_because_it_is_enforced()
     {
-        var consequence = Consequence("access");
-
-        consequence.ShouldContain(
-            "administrable",
-            Shouldly.Case.Sensitive,
-            "the security half — the author believes administration is restricted, and it is not");
-        consequence.ShouldContain(
-            "not compiled",
-            Shouldly.Case.Sensitive,
-            "the second half — a rule that could never evaluate is not even reported, unlike every other "
-            + "CEL slot in the descriptor");
+        UnhonouredSubsystems.All
+            .Select(subsystem => subsystem.Block)
+            .ShouldNotContain(
+                "access",
+                "the three levels are compiled at apply and a caller matching none is refused, so a "
+                + "warning saying the block does nothing would now be false");
     }
 
     /// <summary>
-    /// <b><c>branding</c> stays off the table</b>, and this fact is what stops "access is here, so branding
-    /// should be too" from being applied later as tidying.
+    /// <b><c>branding</c> stays off the table</b>, and this fact is what stops "every dashboard block
+    /// belongs here" from being applied later as tidying.
     /// </summary>
     /// <remarks>
-    /// Both blocks are honoured nowhere and both describe a dashboard this build does not have, so the
-    /// distinction is not obvious from the code and is worth a fact rather than only a comment: a warning
-    /// every author of a <c>branding</c> block earns is a line they cannot act on, about an absence they can
-    /// see by looking. <c>branding</c> qualifies under neither limb of the rule — not limb one (no surface
-    /// exists, so nothing to misattribute) and not limb two (its name promises styling, and no styling is
-    /// what the author gets). The day the dashboard lands, <c>branding</c> joins and this fact goes with it.
+    /// <c>branding</c> is honoured nowhere and describes a dashboard this build does not have, so the
+    /// reason it earns no entry is not obvious from the code and is worth a fact rather than only a
+    /// comment: a warning every author of a <c>branding</c> block earns is a line they cannot act on,
+    /// about an absence they can see by looking. It qualifies under neither limb of the rule — not limb
+    /// one (no surface exists, so nothing to misattribute) and not limb two (its name promises styling,
+    /// and no styling is what the author gets). The day the dashboard lands, nothing changes here either:
+    /// a rendered logo is not an absence at all.
     /// </remarks>
     [Fact]
     public void Branding_is_not_on_the_table_because_its_absence_is_merely_visible()
@@ -295,9 +289,10 @@ public class UnhonouredSubsystemsTests
             .Select(subsystem => subsystem.Block)
             .ShouldNotContain(
                 "branding",
-                "an unstyled dashboard is an unmet expectation the author sees the moment they look — "
-                + "unlike 'access', where nothing happening is exactly what a working restriction looks "
-                + "like");
+                "an unstyled dashboard is an unmet expectation the author sees the moment they look, "
+                + "so it earns an entry under neither limb of the rule — not limb one (nothing to "
+                + "misattribute) and not limb two (its name promises styling, and no styling is what "
+                + "the author gets)");
     }
 
     /// <summary>One entry's consequence, looked up by block name.</summary>
