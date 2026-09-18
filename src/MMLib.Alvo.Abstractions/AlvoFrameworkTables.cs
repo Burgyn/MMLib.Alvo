@@ -48,6 +48,50 @@ internal static class AlvoFrameworkTables
     /// <summary>The suffix of the table holding the transactional outbox.</summary>
     internal const string OutboxSuffix = "_outbox";
 
+    /// <summary>The suffix of the table holding administrator accounts.</summary>
+    internal const string IdentityUsersSuffix = "_identity_users";
+
+    /// <summary>The suffix of the table holding identity role rows.</summary>
+    internal const string IdentityRolesSuffix = "_identity_roles";
+
+    /// <summary>The suffix of the table holding role memberships.</summary>
+    internal const string IdentityUserRolesSuffix = "_identity_user_roles";
+
+    /// <summary>The suffix of the table holding per-user claims.</summary>
+    internal const string IdentityUserClaimsSuffix = "_identity_user_claims";
+
+    /// <summary>The suffix of the table holding external-login links.</summary>
+    internal const string IdentityUserLoginsSuffix = "_identity_user_logins";
+
+    /// <summary>The suffix of the table holding per-user tokens.</summary>
+    internal const string IdentityUserTokensSuffix = "_identity_user_tokens";
+
+    /// <summary>The suffix of the table holding per-role claims.</summary>
+    internal const string IdentityRoleClaimsSuffix = "_identity_role_claims";
+
+    /// <summary>
+    /// Every table <c>MMLib.Alvo.Identity</c> owns, reserved here whether or not that package is
+    /// installed.
+    /// </summary>
+    /// <remarks>
+    /// <b>Reserved before the package that creates them exists</b>, which is the whole point. The
+    /// asymmetry this type's own remarks describe is at its sharpest here: reserving a name the
+    /// package never creates costs a descriptor one unavailable entity name, while failing to
+    /// reserve one the package does create costs **every operator account** on the next re-apply,
+    /// silently, because the introspector reports the table as the user's and the differ plans a
+    /// <c>DROP</c>.
+    /// </remarks>
+    internal static IReadOnlyList<string> IdentitySuffixes { get; } =
+    [
+        IdentityUsersSuffix,
+        IdentityRolesSuffix,
+        IdentityUserRolesSuffix,
+        IdentityUserClaimsSuffix,
+        IdentityUserLoginsSuffix,
+        IdentityUserTokensSuffix,
+        IdentityRoleClaimsSuffix,
+    ];
+
     /// <summary>
     /// Every table the framework owns under <paramref name="schemaPrefix"/> — the set an introspector
     /// excludes from the user's schema and the set an entity name may not collide with.
@@ -63,6 +107,7 @@ internal static class AlvoFrameworkTables
             schemaPrefix + DescriptorVersionsSuffix,
             schemaPrefix + IdempotencySuffix,
             schemaPrefix + OutboxSuffix,
+            .. IdentitySuffixes.Select(suffix => schemaPrefix + suffix),
         ];
     }
 }
