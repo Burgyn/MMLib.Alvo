@@ -672,4 +672,12 @@ It is blocked by #146, which is blocked by the identity issue.
   configuration.
 - A new `docs/architecture/management-api.md` — the surface, the conventions it adopts, and D3.
 - `src/MMLib.Alvo/Descriptor/Internal/UnhonouredSubsystems.cs` — the `access` entry leaves (§3.6).
+- **`schema/project.schema.json` — the `access` block's own description.** Added after a
+  security-core review found it unowned. The frozen schema currently says *"nothing reads or compiles
+  this block yet — applying a descriptor that declares it earns a warning naming it, and a level
+  referring to a role that `auth.roles` does not declare is therefore not reported today either."*
+  Both halves stop being true the moment the levels compile at apply. The under-promise is harmless
+  at runtime and that is exactly why it is dangerous: **the frozen schema is the artifact an agent
+  reads first**, nothing pins its prose, and no test will ever catch the contradiction. It belongs to
+  the task that flips warn into honour.
 - `docs/PLAN.md` — §3 once F5 begins to close.
